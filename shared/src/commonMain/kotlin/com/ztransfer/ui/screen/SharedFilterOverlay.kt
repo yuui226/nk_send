@@ -105,6 +105,7 @@ fun <D : Any, R : Any> SharedFilterOverlay(
             .padding(start = panelStart, top = panelTop)
             .width(panelWidth),
         animateScale = false,
+        genieFromAnchor = true,
         shape = RoundedCornerShape(16.dp),
         dim = false,
     ) { _ ->

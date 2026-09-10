@@ -3,7 +3,6 @@
 package com.ztransfer.ui.screen
 
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -24,16 +23,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -53,7 +49,7 @@ private class PopupAnimationState(
  * 通用「从按钮变形弹出」的毛玻璃浮层外壳（设置面板与筛选面板共用）。
  *
  * 默认以触发按钮 [anchorBounds]（同一 Compose 根坐标系）为原点轻量缩放淡入。
- * [morphFromAnchor] 用于设置：从按钮下缘独立展开和收回，无黏连，也不牵动入口按钮。
+ * [genieFromAnchor] 用于设置和筛选：整块内容向按钮下缘斜向收束。
  * 内容始终按最终尺寸排版，动画只更新绘制和图层，不逐帧重排大型设置内容树。
  * 遮罩随进度淡入，点击遮罩 / 返回键触发收回。
  *
@@ -71,7 +67,7 @@ fun SharedAnchorPopup(
     panelModifier: Modifier,
     panelAlignment: Alignment = Alignment.TopStart,
     animateScale: Boolean = true,
-    morphFromAnchor: Boolean = false,
+    genieFromAnchor: Boolean = false,
     shape: Shape = RoundedCornerShape(20.dp),
     // 遮罩是否压暗背景：大面板（设置）保持压暗聚焦；小面板（筛选下拉）传 false——
     // 全屏变暗对几个胶囊的下拉太兴师动众，遮罩仍在（点外部收起、拦滚动穿透），只是透明。
@@ -80,6 +76,7 @@ fun SharedAnchorPopup(
     content: @Composable BoxScope.(close: () -> Unit) -> Unit
 ) {
     val colors = AppTheme.colors
+    val genieLayer = if (genieFromAnchor) rememberGraphicsLayer() else null
 
     // 入场进度：0=不可见，1=完全展开。
     val progress = remember { Animatable(0f) }
@@ -92,8 +89,9 @@ fun SharedAnchorPopup(
         if (!animationState.closing) {
             animationState.closing = true
             animationScope.launch {
-                progress.animateTo(0f, if (morphFromAnchor) {
-                    tween((260 * progress.value).toInt().coerceAtLeast(1), easing = LinearEasing)
+                progress.animateTo(0f, if (genieFromAnchor) {
+                    tween((260 * progress.value).toInt().coerceAtLeast(1),
+                        easing = GenieCollapseEasing)
                 } else Motion.overlayCollapse)
                 // 收起期间调用方状态仍可能更新，始终执行最新回调，避免捕获关闭开始前的旧闭包。
                 currentOnDismiss()
@@ -116,7 +114,7 @@ fun SharedAnchorPopup(
                 .pointerInput(Unit) { detectDragGestures { change, _ -> change.consume() } }
         )
 
-        // The shell is drawn at animated bounds; the settings tree is measured at its final size.
+        // Content is measured at its final size; only drawing changes during the transition.
         // No per-frame width/height state updates, bitmap snapshots or layout-size animation here.
         Box(
             modifier = Modifier
@@ -129,45 +127,35 @@ fun SharedAnchorPopup(
                         animationScope.launch {
                             withFrameNanos { }
                             if (!animationState.closing) {
-                                progress.animateTo(1f, if (morphFromAnchor) {
-                                    tween(320, easing = LinearEasing)
+                                progress.animateTo(1f, if (genieFromAnchor) {
+                                    tween(320,
+                                        easing = GenieExpandEasing)
                                 } else Motion.overlayExpand)
                             }
                         }
-                    }
-                }
-                .drawBehind {
-                    if (morphFromAnchor) {
-                        val panel = animationState.panelBounds ?: Rect(0f, 0f, size.width, size.height)
-                        val frame = settingsPopupFrame(progress.value, anchorBounds, panel, 20.dp.toPx())
-                        val topLeft = Offset(frame.bounds.left - panel.left, frame.bounds.top - panel.top)
-                        val frameSize = Size(frame.bounds.width, frame.bounds.height)
-                        val radius = CornerRadius(frame.cornerRadius)
-                        drawRoundRect(colors.glassSurfaceHeavy, topLeft, frameSize, radius,
-                            alpha = frame.shellAlpha)
-                        drawRoundRect(colors.glassPanelBorder, topLeft, frameSize, radius,
-                            alpha = frame.shellAlpha, style = Stroke(1.dp.toPx()))
                     }
                 },
             propagateMinConstraints = true,
         ) {
             Surface(
                 modifier = Modifier
+                    .then(if (genieLayer != null) Modifier.geniePopupLayer(
+                        layer = genieLayer,
+                        progress = { progress.value },
+                        anchor = { anchorBounds },
+                        panel = { animationState.panelBounds },
+                    ) else Modifier)
                     .graphicsLayer {
                         val b = animationState.panelBounds
                         val p = progress.value
                         // Group alpha in BOTH directions: nested badge/shadow/sheen must not
                         // accumulate opacity independently and appear before the surrounding text.
                         compositingStrategy = CompositingStrategy.Auto
-                        if (morphFromAnchor && size.width > 0f && size.height > 0f) {
-                            val panel = b ?: Rect(0f, 0f, size.width, size.height)
-                            val frame = settingsPopupFrame(p, anchorBounds, panel, 20.dp.toPx())
-                            transformOrigin = TransformOrigin(0f, 0f)
-                            translationX = frame.bounds.left - panel.left
-                            translationY = frame.bounds.top - panel.top
-                            scaleX = frame.bounds.width / size.width
-                            scaleY = frame.bounds.height / size.height
-                            alpha = frame.contentAlpha
+                        if (genieFromAnchor) {
+                            // The complete, unscaled surface is warped by the outer layer.
+                            alpha = 1f
+                            scaleX = 1f
+                            scaleY = 1f
                         } else {
                             if (animateScale && b != null && b.width > 0f && b.height > 0f &&
                                 anchorBounds != null) {
@@ -184,8 +172,8 @@ fun SharedAnchorPopup(
                     }
                     .pointerInput(Unit) { detectTapGestures { } },
                 shape = shape,
-                color = if (morphFromAnchor) Color.Transparent else colors.glassSurfaceHeavy,
-                border = if (morphFromAnchor) null else BorderStroke(1.dp, colors.glassPanelBorder),
+                color = colors.glassSurfaceHeavy,
+                border = BorderStroke(1.dp, colors.glassPanelBorder),
                 tonalElevation = 6.dp,
             ) {
                 Box {

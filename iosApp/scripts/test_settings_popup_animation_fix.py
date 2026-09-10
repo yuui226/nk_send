@@ -36,10 +36,11 @@ class SettingsPopupAnimationTest(unittest.TestCase):
         restored = restore_settings_motion(self.settings)
         self.assertEqual(previous_directory_ui_source(settings.ANDROID, restored), expected)
 
-    def test_morph_is_opt_in_and_content_constraints_are_preserved(self):
-        self.assertIn("morphFromAnchor: Boolean = false", self.popup)
-        self.assertIn("morphFromAnchor: Boolean = false", self.wrapper)
-        self.assertEqual(self.settings.count("morphFromAnchor = true"), 1)
+    def test_obsolete_morph_is_removed_and_content_constraints_are_preserved(self):
+        self.assertNotIn("morphFromAnchor", self.popup + self.wrapper + self.settings)
+        for path in ("shared/src/commonMain/kotlin/com/ztransfer/ui/screen/SettingsPopupMotion.kt",
+                     "shared/src/commonTest/kotlin/com/ztransfer/ui/screen/SettingsPopupMotionTest.kt"):
+            self.assertFalse((ROOT / path).exists())
         self.assertIn("propagateMinConstraints = true", self.popup)
         self.assertIn("compositingStrategy = CompositingStrategy.Auto", self.popup)
         self.assertNotIn("CompositingStrategy.ModulateAlpha", self.popup)
@@ -68,8 +69,9 @@ class SettingsPopupAnimationTest(unittest.TestCase):
         self.assertNotIn("neckFraction", self.popup)
         self.assertNotIn("Path.combine", self.popup)
         self.assertNotIn("settingsMotion", self.popup + self.wrapper + self.settings)
-        self.assertIn("drawRoundRect(colors.glassSurfaceHeavy", self.popup)
-        self.assertIn("tween(320, easing = LinearEasing)", self.popup)
+        self.assertNotIn("settingsPopupFrame", self.popup)
+        self.assertIn("easing = GenieExpandEasing", self.popup)
+        self.assertIn("easing = GenieCollapseEasing", self.popup)
 
     def test_oracle_fails_closed_when_anchors_are_changed(self):
         with self.assertRaises(ValueError):
@@ -77,7 +79,34 @@ class SettingsPopupAnimationTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             apply_wrapper_motion(self.wrapper)
         with self.assertRaises(ValueError):
-            restore_settings_motion(self.settings.replace("morphFromAnchor = true", "morphFromAnchor = false"))
+            restore_settings_motion(self.settings.replace("genieFromAnchor = true", "genieFromAnchor = false"))
+
+    def test_genie_is_opt_in_and_keeps_settled_content_live(self):
+        self.assertIn("genieFromAnchor: Boolean = false", self.popup)
+        self.assertIn("genieFromAnchor: Boolean = false", self.wrapper)
+        self.assertEqual(self.settings.count("genieFromAnchor = true"), 1)
+        renderer = (ROOT / "shared/src/commonMain/kotlin/com/ztransfer/ui/screen/GeniePopupLayer.kt").read_text(encoding="utf8")
+        self.assertLess(renderer.index("if (p == 1f)"), renderer.index("layer.record"))
+        self.assertEqual(renderer.count("layer.record"), 1)
+        self.assertLess(renderer.index("layer.record"), renderer.index("for (index"))
+        self.assertIn("if (genieProgress(progress()) < 1f)", renderer)
+        self.assertNotIn("toImageBitmap", renderer)
+
+    def test_tiles_accumulate_before_one_backdrop_composite(self):
+        renderer = (ROOT / "shared/src/commonMain/kotlin/com/ztransfer/ui/screen/GeniePopupLayer.kt").read_text(encoding="utf8")
+        self.assertIn("layer.alpha = 1f", renderer)
+        self.assertIn("layer.blendMode = BlendMode.SrcOver", renderer)
+        self.assertLess(renderer.index("canvas.saveLayer(outputBounds, composite)"),
+                        renderer.index("layer.blendMode = BlendMode.Plus"))
+        self.assertIn("finally {\n                canvas.restore()", renderer)
+        self.assertIn("clipPath(tile)\n                            transform(matrix)", renderer)
+        self.assertNotIn("masks[index]", renderer)
+
+    def test_filter_reuses_genie_without_changing_filter_or_calendar_logic(self):
+        from genie_popup_experiment import apply_genie_filter
+        path = "shared/src/commonMain/kotlin/com/ztransfer/ui/screen/SharedFilterOverlay.kt"
+        self.assertEqual(apply_genie_filter(baseline("1403f34", path)),
+                         (ROOT / path).read_text(encoding="utf8"))
 
 
 if __name__ == "__main__":

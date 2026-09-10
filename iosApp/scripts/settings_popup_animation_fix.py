@@ -4,6 +4,8 @@ Only presentation changes are permitted here; settings state, persistence and An
 still have to match the previous oracle byte-for-byte. Not a performance/device test.
 """
 
+from genie_popup_experiment import apply_genie_popup, apply_genie_wrapper, restore_genie_settings
+
 POPUP_EDITS = [
     ("import androidx.compose.animation.core.Animatable",
      "import androidx.compose.animation.core.Animatable\nimport androidx.compose.animation.core.LinearEasing\nimport androidx.compose.animation.core.tween"),
@@ -52,12 +54,12 @@ def transform(source, edits, reverse=False):
 
 
 def apply_popup_motion(source):
-    return transform(transform(source, POPUP_EDITS), POPUP_REFINEMENT)
+    return apply_genie_popup(transform(transform(source, POPUP_EDITS), POPUP_REFINEMENT))
 
 
 def apply_wrapper_motion(source):
-    return transform(source, WRAPPER_EDITS)
+    return apply_genie_wrapper(transform(source, WRAPPER_EDITS))
 
 
 def restore_settings_motion(source):
-    return transform(source, SETTINGS_EDITS, reverse=True)
+    return transform(restore_genie_settings(source), SETTINGS_EDITS, reverse=True)

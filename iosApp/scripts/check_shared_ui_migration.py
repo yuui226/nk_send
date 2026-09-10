@@ -138,6 +138,8 @@ def main():
     from settings_popup_animation_fix import apply_popup_motion, apply_wrapper_motion, restore_settings_motion
     expected_popup_android = apply_wrapper_motion(expected_popup_android)
     expected_popup = apply_popup_motion(expected_popup)
+    from genie_popup_experiment import apply_genie_filter
+    expected_filter = apply_genie_filter(expected_filter)
     for path, expected in [
         ("app/src/main/java/com/ztransfer/ui/screen/AnchorPopup.kt", expected_popup_android),
         ("shared/src/commonMain/kotlin/com/ztransfer/ui/screen/SharedAnchorPopup.kt", expected_popup),
