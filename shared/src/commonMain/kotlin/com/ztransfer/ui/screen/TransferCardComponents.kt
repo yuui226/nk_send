@@ -23,6 +23,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
 import com.ztransfer.ui.theme.*
 import com.ztransfer.viewmodel.TransferStatus
 import com.ztransfer.viewmodel.TransferTask
@@ -178,7 +180,7 @@ fun SharedTransferTaskCardContent(
             },
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = if (isFailed) Modifier.padding(end = 42.dp) else Modifier,
+            // Action buttons reserve their own space in the parent row.
         )
 
         Spacer(modifier = Modifier.height(6.dp))
@@ -355,24 +357,36 @@ fun SharedQueueConfirmFab(
     enabled: Boolean = true,
     modifier: Modifier = Modifier
 ) {
+    val confirmationVisibility = remember { MutableTransitionState(false) }
+    confirmationVisibility.targetState = expanded
     Column(horizontalAlignment = Alignment.End, modifier = modifier) {
-        AnimatedVisibility(
-            visible = expanded,
-            // 以右下角为原点缩放弹出，视觉上从 FAB 位置向左上方展开。
-            enter = scaleIn(transformOrigin = TransformOrigin(1f, 1f)) + fadeIn(),
-            exit = scaleOut(transformOrigin = TransformOrigin(1f, 1f)) + fadeOut()
-        ) {
-            ConfirmCard(
-                title = title,
-                subtitle = subtitle,
-                confirmText = confirmText,
-                confirmColor = confirmColor,
-                onConfirm = onConfirm,
-                onDismiss = onDismiss,
-                cancelText = cancelText,
-            )
+        // A separate popup never contributes its measured height to the FAB stack.
+        // Keep it mounted during exit so dismissal retains the existing animation.
+        if (confirmationVisibility.currentState || confirmationVisibility.targetState) {
+            Popup(
+                popupPositionProvider = QueueConfirmationPositionProvider,
+                onDismissRequest = onDismiss,
+                properties = PopupProperties(focusable = true),
+            ) {
+                AnimatedVisibility(
+                    visibleState = confirmationVisibility,
+                    enter = scaleIn(transformOrigin = TransformOrigin(1f, 1f)) + fadeIn(),
+                    exit = scaleOut(transformOrigin = TransformOrigin(1f, 1f)) + fadeOut(),
+                ) {
+                    ConfirmCard(
+                        title = title,
+                        subtitle = subtitle,
+                        confirmText = confirmText,
+                        confirmColor = confirmColor,
+                        onConfirm = onConfirm,
+                        onDismiss = onDismiss,
+                        cancelText = cancelText,
+                    )
+                }
+            }
         }
 
+        // Preserve the collapsed footprint and the 12dp gap above the button.
         Spacer(modifier = Modifier.height(12.dp))
 
         GlassButton(

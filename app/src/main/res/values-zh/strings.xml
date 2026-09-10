@@ -456,7 +456,7 @@
     <string name="price_promo_tag">限时特惠</string>
     <!-- 价格单位按语言拼，金额本身是常量（见 PRO_PRICE）。 -->
     <string name="price_per_year">%1$s/年</string>
-    <string name="pro_price_per_day">≈%1$s/天</string>
+    <string name="pro_price_per_month">≈%1$s/月</string>
     <string name="quota_left_hint">今日剩余额度 %1$d/%2$d</string>
     <string name="transfer_limit_reached">今日额度已用完，请解锁高级版</string>
     <string name="transfer_size_limit">超过 %1$d MB，请解锁高级版</string>

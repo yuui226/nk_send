@@ -4,6 +4,7 @@ import argparse
 import difflib
 import re
 import subprocess
+from queue_action_layout_fix import apply_cards_fix, apply_page_fix
 from transfer_card_extraction import extract_transfer_cards
 from transfer_page_extraction import extract_transfer_page, extract_collapse_height
 from signal_pill_extraction import extract_signal_pill
@@ -110,10 +111,10 @@ def main():
     if new_transfer != expected_transfer:
         raise ValueError("Transfer screen differs beyond the approved placement API and presentation extraction")
     actual_cards = (root / "shared/src/commonMain/kotlin/com/ztransfer/ui/screen/TransferCardComponents.kt").read_text(encoding="utf-8")
-    if actual_cards != expected_cards:
+    if actual_cards != apply_cards_fix(expected_cards):
         raise ValueError("Shared transfer rendering differs beyond explicit localized-text parameters/visibility changes")
     actual_page = (root / "shared/src/commonMain/kotlin/com/ztransfer/ui/screen/SharedTransferScreen.kt").read_text(encoding="utf-8")
-    if actual_page != expected_page:
+    if actual_page != apply_page_fix(expected_page):
         raise ValueError("Shared queue page differs beyond explicit service/clock/text/slot substitutions")
     file_list_path = "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt"
     expected_list, expected_collapse = extract_collapse_height(original(file_list_path))
@@ -134,6 +135,9 @@ def main():
     if (root / "shared/src/commonMain/kotlin/com/ztransfer/ui/screen/ExportExitUiState.kt").read_text(encoding="utf-8") != expected_export_exit:
         raise ValueError("Original untransferred completion-exit state/callback differs")
     expected_popup_android, expected_popup = extract_anchor_popup(original("app/src/main/java/com/ztransfer/ui/screen/AnchorPopup.kt"))
+    from settings_popup_animation_fix import apply_popup_motion, apply_wrapper_motion, restore_settings_motion
+    expected_popup_android = apply_wrapper_motion(expected_popup_android)
+    expected_popup = apply_popup_motion(expected_popup)
     for path, expected in [
         ("app/src/main/java/com/ztransfer/ui/screen/AnchorPopup.kt", expected_popup_android),
         ("shared/src/commonMain/kotlin/com/ztransfer/ui/screen/SharedAnchorPopup.kt", expected_popup),
@@ -152,9 +156,9 @@ def main():
         raise ValueError("Shared signal pill differs beyond text/settings adapters and explicit unknown-RSSI capability")
     if (root / "shared/src/commonMain/kotlin/com/ztransfer/ui/screen/CollapseHeight.kt").read_text(encoding="utf-8") != expected_collapse:
         raise ValueError("Shared collapseHeight implementation differs from Android baseline")
-    print("PASS entire shared queue body, Android service bindings/formatting/thumbnail loader, collapse layout, signal pill and execution button")
+    print("PASS shared queue body with reviewed 2026-09-10 retry alignment / popup-overlay fixes; Android service bindings unchanged")
     print("PASS entire original thumbnail grid, burst/date reflow, gestures/bounds and Android image/index/text/lifecycle adapters")
-    print("PASS entire original filter/date editor and popup; Android Java calendar/resources/width/back adapters")
+    print("PASS original filter/date editor and popup with reviewed 2026-09-10 settings motion; Android calendar/resources/width/back adapters retained")
     print("PASS original untransferred completion-exit coordinator and callback; shared by Android and iOS")
     preview_base = "app/src/main/java/com/ztransfer/ui/screen/"
     previews = extract_photo_viewport(original(preview_base + "PhotoPreview.kt"), original(preview_base + "PreviewRotationButton.kt"))
@@ -221,9 +225,12 @@ def main():
     from directory_ui_wiring import previous_directory_ui_source
     settings_before = subprocess.check_output(['git', 'show', settings.BASELINE + ':' + settings.ANDROID], cwd=root).decode('utf-8')
     for path, expected in zip((settings.ANDROID, settings.COMMON), settings.extract(settings_before)):
-        if previous_directory_ui_source(path, (root / path).read_text(encoding='utf-8')) != expected:
+        actual_settings = (root / path).read_text(encoding='utf-8')
+        if path == settings.ANDROID:
+            actual_settings = restore_settings_motion(actual_settings)
+        if previous_directory_ui_source(path, actual_settings) != expected:
             raise ValueError(f"Original settings cards/platform callbacks changed beyond enumerated extraction: {path}")
-    print("PASS complete original settings file with three shared cards/four helpers; directory, effects, GPS and license IO retained")
+    print("PASS original settings file with shared controls and reviewed 2026-09-10 motion; directory, effects, GPS and license IO retained")
     print("Dependency upgrades, actual recomposition, screenshots, gestures and iOS rendering are NOT verified here.")
 
 

@@ -42,6 +42,7 @@ fun AnchorPopup(
     panelModifier: Modifier,
     panelAlignment: Alignment = Alignment.TopStart,
     animateScale: Boolean = true,
+    morphFromAnchor: Boolean = false,
     shape: Shape = RoundedCornerShape(20.dp),
     // 遮罩是否压暗背景：大面板（设置）保持压暗聚焦；小面板（筛选下拉）传 false——
     // 全屏变暗对几个胶囊的下拉太兴师动众，遮罩仍在（点外部收起、拦滚动穿透），只是透明。
@@ -52,6 +53,7 @@ fun AnchorPopup(
     SharedAnchorPopup(
         anchorBounds = anchorBounds, onDismiss = onDismiss, panelModifier = panelModifier,
         panelAlignment = panelAlignment, animateScale = animateScale, shape = shape, dim = dim,
+        morphFromAnchor = morphFromAnchor,
         overlayContent = overlayContent, content = content,
         backHandler = { close -> BackHandler(onBack = close) },
     )

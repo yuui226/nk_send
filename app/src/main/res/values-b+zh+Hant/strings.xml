@@ -452,7 +452,7 @@
     <string name="price_promo_tag">限時特惠</string>
     <!-- 價格單位按語言拼，金額本身是常數（見 PRO_PRICE）。 -->
     <string name="price_per_year">%1$s/年</string>
-    <string name="pro_price_per_day">≈%1$s/天</string>
+    <string name="pro_price_per_month">≈%1$s/月</string>
     <string name="quota_left_hint">今日剩餘額度 %1$d/%2$d</string>
     <string name="transfer_limit_reached">今日額度已用完，請解鎖高級版</string>
     <string name="transfer_size_limit">超過 %1$d MB，請解鎖高級版</string>

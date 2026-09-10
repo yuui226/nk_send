@@ -456,7 +456,7 @@
     <string name="price_promo_tag">Limited-time offer</string>
     <!-- Price unit is per-locale text; the amount itself is a constant (see PRO_PRICE). -->
     <string name="price_per_year">%1$s/yr</string>
-    <string name="pro_price_per_day">≈%1$s/day</string>
+    <string name="pro_price_per_month">≈%1$s/month</string>
     <string name="quota_left_hint">%1$d/%2$d left today</string>
     <string name="transfer_limit_reached">Daily limit reached — unlock Pro</string>
     <string name="transfer_size_limit">Over %1$d MB — unlock Pro</string>

@@ -345,20 +345,23 @@ fun SharedTransferScreen(
 
                                 Box(modifier = Modifier.weight(1f)) {
                                     cardContent(task, displayedSpeed, displayedFrameGenerationElapsedMs, Modifier.fillMaxWidth())
-                                    SharedTransferRetryButton(
-                                        contentDescription = text.retry,
-                                        visible = cardActionsVisible &&
-                                            task.status == TransferStatus.FAILED,
-                                        enabled = cardActionsVisible &&
-                                            (connected || isOriginalTransferred(task)),
-                                        onClick = {
-                                            clearScope.launch(start = CoroutineStart.UNDISPATCHED) {
-                                                actions.retrySingleTask(taskId)
-                                            }
-                                        },
-                                        modifier = Modifier.align(Alignment.TopEnd),
-                                    )
                                 }
+
+                                // Both actions are children of the same vertically centered row.
+                                // Reserve a real column so retry cannot overlap wrapped error text.
+                                SharedTransferRetryButton(
+                                    contentDescription = text.retry,
+                                    visible = cardActionsVisible &&
+                                        task.status == TransferStatus.FAILED,
+                                    enabled = cardActionsVisible &&
+                                        (connected || isOriginalTransferred(task)),
+                                    onClick = {
+                                        clearScope.launch(start = CoroutineStart.UNDISPATCHED) {
+                                            actions.retrySingleTask(taskId)
+                                        }
+                                    },
+                                    modifier = Modifier.padding(start = 10.dp),
+                                )
 
                                 // 最尾：毛玻璃移除按钮——把本卡从队列移除。正在传输的
                                 // 不可移除（中途打断会让相机关 Wi-Fi），传完变可移除时淡入。

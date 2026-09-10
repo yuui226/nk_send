@@ -608,9 +608,9 @@ object LicenseManager {
         else -> String.format(Locale.US, "%.2f", fen / 100.0)
     }
 
-    /** 年费摊到每天(分),四舍五入;不足 1 分返回 0,由 UI 决定整行不显示。 */
-    fun perDayFen(p: ProductPricing): Int =
-        if (p.periodDays > 0) Math.round(p.priceFen.toDouble() / p.periodDays).toInt() else 0
+    /** 一年方案按 12 个月折算展示价(分),四舍五入；不是按月收费，不改变订单金额。 */
+    fun perMonthFen(p: ProductPricing): Int =
+        if (p.periodDays > 0) Math.round(p.priceFen.toDouble() / 12).toInt() else 0
 
     // ---------------------------------------------------------------- 购买(自动售码)
 

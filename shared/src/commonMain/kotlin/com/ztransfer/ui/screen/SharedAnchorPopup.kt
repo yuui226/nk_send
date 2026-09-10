@@ -3,6 +3,8 @@
 package com.ztransfer.ui.screen
 
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -22,6 +24,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
@@ -46,8 +52,9 @@ private class PopupAnimationState(
 /**
  * 通用「从按钮变形弹出」的毛玻璃浮层外壳（设置面板与筛选面板共用）。
  *
- * 面板以触发按钮 [anchorBounds]（同一 Compose 根坐标系）中心为缩放原点，做轻量缩放淡入；
- * 关闭时反向收回再移除。避免把复杂面板从极小尺寸逐帧放大，降低首次呼出的图层合成压力。
+ * 默认以触发按钮 [anchorBounds]（同一 Compose 根坐标系）为原点轻量缩放淡入。
+ * [morphFromAnchor] 用于设置：从按钮下缘独立展开和收回，无黏连，也不牵动入口按钮。
+ * 内容始终按最终尺寸排版，动画只更新绘制和图层，不逐帧重排大型设置内容树。
  * 遮罩随进度淡入，点击遮罩 / 返回键触发收回。
  *
  * 位置与尺寸由调用方经 [panelModifier] 决定（相对根 Box 左上角，用 padding 贴到按钮下方、
@@ -64,6 +71,7 @@ fun SharedAnchorPopup(
     panelModifier: Modifier,
     panelAlignment: Alignment = Alignment.TopStart,
     animateScale: Boolean = true,
+    morphFromAnchor: Boolean = false,
     shape: Shape = RoundedCornerShape(20.dp),
     // 遮罩是否压暗背景：大面板（设置）保持压暗聚焦；小面板（筛选下拉）传 false——
     // 全屏变暗对几个胶囊的下拉太兴师动众，遮罩仍在（点外部收起、拦滚动穿透），只是透明。
@@ -84,7 +92,9 @@ fun SharedAnchorPopup(
         if (!animationState.closing) {
             animationState.closing = true
             animationScope.launch {
-                progress.animateTo(0f, Motion.overlayCollapse)
+                progress.animateTo(0f, if (morphFromAnchor) {
+                    tween((260 * progress.value).toInt().coerceAtLeast(1), easing = LinearEasing)
+                } else Motion.overlayCollapse)
                 // 收起期间调用方状态仍可能更新，始终执行最新回调，避免捕获关闭开始前的旧闭包。
                 currentOnDismiss()
             }
@@ -106,8 +116,9 @@ fun SharedAnchorPopup(
                 .pointerInput(Unit) { detectDragGestures { change, _ -> change.consume() } }
         )
 
-        // 面板：以按钮中心为原点轻微缩放淡入；毛玻璃底 + 细描边 + 自上而下高光叠层。
-        Surface(
+        // The shell is drawn at animated bounds; the settings tree is measured at its final size.
+        // No per-frame width/height state updates, bitmap snapshots or layout-size animation here.
+        Box(
             modifier = Modifier
                 .align(panelAlignment)
                 .then(panelModifier)
@@ -116,58 +127,75 @@ fun SharedAnchorPopup(
                     if (!animationState.expansionStarted && !animationState.closing) {
                         animationState.expansionStarted = true
                         animationScope.launch {
-                            // 首次组合可能同时构建设置页等大型内容树。先让布局与绘制完整落一帧，
-                            // 再启动纯图层动画，避免首个动画帧和测量/纹理上传抢主线程与 GPU。
                             withFrameNanos { }
                             if (!animationState.closing) {
-                                progress.animateTo(1f, Motion.overlayExpand)
+                                progress.animateTo(1f, if (morphFromAnchor) {
+                                    tween(320, easing = LinearEasing)
+                                } else Motion.overlayExpand)
                             }
                         }
                     }
                 }
-                .graphicsLayer {
-                    val b = animationState.panelBounds
-                    if (
-                        animateScale && b != null && b.width > 0f && b.height > 0f &&
-                        anchorBounds != null
-                    ) {
-                        // 按钮中心相对于面板自身的比例位置（可超出 0..1，即原点落在面板外）。
-                        transformOrigin = TransformOrigin(
-                            (anchorBounds.center.x - b.left) / b.width,
-                            (anchorBounds.center.y - b.top) / b.height
-                        )
+                .drawBehind {
+                    if (morphFromAnchor) {
+                        val panel = animationState.panelBounds ?: Rect(0f, 0f, size.width, size.height)
+                        val frame = settingsPopupFrame(progress.value, anchorBounds, panel, 20.dp.toPx())
+                        val topLeft = Offset(frame.bounds.left - panel.left, frame.bounds.top - panel.top)
+                        val frameSize = Size(frame.bounds.width, frame.bounds.height)
+                        val radius = CornerRadius(frame.cornerRadius)
+                        drawRoundRect(colors.glassSurfaceHeavy, topLeft, frameSize, radius,
+                            alpha = frame.shellAlpha)
+                        drawRoundRect(colors.glassPanelBorder, topLeft, frameSize, radius,
+                            alpha = frame.shellAlpha, style = Stroke(1.dp.toPx()))
                     }
-                    val p = progress.value
-                    // 极端缩放会让整块设置/筛选内容在每帧进行高成本重采样；4% 的形变已经足以
-                    // 表达来源方向，主要动势交给淡入完成。展开时继续使用 ModulateAlpha，
-                    // 避免为整块面板分配离屏缓冲；收起时改为整体合成后统一淡出。否则金色
-                    // 高级版按钮这类包含底色、扫光、文字和阴影的重叠图层会被分别调制透明度，
-                    // 低 alpha 阶段叠加后仍比普通内容明显，视觉上像是关闭后残留了一拍。
-                    compositingStrategy = if (animationState.closing) {
-                        CompositingStrategy.Offscreen
-                    } else {
-                        CompositingStrategy.ModulateAlpha
-                    }
-                    val s = if (animateScale) 0.96f + 0.04f * p else 1f
-                    scaleX = s
-                    scaleY = s
-                    alpha = p
-                }
-                // 消费面板内点击，避免穿透到遮罩误关闭。
-                .pointerInput(Unit) { detectTapGestures { } },
-            shape = shape,
-            color = colors.glassSurfaceHeavy,
-            border = BorderStroke(1.dp, colors.glassPanelBorder),
-            tonalElevation = 6.dp
+                },
+            propagateMinConstraints = true,
         ) {
-            Box {
-                // 自上而下淡出的高光叠层，营造毛玻璃质感。
-                Box(
-                    modifier = Modifier
-                        .matchParentSize()
-                        .background(Brush.verticalGradient(listOf(colors.glassSheen, Color.Transparent)))
-                )
-                content(startClose)
+            Surface(
+                modifier = Modifier
+                    .graphicsLayer {
+                        val b = animationState.panelBounds
+                        val p = progress.value
+                        // Group alpha in BOTH directions: nested badge/shadow/sheen must not
+                        // accumulate opacity independently and appear before the surrounding text.
+                        compositingStrategy = CompositingStrategy.Auto
+                        if (morphFromAnchor && size.width > 0f && size.height > 0f) {
+                            val panel = b ?: Rect(0f, 0f, size.width, size.height)
+                            val frame = settingsPopupFrame(p, anchorBounds, panel, 20.dp.toPx())
+                            transformOrigin = TransformOrigin(0f, 0f)
+                            translationX = frame.bounds.left - panel.left
+                            translationY = frame.bounds.top - panel.top
+                            scaleX = frame.bounds.width / size.width
+                            scaleY = frame.bounds.height / size.height
+                            alpha = frame.contentAlpha
+                        } else {
+                            if (animateScale && b != null && b.width > 0f && b.height > 0f &&
+                                anchorBounds != null) {
+                                transformOrigin = TransformOrigin(
+                                    (anchorBounds.center.x - b.left) / b.width,
+                                    (anchorBounds.center.y - b.top) / b.height,
+                                )
+                            }
+                            val s = if (animateScale) 0.96f + 0.04f * p else 1f
+                            scaleX = s
+                            scaleY = s
+                            alpha = p
+                        }
+                    }
+                    .pointerInput(Unit) { detectTapGestures { } },
+                shape = shape,
+                color = if (morphFromAnchor) Color.Transparent else colors.glassSurfaceHeavy,
+                border = if (morphFromAnchor) null else BorderStroke(1.dp, colors.glassPanelBorder),
+                tonalElevation = 6.dp,
+            ) {
+                Box {
+                    Box(
+                        modifier = Modifier
+                            .matchParentSize()
+                            .background(Brush.verticalGradient(listOf(colors.glassSheen, Color.Transparent)))
+                    )
+                    content(startClose)
+                }
             }
         }
 
