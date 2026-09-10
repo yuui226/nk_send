@@ -53,7 +53,7 @@ class GeniePopupGeometryTest {
     }
 
     @Test fun trianglesMapCornersAndAllSharedEdgeSamplesWithoutTextureSlips() {
-        for (p in listOf(0.02f, 0.25f, 0.5f, 0.8f, 0.99f, 1f)) {
+        for (p in listOf(0.0011f, 0.002f, 0.02f, 0.25f, 0.5f, 0.8f, 0.99f, 1f)) {
             var previousBottom: List<Offset>? = null
             for (i in 0 until GENIE_BANDS) {
                 val top = genieRow(p, i.toFloat() / GENIE_BANDS, anchor, panel)
@@ -157,15 +157,16 @@ class GeniePopupGeometryTest {
             val bounds = Rect(12f, 84f, 372f, 84f + height)
             val origin = Rect(x, 40f, x + 56f, 76f)
             assertTrue(validGenieAnchor(origin, bounds))
-            for (step in 3..99) for (i in 0 until GENIE_BANDS) {
-                val top = genieRow(step / 100f, i.toFloat() / GENIE_BANDS, origin, bounds)
-                val bottom = genieRow(step / 100f, (i + 1f) / GENIE_BANDS, origin, bounds)
+            val samples = listOf(0.0011f, 0.002f, 0.005f) + (1..99).map { it / 100f }
+            for (p in samples) for (i in 0 until GENIE_BANDS) {
+                val top = genieRow(p, i.toFloat() / GENIE_BANDS, origin, bounds)
+                val bottom = genieRow(p, (i + 1f) / GENIE_BANDS, origin, bounds)
                 for (upper in listOf(true, false)) {
                     val m = genieBandMatrix(bounds.width, height * i / GENIE_BANDS,
                         height * (i + 1) / GENIE_BANDS, top, bottom, upper)
                     assertTrue(m.values.all { it.isFinite() })
                     assertTrue(m[0, 0] * m[1, 1] - m[1, 0] * m[0, 1] > 0f,
-                        "height=$height anchorX=$x progress=$step band=$i upper=$upper")
+                        "height=$height anchorX=$x progress=$p band=$i upper=$upper")
                 }
             }
         }
@@ -174,6 +175,43 @@ class GeniePopupGeometryTest {
     private fun near(expected: Offset, actual: Offset) {
         assertEquals(expected.x, actual.x, 0.05f)
         assertEquals(expected.y, actual.y, 0.05f)
+    }
+
+    @Test fun collapseStartsAtInletBeforePullingTheTailUp() {
+        val p = 1f - GenieCollapseEasing.transform(0.1f)
+        val near = genieRow(p, 0f, anchor, panel)
+        val far = genieRow(p, 1f, anchor, panel)
+        assertTrue(genieLength(p) > 0.96f)
+        assertTrue(near.right - near.left < panel.width * 0.9f)
+        assertTrue(far.right - far.left > panel.width * 0.9f)
+    }
+
+    @Test fun visibleTravelIsDistributedAcrossCollapseInsteadOfDisappearingHalfway() {
+        fun lengthAt(time: Float) = genieLength(1f - GenieCollapseEasing.transform(time))
+        assertTrue(lengthAt(0.5f) in 0.5f..0.75f)
+        assertTrue(lengthAt(0.8f) in 0.08f..0.2f)
+        assertTrue(lengthAt(0.95f) < 0.02f)
+        // At 60 Hz, no nominal frame should discard a large chunk of the panel's height.
+        val samples = (0..21).map { lengthAt(it / 21f) }
+        samples.zipWithNext().forEach { (previous, current) ->
+            assertTrue(current <= previous)
+            assertTrue(previous - current < 0.12f)
+        }
+    }
+
+    @Test fun tailFadesOnlyAfterItsTravelIsNearlyFinished() {
+        assertEquals(0f, geniePanelAlpha(0f))
+        assertEquals(0f, geniePanelAlpha(Float.NaN))
+        assertEquals(1f, geniePanelAlpha(1f))
+        var previousAlpha = 0f
+        for (step in 0..1000) {
+            val p = step / 1000f
+            val alpha = geniePanelAlpha(p)
+            assertTrue(alpha in previousAlpha..1f)
+            if (genieLength(p) >= 0.03f) assertEquals(1f, alpha)
+            previousAlpha = alpha
+        }
+        assertTrue(geniePanelAlpha(0.005f) in 0.01f..0.99f)
     }
 
     @Test fun mouthMatchesLogoWidthAcrossDensitiesAndDifferentButtonPaddings() {

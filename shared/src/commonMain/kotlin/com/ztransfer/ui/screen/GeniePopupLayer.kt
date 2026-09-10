@@ -39,15 +39,15 @@ internal fun Modifier.geniePopupLayer(
                 drawContent()
                 return@onDrawWithContent
             }
-            if (p <= 0.025f || size.width <= 0f || size.height <= 0f) return@onDrawWithContent
+            val panelAlpha = geniePanelAlpha(p)
+            if (panelAlpha <= 0f || size.width <= 0f || size.height <= 0f) return@onDrawWithContent
             val bounds = panel() ?: Rect(0f, 0f, size.width, size.height)
             val origin = anchor()
             layer.compositingStrategy = CompositingStrategy.Offscreen
             layer.blendMode = BlendMode.SrcOver
             layer.alpha = 1f
             // Fade the assembled panel, not each triangle (or individual nested shadows).
-            val fade = ((p - 0.025f) / 0.09f).coerceIn(0f, 1f)
-            composite.alpha = fade * fade * (3f - 2f * fade)
+            composite.alpha = panelAlpha
             layer.record { this@onDrawWithContent.drawContent() }
             if (!validGenieAnchor(origin, bounds)) {
                 layer.alpha = p

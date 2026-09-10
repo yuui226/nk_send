@@ -11,7 +11,7 @@ internal const val GENIE_BANDS = 48
 // Settings ZMark: 20dp tall, aspect = ZW (0.62) + SHEAR (0.30) + DX (0.44).
 internal const val GENIE_Z_MARK_WIDTH_DP = 20f * (0.62f + 0.30f + 0.44f)
 internal val GenieExpandEasing = CubicBezierEasing(0.16f, 0.40f, 0.22f, 1f)
-internal val GenieCollapseEasing = CubicBezierEasing(0.40f, 0.05f, 0.30f, 1f)
+internal val GenieCollapseEasing = CubicBezierEasing(0.30f, 0.18f, 0.60f, 1f)
 
 /** A cross-section of the bent panel; positive tilt lifts its right endpoint. */
 internal data class GenieRow(val left: Float, val right: Float, val y: Float, val tilt: Float = 0f) {
@@ -21,6 +21,16 @@ internal data class GenieRow(val left: Float, val right: Float, val y: Float, va
 
 internal fun genieProgress(value: Float): Float =
     if (value.isFinite()) value.coerceIn(0f, 1f) else 0f
+
+/** Retain the panel's length while its inlet narrows, then let the tail follow continuously. */
+internal fun genieLength(progress: Float): Float {
+    val p = genieProgress(progress)
+    return p * (2f - p)
+}
+
+/** Only soften the last 3% of travel; do not fade a still-recognisable miniature panel. */
+internal fun geniePanelAlpha(progress: Float): Float =
+    genieSmooth((genieLength(progress) - 0.002f) / 0.028f)
 
 internal fun validGenieAnchor(anchor: Rect?, panel: Rect): Boolean =
     anchor != null && listOf(anchor.left, anchor.top, anchor.right, anchor.bottom,
@@ -45,9 +55,11 @@ internal fun genieRow(
     }
     val dockX = anchor.center.x - panel.left
     val dockY = anchor.bottom - panel.top
-    val length = genieSmooth(p)
-    // No delayed, constant-width plateau: even the first rows continuously fan outward.
-    val spread = length.pow(1f + 2.5f * (1f - v) * (1f - v))
+    val length = genieLength(p)
+    // Width and travel deliberately have different clocks derived from the SAME progress.
+    // The inlet responds first, the broad tail follows; no delayed phase or reversal jump.
+    // Avoid smoothing p again here: stacked easing used to hide most motion in a short burst.
+    val spread = p.pow(0.85f + 2.1f * (1f - v) * (1f - v))
     // Logo-sized opening, not button-sized and not a needle. All rows still fan continuously.
     val seedWidth = minOf(anchor.width, panel.width,
         if (mouthWidth.isFinite() && mouthWidth > 0f) mouthWidth else anchor.width * 0.5f)

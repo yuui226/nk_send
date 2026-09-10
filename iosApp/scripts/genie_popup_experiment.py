@@ -43,6 +43,8 @@ SETTINGS = [
 
 # Remove the superseded split/scale renderer, not any popup content or event handling.
 CLEANUP = [
+    ("(260 * progress.value).toInt().coerceAtLeast(1)",
+     "(350 * progress.value).toInt().coerceAtLeast(1)"),
     ("import androidx.compose.animation.core.LinearEasing\n", ""),
     ("import androidx.compose.ui.geometry.Offset\nimport androidx.compose.ui.geometry.Size\n"
      "import androidx.compose.ui.geometry.CornerRadius\nimport androidx.compose.ui.graphics.drawscope.Stroke\n", ""),

@@ -48,7 +48,7 @@ class SettingsPopupAnimationTest(unittest.TestCase):
     def test_close_can_interrupt_open_and_uses_latest_callback(self):
         self.assertIn("if (!animationState.closing)", self.popup)
         self.assertIn("!animationState.expansionStarted && !animationState.closing", self.popup)
-        self.assertIn("(260 * progress.value).toInt().coerceAtLeast(1)", self.popup)
+        self.assertIn("(350 * progress.value).toInt().coerceAtLeast(1)", self.popup)
         self.assertIn("rememberUpdatedState(onDismiss)", self.popup)
         self.assertIn("currentOnDismiss()", self.popup)
         self.assertIn("backHandler { startClose() }", self.popup)
@@ -95,6 +95,8 @@ class SettingsPopupAnimationTest(unittest.TestCase):
     def test_tiles_accumulate_before_one_backdrop_composite(self):
         renderer = (ROOT / "shared/src/commonMain/kotlin/com/ztransfer/ui/screen/GeniePopupLayer.kt").read_text(encoding="utf8")
         self.assertIn("layer.alpha = 1f", renderer)
+        self.assertIn("val panelAlpha = geniePanelAlpha(p)", renderer)
+        self.assertIn("composite.alpha = panelAlpha", renderer)
         self.assertIn("layer.blendMode = BlendMode.SrcOver", renderer)
         self.assertLess(renderer.index("canvas.saveLayer(outputBounds, composite)"),
                         renderer.index("layer.blendMode = BlendMode.Plus"))

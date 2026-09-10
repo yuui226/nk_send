@@ -90,7 +90,7 @@ fun SharedAnchorPopup(
             animationState.closing = true
             animationScope.launch {
                 progress.animateTo(0f, if (genieFromAnchor) {
-                    tween((260 * progress.value).toInt().coerceAtLeast(1),
+                    tween((350 * progress.value).toInt().coerceAtLeast(1),
                         easing = GenieCollapseEasing)
                 } else Motion.overlayCollapse)
                 // 收起期间调用方状态仍可能更新，始终执行最新回调，避免捕获关闭开始前的旧闭包。
