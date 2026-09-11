@@ -150,7 +150,7 @@ git rev-list --left-right --count HEAD...origin/research/ios
 | iOS 滤镜帮助文案 | 新增 `NativePhotoEffectsText`，为简体中文、繁体中文和英文统一提供“拨轮快速调节”和“长按照片滤镜拨轮：按分类选择滤镜”两条文案 | 新增 `NativePhotoEffectsTextTest` 覆盖三语；未改 Android 资源和页面 | iOS 两处灯泡实际 UI 接线、动态语言刷新和无障碍朗读标签仍待完成 |
 | iOS 工作台成片句柄与出口 | 新增线程安全 `PhotoEffectsArtifactSink`，默认批量生成保留每张成片 URL；工作台提供导出到 Files/分享，换图和离开页面自动清理，失败重试替换同一资产旧文件 | `PhotoEffectsArtifactSinkTests` 覆盖替换/清理；`iosApp/scripts/check_structure.py` 通过；本次提交 `a4e0b33` | UIDocumentPicker/ActivityController 真机回执和正式设置宿主导航待 Mac |
 
-本次完成 1 个可独立验收的 Windows 源码子任务：iOS 工作台成片句柄与 Files/分享出口。Android 同步主线仍有 4 个产品项待 iOS 完整接入（滤镜 UI、批量照片效果、反挤压、术语/帮助）；滤镜项已具备共享目录、选择面板和预览同步容器，批量项已具备状态、调度、系统多选、分页容器、图库保存、Files/分享承载、失败项重试和成功结果展示，反挤压项已具备共享循环控件，帮助项已具备共享三语视图，仍待现有设置/工作台的实际入口调用和真机导航验证。共享专项测试已分别通过 `:shared:testDebugUnitTest --tests com.ztransfer.filter.NativePhotoFilterTest`、`:shared:testDebugUnitTest --tests com.ztransfer.protocol.DesqueezePolicyTest` 与 `--tests com.ztransfer.ui.NativePhotoEffectsTextTest`。官方 Mac/真机验收仍为 **12 / 12 项待验（M01—M12）**，本次没有减少该数量。
+本次完成 1 个可独立验收的 Windows 源码子任务：iOS 工作台成片句柄与 Files/分享出口。Android 同步主线仍有 4 个产品项待 iOS 完整接入（滤镜 UI、批量照片效果、反挤压、术语/帮助）；其中滤镜和批量项的 Windows 可实现主体已具备，当前 Windows 可继续内容剩余 2 项：正式设置/工作台入口调用、两处灯泡的正式宿主接线与动态语言场景。反挤压的真实画面缩放和全部正式宿主仍需 Mac/真机验证；帮助项已具备共享三语视图。共享专项测试已分别通过 `:shared:testDebugUnitTest --tests com.ztransfer.filter.NativePhotoFilterTest`、`:shared:testDebugUnitTest --tests com.ztransfer.protocol.DesqueezePolicyTest` 与 `--tests com.ztransfer.ui.NativePhotoEffectsTextTest`。官方 Mac/真机验收仍为 **12 / 12 项待验（M01—M12）**，本次没有减少该数量。
 
 ## 更新规则
 
@@ -359,3 +359,4 @@ W01—W50全部WIN-DONE：50/50，Windows本轮传图范围100%（历史刻度10
 | 主项 | 加分 | 完成 | 清单进度 | 历史刻度 | 证据 |
 |---|---|---|---|---|---|
 | W50 | +1 | 50/50 | 100% | 100% | 最终代码/计分/链接/回归与提交检查；Mac仍待验 |
+| 2026-09-12 / iOS照片效果出口接线（a4e0b33） | Windows iOS子任务 | +0 | 50/50 | 100.0% | 100.0% | 完成成片句柄生命周期、批量Files/分享按钮与结果状态接线；Windows可继续内容剩余2项，Mac/真机仍12项待验 |
