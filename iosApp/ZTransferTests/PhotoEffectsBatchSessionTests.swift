@@ -39,4 +39,31 @@ final class PhotoEffectsBatchSessionTests: XCTestCase {
         XCTAssertEqual(Set(processed), Set(["a", "b", "c"]))
         XCTAssertEqual(session.status, .finished(saved: 2, failed: 1))
     }
+
+    @MainActor
+    func testRetryProcessesOnlyFailedAssets() async {
+        let session = PhotoEffectsBatchSession()
+        session.replaceSelection([asset("a"), asset("b")])
+        let lock = NSLock()
+        var attempts: [String: Int] = [:]
+
+        session.generateAndSave { item in
+            lock.lock(); attempts[item.id, default: 0] += 1; let count = attempts[item.id]!; lock.unlock()
+            return item.id == "a" || count > 1
+        }
+        for _ in 0..<100 where session.isGenerating {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertEqual(session.failedAssets.map(\.id), ["b"])
+        XCTAssertTrue(session.canRetryFailed)
+
+        session.retryFailed()
+        for _ in 0..<100 where session.isGenerating {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertEqual(attempts["a"], 1)
+        XCTAssertEqual(attempts["b"], 2)
+        XCTAssertEqual(session.failedAssets, [])
+        XCTAssertEqual(session.status, .finished(saved: 1, failed: 0))
+    }
 }

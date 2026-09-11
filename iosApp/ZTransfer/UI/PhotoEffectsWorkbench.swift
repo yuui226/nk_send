@@ -89,6 +89,12 @@ struct PhotoEffectsWorkbench: View {
                     Text("已选 \(session.selectedCount) 张")
                         .font(.caption).foregroundStyle(.secondary)
                     Spacer()
+                    if session.canRetryFailed {
+                        Button("重试失败 \(session.failedAssets.count) 张") {
+                            session.retryFailed()
+                        }
+                        .buttonStyle(.bordered)
+                    }
                     Button(session.generateButtonTitle) {
                         session.generateAndSave { asset in
                             guard let selection else { return false }

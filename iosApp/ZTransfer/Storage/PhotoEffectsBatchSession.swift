@@ -20,6 +20,7 @@ final class PhotoEffectsBatchSession: ObservableObject {
     @Published private(set) var assets: [IOSPhotoEffectAsset] = []
     @Published private(set) var previewIndex = 0
     @Published private(set) var status: IOSPhotoEffectsBatchStatus = .idle
+    @Published private(set) var failedAssets: [IOSPhotoEffectAsset] = []
 
     private let coordinator: PhotoEffectsBatchCoordinator
     private var generationTask: Task<Void, Never>?
@@ -35,12 +36,14 @@ final class PhotoEffectsBatchSession: ObservableObject {
         return false
     }
 
+    var canRetryFailed: Bool { !failedAssets.isEmpty && !isGenerating }
+
     var generateButtonTitle: String {
         switch status {
         case .idle: return "生成并保存"
-        case let .generating(completed, total): return "生成中 (completed)/(total)"
+        case let .generating(completed, total): return "生成中 \(completed)/\(total)"
         case let .finished(saved, failed):
-            return failed == 0 ? "已完成 (saved) 张" : "完成 (saved) 张，失败 (failed) 张"
+            return failed == 0 ? "已完成 \(saved) 张" : "完成 \(saved) 张，失败 \(failed) 张"
         }
     }
 
@@ -50,6 +53,7 @@ final class PhotoEffectsBatchSession: ObservableObject {
         var seen = Set<String>()
         assets = values.filter { seen.insert($0.id).inserted }
         previewIndex = 0
+        failedAssets = []
         status = .idle
     }
 
@@ -74,17 +78,46 @@ final class PhotoEffectsBatchSession: ObservableObject {
     /// is reserved for lifecycle teardown and never reports a partial save as finished.
     func generateAndSave(_ operation: @escaping @Sendable (IOSPhotoEffectAsset) async throws -> Bool) {
         guard !assets.isEmpty, !isGenerating else { return }
-        let snapshot = assets
+        failedAssets = []
+        startGeneration(items: assets, operation: operation)
+    }
+
+    func retryFailed() {
+        guard canRetryFailed, let operation = lastOperation else { return }
+        let retry = failedAssets
+        failedAssets = []
+        startGeneration(items: retry, operation: operation)
+    }
+
+    private var lastOperation: (@Sendable (IOSPhotoEffectAsset) async throws -> Bool)?
+
+    private func startGeneration(
+        items: [IOSPhotoEffectAsset],
+        operation: @escaping @Sendable (IOSPhotoEffectAsset) async throws -> Bool
+    ) {
+        guard !items.isEmpty, !isGenerating else { return }
+        let snapshot = items
+        lastOperation = operation
         status = .generating(completed: 0, total: snapshot.count)
         generationTask = Task { [weak self] in
             guard let self else { return }
             do {
+                let trackedOperation: @Sendable (IOSPhotoEffectAsset) async throws -> Bool = { [weak self] asset in
+                    let saved = try await operation(asset)
+                    if !saved {
+                        await MainActor.run { [weak self] in
+                            guard let self, !self.failedAssets.contains(where: { $0.id == asset.id }) else { return }
+                            self.failedAssets.append(asset)
+                        }
+                    }
+                    return saved
+                }
                 let result = try await coordinator.process(snapshot, onProgress: { progress in
                     Task { @MainActor [weak self] in
                         guard let self else { return }
                         self.status = .generating(completed: progress.completed, total: progress.total)
                     }
-                }, generateAndSave: operation)
+                }, generateAndSave: trackedOperation)
                 guard !Task.isCancelled else { return }
                 await MainActor.run { [weak self] in
                     self?.status = .finished(saved: result.saved, failed: result.failed)
