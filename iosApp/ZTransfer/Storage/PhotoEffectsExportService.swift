@@ -10,9 +10,14 @@ enum PhotoEffectsExportError: Error {
     case unableToFinalizeDestination
 }
 
+struct PhotoEffectsRenderedFile: Sendable, Equatable {
+    let assetID: String
+    let url: URL
+}
+
 /// One real render/save operation used by the batch session. It writes a private JPEG first and
-/// only then asks Photos to add it; the source URL is never modified and a failed add leaves the
-/// generated file available for the host's retry/share policy.
+/// only then asks Photos to add it; the source URL is never modified. Hosts that need Files/share
+/// output can retain the returned artifact and call `remove` after their provider has acknowledged it.
 actor PhotoEffectsExportService {
     private let renderer: PhotoFilterPreviewRenderer
     private let importer: PhotoLibraryImporter
@@ -23,7 +28,7 @@ actor PhotoEffectsExportService {
         self.importer = importer
     }
 
-    func generateAndSave(_ asset: IOSPhotoEffectAsset, selection: IOSPhotoFilterSelection) async throws -> Bool {
+    func render(_ asset: IOSPhotoEffectAsset, selection: IOSPhotoFilterSelection) async throws -> PhotoEffectsRenderedFile {
         try Task.checkCancellation()
         guard asset.url.isFileURL,
               (try? asset.url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true,
@@ -41,8 +46,7 @@ actor PhotoEffectsExportService {
         try Task.checkCancellation()
         let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil)
         let output = FileManager.default.temporaryDirectory
-            .appendingPathComponent("ztransfer-effect-(UUID().uuidString).jpg")
-        defer { try? FileManager.default.removeItem(at: output) }
+            .appendingPathComponent("ztransfer-effect-\(UUID().uuidString).jpg")
         guard let destination = CGImageDestinationCreateWithURL(
             output as CFURL, UTType.jpeg.identifier as CFString, 1, nil
         ) else { throw PhotoEffectsExportError.unableToCreateDestination }
@@ -54,7 +58,23 @@ actor PhotoEffectsExportService {
             throw PhotoEffectsExportError.unableToFinalizeDestination
         }
         try Task.checkCancellation()
-        try await importer.save(output)
+        return PhotoEffectsRenderedFile(assetID: asset.id, url: output)
+    }
+
+    func saveToPhotos(_ rendered: PhotoEffectsRenderedFile) async throws {
+        try Task.checkCancellation()
+        guard rendered.url.isFileURL else { throw PhotoEffectsExportError.invalidSource }
+        try await importer.save(rendered.url)
+    }
+
+    func remove(_ rendered: PhotoEffectsRenderedFile) {
+        try? FileManager.default.removeItem(at: rendered.url)
+    }
+
+    func generateAndSave(_ asset: IOSPhotoEffectAsset, selection: IOSPhotoFilterSelection) async throws -> Bool {
+        let rendered = try await render(asset, selection: selection)
+        defer { remove(rendered) }
+        try await saveToPhotos(rendered)
         return true
     }
 }
