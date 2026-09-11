@@ -134,8 +134,9 @@ git rev-list --left-right --count HEAD...origin/research/ios
 | iOS 滤镜目录原生适配 | `NativePhotoFilterCatalog` 增加供 Swift 使用的稳定标量元数据接口；新增 `PhotoFilterCatalogStore`，统一分类、收藏顺序、收藏分类、强度归一化和 UserDefaults 持久化；新增 Xcode 源码与 XCTest 注册 | `NativePhotoFilterTest` 新增目录元数据覆盖；共享 `:shared:test` 报告 793 项通过；`iosApp/scripts/check_structure.py` 通过，451 项 XCTest 已登记待 Mac | iOS 两处实际拨轮长按 UI、滤镜选中回写、强度/预览接线和 Apple 编译/真机证据仍待完成；因此 IOS-E02/IOS-U08 不计完成 |
 | 反挤压共享策略 | 新增 `DesqueezePolicy`，统一 1.0/1.33/1.5/1.8/2.0 循环、默认图标态、1.33 显示为 1.3、比例计算和非法值归一化，供 iOS 接入 | 新增 `DesqueezePolicyTest`；共享 `:shared:test` 报告 793 项通过；未改 Android 页面和取景器实现 | iOS 取景器按钮、真实画面缩放、覆盖层对齐、横竖屏布局和真机证据仍待完成 |
 | iOS 批量效果并发协调 | 新增 `PhotoEffectsBatchCoordinator`，固定选择快照、最多两路 worker、完成/成功/失败计数和失败继续；渲染与保存通过闭包注入，后续接共享滤镜内核与 PhotoKit | 新增 XCTest 覆盖空选择、失败继续、每项只处理一次和并发峰值不超过 2；`iosApp/scripts/check_structure.py` 通过，453 项 XCTest 已登记待 Mac | iOS PHPicker 多选、横向预览、按钮状态动画、实际渲染/导出/PhotoKit 回执仍待完成 |
+| iOS 滤镜帮助文案 | 新增 `NativePhotoEffectsText`，为简体中文、繁体中文和英文统一提供“拨轮快速调节”和“长按照片滤镜拨轮：按分类选择滤镜”两条文案 | 新增 `NativePhotoEffectsTextTest` 覆盖三语；未改 Android 资源和页面 | iOS 两处灯泡实际 UI 接线、动态语言刷新和无障碍朗读标签仍待完成 |
 
-本次完成 3 个可独立验收的 Windows 源码子任务。Android 同步主线仍有 4 个产品项待 iOS 完整接入（滤镜 UI、批量照片效果、反挤压、术语/帮助）；其中滤镜、批量和反挤压目前只完成共享/适配层，完整项仍待 UI 接线。官方 Mac/真机验收仍为 **12 / 12 项待验（M01—M12）**，本次没有减少该数量。
+本次完成 4 个可独立验收的 Windows 源码子任务。Android 同步主线仍有 4 个产品项待 iOS 完整接入（滤镜 UI、批量照片效果、反挤压、术语/帮助）；其中滤镜、批量、反挤压和文案目前只完成共享/适配层，完整项仍待 UI 接线。共享专项测试已分别通过 `:shared:testDebugUnitTest --tests com.ztransfer.protocol.DesqueezePolicyTest` 与 `--tests com.ztransfer.ui.NativePhotoEffectsTextTest`。官方 Mac/真机验收仍为 **12 / 12 项待验（M01—M12）**，本次没有减少该数量。
 
 ## 更新规则
 
