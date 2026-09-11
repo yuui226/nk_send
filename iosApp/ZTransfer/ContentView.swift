@@ -17,7 +17,11 @@ struct ContentView: View {
             .preferredColorScheme(appearance.colorScheme)
             .onAppear {
                 appearance.start()
-                workspace.session.photoEffectsHandler = { photoEffectsPresentation.present() }
+                workspace.session.photoEffectsHandler = {
+                    workspace.session.filesPage?.close()
+                    workspace.session.filesPage = nil
+                    photoEffectsPresentation.present()
+                }
             }
             #if DEBUG
             .overlay(alignment: .topTrailing) {
