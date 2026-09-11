@@ -62,6 +62,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.outlined.AspectRatio
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -512,6 +513,9 @@ private const val BATTERY_REFRESH_INTERVAL_MS = 120_000L
 private const val REMOTE_AUDIO_LEVELS_VISIBLE_KEY = "remote_audio_levels_visible"
 private const val REMOTE_DESQUEEZE_MULTIPLIER_KEY = "remote_desqueeze_multiplier"
 private val REMOTE_DESQUEEZE_OPTIONS = listOf(1f, 1.33f, 1.5f, 1.8f, 2f)
+
+private fun desqueezeDisplayValue(value: Float): String =
+    if (kotlin.math.abs(value - 1.33f) < 0.01f) "1.3" else value.toString()
 
 @Composable
 private fun RemoteContent(
@@ -2529,9 +2533,6 @@ private fun RemoteContent(
                     )
                 })
                 add(@Composable {
-                    DesqueezeToolButton(desqueezeMultiplier, ::setDesqueezeMultiplier)
-                })
-                add(@Composable {
                     TopIconToggle(
                         active = showHistogram,
                         contentDescription = stringResource(R.string.cd_remote_histogram),
@@ -2553,6 +2554,9 @@ private fun RemoteContent(
                         contentDescription = stringResource(R.string.cd_remote_zebra),
                         onClick = { showZebra = !showZebra }
                     ) { ZebraMark(Modifier.size(18.dp)) }
+                })
+                add(@Composable {
+                    DesqueezeToolButton(desqueezeMultiplier, ::setDesqueezeMultiplier)
                 })
                 add(@Composable {
                     TopIconToggle(
@@ -2871,7 +2875,6 @@ private fun RemoteContent(
                                     active = showAudioLevels,
                                     onClick = ::toggleAudioLevels
                                 )
-                                DesqueezeToolButton(desqueezeMultiplier, ::setDesqueezeMultiplier)
                                 TopIconToggle(
                                     active = showHistogram,
                                     contentDescription = stringResource(R.string.cd_remote_histogram),
@@ -2887,6 +2890,7 @@ private fun RemoteContent(
                                     contentDescription = stringResource(R.string.cd_remote_zebra),
                                     onClick = { showZebra = !showZebra }
                                 ) { ZebraMark(Modifier.size(18.dp)) }
+                                DesqueezeToolButton(desqueezeMultiplier, ::setDesqueezeMultiplier)
                                 TopIconToggle(
                                     active = showLevel,
                                     contentDescription = stringResource(R.string.cd_remote_level),
@@ -4605,10 +4609,18 @@ private fun DesqueezeToolButton(multiplier: Float, onSelect: (Float) -> Unit) {
     Box {
         TopIconToggle(
             active = multiplier > 1.001f,
-            contentDescription = "反挤压倍率 ${multiplier}x",
+            contentDescription = "反挤压倍率 ${desqueezeDisplayValue(multiplier)}",
             onClick = { expanded = true }
         ) {
-            Text(if (multiplier > 1.001f) "${multiplier}×" else "1×", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            if (multiplier > 1.001f) {
+                Text(desqueezeDisplayValue(multiplier), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            } else {
+                Icon(
+                    imageVector = Icons.Outlined.AspectRatio,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
         }
         DropdownMenu(
             expanded = expanded,
@@ -4621,7 +4633,7 @@ private fun DesqueezeToolButton(multiplier: Float, onSelect: (Float) -> Unit) {
         ) {
             REMOTE_DESQUEEZE_OPTIONS.forEach { option ->
                 DropdownMenuItem(
-                    text = { Text("${option}×", style = MaterialTheme.typography.labelLarge, color = AppTheme.colors.onBackground) },
+                    text = { Text(desqueezeDisplayValue(option), style = MaterialTheme.typography.labelLarge, color = AppTheme.colors.onBackground) },
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 3.dp),
                     onClick = { onSelect(option); expanded = false },
                 )
