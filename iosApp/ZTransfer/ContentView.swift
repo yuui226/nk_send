@@ -5,6 +5,7 @@ import SwiftUI
 struct ContentView: View {
     @ObservedObject private var appearance = AppAppearanceSettings.shared
     @StateObject private var workspace = CameraWorkspaceBridge()
+    @StateObject private var photoEffectsPresentation = PhotoEffectsPresentation()
     #if DEBUG
     @State private var showDiagnostics = false
     @State private var showSharedComponents = false
@@ -12,6 +13,7 @@ struct ContentView: View {
 
     var body: some View {
         CameraWorkspace(bridge: workspace)
+            .photoEffectsPresentation(photoEffectsPresentation)
             .preferredColorScheme(appearance.colorScheme)
             .onAppear { appearance.start() }
             #if DEBUG
