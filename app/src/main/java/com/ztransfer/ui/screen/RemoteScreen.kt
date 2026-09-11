@@ -63,8 +63,6 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
@@ -103,6 +101,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
@@ -4602,6 +4602,14 @@ private fun AdaptiveRemoteToolBar(
 @Composable
 private fun DesqueezeToolButton(multiplier: Float, onSelect: (Float) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
+    var dialogVisible by remember { mutableStateOf(false) }
+    LaunchedEffect(expanded) {
+        if (expanded) dialogVisible = true
+        else if (dialogVisible) {
+            delay(180)
+            dialogVisible = false
+        }
+    }
     Box {
         TopIconToggle(
             active = multiplier > 1.001f,
@@ -4610,21 +4618,50 @@ private fun DesqueezeToolButton(multiplier: Float, onSelect: (Float) -> Unit) {
         ) {
             Text(if (multiplier > 1.001f) "${multiplier}×" else "1×", fontSize = 12.sp, fontWeight = FontWeight.Bold)
         }
-        DropdownMenu(
-            expanded = expanded,
+        if (dialogVisible) Dialog(
             onDismissRequest = { expanded = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false),
         ) {
-            REMOTE_DESQUEEZE_OPTIONS.forEach { option ->
-                DropdownMenuItem(
-                    text = {
+            AnimatedVisibility(
+                visible = expanded,
+                enter = fadeIn(tween(150)) + scaleIn(initialScale = 0.94f, animationSpec = tween(180)),
+                exit = fadeOut(tween(120)) + scaleOut(targetScale = 0.96f, animationSpec = tween(160)),
+            ) {
+                GlassSurface(
+                    modifier = Modifier.width(300.dp),
+                    shape = RoundedCornerShape(22.dp),
+                    panel = true,
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
                         Text(
-                            if (option == 1f) "关闭（原始）" else "${option}× 反挤压",
-                            style = MaterialTheme.typography.labelLarge,
+                            text = "反挤压",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
                             color = AppTheme.colors.onBackground,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
                         )
-                    },
-                    onClick = { onSelect(option); expanded = false },
-                )
+                        Spacer(Modifier.height(3.dp))
+                        REMOTE_DESQUEEZE_OPTIONS.forEach { option ->
+                            val selected = kotlin.math.abs(multiplier - option) < 0.01f
+                            GlassButton(
+                                onClick = { onSelect(option); expanded = false },
+                                active = selected,
+                                modifier = Modifier.fillMaxWidth().height(42.dp),
+                                contentPadding = PaddingValues(horizontal = 14.dp),
+                            ) {
+                                Text(
+                                    text = "${option}×",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                    color = AppTheme.colors.onBackground,
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
     }
