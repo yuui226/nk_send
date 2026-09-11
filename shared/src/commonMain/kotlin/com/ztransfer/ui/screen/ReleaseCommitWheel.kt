@@ -84,7 +84,7 @@ fun wheelDragEnabled(optionCount: Int): Boolean = optionCount > 3
  *
  * 拖动期间只更新本地预览位置，不会调用 [onValueCommitted]；正常松手时才吸附到最近一档并
  * 提交一次。手势被取消（例如父级滚动接管）时恢复已保存值，也不会误写偏好。轻点默认向下一档
- * 循环；单项操作型波轮可通过 [onActivated] 执行自己的点击动作。[readOnly] 保留正常视觉，
+ * 循环；单项操作型拨轮可通过 [onActivated] 执行自己的点击动作。[readOnly] 保留正常视觉，
  * 但不响应拖动或点击，供连接后的倒计时等原位状态展示复用。[cornerRadius] 允许较大的
  * 页面级入口沿用同一拨轮交互，同时匹配其所在卡片的圆角层级。
  */
@@ -443,7 +443,7 @@ fun <T> ReleaseCommitWheel(
         }
 
         if (showDragHint && wheelDragEnabled(options.size)) {
-            // 纯视觉拖动提示：不安装任何手势或点击处理，事件仍完整交给外层波轮。
+            // 纯视觉拖动提示：不安装任何手势或点击处理，事件仍完整交给外层拨轮。
             Text(
                 text = "↕",
                 color = colors.onBackground.copy(alpha = 0.30f),
@@ -458,3 +458,4 @@ fun <T> ReleaseCommitWheel(
         }
     }
 }
+

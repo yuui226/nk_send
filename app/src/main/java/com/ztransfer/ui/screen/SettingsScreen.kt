@@ -63,6 +63,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.rounded.Star
@@ -153,6 +154,8 @@ import com.ztransfer.frame.photoFrameTimePatternExample
 import com.ztransfer.frame.resolvedPhotoFrameMetadataSettings
 import com.ztransfer.filter.PhotoFilterPreset
 import com.ztransfer.filter.BuiltInPhotoFilters
+import com.ztransfer.filter.PhotoFilterCategory
+import com.ztransfer.filter.orderForCategory
 import com.ztransfer.filter.builtInPhotoFilterNameResId
 import com.ztransfer.filter.PhotoFilterRenderer
 import com.ztransfer.filter.PhotoFilterSelection
@@ -507,7 +510,7 @@ fun SettingsOverlay(
             ) {
                 Surface(
                     shape = RoundedCornerShape(18.dp),
-                    color = colors.glassSurfaceHeavy,
+                    color = colors.glassSurface.copy(alpha = 0.92f),
                     shadowElevation = 6.dp,
                     border = BorderStroke(1.dp, colors.glassPanelBorder)
                 ) {
@@ -1196,7 +1199,7 @@ internal fun PhotoEffectsInfoBubble(
     val panelTop = anchorBounds?.let {
         with(density) { it.bottom.toDp() } - parentTopInset + 8.dp
     } ?: 64.dp
-    val guidance = listOf(gestureHint, stringResource(R.string.photo_effects_wheel_hint))
+    val guidance = listOf(gestureHint, stringResource(R.string.photo_effects_wheel_hint), stringResource(R.string.photo_effects_full_chooser_hint))
         .filter { it.isNotBlank() }
         .joinToString("\n")
     val items = buildList {
@@ -1322,6 +1325,8 @@ internal fun PhotoFilterEditor(
     val filterAccent = colors.accentBlue
     val favoritePalette = rememberPhotoEffectFavoriteButtonPalette()
     val haptics = rememberHaptics(hapticsEnabled)
+    var showFullChooser by rememberSaveable { mutableStateOf(false) }
+    var chooserCategory by rememberSaveable { mutableStateOf(PhotoFilterCategory.ALL.name) }
     val selected = filters.firstOrNull { it.id == selectedId }
     val normalizedIntensity = normalizePhotoFilterIntensity(intensityPercent)
     val intensityChoices = remember { (100 downTo 2 step 2).toList() }
@@ -1375,6 +1380,7 @@ internal fun PhotoFilterEditor(
                 wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
                 accentColor = filterAccent,
                 modifier = Modifier.weight(PHOTO_EFFECTS_PRIMARY_WHEEL_WEIGHT),
+                onLongClick = { showFullChooser = true },
             )
             ReleaseCommitWheel(
                 options = intensityChoices,
@@ -1405,6 +1411,92 @@ internal fun PhotoFilterEditor(
                     }
                 },
             )
+        }
+    }
+    if (showFullChooser) {
+        val category = PhotoFilterCategory.entries.firstOrNull { it.name == chooserCategory } ?: PhotoFilterCategory.ALL
+        val favoriteKeys = favoriteFilters.map { it.catalogKey }
+        val chooserFilters = filters.orderForCategory(category, favoriteKeys) { BuiltInPhotoFilters.catalogKey(it.id) ?: it.id }
+        Dialog(
+            onDismissRequest = { showFullChooser = false },
+            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+        ) {
+            Surface(
+                modifier = Modifier.padding(horizontal = 24.dp).width(280.dp),
+                shape = RoundedCornerShape(18.dp),
+                color = colors.glassSurface.copy(alpha = 0.92f),
+                border = BorderStroke(1.dp, colors.glassPanelBorder),
+                shadowElevation = 6.dp,
+            ) {
+                // Match the painted row and touch target so Material's minimum target does
+                // not add invisible space between cards. No title or action slots here.
+                CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 44.dp) {
+                Row(
+                    Modifier.padding(10.dp).heightIn(max = 380.dp).fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Column(
+                        modifier = Modifier.width(84.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        PhotoFilterCategory.entries.forEach { item ->
+                            val selectedCategory = item == category
+                            Surface(
+                                onClick = { chooserCategory = item.name },
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (selectedCategory) filterAccent.copy(alpha = 0.18f) else Color.Transparent,
+                                modifier = Modifier.fillMaxWidth().heightIn(min = 40.dp),
+                            ) {
+                                Box(contentAlignment = Alignment.CenterStart) {
+                                Text(
+                                    text = item.title,
+                                    color = if (selectedCategory) filterAccent else colors.onSurfaceVariant,
+                                    fontWeight = if (selectedCategory) FontWeight.SemiBold else FontWeight.Normal,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                )
+                                }
+                            }
+                        }
+                    }
+                    Column(
+                        modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        chooserFilters.forEach { preset ->
+                            val isSelected = enabled && preset.id == selectedId
+                            val isFavorite = favoriteKeys.contains(BuiltInPhotoFilters.catalogKey(preset.id))
+                            Surface(
+                                onClick = {
+                                    onSelected(preset.id)
+                                    onIntensityChanged(preset.id, rememberedIntensity(preset.id))
+                                    showFullChooser = false
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (isSelected) filterAccent.copy(alpha = 0.14f) else Color.Transparent,
+                                modifier = Modifier.fillMaxWidth().heightIn(min = 40.dp),
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    if (isFavorite) {
+                                        Icon(Icons.Rounded.Star, contentDescription = null, tint = colors.accentYellow, modifier = Modifier.size(18.dp))
+                                        Spacer(Modifier.width(8.dp))
+                                    }
+                                    Text(
+                                        text = photoFilterDisplayName(preset),
+                                        color = colors.onBackground,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                }
+            }
         }
     }
 }
@@ -2826,7 +2918,7 @@ internal fun PhotoEffectsRenderedPreview(
                     modifier = Modifier.fillMaxSize(),
                 )
                 Surface(
-                    color = colors.glassSurfaceHeavy,
+                    color = colors.glassSurface.copy(alpha = 0.92f),
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.align(Alignment.BottomCenter),
                 ) {
@@ -2840,7 +2932,7 @@ internal fun PhotoEffectsRenderedPreview(
             }
             if (previewFailed && preview != null) {
                 Surface(
-                    color = colors.glassSurfaceHeavy,
+                    color = colors.glassSurface.copy(alpha = 0.92f),
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.align(Alignment.BottomCenter),
                 ) {
@@ -2882,7 +2974,7 @@ private fun PhotoEffectsPreviewLayer(
 private const val PHOTO_EFFECTS_PREVIEW_LANDSCAPE_ASPECT_RATIO = 4f / 3f
 private const val PHOTO_EFFECTS_PREVIEW_PORTRAIT_ASPECT_RATIO = 3f / 4f
 private val PHOTO_EFFECTS_CONTROL_HEIGHT = 50.dp
-// 顶部两行共用 4:3 栅格：名称类波轮更舒展，数值/开关波轮更紧凑，收藏方钮保持对齐。
+// 顶部两行共用 4:3 栅格：名称类拨轮更舒展，数值/开关拨轮更紧凑，收藏方钮保持对齐。
 private const val PHOTO_EFFECTS_PRIMARY_WHEEL_WEIGHT = 4f
 private const val PHOTO_EFFECTS_SECONDARY_WHEEL_WEIGHT = 3f
 // 与相机 FHD 预览源保持一致，避免高密度屏幕或放大查看时出现二次缩放模糊。
@@ -3082,10 +3174,10 @@ private fun createPhotoFramePreviewSource(): Bitmap {
 }
 
 /**
- * 设置页布尔波轮统一入口：档位真正改变时才触发轻触反馈。
+ * 设置页布尔拨轮统一入口：档位真正改变时才触发轻触反馈。
  *
- * 触感反馈波轮本身始终允许播放这一次确认反馈，这样从关闭切到开启时，
- * 用户能够立即知道设置已经生效；其余布尔波轮严格受全局触感偏好控制。
+ * 触感反馈拨轮本身始终允许播放这一次确认反馈，这样从关闭切到开启时，
+ * 用户能够立即知道设置已经生效；其余布尔拨轮严格受全局触感偏好控制。
  */
 @Composable
 private fun BooleanSettingsWheel(
@@ -3317,7 +3409,7 @@ private fun GpsResetPairingDialog(
     Dialog(onDismissRequest = onDismiss) {
         Surface(
             shape = GPS_PANEL_SHAPE,
-            color = colors.glassSurfaceHeavy,
+            color = colors.glassSurface.copy(alpha = 0.92f),
             border = BorderStroke(1.dp, colors.glassPanelBorder),
             tonalElevation = 6.dp,
         ) {
@@ -4790,3 +4882,30 @@ private object AndroidSettingsControlsText : SettingsControlsText {
     })
     @Composable override fun skinLabel(skin: SkinPreset): String = stringResource(skin.displayNameResId)
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

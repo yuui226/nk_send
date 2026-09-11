@@ -301,7 +301,7 @@ private val TOP_BAR_COMPACT_BUTTON_MIN_WIDTH = 40.dp
 // 填充逻辑住在 CameraViewModel.startThumbnailFill（与页面无关）。
 
 // 主筛选与日期编辑共用固定宽度，切页时不横向重排面板。
-// 筛选内容包含五列类型按钮和三列日期波轮：手机上尽量利用横向空间，宽屏则封顶，
+// 筛选内容包含五列类型按钮和三列日期拨轮：手机上尽量利用横向空间，宽屏则封顶，
 // 避免固定窄面板挤压标签，也避免平板上横向铺得过散。
 
 // 有彩色角标底（白字）的类型：其余走灰底灰字。提到顶层，避免每个格子每次重组都新建集合。
@@ -2140,8 +2140,8 @@ private fun formatDateHeader(date: String): String {
 internal fun allowGridRemoteThumbnails(previewOpen: Boolean): Boolean = !previewOpen
 
 /**
- * 类型/标记/日期筛选浮层。主面板保持紧凑；日期页上下同时展示开始、结束两组三波轮，
- * 编辑期间只改草稿，完成时才一次提交，避免滚动波轮时反复重排列表与后台请求。
+ * 类型/标记/日期筛选浮层。主面板保持紧凑；日期页上下同时展示开始、结束两组三拨轮，
+ * 编辑期间只改草稿，完成时才一次提交，避免滚动拨轮时反复重排列表与后台请求。
  * 类型语义：勾"全部"= 不过滤（未来出现的新类型也放行）；点具体类型自动脱离"全部"；
  * 全不选或凑齐全部现有类型时自动归位"全部"（不允许空集）。
  * 面板随开合重建，每次打开都从当前设置初始化。
@@ -2269,3 +2269,4 @@ internal fun computeBurstGroups(files: List<CameraFileInfo>): List<BurstPhotoGro
         BurstPhotoGroup(id = group.id, files = group.files)
     }
 }
+

@@ -263,7 +263,8 @@
     <string name="photo_effects_info_title">照片效果说明</string>
     <string name="photo_effects_info_description">传输原图后，效果图另存。</string>
     <string name="photo_effects_gesture_hint">预览：点击放大 · 双击旋转 · 长按对比滤镜前后</string>
-    <string name="photo_effects_wheel_hint">波轮：按住上下拖动可快速调节</string>
+    <string name="photo_effects_wheel_hint">拨轮：按住上下拖动可快速调节</string>
+    <string name="photo_effects_full_chooser_hint">长按照片滤镜拨轮：按分类选择滤镜</string>
     <string name="photo_filter_off_option">无滤镜</string>
     <string name="photo_filter_intensity_summary">强度 %1$d%%</string>
     <string name="photo_filter_intensity">滤镜强度</string>
@@ -589,3 +590,5 @@
     <string name="gps_bluetooth_required">请打开手机蓝牙以开启 GPS</string>
     <string name="gps_close_before_connect">请先关闭 GPS</string>
 </resources>
+
+
