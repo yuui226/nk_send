@@ -53,7 +53,8 @@ fun queuePillWidthKey(
 }
 
 @Composable
-private fun AnimatedQueuePillCount(
+@kotlin.native.HiddenFromObjC
+fun AnimatedQueuePillCount(
     count: Int,
     color: Color,
     label: String,

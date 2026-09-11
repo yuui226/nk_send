@@ -2,7 +2,6 @@ package com.ztransfer.ui.screen
 
 import android.app.Activity
 import android.content.Intent
-import android.graphics.Bitmap
 import android.net.Uri
 import android.provider.MediaStore
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -22,7 +21,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -46,12 +44,8 @@ import com.ztransfer.effects.FavoriteFrameWatermarkEffect
 import com.ztransfer.effects.FavoritePhotoFilter
 import com.ztransfer.filter.PhotoFilterSelection
 import com.ztransfer.filter.BuiltInPhotoFilters
-import com.ztransfer.frame.PhotoFrameExporter
-import com.ztransfer.frame.PhotoFrameMediaStoreSource
-import com.ztransfer.frame.PhotoFrameMetadata
 import com.ztransfer.frame.PhotoFrameWatermark
 import com.ztransfer.frame.PhotoFrameWatermarkContent
-import com.ztransfer.frame.LOCAL_PHOTO_FALLBACK_RELATIVE_PATH
 import com.ztransfer.frame.defaultPhotoFrameMetadataSettings
 import com.ztransfer.frame.normalizePhotoFrameMetadataSettings
 import com.ztransfer.frame.resolvedPhotoFrameMetadataSettings
@@ -60,21 +54,11 @@ import com.ztransfer.license.LicenseManager
 import com.ztransfer.ui.theme.AppTheme
 import com.ztransfer.viewmodel.TransferViewModel
 import com.ztransfer.viewmodel.freeEditionPhotoFrameWatermark
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-
-private data class LocalPhotoSelection(
-    val sourceUri: Uri,
-    val destination: PhotoFrameMediaStoreSource?,
-    val preview: Bitmap,
-    val metadata: PhotoFrameMetadata,
-)
 
 /**
- * Editor for a phone photo. Its controls persist independently from the transfer pipeline, while
- * the selected source and decoded preview live only for the current visit.
+ * Phone photo workbench. One shared effect configuration applies to all selected originals;
+ * the batch ViewModel owns generation and pager pages own only their bounded previews.
  */
 @Composable
 fun LocalPhotoEffectsPage(
@@ -87,7 +71,6 @@ fun LocalPhotoEffectsPage(
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
-    val scope = rememberCoroutineScope()
     val pageTopInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
 
     val settingsPreferences = remember(context) { LocalPhotoEffectsPreferences(context) }
@@ -96,11 +79,12 @@ fun LocalPhotoEffectsPage(
         settingsPreferences.restore(availableFilterIds)
     }
 
-    var selection by remember { mutableStateOf<LocalPhotoSelection?>(null) }
-    var sourceLoading by remember { mutableStateOf(false) }
-    var saving by remember { mutableStateOf(false) }
+    val batchModel = androidx.lifecycle.viewmodel.compose.viewModel<LocalPhotoBatchViewModel>()
+    val batch by batchModel.state.collectAsState()
+    val saving = batch.generating
     var watermarkImageImporting by remember { mutableStateOf(false) }
     var showPhotoEffectsInfo by remember { mutableStateOf(false) }
+    var previewPage by remember { mutableIntStateOf(0) }
     var photoEffectsInfoAnchorBounds by remember { mutableStateOf<Rect?>(null) }
 
     var decorationEnabled by remember { mutableStateOf(initialSettings.decorationEnabled) }
@@ -156,66 +140,27 @@ fun LocalPhotoEffectsPage(
         }
     }
 
-    val selectFailedText = stringResource(R.string.local_photo_select_failed)
-    val saveFailedText = stringResource(R.string.local_photo_save_failed)
     val watermarkProOnlyText = stringResource(R.string.photo_frame_watermark_pro_only)
     val watermarkImageImportFailedText = stringResource(R.string.photo_frame_image_import_failed)
     val watermarkFavoriteImageMissingText =
         stringResource(R.string.photo_effect_favorite_image_missing)
-    val savedFormat = stringResource(R.string.local_photo_saved)
-
-    fun loadSelectedPhoto(uri: Uri) {
-        sourceLoading = true
-        scope.launch {
-            val selectionResult = withContext(Dispatchers.IO) {
-                runCatching {
-                    val decoded = PhotoFrameExporter.decodePreview(
-                        resolver = context.contentResolver,
-                        sourceUri = uri,
-                    ) ?: error("Cannot decode selected photo")
-                    val metadata = PhotoFrameExporter.readPreviewMetadata(
-                        resolver = context.contentResolver,
-                        sourceUri = uri,
-                    )
-                    val destination = PhotoFrameExporter.prepareMediaStoreSource(
-                        context = context,
-                        resolver = context.contentResolver,
-                        sourceUri = uri,
-                    ).getOrNull()
-                    LocalPhotoSelection(
-                        sourceUri = uri,
-                        destination = destination,
-                        preview = decoded,
-                        metadata = metadata,
-                    )
-                }
-            }
-            sourceLoading = false
-            selectionResult.fold(
-                onSuccess = { selected ->
-                    selection = selected
-                },
-                onFailure = { showHint(selectFailedText) },
-            )
-        }
-    }
-
     val photoPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult(),
     ) { activityResult ->
-        val uri = activityResult.data?.data
-            ?.takeIf { activityResult.resultCode == Activity.RESULT_OK }
-            ?: return@rememberLauncherForActivityResult
-        loadSelectedPhoto(uri)
+        if (activityResult.resultCode != Activity.RESULT_OK) return@rememberLauncherForActivityResult
+        val data = activityResult.data ?: return@rememberLauncherForActivityResult
+        val uris = buildList {
+            data.data?.let(::add)
+            data.clipData?.let { clip -> for (index in 0 until clip.itemCount) add(clip.getItemAt(index).uri) }
+        }.distinct()
+        batchModel.select(uris)
     }
     val launchPhotoPicker = {
         photoPicker.launch(
             Intent(Intent.ACTION_PICK).apply {
-                setDataAndType(
-                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                    "image/*",
-                )
+                setDataAndType(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, "image/*")
                 putExtra(Intent.EXTRA_LOCAL_ONLY, true)
+                putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
         )
@@ -270,6 +215,12 @@ fun LocalPhotoEffectsPage(
         renderWatermark = requestedRenderWatermark
     }
     val hasEffect = decorationEnabled || selectedFilter != null
+    val view = androidx.compose.ui.platform.LocalView.current
+    DisposableEffect(view, saving) {
+        val previous = view.keepScreenOn
+        if (saving) view.keepScreenOn = true
+        onDispose { view.keepScreenOn = previous }
+    }
 
     Box(
         modifier = Modifier
@@ -311,7 +262,17 @@ fun LocalPhotoEffectsPage(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
-                Spacer(Modifier.width(8.dp))
+                if (batch.photos.isNotEmpty()) {
+                    GlassButton(
+                        onClick = launchPhotoPicker,
+                        enabled = !saving,
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 7.dp),
+                        modifier = Modifier.height(38.dp),
+                    ) {
+                        Text(stringResource(R.string.local_photo_replace), style = MaterialTheme.typography.labelMedium, color = colors.onBackground)
+                    }
+                    Spacer(Modifier.width(8.dp))
+                }
                 TipLightbulbButton(
                     onClick = {
                         viewModel.markLocalPhotoEffectsHelpViewed()
@@ -325,39 +286,11 @@ fun LocalPhotoEffectsPage(
                             photoEffectsInfoAnchorBounds = it.boundsInRoot()
                         },
                 )
-                Spacer(Modifier.width(8.dp))
-                GlassButton(
-                    onClick = launchPhotoPicker,
-                    enabled = !sourceLoading && !saving,
-                    contentPadding = PaddingValues(horizontal = 11.dp, vertical = 7.dp),
-                    modifier = Modifier.height(38.dp),
-                ) {
-                    if (sourceLoading) {
-                        CircularProgressIndicator(
-                            color = colors.accentBlue,
-                            strokeWidth = 2.dp,
-                            modifier = Modifier.size(19.dp),
-                        )
-                    }
-                    Text(
-                        text = stringResource(
-                            if (selection == null) R.string.local_photo_choose_short
-                            else R.string.local_photo_replace
-                        ),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = colors.onBackground,
-                    )
-                }
             }
 
             Spacer(Modifier.height(14.dp))
-            val previewBitmap = selection?.preview
             val previewFilterPrefetch = remember(
-                state.photoFilters,
-                favoritePhotoFilters,
-                filterIntensities,
-                filterId,
-                filterEnabled,
+                state.photoFilters, favoritePhotoFilters, filterIntensities, filterId, filterEnabled,
             ) {
                 nextPhotoFilterSelections(
                     filters = state.photoFilters,
@@ -367,120 +300,40 @@ fun LocalPhotoEffectsPage(
                     enabled = filterEnabled,
                 )
             }
-            if (previewBitmap == null) {
-                Surface(
-                    onClick = launchPhotoPicker,
-                    enabled = !sourceLoading && !saving,
-                    shape = RoundedCornerShape(12.dp),
-                    color = colors.onBackground.copy(alpha = 0.035f),
-                    border = BorderStroke(1.dp, colors.glassPanelBorder),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(4f / 3f),
-                ) {
-                    Box(
-                        contentAlignment = Alignment.Center,
-                        modifier = Modifier.fillMaxSize(),
-                    ) {
-                        Text(
-                            text = stringResource(R.string.local_photo_choose_short),
-                            style = MaterialTheme.typography.labelLarge,
-                            color = colors.accentBlue,
-                        )
-                    }
-                }
-            } else {
-                PhotoEffectsRenderedPreview(
-                    source = previewBitmap,
-                    resetOnSourceChange = true,
-                    metadata = selection?.metadata ?: PhotoFrameMetadata(
-                        make = null,
-                        model = null,
-                        aperture = null,
-                        shutter = null,
-                        iso = null,
-                        focalLength = null,
-                        lensModel = null,
-                    ),
-                    sourceRotationQuarterTurns = 0,
-                    requestedRotationQuarterTurns = 0,
-                    requestedPortrait = previewBitmap.height > previewBitmap.width,
-                    onRotate = null,
-                    borderEnabled = decorationEnabled && borderEnabled,
-                    preset = preset,
-                    metadataSettings = resolvedPhotoFrameMetadataSettings(
-                        metadataSettings,
-                        preset,
-                    ).withoutLocationFields(),
-                    // Keep the same clearly-fake preview values as the camera editor whenever
-                    // local EXIF is missing; location fields remain removed above.
-                    previewPlaceholders = true,
-                    watermark = renderWatermark,
-                    filter = selectedFilter,
-                    prefetchFilters = previewFilterPrefetch,
-                    onOpen = null,
-                )
-            }
-
+            val previewEffects = LocalPhotoBatchEffects(
+                preset = preset,
+                watermark = renderWatermark,
+                borderEnabled = decorationEnabled && borderEnabled,
+                metadataSettings = resolvedPhotoFrameMetadataSettings(metadataSettings, preset).withoutLocationFields(),
+                filter = selectedFilter,
+            )
+            LocalPhotoPreviewPager(
+                photos = batch.photos,
+                effects = previewEffects,
+                prefetchFilters = previewFilterPrefetch,
+                generating = saving,
+                onChoose = launchPhotoPicker,
+                onPageChanged = { previewPage = it },
+            )
             Spacer(Modifier.height(10.dp))
-            GlassButton(
-                onClick = {
-                    val selectedSource = selection?.destination ?: run {
-                        showHint(selectFailedText)
-                        return@GlassButton
-                    }
+            LocalPhotoBatchButton(
+                batch = batch,
+                hasEffect = hasEffect,
+                onChoose = launchPhotoPicker,
+                onGenerate = {
                     focusManager.clearFocus()
                     keyboardController?.hide()
-                    saving = true
-                    scope.launch {
-                        val result = withContext(Dispatchers.IO) {
-                            PhotoFrameExporter.exportBesideSource(
-                                context = context,
-                                resolver = context.contentResolver,
-                                source = selectedSource,
-                                preset = preset,
-                                watermark = renderWatermark,
-                                borderEnabled = decorationEnabled && borderEnabled,
-                                metadataSettings = resolvedPhotoFrameMetadataSettings(
-                                    metadataSettings,
-                                    preset,
-                                ).withoutLocationFields(),
-                                filter = selectedFilter,
-                            )
-                        }
-                        saving = false
-                        result.fold(
-                            onSuccess = { exportResult ->
-                                val savedDirectory = exportResult.relativePath
-                                    ?.trimEnd('/', '\\')
-                                    ?.takeIf(String::isNotBlank)
-                                    ?: LOCAL_PHOTO_FALLBACK_RELATIVE_PATH
-                                showHint(savedFormat.format(savedDirectory))
-                            },
-                            onFailure = { showHint(saveFailedText) },
-                        )
-                    }
+                    // Capture the latest text, including edits still awaiting preview debounce.
+                    batchModel.generate(previewEffects.copy(watermark = requestedRenderWatermark))
                 },
-                enabled = selection != null && hasEffect && !saving && !sourceLoading,
-                active = selection != null && hasEffect,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(50.dp),
-            ) {
-                if (saving) {
-                    CircularProgressIndicator(
-                        color = colors.accentBlue,
-                        strokeWidth = 2.dp,
-                        modifier = Modifier.size(19.dp),
-                    )
-                }
+                pageLabel = if (batch.photos.isEmpty()) null else "${previewPage + 1} / ${batch.photos.size}",
+            )
+            if (batch.phase == LocalPhotoBatchPhase.PARTIAL || batch.phase == LocalPhotoBatchPhase.FAILED) {
                 Text(
-                    text = stringResource(
-                        if (saving) R.string.local_photo_generating else R.string.local_photo_generate
-                    ),
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.SemiBold,
-                    color = colors.onBackground,
+                    text = stringResource(R.string.local_photo_batch_failure_detail, batch.progress.failed),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 6.dp),
                 )
             }
 
@@ -645,5 +498,3 @@ fun LocalPhotoEffectsPage(
         }
     }
 }
-
-
