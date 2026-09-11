@@ -71,6 +71,8 @@
 		7A130000000000000000000B /* PhotoEffectsBatchSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A130000000000000000000C /* PhotoEffectsBatchSession.swift */; };
 		7A130000000000000000000D /* PhotoEffectsBatchSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A130000000000000000000E /* PhotoEffectsBatchSessionTests.swift */; };
 		7A130000000000000000000F /* PhotoEffectsPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1300000000000000000010 /* PhotoEffectsPicker.swift */; };
+		7A1300000000000000000011 /* DesqueezeControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1300000000000000000012 /* DesqueezeControl.swift */; };
+		7A1300000000000000000013 /* DesqueezeControlTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1300000000000000000014 /* DesqueezeControlTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -144,6 +146,8 @@
 		7A130000000000000000000C /* PhotoEffectsBatchSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Storage/PhotoEffectsBatchSession.swift; sourceTree = "<group>"; };
 		7A130000000000000000000E /* PhotoEffectsBatchSessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoEffectsBatchSessionTests.swift; sourceTree = "<group>"; };
 		7A1300000000000000000010 /* PhotoEffectsPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Storage/PhotoEffectsPicker.swift; sourceTree = "<group>"; };
+		7A1300000000000000000012 /* DesqueezeControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UI/DesqueezeControl.swift; sourceTree = "<group>"; };
+		7A1300000000000000000014 /* DesqueezeControlTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesqueezeControlTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -226,6 +230,7 @@
 				7A130000000000000000000A /* PhotoFilterPickerView.swift */,
 				7A130000000000000000000C /* PhotoEffectsBatchSession.swift */,
 				7A1300000000000000000010 /* PhotoEffectsPicker.swift */,
+				7A1300000000000000000012 /* DesqueezeControl.swift */,
 				7A1200000000000000000057 /* PhotoMetadataReader.swift */,
 				7A1200000000000000000069 /* PreviewExifReader.swift */,
 				7A1200000000000000000055 /* BluetoothProbeView.swift */,
@@ -244,7 +249,7 @@
 /* iOS network tests: built by the shared scheme against the real application/framework. */
 		7A1200000000000000000021 /* ZTransferTests */ = {
 			isa = PBXGroup;
-			children = (7A1200000000000000000014, 7A120000000000000000006F, 7A1200000000000000000079, 7A120000000000000000007B, 7A120000000000000000007D, 7A1200000000000000000085, 7A1200000000000000000087, 7A1200000000000000000089, 7A1300000000000000000004, 7A1300000000000000000008, 7A130000000000000000000E,);
+			children = (7A1200000000000000000014, 7A120000000000000000006F, 7A1200000000000000000079, 7A120000000000000000007B, 7A120000000000000000007D, 7A1200000000000000000085, 7A1200000000000000000087, 7A1200000000000000000089, 7A1300000000000000000004, 7A1300000000000000000008, 7A130000000000000000000E, 7A1300000000000000000014,);
 			path = ZTransferTests;
 			sourceTree = "<group>";
 		};
@@ -274,7 +279,7 @@
 		7A1200000000000000000031 = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
-			files = (7A1200000000000000000004, 7A120000000000000000006E, 7A1200000000000000000078, 7A120000000000000000007A, 7A120000000000000000007C, 7A1200000000000000000084, 7A1200000000000000000086, 7A1200000000000000000088, 7A1300000000000000000003, 7A1300000000000000000007, 7A130000000000000000000D,);
+			files = (7A1200000000000000000004, 7A120000000000000000006E, 7A1200000000000000000078, 7A120000000000000000007A, 7A120000000000000000007C, 7A1200000000000000000084, 7A1200000000000000000086, 7A1200000000000000000088, 7A1300000000000000000003, 7A1300000000000000000007, 7A130000000000000000000D, 7A1300000000000000000013,);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		7A1200000000000000000032 = {
@@ -461,6 +466,7 @@
 				7A1300000000000000000009 /* PhotoFilterPickerView.swift in Sources */,
 				7A130000000000000000000B /* PhotoEffectsBatchSession.swift in Sources */,
 				7A130000000000000000000F /* PhotoEffectsPicker.swift in Sources */,
+				7A1300000000000000000011 /* DesqueezeControl.swift in Sources */,
 				7A1200000000000000000056 /* PhotoMetadataReader.swift in Sources */,
 				7A1200000000000000000068 /* PreviewExifReader.swift in Sources */,
 				7A120000000000000000006A /* AppAppearanceSettings.swift in Sources */,
