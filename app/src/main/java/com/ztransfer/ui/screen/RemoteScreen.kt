@@ -64,8 +64,6 @@ import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.outlined.AspectRatio
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
@@ -4605,39 +4603,23 @@ private fun AdaptiveRemoteToolBar(
 /** 视频模式专属的音频电平显示开关；横向展开让其后的工具自然平滑让位。 */
 @Composable
 private fun DesqueezeToolButton(multiplier: Float, onSelect: (Float) -> Unit) {
-    var expanded by remember { mutableStateOf(false) }
-    Box {
-        TopIconToggle(
-            active = multiplier > 1.001f,
-            contentDescription = "反挤压倍率 ${desqueezeDisplayValue(multiplier)}",
-            onClick = { expanded = true }
-        ) {
-            if (multiplier > 1.001f) {
-                Text(desqueezeDisplayValue(multiplier), fontSize = 12.sp, fontWeight = FontWeight.Bold)
-            } else {
-                Icon(
-                    imageVector = Icons.Outlined.AspectRatio,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp),
-                )
-            }
-        }
-        DropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false },
-            shape = RoundedCornerShape(18.dp),
-            containerColor = AppTheme.colors.glassSurface,
-            tonalElevation = 0.dp,
-            shadowElevation = 10.dp,
-            border = BorderStroke(1.dp, AppTheme.colors.glassPanelBorder),
-        ) {
-            REMOTE_DESQUEEZE_OPTIONS.forEach { option ->
-                DropdownMenuItem(
-                    text = { Text(desqueezeDisplayValue(option), style = MaterialTheme.typography.labelLarge, color = AppTheme.colors.onBackground) },
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 3.dp),
-                    onClick = { onSelect(option); expanded = false },
-                )
-            }
+    val currentIndex = REMOTE_DESQUEEZE_OPTIONS.indices.minByOrNull { index ->
+        kotlin.math.abs(REMOTE_DESQUEEZE_OPTIONS[index] - multiplier)
+    } ?: 0
+    val nextMultiplier = REMOTE_DESQUEEZE_OPTIONS[(currentIndex + 1) % REMOTE_DESQUEEZE_OPTIONS.size]
+    TopIconToggle(
+        active = multiplier > 1.001f,
+        contentDescription = "反挤压倍率 ${desqueezeDisplayValue(multiplier)}，点击切换",
+        onClick = { onSelect(nextMultiplier) },
+    ) {
+        if (multiplier > 1.001f) {
+            Text(desqueezeDisplayValue(multiplier), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        } else {
+            Icon(
+                imageVector = Icons.Outlined.AspectRatio,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+            )
         }
     }
 }
