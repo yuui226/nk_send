@@ -3,6 +3,7 @@ import UIKit
 
 /// Shared long-press entry point used by the settings and photo-workbench filter wheels.
 /// The host keeps ownership of the preview; this view only returns an atomic filter selection.
+@MainActor
 struct PhotoFilterWheelLauncher<Label: View>: View {
     @ObservedObject var store: PhotoFilterCatalogStore
     let onTap: () -> Void
@@ -33,6 +34,7 @@ struct PhotoFilterWheelLauncher<Label: View>: View {
 /// Compact, landscape-friendly picker: categories occupy a narrow left rail and filters occupy
 /// the larger right column. There is intentionally no title or Done button; selecting a card is
 /// the commit action and dismisses the sheet immediately.
+@MainActor
 struct PhotoFilterPickerView: View {
     @ObservedObject var store: PhotoFilterCatalogStore
     let onSelection: (IOSPhotoFilterSelection) -> Void

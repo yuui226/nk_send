@@ -20,6 +20,7 @@ final class PhotoEffectsHelpModel: ObservableObject {
 
 /// One shared help surface for both the settings effect card and the photo-workbench effect card.
 /// The host controls placement; this component owns wording, accessibility and presentation only.
+@MainActor
 struct PhotoEffectsHelpButton: View {
     @StateObject private var model: PhotoEffectsHelpModel
     @State private var showingHelp = false
@@ -50,6 +51,7 @@ struct PhotoEffectsHelpButton: View {
     }
 }
 
+@MainActor
 struct PhotoEffectsHelpCard: View {
     @ObservedObject var model: PhotoEffectsHelpModel
 

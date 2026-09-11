@@ -3,6 +3,7 @@ import UIKit
 
 /// Reusable iOS workbench shell. CameraWorkspace can present this view from either the settings
 /// effect card or the phone-photo workbench without duplicating picker, wheel or progress logic.
+@MainActor
 struct PhotoEffectsWorkbench: View {
     @StateObject private var session: PhotoEffectsBatchSession
     @StateObject private var catalog: PhotoFilterCatalogStore

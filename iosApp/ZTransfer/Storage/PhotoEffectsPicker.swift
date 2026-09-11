@@ -78,6 +78,7 @@ struct PhotoEffectsPicker: UIViewControllerRepresentable {
 
 /// The preview host supplies the rendered image, so this pager remains independent of the
 /// decoder and filter kernel. Swiping updates the same index used by the session and its status.
+@MainActor
 struct PhotoEffectsPreviewPager<Content: View>: View {
     @ObservedObject var session: PhotoEffectsBatchSession
     @ViewBuilder let content: (IOSPhotoEffectAsset) -> Content

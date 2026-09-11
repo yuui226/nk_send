@@ -19,6 +19,7 @@ final class IOSDesqueezeControlModel: ObservableObject {
     }
 }
 
+@MainActor
 struct IOSDesqueezeButton: View {
     @ObservedObject var model: IOSDesqueezeControlModel
 
