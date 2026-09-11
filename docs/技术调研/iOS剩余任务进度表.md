@@ -116,7 +116,7 @@ git rev-list --left-right --count HEAD...origin/research/ios
 
 ### 2026-09-12 Android 基线同步与 iOS 未完成项
 
-本次按实际仓库状态重新核对：`master` 当前为 `12e3c4e`（已合并并推送 iOS 研究分支），`origin/master` 与之同步；`research/ios` 当前为 `fe5777a`，工作区干净。下面的 Android 功能已经进入共同产品基线，但 iOS 尚未实现或验收，不计入 W01—W50 的 Windows 分数。
+本次按实际仓库状态重新核对：`master` 当前为 `12e3c4e`（已合并并推送 iOS 研究分支），`origin/master` 与之同步；`research/ios` 当前为 `eaf027a`，工作区干净。下面的 Android 功能已经进入共同产品基线，但 iOS 尚未实现或验收，不计入 W01—W50 的 Windows 分数。
 
 | Android 已提交能力 | Android 证据 | iOS 同步缺口（当前仍未完成） |
 |---|---|---|
@@ -146,9 +146,10 @@ git rev-list --left-right --count HEAD...origin/research/ios
 | iOS 批量 Files/分享承载 | 新增 `PhotoEffectsDocumentExporter` 与 `PhotoEffectsShareSheet`，系统一次接收多个成片并按复制语义导出/分享；回调仅使用系统实际回执 | `iosApp/scripts/check_structure.py` 通过；Xcode 主目标已注册；UIDocumentPicker/ActivityController 真机回执待 Mac | 工作台保存结果列表和重试/分享按钮接线仍待完成 |
 | iOS 批量失败项重试 | `PhotoEffectsBatchSession` 记录具体失败资产，完成后只重试失败项，不重复成功项；工作台显示“重试失败 n 张” | 新增 XCTest 覆盖失败资产记录和仅失败项重试；`iosApp/scripts/check_structure.py` 通过；Swift 并发和 UI 待 Mac | 保存结果列表、失败成片分享和正式导航接线仍待完成 |
 | iOS 批量结果状态展示 | session 记录成功资产并按原选择顺序发布；工作台显示已保存资产胶囊，重试成功后合并结果 | XCTest 覆盖成功顺序和重试合并；`iosApp/scripts/check_structure.py` 通过 | 结果成片句柄与 Files/分享按钮的正式页面接线仍待完成 |
+| iOS 照片效果统一路由 | 新增 `PhotoEffectsPresentation`、`PhotoEffectsPresentationModifier` 和 `PhotoEffectsEntryButton`；设置页与工作台可共用同一个 sheet 生命周期和生成闭包 | 新增 XCTest 覆盖打开/关闭；`iosApp/scripts/check_structure.py` 通过，ContentView 已挂载路由 | 现有设置窗口/工作台实际入口调用 `present()`、结果成片句柄与真机导航验证仍待完成 |
 | iOS 滤镜帮助文案 | 新增 `NativePhotoEffectsText`，为简体中文、繁体中文和英文统一提供“拨轮快速调节”和“长按照片滤镜拨轮：按分类选择滤镜”两条文案 | 新增 `NativePhotoEffectsTextTest` 覆盖三语；未改 Android 资源和页面 | iOS 两处灯泡实际 UI 接线、动态语言刷新和无障碍朗读标签仍待完成 |
 
-本次完成 1 个可独立验收的 Windows 源码子任务：iOS 批量结果状态展示。Android 同步主线仍有 4 个产品项待 iOS 完整接入（滤镜 UI、批量照片效果、反挤压、术语/帮助）；滤镜项已具备共享目录、选择面板和预览同步容器，批量项已具备状态、调度、系统多选、分页容器、图库保存、Files/分享承载、失败项重试和成功结果展示，反挤压项已具备共享循环控件，帮助项已具备共享三语视图，仍待正式导航入口、结果成片句柄和另一处宿主接线。共享专项测试已分别通过 `:shared:testDebugUnitTest --tests com.ztransfer.filter.NativePhotoFilterTest`、`:shared:testDebugUnitTest --tests com.ztransfer.protocol.DesqueezePolicyTest` 与 `--tests com.ztransfer.ui.NativePhotoEffectsTextTest`。官方 Mac/真机验收仍为 **12 / 12 项待验（M01—M12）**，本次没有减少该数量。
+本次完成 1 个可独立验收的 Windows 源码子任务：iOS 照片效果统一路由。Android 同步主线仍有 4 个产品项待 iOS 完整接入（滤镜 UI、批量照片效果、反挤压、术语/帮助）；滤镜项已具备共享目录、选择面板和预览同步容器，批量项已具备状态、调度、系统多选、分页容器、图库保存、Files/分享承载、失败项重试和成功结果展示，反挤压项已具备共享循环控件，帮助项已具备共享三语视图，仍待现有设置/工作台的实际入口调用和真机导航验证。共享专项测试已分别通过 `:shared:testDebugUnitTest --tests com.ztransfer.filter.NativePhotoFilterTest`、`:shared:testDebugUnitTest --tests com.ztransfer.protocol.DesqueezePolicyTest` 与 `--tests com.ztransfer.ui.NativePhotoEffectsTextTest`。官方 Mac/真机验收仍为 **12 / 12 项待验（M01—M12）**，本次没有减少该数量。
 
 ## 更新规则
 
