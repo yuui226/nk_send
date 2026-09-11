@@ -65,6 +65,8 @@
 		7A1100000000000000000009 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1100000000000000000007 /* ContentView.swift */; };
 		7A1300000000000000000001 /* PhotoFilterCatalogStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1300000000000000000002 /* PhotoFilterCatalogStore.swift */; };
 		7A1300000000000000000003 /* PhotoFilterCatalogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1300000000000000000004 /* PhotoFilterCatalogTests.swift */; };
+		7A1300000000000000000005 /* PhotoEffectsBatchCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1300000000000000000006 /* PhotoEffectsBatchCoordinator.swift */; };
+		7A1300000000000000000007 /* PhotoEffectsBatchCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1300000000000000000008 /* PhotoEffectsBatchCoordinatorTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -132,6 +134,8 @@
 		7A1100000000000000000007 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		7A1300000000000000000002 /* PhotoFilterCatalogStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Storage/PhotoFilterCatalogStore.swift; sourceTree = "<group>"; };
 		7A1300000000000000000004 /* PhotoFilterCatalogTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoFilterCatalogTests.swift; sourceTree = "<group>"; };
+		7A1300000000000000000006 /* PhotoEffectsBatchCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Storage/PhotoEffectsBatchCoordinator.swift; sourceTree = "<group>"; };
+		7A1300000000000000000008 /* PhotoEffectsBatchCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoEffectsBatchCoordinatorTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -210,6 +214,7 @@
 				7A120000000000000000005B /* SharedUiProbeView.swift */,
 				7A1200000000000000000059 /* PhotoFilterPreviewRenderer.swift */,
 				7A1300000000000000000002 /* PhotoFilterCatalogStore.swift */,
+				7A1300000000000000000006 /* PhotoEffectsBatchCoordinator.swift */,
 				7A1200000000000000000057 /* PhotoMetadataReader.swift */,
 				7A1200000000000000000069 /* PreviewExifReader.swift */,
 				7A1200000000000000000055 /* BluetoothProbeView.swift */,
@@ -228,7 +233,7 @@
 /* iOS network tests: built by the shared scheme against the real application/framework. */
 		7A1200000000000000000021 /* ZTransferTests */ = {
 			isa = PBXGroup;
-			children = (7A1200000000000000000014, 7A120000000000000000006F, 7A1200000000000000000079, 7A120000000000000000007B, 7A120000000000000000007D, 7A1200000000000000000085, 7A1200000000000000000087, 7A1200000000000000000089, 7A1300000000000000000004,);
+			children = (7A1200000000000000000014, 7A120000000000000000006F, 7A1200000000000000000079, 7A120000000000000000007B, 7A120000000000000000007D, 7A1200000000000000000085, 7A1200000000000000000087, 7A1200000000000000000089, 7A1300000000000000000004, 7A1300000000000000000008,);
 			path = ZTransferTests;
 			sourceTree = "<group>";
 		};
@@ -258,7 +263,7 @@
 		7A1200000000000000000031 = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
-			files = (7A1200000000000000000004, 7A120000000000000000006E, 7A1200000000000000000078, 7A120000000000000000007A, 7A120000000000000000007C, 7A1200000000000000000084, 7A1200000000000000000086, 7A1200000000000000000088, 7A1300000000000000000003,);
+			files = (7A1200000000000000000004, 7A120000000000000000006E, 7A1200000000000000000078, 7A120000000000000000007A, 7A120000000000000000007C, 7A1200000000000000000084, 7A1200000000000000000086, 7A1200000000000000000088, 7A1300000000000000000003, 7A1300000000000000000007,);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		7A1200000000000000000032 = {
@@ -441,6 +446,7 @@
 				7A120000000000000000005A /* SharedUiProbeView.swift in Sources */,
 				7A1200000000000000000058 /* PhotoFilterPreviewRenderer.swift in Sources */,
 				7A1300000000000000000001 /* PhotoFilterCatalogStore.swift in Sources */,
+				7A1300000000000000000005 /* PhotoEffectsBatchCoordinator.swift in Sources */,
 				7A1200000000000000000056 /* PhotoMetadataReader.swift in Sources */,
 				7A1200000000000000000068 /* PreviewExifReader.swift in Sources */,
 				7A120000000000000000006A /* AppAppearanceSettings.swift in Sources */,
