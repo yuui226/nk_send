@@ -310,6 +310,7 @@ git rev-list --left-right --count HEAD...origin/research/ios
 | 2026-09-08 / W29（未提交） | W29 | +1 | 29/50 | 58.0% | 91.6% | 已存原片面板按实际索引名/64位大小复制，PhotoLibraryImporter逐项add-only回执；common回执/副本身份PASS，正式批量PhotoKit适配器部分成功XCTest待Mac，原片保留，未提交 |
 | 2026-09-08 / W30（未提交） | W30 | +1 | 30/50 | 60.0% | 92.0% | 同面板接单项/最多500项UIActivity/Files(asCopy)，流式私有副本与冻结provider读取、取消和部分回执不假成功；common+源码守卫PASS，逐字节/正式Files部分回执XCTest待Mac，未提交 |
 
+| 2026-09-12 / iOS照片效果出口接线（a4e0b33） | Windows iOS子任务 | +0 | 50/50 | 100.0% | 100.0% | 完成成片句柄生命周期、批量Files/分享按钮与结果状态接线；Windows可继续内容剩余2项，Mac/真机仍12项待验 |
 ### 历史W31—W40检查点（f993e8e，以下是该时点记录）
 
 W01—W40已WIN-DONE，40/50（80%，历史刻度96%）。W21—W30已推送8594187，W31—W40本次提交；最新指令是提交40后直接继续50，下一项W41。1082项Kotlin/Android、354项Python、common metadata、Android Debug/Release Kotlin及Debug Lint通过。相对8594187无Android宿主/平台/打包改动。446项XCTest与17项Native图片样本待Mac，Swift/Native未编译。当前证据以主任务表和生命周期与恢复验收说明为准，旧阶段描述仅为历史。
@@ -359,4 +360,3 @@ W01—W50全部WIN-DONE：50/50，Windows本轮传图范围100%（历史刻度10
 | 主项 | 加分 | 完成 | 清单进度 | 历史刻度 | 证据 |
 |---|---|---|---|---|---|
 | W50 | +1 | 50/50 | 100% | 100% | 最终代码/计分/链接/回归与提交检查；Mac仍待验 |
-| 2026-09-12 / iOS照片效果出口接线（a4e0b33） | Windows iOS子任务 | +0 | 50/50 | 100.0% | 100.0% | 完成成片句柄生命周期、批量Files/分享按钮与结果状态接线；Windows可继续内容剩余2项，Mac/真机仍12项待验 |
