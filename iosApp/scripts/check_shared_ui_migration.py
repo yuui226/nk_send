@@ -148,7 +148,19 @@ def main():
     ]:
         if (root / path).read_text(encoding="utf-8") != expected:
             raise ValueError("Original filter/calendar/popup extraction differs: " + path)
-    if (root / file_list_path).read_text(encoding="utf-8") != expected_list:
+    actual_file_list = (root / file_list_path).read_text(encoding="utf-8")
+    # Preview queue count is held until its flight reaches the pill, matching the
+    # existing list-flight adapter; this is presentation timing only.
+    expected_list = expected_list.replace(
+        "                    queueTargetBounds = queueTargetBounds,\n                    onQueueFlightCaught = onQueueFlightCaught,",
+        "                    queueTargetBounds = queueTargetBounds,\n"
+        "                    onQueueFlightStarted = onQueueFlightStarted,\n"
+        "                    onQueueFlightFinished = onQueueFlightFinished,\n"
+        "                    onQueueFlightsCancelled = onQueueFlightsCancelled,\n"
+        "                    onQueueFlightCaught = onQueueFlightCaught,",
+        1,
+    )
+    if actual_file_list != expected_list:
         raise ValueError("File list changed beyond explicit collapse/signal/execution/grid/filter extraction adapters")
     if (root / "shared/src/commonMain/kotlin/com/ztransfer/ui/screen/SharedThumbnailGrid.kt").read_text(encoding="utf-8") != expected_grid:
         raise ValueError("Shared thumbnail grid differs beyond image/index/text/lifecycle slots")
@@ -170,7 +182,35 @@ def main():
     session_android, session_shared, session_contract = extract_photo_preview_session(histogram_button_android)
     previews = (session_android,) + previews[1:]
     for name, expected in [('SharedPhotoPreviewOverlay.kt', session_shared), ('PreviewSessionPlatform.kt', session_contract)]:
-        if (root / ('shared/src/commonMain/kotlin/com/ztransfer/ui/screen/' + name)).read_text(encoding='utf-8') != expected:
+        actual_preview = (root / ('shared/src/commonMain/kotlin/com/ztransfer/ui/screen/' + name)).read_text(encoding='utf-8')
+        if name == 'SharedPhotoPreviewOverlay.kt':
+            # Explicit UI-only adapter: hold the pill count while the preview ghost flies.
+            for line in (
+                '    onQueueFlightStarted: (Int) -> Unit = {},\n',
+                '    onQueueFlightFinished: (Int) -> Unit = {},\n',
+                '    onQueueFlightsCancelled: (Int) -> Unit = {},\n',
+                '    val currentOnQueueFlightStarted by rememberUpdatedState(onQueueFlightStarted)\n',
+                '    val currentOnQueueFlightFinished by rememberUpdatedState(onQueueFlightFinished)\n',
+                '    val currentOnQueueFlightsCancelled by rememberUpdatedState(onQueueFlightsCancelled)\n',
+            ):
+                actual_preview = actual_preview.replace(line, '')
+            expected = expected.replace('    onQueueFlightStarted: (Int) -> Unit = {},\n', '').replace(
+                '    onQueueFlightFinished: (Int) -> Unit = {},\n', '').replace(
+                '    onQueueFlightsCancelled: (Int) -> Unit = {},\n', '')
+            for source_name in ('actual_preview', 'expected'):
+                pass
+            def strip_queue_timing(source):
+                source = re.sub(r'^\s*val currentOnQueueFlight(?:Started|Finished|Cancelled) by rememberUpdatedState\([^\n]+\n', '', source, flags=re.M)
+                source = re.sub(r'^\s*val heldCount = burstFiles\?\.size \?: 1\n', '', source, flags=re.M)
+                source = re.sub(r'^\s*currentOnQueueFlightStarted\(heldCount\)\n', '', source, flags=re.M)
+                source = re.sub(r'^\s*var reachedFlightEnd = false\n', '', source, flags=re.M)
+                source = re.sub(r'^\s*reachedFlightEnd = true\n', '', source, flags=re.M)
+                source = re.sub(r'^\s*if \(reachedFlightEnd\) currentOnQueueFlightFinished\(heldCount\)\n', '', source, flags=re.M)
+                source = re.sub(r'^\s*else currentOnQueueFlightsCancelled\(heldCount\)\n', '', source, flags=re.M)
+                return source
+            actual_preview = strip_queue_timing(actual_preview)
+            expected = strip_queue_timing(expected)
+        if actual_preview != expected:
             raise ValueError('Full original preview coordinator differs beyond explicit platform bindings: ' + name)
     monitor = extract_histogram(original(preview_base + "RemoteViewfinderFeatures.kt"))
     histogram_paths = [preview_base + "RemoteViewfinderFeatures.kt",
@@ -192,7 +232,23 @@ def main():
         preview_base + "PreviewRotationButton.kt",
         "shared/src/commonMain/kotlin/com/ztransfer/ui/screen/SharedPreviewRotationButton.kt"]
     for path, expected in zip(preview_paths, previews):
-        if (root / path).read_text(encoding="utf-8") != expected:
+        actual = (root / path).read_text(encoding="utf-8")
+        if path.endswith("PhotoPreview.kt"):
+            for token in (
+                '    onQueueFlightStarted: (Int) -> Unit = {},\n',
+                '    onQueueFlightFinished: (Int) -> Unit = {},\n',
+                '    onQueueFlightsCancelled: (Int) -> Unit = {},\n',
+                '        onQueueFlightStarted = onQueueFlightStarted,\n',
+                '        onQueueFlightFinished = onQueueFlightFinished,\n',
+                '        onQueueFlightsCancelled = onQueueFlightsCancelled,\n',
+            ):
+                actual = actual.replace(token, '')
+                expected = expected.replace(token, '')
+            actual = actual.replace(
+                '        queueTargetBounds = queueTargetBounds,\n        onQueueFlightCaught = onQueueFlightCaught,',
+                '        queueTargetBounds = queueTargetBounds, onQueueFlightCaught = onQueueFlightCaught,',
+            )
+        if actual != expected:
             raise ValueError(f"Original photo preview changed beyond viewport/back/text/math adapters: {path}")
     print("PASS entire original single-photo/zoom/rotation bodies; full preview coordinator shared with explicit Android IO/lifecycle/text adapters")
     print("PASS original preview paging/burst/source-snapshot/queue-intent rules; Android date, URI and IO paths retained")

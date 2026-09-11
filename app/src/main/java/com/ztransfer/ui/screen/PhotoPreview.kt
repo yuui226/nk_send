@@ -170,6 +170,9 @@ internal fun PhotoPreviewOverlay(
     activeProgressFlow: StateFlow<ActiveTransferProgress?>,
     // 根坐标中的真实队列胶囊承载区；预览残影使用它计算与列表一致的弧线落点。
     queueTargetBounds: Rect? = null,
+    onQueueFlightStarted: (Int) -> Unit = {},
+    onQueueFlightFinished: (Int) -> Unit = {},
+    onQueueFlightsCancelled: (Int) -> Unit = {},
     onQueueFlightCaught: () -> Unit = {},
     // 把当前预览文件加入传输队列（父层只负责目录/连接校验与入队；动画留在本层）。
     onTransfer: (CameraFileInfo) -> Boolean = { false },
@@ -197,7 +200,11 @@ internal fun PhotoPreviewOverlay(
         burstHandles = burstHandles, queueTaskFor = queueTaskFor, isTransferred = isTransferred,
         localOriginalUriFor = localOriginalUriFor,
         activeProgress = { activeProgressFlow.collectAsStateWithLifecycle().value },
-        queueTargetBounds = queueTargetBounds, onQueueFlightCaught = onQueueFlightCaught,
+        queueTargetBounds = queueTargetBounds,
+        onQueueFlightStarted = onQueueFlightStarted,
+        onQueueFlightFinished = onQueueFlightFinished,
+        onQueueFlightsCancelled = onQueueFlightsCancelled,
+        onQueueFlightCaught = onQueueFlightCaught,
         onTransfer = onTransfer, onTransferBurst = onTransferBurst,
         onBurstExpandedChange = onBurstExpandedChange, onRotationChanged = onRotationChanged,
         onHistogramVisibleChanged = onHistogramVisibleChanged,

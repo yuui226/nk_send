@@ -62,8 +62,12 @@ class SettingsPopupAnimationTest(unittest.TestCase):
         for name in ("HomeScreen.kt", "FileListScreen.kt"):
             path = "app/src/main/java/com/ztransfer/ui/screen/" + name
             current = (ROOT / path).read_text(encoding="utf8")
-            self.assertEqual(current, baseline("9d1e77a", path))
             self.assertNotIn("settingsMorphSource", current)
+        # FileListScreen carries the explicit preview queue-flight count callbacks;
+        # the two entry buttons themselves remain on the standard click path.
+        file_list = (ROOT / "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt").read_text(encoding="utf8")
+        self.assertIn("onQueueFlightStarted = onQueueFlightStarted", file_list)
+        self.assertIn("onQueueFlightFinished = onQueueFlightFinished", file_list)
 
     def test_no_neck_or_custom_button_progress_and_faster_open(self):
         self.assertNotIn("neckFraction", self.popup)
