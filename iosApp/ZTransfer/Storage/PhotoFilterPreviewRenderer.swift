@@ -10,13 +10,24 @@ enum PhotoFilterPreviewError: Error { case invalidSize, allocationFailed, invali
 /// alpha representation, and Kotlin performs every filter pixel operation using Android's kernel.
 actor PhotoFilterPreviewRenderer {
     static let maximumPixels = 4 * 1024 * 1024
+    /// Export keeps a bounded in-memory buffer while allowing common 12–24MP camera JPEGs.
+    /// Files larger than this are rejected instead of silently downsampling an export.
+    static let maximumExportPixels = 32 * 1024 * 1024
     private static let chunkPixels = 4096
 
     func render(_ source: CGImage, selection: PhotoFilterSelection) throws -> CGImage {
+        try render(source, selection: selection, maximumPixels: Self.maximumPixels)
+    }
+
+    func renderExport(_ source: CGImage, selection: PhotoFilterSelection) throws -> CGImage {
+        try render(source, selection: selection, maximumPixels: Self.maximumExportPixels)
+    }
+
+    private func render(_ source: CGImage, selection: PhotoFilterSelection, maximumPixels: Int) throws -> CGImage {
         try Task.checkCancellation()
         let width = source.width, height = source.height
-        guard width > 0, height > 0, width <= Self.maximumPixels,
-              height <= Self.maximumPixels / width else { throw PhotoFilterPreviewError.invalidSize }
+        guard width > 0, height > 0, width <= maximumPixels,
+              height <= maximumPixels / width else { throw PhotoFilterPreviewError.invalidSize }
         let count = width * height, stride = width * 4
         guard let storage = calloc(count, 4) else { throw PhotoFilterPreviewError.allocationFailed }
         defer { free(storage) }

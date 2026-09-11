@@ -17,7 +17,9 @@ struct PhotoEffectsWorkbench: View {
     init(
         session: PhotoEffectsBatchSession = PhotoEffectsBatchSession(),
         catalog: PhotoFilterCatalogStore = PhotoFilterCatalogStore(),
-        generateAndSave: @escaping @Sendable (IOSPhotoEffectAsset, IOSPhotoFilterSelection) async throws -> Bool = { _, _ in false }
+        generateAndSave: @escaping @Sendable (IOSPhotoEffectAsset, IOSPhotoFilterSelection) async throws -> Bool = { asset, selection in
+            try await PhotoEffectsExportService().generateAndSave(asset, selection: selection)
+        }
     ) {
         _session = StateObject(wrappedValue: session)
         _catalog = StateObject(wrappedValue: catalog)

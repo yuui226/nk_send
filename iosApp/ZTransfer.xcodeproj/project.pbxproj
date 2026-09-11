@@ -76,6 +76,7 @@
 		7A1300000000000000000015 /* PhotoEffectsHelp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1300000000000000000016 /* PhotoEffectsHelp.swift */; };
 		7A1300000000000000000017 /* PhotoEffectsPreviewStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1300000000000000000018 /* PhotoEffectsPreviewStore.swift */; };
 		7A1300000000000000000019 /* PhotoEffectsWorkbench.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A130000000000000000001A /* PhotoEffectsWorkbench.swift */; };
+		7A130000000000000000001B /* PhotoEffectsExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A130000000000000000001C /* PhotoEffectsExportService.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -154,6 +155,7 @@
 		7A1300000000000000000016 /* PhotoEffectsHelp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UI/PhotoEffectsHelp.swift; sourceTree = "<group>"; };
 		7A1300000000000000000018 /* PhotoEffectsPreviewStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Storage/PhotoEffectsPreviewStore.swift; sourceTree = "<group>"; };
 		7A130000000000000000001A /* PhotoEffectsWorkbench.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UI/PhotoEffectsWorkbench.swift; sourceTree = "<group>"; };
+		7A130000000000000000001C /* PhotoEffectsExportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Storage/PhotoEffectsExportService.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -240,6 +242,7 @@
 				7A1300000000000000000016 /* PhotoEffectsHelp.swift */,
 				7A1300000000000000000018 /* PhotoEffectsPreviewStore.swift */,
 				7A130000000000000000001A /* PhotoEffectsWorkbench.swift */,
+				7A130000000000000000001C /* PhotoEffectsExportService.swift */,
 				7A1200000000000000000057 /* PhotoMetadataReader.swift */,
 				7A1200000000000000000069 /* PreviewExifReader.swift */,
 				7A1200000000000000000055 /* BluetoothProbeView.swift */,
@@ -479,6 +482,7 @@
 				7A1300000000000000000015 /* PhotoEffectsHelp.swift in Sources */,
 				7A1300000000000000000017 /* PhotoEffectsPreviewStore.swift in Sources */,
 				7A1300000000000000000019 /* PhotoEffectsWorkbench.swift in Sources */,
+				7A130000000000000000001B /* PhotoEffectsExportService.swift in Sources */,
 				7A1200000000000000000056 /* PhotoMetadataReader.swift in Sources */,
 				7A1200000000000000000068 /* PreviewExifReader.swift in Sources */,
 				7A120000000000000000006A /* AppAppearanceSettings.swift in Sources */,
