@@ -33,4 +33,17 @@ final class PhotoFilterCatalogTests: XCTestCase {
         XCTAssertEqual(second.favoriteKeys, ["b"])
         XCTAssertEqual(second.intensity(for: second.entries[1]), 82)
     }
+
+    @MainActor func testSelectionReturnsStableIdentityAndCurrentIntensityTogether() {
+        let store = store()
+        store.setIntensity(63, for: store.entries[1])
+
+        let selection = store.selection(for: store.entries[1])
+
+        XCTAssertEqual(selection.index, 1)
+        XCTAssertEqual(selection.filterID, "b")
+        XCTAssertEqual(selection.catalogKey, "b")
+        XCTAssertEqual(selection.intensityPercent, 64)
+        XCTAssertEqual(store.selectedKey, "b")
+    }
 }

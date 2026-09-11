@@ -31,6 +31,16 @@ struct IOSPhotoFilterEntry: Identifiable, Equatable {
     var id: String { catalogKey }
 }
 
+/// The small value passed back to either filter-wheel host. Keeping the index and intensity
+/// together prevents the picker from updating its own label while the preview still renders an
+/// older preset.
+struct IOSPhotoFilterSelection: Equatable, Sendable {
+    let index: Int32
+    let filterID: String
+    let catalogKey: String
+    let intensityPercent: Int
+}
+
 @MainActor
 final class PhotoFilterCatalogStore: ObservableObject {
     static let favoritesKey = "ztransfer.ios.photo-filter.favorite-keys.v1"
@@ -99,6 +109,12 @@ final class PhotoFilterCatalogStore: ObservableObject {
 
     func select(_ entry: IOSPhotoFilterEntry) {
         selectedKey = entry.catalogKey
+    }
+
+    func selection(for entry: IOSPhotoFilterEntry) -> IOSPhotoFilterSelection {
+        select(entry)
+        return IOSPhotoFilterSelection(index: entry.index, filterID: entry.filterID,
+                                       catalogKey: entry.catalogKey, intensityPercent: intensity(for: entry))
     }
 
     func intensity(for entry: IOSPhotoFilterEntry) -> Int {
