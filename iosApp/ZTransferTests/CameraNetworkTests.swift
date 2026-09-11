@@ -1,0 +1,6001 @@
+import Foundation
+import CoreGraphics
+import CoreLocation
+import ImageIO
+import UIKit
+import ZTransferShared
+import XCTest
+@testable import ZTransfer
+
+@MainActor private final class AppearancePlatformProbe: NSObject, NativeAppearancePlatform {
+    func readAppearance() -> NativeAppearancePreferences? { NativeAppearancePreferences.companion.defaults() }
+    func saveAppearance(value: NativeAppearancePreferences) -> Bool { true }
+    func setScreenAwake(enabled: Bool) { XCTFail("Controller creation must not own app idle state") }
+    func productVersion() -> String { "fixture" }
+    func copyFeedbackContact() -> Bool { false }
+    func openSourceRepository() {}
+    func resetAppearanceAfterConfirmation() -> Bool { false }
+}
+
+@MainActor private final class OriginalActionReceipt: NSObject, NativeOriginalActionCompletion {
+    var calls = 0
+    var succeeded: [Int32] = []
+    var failedCount: Int32 = 0
+    var cancelled = false
+    var message: String?
+    func complete(succeededIndices: KotlinIntArray, failedCount: Int32, cancelled: Bool, message: String?) {
+        calls += 1
+        succeeded = (0..<Int(succeededIndices.size)).map { succeededIndices.get(index: Int32($0)) }
+        self.failedCount = failedCount; self.cancelled = cancelled; self.message = message
+    }
+}
+
+@MainActor private final class FakeGpsGattDriver: NikonGpsGattDriver {
+    var eventHandler: ((GpsGattDriverEvent) -> Void)?
+    var onWrite: (() -> Void)?
+    var maximumWriteLength = 512
+    let candidate = GpsBluetoothCandidate(id: UUID(), name: "Nikon test", rssi: -45)
+    private(set) var writes: [(GpsGattChannel, Data)] = []
+    private(set) var closed = false
+    func scan() { eventHandler?(.scanning); eventHandler?(.candidate(candidate)) }
+    func stopScan() {}
+    func connect(_ identifier: UUID) { eventHandler?(.ready(maximumWriteLength: maximumWriteLength)) }
+    func write(_ data: Data, channel: GpsGattChannel) { writes.append((channel, data)); onWrite?() }
+    func reply(_ channel: GpsGattChannel) { eventHandler?(.written(channel, nil)) }
+    func close() { closed = true }
+}
+
+@MainActor private final class QueueActionCompletionProbe: NSObject, NativeQueueActionCompletion {
+    let expectation: XCTestExpectation
+    private(set) var succeeded: Bool?
+    init(_ expectation: XCTestExpectation) { self.expectation = expectation }
+    func complete(succeeded: Bool) { self.succeeded = succeeded; expectation.fulfill() }
+}
+
+@MainActor private final class FilesEnqueueCompletionProbe: NSObject, NativeFilesEnqueueCompletion {
+    private(set) var count: Int32?
+    func complete(acceptedCount: Int32) { count = acceptedCount }
+}
+
+@MainActor private final class PreviewExifCompletionProbe: NSObject, NativePreviewExifCompletion {
+    let done: XCTestExpectation
+    private(set) var value: PhotoExif?
+    private(set) var count = 0
+    init(_ done: XCTestExpectation) { self.done = done; super.init(); done.assertForOverFulfill = true }
+    func complete(exif: PhotoExif?) { value = exif; count += 1; done.fulfill() }
+}
+
+@MainActor private final class PreviewPriorityCompletionProbe: NSObject, NativePreviewPriorityCompletion {
+    let done: XCTestExpectation
+    private(set) var granted: Bool?
+    init(_ done: XCTestExpectation) { self.done = done; super.init(); done.assertForOverFulfill = true }
+    func complete(granted: Bool) { self.granted = granted; done.fulfill() }
+}
+
+@MainActor private final class LocalImageCompletionProbe: NSObject, NativeLocalPreviewCompletion {
+    let done: XCTestExpectation
+    private(set) var value: NativeLocalPreviewImage?
+    private(set) var count = 0
+    init(_ done: XCTestExpectation) { self.done = done; super.init(); done.assertForOverFulfill = true }
+    func complete(image: NativeLocalPreviewImage?) { value = image; count += 1; done.fulfill() }
+}
+
+/// Deliberately returns held results even after cancellation, exercising the page's stale-result guard.
+private actor PageOriginalSource: OriginalFilesReading {
+    let entry: OriginalIndexEntry
+    let bytes: Data
+    private var calls: [String] = []
+    private var began: [String: XCTestExpectation] = [:]
+    private var held: [String: CheckedContinuation<Void, Never>] = [:]
+    init(url: URL, bytes: Data) {
+        self.bytes = bytes
+        entry = OriginalIndexEntry(name: url.lastPathComponent, size: Int64(bytes.count), folder: nil, url: url)
+    }
+    func hold(_ operation: String, began: XCTestExpectation) { self.began[operation] = began }
+    func release(_ operation: String) { held.removeValue(forKey: operation)?.resume() }
+    func requests() -> [String] { calls }
+    private func enter(_ operation: String) async {
+        calls.append(operation)
+        if let signal = began.removeValue(forKey: operation) {
+            await withCheckedContinuation { held[operation] = $0; signal.fulfill() }
+        }
+    }
+    func originals(since revision: Int64, rescan: Bool) async throws -> OriginalIndexUpdate {
+        await enter("index")
+        return OriginalIndexUpdate(revision: 1, baseRevision: revision, fullSnapshot: true, entries: [entry])
+    }
+    func originalData(locator: String) async throws -> Data {
+        await enter("data")
+        guard locator == entry.url.absoluteString else { throw OriginalIndexError.unsafeRoot }
+        return bytes
+    }
+    func originalRawPreviewData(locator: String) async throws -> Data? {
+        await enter("raw")
+        guard locator == entry.url.absoluteString else { throw OriginalIndexError.unsafeRoot }
+        return bytes // Already-extracted JPEG fixture; actual RAW IO has provider filesystem tests.
+    }
+    func originalExif(locator: String) async throws -> PhotoExif? {
+        let result = try PreviewExifReader.metadata(header: bytes)
+        await enter("exif")
+        guard locator == entry.url.absoluteString else { throw OriginalIndexError.unsafeRoot }
+        return result
+    }
+}
+
+private final class PageDirectoryGrant: ExportDirectoryAccess {
+    let root: URL
+    var starts = 0, stops = 0
+    init(_ root: URL) { self.root = root }
+    func start(_ url: URL) -> Bool { starts += 1; return true }
+    func stop(_ url: URL) { stops += 1 }
+    func isDirectory(_ url: URL) throws -> Bool { try url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true }
+    func bookmark(_ url: URL) -> Data { Data([1]) }
+    func resolve(_ bookmark: Data) -> ResolvedExportDirectory { ResolvedExportDirectory(url: root, stale: false) }
+}
+
+private actor QueueDestinationProbe: OriginalFilesDestination {
+    private var fail = false, deny = false, finishAfterCancellation = false
+    private var waiting: XCTestExpectation?
+    private var held: CheckedContinuation<Void, Never>?
+    private var publications: [(SavedCameraFile, String?, String?)] = []
+    private var validationCount = 0
+    private var validationWaiting: XCTestExpectation?
+    private var validationHeld: CheckedContinuation<Void, Never>?
+    func holdValidation(_ began: XCTestExpectation) { validationWaiting = began }
+    func releaseValidation() { validationHeld?.resume(); validationHeld = nil }
+    func failures(_ value: Bool) { fail = value }
+    func denied(_ value: Bool) { deny = value }
+    func hold(_ began: XCTestExpectation, finishAfterCancellation: Bool = false) {
+        waiting = began; self.finishAfterCancellation = finishAfterCancellation
+    }
+    func release() { held?.resume(); held = nil }
+    func calls() -> [(SavedCameraFile, String?, String?)] { publications }
+    func validations() -> Int { validationCount }
+    func validateSelection() async throws {
+        validationCount += 1
+        if let waiting = validationWaiting {
+            validationWaiting = nil
+            await withCheckedContinuation { validationHeld = $0; waiting.fulfill() }
+        }
+        if deny { throw ExportDirectoryError.permissionLost }
+    }
+    func publish(_ saved: SavedCameraFile, originalName: String?, folder: String?) async throws -> SavedCameraFile {
+        publications.append((saved, originalName, folder))
+        if let waiting {
+            self.waiting = nil
+            await withCheckedContinuation { held = $0; waiting.fulfill() }
+        }
+        if !finishAfterCancellation { try Task.checkCancellation() }
+        if fail { throw ProviderPublicationError.coordinationFailed }
+        return saved // Lifecycle seam only. The real publisher's bytes/hash/paths have filesystem tests.
+    }
+    func originals(since revision: Int64, rescan: Bool) throws -> OriginalIndexUpdate {
+        OriginalIndexUpdate(revision: 0, baseRevision: revision, fullSnapshot: revision < 0, entries: [])
+    }
+    func copyOriginal(_ reference: ExistingOriginalReference, to output: SandboxTransferFile) throws -> Int64 {
+        throw OriginalIndexError.unsafeRoot // This publication-only seam deliberately has no existing files.
+    }
+    func originalData(locator: String) throws -> Data { throw OriginalIndexError.unsafeRoot }
+    func originalRawPreviewData(locator: String) throws -> Data? { throw OriginalIndexError.unsafeRoot }
+    func originalExif(locator: String) throws -> PhotoExif? { throw OriginalIndexError.unsafeRoot }
+}
+
+private actor DestinationChangeProbe: OriginalDestinationChange {
+    nonisolated let destination: OriginalFilesDestination
+    private let began: XCTestExpectation?
+    private let fail: Bool
+    private let commitDespiteCancellation: Bool
+    private var held: CheckedContinuation<Void, Never>?
+    private var count = 0
+    init(_ destination: OriginalFilesDestination, began: XCTestExpectation? = nil,
+         fail: Bool = false, commitDespiteCancellation: Bool = false) {
+        self.destination = destination; self.began = began; self.fail = fail
+        self.commitDespiteCancellation = commitDespiteCancellation
+    }
+    func commits() -> Int { count }
+    func release() { held?.resume(); held = nil }
+    func commit() async throws {
+        count += 1
+        if let began { await withCheckedContinuation { held = $0; began.fulfill() } }
+        if !commitDespiteCancellation { try Task.checkCancellation() }
+        if fail { throw ExportDirectoryError.permissionLost }
+    }
+}
+
+private actor FakeExifSource: CameraExifSource {
+    private var priorityTokens = Set<UUID>()
+    private(set) var priorityReleases = 0
+    private var priorityBegan: (() -> Void)?
+    private var heldPriority: CheckedContinuation<Void, Never>?
+    func holdNextPriority(_ began: @escaping () -> Void) { priorityBegan = began }
+    func releaseHeldPriority() { heldPriority?.resume(); heldPriority = nil }
+    func beginInteractivePreview() async throws -> UUID {
+        try Task.checkCancellation()
+        if let began = priorityBegan {
+            priorityBegan = nil
+            await withCheckedContinuation { heldPriority = $0; began() }
+            // Deliberately returns a late token even after cancellation: the bridge must release it.
+        }
+        let token = UUID(); priorityTokens.insert(token); return token
+    }
+    func endInteractivePreview(_ token: UUID) {
+        if priorityTokens.remove(token) != nil { priorityReleases += 1 }
+    }
+    func priorityCount() -> Int { priorityTokens.count }
+    enum Reply: Sendable { case bytes(Data), missing, failure }
+    let reply: Reply
+    let holdFirst: Bool
+    let onRequest: (() -> Void)?
+    private var calls: [(Int32, Int32)] = []
+    private var held: CheckedContinuation<Void, Never>?
+    init(_ reply: Reply, holdFirst: Bool = false, onRequest: (() -> Void)? = nil) {
+        self.reply = reply; self.holdFirst = holdFirst; self.onRequest = onRequest
+    }
+    func exifHeader(handle: Int32, maximumBytes: Int32) async throws -> Data? {
+        calls.append((handle, maximumBytes))
+        if holdFirst && calls.count == 1 { await withCheckedContinuation { held = $0; onRequest?() } }
+        else if calls.count == 1 { onRequest?() }
+        try Task.checkCancellation()
+        switch reply { case .bytes(let data): return data; case .missing: return nil; case .failure: throw CameraStreamError.timedOut }
+    }
+    func requests() -> [(Int32, Int32)] { calls }
+    func release() { held?.resume(); held = nil }
+}
+
+final class CameraNetworkTests: XCTestCase {
+    func testExportCopiesAreByteExactAndCleanupNeverDeletesIndexedOriginals() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let input = root.appendingPathComponent("input")
+        try FileManager.default.createDirectory(at: input, withIntermediateDirectories: true)
+        let jpg = input.appendingPathComponent("照片.JPG"), mov = input.appendingPathComponent("clip.MOV")
+        let bytes = Data((0..<150_003).map { UInt8(truncatingIfNeeded: $0) })
+        try bytes.write(to: jpg); try Data(bytes.reversed()).write(to: mov)
+        let source = CameraOriginalStore(root: input)
+        let index = try await source.originals(since: -1, rescan: true)
+        let copies = OriginalActionCopies(source: source, root: root)
+        var exported: [URL] = []
+        for entry in index.entries {
+            let copy = try await copies.prepare(ExistingOriginalReference(name: entry.name, size: entry.size,
+                locator: entry.url.absoluteString))
+            XCTAssertNotEqual(copy.url, entry.url)
+            XCTAssertEqual(try Data(contentsOf: copy.url), try Data(contentsOf: entry.url))
+            exported.append(copy.url)
+        }
+        XCTAssertEqual(exported.count, 2)
+        await copies.release()
+        XCTAssertTrue(exported.allSatisfy { !FileManager.default.fileExists(atPath: $0.path) })
+        XCTAssertEqual(try Data(contentsOf: jpg), bytes)
+        XCTAssertEqual(try Data(contentsOf: mov), Data(bytes.reversed()))
+    }
+
+    func testExportReferenceMismatchFailsWithoutChangingAHealthyPreparedCopy() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sourceRoot = root.appendingPathComponent("input")
+        try FileManager.default.createDirectory(at: sourceRoot, withIntermediateDirectories: true)
+        let original = sourceRoot.appendingPathComponent("a.NEF")
+        try Data([1,2,3,4]).write(to: original)
+        let source = CameraOriginalStore(root: sourceRoot)
+        _ = try await source.originals(since: -1, rescan: true)
+        let copies = OriginalActionCopies(source: source, root: root)
+        let saved = try await copies.prepare(ExistingOriginalReference(name: "a.NEF", size: 4, locator: original.absoluteString))
+        do {
+            _ = try await copies.prepare(ExistingOriginalReference(name: "a.NEF", size: 5, locator: original.absoluteString))
+            XCTFail("Expected frozen identity mismatch")
+        } catch {}
+        XCTAssertEqual(try Data(contentsOf: saved.url), Data([1,2,3,4]))
+        await copies.release()
+        XCTAssertEqual(try Data(contentsOf: original), Data([1,2,3,4]))
+    }
+
+    @MainActor func testExplicitPreferenceRepairsKeepBackupsAndNeverResetOtherDomains() throws {
+        let suite = "repairs-" + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let unknown = Data(#"{"version":999,"future":true}"#.utf8)
+        for key in [BrowsePreferencesStore.key, AppearancePreferencesStore.key, OriginalDestinationPreferences.key] {
+            defaults.set(unknown, forKey: key)
+        }
+        defaults.set("untouched", forKey: "pairing-test")
+        let transfers = TransferPreferencesStore(defaults: defaults)
+        XCTAssertTrue(transfers.saveAutomatic(true))
+        let transferBytes = defaults.data(forKey: TransferPreferencesStore.key)
+        let browse = BrowsePreferencesStore(defaults: defaults)
+        XCTAssertNil(browse.read())
+        XCTAssertTrue(browse.resetAfterUserConfirmation())
+        XCTAssertEqual(defaults.data(forKey: BrowsePreferencesStore.key + ".recoveryBackup"), unknown)
+        XCTAssertEqual(defaults.data(forKey: AppearancePreferencesStore.key), unknown)
+        let appearance = AppearancePreferencesStore(defaults: defaults)
+        XCTAssertTrue(appearance.resetAfterUserConfirmation())
+        XCTAssertEqual(defaults.data(forKey: AppearancePreferencesStore.key + ".recoveryBackup"), unknown)
+        let destination = OriginalDestinationPreferences(defaults: defaults)
+        XCTAssertNil(destination.read())
+        XCTAssertTrue(destination.resetToSandboxAfterUserConfirmation())
+        XCTAssertEqual(destination.read(), .sandbox)
+        XCTAssertEqual(defaults.data(forKey: OriginalDestinationPreferences.key + ".recoveryBackup"), unknown)
+        XCTAssertEqual(defaults.data(forKey: TransferPreferencesStore.key), transferBytes)
+        XCTAssertEqual(defaults.string(forKey: "pairing-test"), "untouched")
+    }
+
+    @MainActor func testSystemExportPartialReceiptDoesNotInventPerFileSuccess() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let source = CameraOriginalStore(root: root)
+        let items = try (1...2).map { n -> NativeOriginalActionItem in
+            let url = root.appendingPathComponent("photo\(n).JPG")
+            try Data([1,2,3]).write(to: url)
+            return NativeOriginalActionItem(file: CameraFileInfo(handle: Int32(n), size: 3, fileName: url.lastPathComponent,
+                captureDate: nil, isProtected: false, storageIds: []), locator: url.absoluteString)
+        }
+        _ = try await source.originals(since: -1, rescan: true)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let host = UIViewController(); window.rootViewController = host; window.makeKeyAndVisible()
+        defer { host.dismiss(animated: false); window.isHidden = true }
+        let owner = OriginalActionPresenter(source: source), receipt = OriginalActionReceipt()
+        owner.perform("files", items: items, presenter: host, completion: receipt)
+        try await waitUntil("system export controller") { await MainActor.run { host.presentedViewController is UIDocumentPickerViewController } }
+        let picker = try XCTUnwrap(host.presentedViewController as? UIDocumentPickerViewController)
+        owner.documentPicker(picker, didPickDocumentsAt: [root.appendingPathComponent("partial-result.JPG")])
+        XCTAssertTrue(receipt.succeeded.isEmpty)
+        XCTAssertEqual(receipt.calls, 1)
+        XCTAssertTrue(receipt.message?.contains("1/2") == true)
+        owner.documentPickerWasCancelled(picker)
+        XCTAssertEqual(receipt.calls, 1)
+        owner.close()
+        for item in items { XCTAssertEqual(try Data(contentsOf: XCTUnwrap(URL(string: item.locator))), Data([1,2,3])) }
+    }
+    @MainActor func testFormalPhotoBatchReportsPartialImportAndKeepsBothOriginals() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let source = CameraOriginalStore(root: root)
+        let items = try ["photo.JPG", "unsupported.TXT"].enumerated().map { index, name -> NativeOriginalActionItem in
+            let url = root.appendingPathComponent(name); try Data([9,8,7]).write(to: url)
+            return NativeOriginalActionItem(file: CameraFileInfo(handle: Int32(index + 1), size: 3,
+                fileName: name, captureDate: nil, isProtected: false, storageIds: []), locator: url.absoluteString)
+        }
+        _ = try await source.originals(since: -1, rescan: true)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let host = UIViewController(); window.rootViewController = host; window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        let client = FakePhotoLibrary(authorization: .allowed)
+        let owner = OriginalActionPresenter(source: source, importer: PhotoLibraryImporter(client: client))
+        let receipt = OriginalActionReceipt()
+        owner.perform("photos", items: items, presenter: host, completion: receipt)
+        try await waitUntil("batch photo receipt") { await MainActor.run { receipt.calls == 1 } }
+        XCTAssertEqual(receipt.succeeded, [0]); XCTAssertEqual(receipt.failedCount, 1)
+        XCTAssertEqual(client.imports, 1); XCTAssertEqual(client.requests, 0)
+        owner.close()
+        for item in items { XCTAssertEqual(try Data(contentsOf: XCTUnwrap(URL(string: item.locator))), Data([9,8,7])) }
+    }
+    @MainActor func testBrowseSessionSurvivesPageReplacementButRejectsAnotherConnection() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let camera = stationCamera(command: FakeCameraConnection(bytes: Data()))
+        let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: root))
+        let catalog = CameraCatalog(source: camera, stationMode: true)
+        let previews = CameraPreviewStore(source: camera)
+        var saved: NativeBrowseSession?
+        let first = OriginalFilesPageBridge(connectionID: camera.connectionID, catalog: catalog,
+            queue: queue, previews: previews, exifSource: camera, exifCache: NativePreviewExifCache(),
+            stationMode: true, rememberBrowseSession: { saved = $0 })
+        first.close()
+        let memory = try XCTUnwrap(saved)
+        let second = OriginalFilesPageBridge(connectionID: camera.connectionID, catalog: catalog,
+            queue: queue, previews: previews, exifSource: camera, exifCache: NativePreviewExifCache(),
+            stationMode: true, browseSession: memory)
+        XCTAssertTrue(second.model.browseSession === memory)
+        XCTAssertFalse(second.model.restoreBrowseSession(value: NativeBrowseSession(connectionId: UUID().uuidString)))
+        second.close()
+    }
+    @MainActor func testTransferPreferenceDefaultAndRoundTripDoNotTouchBrowsePreferences() throws {
+        let suite = "transfer-preferences-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = TransferPreferencesStore(defaults: defaults)
+        let value = try XCTUnwrap(store.read())
+        XCTAssertFalse(value.organizeByDate); XCTAssertFalse(value.deferStart)
+        XCTAssertNil(defaults.object(forKey: TransferPreferencesStore.key))
+        defaults.set(Data([8, 9]), forKey: BrowsePreferencesStore.key)
+        XCTAssertTrue(store.save(NativeTransferPreferences(organizeByDate: true, deferStart: true)))
+        let reopened = try XCTUnwrap(TransferPreferencesStore(defaults: defaults).read())
+        XCTAssertTrue(reopened.organizeByDate); XCTAssertTrue(reopened.deferStart)
+        XCTAssertEqual(defaults.data(forKey: BrowsePreferencesStore.key), Data([8, 9]))
+    }
+
+    @MainActor func testTransferPreferencesPreserveCorruptFutureAndWrongTypeDocuments() throws {
+        let suite = "transfer-invalid-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = TransferPreferencesStore(defaults: defaults)
+        for data in [Data("broken".utf8), Data(repeating: 0, count: 4097),
+                     Data(#"{"version":2,"organizeByDate":true,"deferStart":false}"#.utf8),
+                     Data(#"{"version":1,"organizeByDate":"true","deferStart":false}"#.utf8)] {
+            defaults.set(data, forKey: TransferPreferencesStore.key)
+            XCTAssertNil(store.read())
+            XCTAssertFalse(store.save(NativeTransferPreferences(organizeByDate: false, deferStart: false)))
+            XCTAssertEqual(defaults.data(forKey: TransferPreferencesStore.key), data)
+        }
+        defaults.set("unexpected", forKey: TransferPreferencesStore.key)
+        XCTAssertNil(store.read()); XCTAssertFalse(store.save(NativeTransferPreferences.companion.defaults()))
+        XCTAssertEqual(defaults.string(forKey: TransferPreferencesStore.key), "unexpected")
+    }
+
+    @MainActor func testRealFilesEnqueueUsesRestoredDateAndDeferredOptionsBeforeAcknowledgement() async throws {
+        let suite = "transfer-page-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let transfer = TransferPreferencesStore(defaults: defaults)
+        XCTAssertTrue(transfer.save(NativeTransferPreferences(organizeByDate: true, deferStart: true)))
+        let wire = FakeCameraConnection(bytes: Data()), camera = stationCamera(command: wire)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: root))
+        let bridge = OriginalFilesPageBridge(connectionID: camera.connectionID,
+            catalog: CameraCatalog(source: camera, stationMode: true), queue: queue, previews: CameraPreviewStore(source: camera),
+            exifSource: camera, exifCache: NativePreviewExifCache(), stationMode: true, transferPreferences: transfer)
+        defer { bridge.close() }
+        bridge.setConnected(true)
+        let info = try sampleInfo(7, captureDate: "20260102T123456")
+        let file = try XCTUnwrap(NativeOriginalTransferQueue().enqueue(info: info, byDate: false, dayKey: 0)).file
+        let sequence = bridge.model.beginScan()
+        let snapshot = CameraCatalogSnapshot(connectionID: camera.connectionID, revision: 1, storageIDs: [0x10001],
+            files: [file], objectInfos: [7: info], totalHandles: 1, metadataComplete: true, changedWhileScanning: false)
+        XCTAssertTrue(bridge.acceptCatalog(snapshot, sequence: sequence))
+        let completion = FilesEnqueueCompletionProbe(), handles = KotlinIntArray(size: 1)
+        handles.set(index: 0, value: 7)
+        bridge.enqueue(handles: handles, scanSequence: sequence, completion: completion)
+        try await waitUntil("shared file admission acknowledged") { await MainActor.run { completion.count != nil } }
+        XCTAssertEqual(completion.count, 1)
+        let state = await queue.snapshot()
+        XCTAssertEqual(state.rows.first?.destinationFolderName, "ZT2026-01-02")
+        XCTAssertEqual(state.rows.first?.status, "WAITING"); XCTAssertFalse(state.running)
+        XCTAssertTrue(wire.sent().isEmpty); XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+    }
+
+    @MainActor func testPhotoInteractionLegacyDefaultAndRoundTripPreserveOtherPreferences() throws {
+        let suite = "ZTransferTests.interaction.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let legacy = Data(#"{"version":1,"columns":4,"collapseBursts":false,"protectedOnly":true,"burstOnly":false,"untransferredOnly":false,"startDay":20260101,"endDay":20261231,"previewRotationQuarterTurns":3,"previewHistogramEnabled":true}"#.utf8)
+        defaults.set(legacy, forKey: BrowsePreferencesStore.key)
+        let store = BrowsePreferencesStore(defaults: defaults)
+        let old = try XCTUnwrap(store.read())
+        XCTAssertFalse(old.tapToPreview); XCTAssertEqual(defaults.data(forKey: BrowsePreferencesStore.key), legacy)
+        let edited = NativeBrowsePreferences(columns: old.columns, collapseBursts: old.collapseBursts,
+            extensions: old.extensions, protectedOnly: old.protectedOnly, burstOnly: old.burstOnly,
+            untransferredOnly: old.untransferredOnly, startDay: old.startDay, endDay: old.endDay,
+            previewRotationQuarterTurns: old.previewRotationQuarterTurns, previewHistogramEnabled: old.previewHistogramEnabled,
+            tapToPreview: true)
+        XCTAssertTrue(store.save(edited))
+        let restored = try XCTUnwrap(BrowsePreferencesStore(defaults: defaults).read())
+        XCTAssertTrue(restored.tapToPreview); XCTAssertEqual(restored.columns, 4); XCTAssertFalse(restored.collapseBursts)
+        XCTAssertTrue(restored.protectedOnly); XCTAssertEqual(restored.startDay, 20260101)
+        XCTAssertEqual(restored.endDay, 20261231); XCTAssertEqual(restored.previewRotationQuarterTurns, 3)
+        XCTAssertTrue(restored.previewHistogramEnabled)
+    }
+
+    @MainActor func testMalformedPhotoInteractionFieldIsNeverSilentlyOverwritten() throws {
+        let suite = "ZTransferTests.interaction.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = BrowsePreferencesStore(defaults: defaults)
+        XCTAssertTrue(store.save(NativeBrowsePreferences.companion.defaults()))
+        let saved = try XCTUnwrap(defaults.data(forKey: BrowsePreferencesStore.key))
+        let fields = try XCTUnwrap(JSONSerialization.jsonObject(with: saved) as? [String: Any])
+        let invalidValues: [Any] = ["true", 1, [1], ["wrong": true]]
+        for invalid in invalidValues {
+            var value = fields; value["tapToPreview"] = invalid
+            let data = try JSONSerialization.data(withJSONObject: value)
+            defaults.set(data, forKey: BrowsePreferencesStore.key)
+            XCTAssertNil(store.read()); XCTAssertFalse(store.save(NativeBrowsePreferences.companion.defaults()))
+            XCTAssertEqual(defaults.data(forKey: BrowsePreferencesStore.key), data)
+        }
+    }
+
+    func testPreviewDateFieldsKeepGregorianYearAndPaddingWithoutCalendarConversion() {
+        for tag in ["en_US_POSIX", "de_DE", "zh_CN", "th_TH"] {
+            let locale = Locale(identifier: tag)
+            XCTAssertEqual(ApplePreviewDateText.date(year: 0, month: 2, day: 29, locale: locale), "0000-02-29", tag)
+            XCTAssertEqual(ApplePreviewDateText.date(year: 2026, month: 9, day: 5, locale: locale), "2026-09-05", tag)
+            XCTAssertEqual(ApplePreviewDateText.time(hour: 0, minute: 1, second: 9, locale: locale), "00:01:09", tag)
+            XCTAssertEqual(ApplePreviewDateText.time(hour: 23, minute: 59, second: 59, locale: locale), "23:59:59", tag)
+        }
+    }
+
+    func testPreviewDateArabicDigitsMatchAndroidFormatterGolden() {
+        let locale = Locale(identifier: "ar_EG")
+        XCTAssertEqual(ApplePreviewDateText.date(year: 2026, month: 9, day: 5, locale: locale), "٢٠٢٦-٠٩-٠٥")
+        XCTAssertEqual(ApplePreviewDateText.time(hour: 0, minute: 1, second: 9, locale: locale), "٠٠:٠١:٠٩")
+    }
+
+    private func waitUntil(_ description: String, _ condition: () async -> Bool) async throws {
+        let deadline = ProcessInfo.processInfo.systemUptime + 2
+        while ProcessInfo.processInfo.systemUptime < deadline {
+            if await condition() { return }
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        XCTFail(description)
+        throw CameraStreamError.timedOut
+    }
+
+    func testInteractiveWindowKeepsDownloadBetweenTransactionsUntilFhdAndExifFinish() async throws {
+        let wire = FakeCameraConnection(bytes: response(transaction: 1) + response(transaction: 2)
+            + response(transaction: 3) + response(transaction: 4))
+        let stream = CameraTCPStream(connection: wire)
+        defer { stream.close() }
+        try await stream.connect(timeout: 1)
+        let session = PtpIPCommandSession(stream: stream, initialTransactionId: 0)
+        let window = try await session.beginInteractivePreview()
+        let download = Task { try await session.executeStreaming(operationCode: 0x1009, parameters: [7]) { _ in } }
+        try await waitUntil("download is parked without owning the socket") { await session.pendingTransferSliceCount() == 1 }
+        XCTAssertTrue(wire.sent().isEmpty)
+        let nested = try await session.beginInteractivePreview()
+        _ = try await session.execute(operationCode: 0x9428, parameters: [7])
+        await session.endInteractivePreview(nested)
+        // Ordinary metadata remains eligible. Only transfer slices yield, not the whole camera.
+        _ = try await session.execute(operationCode: 0x1004)
+        _ = try await session.execute(operationCode: PtpConstants.shared.NK_GET_PARTIAL_OBJECT_EX, parameters: [7, 0, 0, 131072, 0])
+        XCTAssertEqual(wire.sent().count, 3)
+        let pending = await session.pendingTransferSliceCount(); XCTAssertEqual(pending, 1)
+        await session.endInteractivePreview(UUID()) // Foreign/duplicate releases cannot open the window.
+        await session.endInteractivePreview(nested)
+        XCTAssertEqual(wire.sent().count, 3)
+        await session.endInteractivePreview(window)
+        let result = try await download.value; XCTAssertEqual(result.code, 0x2001)
+        XCTAssertEqual(wire.sent().last, hex("16000000060000000100000009100400000007000000"))
+    }
+
+    func testPriorityNeverInterruptsAnAlreadyStartedStreamingTransaction() async throws {
+        let received = expectation(description: "first complete slice owns the wire")
+        received.assertForOverFulfill = false
+        let wire = FakeCameraConnection(onReceive: { received.fulfill() })
+        let stream = CameraTCPStream(connection: wire)
+        defer { stream.close() }
+        try await stream.connect(timeout: 1)
+        let session = PtpIPCommandSession(stream: stream, initialTransactionId: 0)
+        let active = Task { try await session.executeStreaming(operationCode: 0x1009, parameters: [7], idleTimeout: 3) { _ in } }
+        await fulfillment(of: [received], timeout: 1)
+        let token = try await session.beginInteractivePreview()
+        let next = Task { try await session.executeStreaming(operationCode: 0x1009, parameters: [8]) { _ in } }
+        try await waitUntil("next slice queued behind active data") { await session.pendingTransferSliceCount() == 1 }
+        XCTAssertEqual(wire.sent().count, 1)
+        wire.feed(response(transaction: 1) + response(transaction: 2) + response(transaction: 3))
+        let completed = try await active.value; XCTAssertEqual(completed.code, 0x2001)
+        _ = try await session.execute(operationCode: 0x9428, parameters: [9])
+        XCTAssertEqual(wire.sent().count, 2)
+        await session.endInteractivePreview(token)
+        _ = try await next.value
+        XCTAssertEqual(wire.sent().last, hex("16000000060000000100000009100300000008000000"))
+    }
+
+    func testCancellingAPriorityParkedSliceConsumesNoTidAndDoesNotCloseTheConnection() async throws {
+        let wire = FakeCameraConnection(bytes: response(transaction: 1))
+        let stream = CameraTCPStream(connection: wire)
+        defer { stream.close() }
+        try await stream.connect(timeout: 1)
+        let session = PtpIPCommandSession(stream: stream, initialTransactionId: 0)
+        let token = try await session.beginInteractivePreview()
+        let waiting = Task { try await session.executeStreaming(operationCode: 0x1009, parameters: [7]) { _ in } }
+        try await waitUntil("slice waits for priority") { await session.pendingTransferSliceCount() == 1 }
+        waiting.cancel()
+        do { _ = try await waiting.value; XCTFail("Expected cancellation") }
+        catch { XCTAssertTrue(error is CancellationError) }
+        XCTAssertTrue(wire.sent().isEmpty)
+        let closed = await session.isClosed(); XCTAssertFalse(closed)
+        await session.endInteractivePreview(token)
+        _ = try await session.execute(operationCode: 0x1004)
+        XCTAssertEqual(wire.sent(), [hex("120000000600000001000000041001000000")])
+    }
+
+    func testClosingSessionWakesPriorityParkedSlicesAndRejectsNewWindows() async throws {
+        let wire = FakeCameraConnection()
+        let stream = CameraTCPStream(connection: wire)
+        defer { stream.close() }
+        try await stream.connect(timeout: 1)
+        let session = PtpIPCommandSession(stream: stream, initialTransactionId: 0)
+        let token = try await session.beginInteractivePreview()
+        let waiting = Task { try await session.executeStreaming(operationCode: 0x1009, parameters: [7]) { _ in } }
+        try await waitUntil("slice parked before close") { await session.pendingTransferSliceCount() == 1 }
+        await session.close()
+        do { _ = try await waiting.value; XCTFail("Closed owner must wake its waiter") }
+        catch { XCTAssertEqual(error as? CameraStreamError, .closed) }
+        await session.endInteractivePreview(token)
+        do { _ = try await session.beginInteractivePreview(); XCTFail("Closed owner cannot issue tokens") }
+        catch { XCTAssertEqual(error as? CameraStreamError, .closed) }
+        XCTAssertTrue(wire.sent().isEmpty)
+    }
+
+    @MainActor func testPagePriorityWindowUsesBorrowedOwnerAndReleasesExactlyOnce() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = FakeExifSource(.missing)
+        let page = try exifPage(NativePreviewExifCache(), source: source, root: root).page
+        defer { page.close() }
+        let reply = PreviewPriorityCompletionProbe(expectation(description: "priority granted"))
+        page.beginPreviewPriority(sessionId: 1, requestId: 1, completion: reply)
+        await fulfillment(of: [reply.done], timeout: 1)
+        XCTAssertEqual(reply.granted, true)
+        let count = await source.priorityCount(); XCTAssertEqual(count, 1)
+        page.endPreviewPriority(sessionId: 1, requestId: 1)
+        page.endPreviewPriority(sessionId: 1, requestId: 1)
+        try await waitUntil("one release acknowledged") { await source.priorityReleases == 1 }
+        let next = PreviewPriorityCompletionProbe(expectation(description: "second priority"))
+        page.beginPreviewPriority(sessionId: 1, requestId: 2, completion: next)
+        await fulfillment(of: [next.done], timeout: 1)
+        page.endPreviewReads(sessionId: 1)
+        try await waitUntil("overlay close releases remaining window") { await source.priorityReleases == 2 }
+        let remaining = await source.priorityCount(); XCTAssertEqual(remaining, 0)
+    }
+
+    @MainActor func testLatePriorityTokenIsReleasedAfterPageSessionReplacement() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = FakeExifSource(.missing)
+        let began = expectation(description: "priority registration held")
+        await source.holdNextPriority { began.fulfill() }
+        let page = try exifPage(NativePreviewExifCache(), source: source, root: root).page
+        defer { page.close() }
+        let old = PreviewPriorityCompletionProbe(expectation(description: "old grant rejected"))
+        page.beginPreviewPriority(sessionId: 1, requestId: 1, completion: old)
+        await fulfillment(of: [began], timeout: 1)
+        page.beginPreviewReads(sessionId: 2)
+        let fresh = PreviewPriorityCompletionProbe(expectation(description: "new grant"))
+        page.beginPreviewPriority(sessionId: 2, requestId: 1, completion: fresh)
+        await fulfillment(of: [fresh.done], timeout: 1)
+        XCTAssertEqual(fresh.granted, true)
+        await source.releaseHeldPriority()
+        await fulfillment(of: [old.done], timeout: 1)
+        XCTAssertEqual(old.granted, false)
+        try await waitUntil("late old token released") { await source.priorityReleases == 1 }
+        let count = await source.priorityCount(); XCTAssertEqual(count, 1)
+        page.close()
+        try await waitUntil("new token released on page close") { await source.priorityCount() == 0 }
+    }
+
+    @MainActor private func exifPage(_ cache: NativePreviewExifCache, source: CameraExifSource, root: URL,
+                                     handle: Int32 = 7, name: String = "sample.JPG", size: Int = 7,
+                                     originals: OriginalFilesReading? = nil)
+        throws -> (page: OriginalFilesPageBridge, file: CameraFileInfo, queue: CameraOriginalQueue) {
+        let camera = stationCamera(command: FakeCameraConnection(bytes: Data()))
+        let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: root))
+        let page = OriginalFilesPageBridge(connectionID: camera.connectionID,
+            catalog: CameraCatalog(source: camera, stationMode: true), queue: queue,
+            previews: CameraPreviewStore(source: camera), exifSource: source, exifCache: cache, stationMode: true, originals: originals)
+        var bytes = Data(repeating: 0, count: 52)
+        bytes[0] = 1; bytes[2] = 1; bytes[4] = 1; bytes[5] = 0x38
+        for i in 0..<4 { bytes[8 + i] = UInt8(truncatingIfNeeded: size >> (8 * i)) }
+        bytes.append(UInt8(name.utf16.count + 1))
+        for unit in name.utf16 { bytes.append(UInt8(unit & 255)); bytes.append(UInt8(unit >> 8)) }
+        bytes.append(contentsOf: [0,0,0])
+        let info = try XCTUnwrap(PtpIPChannel.objectInfo(handle: handle, payload: bytes))
+        let file = try XCTUnwrap(NativeOriginalTransferQueue().enqueue(info: info, byDate: false, dayKey: 0)).file
+        page.setConnected(true)
+        let catalog = CameraCatalogSnapshot(connectionID: camera.connectionID, revision: 0, storageIDs: [0x10001],
+            files: [file], objectInfos: [handle: info], totalHandles: 1, metadataComplete: true, changedWhileScanning: false)
+        XCTAssertTrue(page.acceptCatalog(catalog, sequence: page.model.beginScan()))
+        page.beginPreviewReads(sessionId: 1)
+        return (page, file, queue)
+    }
+
+    @MainActor func testProviderIndexDrivesFrozenSharedPreviewAndRealCoordinatedBitmapExifOffline() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let providerRoot = root.appendingPathComponent("provider", isDirectory: true)
+        try FileManager.default.createDirectory(at: providerRoot, withIntermediateDirectories: true)
+        let data = try previewExifJpegFixture(), url = providerRoot.appendingPathComponent("sample.JPG")
+        try data.write(to: url)
+        let bookmark = root.appendingPathComponent("grant")
+        try Data([1]).write(to: bookmark)
+        let grant = PageDirectoryGrant(providerRoot)
+        let provider = ProviderOriginalStore(directory: ScopedDirectoryStore(bookmarkFile: bookmark, access: grant))
+        try await provider.validateSelection()
+        let remote = FakeExifSource(.failure)
+        let context = try exifPage(NativePreviewExifCache(), source: remote, root: root.appendingPathComponent("sandbox"),
+            size: data.count, originals: provider)
+        defer { context.page.close() }
+        context.page.publishQueue(await context.queue.snapshot())
+        let refresh = try XCTUnwrap(context.page.originalIndexTask)
+        await refresh.value
+        XCTAssertGreaterThanOrEqual(context.page.originalRevision, 0)
+        context.page.setConnected(false)
+        let reads = try XCTUnwrap(context.page.model.beginPreviewReads())
+        let locator = url.standardizedFileURL.resolvingSymlinksInPath().absoluteString
+        let image = try await reads.localBitmap(file: context.file, source: locator)
+        XCTAssertEqual(image?.width, 12); XCTAssertEqual(image?.height, 8)
+        let exif = try await reads.localExif(file: context.file, source: locator)
+        XCTAssertEqual(exif?.iso, "ISO64"); XCTAssertEqual(exif?.dateTime, "2026:09:05 01:02:03")
+        let wrongSource = try await reads.localBitmap(file: context.file, source: root.appendingPathComponent("sandbox/sample.JPG").absoluteString)
+        XCTAssertNil(wrongSource)
+        let calls = await remote.requests(); XCTAssertTrue(calls.isEmpty)
+        let queue = await context.queue.snapshot(); XCTAssertTrue(queue.rows.isEmpty); XCTAssertFalse(queue.running)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("sandbox").path))
+        XCTAssertEqual(try Data(contentsOf: url), data); XCTAssertEqual(grant.starts, grant.stops)
+    }
+
+    @MainActor func testAllLocalPreviewRoutesUseInjectedSourceWithoutReadingQueueSandbox() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let url = root.appendingPathComponent("selected/sample.JPG"), data = try previewExifJpegFixture()
+        let source = PageOriginalSource(url: url, bytes: data), remote = FakeExifSource(.failure)
+        let cache = NativePreviewExifCache()
+        let context = try exifPage(cache, source: remote, root: root.appendingPathComponent("sandbox"), size: data.count, originals: source)
+        defer { context.page.close() }
+        context.page.setConnected(false)
+        let bitmap = LocalImageCompletionProbe(expectation(description: "selected bitmap"))
+        context.page.readLocalBitmap(sessionId: 1, requestId: 1, source: url.absoluteString, completion: bitmap)
+        await fulfillment(of: [bitmap.done], timeout: 3)
+        let raw = LocalImageCompletionProbe(expectation(description: "selected raw slice"))
+        context.page.readLocalRaw(sessionId: 1, requestId: 2, source: url.absoluteString, completion: raw)
+        await fulfillment(of: [raw.done], timeout: 3)
+        let exif = PreviewExifCompletionProbe(expectation(description: "selected exif"))
+        context.page.readLocalExif(sessionId: 1, requestId: 3, file: context.file, source: url.absoluteString, completion: exif)
+        await fulfillment(of: [exif.done], timeout: 3)
+        XCTAssertEqual(bitmap.value?.width, 12); XCTAssertEqual(raw.value?.width, 12)
+        XCTAssertEqual(exif.value?.iso, "ISO64")
+        let calls = await source.requests(); XCTAssertEqual(calls, ["data", "raw", "exif"])
+        let remoteCalls = await remote.requests(); XCTAssertTrue(remoteCalls.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+    }
+
+    @MainActor func testClosedPageCannotPublishLateIndexIntoReplacementWithSameRevision() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let data = try previewExifJpegFixture()
+        let firstSource = PageOriginalSource(url: root.appendingPathComponent("first/sample.JPG"), bytes: data)
+        let secondSource = PageOriginalSource(url: root.appendingPathComponent("second/sample.JPG"), bytes: data)
+        let began = expectation(description: "old index held")
+        await firstSource.hold("index", began: began)
+        let old = try exifPage(NativePreviewExifCache(), source: FakeExifSource(.failure), root: root,
+            size: data.count, originals: firstSource)
+        old.page.publishQueue(await old.queue.snapshot())
+        let oldRefresh = try XCTUnwrap(old.page.originalIndexTask)
+        await fulfillment(of: [began], timeout: 3)
+        old.page.close()
+        let next = try exifPage(NativePreviewExifCache(), source: FakeExifSource(.failure), root: root,
+            size: data.count, originals: secondSource)
+        defer { next.page.close() }
+        next.page.publishQueue(await next.queue.snapshot())
+        let newRefresh = try XCTUnwrap(next.page.originalIndexTask)
+        await newRefresh.value
+        await firstSource.release("index"); await oldRefresh.value
+        XCTAssertEqual(old.page.originalRevision, -1); XCTAssertEqual(next.page.originalRevision, 1)
+        let reads = try XCTUnwrap(next.page.model.beginPreviewReads())
+        let rejected = try await reads.localBitmap(file: next.file, source: root.appendingPathComponent("first/sample.JPG").absoluteString)
+        XCTAssertNil(rejected)
+        let accepted = try await reads.localBitmap(file: next.file, source: root.appendingPathComponent("second/sample.JPG").absoluteString)
+        XCTAssertEqual(accepted?.width, 12)
+        let calls = await secondSource.requests(); XCTAssertEqual(calls, ["index", "data"])
+    }
+
+    @MainActor func testClosedPageDropsLateLocalBitmapAndDoesNotCancelNewPageRead() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let url = root.appendingPathComponent("sample.JPG"), data = try previewExifJpegFixture()
+        let source = PageOriginalSource(url: url, bytes: data)
+        let began = expectation(description: "old bitmap held")
+        await source.hold("data", began: began)
+        let old = try exifPage(NativePreviewExifCache(), source: FakeExifSource(.failure), root: root, originals: source)
+        let completion = LocalImageCompletionProbe(expectation(description: "old bitmap rejected"))
+        old.page.readLocalBitmap(sessionId: 1, requestId: 1, source: url.absoluteString, completion: completion)
+        await fulfillment(of: [began], timeout: 3)
+        old.page.close()
+        let next = try exifPage(NativePreviewExifCache(), source: FakeExifSource(.failure), root: root, originals: source)
+        defer { next.page.close() }
+        let accepted = LocalImageCompletionProbe(expectation(description: "new bitmap"))
+        next.page.readLocalBitmap(sessionId: 1, requestId: 1, source: url.absoluteString, completion: accepted)
+        await fulfillment(of: [accepted.done], timeout: 3)
+        await source.release("data")
+        await fulfillment(of: [completion.done], timeout: 3)
+        XCTAssertNil(completion.value); XCTAssertEqual(completion.count, 1)
+        XCTAssertEqual(accepted.value?.width, 12); XCTAssertEqual(accepted.count, 1)
+    }
+
+    @MainActor func testClosedPageLateLocalExifCannotPoisonSharedCache() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let url = root.appendingPathComponent("sample.JPG"), data = try previewExifJpegFixture()
+        let source = PageOriginalSource(url: url, bytes: data), cache = NativePreviewExifCache()
+        let began = expectation(description: "old exif held")
+        await source.hold("exif", began: began)
+        let context = try exifPage(cache, source: FakeExifSource(.failure), root: root, originals: source)
+        let completion = PreviewExifCompletionProbe(expectation(description: "old exif rejected"))
+        context.page.readLocalExif(sessionId: 1, requestId: 1, file: context.file, source: url.absoluteString, completion: completion)
+        await fulfillment(of: [began], timeout: 3)
+        context.page.close()
+        await source.release("exif")
+        await fulfillment(of: [completion.done], timeout: 3)
+        XCTAssertNil(completion.value); XCTAssertNil(cache.cached(file: context.file)); XCTAssertEqual(completion.count, 1)
+    }
+
+    @MainActor func testIndexSourceStillUsesLowFrequencyQueueRevisionNotProgressSamples() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let source = PageOriginalSource(url: root.appendingPathComponent("sample.JPG"), bytes: Data([1]))
+        let context = try exifPage(NativePreviewExifCache(), source: FakeExifSource(.failure), root: root, originals: source)
+        defer { context.page.close() }
+        let snapshot = await context.queue.snapshot()
+        context.page.publishQueue(snapshot)
+        let refresh = try XCTUnwrap(context.page.originalIndexTask)
+        await refresh.value
+        for _ in 0..<20 { context.page.publishQueue(snapshot) }
+        XCTAssertNil(context.page.originalIndexTask)
+        let calls = await source.requests(); XCTAssertEqual(calls, ["index"])
+    }
+
+    @MainActor func testDefaultFilesSourceRemainsQueueSandbox() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let data = try previewExifJpegFixture(), url = root.appendingPathComponent("sample.JPG")
+        try data.write(to: url)
+        let context = try exifPage(NativePreviewExifCache(), source: FakeExifSource(.failure), root: root, size: data.count)
+        defer { context.page.close() }
+        context.page.publishQueue(await context.queue.snapshot())
+        let refresh = try XCTUnwrap(context.page.originalIndexTask)
+        await refresh.value
+        context.page.setConnected(false)
+        let reads = try XCTUnwrap(context.page.model.beginPreviewReads())
+        let image = try await reads.localBitmap(file: context.file, source: url.standardizedFileURL.resolvingSymlinksInPath().absoluteString)
+        XCTAssertEqual(image?.width, 12)
+        let state = await context.queue.snapshot(); XCTAssertFalse(state.running); XCTAssertTrue(state.rows.isEmpty)
+    }
+
+    @MainActor func testExifCacheSurvivesPageAndConnectionReplacementAndServesLocalOffline() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let cache = NativePreviewExifCache()
+        let data = try rawBiasJpegFixture(numerator: 36_293_949, denominator: 725_879_001, little: true)
+        let firstSource = FakeExifSource(.bytes(data))
+        let first = try exifPage(cache, source: firstSource, root: root)
+        let done = PreviewExifCompletionProbe(expectation(description: "remote EXIF"))
+        first.page.readExif(sessionId: 1, requestId: 1, file: first.file, completion: done)
+        await fulfillment(of: [done.done], timeout: 3)
+        XCTAssertEqual(done.value?.exposureCompensation, "+0.1 EV"); XCTAssertEqual(done.count, 1)
+        let calls = await firstSource.requests(); XCTAssertEqual(calls.count, 1); XCTAssertEqual(calls.first?.1, 128 * 1024)
+        first.page.close()
+        let secondSource = FakeExifSource(.failure)
+        let second = try exifPage(cache, source: secondSource, root: root, handle: 9)
+        defer { second.page.close() }
+        second.page.setConnected(false)
+        let local = PreviewExifCompletionProbe(expectation(description: "local cached EXIF"))
+        second.page.readLocalExif(sessionId: 1, requestId: 1, file: second.file, source: "file:///not-opened/sample.JPG", completion: local)
+        await fulfillment(of: [local.done], timeout: 1)
+        XCTAssertEqual(local.value?.exposureCompensation, "+0.1 EV")
+        let offline = PreviewExifCompletionProbe(expectation(description: "offline cached EXIF"))
+        second.page.readExif(sessionId: 1, requestId: 2, file: second.file, completion: offline)
+        await fulfillment(of: [offline.done], timeout: 1)
+        XCTAssertEqual(offline.value?.exposureCompensation, "+0.1 EV")
+        let laterCalls = await secondSource.requests(); XCTAssertTrue(laterCalls.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+    }
+
+    @MainActor func testExifNegativeCacheDistinguishesFailedAttemptAndSuppressesLocalRetry() async throws {
+        for reply in [FakeExifSource.Reply.missing, .failure] {
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: root) }
+            let cache = NativePreviewExifCache(), source = FakeExifSource(reply)
+            let context = try exifPage(cache, source: source, root: root)
+            defer { context.page.close() }
+            XCTAssertNil(cache.cached(file: context.file))
+            let remote = PreviewExifCompletionProbe(expectation(description: "negative remote"))
+            context.page.readExif(sessionId: 1, requestId: 1, file: context.file, completion: remote)
+            await fulfillment(of: [remote.done], timeout: 3)
+            XCTAssertNil(try XCTUnwrap(cache.cached(file: context.file)).value)
+            let local = PreviewExifCompletionProbe(expectation(description: "negative local"))
+            context.page.readLocalExif(sessionId: 1, requestId: 2, file: context.file, source: "file:///not-opened/sample.JPG", completion: local)
+            await fulfillment(of: [local.done], timeout: 1)
+            XCTAssertNil(local.value)
+            let calls = await source.requests(); XCTAssertEqual(calls.count, 1)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+        }
+    }
+
+    @MainActor func testOfflineExifMissIsNotCachedButUnsupportedFormatIsCachedWithoutIo() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let cache = NativePreviewExifCache(), source = FakeExifSource(.missing)
+        let context = try exifPage(cache, source: source, root: root)
+        defer { context.page.close() }
+        context.page.setConnected(false)
+        let offline = PreviewExifCompletionProbe(expectation(description: "offline miss"))
+        context.page.readExif(sessionId: 1, requestId: 1, file: context.file, completion: offline)
+        await fulfillment(of: [offline.done], timeout: 1)
+        XCTAssertNil(cache.cached(file: context.file))
+        let noCalls = await source.requests(); XCTAssertTrue(noCalls.isEmpty)
+        context.page.setConnected(true)
+        let retry = PreviewExifCompletionProbe(expectation(description: "connected attempt"))
+        context.page.readExif(sessionId: 1, requestId: 2, file: context.file, completion: retry)
+        await fulfillment(of: [retry.done], timeout: 3)
+        XCTAssertNotNil(cache.cached(file: context.file))
+        let unsupportedSource = FakeExifSource(.failure)
+        let video = try exifPage(cache, source: unsupportedSource, root: root, name: "sample.MOV")
+        defer { video.page.close() }
+        video.page.setConnected(false)
+        let unsupported = PreviewExifCompletionProbe(expectation(description: "unsupported"))
+        video.page.readExif(sessionId: 1, requestId: 1, file: video.file, completion: unsupported)
+        await fulfillment(of: [unsupported.done], timeout: 1)
+        XCTAssertNil(try XCTUnwrap(cache.cached(file: video.file)).value)
+        let videoCalls = await unsupportedSource.requests(); XCTAssertTrue(videoCalls.isEmpty)
+    }
+
+    @MainActor func testCancelledExifRequestDoesNotCreateNegativeEntryAndCanRetry() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let began = expectation(description: "EXIF source held")
+        let data = try rawBiasJpegFixture(numerator: -2, denominator: 3, little: true)
+        let source = FakeExifSource(.bytes(data), holdFirst: true, onRequest: { began.fulfill() })
+        let cache = NativePreviewExifCache(), context = try exifPage(cache, source: source, root: root)
+        defer { context.page.close() }
+        let first = PreviewExifCompletionProbe(expectation(description: "cancelled result"))
+        context.page.readExif(sessionId: 1, requestId: 1, file: context.file, completion: first)
+        await fulfillment(of: [began], timeout: 3)
+        context.page.cancelPreviewRead(sessionId: 1, requestId: 1)
+        await source.release()
+        await fulfillment(of: [first.done], timeout: 3)
+        XCTAssertNil(cache.cached(file: context.file))
+        let next = PreviewExifCompletionProbe(expectation(description: "retry result"))
+        context.page.readExif(sessionId: 1, requestId: 2, file: context.file, completion: next)
+        await fulfillment(of: [next.done], timeout: 3)
+        XCTAssertEqual(next.value?.exposureCompensation, "-0.7 EV")
+        let calls = await source.requests(); XCTAssertEqual(calls.count, 2)
+    }
+
+    @MainActor func testLocalExifPopulatesSameCacheBeforeRemoteRead() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let data = try previewExifJpegFixture(), url = root.appendingPathComponent("sample.JPG")
+        try data.write(to: url)
+        let cache = NativePreviewExifCache(), source = FakeExifSource(.failure)
+        let context = try exifPage(cache, source: source, root: root, size: data.count)
+        defer { context.page.close() }
+        _ = try await context.queue.originals(since: -1, rescan: true)
+        let local = PreviewExifCompletionProbe(expectation(description: "local EXIF"))
+        context.page.readLocalExif(sessionId: 1, requestId: 1, file: context.file, source: url.absoluteString, completion: local)
+        await fulfillment(of: [local.done], timeout: 3)
+        XCTAssertEqual(local.value?.aperture, "f/4")
+        let remote = PreviewExifCompletionProbe(expectation(description: "same cached metadata"))
+        context.page.readExif(sessionId: 1, requestId: 2, file: context.file, completion: remote)
+        await fulfillment(of: [remote.done], timeout: 1)
+        XCTAssertEqual(remote.value?.aperture, "f/4")
+        let calls = await source.requests(); XCTAssertTrue(calls.isEmpty)
+        XCTAssertEqual(try Data(contentsOf: url), data)
+    }
+
+    private func fillCatalog(_ id: UUID, handles: [Int32], dated: Bool = false,
+                             complete: Bool = true, changed: Bool = false) throws -> CameraCatalogSnapshot {
+        let queue = NativeOriginalTransferQueue()
+        var infos: [Int32: PtpObjectInfo] = [:]
+        var files: [CameraFileInfo] = []
+        for handle in handles {
+            let info = try sampleInfo(handle, captureDate: dated ? "2026090\(handle)T120000" : nil)
+            infos[handle] = info
+            files.append(try XCTUnwrap(queue.enqueue(info: info, byDate: false, dayKey: 0)).file)
+        }
+        return CameraCatalogSnapshot(connectionID: id, revision: 0, storageIDs: [0x10001], files: files,
+            objectInfos: infos, totalHandles: handles.count, metadataComplete: complete, changedWhileScanning: changed)
+    }
+    private func waitForFillIdle(_ store: CameraPreviewStore) async throws {
+        for _ in 0..<500 {
+            if !(await store.fillCounts()).running { return }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTFail("Background fill did not reach a bounded idle state")
+    }
+
+    func testBackgroundFillUsesOneWorkerAndPersistsTheCompleteCatalogWithoutAPage() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let png = try thumbnailFixture(), id = UUID()
+        let source = FillPreviewSource(results: [3: [.bytes(png)], 2: [.bytes(png)], 1: [.bytes(png)]])
+        let store = CameraPreviewStore(source: source, connectionID: id)
+        _ = await store.openDiskCache(root: root, cameraIdentity: "body")
+        await store.startBackgroundFill(startDay: 0, endDay: 0, revision: 1)
+        let snapshot = try fillCatalog(id, handles: [3, 2, 1])
+        _ = await store.reconcile(snapshot)
+        try await waitForFillIdle(store)
+        let first = await source.stats()
+        XCTAssertEqual(first.handles, [3, 2, 1]); XCTAssertEqual(first.maximumActive, 1)
+        let disk = try CameraThumbnailDiskCache(root: root, cameraIdentity: "body")
+        for info in snapshot.objectInfos.values { XCTAssertEqual(try disk.read(key: NativePreviewPolicy().thumbnailKey(info: info)), png) }
+        await store.clearForMemoryPressure()
+        _ = await store.reconcile(snapshot) // Rechecks disk after each full scan without re-reading the camera.
+        try await waitForFillIdle(store)
+        let second = await source.stats()
+        XCTAssertEqual(second.handles, first.handles)
+        await store.close()
+    }
+
+    func testBackgroundFillWaitsForExecutingQueueAndEveryForegroundUseToken() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let id = UUID(), source = FillPreviewSource(results: [1: [.missing]])
+        let store = CameraPreviewStore(source: source, connectionID: id)
+        _ = await store.openDiskCache(root: root, cameraIdentity: "body")
+        let first = await store.beginForegroundUse(), second = await store.beginForegroundUse()
+        await store.setTransfersBusy(true)
+        await store.startBackgroundFill(startDay: 0, endDay: 0, revision: 1)
+        _ = await store.reconcile(try fillCatalog(id, handles: [1]))
+        await store.endForegroundUse(first); await store.setTransfersBusy(false)
+        let blocked = await source.stats(); XCTAssertTrue(blocked.handles.isEmpty)
+        await store.endForegroundUse(second)
+        try await waitForFillIdle(store)
+        let done = await source.stats(); XCTAssertEqual(done.handles, [1])
+        await store.endForegroundUse(second) // Duplicate release must not resume/retry anything twice.
+        let counts = await store.fillCounts(); XCTAssertEqual(counts.pending, 0); XCTAssertEqual(counts.failed, 0)
+        await store.close()
+    }
+
+    func testBackgroundFailureDoesNotHotLoopAndOnlyRealRangeChangeRetries() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let id = UUID(), source = FillPreviewSource(results: [1: [.busy, .missing]])
+        let store = CameraPreviewStore(source: source, connectionID: id)
+        _ = await store.openDiskCache(root: root, cameraIdentity: "body")
+        await store.startBackgroundFill(startDay: 0, endDay: 0, revision: 1)
+        _ = await store.reconcile(try fillCatalog(id, handles: [1]))
+        try await waitForFillIdle(store)
+        let failed = await store.fillCounts(); XCTAssertEqual(failed.failed, 1)
+        await store.setTransfersBusy(false)
+        await store.setPriorityRange(startDay: 0, endDay: 0, revision: 2)
+        try await Task.sleep(nanoseconds: 30_000_000)
+        let unchanged = await source.stats(); XCTAssertEqual(unchanged.handles, [1])
+        await store.setPriorityRange(startDay: 20260901, endDay: 20260901, revision: 3)
+        try await waitForFillIdle(store)
+        let retried = await source.stats(); XCTAssertEqual(retried.handles, [1, 1])
+        await store.close()
+    }
+
+    func testBackgroundPauseDrainsCurrentRequestThenResumesOnlyRemainingFiles() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let began = expectation(description: "first background request admitted")
+        let id = UUID(), source = FillPreviewSource(results: [1: [.missing], 2: [.missing]], holdFirst: true, onFirst: { began.fulfill() })
+        let store = CameraPreviewStore(source: source, connectionID: id)
+        _ = await store.openDiskCache(root: root, cameraIdentity: "body")
+        await store.startBackgroundFill(startDay: 0, endDay: 0, revision: 1)
+        _ = await store.reconcile(try fillCatalog(id, handles: [1, 2]))
+        await fulfillment(of: [began], timeout: 2)
+        await store.setTransfersBusy(true)
+        await source.releaseFirst()
+        try await waitForFillIdle(store)
+        let paused = await source.stats(); XCTAssertEqual(paused.handles, [1])
+        let pending = await store.fillCounts(); XCTAssertEqual(pending.pending, 1)
+        await store.setTransfersBusy(false)
+        try await waitForFillIdle(store)
+        let done = await source.stats(); XCTAssertEqual(done.handles, [1, 2]); XCTAssertEqual(done.maximumActive, 1)
+        await store.close()
+    }
+
+    func testBackgroundFillRejectsOldScanTokenAndPartialCatalogUntilACompleteScan() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let id = UUID(), source = FillPreviewSource(results: [1: [.missing]])
+        let store = CameraPreviewStore(source: source, connectionID: id)
+        _ = await store.openDiskCache(root: root, cameraIdentity: "body")
+        await store.startBackgroundFill(startDay: 0, endDay: 0, revision: 1)
+        let old = await store.beginCatalogScan(), newer = await store.beginCatalogScan()
+        let rejected = await store.finishCatalogScan(try XCTUnwrap(old), snapshot: try fillCatalog(id, handles: [1]))
+        XCTAssertFalse(rejected)
+        let partial = await store.finishCatalogScan(try XCTUnwrap(newer), snapshot: try fillCatalog(id, handles: [1], complete: false))
+        XCTAssertFalse(partial)
+        let before = await source.stats(); XCTAssertTrue(before.handles.isEmpty)
+        let final = await store.beginCatalogScan()
+        let accepted = await store.finishCatalogScan(try XCTUnwrap(final), snapshot: try fillCatalog(id, handles: [1]))
+        XCTAssertTrue(accepted)
+        try await waitForFillIdle(store)
+        let after = await source.stats(); XCTAssertEqual(after.handles, [1])
+        await store.close()
+    }
+    func testBackgroundDiskFailureStopsAtCurrentFileAndManualRescanCanRecover() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let png = try thumbnailFixture(), id = UUID()
+        let began = expectation(description: "background request before cache becomes unavailable")
+        let source = FillPreviewSource(results: [1: [.bytes(png)], 2: [.bytes(png)]], holdFirst: true, onFirst: { began.fulfill() })
+        let store = CameraPreviewStore(source: source, connectionID: id)
+        _ = await store.openDiskCache(root: root, cameraIdentity: "body")
+        let disk = try CameraThumbnailDiskCache(root: root, cameraIdentity: "body")
+        await store.startBackgroundFill(startDay: 0, endDay: 0, revision: 1)
+        let snapshot = try fillCatalog(id, handles: [1, 2])
+        _ = await store.reconcile(snapshot)
+        await fulfillment(of: [began], timeout: 2)
+        try FileManager.default.removeItem(at: disk.directory)
+        try Data([7]).write(to: disk.directory) // A regular file cannot be treated as a writable cache directory.
+        await source.releaseFirst()
+        try await waitForFillIdle(store)
+        let blocked = await store.diskWritesBlocked
+        XCTAssertTrue(blocked)
+        let stopped = await source.stats(); XCTAssertEqual(stopped.handles, [1])
+        try FileManager.default.removeItem(at: disk.directory)
+        _ = await store.reconcile(snapshot)
+        try await waitForFillIdle(store)
+        let recovered = await source.stats(); XCTAssertEqual(recovered.handles, [1, 2])
+        await store.close()
+    }
+
+    func testBackgroundFillRequiresDiskAndDoesNotIssueSpeculativeMemoryOnlyRequests() async throws {
+        let source = FillPreviewSource(results: [1: [.missing]])
+        let id = UUID(), store = CameraPreviewStore(source: source, connectionID: UUID())
+        // A different-connection snapshot is rejected independently of missing disk configuration.
+        let rejected = await store.reconcile(try fillCatalog(id, handles: [1]))
+        XCTAssertFalse(rejected)
+        let actual = CameraPreviewStore(source: source, connectionID: id)
+        await actual.startBackgroundFill(startDay: 0, endDay: 0, revision: 1)
+        _ = await actual.reconcile(try fillCatalog(id, handles: [1]))
+        let counts = await actual.fillCounts(); XCTAssertFalse(counts.running); XCTAssertEqual(counts.pending, 1)
+        let requests = await source.stats(); XCTAssertTrue(requests.handles.isEmpty)
+        await actual.close(); await store.close()
+    }
+
+    func testBackgroundDatePriorityKeepsNewestRelayAndUsesSharedOrdering() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let id = UUID(), source = FillPreviewSource(results: [1: [.missing], 2: [.missing], 3: [.missing]])
+        let store = CameraPreviewStore(source: source, connectionID: id)
+        _ = await store.openDiskCache(root: root, cameraIdentity: "body")
+        await store.startBackgroundFill(startDay: 0, endDay: 0, revision: 1)
+        await store.setPriorityRange(startDay: 20260901, endDay: 20260901, revision: 3)
+        await store.setPriorityRange(startDay: 20260903, endDay: 20260903, revision: 2)
+        _ = await store.reconcile(try fillCatalog(id, handles: [3, 2, 1], dated: true))
+        try await waitForFillIdle(store)
+        let requests = await source.stats(); XCTAssertEqual(requests.handles, [1, 3, 2])
+        await store.close()
+    }
+
+    func testRejectedBackgroundAdmissionSendsNothingConsumesNoTransactionAndKeepsSessionUsable() async throws {
+        let wire = FakeCameraConnection(bytes: response(transaction: 1))
+        let stream = CameraTCPStream(connection: wire)
+        defer { stream.close() }
+        try await stream.connect(timeout: 1)
+        let session = PtpIPCommandSession(stream: stream, initialTransactionId: 0)
+        await expect(.operationInProgress) {
+            _ = try await session.execute(operationCode: 0x100A, parameters: [1], backgroundAdmission: { false })
+        }
+        XCTAssertTrue(wire.sent().isEmpty)
+        let closed = await session.isClosed(); XCTAssertFalse(closed)
+        let result = try await session.execute(operationCode: 0x1004)
+        XCTAssertEqual(result.code, 0x2001)
+        XCTAssertEqual(wire.sent(), [hex("120000000600000001000000041001000000")])
+    }
+
+    func testQueuedBackgroundAdmissionRechecksAfterActiveTransactionFinishes() async throws {
+        let reading = expectation(description: "foreground transaction holds the channel")
+        reading.assertForOverFulfill = false
+        let wire = FakeCameraConnection(onReceive: { reading.fulfill() })
+        let stream = CameraTCPStream(connection: wire)
+        defer { stream.close() }
+        try await stream.connect(timeout: 1)
+        let session = PtpIPCommandSession(stream: stream, initialTransactionId: 0)
+        let foreground = Task { try await session.execute(operationCode: 0x1004, timeout: 3) }
+        await fulfillment(of: [reading], timeout: 1)
+        let probe = BackgroundAdmissionProbe()
+        let started = expectation(description: "background task submitted")
+        let background = Task {
+            started.fulfill()
+            return try await session.execute(operationCode: 0x100A, parameters: [1],
+                backgroundAdmission: { await probe.check() })
+        }
+        await fulfillment(of: [started], timeout: 1)
+        // Give the submitted task an opportunity to enter the FIFO while the response is held.
+        try await Task.sleep(nanoseconds: 50_000_000)
+        let before = await probe.checks; XCTAssertEqual(before, 0)
+        await probe.deny() // A foreground/scan state change while the background request is queued.
+        wire.feed(response(transaction: 1))
+        let first = try await foreground.value; XCTAssertEqual(first.code, 0x2001)
+        do { _ = try await background.value; XCTFail("Queued work must recheck the current gate") }
+        catch { XCTAssertEqual(error as? CameraStreamError, .operationInProgress) }
+        let after = await probe.checks; XCTAssertEqual(after, 1)
+        XCTAssertEqual(wire.sent().count, 1)
+        wire.feed(response(transaction: 2))
+        let next = try await session.execute(operationCode: 0x1004)
+        XCTAssertEqual(next.code, 0x2001)
+        XCTAssertEqual(wire.sent().last, hex("120000000600000001000000041002000000"))
+    }
+
+    @MainActor func testOriginalSinglePhotoControllerAcceptsNormalizedPNGAndRejectsMalformedInput() async throws {
+        let decoder = PreviewImageDecoder()
+        let image = try await decoder.decode(thumbnailFixture())
+        let png = try await decoder.singlePhotoPNG(image)
+        var closed = false
+        let controller = SharedUiController.shared.singlePhotoPreview(data: png as NSData, title: "actual fixture",
+            rotationDescription: "Rotate photo", onBack: { closed = true; return KotlinUnit() })
+        XCTAssertNotNil(controller)
+        controller?.loadViewIfNeeded()
+        XCTAssertFalse(closed) // Construction must not dismiss or initiate camera IO.
+        XCTAssertNil(SharedUiController.shared.singlePhotoPreview(data: Data() as NSData, title: "empty",
+            rotationDescription: "Rotate photo", onBack: { KotlinUnit() }))
+        var malformed = png
+        malformed[16] = 0x7f // Oversized unsigned width in IHDR must be rejected before Skia allocation.
+        XCTAssertNil(SharedUiController.shared.singlePhotoPreview(data: malformed as NSData, title: "oversized",
+            rotationDescription: "Rotate photo", onBack: { KotlinUnit() }))
+    }
+
+    func testSinglePhotoPNGEncodingPreservesNormalizedSizeAndRejectsUnboundedImages() async throws {
+        let decoder = PreviewImageDecoder()
+        let image = try await decoder.decode(thumbnailFixture())
+        let png = try await decoder.singlePhotoPNG(image)
+        let decoded = try await decoder.decode(png)
+        XCTAssertEqual(decoded.width, image.width); XCTAssertEqual(decoded.height, image.height)
+        XCTAssertLessThanOrEqual(png.count, 20 * 1024 * 1024)
+        let context = try XCTUnwrap(CGContext(data: nil, width: 2049, height: 1, bitsPerComponent: 8,
+            bytesPerRow: 2049 * 4, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        let oversized = try XCTUnwrap(context.makeImage())
+        do { _ = try await decoder.singlePhotoPNG(oversized); XCTFail("Unbounded bridge input must be rejected") }
+        catch { guard case PreviewImageError.invalidSize = error else { return XCTFail("Unexpected error: \(error)") } }
+    }
+
+    private func thumbnailFixture() throws -> Data {
+        let context = try XCTUnwrap(CGContext(data: nil, width: 12, height: 8, bitsPerComponent: 8,
+            bytesPerRow: 48, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.setFillColor(CGColor(red: 0.3, green: 0.7, blue: 0.2, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: 12, height: 8))
+        let image = try XCTUnwrap(context.makeImage())
+        let bytes = NSMutableData()
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithData(bytes, "public.png" as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, image, nil)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        return bytes as Data
+    }
+
+    func testThumbnailDiskCachePersistsByCameraAndCompleteFileIdentity() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let bytes = try thumbnailFixture()
+        let key = NativePreviewPolicy().thumbnailKey(info: try sampleInfo(1))
+        let first = try CameraThumbnailDiskCache(root: root, cameraIdentity: "body-one")
+        XCTAssertTrue(try first.write(bytes, key: key))
+        XCTAssertEqual(try first.read(key: key), bytes)
+        XCTAssertEqual(try CameraThumbnailDiskCache(root: root, cameraIdentity: "body-one").read(key: key), bytes)
+        XCTAssertNil(try CameraThumbnailDiskCache(root: root, cameraIdentity: "body-two").read(key: key))
+        XCTAssertNil(try first.read(key: key + "different-size-or-date"))
+        let unrelated = first.directory.appendingPathComponent("keep-user-note.txt")
+        try Data([42]).write(to: unrelated)
+        XCTAssertEqual(try first.reconcile(validKeys: []), 1)
+        XCTAssertNil(try first.read(key: key))
+        XCTAssertEqual(try Data(contentsOf: unrelated), Data([42]))
+    }
+
+    func testThumbnailDiskCacheRejectsInvalidBytesAndRepairsCorruptEntries() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let cache = try CameraThumbnailDiskCache(root: root, cameraIdentity: "body")
+        XCTAssertFalse(try cache.write(Data([1, 2, 3]), key: "photo"))
+        XCTAssertFalse(try cache.write(Data(repeating: 1, count: 4 * 1024 * 1024 + 1), key: "photo"))
+        let bytes = try thumbnailFixture()
+        XCTAssertTrue(try cache.write(bytes, key: "photo"))
+        let file = try XCTUnwrap(FileManager.default.contentsOfDirectory(at: cache.directory, includingPropertiesForKeys: nil).first { $0.pathExtension == "jpg" })
+        try Data([0]).write(to: file)
+        XCTAssertNil(try cache.read(key: "photo"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
+        XCTAssertTrue(try cache.write(bytes, key: "photo"))
+        XCTAssertEqual(try cache.read(key: "photo"), bytes)
+        XCTAssertFalse(try FileManager.default.contentsOfDirectory(atPath: cache.directory.path).contains { $0.hasSuffix(".tmp") })
+    }
+
+    func testThumbnailDiskCacheRefusesRootAndEntryLinksIncludingBrokenLinks() throws {
+        let area = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: area) }
+        try FileManager.default.createDirectory(at: area, withIntermediateDirectories: true)
+        let outside = area.appendingPathComponent("outside")
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        let link = area.appendingPathComponent("root-link")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: outside)
+        XCTAssertThrowsError(try CameraThumbnailDiskCache(root: link, cameraIdentity: "body"))
+        let broken = area.appendingPathComponent("broken-root")
+        try FileManager.default.createSymbolicLink(at: broken, withDestinationURL: area.appendingPathComponent("missing"))
+        XCTAssertThrowsError(try CameraThumbnailDiskCache(root: broken, cameraIdentity: "body"))
+        let cache = try CameraThumbnailDiskCache(root: area.appendingPathComponent("cache"), cameraIdentity: "body")
+        let bytes = try thumbnailFixture()
+        XCTAssertTrue(try cache.write(bytes, key: "photo"))
+        let file = try XCTUnwrap(FileManager.default.contentsOfDirectory(at: cache.directory, includingPropertiesForKeys: nil).first { $0.pathExtension == "jpg" })
+        let original = outside.appendingPathComponent("original.png")
+        try bytes.write(to: original)
+        try FileManager.default.removeItem(at: file)
+        try FileManager.default.createSymbolicLink(at: file, withDestinationURL: original)
+        XCTAssertThrowsError(try cache.read(key: "photo"))
+        XCTAssertThrowsError(try cache.write(bytes, key: "photo"))
+        _ = try cache.reconcile(validKeys: [])
+        XCTAssertEqual(try Data(contentsOf: original), bytes)
+        XCTAssertTrue(try file.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink == true)
+    }
+
+    func testThumbnailDiskCacheUsesStrictExpiryAndRecreatesAfterSystemPurge() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let start: Int64 = 1_700_000_000_000
+        let expired = try CameraThumbnailDiskCache(root: root, cameraIdentity: "old", now: { start })
+        let unknown = try CameraThumbnailDiskCache(root: root, cameraIdentity: "unknown-child", now: { start })
+        try Data([9]).write(to: unknown.directory.appendingPathComponent("preserve.txt"))
+        let bytes = try thumbnailFixture()
+        XCTAssertTrue(try expired.write(bytes, key: "old-photo"))
+        var current = start + Int64(90 * 24 * 60 * 60 * 1000)
+        let active = try CameraThumbnailDiskCache(root: root, cameraIdentity: "current", now: { current })
+        XCTAssertEqual(try active.cleanupExpired(), 0)
+        current += 1
+        XCTAssertEqual(try active.cleanupExpired(), 1)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: expired.directory.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: unknown.directory.path))
+        XCTAssertTrue(try active.write(bytes, key: "current-photo"))
+        try FileManager.default.removeItem(at: active.directory)
+        XCTAssertNil(try active.read(key: "current-photo"))
+        XCTAssertTrue(try active.write(bytes, key: "current-photo"))
+        XCTAssertEqual(try active.read(key: "current-photo"), bytes)
+    }
+
+    func testPreviewStoreReusesDiskAfterMemoryPressureAndStoreReopen() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let bytes = try thumbnailFixture()
+        let source = FakePreviewSource(thumbs: [.bytes(bytes)])
+        let store = CameraPreviewStore(source: source)
+        let opened = await store.openDiskCache(root: root, cameraIdentity: "body")
+        XCTAssertTrue(opened)
+        let info = try sampleInfo(1)
+        let first = try await store.thumbnail(info: info)
+        await store.clearForMemoryPressure()
+        let second = try await store.thumbnail(info: info)
+        let reopened = CameraPreviewStore(source: source)
+        _ = await reopened.openDiskCache(root: root, cameraIdentity: "body")
+        let third = try await reopened.thumbnail(info: info)
+        XCTAssertEqual(first, bytes); XCTAssertEqual(second, bytes); XCTAssertEqual(third, bytes)
+        let count = await source.counts()
+        XCTAssertEqual(count.thumb, 1)
+    }
+
+    func testPreviewLocalThumbnailReadsDiskOfflineWithoutAnotherCameraRequest() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let bytes = try thumbnailFixture()
+        let source = FakePreviewSource(thumbs: [.bytes(bytes)])
+        let store = CameraPreviewStore(source: source)
+        _ = await store.openDiskCache(root: root, cameraIdentity: "body")
+        let info = try sampleInfo(1)
+        _ = try await store.thumbnail(info: info)
+        await store.clearForMemoryPressure(); await store.setConnected(false)
+        let disk = try await store.thumbnail(info: info, allowRemote: false)
+        XCTAssertEqual(disk, bytes)
+        let memory = await store.cachedThumbnail(info: info); XCTAssertEqual(memory, bytes)
+        let count = await source.counts(); XCTAssertEqual(count.thumb, 1)
+    }
+
+    func testPreviewLocalThumbnailMissNeverNegativeCachesOrStartsNetwork() async throws {
+        let source = FakePreviewSource(thumbs: [.bytes(try thumbnailFixture())])
+        let store = CameraPreviewStore(source: source); let info = try sampleInfo(1)
+        let local = try await store.thumbnail(info: info, allowRemote: false)
+        XCTAssertNil(local)
+        let before = await source.counts(); XCTAssertEqual(before.thumb, 0)
+        let remote = try await store.thumbnail(info: info)
+        XCTAssertNotNil(remote)
+        let after = await source.counts(); XCTAssertEqual(after.thumb, 1)
+    }
+
+    func testPreviewLocalThumbnailHonorsReconciledCatalogDeletion() async throws {
+        let id = UUID(); let source = FakePreviewSource(thumbs: [.bytes(try thumbnailFixture())])
+        let store = CameraPreviewStore(source: source, connectionID: id)
+        let info = try sampleInfo(1); _ = try await store.thumbnail(info: info)
+        let empty = CameraCatalogSnapshot(connectionID: id, revision: 0, storageIDs: [], files: [], objectInfos: [:],
+            totalHandles: 0, metadataComplete: true, changedWhileScanning: false)
+        _ = await store.reconcile(empty)
+        let missing = try await store.thumbnail(info: info, allowRemote: false)
+        XCTAssertNil(missing)
+        let count = await source.counts(); XCTAssertEqual(count.thumb, 1)
+    }
+
+    func testPreviewReconcileRejectsPartialRacedAndWrongConnectionCatalogs() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let bytes = try thumbnailFixture()
+        let id = UUID()
+        let source = FakePreviewSource(thumbs: [.bytes(bytes)])
+        let store = CameraPreviewStore(source: source, connectionID: id)
+        _ = await store.openDiskCache(root: root, cameraIdentity: "body")
+        let info = try sampleInfo(1)
+        _ = try await store.thumbnail(info: info)
+        let disk = try CameraThumbnailDiskCache(root: root, cameraIdentity: "body")
+        let key = NativePreviewPolicy().thumbnailKey(info: info)
+        for (connection, complete, changed) in [(id, false, false), (id, true, true), (UUID(), true, false)] {
+            let snapshot = CameraCatalogSnapshot(connectionID: connection, revision: 0, storageIDs: [], files: [], objectInfos: [:],
+                totalHandles: 0, metadataComplete: complete, changedWhileScanning: changed)
+            let accepted = await store.reconcile(snapshot)
+            XCTAssertFalse(accepted); XCTAssertEqual(try disk.read(key: key), bytes)
+        }
+        let empty = CameraCatalogSnapshot(connectionID: id, revision: 0, storageIDs: [], files: [], objectInfos: [:],
+            totalHandles: 0, metadataComplete: true, changedWhileScanning: false)
+        let accepted = await store.reconcile(empty)
+        XCTAssertTrue(accepted); XCTAssertNil(try disk.read(key: key))
+    }
+
+    func testReconciledThumbnailCannotBeResurrectedByLateNetworkCompletion() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let requested = expectation(description: "thumbnail request started")
+        let source = HeldPreviewSource(started: { requested.fulfill() })
+        let id = UUID()
+        let store = CameraPreviewStore(source: source, connectionID: id)
+        _ = await store.openDiskCache(root: root, cameraIdentity: "body")
+        let info = try sampleInfo(1)
+        let operation = Task { try await store.thumbnail(info: info) }
+        await fulfillment(of: [requested], timeout: 2)
+        let empty = CameraCatalogSnapshot(connectionID: id, revision: 1, storageIDs: [], files: [], objectInfos: [:],
+            totalHandles: 0, metadataComplete: true, changedWhileScanning: false)
+        _ = await store.reconcile(empty)
+        await source.complete(try thumbnailFixture())
+        _ = try await operation.value
+        let disk = try CameraThumbnailDiskCache(root: root, cameraIdentity: "body")
+        XCTAssertNil(try disk.read(key: NativePreviewPolicy().thumbnailKey(info: info)))
+    }
+
+    func testClosedPreviewOwnerCannotWriteIntoAReconnectedCameraCache() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let requested = expectation(description: "request started before disconnect")
+        let source = HeldPreviewSource(started: { requested.fulfill() })
+        let store = CameraPreviewStore(source: source)
+        _ = await store.openDiskCache(root: root, cameraIdentity: "same-body")
+        let info = try sampleInfo(1)
+        let operation = Task { try await store.thumbnail(info: info) }
+        await fulfillment(of: [requested], timeout: 2)
+        await store.close()
+        let reconnected = try CameraThumbnailDiskCache(root: root, cameraIdentity: "same-body")
+        await source.complete(try thumbnailFixture())
+        do { _ = try await operation.value; XCTFail("Closed owner must reject late completion") }
+        catch { XCTAssertTrue(error is CameraStreamError) }
+        XCTAssertNil(try reconnected.read(key: NativePreviewPolicy().thumbnailKey(info: info)))
+        let reopened = await store.openDiskCache(root: root, cameraIdentity: "same-body")
+        XCTAssertFalse(reopened)
+    }
+
+    @MainActor func testLegacyBrowseDocumentRestoresPreviewDefaultsWithoutRewritingThenSavesBothOptions() throws {
+        let suite = "ZTransferTests.preview.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let legacy = Data(#"{"version":1,"columns":4,"collapseBursts":false,"extensions":[".jpg"],"protectedOnly":true,"burstOnly":false,"untransferredOnly":false,"startDay":20260101,"endDay":20261231}"#.utf8)
+        defaults.set(legacy, forKey: BrowsePreferencesStore.key)
+        let store = BrowsePreferencesStore(defaults: defaults)
+        let old = try XCTUnwrap(store.read())
+        XCTAssertEqual(old.previewRotationQuarterTurns, 0); XCTAssertFalse(old.previewHistogramEnabled)
+        XCTAssertEqual(defaults.data(forKey: BrowsePreferencesStore.key), legacy)
+        let edited = NativeBrowsePreferences(columns: old.columns, collapseBursts: old.collapseBursts,
+            extensions: old.extensions, protectedOnly: old.protectedOnly, burstOnly: old.burstOnly,
+            untransferredOnly: old.untransferredOnly, startDay: old.startDay, endDay: old.endDay,
+            previewRotationQuarterTurns: -5, previewHistogramEnabled: true)
+        XCTAssertTrue(store.save(edited))
+        let restored = try XCTUnwrap(BrowsePreferencesStore(defaults: defaults).read())
+        XCTAssertEqual(restored.previewRotationQuarterTurns, 3); XCTAssertTrue(restored.previewHistogramEnabled)
+        XCTAssertEqual(restored.columns, 4); XCTAssertFalse(restored.collapseBursts)
+        XCTAssertEqual(restored.extensions, [".jpg"]); XCTAssertTrue(restored.protectedOnly)
+        XCTAssertEqual(restored.startDay, 20260101); XCTAssertEqual(restored.endDay, 20261231)
+    }
+
+    @MainActor func testMalformedNewPreviewFieldsPreserveExistingDocumentInsteadOfResettingPreferences() throws {
+        let suite = "ZTransferTests.preview.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = BrowsePreferencesStore(defaults: defaults)
+        XCTAssertTrue(store.save(NativeBrowsePreferences.companion.defaults()))
+        let valid = try XCTUnwrap(defaults.data(forKey: BrowsePreferencesStore.key))
+        let fields = try XCTUnwrap(JSONSerialization.jsonObject(with: valid) as? [String: Any])
+        let invalid: [(String, Any)] = [("previewRotationQuarterTurns", "3"),
+            ("previewRotationQuarterTurns", 2_147_483_648), ("previewRotationQuarterTurns", 1.5),
+            ("previewHistogramEnabled", "true"), ("previewHistogramEnabled", 1)]
+        for (key, value) in invalid {
+            var document = fields; document[key] = value
+            let raw = try JSONSerialization.data(withJSONObject: document)
+            defaults.set(raw, forKey: BrowsePreferencesStore.key)
+            XCTAssertNil(store.read()); XCTAssertFalse(store.save(NativeBrowsePreferences.companion.defaults()))
+            XCTAssertEqual(defaults.data(forKey: BrowsePreferencesStore.key), raw)
+        }
+    }
+
+    @MainActor func testPreviewPreferenceBoundaryValuesRoundTripThroughSharedNormalization() throws {
+        let suite = "ZTransferTests.preview.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = BrowsePreferencesStore(defaults: defaults)
+        for (input, expected) in [(Int32.min, Int32(0)), (-1, 3), (4, 0), (Int32.max, 3)] {
+            let value = NativeBrowsePreferences(columns: 3, collapseBursts: true, extensions: nil,
+                protectedOnly: false, burstOnly: false, untransferredOnly: false, startDay: 0, endDay: 0,
+                previewRotationQuarterTurns: input, previewHistogramEnabled: true)
+            XCTAssertTrue(store.save(value))
+            let restored = try XCTUnwrap(store.read())
+            XCTAssertEqual(restored.previewRotationQuarterTurns, expected); XCTAssertTrue(restored.previewHistogramEnabled)
+        }
+        // The original exported initializer remains callable and keeps its documented defaults.
+        let oldInitializer = NativeBrowsePreferences(columns: 3, collapseBursts: true, extensions: nil,
+            protectedOnly: false, burstOnly: false, untransferredOnly: false, startDay: 0, endDay: 0)
+        XCTAssertEqual(oldInitializer.previewRotationQuarterTurns, 0); XCTAssertFalse(oldInitializer.previewHistogramEnabled)
+    }
+
+    @MainActor func testAppearanceStoreDefaultsRoundTripAndBrowseIsolation() throws {
+        let suite = "appearance-tests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = AppearancePreferencesStore(defaults: defaults)
+        let first = try XCTUnwrap(store.read())
+        XCTAssertEqual(first.themeName, "SYSTEM"); XCTAssertEqual(first.skinName, "FROSTED_GLASS")
+        XCTAssertEqual(first.appLanguage, "system"); XCTAssertTrue(first.hapticsEnabled); XCTAssertTrue(first.keepScreenOn)
+        XCTAssertNil(defaults.object(forKey: AppearancePreferencesStore.key))
+        XCTAssertTrue(store.save(NativeAppearancePreferences(themeName: "DARK", appLanguage: "zh-Hant",
+            skinName: "WOOD", hapticsEnabled: false, keepScreenOn: false)))
+        let data = defaults.data(forKey: AppearancePreferencesStore.key)
+        XCTAssertTrue(BrowsePreferencesStore(defaults: defaults).save(NativeBrowsePreferences.companion.defaults()))
+        XCTAssertEqual(defaults.data(forKey: AppearancePreferencesStore.key), data)
+        let restored = try XCTUnwrap(store.read())
+        XCTAssertEqual(restored.themeName, "DARK"); XCTAssertEqual(restored.skinName, "WOOD")
+        XCTAssertEqual(restored.appLanguage, "zh-Hant"); XCTAssertFalse(restored.hapticsEnabled); XCTAssertFalse(restored.keepScreenOn)
+    }
+
+    @MainActor func testAppearanceStorePreservesFutureCorruptWrongTypeAndOversizedData() throws {
+        let suite = "appearance-tests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = AppearancePreferencesStore(defaults: defaults)
+        let invalid: [Any] = ["not data", Data("broken".utf8), Data("{\"version\":2}".utf8),
+            Data("{\"version\":1,\"hapticsEnabled\":\"wrong type\"}".utf8), Data(repeating: 0, count: 16 * 1024 + 1)]
+        for raw in invalid {
+            defaults.set(raw, forKey: AppearancePreferencesStore.key)
+            XCTAssertNil(store.read()); XCTAssertFalse(store.save(NativeAppearancePreferences.companion.defaults()))
+            if let data = raw as? Data { XCTAssertEqual(defaults.data(forKey: AppearancePreferencesStore.key), data) }
+            else { XCTAssertEqual(defaults.string(forKey: AppearancePreferencesStore.key), raw as? String) }
+        }
+    }
+
+    @MainActor func testAppearanceAppOwnerRestoresLegacySkinAndDoesNotChangeNumericLocale() throws {
+        let suite = "appearance-tests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(Data("{\"version\":1,\"skinName\":\"unknown\",\"themeName\":\"DARK\"}".utf8), forKey: AppearancePreferencesStore.key)
+        let owner = AppAppearanceSettings(defaults: defaults, notifications: NotificationCenter(), systemLanguage: { "en" },
+            screenAwake: { _ in XCTFail("Not started") }, isApplicationActive: { false })
+        defer { owner.close() }
+        XCTAssertEqual(owner.themeName, "DARK")
+        XCTAssertEqual(owner.model.currentPreferences().skinName, "TITANIUM")
+        XCTAssertEqual(AppearancePreferencesStore(defaults: defaults).read()?.skinName, "TITANIUM")
+        let locale = Locale.current.identifier
+        owner.model.setLanguage(tag: "zh-Hans")
+        XCTAssertEqual(Locale.current.identifier, locale)
+    }
+
+    @MainActor func testAppearanceOwnerReleasesIdleSynchronouslyAcrossLifecycleAndClose() throws {
+        let suite = "appearance-tests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let center = NotificationCenter()
+        var awake: [Bool] = []
+        let owner = AppAppearanceSettings(defaults: defaults, notifications: center, systemLanguage: { "en" },
+            screenAwake: { awake.append($0) }, isApplicationActive: { true })
+        defer { owner.close() }
+        owner.start(); owner.start()
+        XCTAssertEqual(awake, [true])
+        center.post(name: UIApplication.willResignActiveNotification, object: nil)
+        XCTAssertEqual(awake, [true, false])
+        center.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+        center.post(name: UIApplication.didBecomeActiveNotification, object: nil)
+        owner.model.setKeepScreenOn(enabled: false); owner.model.setKeepScreenOn(enabled: true)
+        owner.close(); owner.close()
+        center.post(name: UIApplication.didBecomeActiveNotification, object: nil)
+        XCTAssertEqual(awake, [true, false, true, false, true, false])
+    }
+
+    @MainActor func testAppearanceSaveFailureKeepsLiveShellAndPreservesOriginalDocument() throws {
+        let suite = "appearance-tests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let data = Data("{\"version\":99}".utf8)
+        defaults.set(data, forKey: AppearancePreferencesStore.key)
+        let owner = AppAppearanceSettings(defaults: defaults, notifications: NotificationCenter(), systemLanguage: { "en" },
+            screenAwake: { _ in }, isApplicationActive: { false })
+        defer { owner.close() }
+        owner.model.setThemeName(name: "LIGHT")
+        XCTAssertEqual(owner.themeName, "LIGHT")
+        XCTAssertEqual(owner.model.currentPreferences().themeName, "LIGHT")
+        XCTAssertEqual(defaults.data(forKey: AppearancePreferencesStore.key), data)
+    }
+
+    @MainActor func testBrowsePreferencesDefaultReadDoesNotWriteAndRoundTripUsesSharedNormalization() throws {
+        let suite = "ZTransferTests.browse.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = BrowsePreferencesStore(defaults: defaults)
+        let initial = try XCTUnwrap(store.read())
+        XCTAssertEqual(initial.columns, 3); XCTAssertTrue(initial.collapseBursts)
+        XCTAssertNil(defaults.object(forKey: BrowsePreferencesStore.key))
+        let value = NativeBrowsePreferences(columns: 100, collapseBursts: false, extensions: [".JPG", ".NEF"],
+            protectedOnly: true, burstOnly: true, untransferredOnly: true, startDay: 20261231, endDay: 20260101)
+        XCTAssertTrue(store.save(value))
+        let reopened = try XCTUnwrap(BrowsePreferencesStore(defaults: defaults).read())
+        XCTAssertEqual(reopened.columns, 4); XCTAssertFalse(reopened.collapseBursts)
+        XCTAssertEqual(reopened.extensions, [".JPG", ".NEF"])
+        XCTAssertTrue(reopened.protectedOnly && reopened.burstOnly && reopened.untransferredOnly)
+        XCTAssertEqual(reopened.startDay, 20260101); XCTAssertEqual(reopened.endDay, 20261231)
+        let data = try XCTUnwrap(defaults.data(forKey: BrowsePreferencesStore.key))
+        let document = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertNil(document["storageSlot"])
+        XCTAssertTrue(store.save(NativeBrowsePreferences.companion.defaults()))
+        XCTAssertNil(store.read()?.extensions); XCTAssertEqual(store.read()?.startDay, 0)
+        XCTAssertFalse(try XCTUnwrap(store.read()).untransferredOnly)
+    }
+
+    @MainActor func testBrowsePreferencesPreserveCorruptFutureWrongTypeAndOversizedValues() throws {
+        let suite = "ZTransferTests.browse.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = BrowsePreferencesStore(defaults: defaults)
+        XCTAssertTrue(store.save(NativeBrowsePreferences.companion.defaults()))
+        let valid = try XCTUnwrap(defaults.data(forKey: BrowsePreferencesStore.key))
+        var future = try XCTUnwrap(JSONSerialization.jsonObject(with: valid) as? [String: Any])
+        future["version"] = 999
+        let invalidValues = [Data("broken".utf8), try JSONSerialization.data(withJSONObject: future), Data(repeating: 0, count: 65 * 1024)]
+        for original in invalidValues {
+            defaults.set(original, forKey: BrowsePreferencesStore.key)
+            XCTAssertNil(store.read()); XCTAssertFalse(store.save(NativeBrowsePreferences.companion.defaults()))
+            XCTAssertEqual(defaults.data(forKey: BrowsePreferencesStore.key), original)
+        }
+        defaults.set("wrong stored type", forKey: BrowsePreferencesStore.key)
+        XCTAssertNil(store.read()); XCTAssertFalse(store.save(NativeBrowsePreferences.companion.defaults()))
+        XCTAssertEqual(defaults.string(forKey: BrowsePreferencesStore.key), "wrong stored type")
+    }
+
+    @MainActor func testBrowsePreferencesEmptyExtensionFilterIsNotSilentlyConvertedToAllTypes() throws {
+        let suite = "ZTransferTests.browse.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = BrowsePreferencesStore(defaults: defaults)
+        XCTAssertTrue(store.save(NativeBrowsePreferences(columns: 2, collapseBursts: true, extensions: [],
+            protectedOnly: false, burstOnly: false, untransferredOnly: false, startDay: 20260229, endDay: 20260905)))
+        let read = try XCTUnwrap(store.read())
+        XCTAssertEqual(read.extensions, []); XCTAssertEqual(read.startDay, 0); XCTAssertEqual(read.endDay, 0)
+    }
+
+    func testFilesFilterCalendarUsesLocalGregorianDayRatherThanUTC() throws {
+        let moment = Date(timeIntervalSince1970: 0)
+        let east = try XCTUnwrap(TimeZone(secondsFromGMT: 9 * 3600))
+        let west = try XCTUnwrap(TimeZone(secondsFromGMT: -8 * 3600))
+        XCTAssertEqual(OriginalFilesPageBridge.localDayKey(at: moment, timeZone: east), 19700101)
+        XCTAssertEqual(OriginalFilesPageBridge.localDayKey(at: moment, timeZone: west), 19691231)
+    }
+
+    @MainActor func testSharedFilesFilterHostLoadsWithEmptySecondCardAndRealEmptyOriginalIndex() async throws {
+        let camera = stationCamera(command: FakeCameraConnection(bytes: Data()))
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: root))
+        let bridge = OriginalFilesPageBridge(connectionID: camera.connectionID,
+            catalog: CameraCatalog(source: camera, stationMode: true), queue: queue,
+            previews: CameraPreviewStore(source: camera), exifSource: camera, exifCache: NativePreviewExifCache(), stationMode: true)
+        bridge.setConnected(true)
+        let info = try sampleInfo(7)
+        let file = try XCTUnwrap(NativeOriginalTransferQueue().enqueue(info: info, byDate: false, dayKey: 0)).file
+        let snapshot = CameraCatalogSnapshot(connectionID: camera.connectionID, revision: 0, storageIDs: [0x10001, 0x20001],
+            files: [file], objectInfos: [7: info], totalHandles: 1, metadataComplete: true, changedWhileScanning: false)
+        XCTAssertTrue(bridge.acceptCatalog(snapshot, sequence: bridge.model.beginScan()))
+        let originals = try await queue.originals(since: -1, rescan: true)
+        XCTAssertTrue(originals.fullSnapshot); XCTAssertTrue(originals.entries.isEmpty)
+        XCTAssertTrue(bridge.model.publishOriginals(update: NativeOriginalIndexUpdate(revision: originals.revision,
+            baseRevision: originals.baseRevision, fullSnapshot: originals.fullSnapshot)))
+        let appearance = NativeAppearanceModel(platform: AppearancePlatformProbe(), systemLanguageTag: "en")
+        defer { appearance.close() }
+        let controller = SharedUiController.shared.originalFiles(model: bridge.model, appearance: appearance, onBack: { KotlinUnit() })
+        controller.loadViewIfNeeded(); XCTAssertNotNil(controller.view)
+        bridge.close()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+    }
+
+    func testOriginalIndexScansOnlyRootAndSharedDateBucketsWithoutFollowingLinks() throws {
+        let area = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let root = area.appendingPathComponent("originals", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: area) }
+        for folder in ["ZT2026-09-05", "ZT2026-99-99", "frames", "ZT2026-09-05/nested"] {
+            try FileManager.default.createDirectory(at: root.appendingPathComponent(folder, isDirectory: true), withIntermediateDirectories: true)
+        }
+        for name in ["ROOT.JPG", "ZT2026-09-05/DATE.NEF", "ZT2026-99-99/SHAPE.JPG",
+                     "frames/EFFECT.JPG", "ZT2026-09-05/nested/DEEP.JPG", ".HIDDEN.JPG",
+                     ".00000000-0000-0000-0000-000000000000_.nkpart_x.JPG", ".nkpart_legacy.JPG"] {
+            try Data([1, 2, 3]).write(to: root.appendingPathComponent(name))
+        }
+        let outside = area.appendingPathComponent("outside.JPG")
+        try Data([9]).write(to: outside)
+        try FileManager.default.createSymbolicLink(at: root.appendingPathComponent("LINK.JPG"), withDestinationURL: outside)
+        try FileManager.default.createSymbolicLink(at: root.appendingPathComponent("BROKEN.JPG"), withDestinationURL: area.appendingPathComponent("missing.JPG"))
+        try FileManager.default.createSymbolicLink(at: root.appendingPathComponent("ZT2026-09-06"), withDestinationURL: area)
+        let cache = OriginalFileIndexCache()
+        try cache.scan(root: root)
+        let snapshot = cache.update(since: -1)
+        XCTAssertTrue(snapshot.fullSnapshot)
+        XCTAssertEqual(Set(snapshot.entries.map(\.name)), ["ROOT.JPG", "DATE.NEF", "SHAPE.JPG", ".HIDDEN.JPG"])
+        XCTAssertTrue(snapshot.entries.allSatisfy { $0.size == 3 })
+        XCTAssertNil(snapshot.entries.first(where: { $0.name == "ROOT.JPG" })?.folder)
+        XCTAssertEqual(snapshot.entries.first(where: { $0.name == "DATE.NEF" })?.folder, "ZT2026-09-05")
+        XCTAssertFalse(SandboxTransferFile.isPrivatePartName(".HIDDEN.JPG"))
+        XCTAssertFalse(SandboxTransferFile.isPrivatePartName(".not-a-uuid_.nkpart_x.JPG"))
+        XCTAssertTrue(SandboxTransferFile.isPrivatePartName(".00000000-0000-0000-0000-000000000000_.nkpart_x.JPG"))
+        let rootLink = area.appendingPathComponent("root-link", isDirectory: true)
+        try FileManager.default.createSymbolicLink(at: rootLink, withDestinationURL: root)
+        XCTAssertThrowsError(try cache.scan(root: rootLink))
+        let brokenRoot = area.appendingPathComponent("broken-root", isDirectory: true)
+        try FileManager.default.createSymbolicLink(at: brokenRoot, withDestinationURL: area.appendingPathComponent("missing", isDirectory: true))
+        XCTAssertThrowsError(try cache.scan(root: brokenRoot))
+        XCTAssertEqual(cache.update(since: -1).entries, snapshot.entries)
+    }
+
+    func testOriginalIndexFailedScanRetainsSnapshotAndCompleteRescanReflectsRemoval() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = try SandboxTransferFile(directory: root, name: "A.JPG", declaredSize: 1, captureDate: nil)
+        try file.write(Data([1])); let saved = try file.commit(expectedBytes: 1)
+        let cache = OriginalFileIndexCache(); try cache.scan(root: root)
+        let old = cache.update(since: -1)
+        XCTAssertThrowsError(try cache.scan(root: saved.url)) // A file where a root is expected is not an empty directory.
+        XCTAssertEqual(cache.update(since: -1).entries, old.entries)
+        XCTAssertEqual(cache.update(since: -1).revision, old.revision)
+        try FileManager.default.removeItem(at: saved.url)
+        try cache.scan(root: root)
+        let next = cache.update(since: old.revision)
+        XCTAssertTrue(next.fullSnapshot); XCTAssertTrue(next.entries.isEmpty)
+        XCTAssertGreaterThan(next.revision, old.revision)
+    }
+
+    func testOriginalStoreRecordsOnlyVerifiedDownloadAndRestoresIndexFromDisk() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = CameraOriginalStore(root: root)
+        let before = try await store.originals(since: -1, rescan: true)
+        XCTAssertTrue(before.entries.isEmpty); XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+        let camera = apCamera(command: FakeCameraConnection(bytes: apOpeningReplies() + response(transaction: 3, payload: Data("ABC".utf8))))
+        _ = try await camera.connect(guid: Data(0...15))
+        let saved = try await store.download(camera: camera, info: sampleInfo(7), byDate: false, dayKey: 0)
+        let delta = try await store.originals(since: before.revision, rescan: false)
+        XCTAssertFalse(delta.fullSnapshot); XCTAssertEqual(delta.entries.count, 1)
+        XCTAssertEqual(delta.entries.first?.url, saved.url)
+        XCTAssertEqual(delta.entries.first?.size, saved.bytes)
+        let unchanged = try await store.originals(since: delta.revision, rescan: false)
+        XCTAssertFalse(unchanged.fullSnapshot); XCTAssertTrue(unchanged.entries.isEmpty)
+        let reopened = CameraOriginalStore(root: root)
+        let rebuilt = try await reopened.originals(since: -1, rescan: true)
+        XCTAssertEqual(rebuilt.entries, delta.entries) // No queue history or sidecar is required after restart.
+        await camera.abort()
+    }
+
+    func testOriginalIndexJournalIsBoundedAndOldConsumersReceiveFullSnapshot() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let cache = OriginalFileIndexCache(); try cache.scan(root: root)
+        let base = cache.update(since: -1).revision
+        // Cache-unit records only, no fake media is written or exposed as a real device result.
+        for number in 0..<1025 {
+            cache.record(SavedCameraFile(url: root.appendingPathComponent("\(number).JPG"), bytes: 1, sha256: "unit"), folder: nil)
+        }
+        let old = cache.update(since: base)
+        XCTAssertTrue(old.fullSnapshot); XCTAssertEqual(old.entries.count, 1025)
+        let recent = cache.update(since: old.revision - 1)
+        XCTAssertFalse(recent.fullSnapshot); XCTAssertEqual(recent.entries.count, 1)
+        XCTAssertTrue(cache.update(since: old.revision).entries.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+    }
+
+    @MainActor func testCancelledOriginalIndexScanDoesNotReplacePreviousSnapshot() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try Data([1]).write(to: root.appendingPathComponent("A.JPG"))
+        let store = CameraOriginalStore(root: root)
+        let before = try await store.originals(since: -1, rescan: true)
+        try Data([2]).write(to: root.appendingPathComponent("B.JPG"))
+        let scan = Task { try await store.originals(since: before.revision, rescan: true) }
+        scan.cancel()
+        do { _ = try await scan.value; XCTFail("Expected cancellation") }
+        catch { XCTAssertTrue(error is CancellationError) }
+        let retained = try await store.originals(since: -1, rescan: false)
+        XCTAssertEqual(retained.entries, before.entries)
+        let refreshed = try await store.originals(since: before.revision, rescan: true)
+        XCTAssertTrue(refreshed.fullSnapshot); XCTAssertEqual(refreshed.entries.count, 2)
+    }
+
+    @MainActor func testRealFilesControllerUsesCompleteCatalogWithoutStartingQueue() async throws {
+        let camera = stationCamera(command: FakeCameraConnection(bytes: Data()))
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: root))
+        let bridge = OriginalFilesPageBridge(connectionID: camera.connectionID,
+            catalog: CameraCatalog(source: camera, stationMode: true), queue: queue,
+            previews: CameraPreviewStore(source: camera), exifSource: camera, exifCache: NativePreviewExifCache(), stationMode: true)
+        bridge.setConnected(true)
+        let info = try sampleInfo(7)
+        let file = try XCTUnwrap(NativeOriginalTransferQueue().enqueue(info: info, byDate: false, dayKey: 0)).file
+        let snapshot = CameraCatalogSnapshot(connectionID: camera.connectionID, revision: 0, storageIDs: [0x10001],
+            files: [file], objectInfos: [7: info], totalHandles: 1, metadataComplete: true, changedWhileScanning: false)
+        XCTAssertTrue(bridge.acceptCatalog(snapshot, sequence: bridge.model.beginScan()))
+        let appearance = NativeAppearanceModel(platform: AppearancePlatformProbe(), systemLanguageTag: "zh-Hant")
+        defer { appearance.close() }
+        let controller = SharedUiController.shared.originalFiles(model: bridge.model, appearance: appearance, onBack: { KotlinUnit() })
+        controller.loadViewIfNeeded()
+        XCTAssertNotNil(controller.view)
+        let before = await queue.snapshot()
+        XCTAssertTrue(before.rows.isEmpty); XCTAssertFalse(before.running)
+        bridge.close()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+    }
+
+    @MainActor func testFilesBridgeRejectsDuplicateCatalogAndStaleEnqueueWithoutTouchingQueue() async throws {
+        let camera = stationCamera(command: FakeCameraConnection(bytes: Data()))
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: root))
+        let bridge = OriginalFilesPageBridge(connectionID: camera.connectionID,
+            catalog: CameraCatalog(source: camera, stationMode: true), queue: queue,
+            previews: CameraPreviewStore(source: camera), exifSource: camera, exifCache: NativePreviewExifCache(), stationMode: true)
+        bridge.setConnected(true)
+        let info = try sampleInfo(7)
+        let file = try XCTUnwrap(NativeOriginalTransferQueue().enqueue(info: info, byDate: false, dayKey: 0)).file
+        let sequence = bridge.model.beginScan()
+        let invalid = CameraCatalogSnapshot(connectionID: camera.connectionID, revision: 0, storageIDs: [0x10001],
+            files: [file, file], objectInfos: [7: info], totalHandles: 2, metadataComplete: true, changedWhileScanning: false)
+        XCTAssertFalse(bridge.acceptCatalog(invalid, sequence: sequence)) // No dictionary duplicate-key trap.
+        let completion = FilesEnqueueCompletionProbe()
+        let handles = KotlinIntArray(size: 1); handles.set(index: 0, value: 7)
+        bridge.enqueue(handles: handles, scanSequence: sequence, completion: completion)
+        XCTAssertEqual(completion.count, 0)
+        let state = await queue.snapshot(); XCTAssertTrue(state.rows.isEmpty)
+        bridge.close(); XCTAssertEqual(bridge.model.beginScan(), 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+    }
+
+    @MainActor func testAutomaticAdmissionRequiresEnabledDirectoryAndDeduplicatesConcurrentEventsButNotManualExports() async throws {
+        let wire = FakeCameraConnection(bytes: Data()), camera = apCamera(command: wire)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: root))
+        let info = try sampleInfo(3), mapper = NativeOriginalTransferQueue()
+        let file = try XCTUnwrap(mapper.enqueue(info: info, byDate: false, dayKey: 0)).file
+        let noTarget = await queue.enqueueNewMedia([info], files: [file], enabled: true, byDate: false, dayKey: 0, deferred: true)
+        XCTAssertEqual(noTarget, 0)
+        _ = try await queue.configureDestination(QueueDestinationProbe())
+        let disabled = await queue.enqueueNewMedia([info], files: [file], enabled: false, byDate: false, dayKey: 0, deferred: true)
+        XCTAssertEqual(disabled, 0)
+        let cancelled = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return await queue.enqueueNewMedia([info], files: [file], enabled: true, byDate: false, dayKey: 0, deferred: true)
+        }
+        let cancelledCount = await cancelled.value; XCTAssertEqual(cancelledCount, 0)
+        async let first = queue.enqueueNewMedia([info, info], files: [file, file], enabled: true, byDate: false, dayKey: 0, deferred: true)
+        async let second = queue.enqueueNewMedia([info], files: [file], enabled: true, byDate: false, dayKey: 0, deferred: true)
+        let counts = await (first, second); XCTAssertEqual(counts.0 + counts.1, 1)
+        let manual = await queue.enqueueCatalog([info], files: [file], byDate: false, dayKey: 0, deferred: true)
+        XCTAssertEqual(manual, 1)
+        let snapshot = await queue.snapshot(); XCTAssertEqual(snapshot.rows.count, 2); XCTAssertFalse(snapshot.running)
+        XCTAssertTrue(wire.sent().isEmpty); XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+    }
+
+    @MainActor func testAutomaticAdmissionHonorsManualPauseAndDoesNotRetryCompletedHistory() async throws {
+        let wire = FakeCameraConnection(bytes: apOpeningReplies() + response(transaction: 3, payload: Data("ABCD".utf8))
+            + response(transaction: 4, payload: Data("ABC".utf8)))
+        let camera = apCamera(command: wire); _ = try await camera.connect(guid: Data(0...15))
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: root)), target = QueueDestinationProbe()
+        _ = try await queue.configureDestination(target)
+        let began = expectation(description: "previous publication held"); await target.hold(began)
+        _ = await queue.enqueue(try sampleInfo(4), byDate: false, dayKey: 0, deferred: false)
+        await fulfillment(of: [began], timeout: 3)
+        await queue.pauseAfterCurrent(); await target.release()
+        try await waitUntil("previous run paused") { let s = await queue.snapshot(); return !s.running && s.paused }
+        await queue.clearTerminal()
+        let info = try sampleInfo(3), mapper = NativeOriginalTransferQueue()
+        let file = try XCTUnwrap(mapper.enqueue(info: info, byDate: false, dayKey: 0)).file
+        let before = wire.sent().count
+        let accepted = await queue.enqueueNewMedia([info], files: [file], enabled: true, byDate: true, dayKey: 20260906, deferred: false)
+        XCTAssertEqual(accepted, 1)
+        let waiting = await queue.snapshot(); XCTAssertTrue(waiting.paused); XCTAssertFalse(waiting.running)
+        XCTAssertEqual(waiting.rows.first?.destinationFolderName, "ZT2026-09-06"); XCTAssertEqual(wire.sent().count, before)
+        await queue.start()
+        try await waitUntil("explicitly resumed automatic task") { let s = await queue.snapshot(); return !s.running && s.rows.first?.status == "COMPLETED" }
+        let duplicate = await queue.enqueueNewMedia([info], files: [file], enabled: true, byDate: false, dayKey: 0, deferred: false)
+        XCTAssertEqual(duplicate, 0)
+        let calls = await target.calls(); XCTAssertEqual(calls.count, 2)
+        await camera.abort()
+    }
+
+    @MainActor func testAutomaticAdmissionUsesTheSameDestinationCommitExecutionFence() async throws {
+        let wire = FakeCameraConnection(bytes: apOpeningReplies() + response(transaction: 3, payload: Data("ABC".utf8)))
+        let camera = apCamera(command: wire); _ = try await camera.connect(guid: Data(0...15))
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: root)), old = QueueDestinationProbe(), next = QueueDestinationProbe()
+        _ = try await queue.configureDestination(old)
+        let began = expectation(description: "automatic destination held"), change = DestinationChangeProbe(next, began: began)
+        let configuring = Task { try await queue.configureDestination(change) }
+        await fulfillment(of: [began], timeout: 3)
+        let info = try sampleInfo(3), mapper = NativeOriginalTransferQueue()
+        let file = try XCTUnwrap(mapper.enqueue(info: info, byDate: false, dayKey: 0)).file
+        let before = wire.sent().count
+        let accepted = await queue.enqueueNewMedia([info], files: [file], enabled: true, byDate: false, dayKey: 0, deferred: false)
+        XCTAssertEqual(accepted, 1); XCTAssertEqual(wire.sent().count, before)
+        let waiting = await queue.snapshot(); XCTAssertFalse(waiting.running)
+        await change.release(); let applied = try await configuring.value; XCTAssertTrue(applied)
+        try await waitUntil("automatic task uses committed target") { let s = await queue.snapshot(); return !s.running && s.rows.first?.status == "COMPLETED" }
+        let oldCalls = await old.calls(), newCalls = await next.calls()
+        XCTAssertTrue(oldCalls.isEmpty); XCTAssertEqual(newCalls.count, 1)
+        await camera.abort()
+    }
+
+    @MainActor func testCatalogBatchPreservesOrderAndDoesNotStartWhenDeferred() async throws {
+        let camera = stationCamera(command: FakeCameraConnection(bytes: Data()))
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: root))
+        let infos = try [sampleInfo(9), sampleInfo(7)]
+        let mapper = NativeOriginalTransferQueue()
+        let files = try infos.map { try XCTUnwrap(mapper.enqueue(info: $0, byDate: false, dayKey: 0)).file }
+        let accepted = await queue.enqueueCatalog(infos, files: files, byDate: false, dayKey: 0, deferred: true)
+        XCTAssertEqual(accepted, 2)
+        let state = await queue.snapshot()
+        XCTAssertEqual(state.rows.map(\.handle), [9, 7]); XCTAssertFalse(state.running)
+        XCTAssertTrue(state.rows.allSatisfy { $0.status == "WAITING" })
+        let cancelled = Task { await queue.enqueueCatalog(infos, files: files, byDate: false, dayKey: 0, deferred: true) }
+        cancelled.cancel()
+        let rejected = await cancelled.value
+        XCTAssertEqual(rejected, 0)
+        let unchanged = await queue.snapshot(); XCTAssertEqual(unchanged.rows.count, 2)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+    }
+    @MainActor func testSharedQueueCarriesActualStationModeWithoutSignalStrengthSample() {
+        let camera = stationCamera(command: FakeCameraConnection(bytes: Data()))
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let bridge = OriginalQueuePageBridge(connectionID: camera.connectionID,
+            queue: CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: root)),
+            previews: CameraPreviewStore(source: camera), stationMode: camera.stationMode)
+        XCTAssertTrue(bridge.model.stationMode)
+        bridge.setConnected(true)
+        let appearance = NativeAppearanceModel(platform: AppearancePlatformProbe(), systemLanguageTag: "en")
+        defer { appearance.close() }
+        let controller = SharedUiController.shared.originalQueue(model: bridge.model, appearance: appearance, onBack: { KotlinUnit() })
+        controller.loadViewIfNeeded()
+        XCTAssertNotNil(controller.view)
+        bridge.close()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+    }
+    @MainActor func testRealQueuePageLoadsSharedControllerWithoutStartingWaitingTasks() async throws {
+        let camera = apCamera(command: FakeCameraConnection(bytes: Data()))
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: root))
+        _ = await queue.enqueue(try sampleInfo(7), byDate: false, dayKey: 0, deferred: true)
+        let bridge = OriginalQueuePageBridge(connectionID: camera.connectionID, queue: queue, previews: CameraPreviewStore(source: camera))
+        bridge.publish(await queue.snapshot())
+        let appearance = NativeAppearanceModel(platform: AppearancePlatformProbe(), systemLanguageTag: "zh-Hans")
+        defer { appearance.close() }
+        let controller = SharedUiController.shared.originalQueue(model: bridge.model, appearance: appearance, onBack: { KotlinUnit() })
+        controller.loadViewIfNeeded()
+        XCTAssertNotNil(controller.view)
+        let state = await queue.snapshot()
+        XCTAssertFalse(state.running)
+        XCTAssertEqual(state.rows.first?.status, "WAITING")
+        bridge.close()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+    }
+
+    @MainActor func testQueuePagePublishesActorResultBeforeAcknowledgingRemoval() async throws {
+        let camera = apCamera(command: FakeCameraConnection(bytes: Data()))
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: root))
+        let value = await queue.enqueue(try sampleInfo(7), byDate: false, dayKey: 0, deferred: true)
+        let id = try XCTUnwrap(value)
+        await queue.withdraw(id)
+        let bridge = OriginalQueuePageBridge(connectionID: camera.connectionID, queue: queue, previews: CameraPreviewStore(source: camera))
+        bridge.publish(await queue.snapshot())
+        let done = expectation(description: "actor removal acknowledged")
+        let completion = QueueActionCompletionProbe(done)
+        bridge.execute(command: .remove, taskId: id, excludedTaskIds: KotlinLongArray(size: 0), completion: completion)
+        await fulfillment(of: [done], timeout: 3)
+        XCTAssertEqual(completion.succeeded, true)
+        let latest = await queue.snapshot()
+        XCTAssertTrue(latest.rows.isEmpty)
+        let alreadyPublished = NativeQueuePageSnapshot(connectionId: camera.connectionID.uuidString,
+            sequence: Int64(bitPattern: latest.sequence), historyRevision: Int64(bitPattern: latest.historyRevision),
+            running: false, paused: false)
+        XCTAssertFalse(bridge.model.publish(snapshot: alreadyPublished)) // ack already published this sequence
+        bridge.close()
+        let late = NativeQueuePageSnapshot(connectionId: camera.connectionID.uuidString,
+            sequence: Int64(bitPattern: latest.sequence) + 1, historyRevision: Int64(bitPattern: latest.historyRevision) + 1,
+            running: false, paused: false)
+        XCTAssertFalse(bridge.model.publish(snapshot: late))
+    }
+    @MainActor func testSharedComposeControllerLoadsThroughExportedUIKitFactory() {
+        // This is intentionally a real UIKit/Compose smoke test, not a fake Swift screen.
+        // It can run only on Mac/iOS after the Kotlin framework and Swift bridge compile.
+        let controller = SharedUiController.shared.componentProbe()
+        controller.loadViewIfNeeded()
+        XCTAssertNotNil(controller.view)
+    }
+
+    func testNativeFilterArgbByteOrderAndSourcePreservation() async throws {
+        let selection = try XCTUnwrap(NativePhotoFilterCatalog.shared.selection(index: 0, intensityPercent: 80))
+        let source = Data([0, 17, 34, 51, 128, 64, 96, 128, 255, 32, 64, 128, 255, 255, 255, 255])
+        let expected = KotlinIntArray(size: 4)
+        for (index, value) in [UInt32(0x00112233), 0x80406080, 0xff204080, 0xffffffff].enumerated() {
+            expected.set(index: Int32(index), value: Int32(bitPattern: value))
+        }
+        XCTAssertTrue(NativePhotoFilter(selection: selection, preserveAlpha: true).render(pixels: expected, count: 4))
+        let filtered = try await PhotoFilterPreviewRenderer().renderArgb(source, selection: selection, preserveAlpha: true)
+        for index in 0..<4 {
+            let expectedValue = UInt32(bitPattern: expected.get(index: Int32(index)))
+            let actual = filtered[(index * 4)..<(index * 4 + 4)].reduce(UInt32(0)) { ($0 << 8) | UInt32($1) }
+            XCTAssertEqual(actual, expectedValue)
+        }
+        XCTAssertEqual(Array(filtered.prefix(4)), [0, 17, 34, 51]) // shared preserves hidden RGB at zero alpha
+        XCTAssertEqual(source, Data([0, 17, 34, 51, 128, 64, 96, 128, 255, 32, 64, 128, 255, 255, 255, 255]))
+    }
+
+    func testOpaqueCGImageFilterMatchesStraightSharedPixelsWithoutFlipping() async throws {
+        let selection = try XCTUnwrap(NativePhotoFilterCatalog.shared.selection(index: 0, intensityPercent: 100))
+        let bytes = Data([255, 32, 64, 128, 255, 224, 128, 16, 255, 255, 255, 255, 255, 0, 0, 0])
+        let space = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))
+        let provider = try XCTUnwrap(CGDataProvider(data: bytes as CFData))
+        let info = CGBitmapInfo(rawValue: CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.noneSkipFirst.rawValue)
+        let source = try XCTUnwrap(CGImage(width: 2, height: 2, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: 8,
+            space: space, bitmapInfo: info, provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent))
+        let renderer = PhotoFilterPreviewRenderer()
+        let expected = try await renderer.renderArgb(bytes, selection: selection, preserveAlpha: false)
+        let image = try await renderer.render(source, selection: selection)
+        XCTAssertEqual(image.width, 2)
+        XCTAssertEqual(image.height, 2)
+        let actual = try XCTUnwrap(image.dataProvider?.data) as Data
+        XCTAssertEqual(actual, expected)
+        XCTAssertEqual(try XCTUnwrap(source.dataProvider?.data) as Data, bytes)
+    }
+
+    func testNativeFilterRejectsMalformedBufferAndPreCancelledTask() async throws {
+        let selection = try XCTUnwrap(NativePhotoFilterCatalog.shared.selection(index: 0, intensityPercent: 80))
+        let renderer = PhotoFilterPreviewRenderer()
+        do { _ = try await renderer.renderArgb(Data([1, 2, 3]), selection: selection, preserveAlpha: true); XCTFail("Invalid ARGB") }
+        catch { XCTAssertTrue(error is PhotoFilterPreviewError) }
+        let cancelled = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await renderer.renderArgb(Data([255, 1, 2, 3]), selection: selection, preserveAlpha: true)
+        }
+        do { _ = try await cancelled.value; XCTFail("Expected cancellation") } catch { XCTAssertTrue(error is CancellationError) }
+    }
+
+    func testImageIOMetadataMappingUsesSharedNormalization() {
+        let properties: [String: Any] = [
+            kCGImagePropertyTIFFDictionary as String: [kCGImagePropertyTIFFMake as String: "NIKON CORPORATION", kCGImagePropertyTIFFModel as String: "NIKON Z 8"],
+            kCGImagePropertyExifDictionary as String: [
+                kCGImagePropertyExifFNumber as String: 4.0, kCGImagePropertyExifExposureTime as String: 0.008,
+                kCGImagePropertyExifISOSpeedRatings as String: [640, 800], kCGImagePropertyExifFocalLength as String: 85.0,
+                kCGImagePropertyExifLensModel as String: "  NIKKOR Z 85mm  ", kCGImagePropertyExifDateTimeOriginal as String: "2026:08:10 14:25:36"],
+            kCGImagePropertyGPSDictionary as String: [
+                kCGImagePropertyGPSLatitude as String: 33.5, kCGImagePropertyGPSLatitudeRef as String: "S",
+                kCGImagePropertyGPSLongitude as String: 151.25, kCGImagePropertyGPSLongitudeRef as String: "E",
+                kCGImagePropertyGPSAltitude as String: 123.4, kCGImagePropertyGPSAltitudeRef as String: 1]
+        ]
+        let metadata = PhotoMetadataReader.metadata(properties)
+        XCTAssertEqual(metadata.model, "NIKON Z 8")
+        XCTAssertEqual(metadata.aperture, "f/4")
+        XCTAssertEqual(metadata.shutter, "1/125")
+        XCTAssertEqual(metadata.iso, "ISO640")
+        XCTAssertEqual(metadata.focalLength, "85mm")
+        XCTAssertEqual(metadata.lensModel, "NIKKOR Z 85mm")
+        XCTAssertEqual(metadata.dateTime, "2026-08-10 14:25:36")
+        XCTAssertEqual(metadata.latitude?.doubleValue, -33.5)
+        XCTAssertEqual(metadata.longitude?.doubleValue, 151.25)
+        XCTAssertEqual(metadata.altitudeMeters?.doubleValue, -123.4)
+        XCTAssertNil(metadata.address)
+    }
+
+    func testImageIOMetadataInvalidFieldsAndApexFallback() {
+        let properties: [String: Any] = [
+            kCGImagePropertyExifDictionary as String: [
+                kCGImagePropertyExifFNumber as String: true, kCGImagePropertyExifApertureValue as String: 4,
+                kCGImagePropertyExifExposureTime as String: "1/0", kCGImagePropertyExifShutterSpeedValue as String: 7],
+            kCGImagePropertyGPSDictionary as String: [kCGImagePropertyGPSLatitude as String: 91,
+                kCGImagePropertyGPSLongitude as String: "bad", kCGImagePropertyGPSAltitude as String: 0]
+        ]
+        let metadata = PhotoMetadataReader.metadata(properties)
+        XCTAssertEqual(metadata.aperture, "f/4")
+        XCTAssertEqual(metadata.shutter, "1/128")
+        XCTAssertNil(metadata.latitude)
+        XCTAssertNil(metadata.longitude)
+        XCTAssertNil(metadata.altitudeMeters)
+        XCTAssertNil(PhotoMetadataReader.metadata([:]).model)
+    }
+
+    func testApplePhotoDecimalFormattingUsesUSAndHalfUpBoundaries() {
+        let formatter = ApplePhotoDecimalFormatter()
+        XCTAssertEqual(formatter.fixed(value: 2.25, fractionDigits: 1), "2.3")
+        XCTAssertEqual(formatter.fixed(value: -12.5, fractionDigits: 0), "-13")
+        XCTAssertEqual(formatter.fixed(value: 1234.5, fractionDigits: 1), "1234.5")
+        XCTAssertEqual(formatter.fixed(value: 1, fractionDigits: 1), "1.0")
+    }
+
+    func testMetadataFileReadDoesNotModifyOriginalBytes() async throws {
+        let context = try XCTUnwrap(CGContext(data: nil, width: 2, height: 2, bitsPerComponent: 8,
+            bytesPerRow: 8, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+        let image = try XCTUnwrap(context.makeImage())
+        let bytes = NSMutableData()
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithData(bytes, "public.jpeg" as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, image, [kCGImagePropertyTIFFDictionary:
+            [kCGImagePropertyTIFFMake: "NIKON", kCGImagePropertyTIFFModel: "Z test"]] as CFDictionary)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("metadata-\(UUID().uuidString).jpg")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let original = bytes as Data
+        try original.write(to: url, options: .withoutOverwriting)
+        let metadata = try await PhotoMetadataReader().read(url)
+        XCTAssertEqual(metadata.model, "Z test")
+        XCTAssertEqual(try Data(contentsOf: url), original)
+    }
+
+    @MainActor func testGattFIFORequiresAuthoritativeAcknowledgement() async throws {
+        let driver = FakeGpsGattDriver()
+        let connection = try readyGatt(driver)
+        defer { connection.close() }
+        let firstSent = expectation(description: "first write submitted")
+        driver.onWrite = { firstSent.fulfill() }
+        let first = Task { try await connection.write(Data(repeating: 1, count: 17), channel: .pair) }
+        await fulfillment(of: [firstSent], timeout: 1)
+        driver.onWrite = nil
+        let queued = expectation(description: "second write enqueued")
+        let second = Task { queued.fulfill(); try await connection.write(Data(repeating: 2, count: 32), channel: .controllerId) }
+        await fulfillment(of: [queued], timeout: 1)
+        XCTAssertEqual(driver.writes.count, 1)
+        driver.reply(.geo) // unrelated callback must not finish PAIR
+        XCTAssertEqual(driver.writes.count, 1)
+        driver.reply(.pair)
+        try await first.value
+        XCTAssertEqual(driver.writes.map { $0.0 }, [.pair, .controllerId])
+        driver.reply(.controllerId)
+        try await second.value
+    }
+
+    @MainActor func testGattQueuedCancellationLeavesActiveWriteAlive() async throws {
+        let driver = FakeGpsGattDriver()
+        let connection = try readyGatt(driver)
+        defer { connection.close() }
+        let sent = expectation(description: "active")
+        driver.onWrite = { sent.fulfill() }
+        let first = Task { try await connection.write(Data(repeating: 0, count: 17), channel: .pair) }
+        await fulfillment(of: [sent], timeout: 1)
+        driver.onWrite = nil
+        let queued = expectation(description: "queued")
+        let second = Task { queued.fulfill(); try await connection.write(Data(repeating: 0, count: 41), channel: .geo) }
+        await fulfillment(of: [queued], timeout: 1)
+        second.cancel()
+        do { try await second.value; XCTFail("Expected cancellation") } catch { XCTAssertTrue(error is CancellationError) }
+        XCTAssertEqual(connection.phase, .gattReady)
+        XCTAssertEqual(driver.writes.count, 1)
+        driver.reply(.pair)
+        try await first.value
+    }
+
+    @MainActor func testGattTimeoutClosesAndIgnoresLateSameCharacteristicAck() async throws {
+        let driver = FakeGpsGattDriver()
+        let connection = try readyGatt(driver, timeout: 0.02)
+        let oldCallback = driver.eventHandler
+        do { try await connection.write(Data(repeating: 0, count: 17), channel: .pair); XCTFail("Expected timeout") }
+        catch { XCTAssertEqual(error as? GpsGattError, .timedOut) }
+        XCTAssertEqual(connection.phase, .failed)
+        XCTAssertTrue(driver.closed)
+        oldCallback?(.written(.pair, nil))
+        oldCallback?(.ready(maximumWriteLength: 512))
+        XCTAssertEqual(connection.phase, .failed)
+        do { try await connection.write(Data(repeating: 0, count: 17), channel: .pair); XCTFail("Cannot reuse poisoned owner") }
+        catch { XCTAssertEqual(error as? GpsGattError, .invalidState) }
+    }
+
+    @MainActor func testGattRejectsInvalidAndOversizePacketsWithoutSplitting() async throws {
+        let driver = FakeGpsGattDriver()
+        driver.maximumWriteLength = 20
+        let connection = try readyGatt(driver)
+        defer { connection.close() }
+        do { try await connection.write(Data(repeating: 0, count: 32), channel: .controllerId); XCTFail("Needs supported long write") }
+        catch { XCTAssertEqual(error as? GpsGattError, .payloadTooLarge) }
+        do { try await connection.write(Data(repeating: 0, count: 16), channel: .pair); XCTFail("Wrong wire size") }
+        catch { XCTAssertEqual(error as? GpsGattError, .invalidPayload) }
+        XCTAssertTrue(driver.writes.isEmpty)
+        XCTAssertEqual(connection.phase, .gattReady)
+    }
+
+    @MainActor func testGattNotificationOverflowFailsInsteadOfDroppingHandshake() throws {
+        let driver = FakeGpsGattDriver()
+        let connection = try readyGatt(driver)
+        for _ in 0..<33 { driver.eventHandler?(.value(.pair, Data(repeating: 0, count: 17))) }
+        XCTAssertEqual(connection.phase, .failed)
+        XCTAssertEqual(connection.failure as? GpsGattError, .eventOverflow)
+        XCTAssertTrue(driver.closed)
+    }
+
+    @MainActor func testGattCloseResumesActiveAndQueuedWritesExactlyOnce() async throws {
+        let driver = FakeGpsGattDriver()
+        let connection = try readyGatt(driver)
+        let sent = expectation(description: "sent")
+        driver.onWrite = { sent.fulfill() }
+        let first = Task { try await connection.write(Data(repeating: 0, count: 17), channel: .pair) }
+        await fulfillment(of: [sent], timeout: 1)
+        let queued = expectation(description: "queued")
+        let second = Task { queued.fulfill(); try await connection.write(Data(repeating: 0, count: 41), channel: .geo) }
+        await fulfillment(of: [queued], timeout: 1)
+        let oldCallback = driver.eventHandler
+        connection.close(); connection.close()
+        oldCallback?(.written(.pair, nil))
+        for operation in [first, second] {
+            do { try await operation.value; XCTFail("Expected close") } catch { XCTAssertEqual(error as? GpsGattError, .closed) }
+        }
+        XCTAssertEqual(driver.writes.count, 1)
+    }
+
+    @MainActor private func readyGatt(_ driver: FakeGpsGattDriver, timeout: TimeInterval = 3) throws -> NikonGpsGattConnection {
+        let connection = NikonGpsGattConnection(driver: driver, operationTimeout: timeout)
+        try connection.scan()
+        try connection.connect(driver.candidate.id)
+        XCTAssertEqual(connection.phase, .gattReady)
+        return connection
+    }
+
+    func testFragmentedReadsPreserveNextPacket() async throws {
+        let wire = FakeCameraConnection(bytes: Data([1, 2, 3, 4, 5, 6]), chunkSize: 2)
+        let stream = CameraTCPStream(connection: wire)
+        defer { stream.close() }
+        try await stream.connect(timeout: 1)
+        let first = try await stream.readExactly(4, timeout: 1)
+        let second = try await stream.readExactly(2, timeout: 1)
+        XCTAssertEqual(first, Data([1, 2, 3, 4]))
+        XCTAssertEqual(second, Data([5, 6]))
+    }
+
+    func testFinalBytesAreDeliveredBeforeEOF() async throws {
+        let wire = FakeCameraConnection(bytes: Data([1, 2]), eof: true)
+        let stream = CameraTCPStream(connection: wire)
+        defer { stream.close() }
+        try await stream.connect(timeout: 1)
+        let bytes = try await stream.readExactly(2, timeout: 1)
+        XCTAssertEqual(bytes, Data([1, 2]))
+        await expect(.endOfStream) { _ = try await stream.readExactly(1, timeout: 1) }
+    }
+
+    func testTruncatedReadClosesStream() async throws {
+        let stream = CameraTCPStream(connection: FakeCameraConnection(bytes: Data([1]), eof: true))
+        defer { stream.close() }
+        try await stream.connect(timeout: 1)
+        await expect(.endOfStream) { _ = try await stream.readExactly(2, timeout: 1) }
+        await expect(.notConnected) { try await stream.write(Data([1]), timeout: 1) }
+    }
+
+    func testConnectTimeoutIgnoresLateReady() async {
+        let wire = FakeCameraConnection(autoReady: false)
+        let stream = CameraTCPStream(connection: wire)
+        defer { stream.close() }
+        await expect(.timedOut) { try await stream.connect(timeout: 0.05) }
+        wire.lateReady()
+        await expect(.notConnected) { try await stream.write(Data([1]), timeout: 1) }
+    }
+
+    func testReadTimeoutPoisonsConnection() async throws {
+        let stream = CameraTCPStream(connection: FakeCameraConnection())
+        defer { stream.close() }
+        try await stream.connect(timeout: 1)
+        await expect(.timedOut) { _ = try await stream.readExactly(8, timeout: 0.05) }
+        await expect(.notConnected) { _ = try await stream.readExactly(8, timeout: 1) }
+    }
+
+    func testWriteTimeoutPoisonsConnection() async throws {
+        let stream = CameraTCPStream(connection: FakeCameraConnection(holdWrites: true))
+        defer { stream.close() }
+        try await stream.connect(timeout: 1)
+        await expect(.timedOut) { try await stream.write(Data([1]), timeout: 0.05) }
+        await expect(.notConnected) { _ = try await stream.readExactly(1, timeout: 1) }
+    }
+
+    func testReadCancellationIgnoresLateReceive() async throws {
+        let received = expectation(description: "receive registered")
+        let wire = FakeCameraConnection(onReceive: { received.fulfill() })
+        let stream = CameraTCPStream(connection: wire)
+        defer { stream.close() }
+        try await stream.connect(timeout: 1)
+        let reading = Task { try await stream.readExactly(8, timeout: 2) }
+        await fulfillment(of: [received], timeout: 1)
+        reading.cancel()
+        do { _ = try await reading.value; XCTFail("Expected cancellation") }
+        catch { XCTAssertTrue(error is CancellationError) }
+        wire.lateReceive()
+        await expect(.notConnected) { try await stream.write(Data([1]), timeout: 1) }
+    }
+
+    func testConcurrentReaderCannotStealBytes() async throws {
+        let received = expectation(description: "first reader registered")
+        let stream = CameraTCPStream(connection: FakeCameraConnection(onReceive: { received.fulfill() }))
+        defer { stream.close() }
+        try await stream.connect(timeout: 1)
+        let reading = Task { try await stream.readExactly(8, timeout: 2) }
+        await fulfillment(of: [received], timeout: 1)
+        await expect(.operationInProgress) { _ = try await stream.readExactly(1, timeout: 1) }
+        // Full duplex is still allowed while a read is pending.
+        try await stream.write(Data([1]), timeout: 1)
+        stream.close()
+        do { _ = try await reading.value; XCTFail("Expected close") }
+        catch { XCTAssertEqual(error as? CameraStreamError, .closed) }
+    }
+
+    func testHandshakeBytesMatchSharedGoldenVectors() async throws {
+        let wire = FakeCameraConnection()
+        let stream = CameraTCPStream(connection: wire)
+        defer { stream.close() }
+        try await stream.connect(timeout: 1)
+        let channel = PtpIPChannel(stream: stream)
+        try await channel.sendCommandHandshake(guid: Data(0...15), name: "NikonPTP", standard: false, timeout: 1)
+        try await channel.sendCommandHandshake(guid: Data("0123456789abcdef".utf8), name: "ZTransfer", standard: true, timeout: 1)
+        try await channel.sendEventHandshake(connectionNumber: 0x11223344, timeout: 1)
+        XCTAssertEqual(wire.sent(), [
+            hex("2C00000001000000000102030405060708090A0B0C0D0E0F4E0069006B006F006E0050005400500000000100"),
+            hex("3000000001000000303132333435363738396162636465665A005400720061006E007300660065007200000000000100"),
+            hex("0C0000000300000044332211"),
+        ])
+    }
+
+    func testShortAckRejectedBeforeKotlinDecoder() async throws {
+        let stream = CameraTCPStream(connection: FakeCameraConnection())
+        defer { stream.close() }
+        let channel = PtpIPChannel(stream: stream)
+        do {
+            _ = try await channel.commandAcknowledgement(PtpIPPacket(type: 2, payload: Data([1, 2, 3])))
+            XCTFail("Expected malformed ACK")
+        } catch {
+            guard case PtpIPChannelError.malformedAcknowledgement = error else { return XCTFail("Unexpected \(error)") }
+        }
+    }
+
+    func testInvalidLengthAndControlLimitCloseStream() async throws {
+        // < 8 and > caller limit: no payload should be consumed or allocated.
+        for header in ["0700000002000000", "0010000002000000"] {
+            let wire = FakeCameraConnection(bytes: hex(header))
+            let stream = CameraTCPStream(connection: wire)
+            defer { stream.close() }
+            try await stream.connect(timeout: 1)
+            let channel = PtpIPChannel(stream: stream)
+            do {
+                _ = try await channel.readControlPacket(timeout: 1, maximumPayloadBytes: 100)
+                XCTFail("Expected framing rejection")
+            } catch { XCTAssertTrue(error is PtpIPChannelError) }
+            await expect(.notConnected) { try await stream.write(Data([1]), timeout: 1) }
+        }
+    }
+
+    func testPayloadStreamingUsesBoundedChunks() async throws {
+        // 131080 total bytes: 8-byte header plus 128 KiB payload, all from a fixed fixture.
+        let wire = FakeCameraConnection(bytes: hex("080002000A000000") + Data(repeating: 0xAB, count: 131072))
+        let stream = CameraTCPStream(connection: wire)
+        defer { stream.close() }
+        try await stream.connect(timeout: 1)
+        let channel = PtpIPChannel(stream: stream)
+        var sizes: [Int] = []
+        let type = try await channel.readPacketPayload(timeout: 2, maximumPayloadBytes: 131072) { chunk in
+            sizes.append(chunk.count)
+            XCTAssertTrue(chunk.allSatisfy { $0 == 0xAB })
+        }
+        XCTAssertEqual(type, 10)
+        XCTAssertEqual(sizes, [65536, 65536])
+    }
+
+    func testAPCommandSequenceUsesAckSessionIdAndTransactionsOneThroughThree() async throws {
+        let replies = hex("0E00000007000000012001000000")
+            + hex("1400000009000000020000000300000000000000")
+            + hex("0F0000000C00000002000000414243")
+            + hex("0E00000007000000012002000000")
+            + hex("0E00000007000000012003000000")
+        let wire = FakeCameraConnection(bytes: replies, chunkSize: 2)
+        let stream = CameraTCPStream(connection: wire)
+        defer { stream.close() }
+        try await stream.connect(timeout: 1)
+        let session = PtpIPCommandSession(stream: stream, initialTransactionId: 0)
+        let opened = try await session.execute(operationCode: 0x1002, parameters: [0x11223344])
+        let device = try await session.execute(operationCode: 0x1001)
+        let closed = try await session.execute(operationCode: 0x1003)
+        XCTAssertEqual(opened.code, 0x2001)
+        XCTAssertEqual(device.payload, Data("ABC".utf8))
+        XCTAssertEqual(closed.code, 0x2001)
+        XCTAssertEqual(wire.sent(), [
+            hex("16000000060000000100000002100100000044332211"),
+            hex("120000000600000001000000011002000000"),
+            hex("120000000600000001000000031003000000"),
+        ])
+    }
+
+    func testStationTransactionZeroIsAvailableWithoutChangingAPDefault() async throws {
+        let wire = FakeCameraConnection(bytes: hex("0E00000007000000012000000000"))
+        let stream = CameraTCPStream(connection: wire)
+        defer { stream.close() }
+        try await stream.connect(timeout: 1)
+        let session = PtpIPCommandSession(stream: stream, initialTransactionId: -1)
+        _ = try await session.execute(operationCode: 0x1002, parameters: [1])
+        XCTAssertEqual(wire.sent(), [hex("16000000060000000100000002100000000001000000")])
+    }
+
+    func testCommandPingGetsPongWithoutConsumingResponse() async throws {
+        let wire = FakeCameraConnection(bytes: hex("080000000D0000000E00000007000000012001000000"))
+        let stream = CameraTCPStream(connection: wire)
+        defer { stream.close() }
+        try await stream.connect(timeout: 1)
+        let session = PtpIPCommandSession(stream: stream, initialTransactionId: 0)
+        let result = try await session.execute(operationCode: 0x1004)
+        XCTAssertEqual(result.code, 0x2001)
+        XCTAssertEqual(wire.sent().last, hex("080000000E000000"))
+    }
+
+    func testWrongTransactionPermanentlyClosesCommandOwner() async throws {
+        let wire = FakeCameraConnection(bytes: hex("0E00000007000000012002000000"))
+        let stream = CameraTCPStream(connection: wire)
+        defer { stream.close() }
+        try await stream.connect(timeout: 1)
+        let session = PtpIPCommandSession(stream: stream, initialTransactionId: 0)
+        for _ in 0..<2 {
+            do { _ = try await session.execute(operationCode: 0x1004); XCTFail("Expected transaction rejection") }
+            catch {
+                guard case PtpIPSessionError.wrongTransaction = error else { return XCTFail("Unexpected \(error)") }
+            }
+        }
+        XCTAssertEqual(wire.sent().count, 1)
+    }
+
+    func testMetadataLimitAppliesAcrossPackets() async throws {
+        let wire = FakeCameraConnection(bytes:
+            hex("0F0000000A00000001000000414243") + hex("0F0000000C00000001000000444546"))
+        let stream = CameraTCPStream(connection: wire)
+        defer { stream.close() }
+        try await stream.connect(timeout: 1)
+        let session = PtpIPCommandSession(stream: stream, initialTransactionId: 0)
+        do {
+            _ = try await session.execute(operationCode: 0x1001, maximumPayloadBytes: 4)
+            XCTFail("Expected cumulative limit")
+        } catch {
+            guard case PtpIPSessionError.metadataLimit = error else { return XCTFail("Unexpected \(error)") }
+        }
+    }
+
+    func testConcurrentCommandsAreSerializedAcrossAllAwaits() async throws {
+        let wire = FakeCameraConnection(bytes:
+            hex("0E00000007000000012001000000") + hex("0E00000007000000012002000000"), chunkSize: 1)
+        let stream = CameraTCPStream(connection: wire)
+        defer { stream.close() }
+        try await stream.connect(timeout: 1)
+        let session = PtpIPCommandSession(stream: stream, initialTransactionId: 0)
+        async let first = session.execute(operationCode: 0x1004)
+        async let second = session.execute(operationCode: 0x1004)
+        let results = try await (first, second)
+        XCTAssertEqual(results.0.code, 0x2001)
+        XCTAssertEqual(results.1.code, 0x2001)
+        XCTAssertEqual(wire.sent(), [
+            hex("120000000600000001000000041001000000"),
+            hex("120000000600000001000000041002000000"),
+        ])
+    }
+
+    func testCancelledRequestDoesNotCloseAnotherActiveTransaction() async throws {
+        let received = expectation(description: "active transaction waiting for response")
+        received.assertForOverFulfill = false
+        let wire = FakeCameraConnection(onReceive: { received.fulfill() })
+        let stream = CameraTCPStream(connection: wire)
+        defer { stream.close() }
+        try await stream.connect(timeout: 1)
+        let session = PtpIPCommandSession(stream: stream, initialTransactionId: 0)
+        let active = Task { try await session.execute(operationCode: 0x1004, timeout: 3) }
+        await fulfillment(of: [received], timeout: 1)
+        let cancelled = Task { try await session.execute(operationCode: 0x1001) }
+        await Task.yield()
+        cancelled.cancel()
+        do { _ = try await cancelled.value; XCTFail("Expected cancellation") }
+        catch { XCTAssertTrue(error is CancellationError) }
+        wire.feed(hex("0E00000007000000012001000000"))
+        let result = try await active.value
+        XCTAssertEqual(result.code, 0x2001)
+        XCTAssertEqual(wire.sent().count, 1)
+    }
+
+    #if DEBUG
+    func testAPDiagnosticReadsSharedDeviceInfoAndAllowsEventEOFOnClose() async throws {
+        let eventWire = FakeCameraConnection()
+        let closeRequest = hex("120000000600000001000000031003000000")
+        let replies = hex("0E000000070000001E2001000000")
+            + hex("6B0000000C000000020000006400EFCDAB8905A0033C5CB75E000001000300000001102894289401000000084002000000015067D000000000010000000138064E0069006B006F006E000000055A0020003300300000000431002E00300000000553004E003DD800DE0000")
+            + hex("0E00000007000000012002000000")
+            + hex("0E00000007000000012003000000")
+        let commandWire = FakeCameraConnection(bytes: replies, onSend: { packet in
+            if packet == closeRequest { eventWire.finish() }
+        })
+        let command = CameraTCPStream(connection: commandWire)
+        let event = CameraTCPStream(connection: eventWire)
+        defer { command.close(); event.close() }
+        try await command.connect(timeout: 1)
+        try await event.connect(timeout: 1)
+        let session = PtpIPCommandSession(stream: command, initialTransactionId: 0)
+        let result = try await CameraHandshakeProbe.inspectAPSession(
+            session, eventChannel: PtpIPChannel(stream: event), connectionNumber: 0x11223344
+        )
+        XCTAssertTrue(result.contains("Nikon Z 30"))
+        XCTAssertTrue(result.contains("正常关闭"))
+        XCTAssertEqual(commandWire.sent().count, 3)
+        await session.close()
+    }
+
+    func testEventDisconnectDuringAPOpenDoesNotReportSuccess() async throws {
+        let command = CameraTCPStream(connection: FakeCameraConnection())
+        let event = CameraTCPStream(connection: FakeCameraConnection(eof: true))
+        defer { command.close(); event.close() }
+        try await command.connect(timeout: 1)
+        try await event.connect(timeout: 1)
+        let session = PtpIPCommandSession(stream: command, initialTransactionId: 0)
+        do {
+            _ = try await CameraHandshakeProbe.inspectAPSession(
+                session, eventChannel: PtpIPChannel(stream: event), connectionNumber: 1
+            )
+            XCTFail("Expected event-channel disconnect")
+        } catch { XCTAssertEqual(error as? CameraStreamError, .endOfStream) }
+        await session.close()
+    }
+    #endif
+
+    func testIdleEventReadIsCancellableWithoutAnIdleDeadline() async throws {
+        let registered = expectation(description: "idle event receive")
+        let stream = CameraTCPStream(connection: FakeCameraConnection(onReceive: { registered.fulfill() }))
+        defer { stream.close() }
+        try await stream.connect(timeout: 1)
+        let channel = PtpIPChannel(stream: stream)
+        let reading = Task { try await channel.readControlPacket(timeout: 0.03, waitForPacket: true) }
+        await fulfillment(of: [registered], timeout: 1)
+        try await Task.sleep(nanoseconds: 80_000_000)
+        // A regular packet timeout would already have closed this socket. Full-duplex write works.
+        try await stream.write(Data([1]), timeout: 1)
+        reading.cancel()
+        do { _ = try await reading.value; XCTFail("Expected cancellation") }
+        catch { XCTAssertTrue(error is CancellationError) }
+    }
+
+    func testEventPartialHeaderStillHasPacketDeadline() async throws {
+        let stream = CameraTCPStream(connection: FakeCameraConnection(bytes: Data([8])))
+        defer { stream.close() }
+        try await stream.connect(timeout: 1)
+        let channel = PtpIPChannel(stream: stream)
+        await expect(.timedOut) { _ = try await channel.readControlPacket(timeout: 0.03, waitForPacket: true) }
+    }
+
+    func testIdleOnlyCommandCannotQueueBehindActiveTransaction() async throws {
+        let registered = expectation(description: "active command read")
+        registered.assertForOverFulfill = false
+        let wire = FakeCameraConnection(onReceive: { registered.fulfill() })
+        let stream = CameraTCPStream(connection: wire)
+        defer { stream.close() }
+        try await stream.connect(timeout: 1)
+        let session = PtpIPCommandSession(stream: stream, initialTransactionId: 0)
+        let active = Task { try await session.execute(operationCode: 0x1004, timeout: 2) }
+        await fulfillment(of: [registered], timeout: 1)
+        await expect(.operationInProgress) { _ = try await session.execute(operationCode: 0x1004, requireIdle: true) }
+        wire.feed(response(transaction: 1))
+        _ = try await active.value
+        XCTAssertEqual(wire.sent().count, 1)
+        let closed = await session.isClosed()
+        XCTAssertFalse(closed)
+    }
+
+    func testPersistentAPReadsIdentifiersAndObjectInfoThenCloses() async throws {
+        let object = hex("0100010001B10080FFFFFFFF01380403020140010000F00000004020000080150000"
+            + "0E000000000000000000000000007856341209677147723DD800DE2E004E00450046000000"
+            + "1032003000320036003000390030003400540031003500300036003000370000000000")
+        let replies = apOpeningReplies()
+            + response(transaction: 3, payload: hex("0100000001000100"))
+            + response(transaction: 4, payload: hex("0200000007000000FFFFFFFF"))
+            + response(transaction: 5, payload: object)
+            + response(transaction: 6)
+        let commandWire = FakeCameraConnection(bytes: replies, chunkSize: 3)
+        let eventWire = FakeCameraConnection(bytes: hex("0800000004000000"))
+        let camera = apCamera(command: commandWire, event: eventWire)
+        let info = try await camera.connect(guid: Data(0...15))
+        XCTAssertNil(info) // Unsupported DeviceInfo is tolerated, as on Android.
+        let stores = try await camera.storageIDs()
+        let handles = try await camera.objectHandles(storageID: 0x10001)
+        let file = try await camera.objectInfo(handle: 7)
+        XCTAssertEqual(stores, [0x10001])
+        XCTAssertEqual(handles, [7, -1])
+        XCTAssertEqual(file.fileName, "照片😀.NEF")
+        XCTAssertEqual(file.size, 0xFFFFFFFF)
+        XCTAssertTrue(file.identityComplete)
+        await camera.disconnect()
+        let state = await camera.snapshot()
+        XCTAssertEqual(state.phase, .closed)
+        XCTAssertNil(state.errorDescription)
+        XCTAssertEqual(Array(commandWire.sent().dropFirst()), [
+            hex("16000000060000000100000002100100000044332211"),
+            hex("120000000600000001000000011002000000"),
+            hex("120000000600000001000000041003000000"),
+            hex("1E000000060000000100000007100400000001000100FFFFFFFF00000000"),
+            hex("16000000060000000100000008100500000007000000"),
+            hex("120000000600000001000000031006000000"),
+        ])
+    }
+
+    func testMalformedCatalogIsNotEmptyAndDoesNotPoisonValidNextTransaction() async throws {
+        let commandWire = FakeCameraConnection(bytes: apOpeningReplies()
+            + response(transaction: 3, payload: hex("01000000"))
+            + response(transaction: 4, payload: hex("00000000")))
+        let camera = apCamera(command: commandWire)
+        _ = try await camera.connect(guid: Data(0...15))
+        do { _ = try await camera.storageIDs(); XCTFail("Expected malformed count") }
+        catch {
+            guard case CameraOperationError.malformedDataset(operation: 0x1004) = error else {
+                await camera.abort(); return XCTFail("Unexpected \(error)")
+            }
+        }
+        let stores = try await camera.storageIDs()
+        XCTAssertEqual(stores, [])
+        let state = await camera.snapshot()
+        XCTAssertEqual(state.phase, .ready)
+        await camera.abort()
+    }
+
+    func testKeepaliveAcceptsBusyResponseAsLiveConnection() async throws {
+        let camera = apCamera(command: FakeCameraConnection(bytes: apOpeningReplies()
+            + response(transaction: 3, code: 0x2019)))
+        _ = try await camera.connect(guid: Data(0...15))
+        let alive = await camera.keepalive()
+        XCTAssertTrue(alive)
+        let state = await camera.snapshot()
+        XCTAssertEqual(state.phase, .ready)
+        await camera.abort()
+    }
+
+    func testEventPingPublishesNoCatalogChangeButRealEventDoes() async throws {
+        let eventWire = FakeCameraConnection(bytes: hex("0800000004000000"))
+        let camera = apCamera(command: FakeCameraConnection(bytes: apOpeningReplies()), event: eventWire)
+        _ = try await camera.connect(guid: Data(0...15))
+        let changed = expectation(description: "catalog invalidation")
+        let observer = Task {
+            for await state in camera.updates where state.eventRevision > 0 {
+                changed.fulfill(); break
+            }
+        }
+        defer { observer.cancel() }
+        eventWire.feed(hex("080000000D000000120000000800000002400000000007000000"))
+        await fulfillment(of: [changed], timeout: 2)
+        let state = await camera.snapshot()
+        XCTAssertEqual(state.eventRevision, 1)
+        XCTAssertEqual(eventWire.sent().last, hex("080000000E000000"))
+        await camera.abort()
+    }
+
+    func testEventHistoryPreservesOrderedDecodedFieldsAcrossAPAndStationWithoutAnotherStreamConsumer() async throws {
+        for station in [false, true] {
+            let replies = station ? stationAck() + response(transaction: 0) + response(transaction: 1)
+                + response(transaction: 2, payload: hex("0100000001000100")) : apOpeningReplies()
+            let wire = FakeCameraConnection(bytes: replies)
+            let event = FakeCameraConnection(bytes: hex("0800000004000000"), chunkSize: 3)
+            let camera = station ? stationCamera(command: wire, event: event) : apCamera(command: wire, event: event)
+            _ = try await camera.connect(guid: Data(0...15))
+            let initial = try await camera.events(after: nil)
+            XCTAssertTrue(initial.requiresRescan); XCTAssertTrue(initial.events.isEmpty)
+            let before = wire.sent().count
+            // Independent wire bytes: duplicate adds must remain ordered with removals and unknown events.
+            let added = hex("12000000080000000240EFCDAB89FFFFFFFF")
+            event.feed(added + added + hex("1200000008000000034001000000FFFFFFFF0E0000000800000034C102000000"))
+            try await waitUntil("four retained events") { await camera.snapshot().eventRevision == 4 }
+            let batch = try await camera.events(after: initial.cursor)
+            XCTAssertFalse(batch.requiresRescan); XCTAssertEqual(batch.events.map(\.revision), [1, 2, 3, 4])
+            XCTAssertEqual(batch.events.map(\.code), [0x4002, 0x4002, 0x4003, 0xC134])
+            XCTAssertEqual(batch.events.map(\.firstParameter), [0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0])
+            XCTAssertEqual(batch.events.map(\.transactionID), [0x89ABCDEF, 0x89ABCDEF, 1, 2])
+            let repeated = try await camera.events(after: initial.cursor)
+            XCTAssertEqual(repeated.events, batch.events) // Reading does not acknowledge or consume.
+            let empty = try await camera.events(after: batch.cursor)
+            XCTAssertFalse(empty.requiresRescan); XCTAssertTrue(empty.events.isEmpty)
+            XCTAssertEqual(wire.sent().count, before)
+            await camera.abort()
+        }
+    }
+
+    func testEventHistoryOverflowReportsGapAndNeverReturnsAnIncompleteTailAsComplete() async throws {
+        let event = FakeCameraConnection(bytes: hex("0800000004000000"))
+        let camera = apCamera(command: FakeCameraConnection(bytes: apOpeningReplies()), event: event)
+        _ = try await camera.connect(guid: Data(0...15))
+        let initial = try await camera.events(after: nil)
+        let total = CameraWiFiConnection.eventHistoryLimit + 2
+        var bytes = Data()
+        for _ in 0..<total { bytes.append(hex("120000000800000002400000000009000000")) }
+        event.feed(bytes)
+        try await waitUntil("bounded history filled") { await camera.snapshot().eventRevision == UInt64(total) }
+        let gap = try await camera.events(after: initial.cursor)
+        XCTAssertTrue(gap.requiresRescan); XCTAssertTrue(gap.events.isEmpty); XCTAssertEqual(gap.cursor.revision, UInt64(total))
+        let oldestRetained = CameraEventCursor(connectionID: camera.connectionID, revision: 2)
+        let full = try await camera.events(after: oldestRetained)
+        XCTAssertFalse(full.requiresRescan); XCTAssertEqual(full.events.count, CameraWiFiConnection.eventHistoryLimit)
+        XCTAssertEqual(full.events.first?.revision, 3); XCTAssertEqual(full.events.last?.revision, UInt64(total))
+        let tooOld = try await camera.events(after: CameraEventCursor(connectionID: camera.connectionID, revision: 1))
+        XCTAssertTrue(tooOld.requiresRescan); XCTAssertTrue(tooOld.events.isEmpty)
+        await camera.abort()
+    }
+
+    func testEventHistoryRejectsForeignFutureCancelledAndClosedReads() async throws {
+        let camera = apCamera(command: FakeCameraConnection(bytes: apOpeningReplies()))
+        _ = try await camera.connect(guid: Data(0...15))
+        for cursor in [CameraEventCursor(connectionID: UUID(), revision: 0),
+                       CameraEventCursor(connectionID: camera.connectionID, revision: 1)] {
+            let result = try await camera.events(after: cursor)
+            XCTAssertTrue(result.requiresRescan); XCTAssertTrue(result.events.isEmpty)
+            XCTAssertEqual(result.cursor.connectionID, camera.connectionID); XCTAssertEqual(result.cursor.revision, 0)
+        }
+        let cancelled = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await camera.events(after: nil)
+        }
+        do { _ = try await cancelled.value; XCTFail("Expected cancellation") }
+        catch { XCTAssertTrue(error is CancellationError) }
+        let state = await camera.snapshot(); XCTAssertEqual(state.phase, .ready)
+        await camera.abort()
+        do { _ = try await camera.events(after: nil); XCTFail("Expected closed connection") }
+        catch { XCTAssertEqual(error as? CameraStreamError, .closed) }
+    }
+
+    func testEventHistoryIgnoresPingAndMalformedEventButKeepsTheFollowingCompleteEvent() async throws {
+        let event = FakeCameraConnection(bytes: hex("0800000004000000"))
+        let camera = apCamera(command: FakeCameraConnection(bytes: apOpeningReplies()), event: event)
+        _ = try await camera.connect(guid: Data(0...15))
+        let initial = try await camera.events(after: nil)
+        event.feed(hex("080000000D0000000A000000080000000240120000000800000002400000000007000000"))
+        try await waitUntil("only complete event counted") { await camera.snapshot().eventRevision == 1 }
+        let batch = try await camera.events(after: initial.cursor)
+        XCTAssertFalse(batch.requiresRescan); XCTAssertEqual(batch.events.count, 1)
+        XCTAssertEqual(batch.events.first?.firstParameter, 7)
+        XCTAssertEqual(event.sent().last, hex("080000000E000000"))
+        await camera.abort()
+    }
+
+    func testEventFailureClosesWholeOwnerAndCannotBeReopened() async throws {
+        let eventWire = FakeCameraConnection(bytes: hex("0800000004000000"))
+        let commandWire = FakeCameraConnection(bytes: apOpeningReplies())
+        let camera = apCamera(command: commandWire, event: eventWire)
+        _ = try await camera.connect(guid: Data(0...15))
+        let closed = expectation(description: "event EOF closes owner")
+        let observer = Task {
+            for await state in camera.updates where state.phase == .closed {
+                closed.fulfill(); break
+            }
+        }
+        defer { observer.cancel() }
+        eventWire.finish()
+        await fulfillment(of: [closed], timeout: 2)
+        await expect(.endOfStream) { _ = try await camera.storageIDs() }
+        await expect(.endOfStream) { _ = try await camera.connect(guid: Data(0...15)) }
+        XCTAssertEqual(commandWire.sent().count, 3)
+        await camera.abort()
+    }
+
+    func testAPOpenRejectionClosesBothChannels() async throws {
+        let commandWire = FakeCameraConnection(bytes: hex("0C0000000200000044332211")
+            + response(transaction: 1, code: 0x2002))
+        let camera = apCamera(command: commandWire)
+        do { _ = try await camera.connect(guid: Data(0...15)); XCTFail("Expected rejection") }
+        catch {
+            guard case PtpIPSessionError.openRejected(0x2002) = error else {
+                await camera.abort(); return XCTFail("Unexpected \(error)")
+            }
+        }
+        let state = await camera.snapshot()
+        XCTAssertEqual(state.phase, .closed)
+        XCTAssertEqual(commandWire.sent().count, 2)
+        await camera.abort()
+    }
+
+    func testPersistentOwnerQueuedCancellationLeavesActiveRequestUsable() async throws {
+        let sent = expectation(description: "metadata command started")
+        let storageRequest = hex("120000000600000001000000041003000000")
+        let wire = FakeCameraConnection(bytes: apOpeningReplies(), onSend: { data in
+            if data == storageRequest { sent.fulfill() }
+        })
+        let camera = apCamera(command: wire)
+        _ = try await camera.connect(guid: Data(0...15))
+        let active = Task { try await camera.storageIDs() }
+        await fulfillment(of: [sent], timeout: 1)
+        let cancelled = Task { try await camera.objectHandles(storageID: -1) }
+        await Task.yield()
+        cancelled.cancel()
+        do { _ = try await cancelled.value; XCTFail("Expected cancellation") }
+        catch { XCTAssertTrue(error is CancellationError) }
+        wire.feed(response(transaction: 3, payload: hex("0100000001000100")))
+        let stores = try await active.value
+        XCTAssertEqual(stores, [0x10001])
+        let state = await camera.snapshot()
+        XCTAssertEqual(state.phase, .ready)
+        XCTAssertEqual(wire.sent().count, 4)
+        await camera.abort()
+    }
+
+    func testBusyDisconnectAbortsInsteadOfQueuingCloseSession() async throws {
+        let sent = expectation(description: "metadata command started")
+        let storageRequest = hex("120000000600000001000000041003000000")
+        let wire = FakeCameraConnection(bytes: apOpeningReplies(), onSend: { data in
+            if data == storageRequest { sent.fulfill() }
+        })
+        let camera = apCamera(command: wire)
+        _ = try await camera.connect(guid: Data(0...15))
+        let active = Task { try await camera.storageIDs() }
+        await fulfillment(of: [sent], timeout: 1)
+        await camera.disconnect()
+        do { _ = try await active.value; XCTFail("Expected abort") } catch {}
+        let state = await camera.snapshot()
+        XCTAssertEqual(state.phase, .closed)
+        XCTAssertNil(state.errorDescription)
+        // No CloseSession command may be inserted into an incomplete transaction.
+        XCTAssertEqual(wire.sent().count, 4)
+    }
+
+    func testGracefulOwnerDisconnectAllowsEventEOFBeforeCloseResponse() async throws {
+        let eventWire = FakeCameraConnection(bytes: hex("0800000004000000"))
+        let closeRequest = hex("120000000600000001000000031003000000")
+        let wire = FakeCameraConnection(bytes: apOpeningReplies() + response(transaction: 3), onSend: { data in
+            if data == closeRequest { eventWire.finish() }
+        })
+        let camera = apCamera(command: wire, event: eventWire)
+        _ = try await camera.connect(guid: Data(0...15))
+        await camera.disconnect()
+        let state = await camera.snapshot()
+        XCTAssertEqual(state.phase, .closed)
+        XCTAssertNil(state.errorDescription)
+        XCTAssertEqual(wire.sent().last, closeRequest)
+    }
+
+    func testCancelledAPHandshakeNeverTransitionsToReady() async throws {
+        let waiting = expectation(description: "command handshake waiting")
+        waiting.assertForOverFulfill = false
+        let wire = FakeCameraConnection(onReceive: { waiting.fulfill() })
+        let camera = apCamera(command: wire)
+        let opening = Task { try await camera.connect(guid: Data(0...15)) }
+        await fulfillment(of: [waiting], timeout: 1)
+        opening.cancel()
+        do { _ = try await opening.value; XCTFail("Expected cancellation") }
+        catch { XCTAssertTrue(error is CancellationError) }
+        wire.lateReady()
+        wire.lateReceive()
+        let state = await camera.snapshot()
+        XCTAssertEqual(state.phase, .closed)
+        XCTAssertEqual(wire.sent().count, 1)
+        await camera.abort()
+    }
+
+    func testStreamingUsesBoundedChunksAndConsumesResponseBeforeNextCommand() async throws {
+        let wire = FakeCameraConnection(bytes: response(transaction: 1, payload: Data(repeating: 0xAB, count: 131072))
+            + response(transaction: 2))
+        let stream = CameraTCPStream(connection: wire)
+        defer { stream.close() }
+        try await stream.connect(timeout: 1)
+        let session = PtpIPCommandSession(stream: stream, initialTransactionId: 0)
+        var count = 0
+        let result = try await session.executeStreaming(operationCode: 0x1009, parameters: [7]) { data in
+            XCTAssertLessThanOrEqual(data.count, 65536)
+            XCTAssertTrue(data.allSatisfy { $0 == 0xAB })
+            count += data.count
+        }
+        XCTAssertEqual(count, 131072)
+        XCTAssertEqual(result.bytes, 131072)
+        XCTAssertEqual(result.code, 0x2001)
+        let next = try await session.execute(operationCode: 0x1004)
+        XCTAssertEqual(next.code, 0x2001)
+    }
+
+    func testStreamingRejectsWrongDataTransactionBeforeWritingAnyMedia() async throws {
+        let stream = CameraTCPStream(connection: FakeCameraConnection(bytes: response(transaction: 2, payload: Data([1, 2]))))
+        defer { stream.close() }
+        try await stream.connect(timeout: 1)
+        let session = PtpIPCommandSession(stream: stream, initialTransactionId: 0)
+        var writes = 0
+        do {
+            _ = try await session.executeStreaming(operationCode: 0x1009, parameters: [7]) { _ in writes += 1 }
+            XCTFail("Expected transaction mismatch")
+        } catch {
+            guard case PtpIPSessionError.wrongTransaction = error else { return XCTFail("Unexpected \(error)") }
+        }
+        XCTAssertEqual(writes, 0)
+        let closed = await session.isClosed()
+        XCTAssertTrue(closed)
+    }
+
+    func testStreamingSinkFailureDrainsBeforeReusingCommandGate() async throws {
+        let wire = FakeCameraConnection(bytes: response(transaction: 1, payload: Data([1, 2])) + response(transaction: 2))
+        let stream = CameraTCPStream(connection: wire)
+        defer { stream.close() }
+        try await stream.connect(timeout: 1)
+        let session = PtpIPCommandSession(stream: stream, initialTransactionId: 0)
+        do {
+            _ = try await session.executeStreaming(operationCode: 0x1009, parameters: [7]) { _ in
+                throw SandboxTransferError.invalidState
+            }
+            XCTFail("Expected disk failure")
+        } catch { XCTAssertTrue(error is SandboxTransferError) }
+        let closed = await session.isClosed()
+        XCTAssertFalse(closed)
+        XCTAssertTrue(wire.sent().contains(PtpIPChannel.data(PtpIpProtocolCodec.shared.encodeCancelRequest(transactionId: 1))))
+        let next = try await session.execute(operationCode: 0x1001)
+        XCTAssertEqual(next.code, PtpConstants.shared.RESPONSE_OK)
+    }
+
+    func testStreamingCancellationHoldsGateUntilMatchingResponseIsDrained() async throws {
+        let wire = FakeCameraConnection()
+        let stream = CameraTCPStream(connection: wire)
+        defer { stream.close() }
+        try await stream.connect(timeout: 1)
+        let session = PtpIPCommandSession(stream: stream, initialTransactionId: 0)
+        let transfer = Task { try await session.executeStreaming(operationCode: 0x1009, parameters: [7]) { _ in
+            XCTFail("Cancelled transfer must not write discarded bytes")
+        } }
+        try await waitUntil("download command") { wire.sent().count == 1 }
+        transfer.cancel()
+        try await waitUntil("cancel packet") { wire.sent().count == 2 }
+        let next = Task { try await session.execute(operationCode: 0x1001) }
+        wire.feed(response(transaction: 1, payload: Data(repeating: 1, count: 150_000)))
+        do { _ = try await transfer.value; XCTFail("Expected cancellation") }
+        catch { XCTAssertTrue(error is CancellationError) }
+        try await waitUntil("next command after drain") { wire.sent().count == 3 }
+        wire.feed(response(transaction: 2))
+        let result = try await next.value
+        XCTAssertEqual(result.code, PtpConstants.shared.RESPONSE_OK)
+        let closed = await session.isClosed(); XCTAssertFalse(closed)
+    }
+
+    func testStreamingCancelledWithoutResponseClosesWithinRecoveryBudget() async throws {
+        let wire = FakeCameraConnection()
+        let actual = CameraTCPStream(connection: wire)
+        defer { actual.close() }
+        try await actual.connect(timeout: 1)
+        let session = PtpIPCommandSession(stream: actual, initialTransactionId: 0)
+        let transfer = Task { try await session.executeStreaming(operationCode: 0x1009, parameters: [7]) { _ in } }
+        try await waitUntil("download command") { wire.sent().count == 1 }
+        let start = ProcessInfo.processInfo.systemUptime
+        transfer.cancel()
+        do { _ = try await transfer.value; XCTFail("Expected cancellation") } catch {}
+        XCTAssertLessThan(ProcessInfo.processInfo.systemUptime - start, 5)
+        let closed = await session.isClosed(); XCTAssertTrue(closed)
+    }
+
+    func testAPPartialDownloadWritesOriginalBytesAndUsesSharedParameters() async throws {
+        let wire = FakeCameraConnection(bytes: apOpeningReplies() + response(transaction: 3, payload: Data("ABC".utf8)))
+        let camera = apCamera(command: wire)
+        _ = try await camera.connect(guid: Data(0...15))
+        var output = Data()
+        let result = try await camera.download(handle: 7, declaredSize: 3) { output.append($0) }
+        XCTAssertEqual(output, Data("ABC".utf8))
+        XCTAssertEqual(result.bytes, 3)
+        XCTAssertEqual(wire.sent().last, hex("2600000006000000010000003194030000000700000000000000000000000300000000000000"))
+        await camera.abort()
+    }
+
+    func testAPPartialUnsupportedFallsBackOnlyBeforeAnyBytes() async throws {
+        let wire = FakeCameraConnection(bytes: apOpeningReplies() + response(transaction: 3, code: 0x2005)
+            + response(transaction: 4, payload: Data("ABC".utf8)))
+        let camera = apCamera(command: wire)
+        _ = try await camera.connect(guid: Data(0...15))
+        var output = Data()
+        _ = try await camera.download(handle: 7, declaredSize: 3) { output.append($0) }
+        XCTAssertEqual(output, Data("ABC".utf8))
+        XCTAssertEqual(wire.sent().last, hex("16000000060000000100000009100400000007000000"))
+        await camera.abort()
+    }
+
+    func testAPUnknownLargeSizeUses64BitQueryAndResumeOffset() async throws {
+        let wire = FakeCameraConnection(bytes: apOpeningReplies()
+            + response(transaction: 3, payload: hex("0000004001000000"))
+            + response(transaction: 4, payload: Data("ABC".utf8)))
+        let camera = apCamera(command: wire)
+        _ = try await camera.connect(guid: Data(0...15))
+        let result = try await camera.download(handle: 7, declaredSize: 0xFFFFFFFF, resumeOffset: 0x13FFFFFFD) { _ in }
+        XCTAssertEqual(result.bytes, 0x140000000)
+        XCTAssertEqual(result.transferred, 3)
+        XCTAssertEqual(wire.sent().last, hex("26000000060000000100000031940400000007000000FDFFFF3F010000000300000000000000"))
+        await camera.abort()
+    }
+
+    func testAPPartialLengthMismatchDoesNotReportSuccess() async throws {
+        let wire = FakeCameraConnection(bytes: apOpeningReplies()
+            + hex("1400000009000000030000000400000000000000")
+            + response(transaction: 3, payload: Data("ABC".utf8)))
+        let camera = apCamera(command: wire)
+        _ = try await camera.connect(guid: Data(0...15))
+        do { _ = try await camera.download(handle: 7, declaredSize: 3) { _ in }; XCTFail("Expected mismatch") }
+        catch { XCTAssertTrue(error is CameraDownloadError) }
+        await camera.abort()
+    }
+
+    func testSandboxCommitPreservesExistingFileAndHashesBytes() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let existing = root.appendingPathComponent("photo.JPG")
+        try Data("old".utf8).write(to: existing, options: .withoutOverwriting)
+        let file = try SandboxTransferFile(directory: root, name: "photo.JPG", declaredSize: 3, captureDate: nil)
+        try file.write(Data("ABC".utf8))
+        let saved = try file.commit(expectedBytes: 3)
+        XCTAssertEqual(saved.url.lastPathComponent, "photo (1).JPG")
+        XCTAssertEqual(saved.sha256, "b5d4045c3f466fa91fe2cc6abe79232a1a57cdf104f7a26e716e0a1e2789df78a")
+        XCTAssertEqual(try Data(contentsOf: existing), Data("old".utf8))
+        file.discard()
+        XCTAssertEqual(try Data(contentsOf: saved.url), Data("ABC".utf8))
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: root.path).count, 2)
+    }
+
+    func testSandboxMismatchAndUnsafeNamesNeverPublishFile() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        for name in ["../outside", "a/b", "a\\b", ".", "..", "", "bad\u{0}name"] {
+            XCTAssertThrowsError(try SandboxTransferFile(directory: root, name: name, declaredSize: 3, captureDate: nil))
+        }
+        let file = try SandboxTransferFile(directory: root, name: "photo.JPG", declaredSize: 3, captureDate: nil)
+        try file.write(Data([1]))
+        XCTAssertThrowsError(try file.commit(expectedBytes: 3))
+        file.discard()
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: root.path), [])
+    }
+
+    func testOriginalQueueSnapshotRetainsMetadataAndRejectsRemovingWaiting() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let camera = apCamera(command: FakeCameraConnection(bytes: Data()))
+        let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: root))
+        var payload = Data(repeating: 0, count: 52)
+        payload[0] = 1; payload[2] = 1; payload[4] = 1; payload[5] = 0x38; payload[8] = 3
+        payload.append(hex("0B730061006D0070006C0065002E004A0050004700000000"))
+        let info = try XCTUnwrap(PtpIPChannel.objectInfo(handle: 7, payload: payload))
+        let enqueued = await queue.enqueue(info, byDate: false, dayKey: 0, deferred: true)
+        let id = try XCTUnwrap(enqueued)
+        let before = await queue.snapshot()
+        let row = try XCTUnwrap(before.rows.first)
+        XCTAssertEqual(before.connectionID, camera.connectionID)
+        XCTAssertEqual(row.id, id)
+        XCTAssertEqual(row.handle, 7)
+        XCTAssertEqual(row.size, 3)
+        XCTAssertEqual(row.name, "sample.JPG")
+        XCTAssertEqual(row.storageIDs, [0x10001])
+        XCTAssertNil(row.elapsedMs)
+        XCTAssertEqual(row.downloadMBps, 0)
+        let removedWaiting = await queue.removeTask(id)
+        XCTAssertFalse(removedWaiting)
+        await queue.withdrawPending()
+        let withdrawn = await queue.snapshot()
+        XCTAssertGreaterThan(withdrawn.historyRevision, before.historyRevision)
+        XCTAssertEqual(withdrawn.rows.first?.status, "CANCELLED")
+        let removed = await queue.removeTask(id)
+        let removedAgain = await queue.removeTask(id)
+        let final = await queue.snapshot()
+        XCTAssertTrue(removed)
+        XCTAssertFalse(removedAgain)
+        XCTAssertTrue(final.rows.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path)) // no network or file writes
+    }
+
+    func testOriginalQueueRetryExclusionsAndClearKeepWaitingWork() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let queue = CameraOriginalQueue(camera: apCamera(command: FakeCameraConnection(bytes: Data())),
+                                        store: CameraOriginalStore(root: root))
+        var payload = Data(repeating: 0, count: 52)
+        payload[0] = 1; payload[2] = 1; payload[4] = 1; payload[5] = 0x38; payload[8] = 3
+        payload.append(hex("0B730061006D0070006C0065002E004A0050004700000000"))
+        let info = try XCTUnwrap(PtpIPChannel.objectInfo(handle: 7, payload: payload))
+        let firstValue = await queue.enqueue(info, byDate: false, dayKey: 0, deferred: true)
+        let secondValue = await queue.enqueue(info, byDate: false, dayKey: 0, deferred: true)
+        let first = try XCTUnwrap(firstValue)
+        let second = try XCTUnwrap(secondValue)
+        await queue.withdraw(first)
+        let retried = await queue.retryFailed(excluding: [first])
+        XCTAssertEqual(retried, 0)
+        await queue.clearTerminal()
+        let snapshot = await queue.snapshot()
+        XCTAssertEqual(snapshot.rows.map(\.id), [second])
+        XCTAssertEqual(snapshot.rows.first?.status, "WAITING")
+        XCTAssertFalse(snapshot.running)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+    }
+
+    func testQueuePublishesActualProviderOriginalNameAfterSandboxCollisionAndKeepsShareSourceLocal() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sandbox = root.appendingPathComponent("sandbox"), target = root.appendingPathComponent("target")
+        try FileManager.default.createDirectory(at: sandbox, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: target, withIntermediateDirectories: false)
+        try Data([9]).write(to: sandbox.appendingPathComponent("sample.JPG"))
+        let bookmark = root.appendingPathComponent("grant"); try Data([1]).write(to: bookmark)
+        let grant = PageDirectoryGrant(target)
+        let destination = ProviderOriginalStore(directory: ScopedDirectoryStore(bookmarkFile: bookmark, access: grant))
+        let camera = apCamera(command: FakeCameraConnection(bytes: apOpeningReplies() + response(transaction: 3, payload: Data("ABC".utf8))))
+        _ = try await camera.connect(guid: Data(0...15))
+        let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: sandbox))
+        let configured = try await queue.configureDestination(destination); XCTAssertTrue(configured)
+        let taskID = await queue.enqueue(try sampleInfo(3), byDate: false, dayKey: 0, deferred: false)
+        let id = try XCTUnwrap(taskID)
+        try await waitUntil("published and worker idle") { let s = await queue.snapshot(); return !s.running && s.rows.first?.status == "COMPLETED" }
+        let source = await queue.savedFile(id)
+        XCTAssertEqual(source?.url.lastPathComponent, "sample (1).JPG")
+        XCTAssertEqual(source?.url.deletingLastPathComponent(), sandbox.standardizedFileURL.resolvingSymlinksInPath())
+        XCTAssertEqual(try Data(contentsOf: target.appendingPathComponent("sample.JPG")), Data("ABC".utf8))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: target.appendingPathComponent("sample (1).JPG").path))
+        let index = try await destination.originals(since: -1, rescan: true)
+        XCTAssertEqual(index.entries.map(\.name), ["sample.JPG"])
+        let state = await queue.snapshot(); XCTAssertEqual(state.completedOriginalRevision, 1)
+        XCTAssertEqual(grant.starts, grant.stops)
+        await camera.abort()
+    }
+
+    func testQueueWaitsForPublicationAndRejectsDestinationChangeDuringRun() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let camera = apCamera(command: FakeCameraConnection(bytes: apOpeningReplies() + response(transaction: 3, payload: Data("ABC".utf8))))
+        _ = try await camera.connect(guid: Data(0...15))
+        let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: root)), target = QueueDestinationProbe()
+        let began = expectation(description: "publication held"); await target.hold(began)
+        _ = try await queue.configureDestination(target)
+        let id = await queue.enqueue(try sampleInfo(3, captureDate: "20260102T123456"), byDate: true, dayKey: 20260905, deferred: false)
+        await fulfillment(of: [began], timeout: 3)
+        let during = await queue.snapshot()
+        XCTAssertEqual(during.rows.first?.status, "TRANSFERING"); XCTAssertEqual(during.completedOriginalRevision, 0)
+        let other = QueueDestinationProbe()
+        let changed = try await queue.configureDestination(other); XCTAssertFalse(changed)
+        let validations = await other.validations(); XCTAssertEqual(validations, 0)
+        let calls = await target.calls()
+        XCTAssertEqual(calls.first?.1, "sample.JPG")
+        XCTAssertEqual(calls.first?.2, PtpTransferBridge.shared.destinationFolder(captureDate: "20260102T123456", byDate: true, dayKey: 20260905))
+        let recoverable = await queue.savedFile(try XCTUnwrap(id)); XCTAssertNotNil(recoverable)
+        await target.release()
+        try await waitUntil("published") { let s = await queue.snapshot(); return !s.running && s.rows.first?.status == "COMPLETED" }
+        let changedAfter = try await queue.configureDestination(other); XCTAssertTrue(changedAfter)
+        await camera.abort()
+    }
+
+    func testFailedPublicationSingleRetryReusesFullOriginalWithoutAnotherCameraRequest() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let wire = FakeCameraConnection(bytes: apOpeningReplies() + response(transaction: 3, payload: Data("ABC".utf8)))
+        let camera = apCamera(command: wire); _ = try await camera.connect(guid: Data(0...15))
+        let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: root)), target = QueueDestinationProbe()
+        await target.failures(true); _ = try await queue.configureDestination(target)
+        let value = await queue.enqueue(try sampleInfo(3), byDate: false, dayKey: 0, deferred: false)
+        let id = try XCTUnwrap(value)
+        try await waitUntil("publication failed") { let s = await queue.snapshot(); return !s.running && s.rows.first?.status == "FAILED" }
+        let failed = await queue.snapshot(); XCTAssertEqual(failed.completedOriginalRevision, 0)
+        let retained = await queue.savedFile(id); XCTAssertNotNil(retained)
+        let requestCount = wire.sent().count
+        await target.failures(false); await queue.retry(id)
+        try await waitUntil("publication retry completed") { let s = await queue.snapshot(); return !s.running && s.rows.first?.status == "COMPLETED" }
+        let complete = await queue.snapshot(); let nextID = try XCTUnwrap(complete.rows.first?.id)
+        XCTAssertNotEqual(nextID, id); XCTAssertEqual(complete.completedOriginalRevision, 1)
+        let retried = await queue.savedFile(nextID), old = await queue.savedFile(id)
+        XCTAssertEqual(retried?.url, retained?.url); XCTAssertNil(old); XCTAssertEqual(wire.sent().count, requestCount)
+        let calls = await target.calls(); XCTAssertEqual(calls.count, 2); XCTAssertEqual(calls.first?.0.url, calls.last?.0.url)
+        await queue.clearTerminal()
+        let removed = await queue.savedFile(nextID); XCTAssertNil(removed)
+        XCTAssertEqual(try Data(contentsOf: try XCTUnwrap(retained?.url)), Data("ABC".utf8))
+        await camera.abort()
+    }
+
+    func testBulkPublicationRetryKeepsExcludedContextAndMapsNewIdToItsOwnStagedFile() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let wire = FakeCameraConnection(bytes: apOpeningReplies() + response(transaction: 3, payload: Data("ABC".utf8)) + response(transaction: 4, payload: Data("DEF".utf8)))
+        let camera = apCamera(command: wire); _ = try await camera.connect(guid: Data(0...15))
+        let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: root)), target = QueueDestinationProbe()
+        await target.failures(true); _ = try await queue.configureDestination(target)
+        let firstValue = await queue.enqueue(try sampleInfo(3), byDate: false, dayKey: 0, deferred: true)
+        let secondValue = await queue.enqueue(try sampleInfo(3), byDate: false, dayKey: 0, deferred: true)
+        let first = try XCTUnwrap(firstValue), second = try XCTUnwrap(secondValue)
+        await queue.start()
+        try await waitUntil("two publication failures") { let s = await queue.snapshot(); return !s.running && s.rows.count == 2 && s.rows.allSatisfy { $0.status == "FAILED" } }
+        let firstFile = await queue.savedFile(first), secondFile = await queue.savedFile(second)
+        XCTAssertNotEqual(firstFile?.url, secondFile?.url)
+        let sent = wire.sent().count
+        await target.failures(false)
+        let count = await queue.retryFailed(excluding: [first]); XCTAssertEqual(count, 1)
+        try await waitUntil("second publication retried") { let s = await queue.snapshot(); return !s.running && s.rows.last?.status == "COMPLETED" }
+        let state = await queue.snapshot(); XCTAssertEqual(state.rows.first?.id, first); XCTAssertEqual(state.rows.first?.status, "FAILED")
+        let newID = try XCTUnwrap(state.rows.last?.id)
+        let retried = await queue.savedFile(newID)
+        XCTAssertNotEqual(newID, second); XCTAssertEqual(retried?.url, secondFile?.url)
+        let excluded = await queue.savedFile(first); XCTAssertEqual(excluded?.url, firstFile?.url)
+        XCTAssertEqual(wire.sent().count, sent)
+        let removed = await queue.removeTask(first); XCTAssertTrue(removed)
+        let released = await queue.savedFile(first); XCTAssertNil(released)
+        XCTAssertEqual(try Data(contentsOf: try XCTUnwrap(firstFile?.url)), Data("ABC".utf8))
+        await camera.abort()
+    }
+
+    func testRevokedPublicationDestinationFailsBeforeDownloadingAndKeepsConfiguration() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let wire = FakeCameraConnection(bytes: apOpeningReplies())
+        let camera = apCamera(command: wire); _ = try await camera.connect(guid: Data(0...15))
+        let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: root)), target = QueueDestinationProbe()
+        _ = try await queue.configureDestination(target); await target.denied(true)
+        let sent = wire.sent().count
+        _ = await queue.enqueue(try sampleInfo(3), byDate: false, dayKey: 0, deferred: false)
+        try await waitUntil("revoked before download") { let s = await queue.snapshot(); return !s.running && s.rows.first?.status == "FAILED" }
+        XCTAssertEqual(wire.sent().count, sent); XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+        let calls = await target.calls(); XCTAssertTrue(calls.isEmpty)
+        let state = await queue.snapshot(); XCTAssertEqual(state.completedOriginalRevision, 0)
+        await camera.abort()
+    }
+
+    func testPublicationCancellationRetainsStageButCommittedPublicationStillCompletes() async throws {
+        for committed in [false, true] {
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: root) }
+            let camera = apCamera(command: FakeCameraConnection(bytes: apOpeningReplies() + response(transaction: 3, payload: Data("ABC".utf8))))
+            _ = try await camera.connect(guid: Data(0...15))
+            let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: root)), target = QueueDestinationProbe()
+            let began = expectation(description: "publication boundary")
+            await target.hold(began, finishAfterCancellation: committed)
+            _ = try await queue.configureDestination(target)
+            let taskID = await queue.enqueue(try sampleInfo(3), byDate: false, dayKey: 0, deferred: false)
+            await fulfillment(of: [began], timeout: 3)
+            let stopped = Task { await queue.stop() }
+            try await waitUntil("stop requested") { await queue.snapshot().paused }
+            await target.release(); await stopped.value
+            let state = await queue.snapshot()
+            XCTAssertEqual(state.rows.first?.status, committed ? "COMPLETED" : "CANCELLED")
+            XCTAssertEqual(state.completedOriginalRevision, committed ? 1 : 0)
+            let retained = await queue.savedFile(try XCTUnwrap(taskID))
+            XCTAssertEqual(try Data(contentsOf: try XCTUnwrap(retained?.url)), Data("ABC".utf8))
+            await camera.abort()
+        }
+    }
+
+    func testOriginalQueueManualDuplicatesReuseFirstExportInFIFOOrder() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let camera = apCamera(command: FakeCameraConnection(bytes: apOpeningReplies()
+            + response(transaction: 3, payload: Data("ABC".utf8))
+            + response(transaction: 4, payload: Data("DEF".utf8))))
+        _ = try await camera.connect(guid: Data(0...15))
+        var payload = Data(repeating: 0, count: 52)
+        payload[0] = 1; payload[2] = 1; payload[4] = 1; payload[5] = 0x38; payload[8] = 3
+        payload.append(hex("0B730061006D0070006C0065002E004A0050004700000000"))
+        let info = try XCTUnwrap(PtpIPChannel.objectInfo(handle: 7, payload: payload))
+        let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: root))
+        let firstID = await queue.enqueue(info, byDate: false, dayKey: 0, deferred: true)
+        let secondID = await queue.enqueue(info, byDate: false, dayKey: 0, deferred: true)
+        let first = try XCTUnwrap(firstID)
+        let second = try XCTUnwrap(secondID)
+        let completed = expectation(description: "two originals completed")
+        let observer = Task {
+            for await snapshot in queue.updates {
+                if snapshot.rows.count == 2 && snapshot.rows.allSatisfy({ $0.status == "COMPLETED" }) {
+                    completed.fulfill(); break
+                }
+            }
+        }
+        defer { observer.cancel() }
+        await queue.start()
+        await fulfillment(of: [completed], timeout: 3)
+        await queue.stop()
+        let firstFile = await queue.savedFile(first)
+        let secondFile = try await queue.prepareSavedFile(second)
+        let firstURL = try XCTUnwrap(firstFile?.url)
+        let secondURL = try XCTUnwrap(secondFile?.url)
+        XCTAssertEqual(try Data(contentsOf: firstURL), Data("ABC".utf8))
+        XCTAssertEqual(try Data(contentsOf: secondURL), Data("ABC".utf8))
+        XCTAssertEqual(secondURL.lastPathComponent, "sample.JPG")
+        XCTAssertEqual(secondURL.deletingLastPathComponent().lastPathComponent, "Shared Originals")
+        let savedSnapshot = await queue.snapshot()
+        XCTAssertEqual(savedSnapshot.completedOriginalRevision, 2)
+        let originalIndex = try await queue.originals(since: -1, rescan: true)
+        XCTAssertEqual(originalIndex.entries.count, 1)
+        XCTAssertFalse(savedSnapshot.rows[0].skipped)
+        XCTAssertNotNil(savedSnapshot.rows[0].elapsedMs)
+        XCTAssertTrue(savedSnapshot.rows[1].skipped)
+        XCTAssertNil(savedSnapshot.rows[1].elapsedMs)
+        XCTAssertEqual(savedSnapshot.rows[1].downloadMBps, 0)
+        let removedHistory = await queue.removeTask(first)
+        XCTAssertTrue(removedHistory)
+        XCTAssertEqual(try Data(contentsOf: firstURL), Data("ABC".utf8)) // removing a card never deletes its export
+        await queue.clearTerminal()
+        let retainedIndex = try await queue.originals(since: -1, rescan: false)
+        XCTAssertEqual(retainedIndex.entries, originalIndex.entries)
+        let emptyHistory = await queue.snapshot()
+        XCTAssertTrue(emptyHistory.rows.isEmpty); XCTAssertEqual(emptyHistory.completedOriginalRevision, 2)
+        await camera.abort()
+    }
+
+    func testDestinationCommitFencesNewAdmissionAndStartsExactlyOnceWithSuccessOrOldTargetOnFailure() async throws {
+        for fail in [false, true] {
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: root) }
+            let wire = FakeCameraConnection(bytes: apOpeningReplies() + response(transaction: 3, payload: Data("ABC".utf8)))
+            let camera = apCamera(command: wire); _ = try await camera.connect(guid: Data(0...15))
+            let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: root))
+            let old = QueueDestinationProbe(), next = QueueDestinationProbe()
+            _ = try await queue.configureDestination(old)
+            let began = expectation(description: "destination commit held")
+            let change = DestinationChangeProbe(next, began: began, fail: fail)
+            let configuring = Task { try await queue.configureDestination(change) }
+            await fulfillment(of: [began], timeout: 3)
+            let count = wire.sent().count
+            _ = await queue.enqueue(try sampleInfo(3), byDate: false, dayKey: 0, deferred: false)
+            await queue.start() // Repeated explicit start still results in one worker.
+            let during = await queue.snapshot()
+            XCTAssertFalse(during.running); XCTAssertEqual(during.rows.first?.status, "WAITING")
+            XCTAssertEqual(wire.sent().count, count); XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+            let rejected = try await queue.configureDestination(QueueDestinationProbe()); XCTAssertFalse(rejected)
+            await change.release()
+            do { let applied = try await configuring.value; XCTAssertFalse(fail); XCTAssertTrue(applied) }
+            catch { XCTAssertTrue(fail) }
+            try await waitUntil("admitted task finished") { let s = await queue.snapshot(); return !s.running && s.rows.first?.status == "COMPLETED" }
+            let oldCalls = await old.calls(), newCalls = await next.calls()
+            XCTAssertEqual(oldCalls.count, fail ? 1 : 0); XCTAssertEqual(newCalls.count, fail ? 0 : 1)
+            await camera.abort()
+        }
+    }
+
+    func testPauseAndStopDuringDestinationCommitWithdrawTheQueuedStartWithoutDroppingTasks() async throws {
+        for stop in [false, true] {
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: root) }
+            let wire = FakeCameraConnection(bytes: apOpeningReplies() + response(transaction: 3, payload: Data("ABC".utf8)))
+            let camera = apCamera(command: wire); _ = try await camera.connect(guid: Data(0...15))
+            let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: root)), target = QueueDestinationProbe()
+            let began = expectation(description: "paused configuration held"), change = DestinationChangeProbe(target, began: began)
+            let configuring = Task { try await queue.configureDestination(change) }
+            await fulfillment(of: [began], timeout: 3)
+            _ = await queue.enqueue(try sampleInfo(3), byDate: false, dayKey: 0, deferred: false)
+            if stop { await queue.stop() } else { await queue.pauseAfterCurrent() }
+            let count = wire.sent().count
+            await change.release(); let applied = try await configuring.value; XCTAssertTrue(applied)
+            let paused = await queue.snapshot()
+            // The destination fence prevented a run from starting: idle pause is intentionally a no-op.
+            XCTAssertFalse(paused.running); XCTAssertFalse(paused.paused); XCTAssertEqual(paused.rows.first?.status, "WAITING")
+            XCTAssertEqual(wire.sent().count, count)
+            await queue.start()
+            try await waitUntil("resumed new target") { let s = await queue.snapshot(); return !s.running && s.rows.first?.status == "COMPLETED" }
+            let calls = await target.calls(); XCTAssertEqual(calls.count, 1)
+            await camera.abort()
+        }
+    }
+
+    func testDestinationCancellationBeforeCommitKeepsOldTargetButAfterCommitCannotUndoIt() async throws {
+        for committed in [false, true] {
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: root) }
+            let wire = FakeCameraConnection(bytes: apOpeningReplies() + response(transaction: 3, payload: Data("ABC".utf8)))
+            let camera = apCamera(command: wire); _ = try await camera.connect(guid: Data(0...15))
+            let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: root))
+            let old = QueueDestinationProbe(), next = QueueDestinationProbe(); _ = try await queue.configureDestination(old)
+            let began = expectation(description: "cancel configuration held")
+            let change = DestinationChangeProbe(next, began: began, commitDespiteCancellation: committed)
+            let configuring = Task { try await queue.configureDestination(change) }
+            await fulfillment(of: [began], timeout: 3)
+            await queue.pauseAfterCurrent()
+            _ = await queue.enqueue(try sampleInfo(3), byDate: false, dayKey: 0, deferred: true)
+            await queue.start() // An explicit start after pause must resume, even while commit is suspended.
+            configuring.cancel(); await change.release()
+            do { let applied = try await configuring.value; XCTAssertTrue(committed); XCTAssertTrue(applied) }
+            catch { XCTAssertFalse(committed); XCTAssertTrue(error is CancellationError) }
+            try await waitUntil("cancellation boundary target used") { let s = await queue.snapshot(); return !s.running && s.rows.first?.status == "COMPLETED" }
+            let oldCalls = await old.calls(), newCalls = await next.calls()
+            XCTAssertEqual(oldCalls.count, committed ? 0 : 1); XCTAssertEqual(newCalls.count, committed ? 1 : 0)
+            await camera.abort()
+        }
+    }
+
+    func testStaleDestinationValidationCannotOverrideAnInterveningCommittedChange() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let wire = FakeCameraConnection(bytes: apOpeningReplies() + response(transaction: 3, payload: Data("ABC".utf8)))
+        let camera = apCamera(command: wire); _ = try await camera.connect(guid: Data(0...15))
+        let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: root))
+        let stale = QueueDestinationProbe(), next = QueueDestinationProbe(), began = expectation(description: "old validation held")
+        await stale.holdValidation(began)
+        let validating = Task { try await queue.configureDestination(stale) }
+        await fulfillment(of: [began], timeout: 3)
+        let applied = try await queue.configureDestination(DestinationChangeProbe(next)); XCTAssertTrue(applied)
+        await stale.releaseValidation()
+        let oldApplied = try await validating.value; XCTAssertFalse(oldApplied)
+        _ = await queue.enqueue(try sampleInfo(3), byDate: false, dayKey: 0, deferred: false)
+        try await waitUntil("only new target used") { let s = await queue.snapshot(); return !s.running && s.rows.first?.status == "COMPLETED" }
+        let oldCalls = await stale.calls(), newCalls = await next.calls()
+        XCTAssertTrue(oldCalls.isEmpty); XCTAssertEqual(newCalls.count, 1)
+        await camera.abort()
+    }
+
+    func testDestinationChangeIsRejectedWithoutCommittingWhileAnOriginalIsPublishing() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let camera = apCamera(command: FakeCameraConnection(bytes: apOpeningReplies() + response(transaction: 3, payload: Data("ABC".utf8))))
+        _ = try await camera.connect(guid: Data(0...15))
+        let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: root)), target = QueueDestinationProbe()
+        let began = expectation(description: "active original held"); await target.hold(began)
+        _ = try await queue.configureDestination(target)
+        _ = await queue.enqueue(try sampleInfo(3), byDate: false, dayKey: 0, deferred: false)
+        await fulfillment(of: [began], timeout: 3)
+        let change = DestinationChangeProbe(QueueDestinationProbe())
+        let applied = try await queue.configureDestination(change); XCTAssertFalse(applied)
+        let commits = await change.commits(); XCTAssertEqual(commits, 0)
+        await target.release()
+        try await waitUntil("old publication finished") { let s = await queue.snapshot(); return !s.running && s.rows.first?.status == "COMPLETED" }
+        await camera.abort()
+    }
+
+    @MainActor func testDestinationDefaultsAndExplicitSandboxNeverReadOrInferAProviderGrant() async throws {
+        let suite = "destination-test-\(UUID().uuidString)", defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let preferences = OriginalDestinationPreferences(defaults: defaults)
+        XCTAssertEqual(preferences.read(), .sandbox)
+        for explicit in [false, true] {
+            if explicit { XCTAssertTrue(preferences.save(.sandbox)) }
+            let restored = try await preferences.restore { XCTFail("Sandbox choice must not access a remembered grant"); throw CameraStreamError.closed }
+            XCTAssertNil(restored.destination); XCTAssertNil(restored.provider); XCTAssertNil(restored.failure)
+            XCTAssertEqual(restored.selected, .sandbox)
+            if !explicit { XCTAssertNil(defaults.object(forKey: OriginalDestinationPreferences.key)) }
+        }
+        XCTAssertTrue(preferences.save(.provider))
+        XCTAssertEqual(OriginalDestinationPreferences(defaults: defaults).read(), .provider)
+        XCTAssertNil(defaults.object(forKey: TransferPreferencesStore.key))
+        XCTAssertNil(defaults.object(forKey: BrowsePreferencesStore.key))
+    }
+
+    @MainActor func testInvalidDestinationPreferencesPreserveBytesAndRestoreAnExplicitErrorInsteadOfSandbox() async throws {
+        let suite = "destination-test-\(UUID().uuidString)", defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let preferences = OriginalDestinationPreferences(defaults: defaults)
+        let documents: [Any] = ["provider", Data(), Data(repeating: 1, count: 1025),
+            Data("{\"version\":2,\"target\":\"provider\"}".utf8),
+            Data("{\"version\":1,\"target\":\"unknown\"}".utf8),
+            Data("{\"version\":1,\"target\":true}".utf8)]
+        for document in documents {
+            defaults.set(document, forKey: OriginalDestinationPreferences.key)
+            XCTAssertNil(preferences.read()); XCTAssertFalse(preferences.save(.sandbox)); XCTAssertFalse(preferences.save(.provider))
+            let restored = try await preferences.restore { XCTFail("Invalid preference must not infer a directory"); throw CameraStreamError.closed }
+            XCTAssertNil(restored.selected); XCTAssertNil(restored.provider); XCTAssertNotNil(restored.failure)
+            let blocked = try XCTUnwrap(restored.destination)
+            do { try await blocked.validateSelection(); XCTFail("Unavailable target must reject execution") } catch {}
+            do { _ = try await blocked.originals(since: -1, rescan: true); XCTFail("Not an empty index") } catch {}
+            do { _ = try await blocked.originalData(locator: "old"); XCTFail("Not sandbox data") } catch {}
+            do { _ = try await blocked.originalRawPreviewData(locator: "old"); XCTFail("Not a RAW miss") } catch {}
+            do { _ = try await blocked.originalExif(locator: "old"); XCTFail("Not an EXIF miss") } catch {}
+            if let bytes = document as? Data { XCTAssertEqual(defaults.data(forKey: OriginalDestinationPreferences.key), bytes) }
+            else { XCTAssertEqual(defaults.string(forKey: OriginalDestinationPreferences.key), "provider") }
+        }
+    }
+
+    @MainActor func testRestoredProviderIsFreshPerConnectionAndQueueUsesItBeforeAnyCameraIO() async throws {
+        let suite = "destination-test-\(UUID().uuidString)", defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let target = root.appendingPathComponent("provider"), bookmark = root.appendingPathComponent("grant")
+        try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+        try Data("ABC".utf8).write(to: target.appendingPathComponent("sample.JPG"))
+        try Data([1]).write(to: bookmark)
+        let grant = PageDirectoryGrant(target), directory = ScopedDirectoryStore(bookmarkFile: bookmark, access: grant)
+        let preferences = OriginalDestinationPreferences(defaults: defaults); XCTAssertTrue(preferences.save(.provider))
+        let first = try await preferences.restore { directory }, second = try await preferences.restore { directory }
+        let firstProvider = try XCTUnwrap(first.provider), secondProvider = try XCTUnwrap(second.provider)
+        XCTAssertFalse(firstProvider === secondProvider); XCTAssertNil(first.failure); XCTAssertEqual(first.selected, .provider)
+        let wire = FakeCameraConnection(bytes: Data()), camera = apCamera(command: wire), sandbox = root.appendingPathComponent("app")
+        let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: sandbox), destination: first.destination)
+        _ = await queue.enqueue(try sampleInfo(3), byDate: false, dayKey: 0, deferred: false)
+        try await waitUntil("restored existing file") { let s = await queue.snapshot(); return !s.running && s.rows.first?.status == "COMPLETED" }
+        let snapshot = await queue.snapshot(); XCTAssertTrue(try XCTUnwrap(snapshot.rows.first).skipped)
+        XCTAssertTrue(wire.sent().isEmpty); XCTAssertFalse(FileManager.default.fileExists(atPath: sandbox.path))
+        XCTAssertEqual(grant.starts, grant.stops)
+        try await directory.forget()
+        do { try await firstProvider.validateSelection(); XCTFail("Restored owner must not outlive its grant") } catch {}
+    }
+
+    @MainActor func testMissingRestoredGrantFailsBeforeNetworkAndCanBeExplicitlyReplacedAndRetried() async throws {
+        let suite = "destination-test-\(UUID().uuidString)", defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let target = root.appendingPathComponent("provider"), bookmark = root.appendingPathComponent("missing-grant")
+        try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+        try Data("ABC".utf8).write(to: target.appendingPathComponent("sample.JPG"))
+        let directory = ScopedDirectoryStore(bookmarkFile: bookmark, access: PageDirectoryGrant(target))
+        let preferences = OriginalDestinationPreferences(defaults: defaults); XCTAssertTrue(preferences.save(.provider))
+        let restored = try await preferences.restore { directory }
+        XCTAssertNotNil(restored.failure); XCTAssertEqual(restored.selected, .provider); XCTAssertNil(restored.provider)
+        let wire = FakeCameraConnection(bytes: Data()), camera = apCamera(command: wire), sandbox = root.appendingPathComponent("app")
+        let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: sandbox), destination: restored.destination)
+        let taskID = await queue.enqueue(try sampleInfo(3), byDate: false, dayKey: 0, deferred: false), id = try XCTUnwrap(taskID)
+        try await waitUntil("failed closed") { let s = await queue.snapshot(); return !s.running && s.rows.first?.status == "FAILED" }
+        let failed = await queue.snapshot(); XCTAssertNotNil(failed.rows.first?.error)
+        XCTAssertTrue(wire.sent().isEmpty); XCTAssertFalse(FileManager.default.fileExists(atPath: sandbox.path))
+        XCTAssertEqual(preferences.read(), .provider); XCTAssertFalse(FileManager.default.fileExists(atPath: bookmark.path))
+        let change = try await ProviderDirectoryChange.prepare(target, directory: directory)
+        let applied = try await queue.configureDestination(change); XCTAssertTrue(applied)
+        _ = await queue.retry(id); await queue.start()
+        try await waitUntil("explicit directory recovery") { let s = await queue.snapshot(); return !s.running && s.rows.first?.status == "COMPLETED" }
+        let recovered = await queue.snapshot(); XCTAssertTrue(try XCTUnwrap(recovered.rows.first).skipped)
+        XCTAssertTrue(wire.sent().isEmpty); XCTAssertFalse(FileManager.default.fileExists(atPath: sandbox.path))
+    }
+
+    @MainActor func testRestorationCancellationIsNotConvertedIntoARecoverableDestinationFailure() async throws {
+        let suite = "destination-test-\(UUID().uuidString)", defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let preferences = OriginalDestinationPreferences(defaults: defaults)
+        for provider in [false, true] {
+            XCTAssertTrue(preferences.save(provider ? .provider : .sandbox))
+            let operation = Task {
+                withUnsafeCurrentTask { $0?.cancel() }
+                return try await preferences.restore { XCTFail("Cancelled restore must not touch a grant"); throw CameraStreamError.closed }
+            }
+            do { _ = try await operation.value; XCTFail("Cancelled") } catch { XCTAssertTrue(error is CancellationError) }
+            XCTAssertEqual(preferences.read(), provider ? .provider : .sandbox)
+        }
+        XCTAssertTrue(preferences.save(.provider))
+        let duringFactory = Task {
+            try await preferences.restore {
+                withUnsafeCurrentTask { $0?.cancel() }
+                throw CameraStreamError.closed
+            }
+        }
+        do { _ = try await duringFactory.value; XCTFail("Cancellation after selection still escapes") }
+        catch { XCTAssertTrue(error is CancellationError) }
+        do { _ = try await preferences.restore { throw CancellationError() }; XCTFail("Explicit cancellation must also escape") }
+        catch { XCTAssertTrue(error is CancellationError) }
+    }
+
+    func testRealPreparedDirectoryBecomesQueueTargetAndServesExistingOriginalWithoutNetwork() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let target = root.appendingPathComponent("provider"), sandbox = root.appendingPathComponent("app")
+        try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+        let original = target.appendingPathComponent("sample.JPG"), bookmark = root.appendingPathComponent("grant")
+        try Data("ABC".utf8).write(to: original)
+        let grant = PageDirectoryGrant(target), directory = ScopedDirectoryStore(bookmarkFile: bookmark, access: grant)
+        let wire = FakeCameraConnection(bytes: Data()), camera = apCamera(command: wire)
+        let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: sandbox)), old = QueueDestinationProbe()
+        _ = try await queue.configureDestination(old)
+        let change = try await ProviderDirectoryChange.prepare(target, directory: directory)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: bookmark.path))
+        let applied = try await queue.configureDestination(change); XCTAssertTrue(applied)
+        XCTAssertEqual(try Data(contentsOf: bookmark), Data([1]))
+        let taskID = await queue.enqueue(try sampleInfo(3), byDate: false, dayKey: 0, deferred: false)
+        let id = try XCTUnwrap(taskID)
+        try await waitUntil("prepared provider selected by real queue") {
+            let state = await queue.snapshot(); return !state.running && state.rows.first?.status == "COMPLETED"
+        }
+        let state = await queue.snapshot(), calls = await old.calls()
+        XCTAssertTrue(try XCTUnwrap(state.rows.first).skipped); XCTAssertTrue(calls.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: sandbox.path))
+        let shared = try await queue.prepareSavedFile(id), saved = try XCTUnwrap(shared)
+        XCTAssertEqual(try Data(contentsOf: saved.url), Data("ABC".utf8))
+        XCTAssertEqual(try Data(contentsOf: original), Data("ABC".utf8))
+        XCTAssertEqual(grant.starts, grant.stops); XCTAssertTrue(wire.sent().isEmpty)
+    }
+
+    func testExistingProviderCopyIsSkippedOfflineAndSharedOnDemandFromTheSameDateBucket() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let target = root.appendingPathComponent("provider"), sandbox = root.appendingPathComponent("app")
+        let folder = "ZT2026-01-02", date = target.appendingPathComponent(folder)
+        try FileManager.default.createDirectory(at: date, withIntermediateDirectories: true)
+        let original = date.appendingPathComponent("SAMPLE (2).jpg")
+        try Data("ABC".utf8).write(to: original)
+        try Data("BAD".utf8).write(to: target.appendingPathComponent("sample.JPG"))
+        let bookmark = root.appendingPathComponent("grant"); try Data([1]).write(to: bookmark)
+        let grant = PageDirectoryGrant(target)
+        let destination = ProviderOriginalStore(directory: ScopedDirectoryStore(bookmarkFile: bookmark, access: grant))
+        let wire = FakeCameraConnection(bytes: Data()), camera = apCamera(command: wire)
+        let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: sandbox))
+        _ = try await queue.configureDestination(destination)
+        let taskID = await queue.enqueue(try sampleInfo(3, captureDate: "20260102T123456"), byDate: true, dayKey: 0, deferred: false)
+        let id = try XCTUnwrap(taskID)
+        try await waitUntil("existing original completed without connecting") { let s = await queue.snapshot(); return !s.running && s.rows.first?.status == "COMPLETED" }
+        let state = await queue.snapshot()
+        XCTAssertTrue(try XCTUnwrap(state.rows.first).skipped)
+        XCTAssertEqual(state.rows.first?.downloaded, 3); XCTAssertNil(state.rows.first?.elapsedMs)
+        XCTAssertTrue(wire.sent().isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: sandbox.path)) // No eager duplicate, even for sharing.
+        let saved = try await queue.prepareSavedFile(id)
+        let result = try XCTUnwrap(saved)
+        XCTAssertEqual(try Data(contentsOf: result.url), Data("ABC".utf8))
+        XCTAssertEqual(result.url.lastPathComponent, "SAMPLE (2).jpg")
+        XCTAssertEqual(result.url.deletingLastPathComponent().lastPathComponent, "Shared Originals")
+        let again = try await queue.prepareSavedFile(id)
+        XCTAssertEqual(again?.url, result.url)
+        XCTAssertEqual(try Data(contentsOf: original), Data("ABC".utf8))
+        XCTAssertEqual(grant.starts, grant.stops); XCTAssertTrue(wire.sent().isEmpty)
+        await queue.clearTerminal()
+        let cleared = try await queue.prepareSavedFile(id); XCTAssertNil(cleared)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: original.path))
+    }
+
+    func testExistingFileWithWrongSizeStillDownloadsAndNeverOverwritesIt() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try Data([9]).write(to: root.appendingPathComponent("sample.JPG"))
+        let wire = FakeCameraConnection(bytes: apOpeningReplies() + response(transaction: 3, payload: Data("ABC".utf8)))
+        let camera = apCamera(command: wire); _ = try await camera.connect(guid: Data(0...15))
+        let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: root))
+        let id = await queue.enqueue(try sampleInfo(3), byDate: false, dayKey: 0, deferred: false)
+        try await waitUntil("different size downloaded") { let s = await queue.snapshot(); return !s.running && s.rows.first?.status == "COMPLETED" }
+        let state = await queue.snapshot(); XCTAssertFalse(try XCTUnwrap(state.rows.first).skipped)
+        let actualID = try XCTUnwrap(id)
+        let actual = await queue.savedFile(actualID)
+        XCTAssertEqual(actual?.url.lastPathComponent, "sample (1).JPG")
+        XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent("sample.JPG")), Data([9]))
+        await camera.abort()
+    }
+
+    func testDeletedExistingOriginalFailsSharingWithoutChangingCompletedTaskOrFetchingCamera() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let original = root.appendingPathComponent("sample.JPG"); try Data("ABC".utf8).write(to: original)
+        let wire = FakeCameraConnection(bytes: Data()), camera = apCamera(command: wire)
+        let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: root))
+        let taskID = await queue.enqueue(try sampleInfo(3), byDate: false, dayKey: 0, deferred: false)
+        let id = try XCTUnwrap(taskID)
+        try await waitUntil("existing task finished") { let s = await queue.snapshot(); return !s.running && s.rows.first?.status == "COMPLETED" }
+        try FileManager.default.removeItem(at: original)
+        do { _ = try await queue.prepareSavedFile(id); XCTFail("Deleted original") } catch {}
+        let state = await queue.snapshot()
+        XCTAssertEqual(state.rows.first?.status, "COMPLETED"); XCTAssertEqual(state.rows.first?.skipped, true)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: root.appendingPathComponent("Shared Originals").path), [])
+        XCTAssertTrue(wire.sent().isEmpty)
+    }
+
+    func testNextQueueRunRescansRemovedOriginalInsteadOfReusingAnOldLookup() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let original = root.appendingPathComponent("sample.JPG"); try Data("OLD".utf8).write(to: original)
+        let wire = FakeCameraConnection(bytes: apOpeningReplies() + response(transaction: 3, payload: Data("NEW".utf8)))
+        let camera = apCamera(command: wire); _ = try await camera.connect(guid: Data(0...15))
+        let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: root))
+        _ = await queue.enqueue(try sampleInfo(3), byDate: false, dayKey: 0, deferred: false)
+        try await waitUntil("first run finished") { let s = await queue.snapshot(); return !s.running && s.rows.first?.status == "COMPLETED" }
+        try FileManager.default.removeItem(at: original)
+        _ = await queue.enqueue(try sampleInfo(3), byDate: false, dayKey: 0, deferred: false)
+        try await waitUntil("second run downloaded") { let s = await queue.snapshot(); return !s.running && s.rows.count == 2 && s.rows.last?.status == "COMPLETED" }
+        let state = await queue.snapshot()
+        XCTAssertTrue(state.rows[0].skipped); XCTAssertFalse(state.rows[1].skipped)
+        XCTAssertEqual(try Data(contentsOf: original), Data("NEW".utf8))
+        await camera.abort()
+    }
+
+    func testStationBaselineUsesTransactionZeroAndNeverProbesDeviceInfoOnStorageSuccess() async throws {
+        let wire = FakeCameraConnection(bytes: stationAck() + response(transaction: 0) + response(transaction: 1)
+            + response(transaction: 2, payload: hex("0100000001000100")))
+        let camera = stationCamera(command: wire)
+        let device = try await camera.connect(guid: Data("0123456789abcdef".utf8))
+        XCTAssertNil(device)
+        let stores = try await camera.storageIDs()
+        XCTAssertEqual(stores, [0x10001])
+        XCTAssertEqual(Array(wire.sent().dropFirst()), [
+            hex("16000000060000000100000002100000000001000000"),
+            hex("1200000006000000010000001C9401000000"),
+            hex("120000000600000001000000041002000000"),
+        ])
+        await camera.abort()
+    }
+
+    func testStationCompatibilityValidatesFirstMiddleLastBeforeReadyAndReusesSingleCardHandles() async throws {
+        let wire = FakeCameraConnection(bytes: stationAck() + response(transaction: 0) + response(transaction: 1)
+            + response(transaction: 2, payload: hex("0100000001000100"))
+            + response(transaction: 3, code: 0x2005)
+            + response(transaction: 4, payload: hex("03000000010000000200000003000000"))
+            + response(transaction: 5, payload: Data(repeating: 0, count: 53))
+            + response(transaction: 6, payload: Data(repeating: 0, count: 53))
+            + response(transaction: 7, payload: Data(repeating: 0, count: 53)))
+        let camera = stationCamera(command: wire)
+        _ = try await camera.connect(guid: Data("0123456789abcdef".utf8),
+            stationOptions: StationConnectionOptions(exploreAlbumAccess: true))
+        let direct = await camera.usesDirectObjectReads(); XCTAssertFalse(direct)
+        let before = wire.sent()
+        let handles = try await camera.objectHandles(storageID: 0x10001)
+        XCTAssertEqual(handles, [1, 2, 3]); XCTAssertEqual(wire.sent(), before)
+        XCTAssertEqual(stationOperations(wire), [0x1002, 0x941C, 0x1004, 0x1001, 0x1007, 0x1008, 0x1008, 0x1008])
+        await camera.abort()
+    }
+
+    func testStationDirectCapabilityRequiresBothSizeAndSuccessfulNonemptyPartialSample() async throws {
+        for valid in [true, false] {
+            let wire = FakeCameraConnection(bytes: stationAck() + response(transaction: 0) + response(transaction: 1)
+                + response(transaction: 2, payload: hex("0100000001000100"))
+                + response(transaction: 3, code: 0x2005)
+                + response(transaction: 4, payload: hex("0100000001000029"))
+                + response(transaction: 5, code: 0x200F)
+                + response(transaction: 6, code: 0x200A)
+                + response(transaction: 7, payload: hex("0010000000000000"))
+                + response(transaction: 8, code: valid ? 0x2001 : 0x200F, payload: valid ? hex("FFD8FF") : nil)
+                + (valid ? Data() : response(transaction: 9, code: 0x2005)))
+            let camera = stationCamera(command: wire)
+            do {
+                _ = try await camera.connect(guid: Data("0123456789abcdef".utf8),
+                    stationOptions: StationConnectionOptions(exploreAlbumAccess: true))
+                XCTAssertTrue(valid)
+            } catch {
+                XCTAssertFalse(valid); XCTAssertTrue(error is CameraStationError)
+            }
+            let direct = await camera.usesDirectObjectReads(); XCTAssertEqual(direct, valid)
+            XCTAssertFalse(stationOperations(wire).contains(0x1009), "Capability probe must never download an original")
+            await camera.abort()
+            let after = await camera.usesDirectObjectReads(); XCTAssertFalse(after)
+        }
+    }
+
+    func testFailedStationApplicationModeProbeRollsBackAndNeverBecomesReady() async throws {
+        let wire = FakeCameraConnection(bytes: stationAck() + response(transaction: 0) + response(transaction: 1)
+            + response(transaction: 2, code: 0x200F) + response(transaction: 3, code: 0x2005)
+            + response(transaction: 4) + response(transaction: 5)
+            + response(transaction: 6, payload: hex("0100000001000100"))
+            + response(transaction: 7, payload: hex("00000000")) + response(transaction: 8))
+        let camera = stationCamera(command: wire)
+        do {
+            _ = try await camera.connect(guid: Data("0123456789abcdef".utf8),
+                stationOptions: StationConnectionOptions(exploreAlbumAccess: true))
+            XCTFail("Empty sample must not imply album access")
+        } catch { XCTAssertTrue(error is CameraStationError) }
+        XCTAssertEqual(stationOperations(wire).suffix(5), [0x9435, 0x941C, 0x1004, 0x1007, 0x9435])
+        XCTAssertEqual(wire.sent().last, hex("16000000060000000100000035940800000000000000"))
+        let state = await camera.snapshot(); XCTAssertEqual(state.phase, .closed)
+        await camera.abort()
+    }
+
+    private func stationOperations(_ wire: FakeCameraConnection) -> [UInt16] {
+        wire.sent().dropFirst().filter { $0.count >= 14 && $0[4] == 6 }
+            .map { UInt16($0[12]) | UInt16($0[13]) << 8 }
+    }
+
+    private func stationDirectOpeningReplies() -> Data {
+        stationAck() + response(transaction: 0) + response(transaction: 1)
+            + response(transaction: 2, payload: hex("0100000001000100"))
+            + response(transaction: 3, code: 0x2005)
+            + response(transaction: 4, payload: hex("0100000001000029"))
+            + response(transaction: 5, code: 0x200F) + response(transaction: 6, code: 0x200A)
+            + response(transaction: 7, payload: hex("0010000000000000"))
+            + response(transaction: 8, payload: hex("FFD8FF"))
+    }
+
+    func testDirectCatalogUsesSharedHeaderNameAndPreservesGoodRowsAfterObjectFailure() async throws {
+        let header = hex("FFD8") + Data("DSC_0001.JPG".utf8)
+        let wire = FakeCameraConnection(bytes: stationDirectOpeningReplies()
+            + response(transaction: 9, payload: hex("0010000000000000")) + response(transaction: 10, payload: header)
+            + response(transaction: 11, payload: hex("0100000001000100"))
+            + response(transaction: 12, payload: hex("0100000001000029")) + response(transaction: 13, code: 0x200F))
+        let camera = stationCamera(command: wire)
+        _ = try await camera.connect(guid: Data("0123456789abcdef".utf8),
+            stationOptions: StationConnectionOptions(exploreAlbumAccess: true))
+        let catalog = CameraCatalog(source: camera, stationMode: true)
+        let complete = try await catalog.refresh()
+        XCTAssertTrue(complete.metadataComplete); XCTAssertEqual(complete.files.count, 1)
+        XCTAssertEqual(complete.files.first?.fileName, "DSC_0001.JPG")
+        XCTAssertEqual(complete.files.first?.size, 4096)
+        XCTAssertEqual(complete.storageIDs, [0x10001])
+        XCTAssertEqual(Array(stationOperations(wire).suffix(2)), [0x9421, 0x9431])
+        let partial = try await catalog.refresh()
+        XCTAssertFalse(partial.metadataComplete)
+        let retained = await catalog.snapshot()
+        XCTAssertEqual(retained?.files.first?.fileName, complete.files.first?.fileName)
+        XCTAssertEqual(retained?.publicationRevision, complete.publicationRevision)
+        await catalog.close(); await camera.abort()
+    }
+
+    func testDirectOriginalForcesSharedPartialPolicyEvenOnHighThroughputPage() async throws {
+        let original = hex("FFD8FFD9")
+        let wire = FakeCameraConnection(bytes: stationDirectOpeningReplies() + response(transaction: 9, payload: original))
+        let camera = stationCamera(command: wire)
+        _ = try await camera.connect(guid: Data("0123456789abcdef".utf8),
+            stationOptions: StationConnectionOptions(exploreAlbumAccess: true))
+        var received = Data()
+        let stats = try await camera.download(handle: 2, declaredSize: 4, highThroughput: true) { received.append($0) }
+        XCTAssertEqual(received, original); XCTAssertEqual(stats.bytes, 4); XCTAssertEqual(stats.transferred, 4)
+        XCTAssertEqual(stationOperations(wire).last, 0x9431)
+        XCTAssertEqual(wire.sent().last, hex("2600000006000000010000003194090000000200000000000000000000000400000000000000"))
+        await camera.abort()
+    }
+
+    func testDirectOriginalUnsupportedFirstEmptyChunkUsesOnlySharedFullFallback() async throws {
+        let original = hex("FFD8FFD9")
+        let wire = FakeCameraConnection(bytes: stationDirectOpeningReplies()
+            + response(transaction: 9, code: 0x2005) + response(transaction: 10, payload: original))
+        let camera = stationCamera(command: wire)
+        _ = try await camera.connect(guid: Data("0123456789abcdef".utf8),
+            stationOptions: StationConnectionOptions(exploreAlbumAccess: true))
+        var received = Data()
+        _ = try await camera.download(handle: 2, declaredSize: 4, highThroughput: true) { received.append($0) }
+        XCTAssertEqual(received, original)
+        XCTAssertEqual(Array(stationOperations(wire).suffix(2)), [0x9431, 0x1009])
+        await camera.abort()
+    }
+
+    func testDirectResumeReadsOnlyRemainingBytesAndNeverFallsBackAfterUnsupportedResponse() async throws {
+        for rejected in [false, true] {
+            let tail = hex("FFD9")
+            let wire = FakeCameraConnection(bytes: stationDirectOpeningReplies()
+                + response(transaction: 9, code: rejected ? 0x2005 : 0x2001, payload: rejected ? nil : tail))
+            let camera = stationCamera(command: wire)
+            _ = try await camera.connect(guid: Data("0123456789abcdef".utf8),
+                stationOptions: StationConnectionOptions(exploreAlbumAccess: true))
+            var received = Data()
+            do {
+                let stats = try await camera.download(handle: 2, declaredSize: 4, resumeOffset: 2) { received.append($0) }
+                XCTAssertFalse(rejected); XCTAssertEqual(stats.bytes, 4); XCTAssertEqual(stats.transferred, 2)
+                XCTAssertEqual(received, tail)
+            } catch { XCTAssertTrue(rejected); XCTAssertTrue(error is CameraDownloadError) }
+            XCTAssertEqual(stationOperations(wire).last, 0x9431)
+            XCTAssertFalse(stationOperations(wire).contains(0x1009))
+            await camera.abort()
+        }
+    }
+
+    func testDirectOversizedChunkCannotBecomeASuccessfulOriginal() async throws {
+        let wire = FakeCameraConnection(bytes: stationDirectOpeningReplies()
+            + response(transaction: 9, payload: Data(repeating: 1, count: 5)))
+        let camera = stationCamera(command: wire)
+        _ = try await camera.connect(guid: Data("0123456789abcdef".utf8),
+            stationOptions: StationConnectionOptions(exploreAlbumAccess: true))
+        do {
+            _ = try await camera.download(handle: 2, declaredSize: 4) { _ in }
+            XCTFail("Bytes exceeding the requested direct range must not publish success")
+        } catch {}
+        XCTAssertFalse(stationOperations(wire).contains(0x1009))
+        await camera.abort()
+    }
+
+    func testStationWrongResponderStopsBeforeOpeningEventSocket() async throws {
+        let wire = FakeCameraConnection(bytes: stationAck())
+        let events = FakeCameraConnection(bytes: hex("0800000004000000"))
+        let camera = stationCamera(command: wire, event: events)
+        do {
+            _ = try await camera.connect(guid: Data("0123456789abcdef".utf8),
+                                         stationOptions: StationConnectionOptions(expectedResponderGUID: String(repeating: "f", count: 32)))
+            XCTFail("Expected wrong responder")
+        } catch {
+            guard case CameraStationError.unexpectedResponder = error else { return XCTFail("Unexpected \(error)") }
+        }
+        XCTAssertEqual(wire.sent().count, 1)
+        XCTAssertTrue(events.sent().isEmpty)
+        await camera.abort()
+    }
+
+    func testStationPairingPersistsAuthoritativeAckWithOrWithoutPacingEvent() async throws {
+        for pacing in [hex("0E00000008000000084000000000"), Data()] {
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+            defer { try? FileManager.default.removeItem(at: root) }
+            let profiles = try StationProfileStore(file: root.appendingPathComponent("identity.json"))
+            let wire = FakeCameraConnection(bytes: stationAck() + response(transaction: 0) + response(transaction: 1)
+                + response(transaction: 2, payload: hex("0100000001000100"))
+                + response(transaction: 3) + response(transaction: 4) + response(transaction: 5))
+            let events = FakeCameraConnection(bytes: hex("0800000004000000") + pacing, eof: true)
+            let camera = stationCamera(command: wire, event: events)
+            do {
+                _ = try await camera.connect(guid: profiles.identity,
+                    stationOptions: StationConnectionOptions(allowPairing: true, forceProfilePairing: true),
+                    hasPairingMarker: { try profiles.isPaired($0) }, onPairingAcknowledged: { try profiles.markPaired($0) })
+                XCTFail("Pairing must request a new connection, not return ready")
+            } catch {
+                guard case CameraStationError.pairingCompleted(let responder) = error else {
+                    await camera.abort(); return XCTFail("Unexpected \(error)")
+                }
+                XCTAssertTrue(try profiles.isPaired(responder))
+            }
+            XCTAssertEqual(Array(wire.sent().suffix(3)), [
+                hex("1200000006000000010000002B9503000000"),
+                hex("1600000006000000010000005A930400000001200000"),
+                hex("120000000600000001000000031005000000"),
+            ])
+            let state = await camera.snapshot()
+            XCTAssertEqual(state.phase, .closed)
+            await camera.abort()
+        }
+    }
+
+    func testStationRejectedPairingDoesNotWriteMarker() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let profiles = try StationProfileStore(file: root.appendingPathComponent("identity.json"))
+        let wire = FakeCameraConnection(bytes: stationAck() + response(transaction: 0) + response(transaction: 1)
+            + response(transaction: 2, payload: hex("0100000001000100"))
+            + response(transaction: 3) + response(transaction: 4, code: 0x2002))
+        let camera = stationCamera(command: wire)
+        do {
+            _ = try await camera.connect(guid: profiles.identity,
+                stationOptions: StationConnectionOptions(allowPairing: true, forceProfilePairing: true),
+                onPairingAcknowledged: { try profiles.markPaired($0) })
+            XCTFail("Expected pairing rejection")
+        } catch { XCTAssertTrue(error is CameraOperationError) }
+        XCTAssertFalse(try profiles.isPaired("00112233445566778899aabbccddeeff"))
+        await camera.abort()
+    }
+
+    func testStationIdentitySurvivesReloadAndCorruptionIsNotSilentlyReset() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent("identity.json")
+        let first = try StationProfileStore(file: file)
+        let second = try StationProfileStore(file: file)
+        XCTAssertEqual(first.identity, second.identity)
+        XCTAssertEqual(first.identity.count, 16)
+        try first.markPaired("00112233445566778899aabbccddeeff")
+        XCTAssertTrue(try second.isPaired("00112233445566778899aabbccddeeff"))
+        try Data("broken".utf8).write(to: file)
+        XCTAssertThrowsError(try StationProfileStore(file: file))
+        XCTAssertEqual(try Data(contentsOf: file), Data("broken".utf8))
+    }
+
+    func testAppleBlowfishMatchesCapturedAndroidNikonStageThree() throws {
+        let stage1 = hex("01DBE113EC44A17D6701E53A3C51A4DA3F")
+        let stage2 = hex("0229FA26805E3D94B9E4F2B3A8136AD516")
+        let response = try NikonGpsPairing.capturedResponse(stage1: stage1, stage2: stage2)
+        XCTAssertEqual(response, hex("03DBE113EC44A17D6753ADF179358A8323"))
+    }
+
+    func testLocationUsesCurrentUTCAndSharedFixedGeoBytes() throws {
+        let now = try XCTUnwrap(ISO8601DateFormatter().date(from: "2025-01-02T03:04:05Z"))
+        let location = CLLocation(coordinate: CLLocationCoordinate2D(latitude: 39.9042, longitude: -116.4074),
+            altitude: -12.5, horizontalAccuracy: 5, verticalAccuracy: 2, timestamp: now.addingTimeInterval(-30))
+        let payload = CameraLocationProvider.payload(for: location, now: now)
+        XCTAssertEqual(payload, hex("7F004E273619145774182C27004D0C00E907010203040500015747532D383400000000000000000000"))
+        // The GEO UTC is 03:04:05, not the cached fix's 03:03:35. No fabricated satellites.
+        XCTAssertEqual(payload?.count, 41)
+    }
+
+    func testLocationRejectsExpiredFixAndFallsBackWhenAltitudeInvalid() throws {
+        let now = Date(timeIntervalSince1970: 1_735_786_800)
+        func fix(age: Double, accuracy: Double = 5) -> CLLocation {
+            CLLocation(coordinate: CLLocationCoordinate2D(latitude: 0, longitude: 0), altitude: 500,
+                horizontalAccuracy: accuracy, verticalAccuracy: -1, timestamp: now.addingTimeInterval(-age))
+        }
+        XCTAssertNotNil(CameraLocationProvider.payload(for: fix(age: 120), now: now))
+        XCTAssertNil(CameraLocationProvider.payload(for: fix(age: 120.01), now: now))
+        XCTAssertNil(CameraLocationProvider.payload(for: fix(age: 0, accuracy: -1), now: now))
+        let payload = try XCTUnwrap(CameraLocationProvider.payload(for: fix(age: 1), now: now))
+        XCTAssertEqual(payload[13], 0x50); XCTAssertEqual(payload[14], 0); XCTAssertEqual(payload[15], 0)
+    }
+
+    func testDownloadProgressReportsActualFinalBytesWithoutDependingOnSlowClock() async throws {
+        let wire = FakeCameraConnection(bytes: apOpeningReplies() + response(transaction: 3, payload: Data([1, 2, 3])))
+        let camera = apCamera(command: wire)
+        _ = try await camera.connect(guid: Data(repeating: 1, count: 16))
+        var samples: [CameraDownloadProgress] = []
+        let result = try await camera.download(handle: 7, declaredSize: 3, onProgress: { samples.append($0) }) { _ in }
+        XCTAssertEqual(result.bytes, 3)
+        XCTAssertEqual(samples.last?.downloaded, 3)
+        XCTAssertEqual(samples.last?.total, 3)
+        await camera.abort()
+    }
+
+    func testDirectoryGrantBalancesScopeAndRefreshesStaleBookmark() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent("grant")
+        let access = FakeDirectoryAccess(url: root)
+        let store = ScopedDirectoryStore(bookmarkFile: file, access: access)
+        try await store.select(root)
+        access.stale = true
+        let name = try await store.displayName()
+        XCTAssertEqual(name, root.lastPathComponent)
+        XCTAssertEqual(access.starts, 2); XCTAssertEqual(access.stops, 2)
+        XCTAssertEqual(try Data(contentsOf: file), Data([2]))
+    }
+
+    func testDirectoryRevocationDoesNotResetBookmarkOrTouchDirectory() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent("grant")
+        let access = FakeDirectoryAccess(url: root)
+        let store = ScopedDirectoryStore(bookmarkFile: file, access: access)
+        try await store.select(root)
+        access.allowed = false
+        do { _ = try await store.displayName(); XCTFail("Expected revoked access") }
+        catch { guard case ExportDirectoryError.permissionLost = error else { return XCTFail("\(error)") } }
+        XCTAssertEqual(access.stops, 1)
+        XCTAssertEqual(try Data(contentsOf: file), Data([1]))
+        try await store.forget()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: root.path))
+    }
+
+    func testDirectoryOperationFailureStillReleasesGrant() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let access = FakeDirectoryAccess(url: root)
+        let store = ScopedDirectoryStore(bookmarkFile: root.appendingPathComponent("grant"), access: access)
+        try await store.select(root)
+        do {
+            let _: String = try await store.withDirectory { _ in throw CameraStreamError.closed }
+            XCTFail("Expected operation failure")
+        } catch { XCTAssertEqual(error as? CameraStreamError, .closed) }
+        XCTAssertEqual(access.starts, access.stops)
+    }
+
+    func testCatalogUsesSharedReverseOrderAndRetainsLastSnapshotOnFailure() async throws {
+        let source = FakeCatalogSource(infos: [1: try sampleInfo(1), 2: try sampleInfo(2)])
+        let catalog = CameraCatalog(source: source, stationMode: false)
+        let first = try await catalog.refresh()
+        XCTAssertEqual(first.files.map(\.handle), [2, 1])
+        XCTAssertTrue(first.metadataComplete)
+        await source.failEnumeration()
+        do { _ = try await catalog.refresh(); XCTFail("Enumeration failure must not publish empty") }
+        catch { XCTAssertTrue(error is CameraOperationError) }
+        let preserved = await catalog.snapshot()
+        XCTAssertEqual(preserved?.files.map(\.handle), [2, 1])
+    }
+
+    func testCatalogPartialMetadataDoesNotEraseCompleteSnapshot() async throws {
+        let source = FakeCatalogSource(infos: [1: try sampleInfo(1), 2: try sampleInfo(2)])
+        let catalog = CameraCatalog(source: source, stationMode: false)
+        _ = try await catalog.refresh()
+        await source.removeMetadata(2)
+        let partial = try await catalog.refresh()
+        XCTAssertFalse(partial.metadataComplete)
+        XCTAssertEqual(partial.files.map(\.handle), [1])
+        let preserved = await catalog.snapshot()
+        XCTAssertEqual(preserved?.files.count, 2)
+    }
+
+    func testCatalogBaselineDoesNotReportInitialFilesAndOnlyDetectsWhenRequested() async throws {
+        let source = BaselineCatalogSource()
+        await source.set([1, 2], infos: [1: try sampleInfo(1), 2: try sampleInfo(2)])
+        let catalog = CameraCatalog(source: source, stationMode: false)
+        let first = try await catalog.refresh(detectNewHandles: true)
+        try assertHandleDelta(first, added: [], removed: [])
+        await source.set([2, 3], infos: [2: try sampleInfo(2), 3: try sampleInfo(3)])
+        let next = try await catalog.refresh(detectNewHandles: true)
+        try assertHandleDelta(next, added: [3], removed: [1])
+        await source.set([3, 4], infos: [3: try sampleInfo(3), 4: try sampleInfo(4)])
+        let disabled = try await catalog.refresh() // Existing manual callers retain the disabled default.
+        try assertHandleDelta(disabled, added: [], removed: [2])
+        let repeated = try await catalog.refresh(detectNewHandles: true)
+        try assertHandleDelta(repeated, added: [], removed: [])
+    }
+
+    func testCatalogEmptyFirstScanAndPartialMetadataBothEstablishHandleBaseline() async throws {
+        let source = BaselineCatalogSource(), catalog = CameraCatalog(source: source, stationMode: false)
+        let empty = try await catalog.refresh(detectNewHandles: true)
+        try assertHandleDelta(empty, added: [], removed: []); XCTAssertTrue(empty.metadataComplete)
+        await source.set([3], infos: [:])
+        let partial = try await catalog.refresh(detectNewHandles: true)
+        try assertHandleDelta(partial, added: [3], removed: []); XCTAssertFalse(partial.metadataComplete)
+        let retained = await catalog.snapshot(); XCTAssertTrue(try XCTUnwrap(retained).files.isEmpty)
+        await source.set([3], infos: [3: try sampleInfo(3)])
+        let repaired = try await catalog.refresh(detectNewHandles: true)
+        try assertHandleDelta(repaired, added: [], removed: []); XCTAssertEqual(repaired.files.count, 1)
+        // First attachment with incomplete metadata must not later reclassify an old file as new.
+        let otherSource = BaselineCatalogSource()
+        await otherSource.set([3], infos: [:])
+        let other = CameraCatalog(source: otherSource, stationMode: false)
+        let initialPartial = try await other.refresh(detectNewHandles: true)
+        try assertHandleDelta(initialPartial, added: [], removed: [])
+        await otherSource.set([3], infos: [3: try sampleInfo(3)])
+        let initialRepaired = try await other.refresh(detectNewHandles: true)
+        try assertHandleDelta(initialRepaired, added: [], removed: [])
+    }
+
+    func testCatalogFailedCancelledOrStaleEnumerationDoesNotAdvanceTheBaseline() async throws {
+        for failure in [BaselineCatalogSource.Failure.enumeration, .cancelEnumeration, .closedEnumeration, .foreignEnumeration] {
+            let source = BaselineCatalogSource(), catalog = CameraCatalog(source: source, stationMode: false)
+            await source.set([1], infos: [1: try sampleInfo(1)])
+            _ = try await catalog.refresh(detectNewHandles: true)
+            await source.set([2], infos: [2: try sampleInfo(2)], failure: failure)
+            let failed = Task { try await catalog.refresh(detectNewHandles: true) }
+            do { _ = try await failed.value; XCTFail("Expected failed enumeration") }
+            catch {
+                if failure == .cancelEnumeration { XCTAssertTrue(error is CancellationError) }
+                else if failure == .enumeration { XCTAssertTrue(error is CameraOperationError) }
+                else { XCTAssertEqual(error as? CameraStreamError, .closed) }
+            }
+            let retained = await catalog.snapshot(); XCTAssertEqual(try XCTUnwrap(retained).files.map(\.handle), [1])
+            await source.set([2], infos: [2: try sampleInfo(2)])
+            let retried = try await catalog.refresh(detectNewHandles: true)
+            try assertHandleDelta(retried, added: [2], removed: [1])
+        }
+    }
+
+    func testCatalogCancellationAfterEnumerationKeepsCommittedBaselineButNotPartialRows() async throws {
+        let source = BaselineCatalogSource(), catalog = CameraCatalog(source: source, stationMode: false)
+        await source.set([1], infos: [1: try sampleInfo(1)])
+        _ = try await catalog.refresh(detectNewHandles: true)
+        await source.set([2], infos: [2: try sampleInfo(2)], failure: .cancelMetadata)
+        let cancelled = Task { try await catalog.refresh(detectNewHandles: true) }
+        do { _ = try await cancelled.value; XCTFail("Expected cancelled metadata read") }
+        catch { XCTAssertTrue(error is CancellationError) }
+        let retained = await catalog.snapshot(); XCTAssertEqual(try XCTUnwrap(retained).files.map(\.handle), [1])
+        await source.set([2], infos: [2: try sampleInfo(2)])
+        let retried = try await catalog.refresh(detectNewHandles: true)
+        try assertHandleDelta(retried, added: [], removed: [])
+    }
+
+    private func assertHandleDelta(_ value: CameraCatalogSnapshot, added: [Int32], removed: [Int32],
+                                   file: StaticString = #filePath, line: UInt = #line) throws {
+        let delta = try XCTUnwrap(value.handleDelta, file: file, line: line)
+        XCTAssertEqual(delta.added.map { $0.int32Value }.sorted(), added.sorted(), file: file, line: line)
+        XCTAssertEqual(delta.removed.map { $0.int32Value }.sorted(), removed.sorted(), file: file, line: line)
+    }
+
+    func testCatalogCarriesHiddenBackupMetadataInReadOrderForSharedRemovalReconciliation() async throws {
+        let source = AliasCatalogSource(primary: try resolverInfo(91), backup: try resolverInfo(7, storage: 0x20001))
+        let catalog = CameraCatalog(source: source, stationMode: false)
+        let full = try await catalog.refresh()
+        XCTAssertEqual(full.files.map(\.handle), [91])
+        XCTAssertEqual(full.indexedObjectInfos.map(\.handle), [91, 7])
+        XCTAssertEqual(Set(full.objectInfos.keys), Set([Int32(91), Int32(7)]))
+        let current = KotlinIntArray(size: 1); current.set(index: 0, value: 7)
+        let survived = try XCTUnwrap(NativeCameraCatalogReconciliation.shared.reconcile(
+            publishedFiles: full.files, currentHandles: current, indexedInfos: full.indexedObjectInfos))
+        XCTAssertEqual(survived.map(\.handle), [7])
+        XCTAssertEqual(survived[0].storageIds.map { $0.int32Value }, [0x20001])
+        XCTAssertEqual(full.files[0].storageIds.map { $0.int32Value }.sorted(), [0x10001, 0x20001])
+        // The pure proposal does not mutate the live catalog; W03-B owns validated event publication.
+        let untouched = await catalog.snapshot(); XCTAssertEqual(untouched?.files.map(\.handle), [91])
+        await catalog.close()
+    }
+
+    func testPartialCatalogRetainsPreviousCompleteAliasIndexAndNullQueryCannotDeleteRows() async throws {
+        let source = AliasCatalogSource(primary: try resolverInfo(91), backup: try resolverInfo(7, storage: 0x20001))
+        let catalog = CameraCatalog(source: source, stationMode: false)
+        _ = try await catalog.refresh()
+        await source.failBackup()
+        let partial = try await catalog.refresh()
+        XCTAssertFalse(partial.metadataComplete)
+        XCTAssertEqual(partial.indexedObjectInfos.map(\.handle), [91])
+        let snapshot = await catalog.snapshot(), preserved = try XCTUnwrap(snapshot)
+        XCTAssertEqual(preserved.indexedObjectInfos.map(\.handle), [91, 7])
+        XCTAssertNotNil(preserved.objectInfos[7])
+        XCTAssertNil(NativeCameraCatalogReconciliation.shared.reconcile(
+            publishedFiles: preserved.files, currentHandles: nil, indexedInfos: preserved.indexedObjectInfos))
+        let empty = try XCTUnwrap(NativeCameraCatalogReconciliation.shared.reconcile(
+            publishedFiles: preserved.files, currentHandles: KotlinIntArray(size: 0), indexedInfos: preserved.indexedObjectInfos))
+        XCTAssertTrue(empty.isEmpty)
+        await catalog.close()
+    }
+
+    func testNativeIdleBaselineDoesNotInventFirstScanOrConsumeUnresolvedAdds() throws {
+        let baseline = NativeCameraHandleBaseline()
+        let old = KotlinIntArray(size: 1); old.set(index: 0, value: 91)
+        let next = KotlinIntArray(size: 1); next.set(index: 0, value: 7)
+        XCTAssertNil(baseline.acceptIdleEnumeration(handles: old)); XCTAssertFalse(baseline.hasSnapshot)
+        _ = baseline.acceptEnumeration(handles: old, detectNewHandles: false)
+        XCTAssertNil(baseline.acceptIdleEnumeration(handles: nil))
+        let delta = try XCTUnwrap(baseline.acceptIdleEnumeration(handles: next))
+        XCTAssertEqual(delta.removed.map { $0.int32Value }, [91])
+        XCTAssertEqual(delta.added.map { $0.int32Value }, [7])
+        XCTAssertTrue(baseline.shouldResolve(handle: 7, visibleFiles: []))
+        let repeated = try XCTUnwrap(baseline.acceptIdleEnumeration(handles: next))
+        XCTAssertTrue(repeated.removed.isEmpty); XCTAssertEqual(repeated.added.map { $0.int32Value }, [7])
+        baseline.recordPublished(handle: 7)
+        let published = try XCTUnwrap(baseline.acceptIdleEnumeration(handles: next)); XCTAssertTrue(published.added.isEmpty)
+    }
+
+    func testNewObjectEventsIgnoreInitialOldInvalidAndDuplicateHandlesAndMergeBackups() async throws {
+        let old = try resolverInfo(1, name: "OLD.JPG"), fresh = try resolverInfo(2, name: "NEW.NEF")
+        let backup = try resolverInfo(3, name: "NEW.NEF", storage: 0x20001)
+        let unknown = try resolverInfo(4, name: "OTHER.BIN")
+        let source = NewObjectCatalogSource(infos: [1: old, 2: fresh, 3: backup, 4: unknown], handles: [1])
+        let sink = CatalogAdditionSink()
+        let catalog = CameraCatalog(source: source, stationMode: false, onAddition: { await sink.append($0) })
+        _ = try await catalog.refresh()
+        await catalog.receiveEvents(objectEvents(source.connectionID, handles: [0, -1, 1, 2, 2, 3, 4]))
+        try await waitUntil("three metadata publications") { await sink.values.count == 3 }
+        let values = await sink.values, reads = await source.reads
+        XCTAssertEqual(reads, [2, 3, 4])
+        XCTAssertEqual(values.map { $0.newMedia?.handle }, [2, nil, nil])
+        XCTAssertEqual(values.last?.snapshot.files.map(\.handle), [4, 2, 1])
+        XCTAssertEqual(values.last?.snapshot.indexedObjectInfos.map(\.handle), [1, 2, 3, 4])
+        XCTAssertEqual(values.last?.snapshot.objectInfos[3]?.handle, 3)
+        XCTAssertEqual(values.last?.snapshot.files[1].storageIds.map { $0.int32Value }.sorted(), [0x10001, 0x20001])
+        await catalog.receiveEvents(objectEvents(source.connectionID, handles: [2, 3], startingAt: 8))
+        try await Task.sleep(nanoseconds: 220_000_000)
+        let repeated = await source.reads; XCTAssertEqual(repeated, reads)
+        await catalog.close()
+    }
+
+    func testNewObjectBusyRetriesAreBoundedAndSuccessfulRetryPublishesOnce() async throws {
+        let source = NewObjectCatalogSource(infos: [2: try resolverInfo(2)], failures: [2: 2, 3: 10])
+        let sink = CatalogAdditionSink()
+        let catalog = CameraCatalog(source: source, stationMode: false, onAddition: { await sink.append($0) })
+        _ = try await catalog.refresh()
+        await catalog.receiveEvents(objectEvents(source.connectionID, handles: [2, 3]))
+        try await waitUntil("successful third attempt") { await sink.values.count == 1 }
+        // Original five attempts require 90 + 180 + 360 + 720 + 1400 ms, not five rapid reads.
+        for _ in 0..<60 {
+            if await source.reads.filter({ $0 == 3 }).count == 5 { break }
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
+        let reads = await source.reads
+        XCTAssertEqual(reads.filter { $0 == 2 }.count, 3)
+        XCTAssertEqual(reads.filter { $0 == 3 }.count, 5)
+        try await Task.sleep(nanoseconds: 220_000_000)
+        let final = await source.reads; XCTAssertEqual(final, reads)
+        await catalog.close()
+    }
+
+    func testNewObjectWaitsForInitialBaselineAndForegroundPreviewWithoutConsumingAttempts() async throws {
+        let source = NewObjectCatalogSource(infos: [2: try resolverInfo(2)])
+        let previews = CameraPreviewStore(source: FakePreviewSource(thumbs: []), connectionID: source.connectionID)
+        let catalog = CameraCatalog(source: source, stationMode: false, previews: previews)
+        await catalog.receiveEvents(objectEvents(source.connectionID, handles: [2]))
+        try await Task.sleep(nanoseconds: 200_000_000)
+        let before = await source.reads; XCTAssertTrue(before.isEmpty)
+        let foreground = await previews.beginForegroundUse()
+        _ = try await catalog.refresh() // Empty authoritative baseline; event 2 is not an old enumerated file.
+        try await Task.sleep(nanoseconds: 220_000_000)
+        let blocked = await source.reads; XCTAssertTrue(blocked.isEmpty)
+        await previews.endForegroundUse(foreground)
+        try await waitUntil("metadata resumes after preview") { await catalog.snapshot()?.files.count == 1 }
+        let resumed = await source.reads; XCTAssertEqual(resumed, [2])
+        await catalog.close(); await previews.close()
+    }
+
+    func testNewObjectScanSupersedesHeldMetadataAndDoesNotReportAnOldFileAsNew() async throws {
+        let source = NewObjectCatalogSource(infos: [2: try resolverInfo(2)], holdFirst: true)
+        let sink = CatalogAdditionSink()
+        let catalog = CameraCatalog(source: source, stationMode: false, onAddition: { await sink.append($0) })
+        _ = try await catalog.refresh()
+        await catalog.receiveEvents(objectEvents(source.connectionID, handles: [2]))
+        try await waitUntil("resolver holds metadata") { await source.isHeld }
+        await source.setHandles([2])
+        let scanned = try await catalog.refresh()
+        await source.release()
+        try await Task.sleep(nanoseconds: 220_000_000)
+        let additions = await sink.values, snapshot = await catalog.snapshot()
+        XCTAssertTrue(additions.isEmpty)
+        XCTAssertEqual(snapshot?.publicationRevision, scanned.publicationRevision)
+        XCTAssertEqual(snapshot?.files.map(\.handle), [2])
+        await catalog.close()
+    }
+
+    func testNewObjectRemovalAndReadditionInvalidatesTheHeldToken() async throws {
+        let source = NewObjectCatalogSource(infos: [2: try resolverInfo(2)], holdFirst: true)
+        let sink = CatalogAdditionSink()
+        let catalog = CameraCatalog(source: source, stationMode: false, onAddition: { await sink.append($0) })
+        _ = try await catalog.refresh()
+        await catalog.receiveEvents(objectEvents(source.connectionID, handles: [2]))
+        try await waitUntil("first token held") { await source.isHeld }
+        await catalog.receiveEvents(objectEvents(source.connectionID, handles: [2], startingAt: 2, code: 0x4003))
+        await catalog.receiveEvents(objectEvents(source.connectionID, handles: [2], startingAt: 3))
+        await source.setRevision(3)
+        _ = try await catalog.refresh() // Explicit reconciliation; W04 owns scheduling this scan.
+        await source.release()
+        try await waitUntil("fresh token resolves") { await sink.values.count == 1 }
+        let reads = await source.reads; XCTAssertEqual(reads, [2, 2])
+        await catalog.close()
+    }
+
+    func testNewObjectSocketObserverLagDoesNotPublishBeforeRemovalIsForwarded() async throws {
+        let source = NewObjectCatalogSource(infos: [2: try resolverInfo(2)], holdFirst: true)
+        let sink = CatalogAdditionSink()
+        let catalog = CameraCatalog(source: source, stationMode: false, onAddition: { await sink.append($0) })
+        _ = try await catalog.refresh()
+        await catalog.receiveEvents(objectEvents(source.connectionID, handles: [2]))
+        try await waitUntil("metadata held before socket removal") { await source.isHeld }
+        await source.setRevision(2)
+        await source.release()
+        try await Task.sleep(nanoseconds: 160_000_000)
+        let before = await sink.values; XCTAssertTrue(before.isEmpty)
+        await catalog.receiveEvents(objectEvents(source.connectionID, handles: [2], startingAt: 2, code: 0x4003))
+        let needsScan = await catalog.needsEventRescan; XCTAssertTrue(needsScan)
+        await catalog.close()
+    }
+
+    func testNewObjectGapAndForeignConnectionCannotStartReadsAndCloseDropsHeldResults() async throws {
+        let source = NewObjectCatalogSource(infos: [2: try resolverInfo(2)], holdFirst: true)
+        let sink = CatalogAdditionSink()
+        let catalog = CameraCatalog(source: source, stationMode: false, onAddition: { await sink.append($0) })
+        _ = try await catalog.refresh()
+        await catalog.receiveEvents(objectEvents(UUID(), handles: [2]))
+        await catalog.receiveEvents(CameraEventBatch(cursor: CameraEventCursor(connectionID: source.connectionID, revision: 1),
+            events: [], requiresRescan: true))
+        await catalog.receiveEvents(objectEvents(source.connectionID, handles: [2], startingAt: 2))
+        try await Task.sleep(nanoseconds: 200_000_000)
+        let blocked = await source.reads; XCTAssertTrue(blocked.isEmpty)
+        await source.setRevision(2); _ = try await catalog.refresh()
+        try await waitUntil("post-gap request held") { await source.isHeld }
+        await catalog.close(); await source.release()
+        try await Task.sleep(nanoseconds: 160_000_000)
+        let additions = await sink.values; XCTAssertTrue(additions.isEmpty)
+        await expect(.closed) { _ = try await catalog.refresh() }
+    }
+
+    func testNewObjectTransportFailureStopsResolverUntilExplicitSuccessfulScan() async throws {
+        let source = NewObjectCatalogSource(infos: [2: try resolverInfo(2)], transportFailure: true)
+        let catalog = CameraCatalog(source: source, stationMode: false)
+        _ = try await catalog.refresh()
+        await catalog.receiveEvents(objectEvents(source.connectionID, handles: [2]))
+        try await waitUntil("transport failure requires reconciliation") { await catalog.needsEventRescan }
+        try await Task.sleep(nanoseconds: 220_000_000)
+        let failed = await source.reads; XCTAssertEqual(failed, [2])
+        await source.repairTransport(); await source.setRevision(1)
+        _ = try await catalog.refresh()
+        try await waitUntil("explicit successful scan allows retry") { await catalog.snapshot()?.files.count == 1 }
+        await catalog.close()
+    }
+
+    func testRealNewObjectCommandChecksAdmissionWithoutSendingOrConsumingTransaction() async throws {
+        let wire = FakeCameraConnection(bytes: apOpeningReplies() + response(transaction: 3, payload: hex("00000000")))
+        let camera = apCamera(command: wire)
+        _ = try await camera.connect(guid: Data(0...15))
+        let before = wire.sent()
+        await expect(.operationInProgress) { _ = try await camera.newObjectInfo(handle: 2, permitted: { false }) }
+        XCTAssertEqual(wire.sent(), before)
+        let stores = try await camera.storageIDs(); XCTAssertEqual(stores, [])
+        XCTAssertEqual(wire.sent().last, hex("120000000600000001000000041003000000"))
+        await camera.abort()
+    }
+
+    func testRealNewObjectCommandPreservesBusyMalformedAndFollowingValidTransactions() async throws {
+        var payload = Data(repeating: 0, count: 52)
+        payload[0] = 1; payload[2] = 1; payload[4] = 1; payload[5] = 0x38; payload[8] = 10
+        payload += hex("0B730061006D0070006C0065002E004A0050004700000000")
+        let wire = FakeCameraConnection(bytes: apOpeningReplies()
+            + response(transaction: 3, code: 0x2019)
+            + response(transaction: 4, payload: Data([0]))
+            + response(transaction: 5, payload: payload))
+        let camera = apCamera(command: wire)
+        _ = try await camera.connect(guid: Data(0...15))
+        do { _ = try await camera.newObjectInfo(handle: 2, permitted: { true }); XCTFail("Busy is retryable") }
+        catch { guard case CameraOperationError.rejected(operation: 0x1008, response: 0x2019) = error else { throw error } }
+        do { _ = try await camera.newObjectInfo(handle: 2, permitted: { true }); XCTFail("Malformed is not an empty catalog") }
+        catch { guard case CameraOperationError.malformedDataset(operation: 0x1008) = error else { throw error } }
+        let info = try await camera.newObjectInfo(handle: 2, permitted: { true })
+        XCTAssertEqual(info.handle, 2); XCTAssertEqual(info.fileName, "sample.JPG"); XCTAssertEqual(info.size, 10)
+        XCTAssertEqual(Array(wire.sent().suffix(3)), [
+            hex("16000000060000000100000008100300000002000000"),
+            hex("16000000060000000100000008100400000002000000"),
+            hex("16000000060000000100000008100500000002000000")])
+        await camera.abort()
+    }
+
+    @MainActor func testFilesAdditionWaitsForScanAndRejectsOlderPublicationWithoutStartingQueue() async throws {
+        let camera = stationCamera(command: FakeCameraConnection(bytes: Data()))
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: root))
+        let bridge = OriginalFilesPageBridge(connectionID: camera.connectionID,
+            catalog: CameraCatalog(source: camera, stationMode: true), queue: queue,
+            previews: CameraPreviewStore(source: camera), exifSource: camera, exifCache: NativePreviewExifCache(), stationMode: true)
+        bridge.setConnected(true)
+        let info = try resolverInfo(2)
+        func snapshot(_ revision: UInt64) throws -> CameraCatalogSnapshot {
+            CameraCatalogSnapshot(connectionID: camera.connectionID, revision: 0, storageIDs: [0x10001],
+                files: [try XCTUnwrap(NewCameraObjectPolicy.shared.publicationFile(info: info))], objectInfos: [2: info],
+                totalHandles: 1, metadataComplete: true, changedWhileScanning: false, publicationRevision: revision)
+        }
+        let active = bridge.model.beginScan()
+        bridge.publishAddition(try snapshot(2))
+        try await Task.sleep(nanoseconds: 120_000_000)
+        XCTAssertTrue(bridge.acceptCatalog(try snapshot(1), sequence: active))
+        try await Task.sleep(nanoseconds: 160_000_000)
+        XCTAssertFalse(bridge.acceptCatalog(try snapshot(1), sequence: bridge.model.beginScan()))
+        let queued = await queue.snapshot(); XCTAssertTrue(queued.rows.isEmpty)
+        bridge.close()
+        bridge.publishAddition(try snapshot(3))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+    }
+
+    func testNewObjectPublicationUpdatesThumbnailAdmissionAndRejectsStaleCacheSnapshot() async throws {
+        let info = try resolverInfo(2), source = NewObjectCatalogSource(infos: [2: try resolverInfo(2)])
+        let previews = CameraPreviewStore(source: FakePreviewSource(thumbs: [.bytes(Data([9]))]), connectionID: source.connectionID)
+        let catalog = CameraCatalog(source: source, stationMode: false, previews: previews)
+        let old = try await catalog.refresh()
+        await catalog.receiveEvents(objectEvents(source.connectionID, handles: [2]))
+        try await waitUntil("new metadata visible") { await catalog.snapshot()?.files.count == 1 }
+        try await Task.sleep(nanoseconds: 100_000_000) // Also allow the cross-actor cache publication to finish.
+        let stale = await previews.reconcile(old); XCTAssertFalse(stale)
+        let bytes = try await previews.thumbnail(info: info); XCTAssertEqual(bytes, Data([9]))
+        await catalog.close(); await previews.close()
+    }
+
+    @MainActor func testAutomaticLoopBurstPublishesUniqueOriginalsAndRefreshesPageIndex() async throws {
+        try await automaticPublicationLoop()
+    }
+
+    @MainActor func testAutomaticLoopScanCatchUpPublishesOnlyNewLogicalOriginals() async throws {
+        try await automaticPublicationLoop(scanCatchUp: true)
+    }
+
+    @MainActor func testAutomaticLoopDeferredAdmissionUsesNewDestinationWhenStarted() async throws {
+        try await automaticPublicationLoop(deferredSwitch: true)
+    }
+
+    @MainActor func testAutomaticLoopCannotOverrideManualPause() async throws {
+        try await automaticPublicationLoop(paused: true)
+    }
+
+    @MainActor func testAutomaticLoopRetriesFailedPublicationWithoutDownloadingAgain() async throws {
+        try await automaticPublicationLoop(failPublication: true)
+    }
+
+    @MainActor func testAutomaticLoopExistingOriginalSkipsDownloadAndRefreshesPageIndex() async throws {
+        try await automaticPublicationLoop(existing: true)
+    }
+
+    /// Fake only the camera wire/catalog and security grant. Admission, PTP download, sandbox
+    /// retention, provider coordination/index and the shared-page adapter are production objects.
+    /// The internal Kotlin badge predicate is covered by NativeFilesPageModelTest; here we verify
+    /// its real Apple index input, not a test-only exported badge API.
+    @MainActor private func automaticPublicationLoop(deferredSwitch: Bool = false, paused: Bool = false,
+        failPublication: Bool = false, existing: Bool = false, scanCatchUp: Bool = false) async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let suite = "automatic-loop-\(UUID())", defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { try? FileManager.default.removeItem(at: root); defaults.removePersistentDomain(forName: suite) }
+        let targetRoot = root.appendingPathComponent("provider")
+        try FileManager.default.createDirectory(at: targetRoot, withIntermediateDirectories: true)
+        let bookmark = root.appendingPathComponent("grant")
+        try Data([1]).write(to: bookmark)
+        let grant = PageDirectoryGrant(targetRoot)
+        let target = ProviderOriginalStore(directory: ScopedDirectoryStore(bookmarkFile: bookmark, access: grant))
+        let bytes = Data("0123456789".utf8)
+        let folder = targetRoot.appendingPathComponent("ZT2026-09-06")
+        if existing {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try bytes.write(to: folder.appendingPathComponent("A.JPG"))
+        }
+        let transferReplies = paused
+            ? response(transaction: 3, payload: Data("ABC".utf8))
+                + response(transaction: 4, payload: bytes) + response(transaction: 5, payload: bytes)
+            : response(transaction: 3, payload: bytes) + response(transaction: 4, payload: bytes)
+        let wire = FakeCameraConnection(bytes: apOpeningReplies() + transferReplies)
+        let camera = apCamera(command: wire)
+        _ = try await camera.connect(guid: Data(0...15))
+        let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: root.appendingPathComponent("app")))
+        let initialTarget = QueueDestinationProbe()
+        await initialTarget.failures(failPublication)
+        let oldRoot = root.appendingPathComponent("old-provider")
+        if deferredSwitch {
+            try FileManager.default.createDirectory(at: oldRoot, withIntermediateDirectories: true)
+            let oldBookmark = root.appendingPathComponent("old-grant")
+            try Data([1]).write(to: oldBookmark)
+            let oldTarget = ProviderOriginalStore(directory: ScopedDirectoryStore(bookmarkFile: oldBookmark,
+                access: PageDirectoryGrant(oldRoot)))
+            _ = try await queue.configureDestination(oldTarget)
+        }
+        else if failPublication || paused { _ = try await queue.configureDestination(initialTarget) }
+        else { _ = try await queue.configureDestination(target) }
+        if paused {
+            // The shared Android rule ignores pause on an idle queue. Establish a real pause
+            // during a prior transfer, then clear only its terminal history before the burst.
+            let publishing = expectation(description: "prior transfer publishing")
+            await initialTarget.hold(publishing)
+            _ = await queue.enqueue(try sampleInfo(3), byDate: false, dayKey: 0, deferred: false)
+            await fulfillment(of: [publishing], timeout: 3)
+            await queue.pauseAfterCurrent(); await initialTarget.release()
+            try await waitUntil("prior transfer left queue manually paused") {
+                let value = await queue.snapshot(); return !value.running && value.paused
+            }
+            await queue.clearTerminal()
+            _ = try await queue.configureDestination(target)
+        }
+        let transfer = TransferPreferencesStore(defaults: defaults)
+        XCTAssertTrue(transfer.saveAutomatic(true))
+        XCTAssertTrue(transfer.save(NativeTransferPreferences(organizeByDate: true, deferStart: deferredSwitch)))
+        let automatic = CameraAutomaticTransferCoordinator(connectionID: camera.connectionID, queue: queue,
+            preferences: transfer)
+        defer { automatic.close() }
+        let source = NewObjectCatalogSource(infos: [
+            1: try resolverInfo(1, name: "OLD.JPG"), 2: try resolverInfo(2, name: "A.JPG"),
+            3: try resolverInfo(3, name: "A.JPG", storage: 0x20001), 4: try resolverInfo(4, name: "B.JPG")
+        ], handles: [1], connectionID: camera.connectionID)
+        let catalog = CameraCatalog(source: source, stationMode: false,
+            onAddition: { await automatic.receive($0) })
+        let previews = CameraPreviewStore(source: camera, connectionID: camera.connectionID)
+        let page = OriginalFilesPageBridge(connectionID: camera.connectionID, catalog: catalog, queue: queue,
+            previews: previews, exifSource: camera, exifCache: NativePreviewExifCache(), stationMode: false,
+            originals: target, transferPreferences: transfer)
+        page.setConnected(true)
+        let observer = Task {
+            for await snapshot in queue.updates {
+                if Task.isCancelled { break }
+                page.publishQueue(snapshot)
+            }
+        }
+        defer { observer.cancel(); page.close() }
+        let baseline = try await catalog.refresh()
+        XCTAssertEqual(baseline.files.map(\.handle), [1])
+        let initial = await queue.snapshot()
+        XCTAssertTrue(initial.rows.isEmpty)
+        let requestBaseline = wire.sent().count
+        await source.setRevision(6)
+        if scanCatchUp {
+            await source.setHandles([1, 2, 3, 4])
+            _ = try await catalog.refresh(detectNewHandles: true)
+        } else {
+            await catalog.receiveEvents(objectEvents(camera.connectionID, handles: [1, 2, 2, 3, 4, 4]))
+        }
+        try await waitUntil("two real admissions") { await queue.snapshot().rows.count == 2 }
+        if deferredSwitch || paused {
+            let waiting = await queue.snapshot()
+            XCTAssertFalse(waiting.running); XCTAssertEqual(waiting.paused, paused)
+            XCTAssertEqual(waiting.rows.map(\.status), ["WAITING", "WAITING"])
+            XCTAssertEqual(wire.sent().count, requestBaseline)
+            if deferredSwitch { _ = try await queue.configureDestination(target) }
+            await queue.start()
+        }
+        if failPublication {
+            try await waitUntil("two retained publication failures") {
+                let value = await queue.snapshot()
+                return !value.running && value.rows.count == 2 && value.rows.allSatisfy { $0.status == "FAILED" }
+            }
+            let failed = await queue.snapshot()
+            XCTAssertEqual(failed.completedOriginalRevision, 0)
+            let failedIndex = try await target.originals(since: -1, rescan: false)
+            XCTAssertTrue(failedIndex.entries.isEmpty)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: folder.appendingPathComponent("A.JPG").path))
+            for row in failed.rows {
+                let retained = await queue.savedFile(row.id)
+                XCTAssertEqual(try Data(contentsOf: XCTUnwrap(retained?.url)), bytes)
+            }
+            let downloaded = wire.sent().count
+            _ = try await queue.configureDestination(target)
+            let retried = await queue.retryFailed(excluding: [])
+            XCTAssertEqual(retried, 2)
+            try await waitUntil("retained files published") {
+                let value = await queue.snapshot()
+                return !value.running && value.rows.allSatisfy { $0.status == "COMPLETED" }
+            }
+            XCTAssertEqual(wire.sent().count, downloaded)
+        }
+        try await waitUntil("both automatic originals completed") {
+            let value = await queue.snapshot()
+            return !value.running && value.rows.count == 2 && value.rows.allSatisfy { $0.status == "COMPLETED" }
+        }
+        let done = await queue.snapshot()
+        XCTAssertEqual(done.completedOriginalRevision, initial.completedOriginalRevision + 2)
+        XCTAssertEqual(done.rows.filter(\.skipped).count, existing ? 1 : 0)
+        XCTAssertEqual(Set(done.rows.map(\.name)), Set(["A.JPG", "B.JPG"]))
+        for name in ["A.JPG", "B.JPG"] {
+            XCTAssertEqual(try Data(contentsOf: folder.appendingPathComponent(name)), bytes)
+        }
+        if deferredSwitch {
+            XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: oldRoot.path).isEmpty)
+        }
+        let catalogValue = await catalog.snapshot()
+        let finalCatalog = try XCTUnwrap(catalogValue)
+        XCTAssertTrue(page.acceptCatalog(finalCatalog, sequence: page.model.beginScan()))
+        let index = try await target.originals(since: -1, rescan: false)
+        try await waitUntil("queue subscription refreshed the page's original index") {
+            page.originalIndexTask == nil && page.originalRevision == index.revision
+        }
+        XCTAssertEqual(page.originalRevision, index.revision)
+        XCTAssertEqual(index.entries.count, 2)
+        let requests = wire.sent().count
+        await source.setRevision(8)
+        await catalog.receiveEvents(objectEvents(camera.connectionID, handles: [2, 3], startingAt: 7))
+        try await Task.sleep(nanoseconds: 220_000_000)
+        let repeated = await queue.snapshot()
+        XCTAssertEqual(repeated.rows.map(\.id), done.rows.map(\.id))
+        XCTAssertEqual(wire.sent().count, requests)
+        observer.cancel(); page.close(); automatic.close(); await catalog.close(); await queue.stop(); await camera.abort()
+        XCTAssertEqual(grant.starts, grant.stops)
+    }
+
+    private func resolverInfo(_ handle: Int32, name: String = "NEW.JPG", storage: Int32 = 0x10001) throws -> PtpObjectInfo {
+        var payload = Data(repeating: 0, count: 52)
+        for index in 0..<4 { payload[index] = UInt8(truncatingIfNeeded: storage >> (index * 8)) }
+        payload[4] = 1; payload[5] = 0x38; payload[8] = 10
+        for value in [name, "20260906T120000", ""] {
+            payload.append(UInt8(value.utf16.count + 1))
+            for unit in value.utf16 { payload.append(UInt8(truncatingIfNeeded: unit)); payload.append(UInt8(unit >> 8)) }
+            payload.append(contentsOf: [0, 0])
+        }
+        return try XCTUnwrap(PtpIPChannel.objectInfo(handle: handle, payload: payload))
+    }
+
+    private func objectEvents(_ id: UUID, handles: [Int32], startingAt: UInt64 = 1, code: Int32 = 0x4002) -> CameraEventBatch {
+        CameraEventBatch(cursor: CameraEventCursor(connectionID: id, revision: startingAt + UInt64(handles.count) - 1),
+            events: handles.enumerated().map { CameraEventRecord(revision: startingAt + UInt64($0.offset), code: code,
+                transactionID: 0, firstParameter: Int64($0.element)) }, requiresRescan: false)
+    }
+
+    func testCatalogMarksEventsDuringScanAsInvalidation() async throws {
+        let source = FakeCatalogSource(infos: [1: try sampleInfo(1), 2: try sampleInfo(2)], changeDuringRead: true)
+        let result = try await CameraCatalog(source: source, stationMode: false).refresh()
+        XCTAssertTrue(result.changedWhileScanning)
+        XCTAssertTrue(result.metadataComplete)
+    }
+
+    func testPreviewCacheRetriesTransientErrorAndDoesNotCacheFhdFallbackAsFhd() async throws {
+        let source = FakePreviewSource(thumbs: [.failure, .bytes(Data([1]))])
+        let store = CameraPreviewStore(source: source)
+        let info = try sampleInfo(1)
+        do { _ = try await store.thumbnail(info: info); XCTFail("Expected transient failure") }
+        catch { XCTAssertTrue(error is CameraOperationError) }
+        let first = try await store.preview(info: info)
+        let second = try await store.preview(info: info)
+        let counts = await source.counts()
+        XCTAssertEqual(first, Data([1])); XCTAssertEqual(second, first)
+        XCTAssertEqual(counts.thumb, 2); XCTAssertEqual(counts.fhd, 2)
+    }
+
+    func testProductFhdMissDoesNotStealTheThumbnailBeforeExif() async throws {
+        let source = FakePreviewSource(thumbs: [.bytes(Data([9]))])
+        let store = CameraPreviewStore(source: source)
+        let info = try sampleInfo(1)
+        let first = try await store.fhd(info: info)
+        let second = try await store.fhd(info: info)
+        XCTAssertNil(first); XCTAssertNil(second)
+        let before = await source.counts()
+        XCTAssertEqual(before.fhd, 2); XCTAssertEqual(before.thumb, 0)
+        let fallback = try await store.thumbnail(info: info)
+        XCTAssertEqual(fallback, Data([9]))
+        let after = await source.counts()
+        XCTAssertEqual(after.thumb, 1)
+    }
+
+    func testProductFhdSuccessReusesExistingCacheWithoutCallingThumbnail() async throws {
+        let payload = try thumbnailFixture()
+        let source = FakePreviewSource(thumbs: [], fhds: [.bytes(payload)])
+        let store = CameraPreviewStore(source: source)
+        let info = try sampleInfo(1)
+        let first = try await store.fhd(info: info)
+        let second = try await store.fhd(info: info)
+        XCTAssertEqual(first, payload); XCTAssertEqual(second, payload)
+        let counts = await source.counts()
+        XCTAssertEqual(counts.fhd, 1); XCTAssertEqual(counts.thumb, 0)
+    }
+
+    func testCacheOnlyPreviewThumbnailNeverTriggersAnIoMiss() async throws {
+        let payload = try thumbnailFixture()
+        let source = FakePreviewSource(thumbs: [.bytes(payload)])
+        let store = CameraPreviewStore(source: source)
+        let info = try sampleInfo(1)
+        let absent = await store.cachedThumbnail(info: info)
+        XCTAssertNil(absent)
+        let before = await source.counts(); XCTAssertEqual(before.thumb, 0)
+        _ = try await store.thumbnail(info: info)
+        let cached = await store.cachedThumbnail(info: info)
+        XCTAssertEqual(cached, payload)
+        await store.clearForMemoryPressure()
+        let cleared = await store.cachedThumbnail(info: info)
+        XCTAssertNil(cleared)
+        let after = await source.counts(); XCTAssertEqual(after.thumb, 1)
+    }
+
+    func testProductFhdKeepsCameraPixelOrientationWhileDiagnosticStillRotates() async throws {
+        let jpeg = try orientedPreviewFixture(width: 40, height: 20, orientation: 6)
+        let decoder = PreviewImageDecoder()
+        let png = try await decoder.fhdPreviewPNG(jpeg)
+        let product = try await decoder.decode(png)
+        let diagnostic = try await decoder.decode(jpeg)
+        XCTAssertEqual(product.width, 40); XCTAssertEqual(product.height, 20)
+        XCTAssertEqual(diagnostic.width, 20); XCTAssertEqual(diagnostic.height, 40)
+    }
+
+    func testProductFhdMatches1920LongEdgeAndRejectsMalformedInput() async throws {
+        let decoder = PreviewImageDecoder()
+        let jpeg = try orientedPreviewFixture(width: 2000, height: 1000, orientation: 6)
+        let png = try await decoder.fhdPreviewPNG(jpeg)
+        let image = try await decoder.decode(png)
+        XCTAssertEqual(image.width, 1920); XCTAssertEqual(image.height, 960)
+        XCTAssertLessThanOrEqual(png.count, 20 * 1024 * 1024)
+        do { _ = try await decoder.fhdPreviewPNG(Data([1, 2, 3])); XCTFail("Malformed input must fail") }
+        catch { XCTAssertTrue(error is PreviewImageError) }
+    }
+
+    @MainActor func testNativeFhdBulkBoundaryChecksDimensionsBeforeComposeDecode() async throws {
+        let png = try await PreviewImageDecoder().fhdPreviewPNG(thumbnailFixture())
+        let payload = try XCTUnwrap(NativePreviewImageBridge.shared.fhdPng(data: png as NSData))
+        XCTAssertEqual(payload.width, 12); XCTAssertEqual(payload.height, 8)
+        var bad = png
+        bad[16] = 0xff // Unsigned IHDR overflow must not become a small signed width.
+        XCTAssertNil(NativePreviewImageBridge.shared.fhdPng(data: bad as NSData))
+        XCTAssertNil(NativePreviewImageBridge.shared.fhdPng(data: Data() as NSData))
+    }
+
+    func testPreviewExifUsesSharedOriginalRulesAndSeparateRootExposureCompensation() throws {
+        let values = NativePreviewExifValues()
+        values.set(tag: .fNumber, value: "28/10")
+        values.set(tag: .exposureTime, value: "3/2")
+        values.set(tag: .exposureBiasValue, value: "2/3")
+        values.set(tag: .photographicSensitivity, value: "64")
+        values.set(tag: .focalLength, value: "85")
+        let result = try XCTUnwrap(NativePreviewExifBridge.shared.metadata(values: values,
+            formatter: ApplePreviewExifFormatter(locale: Locale(identifier: "fr_FR"))))
+        XCTAssertEqual(result.aperture, "f/2,8"); XCTAssertEqual(result.shutterSpeed, "1,5s")
+        XCTAssertEqual(result.exposureCompensation, "+0.7 EV"); XCTAssertEqual(result.iso, "ISO64")
+        XCTAssertEqual(result.focalLength, "85mm")
+    }
+
+    func testPreviewExifNativeValuesKeepApexDateAndCoordinateFallbacks() throws {
+        let values = NativePreviewExifValues()
+        values.set(tag: .apertureValue, value: "4")
+        values.set(tag: .exposureTime, value: "1/250")
+        values.set(tag: .datetimeOriginal, value: " ")
+        values.set(tag: .datetimeDigitized, value: " 2026:09:05 01:02:03 ")
+        values.set(tag: .lensModel, value: "  NIKKOR  ")
+        values.set(tag: .gpsLatitude, value: "[31/1,12/1,30/1]")
+        values.set(tag: .gpsLatitudeRef, value: "S")
+        values.set(tag: .gpsLongitude, value: "121.5")
+        values.set(tag: .gpsLongitudeRef, value: "W")
+        values.altitudeMeters = -15.5
+        let result = try XCTUnwrap(NativePreviewExifBridge.shared.metadata(values: values,
+            formatter: ApplePreviewExifFormatter(locale: Locale(identifier: "en_US_POSIX"))))
+        XCTAssertEqual(result.aperture, "f/4"); XCTAssertEqual(result.shutterSpeed, "1/250")
+        XCTAssertEqual(result.dateTime, " 2026:09:05 01:02:03 "); XCTAssertEqual(result.lensModel, "NIKKOR")
+        XCTAssertEqual(try XCTUnwrap(result.latitude).doubleValue, -(31 + 12.0 / 60 + 30.0 / 3600), accuracy: 0.00000001)
+        XCTAssertEqual(try XCTUnwrap(result.longitude).doubleValue, -121.5)
+        XCTAssertEqual(try XCTUnwrap(result.altitudeMeters).doubleValue, -15.5)
+    }
+
+    func testPreviewExifAppleFormatterGoldensKeepHalfUpNonfiniteAndNegativeZero() {
+        let formatter = ApplePreviewExifFormatter(locale: Locale(identifier: "en_US_POSIX"))
+        let cases: [(Float, Int32, String)] = [(2.5, 0, "3"), (-2.5, 0, "-3"),
+            (2.65, 1, "2.7"), (0, 1, "0.0"), (-0.0, 0, "-0"),
+            (.nan, 0, "NaN"), (.infinity, 1, "Infinity"), (-.infinity, 0, "-Infinity")]
+        for (value, digits, expected) in cases {
+            XCTAssertEqual(formatter.fixed(value: value, fractionDigits: digits, rootLocale: false), expected)
+        }
+    }
+
+    func testImageIoPreviewMetadataUsesSharedFieldsAndKeepsDecodedCoordinatePrecision() throws {
+        let properties: [String: Any] = [
+            kCGImagePropertyExifDictionary as String: [kCGImagePropertyExifFNumber as String: 2.8,
+                kCGImagePropertyExifExposureTime as String: 0.004, kCGImagePropertyExifExposureBiasValue as String: 2.0 / 3,
+                kCGImagePropertyExifISOSpeedRatings as String: [64, 100], kCGImagePropertyExifLensModel as String: " NIKKOR ",
+                kCGImagePropertyExifDateTimeOriginal as String: "2026:09:05 01:02:03"],
+            kCGImagePropertyGPSDictionary as String: [kCGImagePropertyGPSLatitude as String: 31.123456789,
+                kCGImagePropertyGPSLatitudeRef as String: "S", kCGImagePropertyGPSLongitude as String: 121.987654321,
+                kCGImagePropertyGPSLongitudeRef as String: "E", kCGImagePropertyGPSAltitude as String: 123.5,
+                kCGImagePropertyGPSAltitudeRef as String: 1],
+        ]
+        let result = try XCTUnwrap(PreviewExifReader.metadata(properties, locale: Locale(identifier: "en_US_POSIX")))
+        XCTAssertEqual(result.aperture, "f/2.8"); XCTAssertEqual(result.shutterSpeed, "1/250")
+        XCTAssertEqual(result.exposureCompensation, "+0.7 EV"); XCTAssertEqual(result.iso, "ISO64,100")
+        XCTAssertEqual(result.lensModel, "NIKKOR"); XCTAssertEqual(result.dateTime, "2026:09:05 01:02:03")
+        XCTAssertEqual(result.latitude?.doubleValue, -31.123456789)
+        XCTAssertEqual(result.longitude?.doubleValue, 121.987654321); XCTAssertEqual(result.altitudeMeters?.doubleValue, -123.5)
+    }
+
+    func testImageIoPreviewMetadataRejectsBooleanNumbersAndMissingAltitudeReference() throws {
+        let properties: [String: Any] = [kCGImagePropertyExifDictionary as String: [
+            kCGImagePropertyExifFNumber as String: true, kCGImagePropertyExifISOSpeedRatings as String: [true]],
+            kCGImagePropertyGPSDictionary as String: [kCGImagePropertyGPSAltitude as String: 123.5]]
+        let result = try XCTUnwrap(PreviewExifReader.metadata(properties))
+        XCTAssertNil(result.aperture); XCTAssertNil(result.iso); XCTAssertNil(result.altitudeMeters)
+        let fractional = PreviewExifReader.metadata([kCGImagePropertyGPSDictionary as String: [
+            kCGImagePropertyGPSAltitude as String: 123.5, kCGImagePropertyGPSAltitudeRef as String: 0.5]])
+        XCTAssertNil(fractional?.altitudeMeters)
+    }
+
+    /// Inject bytes rather than asking ImageIO to re-encode (and possibly reduce) a fraction.
+    private func rawBiasJpegFixture(numerator: Int32, denominator: Int32, little: Bool) throws -> Data {
+        var tiff = [UInt8](repeating: 0, count: 52)
+        func put(_ offset: Int, _ value: UInt32, _ width: Int) {
+            for i in 0..<width { tiff[offset + i] = UInt8(truncatingIfNeeded: value >> ((little ? i : width - i - 1) * 8)) }
+        }
+        tiff[0] = little ? 73 : 77; tiff[1] = tiff[0]
+        put(2, 42, 2); put(4, 8, 4); put(8, 1, 2)
+        put(10, 0x8769, 2); put(12, 4, 2); put(14, 1, 4); put(18, 26, 4)
+        put(26, 1, 2); put(28, 0x9204, 2); put(30, 10, 2); put(32, 1, 4); put(36, 44, 4)
+        put(44, UInt32(bitPattern: numerator), 4); put(48, UInt32(bitPattern: denominator), 4)
+        let original = [UInt8](try orientedPreviewFixture(width: 12, height: 8, orientation: 1))
+        var output = Data([0xFF, 0xD8, 0xFF, 0xE1, 0, 60, 69, 120, 105, 102, 0, 0])
+        output.append(contentsOf: tiff)
+        var position = 2
+        while position + 4 <= original.count {
+            XCTAssertEqual(original[position], 0xFF)
+            let marker = original[position + 1]
+            if marker == 0xDA || marker == 0xD9 { output.append(contentsOf: original[position...]); return output }
+            let length = Int(original[position + 2]) * 256 + Int(original[position + 3])
+            guard length >= 2, position + length + 2 <= original.count else { throw PreviewImageError.invalidImage }
+            let isExif = marker == 0xE1 && length >= 8 && Array(original[(position + 4)..<(position + 10)]) == [69, 120, 105, 102, 0, 0]
+            if !isExif { output.append(contentsOf: original[position..<(position + length + 2)]) }
+            position += length + 2
+        }
+        throw PreviewImageError.invalidImage
+    }
+
+    func testRealJpegRawBiasPreservesAndroidFloatBoundaryForBothEndianOrders() throws {
+        for little in [true, false] {
+            let jpeg = try rawBiasJpegFixture(numerator: 36_293_949, denominator: 725_879_001, little: little)
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: url) }
+            try jpeg.write(to: url)
+            let input = try FileHandle(forReadingFrom: url); defer { try? input.close() }
+            let source = try XCTUnwrap(CGImageSourceCreateWithData(jpeg as CFData, nil))
+            let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any])
+            XCTAssertNil(PreviewExifReader.metadata(properties)?.exposureCompensation)
+            let result = try PreviewExifReader.metadata(fileDescriptor: input.fileDescriptor, size: Int64(jpeg.count),
+                cancellation: PreviewExifReadCancellation(), locale: Locale(identifier: "en_US_POSIX"))
+            XCTAssertEqual(result?.exposureCompensation, "+0.1 EV")
+            XCTAssertEqual(try input.offset(), 0)
+        }
+    }
+
+    func testRealJpegRawSignedAndZeroDenominatorUseOriginalNormalization() throws {
+        for (numerator, denominator, expected) in [(Int32(-2), Int32(3), "-0.7 EV" as String?), (Int32(99), Int32(0), nil)] {
+            let jpeg = try rawBiasJpegFixture(numerator: numerator, denominator: denominator, little: true)
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: url) }
+            try jpeg.write(to: url)
+            let input = try FileHandle(forReadingFrom: url); defer { try? input.close() }
+            let result = try XCTUnwrap(PreviewExifReader.metadata(fileDescriptor: input.fileDescriptor, size: Int64(jpeg.count),
+                cancellation: PreviewExifReadCancellation(), locale: Locale(identifier: "en_US_POSIX")))
+            XCTAssertEqual(result.exposureCompensation, expected)
+        }
+    }
+
+    func testRealJpegMultipleExifSegmentsRetainVisitedOrOverrideNewDirectory() throws {
+        let original = try rawBiasJpegFixture(numerator: 36_293_949, denominator: 725_879_001, little: true)
+        let other = try rawBiasJpegFixture(numerator: -2, denominator: 3, little: true)
+        for distance in [0, 64] {
+            var tiff = [UInt8](repeating: 0, count: 52 + distance)
+            tiff.replaceSubrange(0..<26, with: other[12..<38])
+            tiff.replaceSubrange((26 + distance)..<(52 + distance), with: other[38..<64])
+            func put(_ at: Int, _ value: UInt32) {
+                for i in 0..<4 { tiff[at + i] = UInt8(truncatingIfNeeded: value >> (8 * i)) }
+            }
+            put(18, UInt32(26 + distance)); put(36 + distance, UInt32(44 + distance))
+            var jpeg = Data(original.prefix(64))
+            jpeg.append(contentsOf: [0xFF, 0xE1, 0, UInt8(tiff.count + 8), 69, 120, 105, 102, 0, 0])
+            jpeg.append(contentsOf: tiff); jpeg.append(original.dropFirst(64))
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: url) }
+            try jpeg.write(to: url)
+            let input = try FileHandle(forReadingFrom: url); defer { try? input.close() }
+            let result = try PreviewExifReader.metadata(fileDescriptor: input.fileDescriptor, size: Int64(jpeg.count),
+                cancellation: PreviewExifReadCancellation(), locale: Locale(identifier: "en_US_POSIX"))
+            XCTAssertEqual(result?.exposureCompensation, distance == 0 ? "+0.1 EV" : "-0.7 EV")
+            XCTAssertEqual(try input.offset(), 0)
+        }
+    }
+
+    func testCameraExifJpegHeaderDoesNotRequireImageEntropyOrFinalEoi() throws {
+        let jpeg = try rawBiasJpegFixture(numerator: 36_293_949, denominator: 725_879_001, little: true)
+        let prefix = Data(jpeg.prefix(64)) // Complete APP1, no image scan data.
+        let result = try PreviewExifReader.metadata(header: prefix, locale: Locale(identifier: "en_US_POSIX"))
+        XCTAssertEqual(result?.exposureCompensation, "+0.1 EV")
+        XCTAssertNil(try PreviewExifReader.metadata(header: Data(repeating: 0, count: 32)))
+        XCTAssertNil(try PreviewExifReader.metadata(header: Data(repeating: 0, count: 2 * 1024 * 1024 + 1)))
+    }
+
+    func testCameraExifTiffPrefixKeepsApertureWhenLaterBiasDataIsMissing() throws {
+        var bytes = [UInt8](repeating: 0, count: 64)
+        func put(_ offset: Int, _ value: UInt32, _ width: Int) {
+            for i in 0..<width { bytes[offset + i] = UInt8(truncatingIfNeeded: value >> (8 * i)) }
+        }
+        put(0, 0x4949, 2); put(2, 42, 2); put(4, 8, 4); put(8, 1, 2)
+        put(10, 0x8769, 2); put(12, 4, 2); put(14, 1, 4); put(18, 26, 4)
+        put(26, 2, 2); put(28, 0x829D, 2); put(30, 5, 2); put(32, 1, 4); put(36, 56, 4)
+        put(40, 0x9204, 2); put(42, 10, 2); put(44, 1, 4); put(48, 72, 4)
+        put(56, 28, 4); put(60, 10, 4)
+        let result = try PreviewExifReader.metadata(header: Data(bytes), locale: Locale(identifier: "en_US_POSIX"))
+        XCTAssertEqual(result?.aperture, "f/2.8"); XCTAssertNil(result?.exposureCompensation)
+    }
+
+    private func previewExifJpegFixture() throws -> Data {
+        let source = try XCTUnwrap(CGImageSourceCreateWithData(orientedPreviewFixture(width: 12, height: 8, orientation: 1) as CFData, nil))
+        let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        let output = NSMutableData()
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithData(output, "public.jpeg" as CFString, 1, nil))
+        let exif: [CFString: Any] = [
+            kCGImagePropertyExifFNumber: 4, kCGImagePropertyExifExposureTime: 0.004,
+            kCGImagePropertyExifISOSpeedRatings: [64], kCGImagePropertyExifDateTimeOriginal: "2026:09:05 01:02:03"]
+        CGImageDestinationAddImage(destination, image, [kCGImagePropertyExifDictionary: exif] as CFDictionary)
+        XCTAssertTrue(CGImageDestinationFinalize(destination)); return output as Data
+    }
+
+    func testLocalExifReadsRealPublishedJpegWithoutMutatingFileOrIndex() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let url = root.appendingPathComponent("ORIGINAL.JPG"), jpeg = try previewExifJpegFixture()
+        try jpeg.write(to: url)
+        let store = CameraOriginalStore(root: root)
+        let index = try await store.originals(since: -1, rescan: true)
+        let result = try await store.originalExif(locator: url.absoluteString)
+        XCTAssertEqual(result?.iso, "ISO64"); XCTAssertEqual(result?.dateTime, "2026:09:05 01:02:03")
+        let unchanged = try await store.originals(since: index.revision, rescan: false)
+        XCTAssertEqual(unchanged.revision, index.revision); XCTAssertTrue(unchanged.entries.isEmpty)
+        XCTAssertEqual(try Data(contentsOf: url), jpeg)
+    }
+
+    func testExifProviderActuallyExtractsMetadataAndDoesNotMoveBorrowedDescriptor() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let jpeg = try previewExifJpegFixture(); try jpeg.write(to: url)
+        let input = try FileHandle(forReadingFrom: url); defer { try? input.close() }
+        try input.seek(toOffset: 17)
+        let result = try PreviewExifReader.metadata(fileDescriptor: input.fileDescriptor, size: Int64(jpeg.count),
+            cancellation: PreviewExifReadCancellation(), locale: Locale(identifier: "en_US_POSIX"))
+        XCTAssertEqual(result?.aperture, "f/4"); XCTAssertEqual(result?.shutterSpeed, "1/250")
+        XCTAssertEqual(try input.offset(), 17)
+    }
+
+    func testExifDescriptorReaderOwnsDuplicateAndReadsBeyondTwoGiB() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: url) }
+        XCTAssertTrue(FileManager.default.createFile(atPath: url.path, contents: nil))
+        let output = try FileHandle(forWritingTo: url)
+        let offset: Int64 = 2_147_483_648 + 4096
+        try output.seek(toOffset: UInt64(offset)); try output.write(contentsOf: Data([7, 8, 9, 10])); try output.close()
+        let input = try FileHandle(forReadingFrom: url)
+        let reader = try PreviewExifFileReader(fileDescriptor: input.fileDescriptor, size: offset + 4, cancellation: PreviewExifReadCancellation())
+        try input.close() // Provider's owned duplicate remains valid.
+        var bytes = [UInt8](repeating: 0, count: 4)
+        let count = bytes.withUnsafeMutableBytes { reader.read(into: $0.baseAddress!, position: offset, count: $0.count) }
+        XCTAssertEqual(count, 4); XCTAssertEqual(bytes, [7, 8, 9, 10]); XCTAssertFalse(reader.failed)
+    }
+
+    func testExifDescriptorReaderCancellationAndTruncationNeverReadInvalidMemory() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: url) }
+        try Data([1, 2, 3, 4]).write(to: url)
+        let input = try FileHandle(forReadingFrom: url); defer { try? input.close() }
+        let cancellation = PreviewExifReadCancellation()
+        let reader = try PreviewExifFileReader(fileDescriptor: input.fileDescriptor, size: 4, cancellation: cancellation)
+        cancellation.cancel()
+        var bytes = [UInt8](repeating: 0, count: 4)
+        XCTAssertEqual(bytes.withUnsafeMutableBytes { reader.read(into: $0.baseAddress!, position: 0, count: $0.count) }, 0)
+        let active = try PreviewExifFileReader(fileDescriptor: input.fileDescriptor, size: 4, cancellation: PreviewExifReadCancellation())
+        let output = try FileHandle(forWritingTo: url); try output.truncate(atOffset: 0); try output.close()
+        XCTAssertEqual(bytes.withUnsafeMutableBytes { active.read(into: $0.baseAddress!, position: 0, count: $0.count) }, 0)
+        XCTAssertTrue(active.failed)
+    }
+
+    func testLocalExifRejectsUnpublishedOrChangedOriginalAndPropagatesCancellation() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let url = root.appendingPathComponent("ORIGINAL.JPG"); try previewExifJpegFixture().write(to: url)
+        let store = CameraOriginalStore(root: root)
+        do { _ = try await store.originalExif(locator: url.absoluteString); XCTFail("Unpublished") } catch {}
+        _ = try await store.originals(since: -1, rescan: true); try Data([1]).write(to: url)
+        do { _ = try await store.originalExif(locator: url.absoluteString); XCTFail("Changed size") } catch {}
+        let task = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await store.originalExif(locator: "file:///not-owned.JPG")
+        }
+        do { _ = try await task.value; XCTFail("Cancelled") } catch { XCTAssertTrue(error is CancellationError) }
+    }
+
+    private func rawIndexFixture(_ ranges: [(UInt32, UInt32)]) -> Data {
+        var data = Data(repeating: 0, count: max(128, 8 + ranges.count * 40))
+        func u16(_ at: Int, _ value: UInt16) { data[at] = UInt8(truncatingIfNeeded: value); data[at + 1] = UInt8(truncatingIfNeeded: value >> 8) }
+        func u32(_ at: Int, _ value: UInt32) { for i in 0..<4 { data[at + i] = UInt8(truncatingIfNeeded: value >> (8 * i)) } }
+        data[0] = 73; data[1] = 73; u16(2, 42); u32(4, 8)
+        for (i, range) in ranges.enumerated() {
+            let at = 8 + i * 40; u16(at, 2)
+            u16(at + 2, 0x0201); u16(at + 4, 4); u32(at + 6, 1); u32(at + 10, range.0)
+            u16(at + 14, 0x0202); u16(at + 16, 4); u32(at + 18, 1); u32(at + 22, range.1)
+            if i + 1 < ranges.count { u32(at + 26, UInt32(at + 40)) }
+        }
+        return data
+    }
+
+    private func writeRawFixture(root: URL, bodies: [(UInt32, Data)], ranges: [(UInt32, UInt32)]? = nil,
+                                 size: UInt64? = nil, header: Data? = nil) throws -> URL {
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let url = root.appendingPathComponent("ORIGINAL.NEF")
+        XCTAssertTrue(FileManager.default.createFile(atPath: url.path, contents: nil))
+        let output = try FileHandle(forWritingTo: url); defer { try? output.close() }
+        let index = header ?? rawIndexFixture(ranges ?? bodies.map { ($0.0, UInt32($0.1.count)) })
+        try output.write(contentsOf: index)
+        for (offset, bytes) in bodies { try output.seek(toOffset: UInt64(offset)); try output.write(contentsOf: bytes) }
+        if let size { try output.truncate(atOffset: size) } // Sparse fixture, not a multi-GB allocation.
+        return url
+    }
+
+    private func padJpegFixture(_ jpeg: Data, minimumBytes: Int = 60_000) -> Data {
+        // Legal COM segment makes a lower-resolution JPEG larger in encoded bytes.
+        var result = Data(jpeg.prefix(2))
+        repeat {
+            result.append(contentsOf: [0xff, 0xfe, 0xea, 0x62])
+            result.append(Data(repeating: 65, count: 60_000))
+        } while result.count + jpeg.count - 2 <= minimumBytes
+        result.append(jpeg.dropFirst(2))
+        return result
+    }
+
+    func testRawPreviewSelectsDecodedPixelsNotEncodedSizeAndKeepsFullOrientation() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let large = try orientedPreviewFixture(width: 3000, height: 1500, orientation: 6)
+        let small = padJpegFixture(try orientedPreviewFixture(width: 20, height: 10, orientation: 1), minimumBytes: large.count)
+        XCTAssertGreaterThan(small.count, large.count)
+        let url = try writeRawFixture(root: root, bodies: [(4096, small), (UInt32(8192 + small.count), large)])
+        let store = CameraOriginalStore(root: root); let index = try await store.originals(since: -1, rescan: true)
+        let actual = try await store.originalRawPreviewData(locator: url.absoluteString)
+        XCTAssertEqual(actual, large)
+        let png = try await PreviewImageDecoder().originalBitmapPNG(XCTUnwrap(actual))
+        let source = try XCTUnwrap(CGImageSourceCreateWithData(png as CFData, nil))
+        let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        XCTAssertEqual(image.width, 3000); XCTAssertEqual(image.height, 1500)
+        let unchanged = try await store.originals(since: index.revision, rescan: false)
+        XCTAssertEqual(unchanged.revision, index.revision); XCTAssertTrue(unchanged.entries.isEmpty)
+    }
+
+    func testRawPreviewReadsIndexedJpegBeyondPrefixAndTwoGiBWithoutReadingWholeRaw() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let jpeg = try orientedPreviewFixture(width: 40, height: 30, orientation: 1)
+        let offset: UInt32 = 2_147_483_648 + 4096
+        let url = try writeRawFixture(root: root, bodies: [(offset, jpeg)], size: UInt64(offset) + UInt64(jpeg.count))
+        let store = CameraOriginalStore(root: root); _ = try await store.originals(since: -1, rescan: true)
+        let actual = try await store.originalRawPreviewData(locator: url.absoluteString)
+        XCTAssertEqual(actual, jpeg)
+        do { _ = try await store.originalData(locator: url.absoluteString); XCTFail("Ordinary bitmap retains its existing full-read size bound") }
+        catch { XCTAssertTrue(error is OriginalIndexError) }
+        let fileSize = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize
+        XCTAssertEqual(fileSize, Int(offset) + jpeg.count)
+    }
+
+    func testRawPreviewCanUseScannedJpegWithoutTiffDirectory() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let jpeg = try orientedPreviewFixture(width: 60, height: 40, orientation: 1)
+        let url = try writeRawFixture(root: root, bodies: [(1024, jpeg)], header: Data(repeating: 0, count: 128))
+        let store = CameraOriginalStore(root: root); _ = try await store.originals(since: -1, rescan: true)
+        let actual = try await store.originalRawPreviewData(locator: url.absoluteString)
+        XCTAssertEqual(actual, jpeg)
+    }
+
+    func testRawPreviewEqualPixelAreaKeepsFirstCandidateInOriginalIndexOrder() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let first = padJpegFixture(try orientedPreviewFixture(width: 60, height: 40, orientation: 1))
+        let second = try orientedPreviewFixture(width: 40, height: 60, orientation: 1)
+        let url = try writeRawFixture(root: root, bodies: [(4096, first), (100_000, second)])
+        let store = CameraOriginalStore(root: root); _ = try await store.originals(since: -1, rescan: true)
+        let actual = try await store.originalRawPreviewData(locator: url.absoluteString)
+        XCTAssertEqual(actual, first)
+    }
+
+    func testRawPreviewSkipsOutOfFileAndUndecodableCandidates() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let jpeg = try orientedPreviewFixture(width: 40, height: 30, orientation: 1)
+        let url = try writeRawFixture(root: root, bodies: [(4096, Data([0xff, 0xd8, 0xff, 0xd9])), (8192, jpeg)],
+            ranges: [(UInt32.max, 100_000), (4096, 4), (8192, UInt32(jpeg.count))])
+        let store = CameraOriginalStore(root: root); _ = try await store.originals(since: -1, rescan: true)
+        let actual = try await store.originalRawPreviewData(locator: url.absoluteString)
+        XCTAssertEqual(actual, jpeg)
+    }
+
+    func testRawPreviewUsesExactIndexAndRejectsChangedSizeOrSymlink() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let jpeg = try orientedPreviewFixture(width: 40, height: 30, orientation: 1)
+        let url = try writeRawFixture(root: root, bodies: [(4096, jpeg)])
+        let store = CameraOriginalStore(root: root)
+        do { _ = try await store.originalRawPreviewData(locator: url.absoluteString); XCTFail("Unpublished locator") } catch {}
+        _ = try await store.originals(since: -1, rescan: true)
+        let before = try Data(contentsOf: url)
+        try Data([1]).write(to: url)
+        do { _ = try await store.originalRawPreviewData(locator: url.absoluteString); XCTFail("Changed size") } catch {}
+        try before.write(to: url)
+        let moved = root.appendingPathComponent("MOVED.NEF"); try FileManager.default.moveItem(at: url, to: moved)
+        try FileManager.default.createSymbolicLink(at: url, withDestinationURL: moved)
+        do { _ = try await store.originalRawPreviewData(locator: url.absoluteString); XCTFail("Symlink") } catch {}
+    }
+
+    func testRawPreviewCancellationPrecedesFileAccess() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let store = CameraOriginalStore(root: root)
+        let task = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await store.originalRawPreviewData(locator: "file:///not-owned.NEF")
+        }
+        do { _ = try await task.value; XCTFail("Cancelled") } catch { XCTAssertTrue(error is CancellationError) }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+    }
+
+    func testRawNativeBridgeContainsMalformedTiffExceptionsAndChecksJpegEnvelope() throws {
+        var header = rawIndexFixture([])
+        header[4] = 0xff; header[5] = 0xff; header[6] = 0xff; header[7] = 0x7f
+        XCTAssertTrue(NativeRawPreviewBridge.shared.candidates(data: header as NSData).isEmpty)
+        XCTAssertTrue(NativeRawPreviewBridge.shared.candidates(data: Data(repeating: 0, count: 16 * 1024 * 1024 + 1) as NSData).isEmpty)
+        XCTAssertTrue(NativeRawPreviewBridge.shared.isCompleteJpeg(data: Data([0xff, 0xd8, 0xff, 0xd9]) as NSData))
+        XCTAssertFalse(NativeRawPreviewBridge.shared.isCompleteJpeg(data: Data([0xff, 0xd8, 0xff, 0xd9, 0]) as NSData))
+        XCTAssertFalse(NativeRawPreviewBridge.shared.isCompleteJpeg(data: Data() as NSData))
+    }
+
+    func testIncrementalCatalogPublishesBeforeWholeMetadataAndNeverCommitsPartialBaseline() async throws {
+        let source = BaselineCatalogSource(), handles = (1...45).map(Int32.init)
+        var infos: [Int32: PtpObjectInfo] = [:]
+        for handle in handles { infos[handle] = try resolverInfo(handle, name: "PHOTO_\(handle).JPG") }
+        await source.set(handles, infos: infos)
+        let catalog = CameraCatalog(source: source, stationMode: false)
+        let batches = expectation(description: "20 and 40 rows arrive before the whole directory")
+        batches.expectedFulfillmentCount = 2
+        let result = try await catalog.refresh(onBatch: { value in
+            XCTAssertTrue([20, 40].contains(value.files.count))
+            let reads = await source.readCount
+            XCTAssertEqual(reads, value.files.count)
+            XCTAssertFalse(value.metadataComplete)
+            let complete = await catalog.snapshot(); XCTAssertNil(complete)
+            let presentation = await catalog.presentation()
+            XCTAssertTrue(presentation.scanning); XCTAssertEqual(presentation.progress?.files.count, value.files.count)
+            batches.fulfill()
+        })
+        await fulfillment(of: [batches], timeout: 2)
+        XCTAssertTrue(result.metadataComplete); XCTAssertEqual(result.files.count, 45)
+        let final = await catalog.presentation(); XCTAssertFalse(final.scanning); XCTAssertNil(final.progress)
+        await catalog.close()
+    }
+
+    func testIncrementalThumbnailFillRunsBeforeScanFinishWithoutDeletingPreviousDiskEntries() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let png = try thumbnailFixture(), id = UUID()
+        let source = FillPreviewSource(results: [1: [.bytes(png)], 2: [.bytes(png)]])
+        let store = CameraPreviewStore(source: source, connectionID: id)
+        _ = await store.openDiskCache(root: root, cameraIdentity: "batch-camera")
+        await store.startBackgroundFill(startDay: 0, endDay: 0, revision: 1)
+        _ = await store.reconcile(try fillCatalog(id, handles: [1]))
+        try await waitForFillIdle(store)
+        let pendingToken = await store.beginCatalogScan()
+        let token = try XCTUnwrap(pendingToken)
+        let accepted = await store.appendCatalogBatch(token, snapshot: try fillCatalog(id, handles: [2], complete: false))
+        XCTAssertTrue(accepted)
+        try await waitForFillIdle(store)
+        let calls = await source.stats(); XCTAssertEqual(calls.handles, [1, 2])
+        let disk = try CameraThumbnailDiskCache(root: root, cameraIdentity: "batch-camera")
+        XCTAssertNotNil(try disk.read(key: NativePreviewPolicy().thumbnailKey(info: sampleInfo(1))))
+        let failed = await store.finishCatalogScan(token, snapshot: nil); XCTAssertFalse(failed)
+        await store.close()
+        let late = await store.appendCatalogBatch(token, snapshot: try fillCatalog(id, handles: [2], complete: false))
+        XCTAssertFalse(late)
+    }
+
+    func testRawEmbeddedExifUsesSharedDirectoryRouteWithoutMutatingOriginal() async throws {
+        let jpeg = try previewExifJpegFixture()
+        var bytes = rawIndexFixture([(4096, UInt32(jpeg.count))])
+        bytes.append(Data(repeating: 0, count: 8192 - bytes.count))
+        bytes.replaceSubrange(4096..<(4096 + jpeg.count), with: jpeg)
+        let before = bytes
+        let header = try PreviewExifReader.metadata(header: bytes, locale: Locale(identifier: "en_US_POSIX"))
+        XCTAssertEqual(header?.aperture, "f/4"); XCTAssertEqual(header?.iso, "ISO64")
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".NEF")
+        try bytes.write(to: url); defer { try? FileManager.default.removeItem(at: url) }
+        let input = try FileHandle(forReadingFrom: url); defer { try? input.close() }
+        let local = try PreviewExifReader.metadata(fileDescriptor: input.fileDescriptor, size: Int64(bytes.count),
+            cancellation: PreviewExifReadCancellation(), locale: Locale(identifier: "en_US_POSIX"))
+        XCTAssertEqual(local?.aperture, header?.aperture); XCTAssertEqual(local?.dateTime, header?.dateTime)
+        XCTAssertEqual(try Data(contentsOf: url), before)
+    }
+
+    func testDirectVideoThumbnailReusesHeaderJpegAndKeepsVideoIdentity() async throws {
+        let jpeg = try previewExifJpegFixture()
+        var header = Data(repeating: 0, count: 4096)
+        header.replaceSubrange(4..<12, with: Data("ftypqt  ".utf8))
+        header.replaceSubrange(16..<20, with: Data("mvhd".utf8))
+        let seconds: UInt32 = 2_082_844_801
+        for i in 0..<4 { header[24 + i] = UInt8(truncatingIfNeeded: seconds >> ((3 - i) * 8)) }
+        header.replaceSubrange(512..<(512 + jpeg.count), with: jpeg)
+        let wire = FakeCameraConnection(bytes: stationDirectOpeningReplies()
+            + response(transaction: 9, payload: hex("0010000000000000")) + response(transaction: 10, payload: header))
+        let camera = stationCamera(command: wire)
+        _ = try await camera.connect(guid: Data("0123456789abcdef".utf8), stationOptions: StationConnectionOptions(exploreAlbumAccess: true))
+        let snapshot = try await CameraCatalog(source: camera, stationMode: true).refresh()
+        let file = try XCTUnwrap(snapshot.files.first)
+        XCTAssertTrue(file.fileName.hasSuffix(".mov")); XCTAssertEqual(file.size, 4096)
+        let before = wire.sent().count
+        let thumbnail = try await camera.thumbnail(handle: file.handle)
+        XCTAssertEqual(thumbnail, jpeg); XCTAssertEqual(wire.sent().count, before)
+        XCTAssertEqual(PreviewMediaDate.video(header, timeZone: try XCTUnwrap(TimeZone(secondsFromGMT: 0))), "19700101T000001")
+        XCTAssertEqual(PreviewMediaDate.video(header, timeZone: try XCTUnwrap(TimeZone(secondsFromGMT: 28800))), "19700101T080001")
+        await camera.abort()
+    }
+
+    func testVideoPrefixDecoderRejectsBadOrOversizedInputAndHonorsCancellation() async throws {
+        let decoder = PreviewImageDecoder()
+        let invalid = try await decoder.videoThumbnail(Data([0, 1, 2]), fileExtension: ".mov")
+        let large = try await decoder.videoThumbnail(Data(repeating: 0, count: 8 * 1024 * 1024 + 1), fileExtension: ".mov")
+        XCTAssertNil(invalid); XCTAssertNil(large)
+        let cancelled = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await decoder.videoThumbnail(Data([1]), fileExtension: ".mp4")
+        }
+        do { _ = try await cancelled.value; XCTFail("Cancelled video probe") }
+        catch { XCTAssertTrue(error is CancellationError) }
+    }
+
+    func testDirectRawAndVideoMissesRemainRetryableAtPreviewStoreBoundary() async throws {
+        for name in ["A.NEF", "A.MOV", "A.MP4"] {
+            let source = FakePreviewSource(thumbs: [.missing, .bytes(Data([7]))])
+            let store = CameraPreviewStore(source: source)
+            await store.configureDirectObjectReads(true)
+            let file = CameraFileInfo(handle: 1, size: 400, fileName: name, captureDate: nil, isProtected: false, storageIds: [])
+            let info = NativePreviewPolicy().originalThumbnailInfo(file: file)
+            let first = try await store.thumbnail(info: info), second = try await store.thumbnail(info: info)
+            XCTAssertNil(first); XCTAssertEqual(second, Data([7]))
+            let count = await source.counts(); XCTAssertEqual(count.thumb, 2)
+            await store.close()
+        }
+    }
+
+    func testDirectMpfPreviewUsesSecondaryRangeAndLatchesUnsupportedCameraFhd() async throws {
+        let jpeg = try previewExifJpegFixture()
+        var header = Data(repeating: 0, count: 128 * 1024)
+        func u16(_ at: Int, _ value: UInt16) { for i in 0..<2 { header[at + i] = UInt8(truncatingIfNeeded: value >> (8 * i)) } }
+        func u32(_ at: Int, _ value: UInt32) { for i in 0..<4 { header[at + i] = UInt8(truncatingIfNeeded: value >> (8 * i)) } }
+        header.replaceSubrange(0..<10, with: hex("FFD8FFE2004C4D504600"))
+        header[10] = 73; header[11] = 73; u16(12, 42); u32(14, 8)
+        u16(18, 2); u16(20, 0xB001); u16(22, 4); u32(24, 1); u32(28, 2)
+        u16(32, 0xB002); u16(34, 7); u32(36, 32); u32(40, 38)
+        u32(48, 0x030000); u32(52, 900_000); u32(56, 0)
+        u32(64, 0x010002); u32(68, UInt32(jpeg.count)); u32(72, 500_000)
+        header[80] = 0xff; header[81] = 0xda
+        let wire = FakeCameraConnection(bytes: stationDirectOpeningReplies()
+            + response(transaction: 9, payload: hex("0000100000000000")) + response(transaction: 10, payload: header)
+            + response(transaction: 11, code: 0x200F) + response(transaction: 12, payload: jpeg)
+            + response(transaction: 13, payload: jpeg))
+        let camera = stationCamera(command: wire)
+        _ = try await camera.connect(guid: Data("0123456789abcdef".utf8), stationOptions: StationConnectionOptions(exploreAlbumAccess: true))
+        _ = try await CameraCatalog(source: camera, stationMode: true).refresh()
+        let first = try await camera.fhdPicture(handle: 0x29000001)
+        let again = try await camera.fhdPicture(handle: 0x29000001)
+        XCTAssertEqual(first, jpeg); XCTAssertEqual(again, jpeg)
+        XCTAssertEqual(Array(stationOperations(wire).suffix(3)), [0x920F, 0x9431, 0x9431])
+        let request = try XCTUnwrap(wire.sent().last)
+        XCTAssertEqual(request.subdata(in: 22..<30), hex("2AA1070000000000")) // TIFF base 10 + 500000.
+        XCTAssertFalse(stationOperations(wire).contains(0x1009))
+        await camera.abort()
+    }
+
+    func testDirectRawThumbnailUsesSmallestIndexedRangeWithoutChangingOriginal() async throws {
+        let small = try previewExifJpegFixture(), large = try padJpegFixture(previewExifJpegFixture())
+        var header = rawIndexFixture([(400_000, UInt32(large.count)), (300_000, UInt32(small.count))])
+        header.append(Data(repeating: 0, count: 128 * 1024 - header.count))
+        let wire = FakeCameraConnection(bytes: stationDirectOpeningReplies()
+            + response(transaction: 9, payload: hex("0000100000000000")) + response(transaction: 10, payload: header)
+            + response(transaction: 11, payload: small))
+        let camera = stationCamera(command: wire)
+        _ = try await camera.connect(guid: Data("0123456789abcdef".utf8), stationOptions: StationConnectionOptions(exploreAlbumAccess: true))
+        let snapshot = try await CameraCatalog(source: camera, stationMode: true).refresh()
+        XCTAssertTrue(snapshot.files.first?.fileName.lowercased().hasSuffix(".nef") == true)
+        let actual = try await camera.thumbnail(handle: 0x29000001)
+        XCTAssertEqual(actual, small)
+        XCTAssertEqual(wire.sent().last?.subdata(in: 22..<30), hex("E093040000000000"))
+        XCTAssertFalse(stationOperations(wire).contains(0x1009))
+        await camera.abort()
+    }
+
+    func testEmbeddedExifThumbnailDoesNotRenderPrimaryJpegWhenThumbnailMissing() async throws {
+        let original = try previewExifJpegFixture()
+        let result = try await PreviewImageDecoder().embeddedExifThumbnailPNG(original)
+        XCTAssertNil(result)
+        XCTAssertNotNil(try PreviewImageDecoder.cameraPreviewDimensions(original))
+        XCTAssertNil(try PreviewImageDecoder.cameraPreviewDimensions(Data([1, 2, 3])))
+    }
+
+    func testEmbeddedExifThumbnailCanDecodeWithoutPrimaryImageEntropy() async throws {
+        let jpeg = try previewExifJpegFixture()
+        var tiff = Data(repeating: 0, count: 80 + jpeg.count)
+        func u16(_ at: Int, _ value: UInt16) { for i in 0..<2 { tiff[at + i] = UInt8(truncatingIfNeeded: value >> (8 * i)) } }
+        func u32(_ at: Int, _ value: UInt32) { for i in 0..<4 { tiff[at + i] = UInt8(truncatingIfNeeded: value >> (8 * i)) } }
+        tiff[0] = 73; tiff[1] = 73; u16(2, 42); u32(4, 8); u16(8, 0); u32(10, 14)
+        u16(14, 5)
+        for (i, entry) in [(UInt16(0x0100), UInt32(12)), (0x0101, 8), (0x0103, 6), (0x0201, 80), (0x0202, UInt32(jpeg.count))].enumerated() {
+            let at = 16 + i * 12
+            u16(at, entry.0); u16(at + 2, 4); u32(at + 4, 1); u32(at + 8, entry.1)
+        }
+        tiff.replaceSubrange(80..<(80 + jpeg.count), with: jpeg)
+        let length = tiff.count + 8
+        let envelope = Data([0xff, 0xd8, 0xff, 0xe1, UInt8(length >> 8), UInt8(length & 255)])
+            + Data("Exif\0\0".utf8) + tiff + Data([0xff, 0xd9])
+        let thumbnail = try await PreviewImageDecoder().embeddedExifThumbnailPNG(envelope)
+        let decoded = try XCTUnwrap(thumbnail)
+        let source = try XCTUnwrap(CGImageSourceCreateWithData(decoded as CFData, nil))
+        let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        XCTAssertEqual(image.width, 12); XCTAssertEqual(image.height, 8)
+    }
+
+    func testSharedThumbnailCropPreservesContentAndLeavesFhdUncropped() async throws {
+        let context = try XCTUnwrap(CGContext(data: nil, width: 100, height: 100, bitsPerComponent: 8,
+            bytesPerRow: 400, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.setFillColor(CGColor(gray: 0, alpha: 1)); context.fill(CGRect(x: 0, y: 0, width: 100, height: 100))
+        context.setFillColor(CGColor(red: 1, green: 0.2, blue: 0.1, alpha: 1))
+        context.fill(CGRect(x: 0, y: 5, width: 100, height: 90))
+        let image = try XCTUnwrap(context.makeImage()), decoder = PreviewImageDecoder()
+        let cropped = try await decoder.cropThumbnail(image, video: false)
+        XCTAssertEqual(cropped.width, 100); XCTAssertEqual(cropped.height, 88)
+        XCTAssertEqual(image.height, 100)
+        let encoded = NSMutableData()
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithData(encoded, "public.png" as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, image, nil); XCTAssertTrue(CGImageDestinationFinalize(destination))
+        let fhd = try await decoder.fhdPreviewPNG(encoded as Data)
+        let source = try XCTUnwrap(CGImageSourceCreateWithData(fhd as CFData, nil))
+        let uncropped = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        XCTAssertEqual(uncropped.height, 100)
+    }
+
+    private func orientedPreviewFixture(width: Int, height: Int, orientation: Int) throws -> Data {
+        let context = try XCTUnwrap(CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
+            bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.setFillColor(CGColor(red: 0.7, green: 0.2, blue: 0.3, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        let image = try XCTUnwrap(context.makeImage())
+        let data = NSMutableData()
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithData(data, "public.jpeg" as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, image, [kCGImagePropertyOrientation: orientation] as CFDictionary)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        return data as Data
+    }
+
+    func testLocalPreviewReadsOnlyAnAlreadyPublishedIndexWithoutRescanningOrMutatingIt() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let url = root.appendingPathComponent("ORIGINAL.JPG")
+        let bytes = Data(repeating: 37, count: 150_123) // More than two read chunks.
+        try bytes.write(to: url)
+        let store = CameraOriginalStore(root: root)
+        do { _ = try await store.originalData(locator: url.absoluteString); XCTFail("No published locator yet") }
+        catch { XCTAssertTrue(error is OriginalIndexError) }
+        let index = try await store.originals(since: -1, rescan: true)
+        let locator = try XCTUnwrap(index.entries.first?.url.absoluteString)
+        let actual = try await store.originalData(locator: locator)
+        XCTAssertEqual(actual, bytes)
+        let unchanged = try await store.originals(since: index.revision, rescan: false)
+        XCTAssertEqual(unchanged.revision, index.revision); XCTAssertTrue(unchanged.entries.isEmpty)
+        XCTAssertEqual(try Data(contentsOf: url), bytes)
+    }
+
+    func testLocalPreviewRejectsExternalAliasesPrivatePartsAndNonFileLocators() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let file = root.appendingPathComponent("A.JPG")
+        try Data([1, 2, 3]).write(to: file)
+        let part = root.appendingPathComponent(".nkpart_hidden.JPG")
+        try Data([1, 2, 3]).write(to: part)
+        let store = CameraOriginalStore(root: root)
+        let snapshot = try await store.originals(since: -1, rescan: true)
+        let locator = try XCTUnwrap(snapshot.entries.first?.url.absoluteString)
+        for invalid in ["https://example.invalid/A.JPG", "file:///etc/passwd", locator + "?q=1",
+                        locator + "#fragment", part.absoluteString, root.appendingPathComponent("missing.JPG").absoluteString] {
+            do { _ = try await store.originalData(locator: invalid); XCTFail("Unowned locator: \(invalid)") }
+            catch { XCTAssertTrue(error is OriginalIndexError) }
+        }
+    }
+
+    func testLocalPreviewFailsOnDeletedOrChangedLengthWithoutChangingItsOldIndex() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let file = root.appendingPathComponent("A.JPG")
+        try Data([1, 2, 3]).write(to: file)
+        let store = CameraOriginalStore(root: root)
+        let index = try await store.originals(since: -1, rescan: true)
+        let locator = try XCTUnwrap(index.entries.first?.url.absoluteString)
+        try Data([1, 2, 3, 4]).write(to: file)
+        do { _ = try await store.originalData(locator: locator); XCTFail("Changed length") } catch {}
+        try FileManager.default.removeItem(at: file)
+        do { _ = try await store.originalData(locator: locator); XCTFail("Deleted file") } catch {}
+        let unchanged = try await store.originals(since: index.revision, rescan: false)
+        XCTAssertEqual(index.revision, unchanged.revision); XCTAssertTrue(unchanged.entries.isEmpty)
+    }
+
+    func testLocalPreviewCannotFollowAnIndexedLeafReplacedByASymlink() async throws {
+        let area = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let root = area.appendingPathComponent("originals")
+        defer { try? FileManager.default.removeItem(at: area) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let file = root.appendingPathComponent("A.JPG")
+        let outside = area.appendingPathComponent("outside.JPG")
+        try Data([1, 2, 3]).write(to: file); try Data([9, 9, 9]).write(to: outside)
+        let store = CameraOriginalStore(root: root)
+        let index = try await store.originals(since: -1, rescan: true)
+        let locator = try XCTUnwrap(index.entries.first?.url.absoluteString)
+        try FileManager.default.removeItem(at: file)
+        try FileManager.default.createSymbolicLink(at: file, withDestinationURL: outside)
+        do { _ = try await store.originalData(locator: locator); XCTFail("Followed a symlink") }
+        catch { XCTAssertTrue(error is OriginalIndexError) }
+        XCTAssertEqual(try Data(contentsOf: outside), Data([9, 9, 9]))
+    }
+
+    func testLocalPreviewSupportsIndexedDateBucketButRejectsReplacementDirectorySymlink() async throws {
+        let area = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let root = area.appendingPathComponent("originals")
+        let folder = root.appendingPathComponent("ZT2026-09-05")
+        defer { try? FileManager.default.removeItem(at: area) }
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try Data([1, 2, 3]).write(to: folder.appendingPathComponent("A.JPG"))
+        let store = CameraOriginalStore(root: root)
+        let index = try await store.originals(since: -1, rescan: true)
+        let locator = try XCTUnwrap(index.entries.first?.url.absoluteString)
+        let data = try await store.originalData(locator: locator); XCTAssertEqual(data, Data([1, 2, 3]))
+        let moved = area.appendingPathComponent("moved")
+        try FileManager.default.moveItem(at: folder, to: moved)
+        try FileManager.default.createSymbolicLink(at: folder, withDestinationURL: moved)
+        do { _ = try await store.originalData(locator: locator); XCTFail("Followed a replaced directory") }
+        catch { XCTAssertTrue(error is OriginalIndexError) }
+    }
+
+    func testLocalPreviewReadHonorsCancellationBeforeAccessingStorage() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let store = CameraOriginalStore(root: root)
+        let task = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await store.originalData(locator: "file:///not-owned.JPG")
+        }
+        do { _ = try await task.value; XCTFail("Cancelled reader must fail") }
+        catch { XCTAssertTrue(error is CancellationError) }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+    }
+
+    func testLocalBitmapPreservesOriginalResolutionAndCameraPixelOrientation() async throws {
+        let jpeg = try orientedPreviewFixture(width: 3000, height: 1500, orientation: 6)
+        let decoder = PreviewImageDecoder()
+        let png = try await decoder.originalBitmapPNG(jpeg)
+        let source = try XCTUnwrap(CGImageSourceCreateWithData(png as CFData, nil))
+        let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        XCTAssertEqual(image.width, 3000); XCTAssertEqual(image.height, 1500)
+        let diagnostic = try await decoder.decode(jpeg)
+        XCTAssertEqual(diagnostic.width, 1024); XCTAssertEqual(diagnostic.height, 2048)
+    }
+
+    @MainActor func testLocalBitmapBulkBridgeDoesNotApplyCameraFhdOrProbeLimits() async throws {
+        let jpeg = try orientedPreviewFixture(width: 3000, height: 1500, orientation: 6)
+        let png = try await PreviewImageDecoder().originalBitmapPNG(jpeg)
+        let local = try XCTUnwrap(NativePreviewImageBridge.shared.localPng(data: png as NSData))
+        XCTAssertEqual(local.width, 3000); XCTAssertEqual(local.height, 1500)
+        XCTAssertNil(NativePreviewImageBridge.shared.fhdPng(data: png as NSData))
+        var corrupt = png; corrupt[16] = 0xff
+        XCTAssertNil(NativePreviewImageBridge.shared.localPng(data: corrupt as NSData))
+        do { _ = try await PreviewImageDecoder().originalBitmapPNG(Data([1, 2, 3])); XCTFail("Malformed image") }
+        catch { XCTAssertTrue(error is PreviewImageError) }
+    }
+
+    func testPreviewConfirmedMissIsCachedUntilMemoryClear() async throws {
+        let source = FakePreviewSource(thumbs: [.missing, .bytes(Data([2]))])
+        let store = CameraPreviewStore(source: source)
+        let info = try sampleInfo(1)
+        let first = try await store.thumbnail(info: info)
+        let second = try await store.thumbnail(info: info)
+        XCTAssertNil(first); XCTAssertNil(second)
+        let before = await source.counts()
+        XCTAssertEqual(before.thumb, 1)
+        await store.clearForMemoryPressure()
+        let after = try await store.thumbnail(info: info)
+        XCTAssertEqual(after, Data([2]))
+    }
+
+    func testImageDecoderAppliesOrientationAndBoundsOutput() async throws {
+        let context = try XCTUnwrap(CGContext(data: nil, width: 40, height: 20, bitsPerComponent: 8,
+            bytesPerRow: 160, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.setFillColor(CGColor(red: 1, green: 0, blue: 0, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: 40, height: 20))
+        let original = try XCTUnwrap(context.makeImage())
+        let data = NSMutableData()
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithData(data, "public.jpeg" as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, original, [kCGImagePropertyOrientation: 6] as CFDictionary)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        let image = try await PreviewImageDecoder().decode(data as Data, maximumPixelSize: 10)
+        XCTAssertEqual(image.width, 5); XCTAssertEqual(image.height, 10)
+        let queuePNG = try await PreviewImageDecoder().queueThumbnailPNG(data as Data)
+        XCTAssertLessThanOrEqual(queuePNG.count, 1_048_576)
+        let queueImage = try await PreviewImageDecoder().decode(queuePNG, maximumPixelSize: 128)
+        XCTAssertEqual(queueImage.width, 20); XCTAssertEqual(queueImage.height, 40)
+        let gridPNG = try await PreviewImageDecoder().gridThumbnailPNG(data as Data)
+        XCTAssertLessThanOrEqual(gridPNG.count, 4 * 1024 * 1024)
+        let gridImage = try await PreviewImageDecoder().decode(gridPNG, maximumPixelSize: 512)
+        XCTAssertEqual(gridImage.width, 20); XCTAssertEqual(gridImage.height, 40)
+    }
+
+    private func sampleInfo(_ handle: Int32, captureDate: String? = nil) throws -> PtpObjectInfo {
+        var prefix = Data(repeating: 0, count: 52)
+        prefix[0] = 1; prefix[2] = 1; prefix[4] = 1; prefix[5] = 0x38; prefix[8] = UInt8(handle)
+        var payload = prefix + hex("0B730061006D0070006C0065002E004A0050004700000000")
+        if let captureDate {
+            payload.append(UInt8(captureDate.utf16.count + 1))
+            for unit in captureDate.utf16 { payload.append(UInt8(unit & 0xff)); payload.append(UInt8(unit >> 8)) }
+            payload.append(contentsOf: [0, 0])
+        }
+        return try XCTUnwrap(PtpIPChannel.objectInfo(handle: handle, payload: payload))
+    }
+
+    func testDataOutMatchesIndependentThreePacketVectorIncludingEmptyPayload() async throws {
+        for data in [hex("AABBCC"), Data()] {
+            let wire = FakeCameraConnection(bytes: response(transaction: 0x11223344))
+            let stream = CameraTCPStream(connection: wire)
+            try await stream.connect(timeout: 1)
+            let session = PtpIPCommandSession(stream: stream, initialTransactionId: 0x11223343)
+            _ = try await session.execute(operationCode: 0x1016, parameters: [0x55667788], outgoingData: data)
+            let tail = data.isEmpty ? "14000000090000004433221100000000000000000C0000000C00000044332211"
+                : "14000000090000004433221103000000000000000F0000000C00000044332211AABBCC"
+            XCTAssertEqual(wire.sent(), [hex("16000000060000000200000016104433221188776655" + tail)])
+            await session.close()
+        }
+    }
+
+    func testThumbnailBusyIsRetryableAndConfirmedMissDoesNotPoisonConnection() async throws {
+        let wire = FakeCameraConnection(bytes: apOpeningReplies() + response(transaction: 3, code: 0x2019)
+            + response(transaction: 4, payload: Data([1])) + response(transaction: 5, code: 0x2010))
+        let camera = apCamera(command: wire)
+        _ = try await camera.connect(guid: Data(repeating: 1, count: 16))
+        do { _ = try await camera.thumbnail(handle: 10); XCTFail("Busy must not be a cacheable miss") }
+        catch { XCTAssertTrue(error is CameraOperationError) }
+        let bytes = try await camera.thumbnail(handle: 10)
+        let missing = try await camera.thumbnail(handle: 11)
+        let state = await camera.snapshot()
+        XCTAssertEqual(bytes, Data([1])); XCTAssertNil(missing); XCTAssertEqual(state.phase, .ready)
+        await camera.abort()
+    }
+
+    func testExifHeaderUsesSharedPartialParametersForBothOriginalHeaderSizes() async throws {
+        let wire = FakeCameraConnection(bytes: apOpeningReplies() + response(transaction: 3, payload: Data([1,2]))
+            + response(transaction: 4, payload: Data([3,4])))
+        let camera = apCamera(command: wire)
+        _ = try await camera.connect(guid: Data(repeating: 1, count: 16))
+        let jpeg = try await camera.exifHeader(handle: 7, maximumBytes: 128 * 1024)
+        let raw = try await camera.exifHeader(handle: 7, maximumBytes: 2 * 1024 * 1024)
+        XCTAssertEqual(jpeg, Data([1,2])); XCTAssertEqual(raw, Data([3,4]))
+        XCTAssertEqual(Array(wire.sent().suffix(2)), [
+            hex("2600000006000000010000003194" + "03000000" + "07000000" + "00000000" + "00000000" + "00000200" + "00000000"),
+            hex("2600000006000000010000003194" + "04000000" + "07000000" + "00000000" + "00000000" + "00002000" + "00000000")])
+        let state = await camera.snapshot(); XCTAssertEqual(state.phase, .ready)
+        await camera.abort()
+    }
+
+    func testExifHeaderRejectedOrEmptyResponseIsMissWithoutRetryOrConnectionPoison() async throws {
+        let wire = FakeCameraConnection(bytes: apOpeningReplies() + response(transaction: 3, code: 0x2019)
+            + response(transaction: 4, code: 0x2005) + response(transaction: 5, code: 0x2009)
+            + response(transaction: 6) + response(transaction: 7, payload: Data()))
+        let camera = apCamera(command: wire)
+        _ = try await camera.connect(guid: Data(repeating: 1, count: 16))
+        for _ in 0..<5 {
+            let result = try await camera.exifHeader(handle: 7, maximumBytes: 128 * 1024)
+            XCTAssertNil(result)
+            let state = await camera.snapshot(); XCTAssertEqual(state.phase, .ready)
+        }
+        XCTAssertEqual(wire.sent().count, 8)
+        await camera.abort()
+    }
+
+    func testExifHeaderInvalidLimitNeverUsesWireAndMalformedTransactionClosesOwner() async throws {
+        let wire = FakeCameraConnection(bytes: apOpeningReplies() + response(transaction: 99, payload: Data([1])))
+        let camera = apCamera(command: wire)
+        _ = try await camera.connect(guid: Data(repeating: 1, count: 16))
+        for invalid in [Int32(0), -1, 2 * 1024 * 1024 + 1] {
+            await expect(.invalidArgument) { _ = try await camera.exifHeader(handle: 7, maximumBytes: invalid) }
+        }
+        XCTAssertEqual(wire.sent().count, 3)
+        let result = try await camera.exifHeader(handle: 7, maximumBytes: 128 * 1024)
+        XCTAssertNil(result)
+        let state = await camera.snapshot(); XCTAssertEqual(state.phase, .closed)
+    }
+
+    func testCancelledExifRequestDoesNotInterruptAnotherActiveCameraTransaction() async throws {
+        let sent = expectation(description: "storage command active")
+        let storageRequest = hex("120000000600000001000000041003000000")
+        let wire = FakeCameraConnection(bytes: apOpeningReplies(), onSend: { if $0 == storageRequest { sent.fulfill() } })
+        let camera = apCamera(command: wire)
+        _ = try await camera.connect(guid: Data(repeating: 1, count: 16))
+        let active = Task { try await camera.storageIDs() }
+        await fulfillment(of: [sent], timeout: 1)
+        let cancelled = Task { try await camera.exifHeader(handle: 7, maximumBytes: 128 * 1024) }
+        await Task.yield(); cancelled.cancel()
+        do { _ = try await cancelled.value; XCTFail("Cancellation is not an EXIF cache miss") }
+        catch { XCTAssertTrue(error is CancellationError) }
+        wire.feed(response(transaction: 3, payload: hex("0100000001000100")))
+        let stores = try await active.value
+        XCTAssertEqual(stores, [0x10001]); XCTAssertEqual(wire.sent().count, 4)
+        let state = await camera.snapshot(); XCTAssertEqual(state.phase, .ready)
+        await camera.abort()
+    }
+
+    func testPreCancelledCameraHeaderParsingThrowsInsteadOfReturningPartialExif() async throws {
+        let jpeg = try rawBiasJpegFixture(numerator: 36_293_949, denominator: 725_879_001, little: true)
+        let cancelled = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try PreviewExifReader.metadata(header: Data(jpeg.prefix(64)))
+        }
+        do { _ = try await cancelled.value; XCTFail("Expected parsing cancellation") }
+        catch { XCTAssertTrue(error is CancellationError) }
+    }
+
+    func testFhdSuccessPreventsLaterUnsupportedResponseFromLatchingOff() async throws {
+        let wire = FakeCameraConnection(bytes: apOpeningReplies() + response(transaction: 3, payload: Data([1]))
+            + response(transaction: 4, code: 0x2005) + response(transaction: 5, payload: Data([2])))
+        let camera = apCamera(command: wire)
+        _ = try await camera.connect(guid: Data(repeating: 1, count: 16))
+        let first = try await camera.fhdPicture(handle: 10)
+        let unsupported = try await camera.fhdPicture(handle: 11)
+        let next = try await camera.fhdPicture(handle: 12)
+        XCTAssertEqual(first, Data([1])); XCTAssertNil(unsupported); XCTAssertEqual(next, Data([2]))
+        await camera.abort()
+    }
+
+    func testFhdInitialUnsupportedStopsRepeatedWireRequests() async throws {
+        let wire = FakeCameraConnection(bytes: apOpeningReplies() + response(transaction: 3, code: 0x2005))
+        let camera = apCamera(command: wire)
+        _ = try await camera.connect(guid: Data(repeating: 1, count: 16))
+        let first = try await camera.fhdPicture(handle: 10)
+        let next = try await camera.fhdPicture(handle: 11)
+        XCTAssertNil(first); XCTAssertNil(next); XCTAssertEqual(wire.sent().count, 4)
+        await camera.abort()
+    }
+
+    func testPhotoImportDeniedNeverSubmitsAndRetainsOriginal() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".jpg")
+        try Data([1, 2, 3]).write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let client = FakePhotoLibrary(authorization: .notDetermined, requested: .denied)
+        do { try await PhotoLibraryImporter(client: client).save(url); XCTFail("Expected denial") }
+        catch { guard case PhotoLibraryImportError.permissionDenied = error else { return XCTFail("\(error)") } }
+        XCTAssertEqual(client.requests, 1)
+        XCTAssertEqual(client.imports, 0)
+        XCTAssertEqual(try Data(contentsOf: url), Data([1, 2, 3]))
+    }
+
+    func testPhotoImportFailureRetainsOriginalWithoutRetry() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".jpg")
+        try Data([1]).write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let client = FakePhotoLibrary(authorization: .allowed, success: false)
+        do { try await PhotoLibraryImporter(client: client).save(url); XCTFail("Expected failure") }
+        catch { guard case PhotoLibraryImportError.importFailed = error else { return XCTFail("\(error)") } }
+        XCTAssertEqual(client.requests, 0)
+        XCTAssertEqual(client.imports, 1)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+    }
+
+    func testPhotoUnsupportedTypeDoesNotPrompt() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".txt")
+        try Data([1]).write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let client = FakePhotoLibrary(authorization: .notDetermined)
+        do { try await PhotoLibraryImporter(client: client).save(url); XCTFail("Expected unsupported type") }
+        catch { guard case PhotoLibraryImportError.unsupportedType = error else { return XCTFail("\(error)") } }
+        XCTAssertEqual(client.requests, 0)
+        XCTAssertEqual(client.imports, 0)
+    }
+
+    func testPhotoCancellationAfterSubmitReportsActualSuccess() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".jpg")
+        try Data([1]).write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let submitted = expectation(description: "Photos submitted")
+        let client = FakePhotoLibrary(authorization: .allowed, hold: true, onSubmit: { submitted.fulfill() })
+        let importer = PhotoLibraryImporter(client: client)
+        let task = Task { try await importer.save(url) }
+        await fulfillment(of: [submitted], timeout: 1)
+        task.cancel()
+        client.complete()
+        try await task.value
+        XCTAssertEqual(client.imports, 1)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+    }
+
+    private func stationAck() -> Data { hex("1C000000020000004433221100112233445566778899AABBCCDDEEFF") }
+
+    private func stationCamera(command: FakeCameraConnection, event: FakeCameraConnection? = nil) -> CameraWiFiConnection {
+        CameraWiFiConnection(command: CameraTCPStream(connection: command),
+                             event: CameraTCPStream(connection: event ?? FakeCameraConnection(bytes: hex("0800000004000000"))),
+                             stationMode: true)
+    }
+
+    private func apCamera(command: FakeCameraConnection, event: FakeCameraConnection? = nil) -> CameraWiFiConnection {
+        CameraWiFiConnection(command: CameraTCPStream(connection: command),
+                           event: CameraTCPStream(connection: event ?? FakeCameraConnection(bytes: hex("0800000004000000"))))
+    }
+
+    private func apOpeningReplies() -> Data {
+        hex("0C0000000200000044332211") + response(transaction: 1)
+            + response(transaction: 2, code: 0x2005)
+    }
+
+    // Independent fixture writer; never calls a production codec to generate expected bytes.
+    private func response(transaction: UInt32, code: UInt16 = 0x2001, payload: Data? = nil) -> Data {
+        func u32(_ value: UInt32) -> Data {
+            Data((0..<4).map { UInt8(truncatingIfNeeded: value >> ($0 * 8)) })
+        }
+        var bytes = Data()
+        if let payload { bytes = u32(UInt32(12 + payload.count)) + u32(12) + u32(transaction) + payload }
+        return bytes + u32(14) + u32(7) + Data([UInt8(truncatingIfNeeded: code), UInt8(code >> 8)]) + u32(transaction)
+    }
+
+    private func expect(_ expected: CameraStreamError, operation: () async throws -> Void) async {
+        do { try await operation(); XCTFail("Expected \(expected)") }
+        catch { XCTAssertEqual(error as? CameraStreamError, expected) }
+    }
+
+    private func hex(_ text: String) -> Data {
+        let characters = Array(text)
+        return Data(stride(from: 0, to: characters.count, by: 2).map {
+            UInt8(String(characters[$0...($0 + 1)]), radix: 16)!
+        })
+    }
+}
+
+/// Tests mutate fields only after awaited store calls complete; no concurrent mutation.
+private final class FakeDirectoryAccess: ExportDirectoryAccess {
+    let url: URL
+    var allowed = true
+    var stale = false
+    var starts = 0
+    var stops = 0
+    private var version: UInt8 = 0
+    init(url: URL) { self.url = url }
+    func start(_ url: URL) -> Bool { starts += 1; return allowed }
+    func stop(_ url: URL) { stops += 1 }
+    func isDirectory(_ url: URL) -> Bool { true }
+    func bookmark(_ url: URL) -> Data { version += 1; return Data([version]) }
+    func resolve(_ bookmark: Data) -> ResolvedExportDirectory { ResolvedExportDirectory(url: url, stale: stale) }
+}
+
+private actor AliasCatalogSource: CameraCatalogSource {
+    nonisolated let connectionID = UUID()
+    private let primary: PtpObjectInfo
+    private let backup: PtpObjectInfo
+    private var backupFails = false
+    init(primary: PtpObjectInfo, backup: PtpObjectInfo) { self.primary = primary; self.backup = backup }
+    func failBackup() { backupFails = true }
+    func storageIDs() -> [Int32] { [0x10001, 0x20001] }
+    func objectHandles(storageID: Int32) -> [Int32] { storageID == 0x10001 ? [primary.handle] : [backup.handle] }
+    func objectInfo(handle: Int32) throws -> PtpObjectInfo {
+        if handle == primary.handle { return primary }
+        if handle == backup.handle && !backupFails { return backup }
+        throw CameraOperationError.rejected(operation: 0x1008, response: 0x2019)
+    }
+    func snapshot() -> CameraConnectionSnapshot {
+        CameraConnectionSnapshot(connectionID: connectionID, phase: .ready, eventRevision: 0, errorDescription: nil)
+    }
+}
+
+private actor CatalogAdditionSink {
+    private(set) var values: [CameraCatalogAddition] = []
+    func append(_ value: CameraCatalogAddition) { values.append(value) }
+}
+
+private actor NewObjectCatalogSource: CameraCatalogSource {
+    nonisolated let connectionID: UUID
+    private let infos: [Int32: PtpObjectInfo]
+    private var handles: [Int32]
+    private var failures: [Int32: Int]
+    private var revision: UInt64 = 0
+    private let holdFirst: Bool
+    private var transportFailure: Bool
+    private var held: CheckedContinuation<Void, Never>?
+    private(set) var reads: [Int32] = []
+    var isHeld: Bool { held != nil }
+    init(infos: [Int32: PtpObjectInfo], handles: [Int32] = [], failures: [Int32: Int] = [:],
+         holdFirst: Bool = false, transportFailure: Bool = false, connectionID: UUID = UUID()) {
+        self.connectionID = connectionID
+        self.infos = infos; self.handles = handles; self.failures = failures
+        self.holdFirst = holdFirst; self.transportFailure = transportFailure
+    }
+    func setHandles(_ values: [Int32]) { handles = values }
+    func setRevision(_ value: UInt64) { revision = value }
+    func repairTransport() { transportFailure = false }
+    func release() { held?.resume(); held = nil }
+    func storageIDs() -> [Int32] { [0x10001] }
+    func objectHandles(storageID: Int32) -> [Int32] { handles }
+    func objectInfo(handle: Int32) throws -> PtpObjectInfo {
+        guard let info = infos[handle] else { throw CameraOperationError.malformedDataset(operation: 0x1008) }
+        return info
+    }
+    func newObjectInfo(handle: Int32, permitted: @escaping @Sendable () async -> Bool) async throws -> PtpObjectInfo {
+        guard await permitted() else { throw CameraStreamError.operationInProgress }
+        reads.append(handle)
+        if holdFirst && reads.count == 1 { await withCheckedContinuation { held = $0 } }
+        if transportFailure { throw CameraStreamError.closed }
+        if failures[handle, default: 0] > 0 {
+            failures[handle, default: 0] -= 1
+            throw CameraOperationError.rejected(operation: 0x1008, response: 0x2019)
+        }
+        return try objectInfo(handle: handle)
+    }
+    func snapshot() -> CameraConnectionSnapshot {
+        CameraConnectionSnapshot(connectionID: connectionID, phase: .ready, eventRevision: revision, errorDescription: nil)
+    }
+}
+
+private actor BaselineCatalogSource: CameraCatalogSource {
+    private(set) var readCount = 0
+    enum Failure: Equatable { case none, enumeration, cancelEnumeration, closedEnumeration, foreignEnumeration, cancelMetadata }
+    nonisolated let connectionID = UUID()
+    private var handles: [Int32] = []
+    private var infos: [Int32: PtpObjectInfo] = [:]
+    private var failure: Failure = .none
+    private var enumerated = false
+    func set(_ handles: [Int32], infos: [Int32: PtpObjectInfo], failure: Failure = .none) {
+        self.handles = handles; self.infos = infos; self.failure = failure; enumerated = false
+    }
+    func storageIDs() -> [Int32] { [0x10001, 0x20001] }
+    func objectHandles(storageID: Int32) throws -> [Int32] {
+        if storageID == 0x10001 { return handles }
+        enumerated = true // Fail the second card, after the first query succeeded.
+        if failure == .enumeration { throw CameraOperationError.malformedDataset(operation: 0x1007) }
+        if failure == .cancelEnumeration { withUnsafeCurrentTask { $0?.cancel() } }
+        return []
+    }
+    func objectInfo(handle: Int32) throws -> PtpObjectInfo {
+        readCount += 1
+        if failure == .cancelMetadata { withUnsafeCurrentTask { $0?.cancel() }; throw CancellationError() }
+        guard let info = infos[handle] else { throw CameraOperationError.malformedDataset(operation: 0x1008) }
+        return info
+    }
+    func snapshot() -> CameraConnectionSnapshot {
+        CameraConnectionSnapshot(connectionID: enumerated && failure == .foreignEnumeration ? UUID() : connectionID,
+            phase: enumerated && failure == .closedEnumeration ? .closed : .ready, eventRevision: 0, errorDescription: nil)
+    }
+}
+
+private actor FakeCatalogSource: CameraCatalogSource {
+    nonisolated let connectionID = UUID()
+    private var infos: [Int32: PtpObjectInfo]
+    private var failure = false
+    private var revision: UInt64 = 0
+    private let changeDuringRead: Bool
+    init(infos: [Int32: PtpObjectInfo], changeDuringRead: Bool = false) { self.infos = infos; self.changeDuringRead = changeDuringRead }
+    func failEnumeration() { failure = true }
+    func removeMetadata(_ handle: Int32) { infos[handle] = nil }
+    func storageIDs() throws -> [Int32] {
+        if failure { throw CameraOperationError.malformedDataset(operation: 0x1004) }
+        return [0x10001]
+    }
+    func objectHandles(storageID: Int32) -> [Int32] { [1, 2] }
+    func objectInfo(handle: Int32) throws -> PtpObjectInfo {
+        if changeDuringRead { revision &+= 1 }
+        guard let info = infos[handle] else { throw CameraOperationError.malformedDataset(operation: 0x1008) }
+        return info
+    }
+    func snapshot() -> CameraConnectionSnapshot {
+        CameraConnectionSnapshot(connectionID: connectionID, phase: .ready, eventRevision: revision, errorDescription: nil)
+    }
+}
+
+private actor FillPreviewSource: CameraPreviewSource {
+    enum Result { case bytes(Data), missing, busy }
+    private var results: [Int32: [Result]]
+    private let holdFirst: Bool
+    private let onFirst: (@Sendable () -> Void)?
+    private var held: CheckedContinuation<Void, Never>?
+    private var handles: [Int32] = []
+    private var active = 0
+    private var maximumActive = 0
+    init(results: [Int32: [Result]], holdFirst: Bool = false, onFirst: (@Sendable () -> Void)? = nil) {
+        self.results = results; self.holdFirst = holdFirst; self.onFirst = onFirst
+    }
+    func thumbnail(handle: Int32) async throws -> Data? {
+        handles.append(handle); active += 1; maximumActive = max(maximumActive, active)
+        defer { active -= 1 }
+        if handles.count == 1, holdFirst {
+            await withCheckedContinuation { continuation in held = continuation; onFirst?() }
+        }
+        guard var values = results[handle], !values.isEmpty else { throw CameraStreamError.closed }
+        let next = values.removeFirst(); results[handle] = values
+        switch next {
+        case .bytes(let data): return data
+        case .missing: return nil
+        case .busy: throw CameraOperationError.rejected(operation: 0x100A, response: 0x2019)
+        }
+    }
+    func releaseFirst() { held?.resume(); held = nil }
+    func fhdPicture(handle: Int32, retryDeviceBusy: Bool) -> Data? { nil }
+    func stats() -> (handles: [Int32], maximumActive: Int) { (handles, maximumActive) }
+}
+
+private actor HeldPreviewSource: CameraPreviewSource {
+    private let started: @Sendable () -> Void
+    private var continuation: CheckedContinuation<Data?, Never>?
+    init(started: @escaping @Sendable () -> Void) { self.started = started }
+    func thumbnail(handle: Int32) async -> Data? {
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+            started()
+        }
+    }
+    func complete(_ data: Data) { continuation?.resume(returning: data); continuation = nil }
+    func fhdPicture(handle: Int32, retryDeviceBusy: Bool) -> Data? { nil }
+}
+
+private actor FakePreviewSource: CameraPreviewSource {
+    enum Result { case missing, bytes(Data), failure }
+    private var thumbs: [Result]
+    private var fhds: [Result]
+    private var thumbCount = 0
+    private var fhdCount = 0
+    init(thumbs: [Result], fhds: [Result] = []) { self.thumbs = thumbs; self.fhds = fhds }
+    func thumbnail(handle: Int32) throws -> Data? {
+        thumbCount += 1
+        guard !thumbs.isEmpty else { throw CameraStreamError.closed }
+        switch thumbs.removeFirst() {
+        case .missing: return nil
+        case .bytes(let data): return data
+        case .failure: throw CameraOperationError.rejected(operation: 0x100A, response: 0x2019)
+        }
+    }
+    func fhdPicture(handle: Int32, retryDeviceBusy: Bool) throws -> Data? {
+        fhdCount += 1
+        guard !fhds.isEmpty else { return nil }
+        switch fhds.removeFirst() {
+        case .missing: return nil
+        case .bytes(let data): return data
+        case .failure: throw CameraOperationError.rejected(operation: 0x920f, response: 0x2019)
+        }
+    }
+    func counts() -> (thumb: Int, fhd: Int) { (thumbCount, fhdCount) }
+}
+
+private final class FakePhotoLibrary: PhotoLibraryClient {
+    private let lock = NSLock()
+    private let state: PhotoLibraryAuthorization
+    private let requested: PhotoLibraryAuthorization
+    private let success: Bool
+    private let hold: Bool
+    private let onSubmit: (() -> Void)?
+    private var completion: ((Bool, Error?) -> Void)?
+    private var requestCount = 0
+    private var importCount = 0
+    var requests: Int { lock.lock(); defer { lock.unlock() }; return requestCount }
+    var imports: Int { lock.lock(); defer { lock.unlock() }; return importCount }
+    init(authorization: PhotoLibraryAuthorization, requested: PhotoLibraryAuthorization = .allowed,
+         success: Bool = true, hold: Bool = false, onSubmit: (() -> Void)? = nil) {
+        state = authorization; self.requested = requested; self.success = success
+        self.hold = hold; self.onSubmit = onSubmit
+    }
+    func authorization() -> PhotoLibraryAuthorization { state }
+    func requestAddOnly(_ completion: @escaping (PhotoLibraryAuthorization) -> Void) {
+        lock.lock(); requestCount += 1; lock.unlock()
+        completion(requested)
+    }
+    func importFile(_ url: URL, kind: PhotoImportKind, completion: @escaping (Bool, Error?) -> Void) {
+        lock.lock(); importCount += 1; self.completion = completion; lock.unlock()
+        onSubmit?()
+        if !hold { complete() }
+    }
+    func complete() {
+        lock.lock(); let callback = completion; completion = nil; lock.unlock()
+        callback?(success, nil)
+    }
+}
+
+/// Deliberately retains callbacks after cancel to reproduce Network.framework late completions.
+private actor BackgroundAdmissionProbe {
+    private var allowed = true
+    private(set) var checks = 0
+    func check() -> Bool { checks += 1; return allowed }
+    func deny() { allowed = false }
+}
+
+private final class FakeCameraConnection: CameraByteConnection {
+    private let lock = NSLock()
+    private var bytes: Data
+    private let chunkSize: Int
+    private var eof: Bool
+    private let autoReady: Bool
+    private let holdWrites: Bool
+    private let onReceive: (() -> Void)?
+    private let onSend: ((Data) -> Void)?
+    private var output: [Data] = []
+    private var stateCallback: ((CameraConnectionEvent) -> Void)?
+    private var receiveCallback: ((Data?, Bool, Error?) -> Void)?
+    private var pendingReceive: (maximum: Int, callback: (Data?, Bool, Error?) -> Void)?
+
+    init(bytes: Data = Data(), chunkSize: Int = 65536, eof: Bool = false, autoReady: Bool = true,
+         holdWrites: Bool = false, onReceive: (() -> Void)? = nil, onSend: ((Data) -> Void)? = nil) {
+        self.bytes = bytes; self.chunkSize = chunkSize; self.eof = eof
+        self.autoReady = autoReady; self.holdWrites = holdWrites; self.onReceive = onReceive
+        self.onSend = onSend
+    }
+    func start(on queue: DispatchQueue, state: @escaping (CameraConnectionEvent) -> Void) {
+        lock.lock(); stateCallback = state; lock.unlock()
+        if autoReady { state(.ready) }
+    }
+    func receive(maximumLength: Int, completion: @escaping (Data?, Bool, Error?) -> Void) {
+        lock.lock()
+        receiveCallback = completion
+        let count = min(bytes.count, min(maximumLength, chunkSize))
+        let value = Data(bytes.prefix(count))
+        bytes.removeFirst(count)
+        let complete = eof && bytes.isEmpty
+        if count == 0 && !complete { pendingReceive = (maximumLength, completion) }
+        lock.unlock()
+        onReceive?()
+        if count > 0 || complete { completion(value, complete, nil) }
+    }
+    func send(_ data: Data, completion: @escaping (Error?) -> Void) {
+        lock.lock(); output.append(data); lock.unlock()
+        onSend?(data)
+        if !holdWrites { completion(nil) }
+    }
+    func cancel() {}
+    func sent() -> [Data] { lock.lock(); defer { lock.unlock() }; return output }
+    func lateReady() {
+        lock.lock(); let callback = stateCallback; lock.unlock(); callback?(.ready)
+    }
+    func lateReceive() {
+        lock.lock(); let callback = receiveCallback; lock.unlock(); callback?(Data(repeating: 1, count: 8), false, nil)
+    }
+    func feed(_ data: Data) {
+        lock.lock()
+        bytes.append(data)
+        let pending = pendingReceive
+        pendingReceive = nil
+        let count = min(bytes.count, pending?.maximum ?? 0)
+        let value = Data(bytes.prefix(count))
+        bytes.removeFirst(count)
+        let complete = eof && bytes.isEmpty
+        lock.unlock()
+        pending?.callback(value, complete, nil)
+    }
+    func finish() {
+        lock.lock(); eof = true; lock.unlock()
+        feed(Data())
+    }
+}

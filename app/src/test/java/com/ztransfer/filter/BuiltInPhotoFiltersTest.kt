@@ -74,7 +74,7 @@ class BuiltInPhotoFiltersTest {
         )
         filters.forEach { filter ->
             assertTrue(filter.id.matches(Regex("[0-9a-f]{64}")))
-            assertNotNull(BuiltInPhotoFilters.nameResId(filter.id))
+            assertNotNull(builtInPhotoFilterNameResId(filter.id))
             assertTrue(BuiltInPhotoFilters.catalogKey(filter.id)?.matches(Regex("[0-9a-f]{64}")) == true)
             assertTrue(filter.parameters is Np3PhotoFilterParameters)
         }
@@ -160,7 +160,7 @@ class BuiltInPhotoFiltersTest {
 
     @Test
     fun unknownImportedPresetHasNoBuiltInLabel() {
-        assertEquals(null, BuiltInPhotoFilters.nameResId("f".repeat(64)))
+        assertEquals(null, builtInPhotoFilterNameResId("f".repeat(64)))
     }
 
     private fun toneCurveSha256(curve: IntArray): String {

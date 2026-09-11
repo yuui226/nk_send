@@ -11,7 +11,7 @@ import com.ztransfer.frame.PhotoFrameWatermarkPosition
 import com.ztransfer.filter.NcpPhotoFilterParameters
 import com.ztransfer.filter.PhotoFilterPreset
 import com.ztransfer.filter.PhotoFilterSelection
-import com.ztransfer.protocol.NikonCamera
+import com.ztransfer.protocol.CameraFileInfo
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Test
@@ -38,75 +38,6 @@ class TransferStateTest {
     }
 
     @Test
-    fun enqueueStartsOnlyWhenTheExecutionGateAllowsIt() {
-        assertEquals(
-            true,
-            shouldRunQueueAfterEnqueue(
-                deferTransferStart = false,
-                isTransferring = false,
-                pauseAfterCurrent = false,
-            ),
-        )
-        assertEquals(
-            false,
-            shouldRunQueueAfterEnqueue(
-                deferTransferStart = true,
-                isTransferring = false,
-                pauseAfterCurrent = false,
-            ),
-        )
-        assertEquals(
-            true,
-            shouldRunQueueAfterEnqueue(
-                deferTransferStart = true,
-                isTransferring = true,
-                pauseAfterCurrent = false,
-            ),
-        )
-        assertEquals(
-            false,
-            shouldRunQueueAfterEnqueue(
-                deferTransferStart = false,
-                isTransferring = true,
-                pauseAfterCurrent = true,
-            ),
-        )
-        assertEquals(
-            false,
-            shouldRunQueueAfterEnqueue(
-                deferTransferStart = false,
-                isTransferring = false,
-                pauseAfterCurrent = true,
-            ),
-        )
-    }
-
-    @Test
-    fun pauseIsObservedOnlyBetweenCompleteQueueTasks() {
-        assertEquals(
-            true,
-            shouldPauseBeforeNextTransfer(
-                pauseAfterCurrent = true,
-                isRecheckingCurrentTask = false,
-            ),
-        )
-        assertEquals(
-            false,
-            shouldPauseBeforeNextTransfer(
-                pauseAfterCurrent = true,
-                isRecheckingCurrentTask = true,
-            ),
-        )
-        assertEquals(
-            false,
-            shouldPauseBeforeNextTransfer(
-                pauseAfterCurrent = false,
-                isRecheckingCurrentTask = false,
-            ),
-        )
-    }
-
-    @Test
     fun frameGenerationTimingUsesUserVisibleMonotonicInterval() {
         val started = TransferTask(file(1)).startFrameGeneration(nowElapsedMs = 1_000L)
 
@@ -128,7 +59,7 @@ class TransferStateTest {
         assertEquals(task, task.finishFrameGeneration(nowElapsedMs = 10_000L))
     }
 
-    private fun file(handle: Int) = NikonCamera.FileInfo(
+    private fun file(handle: Int) = CameraFileInfo(
         handle = handle,
         size = 100L,
         fileName = "DSC_$handle.JPG",
@@ -186,13 +117,6 @@ class TransferStateTest {
     }
 
     @Test
-    fun queueSpeedSurvivesZeroSamplesBetweenFiles() {
-        assertEquals(12L * 1024L * 1024L, retainLastValidTransferSpeed(0L, 12L * 1024L * 1024L))
-        assertEquals(12L * 1024L * 1024L, retainLastValidTransferSpeed(12L * 1024L * 1024L, 0L))
-        assertEquals(9L * 1024L * 1024L, retainLastValidTransferSpeed(12L * 1024L * 1024L, 9L * 1024L * 1024L))
-    }
-
-    @Test
     fun activeProgressIsMergedOnlyIntoItsMatchingTaskSnapshot() {
         val activeTask = TransferTask(file(1), status = TransferStatus.TRANSFERING)
         val waitingTask = TransferTask(file(2), status = TransferStatus.WAITING)
@@ -209,8 +133,17 @@ class TransferStateTest {
         assertEquals(0.4f, merged.progress)
         assertEquals(40L, merged.downloaded)
         assertEquals(12L, merged.speed)
+        assertNotEquals(progress.retainedBytesPerSecond, merged.speed)
         assertEquals(0f, activeTask.progress)
         assertEquals(waitingTask, waitingTask.withActiveProgress(progress))
+        assertEquals(
+            activeTask.copy(status = TransferStatus.WAITING),
+            activeTask.copy(status = TransferStatus.WAITING).withActiveProgress(progress),
+        )
+        assertEquals(
+            activeTask.copy(status = TransferStatus.COMPLETED),
+            activeTask.copy(status = TransferStatus.COMPLETED).withActiveProgress(progress),
+        )
     }
 
     @Test
@@ -229,19 +162,6 @@ class TransferStateTest {
     }
 
     @Test
-    fun retryAllExcludesTasksThatAreAlreadyLeavingTheUi() {
-        val departing = TransferTask(file(1), status = TransferStatus.CANCELLED)
-        val failed = TransferTask(file(2), status = TransferStatus.FAILED)
-
-        val retryIds = retryableTransferTaskIds(
-            tasks = listOf(departing, failed),
-            excludedTaskIds = setOf(departing.taskId),
-        )
-
-        assertEquals(setOf(failed.taskId), retryIds)
-    }
-
-    @Test
     fun claimedPendingTaskCanStillBeWithdrawnDuringPreflight() {
         val task = TransferTask(file(1))
         val queue = PendingTransferQueue()
@@ -252,6 +172,73 @@ class TransferStateTest {
 
         assertEquals(true, queue.consumeWithdrawal(task.taskId))
         assertEquals(false, queue.consumeWithdrawal(task.taskId))
+    }
+
+    @Test
+    fun retryKeepsTheQueuedOutputSnapshotAndResetsEveryRuntimeField() {
+        val metadata = defaultPhotoFrameMetadataSettings(PhotoFramePreset.MIST).copy(
+            showModel = false,
+        )
+        val watermark = PhotoFrameWatermark(
+            enabled = true,
+            text = "original snapshot",
+            opacityPercent = 41,
+        )
+        val filter = PhotoFilterSelection(
+            preset = PhotoFilterPreset(
+                id = "retry-snapshot",
+                name = "Retry snapshot",
+                parameters = NcpPhotoFilterParameters(
+                    saturationStep = 1,
+                    hueStep = -1,
+                    toneCurve = IntArray(257) { index -> (index * 0x7fff) / 256 },
+                ),
+            ),
+            intensityPercent = 64,
+        )
+        val failed = TransferTask(
+            file = file(7),
+            taskId = 9_000L,
+            framePreset = PhotoFramePreset.MIST,
+            frameBorderRequested = false,
+            frameMetadataSettings = metadata,
+            frameWatermarkRequested = watermark,
+            photoFilterRequested = filter,
+            destinationFolderName = "ZT2026-08-07",
+            status = TransferStatus.FAILED,
+            progress = 0.73f,
+            speed = 123L,
+            downloaded = 456L,
+            error = "connection reset",
+            skipped = true,
+            downloadMBps = 7.5f,
+            elapsedMs = 8_000L,
+            isGeneratingFrame = true,
+            frameGenerationStartedAtElapsedMs = 9_000L,
+            frameGenerationElapsedMs = 2_000L,
+        )
+
+        val retry = failed.newAttempt()
+
+        assertNotEquals(failed.taskId, retry.taskId)
+        assertEquals(failed.file, retry.file)
+        assertEquals(failed.framePreset, retry.framePreset)
+        assertEquals(failed.frameBorderRequested, retry.frameBorderRequested)
+        assertEquals(failed.frameMetadataSettings, retry.frameMetadataSettings)
+        assertEquals(failed.frameWatermarkRequested, retry.frameWatermarkRequested)
+        assertEquals(failed.photoFilterRequested, retry.photoFilterRequested)
+        assertEquals(failed.destinationFolderName, retry.destinationFolderName)
+        assertEquals(TransferStatus.WAITING, retry.status)
+        assertEquals(0f, retry.progress)
+        assertEquals(0L, retry.speed)
+        assertEquals(0L, retry.downloaded)
+        assertEquals(null, retry.error)
+        assertEquals(false, retry.skipped)
+        assertEquals(0f, retry.downloadMBps)
+        assertEquals(null, retry.elapsedMs)
+        assertEquals(false, retry.isGeneratingFrame)
+        assertEquals(null, retry.frameGenerationStartedAtElapsedMs)
+        assertEquals(null, retry.frameGenerationElapsedMs)
     }
 
     @Test

@@ -1,0 +1,65 @@
+"""Exact, reviewed 2026-09-10 settings motion edits layered on the frozen migration oracle.
+
+Only presentation changes are permitted here; settings state, persistence and Android IO
+still have to match the previous oracle byte-for-byte. Not a performance/device test.
+"""
+
+from genie_popup_experiment import apply_genie_popup, apply_genie_wrapper, restore_genie_settings
+
+POPUP_EDITS = [
+    ("import androidx.compose.animation.core.Animatable",
+     "import androidx.compose.animation.core.Animatable\nimport androidx.compose.animation.core.LinearEasing\nimport androidx.compose.animation.core.tween"),
+    ("import androidx.compose.ui.geometry.Rect",
+     "import androidx.compose.ui.geometry.Rect\nimport androidx.compose.ui.geometry.Offset\nimport androidx.compose.ui.geometry.Size\nimport androidx.compose.ui.geometry.CornerRadius\nimport androidx.compose.ui.graphics.drawscope.Stroke"),
+    (" * 面板以触发按钮 [anchorBounds]（同一 Compose 根坐标系）中心为缩放原点，做轻量缩放淡入；\n * 关闭时反向收回再移除。避免把复杂面板从极小尺寸逐帧放大，降低首次呼出的图层合成压力。",
+     " * 默认以触发按钮 [anchorBounds]（同一 Compose 根坐标系）为原点轻量缩放淡入。\n * [morphFromAnchor] 用于设置：先向下分离玻璃外壳，再展开并整体显现内容，关闭反向收回。\n * 内容始终按最终尺寸排版，动画只更新绘制和图层，不逐帧重排大型设置内容树。"),
+    ("    animateScale: Boolean = true,",
+     "    animateScale: Boolean = true,\n    morphFromAnchor: Boolean = false,"),
+    ("                progress.animateTo(0f, Motion.overlayCollapse)",
+     "                progress.animateTo(0f, if (morphFromAnchor) {\n                    tween((260 * progress.value).toInt().coerceAtLeast(1), easing = LinearEasing)\n                } else Motion.overlayCollapse)"),
+    ("        // 面板：以按钮中心为原点轻微缩放淡入；毛玻璃底 + 细描边 + 自上而下高光叠层。\n        Surface(\n            modifier = Modifier\n                .align(panelAlignment)\n                .then(panelModifier)\n                .onGloballyPositioned { coordinates ->\n                    animationState.panelBounds = coordinates.boundsInRoot()\n                    if (!animationState.expansionStarted && !animationState.closing) {\n                        animationState.expansionStarted = true\n                        animationScope.launch {\n                            // 首次组合可能同时构建设置页等大型内容树。先让布局与绘制完整落一帧，\n                            // 再启动纯图层动画，避免首个动画帧和测量/纹理上传抢主线程与 GPU。\n                            withFrameNanos { }\n                            if (!animationState.closing) {\n                                progress.animateTo(1f, Motion.overlayExpand)\n                            }\n                        }\n                    }\n                }\n                .graphicsLayer {\n                    val b = animationState.panelBounds\n                    if (\n                        animateScale && b != null && b.width > 0f && b.height > 0f &&\n                        anchorBounds != null\n                    ) {\n                        // 按钮中心相对于面板自身的比例位置（可超出 0..1，即原点落在面板外）。\n                        transformOrigin = TransformOrigin(\n                            (anchorBounds.center.x - b.left) / b.width,\n                            (anchorBounds.center.y - b.top) / b.height\n                        )\n                    }\n                    val p = progress.value\n                    // 极端缩放会让整块设置/筛选内容在每帧进行高成本重采样；4% 的形变已经足以\n                    // 表达来源方向，主要动势交给淡入完成。展开时继续使用 ModulateAlpha，\n                    // 避免为整块面板分配离屏缓冲；收起时改为整体合成后统一淡出。否则金色\n                    // 高级版按钮这类包含底色、扫光、文字和阴影的重叠图层会被分别调制透明度，\n                    // 低 alpha 阶段叠加后仍比普通内容明显，视觉上像是关闭后残留了一拍。\n                    compositingStrategy = if (animationState.closing) {\n                        CompositingStrategy.Offscreen\n                    } else {\n                        CompositingStrategy.ModulateAlpha\n                    }\n                    val s = if (animateScale) 0.96f + 0.04f * p else 1f\n                    scaleX = s\n                    scaleY = s\n                    alpha = p\n                }\n                // 消费面板内点击，避免穿透到遮罩误关闭。\n                .pointerInput(Unit) { detectTapGestures { } },\n            shape = shape,\n            color = colors.glassSurfaceHeavy,\n            border = BorderStroke(1.dp, colors.glassPanelBorder),\n            tonalElevation = 6.dp\n        ) {\n            Box {\n                // 自上而下淡出的高光叠层，营造毛玻璃质感。\n                Box(\n                    modifier = Modifier\n                        .matchParentSize()\n                        .background(Brush.verticalGradient(listOf(colors.glassSheen, Color.Transparent)))\n                )\n                content(startClose)\n            }\n        }\n\n",
+     "        // The shell is drawn at animated bounds; the settings tree is measured at its final size.\n        // No per-frame width/height state updates, bitmap snapshots or layout-size animation here.\n        Box(\n            modifier = Modifier\n                .align(panelAlignment)\n                .then(panelModifier)\n                .onGloballyPositioned { coordinates ->\n                    animationState.panelBounds = coordinates.boundsInRoot()\n                    if (!animationState.expansionStarted && !animationState.closing) {\n                        animationState.expansionStarted = true\n                        animationScope.launch {\n                            withFrameNanos { }\n                            if (!animationState.closing) {\n                                progress.animateTo(1f, if (morphFromAnchor) {\n                                    tween(360, easing = LinearEasing)\n                                } else Motion.overlayExpand)\n                            }\n                        }\n                    }\n                }\n                .drawBehind {\n                    if (morphFromAnchor) {\n                        val panel = animationState.panelBounds ?: Rect(0f, 0f, size.width, size.height)\n                        val frame = settingsPopupFrame(progress.value, anchorBounds, panel, 20.dp.toPx())\n                        val topLeft = Offset(frame.bounds.left - panel.left, frame.bounds.top - panel.top)\n                        val frameSize = Size(frame.bounds.width, frame.bounds.height)\n                        val radius = CornerRadius(frame.cornerRadius)\n                        drawRoundRect(colors.glassSurfaceHeavy, topLeft, frameSize, radius,\n                            alpha = frame.shellAlpha)\n                        drawRoundRect(colors.glassPanelBorder, topLeft, frameSize, radius,\n                            alpha = frame.shellAlpha, style = Stroke(1.dp.toPx()))\n                    }\n                },\n            propagateMinConstraints = true,\n        ) {\n            Surface(\n                modifier = Modifier\n                    .graphicsLayer {\n                        val b = animationState.panelBounds\n                        val p = progress.value\n                        // Group alpha in BOTH directions: nested badge/shadow/sheen must not\n                        // accumulate opacity independently and appear before the surrounding text.\n                        compositingStrategy = CompositingStrategy.Auto\n                        if (morphFromAnchor && size.width > 0f && size.height > 0f) {\n                            val panel = b ?: Rect(0f, 0f, size.width, size.height)\n                            val frame = settingsPopupFrame(p, anchorBounds, panel, 20.dp.toPx())\n                            transformOrigin = TransformOrigin(0f, 0f)\n                            translationX = frame.bounds.left - panel.left\n                            translationY = frame.bounds.top - panel.top\n                            scaleX = frame.bounds.width / size.width\n                            scaleY = frame.bounds.height / size.height\n                            alpha = frame.contentAlpha\n                        } else {\n                            if (animateScale && b != null && b.width > 0f && b.height > 0f &&\n                                anchorBounds != null) {\n                                transformOrigin = TransformOrigin(\n                                    (anchorBounds.center.x - b.left) / b.width,\n                                    (anchorBounds.center.y - b.top) / b.height,\n                                )\n                            }\n                            val s = if (animateScale) 0.96f + 0.04f * p else 1f\n                            scaleX = s\n                            scaleY = s\n                            alpha = p\n                        }\n                    }\n                    .pointerInput(Unit) { detectTapGestures { } },\n                shape = shape,\n                color = if (morphFromAnchor) Color.Transparent else colors.glassSurfaceHeavy,\n                border = if (morphFromAnchor) null else BorderStroke(1.dp, colors.glassPanelBorder),\n                tonalElevation = 6.dp,\n            ) {\n                Box {\n                    Box(\n                        modifier = Modifier\n                            .matchParentSize()\n                            .background(Brush.verticalGradient(listOf(colors.glassSheen, Color.Transparent)))\n                    )\n                    content(startClose)\n                }\n            }\n        }\n\n"),
+]
+
+WRAPPER_EDITS = [
+    ("    animateScale: Boolean = true,",
+     "    animateScale: Boolean = true,\n    morphFromAnchor: Boolean = false,"),
+    ("        overlayContent = overlayContent, content = content,",
+     "        morphFromAnchor = morphFromAnchor,\n        overlayContent = overlayContent, content = content,"),
+]
+
+SETTINGS_EDITS = [
+    ("        animateScale = false,",
+     "        animateScale = false,\n        morphFromAnchor = true,"),
+    ("        AnimatedContent(\n            targetState = settingsPage,\n            transitionSpec = {\n                val enteringEditor = targetState != SettingsPage.MAIN\n                val enter = if (enteringEditor) {\n                    slideInHorizontally(Motion.pageSlide) { it / 3 }\n                } else {\n                    slideInHorizontally(Motion.pageSlide) { -it / 3 }\n                }\n                val exit = if (enteringEditor) {\n                    slideOutHorizontally(Motion.pageSlide) { -it / 3 }\n                } else {\n                    slideOutHorizontally(Motion.pageSlide) { it / 3 }\n                }\n                (enter + fadeIn(Motion.overlayExpand))\n                    .togetherWith(exit + fadeOut(Motion.overlayCollapse))\n                    .using(\n                        SizeTransform(\n                            clip = false,\n                            sizeAnimationSpec = { _, _ -> tween(340, easing = FastOutSlowInEasing) },\n                        )\n                    )\n            },",
+     "        // Detail navigation is a short directional push, not another popup opening.\n        val pageTravel = with(density) { 24.dp.roundToPx() }\n        AnimatedContent(\n            targetState = settingsPage,\n            transitionSpec = {\n                val enteringEditor = targetState != SettingsPage.MAIN\n                val direction = if (enteringEditor) 1 else -1\n                val enter = slideInHorizontally(tween(240, easing = FastOutSlowInEasing)) {\n                    direction * pageTravel\n                }\n                val exit = slideOutHorizontally(tween(200, easing = FastOutSlowInEasing)) {\n                    -direction * pageTravel\n                }\n                (enter + fadeIn(tween(180, delayMillis = 40)))\n                    .togetherWith(exit + fadeOut(tween(100)))\n                    .apply { targetContentZIndex = if (enteringEditor) 1f else 0f }\n                    .using(\n                        SizeTransform(\n                            clip = true,\n                            sizeAnimationSpec = { _, _ -> tween(240, easing = FastOutSlowInEasing) },\n                        )\n                    )\n            },"),
+]
+
+# Reviewed simplification: independent panel, faster timing, standard GlassButton feedback.
+POPUP_REFINEMENT = [
+    (" * [morphFromAnchor] 用于设置：先向下分离玻璃外壳，再展开并整体显现内容，关闭反向收回。",
+     " * [morphFromAnchor] 用于设置：从按钮下缘独立展开和收回，无黏连，也不牵动入口按钮。"),
+    ("tween(360, easing = LinearEasing)", "tween(320, easing = LinearEasing)"),
+]
+
+def transform(source, edits, reverse=False):
+    for old, new in reversed(edits) if reverse else edits:
+        if not reverse and new in source:
+            raise ValueError("Settings motion edit already applied: " + new[:80])
+        before, after = (new, old) if reverse else (old, new)
+        if source.count(before) != 1:
+            raise ValueError("Settings motion anchor changed: " + before[:80])
+        source = source.replace(before, after, 1)
+    return source
+
+
+def apply_popup_motion(source):
+    return apply_genie_popup(transform(transform(source, POPUP_EDITS), POPUP_REFINEMENT))
+
+
+def apply_wrapper_motion(source):
+    return apply_genie_wrapper(transform(source, WRAPPER_EDITS))
+
+
+def restore_settings_motion(source):
+    return transform(restore_genie_settings(source), SETTINGS_EDITS, reverse=True)

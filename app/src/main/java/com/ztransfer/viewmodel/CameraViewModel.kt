@@ -26,19 +26,45 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.exifinterface.media.ExifInterface
+import com.ztransfer.catalog.CameraHandleDelta
+import com.ztransfer.catalog.StorageHandleBatch
+import com.ztransfer.catalog.StorageHandleOrder
+import com.ztransfer.catalog.ThumbnailFillQueue
+import com.ztransfer.catalog.analyzeStaDirectStorageLayout
+import com.ztransfer.catalog.cameraHandleDelta
+import com.ztransfer.catalog.newestFirstHandleOrders
+import com.ztransfer.catalog.objectHandleQueryStorageId
+import com.ztransfer.catalog.prioritizedThumbnailFiles as sharedPrioritizedThumbnailFiles
+import com.ztransfer.catalog.remainingStorageHandleOrders
+import com.ztransfer.catalog.shouldPrefetchThumbnailInBackground
+import com.ztransfer.catalog.shouldRememberThumbnailMiss
+import com.ztransfer.catalog.storageIdsBySlot
+import com.ztransfer.catalog.totalStorageHandleCount
+import com.ztransfer.catalog.usableStorageIds
+import com.ztransfer.connection.StaConnectionStatus
+import com.ztransfer.connection.StaInitiatorIdentity
+import com.ztransfer.connection.WifiConnectionStatus
+import com.ztransfer.connection.WirelessMode
+import com.ztransfer.connection.canActivateStaSession
+import com.ztransfer.connection.restoredStaInitiatorIdentity
+import com.ztransfer.connection.restoredWirelessMode
+import com.ztransfer.connection.shouldKeepStaDiscoveryAlive
+import com.ztransfer.connection.shouldReconnectUsingSta
+import com.ztransfer.connection.shouldScheduleStaDiscoveryRetry
+import com.ztransfer.connection.staReconnectDelayMs
 import com.ztransfer.diagnostics.FileOrderProbe
 import com.ztransfer.diagnostics.PhotoGenerationProbe
 import com.ztransfer.protocol.CameraConnectionType
 import com.ztransfer.protocol.CameraEndpointOverride
 import com.ztransfer.protocol.CameraRefusedException
 import com.ztransfer.protocol.Lab
+import com.ztransfer.protocol.CameraFileInfo
 import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.protocol.PairingCompletedException
 import com.ztransfer.protocol.PTPIP_IDENTITY_PREFERENCES
 import com.ztransfer.protocol.PtpConstants
 import com.ztransfer.protocol.PtpIpCandidate
 import com.ztransfer.protocol.PtpIpDiscovery
-import com.ztransfer.protocol.StaInitiatorIdentity
 import com.ztransfer.protocol.UnexpectedStaResponderException
 import com.ztransfer.protocol.UsbPtpConnection
 import com.ztransfer.protocol.rcPollEvents
@@ -83,36 +109,11 @@ import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import kotlin.math.roundToInt
 
-enum class WifiConnectionStatus {
-    IDLE,
-    PROBING,
-    NOT_FOUND,
-    REFUSED,
-    FAILED,
-    RECONNECTING
-}
-
-enum class StaConnectionStatus {
-    IDLE,
-    DISCOVERING,
-    PAIRING,
-    CONNECTING,
-    FAILED,
-}
-
-enum class WirelessMode {
-    AP,
-    STA,
-}
-
 private enum class StaCandidateConnectionResult {
     CONNECTED,
     REJECTED,
     UNEXPECTED_CAMERA,
 }
-
-internal fun restoredWirelessMode(value: String?): WirelessMode =
-    runCatching { WirelessMode.valueOf(value.orEmpty()) }.getOrDefault(WirelessMode.STA)
 
 internal fun classifyWifiConnectionFailure(error: Throwable): WifiConnectionStatus = when (error) {
     is CameraRefusedException -> WifiConnectionStatus.REFUSED
@@ -128,229 +129,14 @@ internal fun isTransientStaServiceReadinessFailure(error: Throwable?): Boolean =
         error is ConnectException ||
         (error is IOException && error.message?.startsWith("STA album access unavailable") == true)
 
-/** STA reconnection is selected only for an established STA-origin Wi-Fi session. */
-internal fun shouldReconnectUsingSta(
-    connectionType: CameraConnectionType?,
-    wirelessMode: WirelessMode,
-): Boolean = connectionType == CameraConnectionType.WIFI && wirelessMode == WirelessMode.STA
-
-/** Keeps an already-started STA discovery alive through Nikon's service restart or reconnect. */
-internal fun shouldKeepStaDiscoveryAlive(
-    reconnectRequested: Boolean,
-    hasReusableProfile: Boolean,
-): Boolean = reconnectRequested || hasReusableProfile
-
-/** A reconnect request that overlaps the tail of the previous scan must be retried, not dropped. */
-internal fun shouldScheduleStaDiscoveryRetry(
-    reconnectRequested: Boolean,
-    discoveryInProgress: Boolean,
-): Boolean = reconnectRequested && discoveryInProgress
-
-/** Album access alone is not proof that Nikon finished the computer-profile pairing. */
-internal fun canActivateStaSession(
-    albumAccessValidated: Boolean,
-    pairingConfirmed: Boolean,
-): Boolean = albumAccessValidated && pairingConfirmed
-
-internal fun restoredStaInitiatorIdentity(value: String?): StaInitiatorIdentity =
-    runCatching { StaInitiatorIdentity.valueOf(value.orEmpty()) }
-        .getOrDefault(StaInitiatorIdentity.PAIRED_COMPUTER)
-
-/** AP keeps the proven slot filter; STA also accepts Nikon's non-zero aggregate storage IDs. */
-internal fun usableStorageIds(rawIds: List<Int>, isStaConnection: Boolean): List<Int> = rawIds
-    .filter { storageId ->
-        if (isStaConnection) storageId != 0 && storageId != -1
-        else storageId and 0xFFFF != 0
-    }
-    .distinct()
-    .sorted()
-
-/** Paired Nikon STA exposes its aggregate store through wildcard object enumeration. */
-internal fun objectHandleQueryStorageId(storageId: Int, isStaConnection: Boolean): Int =
-    if (isStaConnection && storageId and 0xFFFF == 0) -1 else storageId
-
-private val EFFECT_PREVIEW_VIDEO_EXTENSIONS = setOf(".mov", ".mp4")
 internal val NIKON_RAW_EXTENSIONS = setOf(".nef", ".nrw")
 internal val TIFF_EXTENSIONS = setOf(".tif", ".tiff")
 private val LARGE_EXIF_HEADER_EXTENSIONS = NIKON_RAW_EXTENSIONS + TIFF_EXTENSIONS
-private val AUTO_TRANSFER_MEDIA_EXTENSIONS = PtpConstants.FORMAT_EXT.values.toSet()
-
-/** 未知 PTP 对象(.bin 等)仍显示在列表，但不会被“照片/视频自动传输”误收。 */
-internal fun isAutoTransferMedia(file: NikonCamera.FileInfo): Boolean =
-    file.extension in AUTO_TRANSFER_MEDIA_EXTENSIONS
-
-/** Selects the newest still image deterministically; video covers must never become effect demos. */
-internal fun latestEffectPreviewFile(files: List<NikonCamera.FileInfo>): NikonCamera.FileInfo? =
-    files.asSequence()
-        .filter { it.extension !in EFFECT_PREVIEW_VIDEO_EXTENSIONS }
-        .maxWithOrNull(compareBy<NikonCamera.FileInfo>({ it.captureDate.orEmpty() }, { it.handle }))
-
-private fun NikonCamera.FileInfo.logicalIdentity(): String =
-    "$fileName|$size|$captureDate"
-
-internal data class CameraHandleDelta(
-    val added: Set<Int>,
-    val removed: Set<Int>,
-)
-
-/** 两个完整且成功的 GetObjectHandles 快照之间的权威差量。 */
-internal fun cameraHandleDelta(
-    knownHandles: Set<Int>,
-    currentHandles: Set<Int>,
-): CameraHandleDelta = CameraHandleDelta(
-    added = currentHandles - knownHandles,
-    removed = knownHandles - currentHandles,
-)
-
-/** 双卡备份文件仍只显示一份，但保留它在两张卡上的完整归属。 */
-internal fun mergeStorageMembership(
-    existing: NikonCamera.FileInfo,
-    duplicate: NikonCamera.FileInfo,
-): NikonCamera.FileInfo {
-    if (duplicate.storageIds.all { it in existing.storageIds }) return existing
-    return existing.copy(storageIds = existing.storageIds + duplicate.storageIds)
-}
-
-/**
- * Rebuilds only already-published rows after a handle catalog shrinks. Raw aliases are retained for
- * the camera session so deleting one half of a dual-card backup switches to the surviving handle
- * instead of removing the logical photo. Display order is preserved.
- */
-internal fun reconcilePublishedCameraFiles(
-    publishedFiles: List<NikonCamera.FileInfo>,
-    currentHandles: Set<Int>,
-    indexedFilesByHandle: Map<Int, NikonCamera.FileInfo>,
-): List<NikonCamera.FileInfo> {
-    val aliasesByIdentity = LinkedHashMap<String, MutableList<NikonCamera.FileInfo>>()
-    indexedFilesByHandle.forEach { (handle, file) ->
-        if (handle in currentHandles) {
-            aliasesByIdentity.getOrPut(file.logicalIdentity()) { ArrayList(1) } += file
-        }
-    }
-    return publishedFiles.mapNotNull { published ->
-        val aliases = aliasesByIdentity[published.logicalIdentity()]
-        if (aliases.isNullOrEmpty()) {
-            published.takeIf { it.handle in currentHandles }
-        } else {
-            val primary = aliases.firstOrNull { it.handle == published.handle } ?: aliases.first()
-            aliases.asSequence()
-                .filterNot { it.handle == primary.handle }
-                .fold(primary, ::mergeStorageMembership)
-        }
-    }
-}
-
-/**
- * PTP StorageID 高 16 位是物理存储、低 16 位是其逻辑分区。优先据此识别卡槽；
- * 对少数非标准编号，按稳定排序补进尚未占用的卡 1/2。
- */
-internal fun storageIdsBySlot(storageIds: List<Int>): Map<Int, Set<Int>> {
-    val result = sortedMapOf<Int, MutableSet<Int>>()
-    val unassignedGroups = linkedMapOf<Int, MutableSet<Int>>()
-    storageIds.distinct().sorted().forEach { storageId ->
-        val physical = storageId ushr 16 and 0xFFFF
-        val logical = storageId and 0xFFFF
-        val slot = when {
-            physical in 1..2 -> physical
-            physical == 0 && logical in 1..2 -> logical
-            else -> null
-        }
-        if (slot != null) {
-            result.getOrPut(slot) { linkedSetOf() } += storageId
-        } else {
-            val groupKey = if (physical == 0) storageId else physical
-            unassignedGroups.getOrPut(groupKey) { linkedSetOf() } += storageId
-        }
-    }
-    unassignedGroups.values.forEach { ids ->
-        val freeSlot = (1..2).firstOrNull { it !in result } ?: return@forEach
-        result[freeSlot] = ids
-    }
-    return result.mapValues { it.value.toSet() }
-}
-
 /** 日期范围只改变优先级，不改变最终全量填充集合。范围完成后自然接回全局新→旧。 */
 internal fun prioritizedThumbnailFiles(
-    files: List<NikonCamera.FileInfo>,
+    files: List<CameraFileInfo>,
     range: PhotoDateRange?,
-): List<NikonCamera.FileInfo> {
-    // Kotlin 的排序稳定：同一拍摄时间保留文件枚举时的相机自然顺序，让 JPG/RAW 配对
-    // 继续相邻。不能再用 handle 打破平局，其高位在 Nikon 上含格式特征。
-    val ordered = files.sortedByDescending { it.captureDate.orEmpty() }
-    if (range == null) return ordered
-    val prioritized = ArrayList<NikonCamera.FileInfo>(ordered.size)
-    val remaining = ArrayList<NikonCamera.FileInfo>(ordered.size)
-    ordered.forEach { file ->
-        if (range.containsCaptureDate(file.captureDate)) prioritized += file else remaining += file
-    }
-    prioritized.addAll(remaining)
-    return prioritized
-}
-
-/** 单个 PTP StorageID 内由新到旧的 handle 顺序；顺序来自相机原始数组的反序。 */
-internal data class StorageHandleOrder(
-    val storageId: Int,
-    val newestFirstHandles: List<Int>,
-)
-
-/**
- * Nikon 返回的单卡 handle 数组在实机上是旧到新，并且天然把同次拍摄的 JPG/RAW、视频
- * 按拍摄顺序交错排列。只反转每张卡，不能再按 handle 数值排序：handle 高位含格式特征，
- * 数值排序会把 MP4/JPG/RAW 拆成大块。跨卡重复 handle 仍按第一张卡出现的位置保留一次。
- */
-internal fun newestFirstHandleOrders(
-    rawHandlesByStorage: List<Pair<Int, List<Int>>>,
-): List<StorageHandleOrder> {
-    val seen = HashSet<Int>()
-    return rawHandlesByStorage.map { (storageId, rawHandles) ->
-        StorageHandleOrder(
-            storageId = storageId,
-            newestFirstHandles = rawHandles.asReversed().filter { seen.add(it) },
-        )
-    }
-}
-
-/**
- * STA direct browsing cannot ask ObjectInfo for an object's StorageID. Derive the membership from
- * the per-storage GetObjectHandles responses, but only expose the card filter when those responses
- * are unambiguous. A handle returned for two physical slots means the camera ignored/aliased the
- * storage selector; treating every such object as belonging to both cards would be misleading.
- */
-internal data class StaDirectStorageLayout(
-    val storageIdsByHandle: Map<Int, Set<Int>>,
-    val filterStorageIds: List<Int>,
-    val crossSlotOverlapCount: Int,
-)
-
-internal fun analyzeStaDirectStorageLayout(
-    rawHandlesByStorage: List<Pair<Int, List<Int>>>,
-): StaDirectStorageLayout {
-    val storageIds = rawHandlesByStorage.map { it.first }.distinct().sorted()
-    val slotByStorageId = buildMap {
-        storageIdsBySlot(storageIds).forEach { (slot, ids) ->
-            ids.forEach { storageId -> put(storageId, slot) }
-        }
-    }
-    val observedStorageIds = LinkedHashMap<Int, MutableSet<Int>>()
-    rawHandlesByStorage.forEach { (storageId, handles) ->
-        handles.forEach { handle ->
-            observedStorageIds.getOrPut(handle) { linkedSetOf() } += storageId
-        }
-    }
-    val crossSlotOverlapCount = observedStorageIds.values.count { memberships ->
-        memberships.mapNotNull(slotByStorageId::get).distinct().size > 1
-    }
-    val reliable = crossSlotOverlapCount == 0
-    return StaDirectStorageLayout(
-        storageIdsByHandle = if (reliable) {
-            observedStorageIds.mapValues { (_, ids) -> ids.toSet() }
-        } else {
-            emptyMap()
-        },
-        filterStorageIds = if (reliable) storageIds else emptyList(),
-        crossSlotOverlapCount = crossSlotOverlapCount,
-    )
-}
+): List<CameraFileInfo> = sharedPrioritizedThumbnailFiles(files, range?.captureDayRange)
 
 /**
  * 一次相机会话内的整卡枚举快照。大图预览只暂停 ObjectInfo 阶段，关闭后可直接复用
@@ -374,7 +160,7 @@ internal data class FileScanHandleSnapshot(
     fun belongsTo(sessionToken: Any): Boolean = this.sessionToken === sessionToken
 
     val totalHandleCount: Int
-        get() = handleOrders.sumOf { it.newestFirstHandles.size }
+        get() = totalStorageHandleCount(handleOrders)
 
     fun markProcessed(handles: Collection<Int>) {
         synchronized(processedHandles) { processedHandles.addAll(handles) }
@@ -387,11 +173,7 @@ internal data class FileScanHandleSnapshot(
                 addAll(processedHandles)
             }
         }
-        return handleOrders.map { order ->
-            order.copy(
-                newestFirstHandles = order.newestFirstHandles.filterNot { it in skipped }
-            )
-        }
+        return remainingStorageHandleOrders(handleOrders, skipped)
     }
 }
 
@@ -401,7 +183,7 @@ data class CameraState(
     val isConnectedToCamera: Boolean = false,
     val isConnecting: Boolean = false,
     val connectionType: CameraConnectionType? = null,
-    /** Persisted user choice for wireless discovery; unknown/legacy preferences fall back to AP. */
+    /** Persisted user choice for wireless discovery; unknown/legacy preferences fall back to STA. */
     val wirelessMode: WirelessMode = WirelessMode.STA,
     /** True when the active/most recent Wi-Fi session was reached through STA discovery. */
     val isStaConnection: Boolean = false,
@@ -413,7 +195,7 @@ data class CameraState(
     val cameraModel: String? = null,
     val usbConnectionError: String? = null,
     val wifiConnectionStatus: WifiConnectionStatus = WifiConnectionStatus.IDLE,
-    val files: List<NikonCamera.FileInfo> = emptyList(),
+    val files: List<CameraFileInfo> = emptyList(),
     /** 当前相机已插卡的 PTP StorageID；卡槽映射由 [storageIdsBySlot] 统一解释。 */
     val storageIds: List<Int> = emptyList(),
     val isLoadingFiles: Boolean = false,
@@ -428,37 +210,15 @@ data class CameraState(
     val wifiRssi: Int? = null
 )
 
-/**
- * 从相机文件头（JPEG EXIF）解析的照片参数。所有字段均可为 null——解析不到时静默缺省。
- */
-data class PhotoExif(
-    val aperture: String?,       // "f/2.8"
-    val shutterSpeed: String?,   // "1/250"
-    val iso: String?,            // "400"
-    val focalLength: String?,    // "50mm"
-    val dateTime: String? = null,
-    val lensModel: String? = null,
-    /** Non-zero exposure compensation intent recorded by the camera, e.g. "+0.7 EV". */
-    val exposureCompensation: String? = null,
-    val latitude: Double? = null,
-    val longitude: Double? = null,
-    val altitudeMeters: Double? = null,
-    val address: String? = null,
-)
-
 internal fun formatExposureCompensation(value: Float?): String? {
-    val ev = value?.takeIf { it.isFinite() } ?: return null
-    if (kotlin.math.abs(ev) < 0.05f) return null
-    return if (ev > 0f) {
-        String.format(java.util.Locale.ROOT, "+%.1f EV", ev)
-    } else {
-        String.format(java.util.Locale.ROOT, "%.1f EV", ev)
+    return exposureCompensationText(value) { ev ->
+        String.format(java.util.Locale.ROOT, "%.1f", ev)
     }
 }
 
 data class NewCameraMedia(
     val camera: NikonCamera,
-    val files: List<NikonCamera.FileInfo>,
+    val files: List<CameraFileInfo>,
 )
 
 class CameraViewModel(application: Application) : AndroidViewModel(application) {
@@ -521,7 +281,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private val knownHandles = HashSet<Int>()
     // Contains every successfully decoded raw handle, including the hidden second copy in backup
     // mode. It is session-bound and lets a deletion switch aliases without re-reading metadata.
-    private val indexedCameraFiles = LinkedHashMap<Int, NikonCamera.FileInfo>()
+    private val indexedCameraFiles = LinkedHashMap<Int, CameraFileInfo>()
     private var usbPermissionJob: Job? = null
     private var usbConnectJob: Job? = null
     private var staDiscoveryJob: Job? = null
@@ -570,10 +330,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     // EXIF 参数缓存。null value = 已尝试但失败（负缓存）。
     private val exifCache = HashMap<String, PhotoExif?>()
 
-    /** EXIF 缓存键：与缩略图磁盘缓存同一稳定身份，跨会话/重连命中同一张照片。 */
-    private fun exifKey(file: NikonCamera.FileInfo): String =
-        "${file.fileName}_${file.size}_${file.captureDate ?: "0"}"
-
     // 用于连接清理等需在 viewModelScope 取消后仍完成的一次性 IO。
     private val cleanupScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     // 缩略图按机身稳定身份分目录保存，无容量上限；当前相机完整扫描成功后才同步清理。
@@ -590,7 +346,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private val reportedStaMetadataDiagnostics = HashSet<String>()
     // 本轮发生真实写入失败（含磁盘满）后停止后台落盘；换相机/重连时重新尝试。
     private var thumbnailDiskWritesBlocked = false
-    private val thumbnailFillQueue = ThumbnailFillQueue()
+    private val thumbnailFillQueue = ThumbnailFillQueue<CameraFileInfo>()
     private val thumbnailFillWake = Channel<Unit>(Channel.CONFLATED)
 
     private suspend fun activateThumbnailDiskCache(cam: NikonCamera) {
@@ -1238,7 +994,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         // 日期范围变化只重排尚未处理的队列。当前 GetThumb 完成后再采用新顺序。
         viewModelScope.launch {
             thumbnailPriorityRangeFlow.collect { range ->
-                thumbnailFillQueue.updatePriorityRange(range)
+                thumbnailFillQueue.updatePriorityRange(range?.captureDayRange)
                 thumbnailFillQueue.retryFailed()
                 thumbnailFillWake.trySend(Unit)
             }
@@ -1260,7 +1016,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 if (blocked || !connected || !scanComplete) return@collectLatest
                 val expectedCacheGeneration = thumbnailCacheSessionGeneration
                 val expectedQueueRevision = thumbnailFillQueue.revision
-                thumbnailFillQueue.seed(state.value.files, thumbnailPriorityRangeFlow.value)
+                thumbnailFillQueue.seed(
+                    state.value.files,
+                    thumbnailPriorityRangeFlow.value?.captureDayRange,
+                )
                 thumbnailFillQueue.retryFailed()
                 log { "THUMB_FILL resume pending=${thumbnailFillQueue.pendingCount}" }
                 var loaded = 0
@@ -1392,9 +1151,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
     }
-
-    private fun effectPreviewKey(file: NikonCamera.FileInfo): String =
-        "${file.handle}|${file.fileName}|${file.size}|${file.captureDate.orEmpty()}"
 
     /** Temporarily disables every automatic camera-discovery entry point. */
     fun setConnectionDiscoveryPaused(paused: Boolean) {
@@ -2320,9 +2076,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             _state.value.connectionType == CameraConnectionType.USB
         ) return
         staReconnectJob?.cancel()
-        val delayMs = STA_RECONNECT_DELAYS_MS[
-            staReconnectAttempt.coerceAtMost(STA_RECONNECT_DELAYS_MS.lastIndex)
-        ]
+        val delayMs = staReconnectDelayMs(staReconnectAttempt)
         staReconnectAttempt++
         staReconnectJob = viewModelScope.launch {
             delay(delayMs)
@@ -2689,7 +2443,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private fun removeMissingCameraHandles(
         removedHandles: Set<Int>,
         currentHandles: Set<Int>,
-    ): List<NikonCamera.FileInfo> {
+    ): List<CameraFileInfo> {
         removedHandles.forEach { handle ->
             indexedCameraFiles.remove(handle)
             thumbnailCache.remove(handle)
@@ -2720,10 +2474,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun enqueueNewCameraObject(cam: NikonCamera, handle: Int) {
-        if (camera !== cam || handle == 0 || handle == -1) return
+        if (camera !== cam) return
         val hasKnownBaseline = knownHandlesCamera === cam
-        if (hasKnownBaseline && handle in knownHandles) return
-        if (_state.value.files.any { it.handle == handle }) return
+        if (!NewCameraObjectPolicy.shouldResolve(handle, knownHandles.takeIf { hasKnownBaseline }, _state.value.files)) return
         if (pendingNewObjectCamera !== cam) {
             pendingNewObjectHandles.clear()
             pendingNewObjectCamera = cam
@@ -2843,7 +2596,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                             log { "NEW_OBJECT give up handle=0x%08X".format(handle) }
                         } else {
                             pending.nextAttemptAtMs = SystemClock.elapsedRealtime() +
-                                NEW_OBJECT_RESOLVE_BACKOFF_MS[pending.attempts - 1]
+                                NewCameraObjectPolicy.retryDelayMs(pending.attempts)
                         }
                     }
                 }
@@ -2854,8 +2607,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private suspend fun resolveNewCameraObject(
         cam: NikonCamera,
         handle: Int,
-    ): NikonCamera.FileInfo? = try {
-        var result: NikonCamera.FileInfo? = null
+    ): CameraFileInfo? = try {
+        var result: CameraFileInfo? = null
         if (cam.staDirectObjectReadValidated) {
             val currentStorageIds = _state.value.storageIds
             val memberships = resolveStaDirectStorageMembership(
@@ -2863,7 +2616,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 handle = handle,
                 storageIds = currentStorageIds,
             )
-            val onBatch: suspend (List<NikonCamera.FileInfo>, Int, Int) -> Unit =
+            val onBatch: suspend (List<CameraFileInfo>, Int, Int) -> Unit =
                 { batch, _, _ ->
                     result = batch.firstOrNull()?.let { file ->
                         if (memberships.isEmpty()) file else file.copy(storageIds = memberships)
@@ -2900,28 +2653,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private suspend fun publishNewCameraObject(
         cam: NikonCamera,
         handle: Int,
-        info: NikonCamera.FileInfo,
+        info: CameraFileInfo,
     ) {
         if (camera !== cam) return
         val hasKnownBaseline = knownHandlesCamera === cam
         indexedCameraFiles[handle] = info
         val previousState = _state.getAndUpdate { state ->
-            val duplicateIndex = state.files.indexOfFirst {
-                it.handle == handle || it.logicalIdentity() == info.logicalIdentity()
-            }
-            if (duplicateIndex < 0) {
-                state.copy(files = listOf(info) + state.files)
-            } else {
-                val existing = state.files[duplicateIndex]
-                val merged = mergeStorageMembership(existing, info)
-                if (merged === existing) state else state.copy(
-                    files = state.files.toMutableList().apply { this[duplicateIndex] = merged },
-                )
-            }
+            val published = NewCameraObjectPolicy.publish(state.files, handle, info)
+            if (published === state.files) state else state.copy(files = published)
         }
-        val added = previousState.files.none {
-            it.handle == handle || it.logicalIdentity() == info.logicalIdentity()
-        }
+        val added = NewCameraObjectPolicy.isNew(previousState.files, handle, info)
         if (knownHandlesCamera === cam) knownHandles += handle
         if (added && hasKnownBaseline && knownHandlesCamera === cam) {
             if (isAutoTransferMedia(info)) {
@@ -2940,12 +2681,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     ): Set<Int> {
         if (storageIds.isEmpty()) return emptySet()
         if (storageIds.size == 1) return setOf(storageIds.single())
-        val rawHandlesByStorage = ArrayList<Pair<Int, List<Int>>>(storageIds.size)
+        val rawHandlesByStorage = ArrayList<StorageHandleBatch>(storageIds.size)
         for (storageId in storageIds) {
             val queryStorageId = objectHandleQueryStorageId(storageId, isStaConnection = true)
             val result = cam.getObjectHandlesWithStatus(queryStorageId)
             if (!result.successful) return emptySet()
-            rawHandlesByStorage += storageId to result.handles
+            rawHandlesByStorage += StorageHandleBatch(storageId, result.handles)
         }
         val layout = analyzeStaDirectStorageLayout(rawHandlesByStorage)
         return layout.storageIdsByHandle[handle].orEmpty()
@@ -3020,7 +2761,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     if (preserveExisting && camera === cam) _state.value.files else emptyList()
                 var existingHandles = existingFiles.asSequence().map { it.handle }.toHashSet()
                 var newHandlesToReport: Set<Int> = emptySet()
-                val scanDiscoveredMedia = ArrayList<NikonCamera.FileInfo>()
+                val scanDiscoveredMedia = ArrayList<CameraFileInfo>()
                 val reusableSnapshot = resumeSnapshot?.takeIf { it.belongsTo(cam) }
                 val storageIds: List<Int>
                 val remainingHandleOrders: List<StorageHandleOrder>
@@ -3170,7 +2911,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     }
                     val handleQueriesSucceeded = handleResultsByStorage.all { it.second.successful }
                     val rawHandlesByStorage = handleResultsByStorage.map { (storageId, result) ->
-                        storageId to result.handles
+                        StorageHandleBatch(storageId, result.handles)
                     }
                     val staDirectStorageLayout = if (cam.staDirectObjectReadValidated) {
                         analyzeStaDirectStorageLayout(rawHandlesByStorage)
@@ -3192,7 +2933,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     if (fileLoadGeneration != generation || camera !== cam) return@launch
                     if (handleQueriesSucceeded) {
                         val currentHandles = rawHandlesByStorage
-                            .flatMapTo(HashSet()) { it.second.asIterable() }
+                            .flatMapTo(HashSet()) { it.handles.asIterable() }
                         val hadKnownBaseline = knownHandlesCamera === cam
                         val delta = if (hadKnownBaseline) {
                             cameraHandleDelta(knownHandles, currentHandles)
@@ -3307,7 +3048,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 val dynamicDualCardSchedule = activeSnapshot.handleOrders.count {
                     it.newestFirstHandles.isNotEmpty()
                 } > 1
-                val publishBatch: suspend (List<NikonCamera.FileInfo>, Int, Int) -> Unit =
+                val publishBatch: suspend (List<CameraFileInfo>, Int, Int) -> Unit =
                     { rawBatch, loaded, total ->
                     val batch = if (cam.staDirectObjectReadValidated &&
                         activeSnapshot.staDirectStorageIdsByHandle.isNotEmpty()
@@ -3322,8 +3063,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         rawBatch
                     }
                     val publishedSizeBeforeBatch = publishedFiles.size
-                    val additions = ArrayList<NikonCamera.FileInfo>(batch.size)
-                    val replacements = HashMap<Int, NikonCamera.FileInfo>()
+                    val additions = ArrayList<CameraFileInfo>(batch.size)
+                    val replacements = HashMap<Int, CameraFileInfo>()
                     batch.forEach { file ->
                         val identity = file.logicalIdentity()
                         val existingIndex = indexByIdentity[identity]
@@ -3350,7 +3091,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         }
                     }
                     publishedFiles = publishedFiles.withBatch(replacements, additions)
-                    val snapshot: List<NikonCamera.FileInfo> = publishedFiles
+                    val snapshot: List<CameraFileInfo> = publishedFiles
                     // onBatch may run on the protocol IO dispatcher. Validate and publish on Main
                     // as one non-suspending section: otherwise a replacement connection could
                     // slip between the stale-session check and these session-global writes.
@@ -3550,7 +3291,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * USB 与传输页内的无线高吞吐模式，大文件/续传每 64MB 让路，普通文件 GetObject 需等当前文件。
      */
     suspend fun loadThumbnail(
-        file: NikonCamera.FileInfo,
+        file: CameraFileInfo,
         allowRemote: Boolean = true,
     ): ImageBitmap? {
         val handle = file.handle
@@ -3603,7 +3344,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * 解码入内存，扫到后面会把前面（以及视口附近）的全部挤出去——扫描白跑，还破坏
      * 可见区缓存。落盘不占堆内存，几千张也只有几十 MB；格子滚到时从磁盘毫秒级解码。
      */
-    suspend fun prefetchThumbnail(file: NikonCamera.FileInfo): Boolean {
+    suspend fun prefetchThumbnail(file: CameraFileInfo): Boolean {
         val handle = file.handle
         if (handle in noThumbHandles) return true
         val expectedCamera = camera ?: return false
@@ -3623,7 +3364,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         if (cached != null) return true
         // Direct STA RAW/video thumbnails need bounded multi-MiB partial reads. Treat them as lazy-visible
         // work instead of blocking the progressive 829-object catalog with background prefetch.
-        if (expectedCamera.staDirectObjectReadValidated && file.extension != ".jpg") return true
+        if (!shouldPrefetchThumbnailInBackground(
+                expectedCamera.staDirectObjectReadValidated,
+                file.extension,
+            )
+        ) return true
         if (thumbnailDiskWritesBlocked) return false
         // 可见格子正在取同一张：共乘同一次请求（结果会自动落盘）。作为共同等待者，
         // 即使格子滚出屏幕取消了自己的等待，本次共乘也会把请求保活到完成——
@@ -3658,7 +3403,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * PTP 和磁盘 IO 会由各自实现切到 IO 调度器，不会阻塞界面线程。
      */
     private suspend fun prefetchPublishedFileBatch(
-        batch: List<NikonCamera.FileInfo>,
+        batch: List<CameraFileInfo>,
         expectedCamera: NikonCamera,
         expectedGeneration: Long,
     ) = withContext(Dispatchers.Main.immediate) {
@@ -3766,47 +3511,18 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * 检出后每侧多裁 1px，吃掉 JPEG 在黑边交界处的灰色过渡线，边缘干净"刚刚好"。
      * 仅在解码时执行一次（后台线程），结果入缓存，滚动与传输热路径零开销。
      */
+    private fun thumbnailCropPixels(src: Bitmap) = object : com.ztransfer.preview.ThumbnailCropPixels {
+        override val width: Int get() = src.width
+        override val height: Int get() = src.height
+        override fun readLine(index: Int, horizontal: Boolean, into: IntArray) {
+            if (horizontal) src.getPixels(into, 0, src.width, 0, index, src.width, 1)
+            else src.getPixels(into, 0, 1, index, 0, 1, src.height)
+        }
+    }
+
     private fun cropLetterbox(src: Bitmap): Bitmap {
-        val w = src.width
-        val h = src.height
-        if (w < 16 || h < 16) return src
-        val buf = IntArray(maxOf(w, h))
-
-        // 横线（y 行）或竖线（x 列）是否几乎全为近黑像素。隔点采样，量级仅几千次整数比较。
-        fun lineIsBlack(index: Int, horizontal: Boolean): Boolean {
-            val n = if (horizontal) w else h
-            if (horizontal) src.getPixels(buf, 0, w, 0, index, w, 1)
-            else src.getPixels(buf, 0, 1, index, 0, 1, h)
-            var dark = 0
-            var total = 0
-            var i = 0
-            while (i < n) {
-                val p = buf[i]
-                if ((p ushr 16 and 0xFF) < BAR_BLACK_MAX &&
-                    (p ushr 8 and 0xFF) < BAR_BLACK_MAX &&
-                    (p and 0xFF) < BAR_BLACK_MAX
-                ) dark++
-                total++
-                i += 2
-            }
-            return dark * 100 >= total * 97
-        }
-
-        // 从两端向内数黑线；不成对/不对称/越过上限均按"无黑边"处理，成对时各 +1px 裁掉过渡线。
-        fun scanPair(size: Int, isBlack: (Int) -> Boolean): Pair<Int, Int> {
-            val limit = (size * BAR_MAX_FRACTION).toInt()
-            var a = 0
-            while (a < limit && isBlack(a)) a++
-            var b = 0
-            while (b < limit && isBlack(size - 1 - b)) b++
-            return if (a == 0 || b == 0 || a >= limit || b >= limit || kotlin.math.abs(a - b) > 3) 0 to 0
-            else a + 1 to b + 1
-        }
-
-        val (top, bottom) = scanPair(h) { y -> lineIsBlack(y, horizontal = true) }
-        val (left, right) = scanPair(w) { x -> lineIsBlack(x, horizontal = false) }
-        if (top == 0 && left == 0) return src
-        return Bitmap.createBitmap(src, left, top, w - left - right, h - top - bottom)
+        val crop = com.ztransfer.preview.ThumbnailCropPolicy.letterbox(thumbnailCropPixels(src)) ?: return src
+        return Bitmap.createBitmap(src, crop.left, crop.top, crop.width, crop.height)
     }
 
     /**
@@ -3818,34 +3534,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * （画面均值远高于黑条）。每侧多裁 1px 吃掉交界灰线，与 [cropLetterbox] 同规。
      */
     private fun cropVideoBars(src: Bitmap): Bitmap {
-        val w = src.width
-        val h = src.height
-        if (w < 16 || h < 16) return src
-        val cut = (h - w * 9 / 16) / 2
-        if (cut < 2 || h - (cut + 1) * 2 < 8) return src   // 已接近 16:9 或图太小，无带可裁
-        val buf = IntArray(w)
-        fun bandIsDark(y0: Int, y1: Int): Boolean {
-            var sum = 0L
-            var cnt = 0
-            var y = y0
-            while (y < y1) {
-                src.getPixels(buf, 0, w, 0, y, w, 1)
-                var x = 0
-                while (x < w) {
-                    val p = buf[x]
-                    sum += maxOf(p ushr 16 and 0xFF, p ushr 8 and 0xFF, p and 0xFF)
-                    cnt++
-                    x += 2
-                }
-                y += 2
-            }
-            return cnt > 0 && sum < cnt.toLong() * BAR_AVG_MAX
-        }
-        if (!bandIsDark(0, cut) || !bandIsDark(h - cut, h)) return src
-        return Bitmap.createBitmap(src, 0, cut + 1, w, h - (cut + 1) * 2)
+        val crop = com.ztransfer.preview.ThumbnailCropPolicy.videoBars(thumbnailCropPixels(src)) ?: return src
+        return Bitmap.createBitmap(src, crop.left, crop.top, crop.width, crop.height)
     }
 
-    private suspend fun loadThumbnailFromDisk(file: NikonCamera.FileInfo): ImageBitmap? {
+    private suspend fun loadThumbnailFromDisk(file: CameraFileInfo): ImageBitmap? {
         val diskCache = activeThumbnailDiskCache ?: return null
         val expectedCacheGeneration = thumbnailCacheSessionGeneration
         val cacheFileName = thumbnailDiskCacheFileName(file)
@@ -3883,7 +3576,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    private suspend fun fetchAndDecodeThumb(file: NikonCamera.FileInfo): ImageBitmap? {
+    private suspend fun fetchAndDecodeThumb(file: CameraFileInfo): ImageBitmap? {
         val handle = file.handle
         return try {
             // 创建共享远程请求前已经查过一次磁盘；排队期间后台可能刚好写入，再查一次
@@ -3907,7 +3600,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             if (bytes == null || bytes.isEmpty()) {
                 // Direct STA RAW/video only performed a bounded fallback probe. Null is not the
                 // camera's authoritative NoThumbnail response, so a later visible retry remains valid.
-                if (!(expectedCamera.staDirectObjectReadValidated && file.extension != ".jpg")) {
+                if (shouldRememberThumbnailMiss(
+                        expectedCamera.staDirectObjectReadValidated,
+                        file.extension,
+                    )
+                ) {
                     noThumbHandles.add(handle)
                 }
                 log { "THUMB no-thumb handle=$handle (resp non-OK / empty)" }
@@ -3943,7 +3640,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private suspend fun decodeThumbnail(
-        file: NikonCamera.FileInfo,
+        file: CameraFileInfo,
         data: ByteArray,
         diskCache: ThumbnailDiskCache.CameraCache?,
         cacheFileName: String,
@@ -3970,7 +3667,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private suspend fun decodeThumbnailFile(
-        file: NikonCamera.FileInfo,
+        file: CameraFileInfo,
         encodedSize: Long,
         diskCache: ThumbnailDiskCache.CameraCache,
         cacheFileName: String,
@@ -3994,7 +3691,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private suspend fun publishDecodedThumbnail(
-        file: NikonCamera.FileInfo,
+        file: CameraFileInfo,
         image: ImageBitmap?,
         encodedSize: Long,
         diskCache: ThumbnailDiskCache.CameraCache?,
@@ -4011,7 +3708,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             }
             if (!fromDisk &&
                 thumbnailCacheSessionGeneration == expectedCacheGeneration &&
-                !(camera?.staDirectObjectReadValidated == true && file.extension != ".jpg")
+                shouldRememberThumbnailMiss(
+                    camera?.staDirectObjectReadValidated == true,
+                    file.extension,
+                )
             ) {
                 noThumbHandles.add(file.handle)
             }
@@ -4026,7 +3726,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun postProcessThumbnail(
-        file: NikonCamera.FileInfo,
+        file: CameraFileInfo,
         decoded: Bitmap?,
     ): ImageBitmap? = decoded
         ?.let { cropLetterbox(it) }
@@ -4045,7 +3745,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * 的像素方向，继续由既有手动旋转功能负责。
      * 调用方应先通过 [setFhdActive] 暂停后台缩略图填充，再调用本方法。
      */
-    suspend fun loadFhdPreview(file: NikonCamera.FileInfo): ImageBitmap? {
+    suspend fun loadFhdPreview(file: CameraFileInfo): ImageBitmap? {
         return loadFhdBitmap(
             file,
             Bitmap.Config.RGB_565,
@@ -4061,7 +3761,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private suspend fun loadFhdBitmap(
-        file: NikonCamera.FileInfo,
+        file: CameraFileInfo,
         config: Bitmap.Config,
         honorExifOrientation: Boolean,
         retryDeviceBusy: Boolean,
@@ -4152,7 +3852,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * [androidx.exifinterface.media.ExifInterface] 解析标准标签 + Nikon MakerNote。
      * 任何环节失败返回 null——EXIF 是纯体验增强，静默失败。
      */
-    suspend fun loadExif(file: NikonCamera.FileInfo): PhotoExif? {
+    suspend fun loadExif(file: CameraFileInfo): PhotoExif? {
         val key = exifKey(file)
         // containsKey 区分"未尝试"与"已尝试但为 null（负缓存）"——?.let 无法区分。
         if (key in exifCache) return exifCache[key]
@@ -4175,7 +3875,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     /** Reads EXIF from an already-transferred local original without touching the camera session. */
-    suspend fun loadLocalExif(file: NikonCamera.FileInfo, sourceUri: Uri): PhotoExif? {
+    suspend fun loadLocalExif(file: CameraFileInfo, sourceUri: Uri): PhotoExif? {
         val key = exifKey(file)
         if (key in exifCache) return exifCache[key]
         if (file.extension !in EXIF_SUPPORTED_EXTENSIONS) {
@@ -4198,21 +3898,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         return parsed
     }
 
-    /**
-     * 解析 ExifInterface RATIONAL/SRATIONAL 属性值（"num/denom" → Float）。
-     * SHORT/LONG 等整数类型直接解析为 Float。null 或格式异常返回 null。
-     */
-    private fun parseRational(raw: String?): Float? {
-        if (raw == null) return null
-        val slash = raw.indexOf('/')
-        return if (slash > 0) {
-            val num = raw.substring(0, slash).toFloatOrNull() ?: return null
-            val den = raw.substring(slash + 1).toFloatOrNull() ?: return null
-            if (den == 0f) null else num / den
-        } else {
-            raw.toFloatOrNull()
-        }
-    }
 
     /**
      * 解析文件头字节中的 EXIF 数据。
@@ -4253,102 +3938,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
 
     /** 从已构造的 [exif] 中提取标准 EXIF 参数。 */
-    private fun parseExifImpl(exif: ExifInterface): PhotoExif? {
-        // 光圈：优先 TAG_F_NUMBER（0x829D，直接的 f 值 RATIONAL，多数尼康机身填这个）；
-        // 缺失时回退 TAG_APERTURE_VALUE（APEX 编码，f = 2^(apex/2)）。两者都试以免漏显。
-        val fNumber = parseRational(exif.getAttribute(ExifInterface.TAG_F_NUMBER))
-            ?: parseRational(exif.getAttribute(ExifInterface.TAG_APERTURE_VALUE))
-                ?.let { apex -> Math.pow(2.0, apex.toDouble() / 2.0).toFloat() }
-        val aperture = fNumber?.let { f -> if (f % 1f < 0.05f) "f/%.0f".format(f) else "f/%.1f".format(f) }
+    private fun parseExifImpl(exif: ExifInterface): PhotoExif? =
+        com.ztransfer.preview.parsePreviewExif(AndroidPreviewExifSource(exif), AndroidPreviewExifDecimalFormatter)
 
-        // 快门：TAG_EXPOSURE_TIME 直接返回秒数 RATIONAL（如 "1/250"）
-        val exposureTime = parseRational(exif.getAttribute(ExifInterface.TAG_EXPOSURE_TIME))
-        val shutter = exposureTime?.let { sec ->
-            if (sec >= 1f) "%.1fs".format(sec) else "1/%.0f".format(1f / sec)
-        }
-
-        // ISO：SHORT 整数
-        val isoRaw = exif.getAttribute(ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY)
-        val iso = if (isoRaw != null) "ISO$isoRaw" else null
-
-        // Exposure compensation is the photographer's metering intent and cannot be inferred from
-        // the final aperture/shutter/ISO values. Keep the common 0 EV case out of the preview bar.
-        val exposureCompensation = formatExposureCompensation(
-            parseRational(exif.getAttribute(ExifInterface.TAG_EXPOSURE_BIAS_VALUE)),
-        )
-
-        // 焦距：RATIONAL mm
-        val focal = parseRational(exif.getAttribute(ExifInterface.TAG_FOCAL_LENGTH))
-            ?.let { "%.0fmm".format(it) }
-        val lensModel = exif.getAttribute(ExifInterface.TAG_LENS_MODEL)
-            ?.trim()
-            ?.takeIf(String::isNotEmpty)
-
-        // 图像尺寸：SHORT/LONG 整数
-        val dateTime = sequenceOf(
-            ExifInterface.TAG_DATETIME_ORIGINAL,
-            ExifInterface.TAG_DATETIME_DIGITIZED,
-            ExifInterface.TAG_DATETIME,
-        ).mapNotNull(exif::getAttribute)
-            .firstOrNull { it.isNotBlank() }
-
-        val coordinates = exif.latLong
-        val latitude = (coordinates?.getOrNull(0)
-            ?.takeIf { it.isFinite() && it != 0.0 && it in -90.0..90.0 }
-            ?: parseGpsCoordinate(
-                exif.getAttribute(ExifInterface.TAG_GPS_LATITUDE),
-                exif.getAttribute(ExifInterface.TAG_GPS_LATITUDE_REF),
-            ))?.takeIf { it.isFinite() && it in -90.0..90.0 }
-        val longitude = (coordinates?.getOrNull(1)
-            ?.takeIf { it.isFinite() && it != 0.0 && it in -180.0..180.0 }
-            ?: parseGpsCoordinate(
-                exif.getAttribute(ExifInterface.TAG_GPS_LONGITUDE),
-                exif.getAttribute(ExifInterface.TAG_GPS_LONGITUDE_REF),
-            ))?.takeIf { it.isFinite() && it in -180.0..180.0 }
-        val validCoordinates = latitude != null && longitude != null
-        val altitude = exif.getAltitude(Double.NaN)
-            .takeIf { it.isFinite() && it != 0.0 }
-
-        return PhotoExif(
-            aperture = aperture,
-            shutterSpeed = shutter,
-            iso = iso,
-            focalLength = focal,
-            dateTime = dateTime,
-            lensModel = lensModel,
-            exposureCompensation = exposureCompensation,
-            latitude = latitude.takeIf { validCoordinates },
-            longitude = longitude.takeIf { validCoordinates },
-            altitudeMeters = altitude,
-        )
-    }
-
-    private fun parseGpsCoordinate(value: String?, reference: String?): Double? {
-        val parts = value
-            ?.trim()
-            ?.removePrefix("[")
-            ?.removeSuffix("]")
-            ?.split(Regex("[,;\\s]+"))
-            ?.map { it.trim().trim('"', '\'') }
-            ?.filter(String::isNotEmpty)
-            ?: return null
-        val absolute = when {
-            parts.size == 1 -> parseRational(parts[0])?.toDouble() ?: return null
-            parts.size >= 3 -> {
-                val degrees = parseRational(parts[0])?.toDouble() ?: return null
-                val minutes = parseRational(parts[1])?.toDouble() ?: return null
-                val seconds = parseRational(parts[2])?.toDouble() ?: return null
-                degrees + minutes / 60.0 + seconds / 3600.0
-            }
-            else -> return null
-        }
-        return if (reference.equals("S", ignoreCase = true) ||
-            reference.equals("W", ignoreCase = true)
-        ) -absolute else absolute
-    }
 
     private fun thumbnailDiskCacheFileName(
-        file: NikonCamera.FileInfo,
+        file: CameraFileInfo,
         useStaKeys: Boolean = activeThumbnailDiskCacheUsesStaKeys,
     ): String =
         if (useStaKeys) {
@@ -4358,7 +3953,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
 
     private fun alternateThumbnailDiskCacheFileName(
-        file: NikonCamera.FileInfo,
+        file: CameraFileInfo,
         useStaKeys: Boolean = activeThumbnailDiskCacheUsesStaKeys,
     ): String? =
         if (useStaKeys) {
@@ -4367,12 +3962,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             null
         }
 
-    private fun legacyThumbnailDiskCacheFileName(file: NikonCamera.FileInfo): String =
+    private fun legacyThumbnailDiskCacheFileName(file: CameraFileInfo): String =
         legacyThumbnailCacheFileName(file.fileName, file.size, file.captureDate)
 
     private suspend fun reconcileThumbnailCache(
         diskCache: ThumbnailDiskCache.CameraCache,
-        files: List<NikonCamera.FileInfo>,
+        files: List<CameraFileInfo>,
         useStaKeys: Boolean,
     ) {
         withContext(Dispatchers.IO) {
@@ -4422,10 +4017,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         // STA 正常走事件通道；2 秒轮询只承担丢包、旧机型和 USB/AP 的原有兜底职责。
         private const val EVENT_POLL_INTERVAL_MS = 2_000L
         private const val HANDLE_CATALOG_SYNC_INTERVAL_MS = 10_000L
-        private const val NEW_OBJECT_COALESCE_MS = 90L
-        private const val NEW_OBJECT_RESOLVE_BATCH_SIZE = 16
-        private const val NEW_OBJECT_RESOLVE_MAX_ATTEMPTS = 5
-        private val NEW_OBJECT_RESOLVE_BACKOFF_MS = longArrayOf(180L, 360L, 720L, 1_400L)
+        private const val NEW_OBJECT_COALESCE_MS = NewCameraObjectPolicy.COALESCE_MS
+        private const val NEW_OBJECT_RESOLVE_BATCH_SIZE = NewCameraObjectPolicy.RESOLVE_BATCH_SIZE
+        private const val NEW_OBJECT_RESOLVE_MAX_ATTEMPTS = NewCameraObjectPolicy.RESOLVE_MAX_ATTEMPTS
         // 连接失败重试间隔：相机刚开热点时 PTP 服务可能晚于 Wi-Fi 就绪，快节奏重试
         // 让"差一步"的场景少等一秒；连续失败后降频，避免普通路由器恰好使用同网关时
         // 每秒空连。看护轮询只读本地 DHCP，保持 1 秒用于及时发现真正的网络切换。
@@ -4436,7 +4030,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         const val STA_SERVICE_READY_RETRY_DELAY_MS = 1_200L
         const val STA_EXPLORER_RECONNECT_DELAY_MS = 900L
         const val STA_FILE_SCAN_RETRY_DELAY_MS = 750L
-        val STA_RECONNECT_DELAYS_MS = longArrayOf(3_000L, 8_000L, 15_000L, 30_000L)
         private const val CONNECTION_PREFERENCES = "sta_connection"
         private const val WIRELESS_MODE_PREFERENCE = "wireless_mode"
         internal const val FILE_THUMBNAIL_PIPELINE_BATCH_SIZE = 12
@@ -4444,14 +4037,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         const val MAX_FHD_PREVIEW_EDGE = 1_920
         // 黑边判定：近黑像素的通道上限（JPEG 压缩后黑条并非纯黑，留噪声余量）；
         // 黑边占边长的上限——3:2 塞 4:3 为 5.6%、16:9 为 12.5%，超过 15% 视为画面本身偏暗。
-        const val BAR_BLACK_MAX = 32
-        const val BAR_MAX_FRACTION = 0.15f
+        const val BAR_BLACK_MAX = com.ztransfer.preview.ThumbnailCropPolicy.BAR_BLACK_MAX
+        const val BAR_MAX_FRACTION = com.ztransfer.preview.ThumbnailCropPolicy.BAR_MAX_FRACTION
         // 视频封面黑边兜底（cropVideoBars）：待裁带平均亮度上限。比 BAR_BLACK_MAX 略宽
         //（均值统计天然抗噪），但仍远低于正常画面暗部的均值。
-        const val BAR_AVG_MAX = 40
+        const val BAR_AVG_MAX = com.ztransfer.preview.ThumbnailCropPolicy.BAR_AVG_MAX
         // 视频扩展名：封面黑边兜底裁切按 16:9 画面处理。
         // 注意与 PhotoPreview.kt 顶部的 VIDEO_EXTENSIONS（预览占位分支）保持同步。
-        val VIDEO_EXTENSIONS = EFFECT_PREVIEW_VIDEO_EXTENSIONS
+        val VIDEO_EXTENSIONS = effectPreviewVideoExtensions
         // EXIF 解析支持的图片扩展名——视频/音频等格式不会有 EXIF 头。
         val EXIF_SUPPORTED_EXTENSIONS = setOf(".jpg", ".jpeg", ".nef", ".tif", ".tiff", ".nrw")
     }

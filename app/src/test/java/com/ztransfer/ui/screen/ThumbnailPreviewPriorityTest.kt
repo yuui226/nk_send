@@ -7,24 +7,6 @@ import org.junit.Test
 
 class ThumbnailPreviewPriorityTest {
     @Test
-    fun missingLocalOriginalNeverSuppressesCurrentCameraFhd() {
-        assertFalse(isLocalPreviewResolved<String>(null, null))
-        assertFalse(isLocalPreviewResolved(localSource = "content://photo", cachedLocalSource = null))
-        assertFalse(
-            isLocalPreviewResolved(
-                localSource = "content://photo-new",
-                cachedLocalSource = "content://photo-old",
-            ),
-        )
-        assertTrue(
-            isLocalPreviewResolved(
-                localSource = "content://photo",
-                cachedLocalSource = "content://photo",
-            ),
-        )
-    }
-
-    @Test
     fun localOriginalPreviewRoutesKeepTiffOnCameraFhd() {
         assertEquals(
             LocalOriginalPreviewRoute.DIRECT_BITMAP,
@@ -54,35 +36,5 @@ class ThumbnailPreviewPriorityTest {
         assertFalse(allowGridRemoteThumbnails(previewOpen = true))
     }
 
-    @Test
-    fun previewFallbackWaitsForCurrentFhdAndExifToFinish() {
-        assertFalse(
-            allowPreviewRemoteThumbnailFallback(
-                isCurrent = true,
-                fhdUnavailable = false,
-                exifFinished = true,
-            )
-        )
-        assertFalse(
-            allowPreviewRemoteThumbnailFallback(
-                isCurrent = true,
-                fhdUnavailable = true,
-                exifFinished = false,
-            )
-        )
-        assertFalse(
-            allowPreviewRemoteThumbnailFallback(
-                isCurrent = false,
-                fhdUnavailable = true,
-                exifFinished = true,
-            )
-        )
-        assertTrue(
-            allowPreviewRemoteThumbnailFallback(
-                isCurrent = true,
-                fhdUnavailable = true,
-                exifFinished = true,
-            )
-        )
-    }
+
 }

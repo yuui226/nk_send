@@ -62,6 +62,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.outlined.AspectRatio
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
@@ -109,7 +110,10 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.ztransfer.R
 import com.ztransfer.license.LicenseManager
 import com.ztransfer.protocol.CameraConnectionType
+import com.ztransfer.protocol.LIVE_VIEW_SESSION_RESTART_DELAY_MS
+import com.ztransfer.protocol.LIVE_VIEW_START_FAILURE_RETRY_DELAY_MS
 import com.ztransfer.protocol.Lab
+import com.ztransfer.protocol.LiveViewFramePollOutcome
 import com.ztransfer.protocol.LiveViewFocusFrame
 import com.ztransfer.protocol.LiveViewFocusJudgement
 import com.ztransfer.protocol.LiveViewMetadata
@@ -118,18 +122,28 @@ import com.ztransfer.protocol.LiveViewSoundLevels
 import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.protocol.PtpConstants
 import com.ztransfer.protocol.RcParam
+import com.ztransfer.protocol.RcMovieRecordingEvent
+import com.ztransfer.protocol.RcPendingCaptureConfirmation
+import com.ztransfer.protocol.coalesceRemoteEvents
+import com.ztransfer.protocol.isRemoteCaptureCompletionEvent
+import com.ztransfer.protocol.isRemoteMovieCompletionEvent
 import com.ztransfer.protocol.labEndLiveView
 import com.ztransfer.protocol.labGrabFrame
 import com.ztransfer.protocol.labStartLiveView
 import com.ztransfer.protocol.liveViewWarmupRemainingMs
+import com.ztransfer.protocol.liveViewFramePollDecision
+import com.ztransfer.protocol.liveViewIsStableAfterSuccessfulFrames
 import com.ztransfer.protocol.rcAfDriveAndWait
 import com.ztransfer.protocol.rcAngleLevelRoll
+import com.ztransfer.protocol.rcAllExposureProps
 import com.ztransfer.protocol.rcAutoIsoCandidateProps
+import com.ztransfer.protocol.rcAutoIsoTarget
 import com.ztransfer.protocol.rcBatteryPercentage
 import com.ztransfer.protocol.rcCapture
 import com.ztransfer.protocol.rcFocusAt
 import com.ztransfer.protocol.rcChangeApplicationMode
 import com.ztransfer.protocol.rcCanonicalExposureProp
+import com.ztransfer.protocol.rcDownStepSign
 import com.ztransfer.protocol.rcEndMovie
 import com.ztransfer.protocol.rcEndSubjectTracking
 import com.ztransfer.protocol.rcFormat
@@ -142,14 +156,25 @@ import com.ztransfer.protocol.rcPollEvents
 import com.ztransfer.protocol.rcPrepareAndStartMovieDetailed
 import com.ztransfer.protocol.rcRefreshParam
 import com.ztransfer.protocol.rcIsBinaryToggle
+import com.ztransfer.protocol.rcExposureProps
+import com.ztransfer.protocol.rcParamAnchorIndex
+import com.ztransfer.protocol.rcParamLabel
+import com.ztransfer.protocol.rcSteppedValue
 import com.ztransfer.protocol.rcSetApplicationMode
 import com.ztransfer.protocol.rcSetControlMode
 import com.ztransfer.protocol.rcSetLvSize
 import com.ztransfer.protocol.rcSetValueVerified
 import com.ztransfer.protocol.rcStartMovieDetailed
 import com.ztransfer.protocol.runLabProbe
+import com.ztransfer.protocol.shouldPollMovieModeDuringLiveViewRecovery
+import com.ztransfer.protocol.shouldPrepareUsbMovieSessionForRecord
+import com.ztransfer.protocol.shouldReturnUsbMovieSessionToStandby
 import com.ztransfer.protocol.movieStartNeedsLiveViewRestart
-import com.ztransfer.protocol.movieProhibitIndicatesRecording
+import com.ztransfer.protocol.movieStopNeedsFinalizationWait
+import com.ztransfer.protocol.rcMovieRecordingEvent
+import com.ztransfer.protocol.rcRecordingAfterMovieEvent
+import com.ztransfer.protocol.runRemoteCapture
+import com.ztransfer.protocol.shouldAdoptMovieRecording
 import com.ztransfer.protocol.diagnosticSummary
 import com.ztransfer.ui.theme.AppTheme
 import com.ztransfer.ui.theme.LocalButtonTexturePalette
@@ -188,18 +213,12 @@ import kotlin.math.hypot
 // 第一排 曝光补偿 / ISO，第二排 光圈 / 快门速度。
 // 照片与录像的参数在机内是两套独立属性（Z 30 实测：拨杆在录像位时照片侧属性
 // 读不到/不可写），拨杆位置决定网格绑定哪一组。
-private val EXPOSURE_PROPS = listOf(
-    Lab.PROP_EXP_COMPENSATION, Lab.PROP_ISO, Lab.PROP_F_NUMBER, Lab.PROP_NK_SHUTTER
-)
-private val MOVIE_EXPOSURE_PROPS = listOf(
-    Lab.PROP_NK_MOVIE_EXP_COMP, Lab.PROP_NK_MOVIE_ISO,
-    Lab.PROP_NK_MOVIE_F_NUMBER, Lab.PROP_NK_MOVIE_SHUTTER
-)
+private val EXPOSURE_PROPS = rcExposureProps(movieMode = false)
+private val MOVIE_EXPOSURE_PROPS = rcExposureProps(movieMode = true)
 // 事件刷新的匹配范围（两套都听：拨杆随时可能切换）
-private val ALL_EXPOSURE_PROPS = EXPOSURE_PROPS + MOVIE_EXPOSURE_PROPS
+private val ALL_EXPOSURE_PROPS = rcAllExposureProps()
 private val ALL_AUTO_ISO_PROPS =
     (rcAutoIsoCandidateProps(false) + rcAutoIsoCandidateProps(true)).distinct()
-private const val USB_LIVE_VIEW_STABLE_FRAMES = 8
 private const val TAP_FOCUS_LOCKED_FEEDBACK_MS = 1800L
 private const val TAP_FOCUS_MARKER_VISIBLE_MS = 3_000L
 private const val TRACKING_CANCEL_EXIT_MS = 220L
@@ -246,43 +265,6 @@ internal fun remoteRotationForDeviceOrientation(orientation: Int): Int? = when (
     in 60..120 -> 2
     in 240..300 -> 1
     else -> null
-}
-
-internal fun shouldPollMovieModeDuringLiveViewRecovery(
-    initialLoaded: Boolean,
-    liveViewStable: Boolean,
-    cameraBusy: Boolean
-): Boolean = initialLoaded && !liveViewStable && !cameraBusy
-
-internal fun shouldPrepareUsbMovieSessionForRecord(
-    connectionType: CameraConnectionType,
-    remoteControlModeSet: Boolean
-): Boolean = connectionType == CameraConnectionType.USB && !remoteControlModeSet
-
-internal fun shouldReturnUsbMovieSessionToStandby(
-    connectionType: CameraConnectionType,
-    remoteControlModeSet: Boolean
-): Boolean = connectionType == CameraConnectionType.USB && remoteControlModeSet
-
-/**
- * A single GetEvent can repeat the same property change many times while Live View starts.
- * The first batch is already covered by the post-start parameter snapshot; steady-state batches
- * are de-duplicated by logical property so redundant descriptors do not compete with frames.
- */
-internal fun coalesceRemoteEvents(
-    events: List<Pair<Int, Long>>,
-    suppressPropertyChanges: Boolean
-): List<Pair<Int, Long>> = buildList {
-    val changedProps = mutableSetOf<Int>()
-    for (event in events) {
-        if (event.first != Lab.EVT_DEVICE_PROP_CHANGED) {
-            add(event)
-            continue
-        }
-        if (suppressPropertyChanges) continue
-        val canonicalProp = rcCanonicalExposureProp(event.second.toInt())
-        if (changedProps.add(canonicalProp)) add(event)
-    }
 }
 
 private data class RemoteLiveFrame(
@@ -527,6 +509,11 @@ object RemoteTrialNotice {
 private const val DEFAULT_VIEWFINDER_ASPECT = 3f / 2f
 private const val BATTERY_REFRESH_INTERVAL_MS = 120_000L
 private const val REMOTE_AUDIO_LEVELS_VISIBLE_KEY = "remote_audio_levels_visible"
+private const val REMOTE_DESQUEEZE_MULTIPLIER_KEY = "remote_desqueeze_multiplier"
+private val REMOTE_DESQUEEZE_OPTIONS = listOf(1f, 1.33f, 1.5f, 1.8f, 2f)
+
+private fun desqueezeDisplayValue(value: Float): String =
+    if (kotlin.math.abs(value - 1.33f) < 0.01f) "1.3" else value.toString()
 
 @Composable
 private fun RemoteContent(
@@ -617,6 +604,13 @@ private fun RemoteContent(
         mutableStateOf(
             remotePreferences.getBoolean(REMOTE_AUDIO_LEVELS_VISIBLE_KEY, true)
         )
+    }
+    var desqueezeMultiplier by remember {
+        mutableFloatStateOf(remotePreferences.getFloat(REMOTE_DESQUEEZE_MULTIPLIER_KEY, 1f).coerceIn(1f, 2f))
+    }
+    fun setDesqueezeMultiplier(value: Float) {
+        desqueezeMultiplier = value
+        remotePreferences.edit().putFloat(REMOTE_DESQUEEZE_MULTIPLIER_KEY, value).apply()
     }
     fun toggleAudioLevels() {
         showAudioLevels = !showAudioLevels
@@ -911,7 +905,10 @@ private fun RemoteContent(
                         runCatching { cam.labStartLiveView { devLog(it) } }
                             .getOrDefault(false)
                     }
-                    if (!started) { delay(3000); continue }
+                    if (!started) {
+                        delay(LIVE_VIEW_START_FAILURE_RETRY_DELAY_MS)
+                        continue
+                    }
                     val warmupRemainingMs = liveViewWarmupRemainingMs(
                         connectionType = cam.connectionType,
                         readyAtElapsedMs = cam.liveViewReadyAtElapsedMs,
@@ -923,7 +920,9 @@ private fun RemoteContent(
                     }
                     val requiresUsbStabilization =
                         cam.connectionType == CameraConnectionType.USB
-                    if (!requiresUsbStabilization) liveViewStable = true
+                    if (liveViewIsStableAfterSuccessfulFrames(cam.connectionType, 0)) {
+                        liveViewStable = true
+                    }
                     val stabilizationStartedAt = SystemClock.elapsedRealtime()
                     var startupSuccessfulFrames = 0
                     var startupBusyResponses = 0
@@ -994,10 +993,14 @@ private fun RemoteContent(
                                 error = true
                             )
                             // 非忙失败（掉出 LV / 连接异常）：退避后回外层整体重启
-                            errStreak++
+                            val decision = liveViewFramePollDecision(
+                                previousErrorStreak = errStreak,
+                                outcome = LiveViewFramePollOutcome.ERROR,
+                            )
+                            errStreak = decision.errorStreak
                             devLog("!! LV: ${e.message}")
-                            if (errStreak >= 3) break
-                            delay(300)
+                            if (decision.restartSession) break
+                            delay(checkNotNull(decision.retryDelayMs))
                             continue
                         }
                         val pollElapsedNanos =
@@ -1005,16 +1008,28 @@ private fun RemoteContent(
                         if (grabbed == null) {
                             recordStartupPoll(elapsedNanos = pollElapsedNanos, busy = true)
                             if (!liveViewStable) startupBusyResponses++
-                            delay(40)
+                            val decision = liveViewFramePollDecision(
+                                previousErrorStreak = errStreak,
+                                outcome = LiveViewFramePollOutcome.BUSY,
+                            )
+                            errStreak = decision.errorStreak
+                            delay(checkNotNull(decision.retryDelayMs))
                             continue
                         }
                         recordStartupPoll(elapsedNanos = pollElapsedNanos, success = true)
-                        errStreak = 0
+                        errStreak = liveViewFramePollDecision(
+                            previousErrorStreak = errStreak,
+                            outcome = LiveViewFramePollOutcome.SUCCESS,
+                        ).errorStreak
                         frameCh.trySend(grabbed)
                         val now = SystemClock.elapsedRealtime()
                         if (!liveViewStable && requiresUsbStabilization) {
                             startupSuccessfulFrames++
-                            if (startupSuccessfulFrames >= USB_LIVE_VIEW_STABLE_FRAMES) {
+                            if (liveViewIsStableAfterSuccessfulFrames(
+                                    cam.connectionType,
+                                    startupSuccessfulFrames,
+                                )
+                            ) {
                                 liveViewStable = true
                                 devLog(
                                     "LV USB stable: frames=$startupSuccessfulFrames " +
@@ -1043,7 +1058,7 @@ private fun RemoteContent(
                         runCatching { cam.labEndLiveView() }
                         subjectTrackingActive = false
                     }
-                    delay(2000)
+                    delay(LIVE_VIEW_SESSION_RESTART_DELAY_MS)
                 }
             } finally {
                 liveViewStable = false
@@ -1090,9 +1105,7 @@ private fun RemoteContent(
                 val events = runCatching { cam.rcPollEvents() }.getOrDefault(emptyList())
                 for (event in events) {
                     eventFlow.emit(event)
-                    if (event.first == Lab.EVT_NK_MOVIE_REC_COMPLETE ||
-                        event.first == Lab.EVT_NK_MOVIE_REC_INTERRUPTED
-                    ) {
+                    if (isRemoteMovieCompletionEvent(event.first)) {
                         return@withTimeoutOrNull true
                     }
                 }
@@ -1397,16 +1410,26 @@ private fun RemoteContent(
             var movieModeRefreshRequested = false
             for (e in events) {
                 eventFlow.emit(e)
-                when (e.first) {
+                when (rcMovieRecordingEvent(e.first)) {
                     // 录像状态以相机事件为准（卡满/过热等相机自行停录也能收到）。
                     // 例外：本地刚（2s 内）发过停止命令时忽略"已开始"——那是上一次开始
                     // 的迟到回声（开始+停止落在同一轮询窗口内），别把 UI 翻回录制中。
                     // 停止方向的事件永远接受：宁可误停（可再按开始），不可卡在录制态。
-                    Lab.EVT_NK_MOVIE_REC_STARTED -> {
-                        if (System.currentTimeMillis() - lastStopCmdAt > 2000) recording = true
+                    RcMovieRecordingEvent.STARTED -> {
+                        recording = rcRecordingAfterMovieEvent(
+                            recording = recording,
+                            eventCode = e.first,
+                            eventTimeMs = System.currentTimeMillis(),
+                            lastStopCommandAtMs = lastStopCmdAt,
+                        )
                     }
-                    Lab.EVT_NK_MOVIE_REC_COMPLETE, Lab.EVT_NK_MOVIE_REC_INTERRUPTED -> {
-                        recording = false
+                    RcMovieRecordingEvent.FINISHED -> {
+                        recording = rcRecordingAfterMovieEvent(
+                            recording = recording,
+                            eventCode = e.first,
+                            eventTimeMs = System.currentTimeMillis(),
+                            lastStopCommandAtMs = lastStopCmdAt,
+                        )
                         // 用户主动停止时 toggleRecord 负责等完成事件并清理；相机因卡满、
                         // 过热等自行停止时事件循环必须接管，不能把应用模式留在机身上。
                         if (!recBusy) {
@@ -1421,7 +1444,7 @@ private fun RemoteContent(
                             }
                         }
                     }
-                    Lab.EVT_DEVICE_PROP_CHANGED -> {
+                    RcMovieRecordingEvent.OTHER -> if (e.first == Lab.EVT_DEVICE_PROP_CHANGED) {
                         val reportedProp = e.second.toInt()
                         val prop = rcCanonicalExposureProp(reportedProp)
                         if (reportedProp == Lab.PROP_BATTERY_LEVEL) refreshBattery()
@@ -1512,13 +1535,8 @@ private fun RemoteContent(
 
     fun stepParam(prop: Int, delta: Int) {
         val p = params[prop] ?: return
-        if (!p.writable || p.values.isEmpty()) return
-        // 起点用共用锚点（精确命中或按物理量最近档）：当前值不在枚举里时哪怕 delta
-        // 走不动也发一次，把值吸附回枚举，否则拖动完全失灵（indexOf 永远 -1）。
-        val from = paramAnchorIdx(prop, p.values, p.current)
-        val newIdx = (from + delta).coerceIn(0, p.values.size - 1)
-        if (newIdx == from && p.values[from] == p.current) return
-        sendValue(prop, p.values[newIdx], immediate = false)
+        val value = rcSteppedValue(logicalProp = prop, param = p, delta = delta) ?: return
+        sendValue(prop, value, immediate = false)
     }
 
     // 拍摄：capturing 从触发一直保持到收到 ObjectAdded（相机确认新照片已生成）——
@@ -1540,20 +1558,27 @@ private fun RemoteContent(
                 haptics.longPress()   // 快门触发反馈（经全局震动设置门控）
                 // 先挂事件等待、再触发拍摄：ObjectAdded 是取走即消费的，
                 // 订阅晚于轮询取走就永远等不到了。
-                val pending = async {
-                    withTimeoutOrNull(12_000) {
-                        eventFlow.first {
-                            it.first == Lab.EVT_OBJECT_ADDED || it.first == Lab.EVT_OBJECT_ADDED_SDRAM
-                        }.second.toInt()
-                    }
-                }
-                val rc = runCatching { cam.rcCapture() }.getOrDefault(-1)
-                if (rc != Lab.OK) {
-                    pending.cancel()
-                    devLog("!! capture resp=0x%04X".format(rc and 0xFFFF))
+                val result = runRemoteCapture(
+                    armConfirmation = {
+                        val pending = async {
+                            withTimeoutOrNull(12_000) {
+                                eventFlow.first { isRemoteCaptureCompletionEvent(it.first) }
+                                    .second
+                                    .toInt()
+                            }
+                        }
+                        RcPendingCaptureConfirmation(
+                            awaitObjectHandle = { pending.await()?.toLong() },
+                            cancel = { pending.cancel() },
+                        )
+                    },
+                    capture = { runCatching { cam.rcCapture() }.getOrDefault(-1) },
+                )
+                if (result.responseCode != Lab.OK) {
+                    devLog("!! capture resp=0x%04X".format(result.responseCode and 0xFFFF))
                     return@launch
                 }
-                val handle = pending.await()   // 拍摄成功的确认信号
+                val handle = result.objectHandle?.toInt()   // 拍摄成功的确认信号
                 if (handle == null) devLog("!! capture: no ObjectAdded in 12s")
                 else devLog("shot ok: handle=0x%08X".format(handle))
             } finally {
@@ -1777,7 +1802,9 @@ private fun RemoteContent(
                     focusY = tap.focusY
                 )
                 val af = result.afResult
-                if (result.trackingStarted || result.moveResponseCode == Lab.OK) {
+                val trackingResponseCode = result.trackingResponseCode
+                val moveResponseCode = result.moveResponseCode
+                if (result.trackingStarted || moveResponseCode == Lab.OK) {
                     focusAreaPoint = tap.normalized
                 }
                 tapFocusFeedback = if (result.trackingStarted) {
@@ -1806,26 +1833,26 @@ private fun RemoteContent(
                         TapFocusFeedback.FAILED
                     }
                 } else if (
-                    result.trackingResponseCode != null &&
-                    result.trackingResponseCode != PtpConstants.OPERATION_NOT_SUPPORTED
+                    trackingResponseCode != null &&
+                    trackingResponseCode != PtpConstants.OPERATION_NOT_SUPPORTED
                 ) {
-                    if (result.trackingResponseCode == Lab.NK_INVALID_STATUS) {
+                    if (trackingResponseCode == Lab.NK_INVALID_STATUS) {
                         showHint(trackingAreaModeHint)
                     }
                     devLog(
                         "!! StartTracking resp=0x%04X".format(
-                            result.trackingResponseCode and 0xFFFF
+                            trackingResponseCode and 0xFFFF
                         )
                     )
                     TapFocusFeedback.FAILED
-                } else if (result.moveResponseCode == null) {
+                } else if (moveResponseCode == null) {
                     result.endTrackingResponseCode?.let {
                         devLog("!! EndTracking resp=0x%04X".format(it and 0xFFFF))
                     }
                     TapFocusFeedback.FAILED
-                } else if (result.moveResponseCode != Lab.OK) {
+                } else if (moveResponseCode != Lab.OK) {
                     devLog(
-                        "!! ChangeAfArea resp=0x%04X".format(result.moveResponseCode and 0xFFFF)
+                        "!! ChangeAfArea resp=0x%04X".format(moveResponseCode and 0xFFFF)
                     )
                     TapFocusFeedback.FAILED
                 } else if (af == null) {
@@ -1901,11 +1928,7 @@ private fun RemoteContent(
     fun setAutoIso(enabled: Boolean) {
         val p = autoIsoProp?.let { params[it] } ?: return
         if (!p.writable || autoIsoBusy) return
-        val target = if (enabled) {
-            p.values.firstOrNull { it != 0L } ?: 1L
-        } else {
-            p.values.firstOrNull { it == 0L } ?: 0L
-        }
+        val target = rcAutoIsoTarget(p, enabled)
         val requestedMovieMode = movieMode
         if ((p.current != 0L) == enabled) return
 
@@ -1934,11 +1957,7 @@ private fun RemoteContent(
                 }
                 var confirmedParam: RcParam? = null
                 for (candidate in candidates) {
-                    val candidateTarget = if (enabled) {
-                        candidate.values.firstOrNull { it != 0L } ?: 1L
-                    } else {
-                        candidate.values.firstOrNull { it == 0L } ?: 0L
-                    }
+                    val candidateTarget = rcAutoIsoTarget(candidate, enabled)
                     if ((candidate.current != 0L) == enabled) {
                         confirmedParam = candidate
                         break
@@ -2052,7 +2071,7 @@ private fun RemoteContent(
                     if (preparedUsbSession) initialLoaded = true
 
                     val rc = result?.responseCode ?: -1
-                    if (rc == Lab.OK || movieProhibitIndicatesRecording(result?.prohibitCondition)) {
+                    if (shouldAdoptMovieRecording(result)) {
                         recording = true
                         if (rc == Lab.OK) {
                             devLog("movie rec started")
@@ -2085,17 +2104,16 @@ private fun RemoteContent(
                     }
                 } else {
                     lastStopCmdAt = System.currentTimeMillis()   // 之后 2s 内的"已开始"事件按迟到回声忽略
-                    val needsFinalizationWait =
-                        cam.remoteMovieApplicationPropSet || cam.remoteMovieApplicationOpSet
+                    val needsFinalizationWait = movieStopNeedsFinalizationWait(
+                        applicationPropertySet = cam.remoteMovieApplicationPropSet,
+                        applicationOperationSet = cam.remoteMovieApplicationOpSet,
+                    )
                     // 仅兼容恢复路径需要等相机写卡完成再退出应用模式。旧机型沿用原
                     // 即时停止路径，不因缺少 Nikon 完成事件而多等 8 秒。
                     val completion = if (needsFinalizationWait) {
                         async(start = CoroutineStart.UNDISPATCHED) {
                             withTimeoutOrNull(8_000) {
-                                eventFlow.first {
-                                    it.first == Lab.EVT_NK_MOVIE_REC_COMPLETE ||
-                                        it.first == Lab.EVT_NK_MOVIE_REC_INTERRUPTED
-                                }
+                                eventFlow.first { isRemoteMovieCompletionEvent(it.first) }
                             }
                         }
                     } else null
@@ -2459,7 +2477,8 @@ private fun RemoteContent(
                 showZebra = showZebra,
                 showLevel = showLevel,
                 levelRoll = levelRoll,
-                modifier = Modifier.fillMaxWidth().aspectRatio(viewfinderAspect)
+                desqueezeMultiplier = desqueezeMultiplier,
+                modifier = Modifier.fillMaxWidth().aspectRatio(viewfinderAspect * desqueezeMultiplier)
             )
             Spacer(Modifier.height(8.dp))
             // Row 1: overlay tools (left) + screen actions (right)
@@ -2535,6 +2554,9 @@ private fun RemoteContent(
                     ) { ZebraMark(Modifier.size(18.dp)) }
                 })
                 add(@Composable {
+                    DesqueezeToolButton(desqueezeMultiplier, ::setDesqueezeMultiplier)
+                })
+                add(@Composable {
                     TopIconToggle(
                         active = showLevel,
                         contentDescription = stringResource(R.string.cd_remote_level),
@@ -2594,7 +2616,7 @@ private fun RemoteContent(
                             val hasAutoIso =
                                 prop == isoProp && autoIsoAvailable
                             ParamTile(
-                                label = paramLabel(prop),
+                                label = rcParamLabel(prop),
                                 param = params[prop],
                                 autoIsoEnabled = if (hasAutoIso) autoIsoEnabled else null,
                                 autoIsoValue = if (hasAutoIso) effectiveAutoIsoValue else null,
@@ -2655,16 +2677,17 @@ private fun RemoteContent(
 
                 fun fitWithin(
                     availableWidth: androidx.compose.ui.unit.Dp,
-                    availableHeight: androidx.compose.ui.unit.Dp
+                    availableHeight: androidx.compose.ui.unit.Dp,
+                    aspectRatio: Float = viewfinderAspect * desqueezeMultiplier,
                 ): Pair<androidx.compose.ui.unit.Dp, androidx.compose.ui.unit.Dp> {
                     val width = availableWidth.coerceAtLeast(0.dp)
                     val height = availableHeight.coerceAtLeast(0.dp)
                     if (width == 0.dp || height == 0.dp) return 0.dp to 0.dp
-                    val heightAtFullWidth = width / viewfinderAspect
+                    val heightAtFullWidth = width / aspectRatio
                     return if (heightAtFullWidth <= height) {
                         width to heightAtFullWidth
                     } else {
-                        (height * viewfinderAspect) to height
+                        (height * aspectRatio) to height
                     }
                 }
 
@@ -2761,6 +2784,7 @@ private fun RemoteContent(
                     showLevel = showLevel,
                     levelRoll = levelRoll,
                     showEmbeddedAudioMeter = !audioMeterOutside,
+                    desqueezeMultiplier = desqueezeMultiplier,
                     modifier = Modifier
                         .offset(x = imageX, y = imageY)
                         .size(width = imageWidth, height = imageHeight)
@@ -2865,6 +2889,7 @@ private fun RemoteContent(
                                     contentDescription = stringResource(R.string.cd_remote_zebra),
                                     onClick = { showZebra = !showZebra }
                                 ) { ZebraMark(Modifier.size(18.dp)) }
+                                DesqueezeToolButton(desqueezeMultiplier, ::setDesqueezeMultiplier)
                                 TopIconToggle(
                                     active = showLevel,
                                     contentDescription = stringResource(R.string.cd_remote_level),
@@ -2917,7 +2942,7 @@ private fun RemoteContent(
                                             val hasAutoIso =
                                                 prop == isoProp && autoIsoAvailable
                                             ParamTile(
-                                                label = paramLabel(prop),
+                                                label = rcParamLabel(prop),
                                                 param = params[prop],
                                                 autoIsoEnabled =
                                                     if (hasAutoIso) autoIsoEnabled else null,
@@ -3456,6 +3481,7 @@ private fun RemoteViewfinderPanel(
     /** 相机机身滚转角；null=没有可用角度，水平仪什么都不画。 */
     levelRoll: Float? = null,
     showEmbeddedAudioMeter: Boolean = true,
+    desqueezeMultiplier: Float = 1f,
     modifier: Modifier = Modifier
 ) {
     val colors = AppTheme.colors
@@ -3478,7 +3504,8 @@ private fun RemoteViewfinderPanel(
             confirmedFocusMarker = confirmedFocusMarker,
             subjectTrackingActive = subjectTrackingActive,
             onTapFocus = onTapFocus,
-            showZebra = showZebra
+            showZebra = showZebra,
+            desqueezeMultiplier = desqueezeMultiplier
         )
 
         if (showEmbeddedAudioMeter) {
@@ -3744,13 +3771,15 @@ private fun ViewfinderImage(
     confirmedFocusMarker: ConfirmedFocusMarker?,
     subjectTrackingActive: Boolean,
     onTapFocus: (ViewfinderTap) -> Unit,
-    showZebra: Boolean
+    showZebra: Boolean,
+    desqueezeMultiplier: Float = 1f
 ) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         val liveFrame = frameProvider()
         if (liveFrame != null) {
             val imageWidth = liveFrame.image.width
             val imageHeight = liveFrame.image.height
+            val displayAspectRatio = imageWidth.toFloat() / imageHeight * desqueezeMultiplier
             // StartTracking 使用增强帧头 +16/+18 的完整画面坐标；普通 ChangeAfArea
             // 使用 +28/+30 的显示 AF 网格。两套坐标纵横比接近但量级完全不同，不能混用。
             val trackingCoordinateWidth =
@@ -3777,7 +3806,7 @@ private fun ViewfinderImage(
                             val imageRect = fitCenterRect(
                                 size.width.toFloat(),
                                 size.height.toFloat(),
-                                imageWidth.toFloat() / imageHeight
+                                displayAspectRatio
                             )
                             if (tap.x in imageRect.left..imageRect.right &&
                                 tap.y in imageRect.top..imageRect.bottom
@@ -3815,7 +3844,14 @@ private fun ViewfinderImage(
                     bitmap = liveFrame.image,
                     contentDescription = null,
                     contentScale = ContentScale.Fit,
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(displayAspectRatio)
+                        .graphicsLayer {
+                            // An anamorphic frame is encoded horizontally compressed. Fit it
+                            // into the corrected viewport first, then restore its pixel width.
+                            scaleX = desqueezeMultiplier
+                        }
                 )
             }
             // 暗角：四周极淡压暗，画面"坐进"边框（相机目镜语言），角标叠其上不受影响。
@@ -3837,14 +3873,14 @@ private fun ViewfinderImage(
             )
             FramingGridOverlay(
                 grid = grid,
-                imageAspectRatio = liveFrame.image.width.toFloat() / liveFrame.image.height,
+                imageAspectRatio = displayAspectRatio,
                 modifier = Modifier.matchParentSize()
             )
             // 斑马纹跟随帧上的掩码走：掩码在解码线程按节流计算，这里只做裁剪绘制。
             if (showZebra) {
                 ViewfinderZebraOverlay(
                     mask = liveFrame.zebraMask,
-                    imageAspectRatio = imageWidth.toFloat() / imageHeight,
+                    imageAspectRatio = displayAspectRatio,
                     modifier = Modifier.matchParentSize()
                 )
             }
@@ -3853,7 +3889,7 @@ private fun ViewfinderImage(
                     feedback = tapFocusFeedback,
                     point = tapFocusPoint,
                     nonce = tapFocusNonce,
-                    imageAspectRatio = imageWidth.toFloat() / imageHeight,
+                    imageAspectRatio = displayAspectRatio,
                     modifier = Modifier.matchParentSize()
                 )
             } else if (afHeld) {
@@ -3865,7 +3901,7 @@ private fun ViewfinderImage(
                     },
                     point = afFocusPoint,
                     nonce = tapFocusNonce,
-                    imageAspectRatio = imageWidth.toFloat() / imageHeight,
+                    imageAspectRatio = displayAspectRatio,
                     modifier = Modifier.matchParentSize()
                 )
             }
@@ -3889,7 +3925,7 @@ private fun ViewfinderImage(
                     cameraFrame = cameraFrame,
                     nonce = marker.confirmedAtElapsedMs,
                     visible = markerVisible,
-                    imageAspectRatio = imageWidth.toFloat() / imageHeight,
+                    imageAspectRatio = displayAspectRatio,
                     modifier = Modifier.matchParentSize()
                 )
             }
@@ -3916,63 +3952,13 @@ private fun ViewfinderImage(
 // 跟手又能精确单步(> 触摸 slop);大跨度不靠拖,点数值弹全表直跳。太钝调小、太跳调大。
 private val PARAM_WHEEL_ROW_DP = 18.dp
 
-/** 参数在 tile 左上角的短标（相机通用符号，不进 i18n）。 */
-private fun paramLabel(prop: Int): String = when (prop) {
-    Lab.PROP_NK_SHUTTER, Lab.PROP_NK_MOVIE_SHUTTER -> "S"
-    Lab.PROP_F_NUMBER, Lab.PROP_NK_MOVIE_F_NUMBER -> "f"
-    Lab.PROP_ISO, Lab.PROP_NK_MOVIE_ISO -> "ISO"
-    Lab.PROP_EXP_COMPENSATION, Lab.PROP_NK_MOVIE_EXP_COMP -> "EV"
-    else -> ""
-}
-
-/**
- * 参数的"物理量"度量：数值越大 = 向下拖趋近的方向（用户定义的向下语义）。
- * 快门→速度(分母/分子,越快越大)、光圈→开口(用 -f,f 越小开口越大)、ISO→感光度、EV→补偿值。
- */
-private fun paramMetric(prop: Int, raw: Long): Double = when (prop) {
-    Lab.PROP_NK_SHUTTER, Lab.PROP_NK_MOVIE_SHUTTER -> when (raw) {
-        0xFFFFFFFFL, 0xFFFFFFFEL, 0xFFFFFFFDL -> 0.0   // Bulb/x200/Time：当作极慢
-        else -> {
-            val num = ((raw ushr 16) and 0xFFFFL).toDouble()
-            val den = (raw and 0xFFFFL).toDouble()
-            if (num > 0) den / num else 0.0
-        }
-    }
-    Lab.PROP_F_NUMBER, Lab.PROP_NK_MOVIE_F_NUMBER -> -raw.toDouble()   // f 越小开口越大
-    Lab.PROP_ISO, Lab.PROP_NK_ISO_EX, Lab.PROP_NK_MOVIE_ISO -> raw.toDouble()  // ISO 越大越高
-    Lab.PROP_EXP_COMPENSATION, Lab.PROP_NK_MOVIE_EXP_COMP -> raw.toDouble()    // EV（已带符号）
-    else -> raw.toDouble()
-}
-
-/**
- * 向下拖对应的 enum 步进方向（+1 / -1）：使"向下拖 = 增大物理量"。
- * 通过比较枚举首尾值的度量得到，与枚举本身升/降序无关（换机型也稳）。
- */
-private fun downStepSign(param: RcParam): Int {
-    val vals = param.values
-    if (vals.size < 2) return -1
-    return if (paramMetric(param.prop, vals.last()) > paramMetric(param.prop, vals.first())) 1 else -1
-}
-
-/**
- * 当前值的锚点索引：优先精确命中；不在枚举里（非标准档位/值域刚随模式变化）时按
- * 物理量取最近档。拨轮定位与 stepParam 的步进起点共用，保证两者永不打架。
- * 仅在 [values] 为空时返回 -1。
- */
-private fun paramAnchorIdx(prop: Int, values: List<Long>, current: Long): Int {
-    val i = values.indexOf(current)
-    if (i >= 0) return i
-    val m = paramMetric(prop, current)
-    return values.indices.minByOrNull { abs(paramMetric(prop, values[it]) - m) } ?: -1
-}
-
 /**
  * 参数微调 tile：iOS 拨轮式交互——数值列随手指 1:1 同向连续滚动（可停在档间），
  * 每跨过一档触感反馈（走 onStep→sendValue→haptics），松手平滑吸附最近档位，
  * 端点橡皮筋阻尼。无惯性甩动（有意为之：拖动只管微调，大跨度靠点数值弹全表直跳）。
  * 点一下打开完整值表。只读参数整块压暗 + 锁，拖动禁用。
  * 方向按物理量：向下拖 = 增大物理量（快门更快 / 光圈开口更大 / ISO 更高 / EV 更正），
- * 具体 enum 步进方向由 [downStepSign] 判定（不依赖枚举升/降序）。跟手滚动决定了
+ * 具体 enum 步进方向由 [rcDownStepSign] 判定（不依赖枚举升/降序）。跟手滚动决定了
  * 向下拖趋近的档位显示在【上】缘、随手指落入中心（内容与手指同向，苹果拨轮语义）。
  */
 @Composable
@@ -3998,13 +3984,13 @@ private fun ParamTile(
     val scope = rememberCoroutineScope()
 
     // 向下拖对应的 enum 步进方向（向下=增大物理量）。
-    val downSign = if (writable && param != null) downStepSign(param) else -1
+    val downSign = if (writable && param != null) rcDownStepSign(param) else -1
 
     // 当前值的锚点索引（精确命中或按物理量最近档；remember 避免值不在枚举时每次重组
-    // 都全表扫描）。与 stepParam 共用 paramAnchorIdx，保证拨轮位置和步进起点不打架。
+    // 都全表扫描）。与 stepParam 共用 rcParamAnchorIndex，保证拨轮位置和步进起点不打架。
     val values = param?.values ?: emptyList()
     val curIdx = if (param == null || values.isEmpty()) -1
-        else remember(param) { paramAnchorIdx(param.prop, values, param.current) }
+        else remember(param) { rcParamAnchorIndex(param.prop, values, param.current) }
 
     // 拨轮位置：枚举索引空间的连续值，拖动/吸附过程中可停在档间，静止时必为整数档。
     val pos = remember { Animatable(0f) }
@@ -4623,6 +4609,31 @@ private fun AdaptiveRemoteToolBar(
 
 /** 视频模式专属的音频电平显示开关；横向展开让其后的工具自然平滑让位。 */
 @Composable
+private fun DesqueezeToolButton(multiplier: Float, onSelect: (Float) -> Unit) {
+    val currentIndex = REMOTE_DESQUEEZE_OPTIONS.indices.minByOrNull { index ->
+        kotlin.math.abs(REMOTE_DESQUEEZE_OPTIONS[index] - multiplier)
+    } ?: 0
+    val nextMultiplier = REMOTE_DESQUEEZE_OPTIONS[(currentIndex + 1) % REMOTE_DESQUEEZE_OPTIONS.size]
+    TopIconToggle(
+        active = multiplier > 1.001f,
+        contentDescription = "反挤压倍率 ${desqueezeDisplayValue(multiplier)}，点击切换",
+        onClick = { onSelect(nextMultiplier) },
+        modifier = Modifier.size(36.dp),
+    ) {
+        if (multiplier > 1.001f) {
+            Text(desqueezeDisplayValue(multiplier), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        } else {
+            Icon(
+                imageVector = Icons.Outlined.AspectRatio,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+    }
+}
+
+/** 视频模式专属的音频电平显示开关；横向展开让其后的工具自然平滑让位。 */
+@Composable
 private fun AudioLevelsToolButton(
     visible: Boolean,
     active: Boolean,
@@ -4662,6 +4673,7 @@ internal fun TopIconToggle(
     active: Boolean,
     contentDescription: String,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
     content: @Composable () -> Unit
 ) {
     val colors = AppTheme.colors
@@ -4672,7 +4684,7 @@ internal fun TopIconToggle(
         showSheen = false,
         shadowElevation = 0.dp,
         contentPadding = PaddingValues(8.dp),
-        modifier = Modifier
+        modifier = modifier
             .defaultMinSize(minWidth = 36.dp, minHeight = 36.dp)
             .semantics { this.contentDescription = contentDescription }
     ) {

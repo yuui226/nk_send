@@ -1,0 +1,5 @@
+/gradlew text eol=lf
+*.pbxproj text eol=lf
+*.xcscheme text eol=lf
+*.swift text eol=lf
+*.sh text eol=lf

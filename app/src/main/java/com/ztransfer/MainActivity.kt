@@ -1,6 +1,7 @@
 package com.ztransfer
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.pm.PackageManager
 import android.os.Build
@@ -60,6 +61,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.ztransfer.connection.WirelessMode
 import com.ztransfer.ui.screen.*
 import com.ztransfer.ui.theme.AppTheme
 import com.ztransfer.ui.theme.ZTransferTheme
@@ -67,6 +69,7 @@ import com.ztransfer.ui.theme.rememberAppBackgroundBrush
 import com.ztransfer.ui.util.rememberHaptics
 import com.ztransfer.protocol.CameraConnectionType
 import com.ztransfer.protocol.CameraEndpointOverride
+import com.ztransfer.protocol.CameraFileInfo
 import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.update.AppUpdateHost
 import com.ztransfer.update.AppUpdateManager
@@ -76,7 +79,6 @@ import com.ztransfer.viewmodel.PhotoDateRange
 import com.ztransfer.viewmodel.TransferState
 import com.ztransfer.viewmodel.TransferStatus
 import com.ztransfer.viewmodel.TransferViewModel
-import com.ztransfer.viewmodel.WirelessMode
 import com.ztransfer.viewmodel.isTransferredOriginal
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Job
@@ -216,91 +218,8 @@ private fun FilesQueueWorkspace(
     queueContent: @Composable () -> Unit,
     queueTopContent: @Composable () -> Unit,
 ) {
-    val stateHolder = rememberSaveableStateHolder()
-    val transition = updateTransition(
-        targetState = queueVisible,
-        label = "filesQueueTransition",
-    )
-    val currentOnFilesSettledChanged by rememberUpdatedState(onFilesSettledChanged)
-    LaunchedEffect(transition) {
-        snapshotFlow {
-            !transition.isRunning &&
-                !transition.currentState &&
-                !transition.targetState
-        }
-            .distinctUntilChanged()
-            .collect { settled -> currentOnFilesSettledChanged(settled) }
-    }
-    val topControlsProgress = transition.animateFloat(
-        transitionSpec = {
-            if (targetState) {
-                tween(
-                    durationMillis = 140,
-                    delayMillis = Motion.QUEUE_PAGE_SLIDE_MS,
-                    easing = FastOutSlowInEasing,
-                )
-            } else {
-                tween(durationMillis = 80, easing = FastOutSlowInEasing)
-            }
-        },
-        label = "queueTopControls",
-    ) { showingQueue ->
-        if (showingQueue) 1f else 0f
-    }
-
-    Box(Modifier.fillMaxSize()) {
-        transition.AnimatedContent(
-            modifier = Modifier.fillMaxSize(),
-            transitionSpec = {
-                if (targetState) {
-                    val enterQueue = slideInHorizontally(Motion.queuePageSlide) { it } +
-                        fadeIn(
-                            tween(220, easing = FastOutSlowInEasing),
-                            initialAlpha = 0.72f,
-                        )
-                    val exitFiles = slideOutHorizontally(Motion.queuePageSlide) { -it / 3 } +
-                        fadeOut(
-                            tween(Motion.PAGE_FADE_MS),
-                            targetAlpha = 0.5f,
-                        )
-                    (enterQueue togetherWith exitFiles).apply { targetContentZIndex = 1f }
-                } else {
-                    val enterFiles = slideInHorizontally(Motion.queuePageSlide) { -it / 3 } +
-                        fadeIn(
-                            tween(Motion.PAGE_FADE_MS),
-                            initialAlpha = 0.5f,
-                        )
-                    val exitQueue = slideOutHorizontally(Motion.queuePageSlide) { it } +
-                        fadeOut(
-                            tween(140, easing = FastOutSlowInEasing),
-                            targetAlpha = 0.72f,
-                        )
-                    (enterFiles togetherWith exitQueue).apply { targetContentZIndex = 0f }
-                }
-            },
-            contentKey = { it },
-        ) { showingQueue ->
-            val stateKey = if (showingQueue) "transferQueue" else "cameraFiles"
-            stateHolder.SaveableStateProvider(stateKey) {
-                if (showingQueue) queueContent() else filesContent()
-            }
-        }
-
-        // 顶栏不参与横向位移或缩放。等正文横向转场彻底完成后才在原位淡入，避免
-        // 返回/信号按钮与仍在滑出的照片页重叠；返回时则立即淡出。
-        if (transition.currentState || transition.targetState) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .fillMaxWidth()
-                    .graphicsLayer {
-                        alpha = topControlsProgress.value
-                    },
-            ) {
-                queueTopContent()
-            }
-        }
-    }
+    com.ztransfer.ui.screen.SharedFilesQueueWorkspace(queueVisible, onFilesSettledChanged,
+        filesContent, queueContent, queueTopContent)
 }
 
 /** Navigation Compose 会在目的地转场真正结束后才把当前条目推进到 RESUMED。 */
@@ -404,6 +323,8 @@ private fun BottomGlassHint(
  * 照片列表与传输页共用同一个顶部队列控件实例。它位于 NavHost 之外，因此两页横向
  * 切换时不会随页面退场、重建并重播胶囊动画；只有点击语义随当前页面变化。
  */
+// `.value` only seeds the mapped flow; ongoing updates are collected immediately below.
+@SuppressLint("StateFlowValueCalledInComposition")
 @Composable
 private fun SharedQueueControls(
     route: String,
@@ -575,6 +496,8 @@ private fun SharedQueueControls(
     }
 }
 
+// `.value` only seeds the mapped flows; ongoing updates are collected immediately below.
+@SuppressLint("StateFlowValueCalledInComposition")
 @Composable
 fun MainScreen(transferViewModel: TransferViewModel) {
     val navController = rememberNavController()
@@ -680,7 +603,7 @@ fun MainScreen(transferViewModel: TransferViewModel) {
     // 照片页不可见期间只在可变 Map 中 O(1) 累积；恢复可见时才一次性生成动画快照。
     // 不能每来一批都复制此前的 List，监看页长时间间隔拍摄会退化成 O(n²)。
     val pendingAutoQueueFiles = remember {
-        LinkedHashMap<NikonCamera, LinkedHashMap<Int, NikonCamera.FileInfo>>()
+        LinkedHashMap<NikonCamera, LinkedHashMap<Int, CameraFileInfo>>()
     }
     var nextAutoQueueFlightId by remember { mutableLongStateOf(0L) }
     var filesWorkspaceSettled by remember { mutableStateOf(false) }
@@ -693,7 +616,7 @@ fun MainScreen(transferViewModel: TransferViewModel) {
 
     fun publishAutoQueueFlight(
         camera: NikonCamera,
-        files: List<NikonCamera.FileInfo>,
+        files: List<CameraFileInfo>,
     ) {
         if (files.isEmpty()) return
         autoQueueFlightRequests += AutoQueueFlightRequest(
@@ -744,7 +667,7 @@ fun MainScreen(transferViewModel: TransferViewModel) {
     // 才生成视觉事件。短时间连续到达会合成一摞；照片页不可见时继续合并，回来只播一次，
     // 不让监看连拍在返回后逐张刷动画。
     LaunchedEffect(cameraViewModel, transferViewModel) {
-        val stagedFiles = LinkedHashMap<NikonCamera, LinkedHashMap<Int, NikonCamera.FileInfo>>()
+        val stagedFiles = LinkedHashMap<NikonCamera, LinkedHashMap<Int, CameraFileInfo>>()
         var flushJob: Job? = null
         cameraViewModel.newMediaFiles.collect { event ->
             if (cameraViewModel.getCamera() === event.camera) {

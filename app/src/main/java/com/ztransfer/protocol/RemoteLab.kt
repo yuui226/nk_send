@@ -18,181 +18,6 @@ import kotlinx.coroutines.withContext
  *
  * 探测/诊断日志固定英文 + 十六进制（用于与 libgphoto2 语义比对），不做 i18n。
  */
-object Lab {
-    // ---- 标准操作码 ----
-    const val GET_DEVICE_PROP_DESC = 0x1014
-    const val GET_DEVICE_PROP_VALUE = 0x1015
-    const val SET_DEVICE_PROP_VALUE = 0x1016
-
-    // ---- Nikon 厂商操作码（语义来源 libgphoto2 ptp.h/library.c）----
-    const val NK_START_LIVE_VIEW = 0x9201
-    const val NK_END_LIVE_VIEW = 0x9202
-    const val NK_GET_LIVE_VIEW_IMG = 0x9203
-    const val NK_GET_LIVE_VIEW_IMG_EX = 0x9428
-    const val NK_MF_DRIVE = 0x9204
-    const val NK_CHANGE_AF_AREA = 0x9205
-    const val NK_AF_DRIVE = 0x90C1
-    const val NK_START_TRACKING = 0x9424
-    const val NK_END_TRACKING = 0x9425
-    const val NK_CAPTURE_REC_IN_MEDIA = 0x9207
-    const val NK_CAPTURE_REC_IN_SDRAM = 0x90C0
-    const val NK_SET_CONTROL_MODE = 0x90C2
-    const val NK_GET_EVENT = 0x90C7
-    const val NK_DEVICE_READY = 0x90C8
-    const val NK_GET_VENDOR_PROP_CODES = 0x90CA
-    const val NK_GET_VENDOR_CODES = 0x9439      // Z8/Z9 世代
-    const val NK_GET_EVENT_EX = 0x941C
-    const val NK_POWER_ZOOM_BY_FOCAL_LENGTH = 0x941E
-    const val NK_GET_DEVICE_PROP_VALUE_EX = 0x943B
-
-    const val NK_START_MOVIE_REC = 0x920A   // StartMovieRecInCard
-    const val NK_END_MOVIE_REC = 0x920B     // EndMovieRec
-    const val NK_CHANGE_APP_MODE = 0x9435   // ChangeApplicationMode(mode)，远程录像放行
-
-    // ---- 事件码 ----
-    const val EVT_OBJECT_ADDED = 0x4002
-    const val EVT_OBJECT_REMOVED = 0x4003
-    const val EVT_DEVICE_PROP_CHANGED = 0x4006
-    const val EVT_CAPTURE_COMPLETE = 0x400D
-    const val EVT_OBJECT_ADDED_SDRAM = 0xC101
-    const val EVT_NK_MOVIE_REC_INTERRUPTED = 0xC105
-    const val EVT_NK_MOVIE_REC_COMPLETE = 0xC108
-    const val EVT_NK_MOVIE_REC_STARTED = 0xC10A
-
-    // ---- 响应码 ----
-    const val OK = 0x2001
-    const val ACCESS_DENIED = 0x200F
-    const val DEVICE_BUSY = 0x2019
-    const val NK_OUT_OF_FOCUS = 0xA002   // AfDrive 未能合焦
-    const val NK_INVALID_STATUS = 0xA004
-    const val NK_NOT_LIVE_VIEW = 0xA00B
-
-    // ---- 关注的属性 ----
-    const val PROP_BATTERY_LEVEL = 0x5001
-    const val PROP_WHITE_BALANCE = 0x5005
-    const val PROP_F_NUMBER = 0x5007
-    const val PROP_FOCUS_MODE = 0x500A
-    const val PROP_EXPOSURE_TIME_STD = 0x500D
-    const val PROP_EXPOSURE_PROGRAM = 0x500E
-    const val PROP_ISO = 0x500F
-    const val PROP_EXP_COMPENSATION = 0x5010
-    const val PROP_DIGITAL_ZOOM = 0x5016             // 标准 PTP DigitalZoom
-    const val PROP_NK_EXP_COMPENSATION = 0xD058
-    const val PROP_NK_AUTO_ISO = 0xD054
-    const val PROP_NK_SHUTTER = 0xD100
-    const val PROP_NK_RECORDING_MEDIA = 0xD10B
-    const val PROP_NK_LV_STATUS = 0xD1A2
-    const val PROP_NK_LV_IMAGE_ZOOM_RATIO = 0xD1A3  // Nikon 实时取景画面放大倍率
-    const val PROP_NK_LV_PROHIBIT = 0xD1A4
-    const val PROP_NK_LV_IMAGE_SIZE = 0xD1AC
-    const val PROP_NK_LV_ZOOM_AREA = 0xD1BD         // 放大取景区域/位置（通常只读）
-    const val PROP_NK_HI_RES_ZOOM = 0x1D033         // 新世代视频高解析度数字变焦（32 位扩展属性码）
-    const val PROP_NK_MOVIE_AUTO_ISO = 0xD0AD
-    const val PROP_NK_ISO_EX = 0xD0B4
-    const val PROP_NK_ISO_CONTROL_SENSITIVITY = 0xD0B5
-    const val PROP_NK_AUTO_ISO_ALT = 0xD16A
-    const val PROP_NK_AF_MODE = 0xD161
-    const val PROP_NK_STILL_FOCUS_METERING_MODE = 0xD05D
-    const val PROP_NK_STILL_FOCUS_MODE = 0xD061
-    const val PROP_NK_ANGLE_LEVEL = 0xD067       // 机身电子水平仪滚转角，只读
-                                                 // libgphoto2 ptp.h: PTP_DPC_NIKON_AngleLevel
-                                                 // Z 30/Z 50/Z 8/Z 9/Z 6iii 全世代共用此 DPC
-    const val PROP_NK_MOV_PROHIBIT = 0xD0A4      // 录像禁止条件 bitmask，0=可录
-    const val PROP_NK_LV_SELECTOR = 0xD1A6       // 照片/录像实体拨杆：0=照片 1=录像
-    const val PROP_NK_APPLICATION_MODE = 0xD1F0  // 部分机型的应用模式属性入口
-    // 录像模式独立的曝光参数（与照片侧 0x5007/0xD100/0x500F/0x5010 平行的一套，
-    // 拨杆在录像位时读写这组；编码与照片侧同构）
-    const val PROP_NK_MOVIE_SHUTTER = 0xD1A8
-    const val PROP_NK_MOVIE_F_NUMBER = 0xD1A9
-    const val PROP_NK_MOVIE_ISO = 0xD1AA
-    const val PROP_NK_MOVIE_EXP_COMP = 0xD1AB
-
-    /**
-     * 四类“数字变焦”必须分开探测：
-     * - 0xD1A3 只放大实时取景，最接近监看页 +/- 对焦辅助；
-     * - 0x5016 是标准 PTP 数字变焦，可能影响相机实际输出。
-     * - 0xD1BD 是取景放大区域/位置，用来判断放大后能否遥控移动观察区域；
-     * - 0x1D033 是新世代 Nikon Hi-Res Zoom。它超过 16 位，必须按 0x9439
-     *   的 32 位码表保留完整编号，再作为标准 PTP 属性命令的 32 位参数传入。
-     *
-     * 深度探测只对相机明确报告为可写且给出值域的标量做临时写入，并保证恢复原值；
-     * 在没有真机日志确认前不用于正式控制。
-     */
-    val DIGITAL_ZOOM_PROPS = linkedMapOf(
-        PROP_NK_LV_IMAGE_ZOOM_RATIO to "NikonLiveViewImageZoomRatio",
-        PROP_NK_LV_ZOOM_AREA to "NikonLiveViewZoomArea",
-        PROP_DIGITAL_ZOOM to "DigitalZoom(std)",
-        PROP_NK_HI_RES_ZOOM to "NikonHiResZoom(ext32)",
-    )
-
-    /** 探测清单：操作码 -> 可读名称（勾选表用）。 */
-    val INTEREST_OPS = linkedMapOf(
-        NK_START_LIVE_VIEW to "StartLiveView",
-        NK_END_LIVE_VIEW to "EndLiveView",
-        NK_GET_LIVE_VIEW_IMG to "GetLiveViewImg",
-        NK_GET_LIVE_VIEW_IMG_EX to "GetLiveViewImgEx",
-        NK_CAPTURE_REC_IN_MEDIA to "InitiateCaptureRecInMedia",
-        NK_CAPTURE_REC_IN_SDRAM to "InitiateCaptureRecInSdram",
-        0x90CB to "AfCaptureSDRAM",
-        0x90C1 to "AfDrive",
-        0x9205 to "ChangeAfArea",
-        NK_START_TRACKING to "StartTracking",
-        NK_END_TRACKING to "EndTracking",
-        0x920C to "TerminateCapture(Bulb)",
-        0x920A to "StartMovieRec",
-        0x920B to "EndMovieRec",
-        NK_GET_EVENT to "GetEvent",
-        NK_GET_EVENT_EX to "GetEventEx",
-        NK_POWER_ZOOM_BY_FOCAL_LENGTH to "PowerZoomByFocalLength",
-        NK_DEVICE_READY to "DeviceReady",
-        NK_SET_CONTROL_MODE to "SetControlMode",
-        0x9435 to "ChangeApplicationMode",
-        NK_GET_VENDOR_PROP_CODES to "GetVendorPropCodes",
-        NK_GET_VENDOR_CODES to "GetVendorCodes(Z8/Z9)",
-        GET_DEVICE_PROP_DESC to "GetDevicePropDesc",
-        GET_DEVICE_PROP_VALUE to "GetDevicePropValue",
-        SET_DEVICE_PROP_VALUE to "SetDevicePropValue",
-        0x101B to "GetPartialObject",
-    )
-
-    val INTEREST_PROPS = linkedMapOf(
-        PROP_BATTERY_LEVEL to "BatteryLevel",
-        PROP_F_NUMBER to "FNumber",
-        PROP_NK_SHUTTER to "NikonShutterSpeed",
-        PROP_EXPOSURE_TIME_STD to "ExposureTime(std)",
-        PROP_ISO to "ISO",
-        PROP_NK_AUTO_ISO to "AutoISO",
-        PROP_NK_ISO_EX to "ISOEx",
-        PROP_NK_ISO_CONTROL_SENSITIVITY to "ISOControlSensitivity",
-        PROP_NK_AUTO_ISO_ALT to "AutoISOAlt",
-        PROP_EXP_COMPENSATION to "ExpCompensation",
-        PROP_NK_EXP_COMPENSATION to "NikonExpCompensation",
-        PROP_DIGITAL_ZOOM to "DigitalZoom(std)",
-        PROP_EXPOSURE_PROGRAM to "ExposureProgram",
-        PROP_WHITE_BALANCE to "WhiteBalance",
-        PROP_FOCUS_MODE to "FocusMode",
-        PROP_NK_AF_MODE to "NikonAutofocusMode",
-        PROP_NK_STILL_FOCUS_METERING_MODE to "StillFocusMeteringMode",
-        PROP_NK_STILL_FOCUS_MODE to "StillFocusMode",
-        PROP_NK_ANGLE_LEVEL to "AngleLevel",
-        PROP_NK_RECORDING_MEDIA to "RecordingMedia",
-        PROP_NK_LV_STATUS to "LiveViewStatus",
-        PROP_NK_LV_IMAGE_ZOOM_RATIO to "NikonLiveViewImageZoomRatio",
-        PROP_NK_LV_ZOOM_AREA to "NikonLiveViewZoomArea",
-        PROP_NK_HI_RES_ZOOM to "NikonHiResZoom(ext32)",
-        PROP_NK_LV_PROHIBIT to "LiveViewProhibit",
-        PROP_NK_LV_IMAGE_SIZE to "LiveViewImageSize",
-        PROP_NK_LV_SELECTOR to "LiveViewSelector",
-        PROP_NK_MOV_PROHIBIT to "MovRecProhibitCond",
-        PROP_NK_MOVIE_AUTO_ISO to "MovieISOAutoControl",
-        PROP_NK_APPLICATION_MODE to "ApplicationMode",
-        PROP_NK_MOVIE_SHUTTER to "MovieShutterSpeed",
-        PROP_NK_MOVIE_F_NUMBER to "MovieFNumber",
-        PROP_NK_MOVIE_ISO to "MovieISO",
-        PROP_NK_MOVIE_EXP_COMP to "MovieExpComp",
-    )
-}
-
 private fun hex4(v: Int) = "0x%04X".format(v and 0xFFFF)
 private fun hex8(v: Long) = "0x%08X".format(v)
 private fun hexCode(v: Int) =
@@ -259,232 +84,24 @@ suspend fun NikonCamera.labSetProp(prop: Int, raw: ByteArray): Int =
 
 // ============================ PTP 数据集解析 ============================
 
-/** 小端游标读取器（解析 DeviceInfo/PropDesc/事件等数据集用，越界抛异常由调用方兜住）。 */
-private class Cur(val d: ByteArray) {
-    var p = 0
-    fun u8(): Int = d[p++].toInt() and 0xFF
-    fun u16(): Int {
-        val v = (d[p].toInt() and 0xFF) or ((d[p + 1].toInt() and 0xFF) shl 8)
-        p += 2; return v
-    }
-    fun u32(): Long {
-        var v = 0L
-        for (i in 0 until 4) v = v or ((d[p + i].toLong() and 0xFF) shl (8 * i))
-        p += 4; return v
-    }
-    fun u64(): Long {
-        var v = 0L
-        for (i in 0 until 8) v = v or ((d[p + i].toLong() and 0xFF) shl (8 * i))
-        p += 8; return v
-    }
-
-    /** PTP 字符串：u8 字符数（含终止 null）+ UTF-16LE。 */
-    fun str(): String {
-        val n = u8()
-        if (n == 0) return ""
-        val s = String(d, p, n * 2, Charsets.UTF_16LE).trimEnd('\u0000')
-        p += n * 2
-        return s
-    }
-
-    /** PTP AUINT16 数组：u32 count + count×u16。 */
-    fun u16Array(): IntArray {
-        val n = u32().toInt()
-        return IntArray(n) { u16() }
-    }
-
-    /**
-     * 按 PTP dataType 读一个值。标量返回符号处理后的 Long；字符串/数组返回 0 并跳过。
-     * 返回 (raw, 是否标量)。
-     */
-    fun typed(dataType: Int): Pair<Long, Boolean> = when (dataType) {
-        0x0001 -> u8().toByte().toLong() to true            // INT8
-        0x0002 -> u8().toLong() to true                     // UINT8
-        0x0003 -> u16().toShort().toLong() to true          // INT16
-        0x0004 -> u16().toLong() to true                    // UINT16
-        0x0005 -> u32().toInt().toLong() to true            // INT32
-        0x0006 -> u32() to true                             // UINT32
-        0x0007, 0x0008 -> u64() to true                     // INT64/UINT64（显示按无符号即可）
-        0x0009, 0x000A -> { p += 16; 0L to false }          // INT128/UINT128
-        0xFFFF -> { str(); 0L to false }                    // STR
-        else -> {                                            // 数组类型 0x40xx：u32 count + 元素
-            if (dataType and 0x4000 != 0) {
-                val elem = dataType and 0xFF
-                val size = when (elem) {
-                    0x01, 0x02 -> 1; 0x03, 0x04 -> 2; 0x05, 0x06 -> 4; else -> 8
-                }
-                val n = u32().toInt()
-                p += n * size
-            }
-            0L to false
-        }
+/** 数值仍由 Android 默认 Locale 渲染，shared 只决定相机语义、位数、正号与单位。 */
+private fun RcValuePresentation.renderWithAndroidLocale(): String = when (this) {
+    is RcValuePresentation.Text -> value
+    is RcValuePresentation.Decimal -> {
+        val pattern = "%${if (alwaysShowSign) "+" else ""}.${fractionDigits}f"
+        prefix + pattern.format(value) + suffix
     }
 }
 
-/**
- * Nikon GetVendorCodes(0x9439) 使用 u32 count + count×u32 code。
- * 先校验数量，避免损坏的载荷按虚假数量分配大数组。
- */
-internal fun parseVendorCodes32(d: ByteArray): Set<Int> {
-    require(d.size >= 4) { "missing u32 count" }
-    val c = Cur(d)
-    val count = c.u32()
-    val available = (d.size - 4) / 4
-    require(count <= available.toLong()) {
-        "declared $count codes but payload only contains $available"
-    }
-    val result = LinkedHashSet<Int>(count.toInt())
-    repeat(count.toInt()) { result += c.u32().toInt() }
-    return result
-}
-
-data class LabDeviceInfo(
-    val manufacturer: String,
-    val model: String,
-    val deviceVersion: String,
-    val serial: String,
-    val vendorExtId: Long,
-    val vendorExtVersion: Int,
-    val vendorExtDesc: String,
-    val operations: Set<Int>,
-    val events: Set<Int>,
-    val props: Set<Int>,
-)
-
-internal fun parseDeviceInfo(d: ByteArray): LabDeviceInfo {
-    val c = Cur(d)
-    c.u16()                       // StandardVersion
-    val vendorExtId = c.u32()
-    val vendorExtVersion = c.u16()
-    val vendorExtDesc = c.str()
-    c.u16()                       // FunctionalMode
-    val ops = c.u16Array().toSet()
-    val events = c.u16Array().toSet()
-    val props = c.u16Array().toSet()
-    c.u16Array()                  // CaptureFormats
-    c.u16Array()                  // ImageFormats
-    val manufacturer = c.str()
-    val model = c.str()
-    val version = c.str()
-    val serial = c.str()
-    return LabDeviceInfo(manufacturer, model, version, serial, vendorExtId, vendorExtVersion, vendorExtDesc, ops, events, props)
-}
-
-/** 按属性语义把原始值排成人话（快门分数、光圈 f 值、EV 等）。 */
-private fun fmtVal(prop: Int, raw: Long): String = when (prop) {
-    Lab.PROP_F_NUMBER, Lab.PROP_NK_MOVIE_F_NUMBER -> "f/%.1f".format(raw / 100.0)
-    Lab.PROP_NK_SHUTTER, Lab.PROP_NK_MOVIE_SHUTTER -> when (raw) {
-        0xFFFFFFFFL -> "Bulb"
-        0xFFFFFFFEL -> "x200"
-        0xFFFFFFFDL -> "Time"
-        else -> {
-            // 分子/分母编码，慢速档分子>1（如 300/10=30s），直接打分数不像人话，约分展示。
-            val num = (raw ushr 16) and 0xFFFFL
-            val den = raw and 0xFFFFL
-            when {
-                num == 0L || den == 0L -> "$raw"
-                num == 1L -> "1/${den}s"
-                num % den == 0L -> "${num / den}s"            // 300/10 → 30s
-                den % num == 0L -> "1/${den / num}s"          // 2/500 → 1/250s
-                else -> "%.1fs".format(num.toDouble() / den)  // 13/10 → 1.3s
-            }
-        }
-    }
-    Lab.PROP_EXPOSURE_TIME_STD -> "%.4fs".format(raw / 10000.0)
-    Lab.PROP_EXP_COMPENSATION, Lab.PROP_NK_EXP_COMPENSATION,
-    Lab.PROP_NK_MOVIE_EXP_COMP -> "%+.1fEV".format(raw / 1000.0)
-    Lab.PROP_ISO, Lab.PROP_NK_ISO_EX, Lab.PROP_NK_ISO_CONTROL_SENSITIVITY,
-    Lab.PROP_NK_MOVIE_ISO -> "ISO$raw"
-    Lab.PROP_NK_AUTO_ISO, Lab.PROP_NK_AUTO_ISO_ALT -> if (raw == 0L) "Off" else "On"
-    // 16.16 定点度数（详见 rcAngleLevelRoll 的编码说明）。
-    Lab.PROP_NK_ANGLE_LEVEL -> "%.1f°".format(raw / 65536.0)
-    Lab.PROP_EXPOSURE_PROGRAM -> when (raw) {
-        1L -> "M"
-        2L -> "P"
-        3L -> "A"
-        4L -> "S"
-        // Nikon 在全自动档使用厂商扩展枚举；不是操作失败或错误码。
-        0x8010L -> "AUTO"
-        else -> "0x${raw.toString(16)}"
-    }
-    Lab.PROP_FOCUS_MODE -> when (raw) {
-        1L -> "MF"
-        2L -> "AF"
-        3L -> "AF Macro"
-        0x8010L -> "AF-S"
-        0x8011L -> "AF-C"
-        0x8012L -> "AF-A"
-        0x8013L -> "AF-F"
-        else -> "0x${raw.toString(16)}"
-    }
-    Lab.PROP_NK_AF_MODE -> when (raw) {
-        0L -> "AF-S"
-        1L -> "AF-C"
-        2L -> "AF-A"
-        // 3/4 会在部分机型 AF 失败后出现，并不代表用户切到了 MF。
-        // 语义未确认前保留为未知值，由上层隐藏标签。
-        else -> "0x${raw.toString(16)}"
-    }
-    else -> "$raw"
-}
-
-private data class ProbePropDescData(
-    val dataType: Int,
-    val writable: Boolean,
-    val defaultValue: Long,
-    val defaultIsScalar: Boolean,
-    val current: Long,
-    val currentIsScalar: Boolean,
-    val formFlag: Int,
-    val rangeMin: Long? = null,
-    val rangeMax: Long? = null,
-    val rangeStep: Long? = null,
-    val enumValues: List<Long> = emptyList(),
-)
+internal fun rcDetailedFormat(prop: Int, raw: Long): String =
+    rcDetailedValuePresentation(prop, raw).renderWithAndroidLocale()
 
 /**
  * 解析标准 DevicePropDesc。即使请求参数是 Nikon 的 32 位属性编号，返回数据集里的
  * DevicePropCode 仍是标准 u16；完整编号只存在于命令参数和 0x9439 能力表中。
  */
-private fun parseProbePropDescData(prop: Int, d: ByteArray): ProbePropDescData {
-    val c = Cur(d)
-    val echoedProp = c.u16()
-    require(echoedProp == (prop and 0xFFFF)) {
-        "descriptor echoed ${hex4(echoedProp)}, expected ${hex4(prop)}"
-    }
-    val dataType = c.u16()
-    val writable = c.u8() == 1
-    val (def, defScalar) = c.typed(dataType)
-    val (cur, curScalar) = c.typed(dataType)
-    val formFlag = c.u8()
-    var rangeMin: Long? = null
-    var rangeMax: Long? = null
-    var rangeStep: Long? = null
-    var enumValues = emptyList<Long>()
-    when (formFlag) {
-        1 -> {
-            rangeMin = c.typed(dataType).first
-            rangeMax = c.typed(dataType).first
-            rangeStep = c.typed(dataType).first
-        }
-        2 -> {
-            val n = c.u16()
-            enumValues = (0 until n).map { c.typed(dataType).first }
-        }
-    }
-    return ProbePropDescData(
-        dataType = dataType,
-        writable = writable,
-        defaultValue = def,
-        defaultIsScalar = defScalar,
-        current = cur,
-        currentIsScalar = curScalar,
-        formFlag = formFlag,
-        rangeMin = rangeMin,
-        rangeMax = rangeMax,
-        rangeStep = rangeStep,
-        enumValues = enumValues,
-    )
+private fun parseProbePropDescData(prop: Int, d: ByteArray): PtpDevicePropDescriptor {
+    return parsePtpDevicePropDescriptor(prop, d)
 }
 
 /** 解析 DevicePropDesc 并格式化成单段日志文本。 */
@@ -492,128 +109,36 @@ private fun parsePropDesc(prop: Int, d: ByteArray): String {
     val desc = parseProbePropDescData(prop, d)
     val form = when (desc.formFlag) {
         1 ->
-            "range[${fmtVal(prop, desc.rangeMin ?: 0L)}.." +
-                "${fmtVal(prop, desc.rangeMax ?: 0L)} step ${desc.rangeStep}]"
+            "range[${rcDetailedFormat(prop, desc.rangeMin ?: 0L)}.." +
+                "${rcDetailedFormat(prop, desc.rangeMax ?: 0L)} step ${desc.rangeStep}]"
         2 -> {
             // 数字变焦的全部档位正是这次探测要回收的核心信息，即使超过 12 档也不截断。
             // 其他属性仍保持紧凑展示；它们的完整二进制始终另行写入 raw 字段。
             val displayLimit = if (prop in Lab.DIGITAL_ZOOM_PROPS) Int.MAX_VALUE else 12
             val shown = desc.enumValues.take(displayLimit)
-                .joinToString(",") { fmtVal(prop, it) }
+                .joinToString(",") { rcDetailedFormat(prop, it) }
             val suffix = if (desc.enumValues.size > displayLimit) ",…]" else "]"
             "enum(${desc.enumValues.size})[$shown$suffix"
         }
         else -> "none"
     }
     val curTxt =
-        if (desc.currentIsScalar) "${fmtVal(prop, desc.current)} (raw=${desc.current})"
+        if (desc.currentIsScalar) "${rcDetailedFormat(prop, desc.current)} (raw=${desc.current})"
         else "<non-scalar>"
     val defTxt =
-        if (desc.defaultIsScalar) fmtVal(prop, desc.defaultValue)
+        if (desc.defaultIsScalar) rcDetailedFormat(prop, desc.defaultValue)
         else "<non-scalar>"
     return "type=${hex4(desc.dataType)} ${if (desc.writable) "RW" else "RO"} " +
         "cur=$curTxt def=$defTxt $form"
 }
 
-/** 解析 Nikon GetEvent(0x90C7)：u16 count + count×{u16 code, u32 param}。 */
-internal fun parseNikonEvents(d: ByteArray): List<Pair<Int, Long>> {
-    require(d.size >= 2) { "missing Nikon event count" }
-    val c = Cur(d)
-    val n = c.u16()
-    require(n <= (d.size - 2) / 6) { "truncated Nikon event payload" }
-    return (0 until n).map { c.u16() to c.u32() }
-}
-
-/**
- * 解析 Nikon GetEventEx(0x941C)：u16 count + u16 reserved，随后每项为
- * u16 code + u16 parameterCount + parameterCount×u32。只向现有调用方暴露首参数。
- */
-internal fun parseNikonExtendedEvents(d: ByteArray): List<Pair<Int, Long>> {
-    require(d.size >= 2) { "missing Nikon extended event count" }
-    val count = Cur(d).u16()
-    if (count == 0) return emptyList()
-    require(d.size >= 4 && count <= (d.size - 4) / 4) {
-        "truncated Nikon extended event payload"
-    }
-    val cursor = Cur(d).apply { p = 4 }
-    return buildList(count) {
-        repeat(count) {
-            require(cursor.p + 4 <= d.size) { "missing Nikon extended event header" }
-            val code = cursor.u16()
-            val parameterCount = cursor.u16()
-            require(parameterCount in 0..5 && cursor.p + parameterCount * 4 <= d.size) {
-                "invalid Nikon extended event parameter count"
-            }
-            val firstParameter = if (parameterCount > 0) cursor.u32() else 0L
-            repeat((parameterCount - 1).coerceAtLeast(0)) { cursor.u32() }
-            add(code to firstParameter)
-        }
-    }
-}
-
-/** 在数据里找 JPEG SOI（FF D8 FF）偏移；找不到返回 -1。 */
-private fun findJpegStart(d: ByteArray): Int {
-    for (i in 0 until d.size - 2) {
-        if (d[i] == 0xFF.toByte() && d[i + 1] == 0xD8.toByte() && d[i + 2] == 0xFF.toByte()) return i
-    }
-    return -1
-}
-
 // ============================ 正式遥控页协议支持 ============================
-
-/** DevicePropDesc 的结构化解析结果。 */
-private data class PropDescData(
-    val dataType: Int,
-    val writable: Boolean,
-    val current: Long,
-    val enumValues: List<Long>
-)
-
-private fun parsePropDescData(d: ByteArray): PropDescData {
-    val c = Cur(d)
-    c.u16()
-    val dataType = c.u16()
-    val writable = c.u8() == 1           // GetSet
-    c.typed(dataType)                    // default
-    val (cur, _) = c.typed(dataType)
-    val formFlag = c.u8()
-    val values = when (formFlag) {
-        // Nikon 的布尔属性常用 Range(0..1) 而不是 Enumeration。只把严格的
-        // 二值范围展开；其他连续范围仍保持为空，避免为曝光参数制造庞大值表。
-        1 -> {
-            val min = c.typed(dataType).first
-            val max = c.typed(dataType).first
-            val step = c.typed(dataType).first
-            if (min == 0L && max == 1L && step == 1L) listOf(0L, 1L) else emptyList()
-        }
-        2 -> {
-            val n = c.u16()
-            (0 until n).map { c.typed(dataType).first }
-        }
-        else -> emptyList()
-    }
-    return PropDescData(dataType, writable, cur, values)
-}
-
-private fun encodeScalar(dataType: Int, v: Long): ByteArray {
-    val size = scalarSize(dataType) ?: 8
-    return ByteArray(size) { i -> ((v shr (8 * i)) and 0xFF).toByte() }
-}
-
-private fun scalarSize(dataType: Int): Int? =
-    when (dataType) {
-        0x0001, 0x0002 -> 1
-        0x0003, 0x0004 -> 2
-        0x0005, 0x0006 -> 4
-        0x0007, 0x0008 -> 8
-        else -> null
-    }
 
 /**
  * 深度探测不暴力枚举未知整数空间：只使用相机自己给出的 enum，或 range 的端点/
  * 当前值相邻一步。最多 8 档，既能反推出写法，也避免让用户等待几十秒。
  */
-private fun digitalZoomProbeValues(desc: ProbePropDescData): List<Long> {
+private fun digitalZoomProbeValues(desc: PtpDevicePropDescriptor): List<Long> {
     val candidates = when (desc.formFlag) {
         2 -> desc.enumValues
         1 -> buildList {
@@ -639,88 +164,15 @@ private fun digitalZoomProbeValues(desc: ProbePropDescData): List<Long> {
     return evenlySpaced.distinct()
 }
 
-/** 一个曝光参数的完整描述。值域来自相机且随曝光模式动态变化，收到
- *  DevicePropChanged(0x4006) 事件后应重新拉取。 */
-data class RcParam(
-    val prop: Int,
-    val dataType: Int,
-    val writable: Boolean,
-    val current: Long,
-    val values: List<Long>
-)
-
-/** 各 Nikon 世代的 Auto ISO 属性优先级；按能力探测，不按型号字符串分支。 */
-internal fun rcAutoIsoCandidateProps(movieMode: Boolean): List<Int> =
-    if (movieMode) {
-        listOf(
-            Lab.PROP_NK_MOVIE_AUTO_ISO,
-            Lab.PROP_NK_AUTO_ISO_ALT,
-            Lab.PROP_NK_AUTO_ISO
-        )
-    } else {
-        listOf(Lab.PROP_NK_AUTO_ISO, Lab.PROP_NK_AUTO_ISO_ALT)
-    }
-
-/**
- * 判断属性能否作为 Auto ISO 开关。
- *
- * 部分 Nikon 机身会把 D0AD/D054/D16A 描述为可写 UINT8，却不附带 enum/range form；
- * 这仍是标准的 0/1 On/Off 属性。只对 8 位、当前值确实为 0/1 的无 form 属性放宽，
- * 写入端仍会回读确认，避免把其他厂商属性误认成开关。
- */
-internal fun RcParam.rcIsBinaryToggle(): Boolean {
-    if (!writable) return false
-    val hasExplicitStates = values.any { it == 0L } && values.any { it != 0L }
-    val isImplicitByteToggle =
-        values.isEmpty() &&
-            dataType in setOf(0x0001, 0x0002) &&
-            current in 0L..1L
-    return hasExplicitStates || isImplicitByteToggle
-}
-
-/** 当前镜头伺服方式。现代 Z 机优先走标准 FocusMode(0x500A)，旧 Nikon
- *  机身回退到厂商属性 0xD161；未知枚举保留原始值供日志定位，不伪造名称。 */
-data class RcFocusMode(
-    val label: String,
-    val manual: Boolean,
-    val prop: Int,
-    val raw: Long
-)
-
 /** 遥控参数 UI 的紧凑读数；tile 已标明 ISO/EV，因此数值中不重复单位。 */
-fun rcFormat(prop: Int, raw: Long): String = when (prop) {
-    Lab.PROP_ISO, Lab.PROP_NK_ISO_EX, Lab.PROP_NK_ISO_CONTROL_SENSITIVITY,
-    Lab.PROP_NK_MOVIE_ISO -> raw.toString()
-    Lab.PROP_EXP_COMPENSATION, Lab.PROP_NK_EXP_COMPENSATION,
-    Lab.PROP_NK_MOVIE_EXP_COMP ->
-        "%+.1f".format(raw / 1000.0)
-    else -> fmtVal(prop, raw)
-}
+fun rcFormat(prop: Int, raw: Long): String =
+    rcCompactValuePresentation(prop, raw).renderWithAndroidLocale()
 
 suspend fun NikonCamera.rcGetParam(prop: Int): RcParam? {
     val (rc, d) = labCommand(Lab.GET_DEVICE_PROP_DESC, prop)
     if (rc != Lab.OK || d == null) return null
-    val desc = runCatching { parsePropDescData(d) }.getOrNull() ?: return null
-    return RcParam(prop, desc.dataType, desc.writable, desc.current, desc.enumValues)
-}
-
-/**
- * 把不同 Nikon 世代对同一曝光参数使用的属性码归一到 UI 的逻辑属性。
- * UI 始终用逻辑属性作 key，[RcParam.prop] 则保留机身实际支持、实际写入的属性码。
- */
-fun rcCanonicalExposureProp(prop: Int): Int = when (prop) {
-    Lab.PROP_NK_EXP_COMPENSATION -> Lab.PROP_EXP_COMPENSATION
-    Lab.PROP_NK_ISO_EX -> Lab.PROP_ISO
-    Lab.PROP_EXPOSURE_TIME_STD -> Lab.PROP_NK_SHUTTER
-    else -> prop
-}
-
-private fun compatibleExposureProps(logicalProp: Int): IntArray = when (logicalProp) {
-    Lab.PROP_EXP_COMPENSATION ->
-        intArrayOf(Lab.PROP_EXP_COMPENSATION, Lab.PROP_NK_EXP_COMPENSATION)
-    Lab.PROP_ISO -> intArrayOf(Lab.PROP_ISO, Lab.PROP_NK_ISO_EX)
-    Lab.PROP_NK_SHUTTER -> intArrayOf(Lab.PROP_NK_SHUTTER, Lab.PROP_EXPOSURE_TIME_STD)
-    else -> intArrayOf(logicalProp)
+    val descriptor = runCatching { parsePtpDevicePropDescriptor(d) }.getOrNull() ?: return null
+    return rcParamFromDescriptor(prop, descriptor)
 }
 
 /**
@@ -729,7 +181,7 @@ private fun compatibleExposureProps(logicalProp: Int): IntArray = when (logicalP
  */
 suspend fun NikonCamera.rcGetCompatibleParam(logicalProp: Int): RcParam? {
     var readableFallback: RcParam? = null
-    for (actualProp in compatibleExposureProps(logicalProp)) {
+    for (actualProp in rcCompatibleExposureProps(logicalProp)) {
         val param = rcGetParam(actualProp) ?: continue
         if (param.writable && param.values.isNotEmpty()) return param
         if (readableFallback == null) readableFallback = param
@@ -741,35 +193,9 @@ suspend fun NikonCamera.rcGetCompatibleParam(logicalProp: Int): RcParam? {
 suspend fun NikonCamera.rcRefreshParam(param: RcParam): RcParam? {
     val (rc, data) = labCommand(Lab.GET_DEVICE_PROP_VALUE, param.prop)
     if (rc != Lab.OK || data == null) return null
-    val (current, scalar) = runCatching { Cur(data).typed(param.dataType) }.getOrNull()
+    val decoded = runCatching { decodePtpTypedValue(param.dataType, data) }.getOrNull()
         ?: return null
-    return if (scalar) param.copy(current = current) else null
-}
-
-/**
- * 机身电子水平仪（Nikon AngleLevel 0xD067）的滚转角：单位度、范围 (-180,180]，0 即水平。
- * 无法解释的编码返回 null，调用方据此不画任何角度。
- *
- * 编码依据：该属性是只读 INT32，值为 16.16 定点的度数（libgphoto2 对 0xD067 固定按
- * 1/65536 缩放渲染）。libgphoto2 自带的 nikon-z7 属性 dump 可直接验算：
- * `Angle Level(0xd067):(read only) (type=0x5) 358.8' (23514322)` → 23514322/65536 = 358.8，
- * 即相机按 0..360 的环报角，358.8 就是反方向偏 1.2°、几乎水平。
- * 8/16 位类型装不下 360° 的 16.16 编码，只可能是整度数，一并容错。
- *
- * 正负方向（顺时针为正还是为负）尚未在真机核对；若实机上水平线歪的方向相反，
- * 只需在这里对结果取反即可，绘制层不必改。
- */
-fun rcAngleLevelRoll(param: RcParam): Float? {
-    val degrees = when (param.dataType) {
-        0x0005, 0x0006 -> param.current.toDouble() / 65536.0   // INT32/UINT32：16.16 定点
-        0x0001, 0x0002, 0x0003, 0x0004 -> param.current.toDouble()
-        else -> return null
-    }
-    if (!degrees.isFinite()) return null
-    var roll = degrees % 360.0
-    if (roll > 180.0) roll -= 360.0
-    if (roll <= -180.0) roll += 360.0
-    return roll.toFloat()
+    return if (decoded.isScalar) param.copy(current = decoded.value) else null
 }
 
 /**
@@ -784,46 +210,22 @@ suspend fun NikonCamera.rcGetAngleLevel(): RcParam? =
     rcGetParam(Lab.PROP_NK_ANGLE_LEVEL)?.takeIf { rcAngleLevelRoll(it) != null }
 
 suspend fun NikonCamera.rcGetFocusMode(): RcFocusMode? {
-    val candidates = intArrayOf(Lab.PROP_FOCUS_MODE, Lab.PROP_NK_AF_MODE)
-    for (prop in candidates) {
+    for (prop in rcFocusModeCandidateProps()) {
         // 对焦模式标签宁缺毋滥：只接受 GetDevicePropValue 成功直读到的当前值。
         // PropDesc 兼容回退在部分机型的失败响应里会带无效默认值 1，曾被误显示成 MF。
         val (valueRc, valueData) = labCommand(Lab.GET_DEVICE_PROP_VALUE, prop)
-        val raw = if (valueRc == Lab.OK && valueData != null &&
-            (valueData.size == 1 || valueData.size == 2 ||
-                valueData.size == 4 || valueData.size == 8)
-        ) {
-            valueData.indices.fold(0L) { acc, i ->
-                acc or ((valueData[i].toLong() and 0xFF) shl (8 * i))
-            }
-        } else continue
-        val label = fmtVal(prop, raw)
-        // 未确认的厂商枚举不把十六进制原值当成面向用户的模式标签。
-        if (label.startsWith("0x")) continue
-        val result = RcFocusMode(
-            label = label,
-            manual = when (prop) {
-                Lab.PROP_FOCUS_MODE -> raw == 1L
-                Lab.PROP_NK_AF_MODE -> false
-                else -> false
-            },
-            prop = prop,
-            raw = raw
-        )
-        return result
+        val raw = if (valueRc == Lab.OK && valueData != null) {
+            rcDecodeFocusModeRaw(valueData)
+        } else {
+            null
+        } ?: continue
+        rcFocusModeFromRaw(prop, raw)?.let { return it }
     }
     return null
 }
 
 suspend fun NikonCamera.rcSetValue(param: RcParam, value: Long): Int =
-    labSetProp(param.prop, encodeScalar(param.dataType, value))
-
-/** 写入后由机身回读得到的结果，避免把 0x2001 误当成“参数已经采用”。 */
-data class RcSetResult(
-    val responseCode: Int,
-    val actual: RcParam?,
-    val confirmed: Boolean
-)
+    labSetProp(param.prop, encodePtpScalar(param.dataType, value))
 
 /**
  * Nikon 某些机型会在当前曝光模式或 Live View 状态下接受 SetDevicePropValue，
@@ -866,49 +268,6 @@ suspend fun NikonCamera.rcSetValueVerified(param: RcParam, value: Long): RcSetRe
     }
     return RcSetResult(rc, actual, false)
 }
-
-/** AF 驱动后的最终结果，[polls] 是 DeviceReady 查询次数。 */
-data class RcAfResult(
-    val responseCode: Int,
-    val polls: Int,
-    val elapsedMs: Long,
-    val timedOut: Boolean
-)
-
-data class RcTapFocusResult(
-    val endTrackingResponseCode: Int?,
-    /** null 表示直接由 StartTracking(x,y) 接受坐标，或旧追踪未能结束。 */
-    val moveResponseCode: Int?,
-    val trackingResponseCode: Int?,
-    val trackingStarted: Boolean,
-    val afResult: RcAfResult?
-)
-
-/**
- * 相机上报的标准 PTP BatteryLevel(0x5001)。该属性规定为 UINT8 0..100；
- * 值域外的数字（部分机身可能用 0xFF 表示未知）不猜测、不折算。
- */
-fun rcBatteryPercentage(param: RcParam?): Int? = param
-    ?.takeIf {
-        it.prop == Lab.PROP_BATTERY_LEVEL &&
-            it.dataType == 0x0002 &&
-            it.current in 0L..100L
-    }
-    ?.current
-    ?.toInt()
-
-internal data class RcTapFocusStartResult(
-    val moveResponseCode: Int?,
-    val trackingResponseCode: Int?,
-    val afStartResponseCode: Int?
-)
-
-private fun timedOutAfResult(startedAt: Long, now: Long, polls: Int = 0) = RcAfResult(
-    responseCode = Lab.DEVICE_BUSY,
-    polls = polls,
-    elapsedMs = now - startedAt,
-    timedOut = true
-)
 
 private fun NikonCamera.recvFocusResponse(deadlineMs: Long): Pair<Int, ByteArray?> {
     val remaining = deadlineMs - SystemClock.elapsedRealtime()
@@ -960,132 +319,15 @@ private fun NikonCamera.focusCommandLocked(
     return recvFocusResponse(deadlineMs)
 }
 
-/**
- * 移动 AF 点并启动主体追踪。明确不支持 StartTracking 的机身才回退一次普通 AF。
- * 调用方在整个函数外持有 I/O 锁，确保 80ms 应用窗口内不会被连续的 Live View
- * 取帧插入；普通 AF 回退启动后的就绪轮询仍可释放锁。
- */
-internal suspend fun runTapFocusStart(
-    trackingX: Int,
-    trackingY: Int,
-    focusX: Int,
-    focusY: Int,
-    tryTracking: Boolean,
-    command: suspend (code: Int, params: IntArray) -> Int?,
-    pause: suspend (Long) -> Unit
-): RcTapFocusStartResult {
-    if (tryTracking) {
-        // Z 30 实机探测确认坐标属于 StartTracking 本身：无参调用返回 0x2006，
-        // StartTracking(x,y) 返回 OK，并使增强帧开始携带选中 AF 框。
-        val trackingRc = command(Lab.NK_START_TRACKING, intArrayOf(trackingX, trackingY))
-            ?: return RcTapFocusStartResult(null, Lab.DEVICE_BUSY, null)
-        if (trackingRc == Lab.OK) {
-            // StartTracking 只选中主体并显示追踪框，不会驱动镜头。让机身先采用目标，
-            // 再像普通点按 AF 一样只发送一次 AfDrive；最终状态仍由 DeviceReady 判定。
-            pause(80)
-            return RcTapFocusStartResult(
-                moveResponseCode = null,
-                trackingResponseCode = trackingRc,
-                afStartResponseCode = command(Lab.NK_AF_DRIVE, intArrayOf())
-            )
-        }
-        if (trackingRc != PtpConstants.OPERATION_NOT_SUPPORTED) {
-            return RcTapFocusStartResult(null, trackingRc, null)
-        }
-        // 只有机身明确不支持追踪操作码时才继续走普通点按 AF。InvalidStatus/Busy 等
-        // 状态错误直接上报，避免擅自改变用户预期。
-    }
-
-    val trackingUnsupported = if (tryTracking) {
-        PtpConstants.OPERATION_NOT_SUPPORTED
-    } else {
-        null
-    }
-    val moveRc = command(Lab.NK_CHANGE_AF_AREA, intArrayOf(focusX, focusY))
-        ?: return RcTapFocusStartResult(Lab.DEVICE_BUSY, trackingUnsupported, null)
-    if (moveRc != Lab.OK) {
-        return RcTapFocusStartResult(moveRc, trackingUnsupported, null)
-    }
-
-    // Z 30 / SnapBridge 实抓表明 ChangeAfArea 的新坐标需要约 80ms 才被机身采用。
-    pause(80)
-    return RcTapFocusStartResult(
-        moveResponseCode = moveRc,
-        trackingResponseCode = trackingUnsupported,
-        afStartResponseCode = command(Lab.NK_AF_DRIVE, intArrayOf())
-    )
-}
-
 /** 调用方必须持有 focusMutex -> ioMutex；没有活动追踪时不发送冗余命令。 */
 private fun NikonCamera.endSubjectTrackingLocked(deadlineMs: Long): Int? {
     if (!subjectTrackingActive) return null
     sendCmd(Lab.NK_END_TRACKING)
     val response = recvFocusResponse(deadlineMs).first
-    if (
-        response == Lab.OK ||
-        response == PtpConstants.OPERATION_NOT_SUPPORTED ||
-        response == Lab.NK_INVALID_STATUS // 机身侧已经不处于可结束的追踪状态
-    ) {
+    if (rcEndTrackingClearsActive(response)) {
         subjectTrackingActive = false
     }
     return response
-}
-
-private suspend fun runAfReadyWait(
-    startedAt: Long,
-    deadlineMs: Long,
-    startResponseCode: Int,
-    elapsedRealtime: () -> Long,
-    command: suspend (Int) -> Int?,
-    pause: suspend (Long) -> Unit
-): RcAfResult {
-    if (startResponseCode != Lab.OK) {
-        return RcAfResult(startResponseCode, 0, elapsedRealtime() - startedAt, false)
-    }
-
-    var polls = 0
-    while (true) {
-        if (elapsedRealtime() >= deadlineMs) {
-            return timedOutAfResult(startedAt, elapsedRealtime(), polls)
-        }
-        val readyRc = command(Lab.NK_DEVICE_READY)
-            ?: return timedOutAfResult(startedAt, elapsedRealtime(), polls)
-        polls++
-        if (readyRc != Lab.DEVICE_BUSY) {
-            return RcAfResult(
-                responseCode = readyRc,
-                polls = polls,
-                elapsedMs = elapsedRealtime() - startedAt,
-                timedOut = false
-            )
-        }
-        if (elapsedRealtime() >= deadlineMs) {
-            return timedOutAfResult(startedAt, elapsedRealtime(), polls)
-        }
-        pause(150)
-    }
-}
-
-internal suspend fun runAfDriveAndWait(
-    startedAt: Long,
-    deadlineMs: Long,
-    elapsedRealtime: () -> Long,
-    command: suspend (Int) -> Int?,
-    pause: suspend (Long) -> Unit
-): RcAfResult {
-    if (elapsedRealtime() >= deadlineMs) {
-        return timedOutAfResult(startedAt, elapsedRealtime())
-    }
-    val startRc = command(Lab.NK_AF_DRIVE)
-        ?: return timedOutAfResult(startedAt, elapsedRealtime())
-    return runAfReadyWait(
-        startedAt = startedAt,
-        deadlineMs = deadlineMs,
-        startResponseCode = startRc,
-        elapsedRealtime = elapsedRealtime,
-        command = command,
-        pause = pause
-    )
 }
 
 private suspend fun NikonCamera.afDriveAndWait(
@@ -1166,75 +408,29 @@ suspend fun NikonCamera.rcFocusAt(
             endRc to startResult
         }
     }
-    if (start == null) {
-        return@withLock RcTapFocusResult(
-            endTrackingResponseCode = endTrackingRc,
-            moveResponseCode = null,
-            trackingResponseCode = null,
-            trackingStarted = false,
-            afResult = null
-        )
-    }
-    when (start.trackingResponseCode) {
-        Lab.OK -> {
-            subjectTrackingSupported = true
-            subjectTrackingActive = true
-        }
-        PtpConstants.OPERATION_NOT_SUPPORTED -> subjectTrackingSupported = false
-    }
-    val startRc = start.afStartResponseCode
-    suspend fun waitForStartedAf(): RcAfResult = if (startRc == null) {
-        timedOutAfResult(startedAt, SystemClock.elapsedRealtime())
-    } else {
-        runAfReadyWait(
-            startedAt = startedAt,
-            deadlineMs = deadlineMs,
-            startResponseCode = startRc,
-            elapsedRealtime = SystemClock::elapsedRealtime,
-            command = { code -> focusCommand(code, deadlineMs)?.first },
-            pause = { durationMs -> delay(durationMs) }
-        )
-    }
-    if (start.trackingResponseCode == Lab.OK) {
-        RcTapFocusResult(
-            endTrackingResponseCode = endTrackingRc,
-            moveResponseCode = start.moveResponseCode,
+    if (start != null) {
+        subjectTrackingSupported = rcTrackingSupportAfterStart(
+            currentSupport = subjectTrackingSupported,
             trackingResponseCode = start.trackingResponseCode,
-            trackingStarted = true,
-            afResult = waitForStartedAf()
         )
-    } else if (start.moveResponseCode != null && start.moveResponseCode != Lab.OK) {
-        RcTapFocusResult(
-            endTrackingResponseCode = endTrackingRc,
-            moveResponseCode = start.moveResponseCode,
-            trackingResponseCode = start.trackingResponseCode,
-            trackingStarted = false,
-            afResult = null
-        )
-    } else if (startRc == null) {
-        RcTapFocusResult(
-            endTrackingResponseCode = endTrackingRc,
-            moveResponseCode = start.moveResponseCode,
-            trackingResponseCode = start.trackingResponseCode,
-            trackingStarted = false,
-            afResult = if (
-                start.trackingResponseCode == null ||
-                start.trackingResponseCode == PtpConstants.OPERATION_NOT_SUPPORTED
-            ) {
-                timedOutAfResult(startedAt, SystemClock.elapsedRealtime())
-            } else {
-                null
-            }
-        )
-    } else {
-        RcTapFocusResult(
-            endTrackingResponseCode = endTrackingRc,
-            moveResponseCode = start.moveResponseCode,
-            trackingResponseCode = start.trackingResponseCode,
-            trackingStarted = false,
-            afResult = waitForStartedAf()
-        )
+        if (start.trackingResponseCode == Lab.OK) subjectTrackingActive = true
     }
+    completeTapFocus(
+        endTrackingResponseCode = endTrackingRc,
+        start = start,
+        startedAt = startedAt,
+        elapsedRealtime = SystemClock::elapsedRealtime,
+        waitForStartedAf = { startResponseCode ->
+            runAfReadyWait(
+                startedAt = startedAt,
+                deadlineMs = deadlineMs,
+                startResponseCode = startResponseCode,
+                elapsedRealtime = SystemClock::elapsedRealtime,
+                command = { code -> focusCommand(code, deadlineMs)?.first },
+                pause = { durationMs -> delay(durationMs) },
+            )
+        },
+    )
 }
 
 suspend fun NikonCamera.rcPollEvents(): List<Pair<Int, Long>> {
@@ -1257,14 +453,10 @@ suspend fun NikonCamera.rcPollEvents(): List<Pair<Int, Long>> {
 
 /** 发单条命令，DEVICE_BUSY 时退避重试（200ms × 5）。拍摄/录像触发类命令共用。 */
 private suspend fun NikonCamera.cmdBusyRetry(code: Int, vararg params: Int): Int {
-    var rc = labCommand(code, *params).first
-    var tries = 0
-    while (rc == Lab.DEVICE_BUSY && tries < 5) {
-        delay(200)
-        rc = labCommand(code, *params).first
-        tries++
-    }
-    return rc
+    return runRemoteBusyCommand(
+        command = { labCommand(code, *params).first },
+        pause = { delay(it) },
+    ).responseCode
 }
 
 /** 触发拍摄（无 AF、存卡）。只负责发命令；完成与新照片经事件（ObjectAdded）通知。 */
@@ -1283,77 +475,6 @@ suspend fun NikonCamera.rcGetMovieMode(): Boolean? {
     return d[0].toInt() != 0
 }
 
-internal data class RcMovieStartResult(
-    val responseCode: Int,
-    val prohibitCondition: Long?,
-    val prohibitExtendedResponse: Int? = null,
-    val applicationModeResponse: Int? = null,
-    val applicationModePropertyResponse: Int? = null,
-    val startCommandResponse: Int? = responseCode,
-)
-
-internal fun RcMovieStartResult.diagnosticSummary(): String = buildString {
-    append("result=").append(hex4(responseCode))
-    append(" startOp=")
-    append(startCommandResponse?.let(::hex4) ?: "not-sent")
-    prohibitCondition?.let { append(" prohibit=").append(hex8(it)) }
-    prohibitExtendedResponse?.let { append(" preEx=").append(hex4(it)) }
-    applicationModeResponse?.let { append(" appOp=").append(hex4(it)) }
-    applicationModePropertyResponse?.let { append(" appProp=").append(hex4(it)) }
-}
-
-private const val MOVIE_PROHIBIT_NO_CARD = 1L shl 0
-private const val MOVIE_PROHIBIT_CARD_ERROR = 1L shl 1
-private const val MOVIE_PROHIBIT_CARD_UNFORMATTED = 1L shl 2
-private const val MOVIE_PROHIBIT_CARD_FULL = 1L shl 3
-private const val MOVIE_PROHIBIT_BUFFER_PENDING = 1L shl 9
-private const val MOVIE_PROHIBIT_ALREADY_RECORDING = 1L shl 10
-private const val MOVIE_PROHIBIT_CARD_PROTECTED = 1L shl 11
-private const val MOVIE_PROHIBIT_ENLARGED_LIVE_VIEW = 1L shl 12
-private const val MOVIE_PROHIBIT_NOT_APPLICATION_MODE = 1L shl 14
-private const val MOVIE_PROHIBIT_STORAGE_MASK =
-    MOVIE_PROHIBIT_NO_CARD or
-        MOVIE_PROHIBIT_CARD_ERROR or
-        MOVIE_PROHIBIT_CARD_UNFORMATTED or
-        MOVIE_PROHIBIT_CARD_FULL or
-        MOVIE_PROHIBIT_CARD_PROTECTED
-private const val MOVIE_PROHIBIT_RESTARTABLE_MASK =
-    MOVIE_PROHIBIT_ENLARGED_LIVE_VIEW or MOVIE_PROHIBIT_NOT_APPLICATION_MODE
-
-internal fun movieProhibitIndicatesRecording(prohibitCondition: Long?): Boolean =
-    prohibitCondition?.let { it and MOVIE_PROHIBIT_ALREADY_RECORDING != 0L } == true
-
-internal fun movieProhibitRequiresApplicationMode(prohibitCondition: Long?): Boolean =
-    prohibitCondition?.let { it and MOVIE_PROHIBIT_NOT_APPLICATION_MODE != 0L } == true
-
-internal fun shouldFallbackToApplicationModeProperty(applicationModeResponse: Int): Boolean =
-    applicationModeResponse == PtpConstants.OPERATION_NOT_SUPPORTED
-
-/**
- * 开录失败后是否值得在已进入应用模式的前提下重建一次 Live View 再试。
- * 存储卡、写缓冲和已在录像不会被重启掩盖；有明确禁止位时只接受 LV/应用模式
- * 两类可恢复状态。无禁止信息时，仅 InvalidStatus/持续 Busy 允许一次恢复。
- */
-internal fun movieStartNeedsLiveViewRestart(
-    responseCode: Int,
-    prohibitCondition: Long?
-): Boolean {
-    if (responseCode == Lab.OK) return false
-    if (prohibitCondition != null && prohibitCondition and MOVIE_PROHIBIT_STORAGE_MASK != 0L) {
-        return false
-    }
-    if (prohibitCondition != null &&
-        prohibitCondition and
-        (MOVIE_PROHIBIT_BUFFER_PENDING or MOVIE_PROHIBIT_ALREADY_RECORDING) != 0L
-    ) {
-        return false
-    }
-    if (prohibitCondition != null && prohibitCondition != 0L) {
-        return prohibitCondition and MOVIE_PROHIBIT_RESTARTABLE_MASK != 0L
-    }
-    return responseCode == 0xA004 || responseCode == Lab.DEVICE_BUSY
-}
-
 /** 开始录像（存卡）。忙则重试；失败时一并返回录像禁止条件供上层决定是否重建 LV。 */
 internal suspend fun NikonCamera.rcStartMovieDetailed(
     log: (String) -> Unit = {}
@@ -1364,7 +485,7 @@ internal suspend fun NikonCamera.rcStartMovieDetailed(
         log("!! StartMovieRec resp=${hex4(rc)}")
         val (prc, pd) = labCommand(Lab.GET_DEVICE_PROP_VALUE, Lab.PROP_NK_MOV_PROHIBIT)
         if (prc == Lab.OK && pd != null && pd.size >= 4) {
-            val cond = Cur(pd).u32()
+            val cond = decodePtpUInt32(pd)
             prohibitCondition = cond
             if (cond != 0L) log("!! MovRecProhibit=${hex8(cond)}")
         }
@@ -1389,7 +510,7 @@ private fun NikonCamera.prepareAndStartMovieLocked(): RcMovieStartResult {
             Lab.GET_DEVICE_PROP_VALUE,
             Lab.PROP_NK_MOV_PROHIBIT
         ).let { (rc, data) ->
-            if (rc == Lab.OK && data != null && data.size >= 4) Cur(data).u32() else null
+            if (rc == Lab.OK && data != null && data.size >= 4) decodePtpUInt32(data) else null
         }
 
     val prohibitExtendedRc = command(
@@ -1497,28 +618,10 @@ suspend fun NikonCamera.rcModelName(): String? = deviceModel
 
 // ============================ Live View ============================
 
-/** 竞品 Z30 USB 实抓：DeviceReady 后约 733ms 才开始第一笔取帧。 */
-internal const val USB_LIVE_VIEW_WARMUP_MS = 750L
-
-internal fun liveViewWarmupRemainingMs(
-    connectionType: CameraConnectionType,
-    readyAtElapsedMs: Long,
-    nowElapsedMs: Long
-): Long {
-    if (connectionType != CameraConnectionType.USB || readyAtElapsedMs <= 0L) return 0L
-    return (readyAtElapsedMs + USB_LIVE_VIEW_WARMUP_MS - nowElapsedMs).coerceAtLeast(0L)
-}
-
 /** 复用连接阶段缓存的 DeviceInfo 取帧能力，监看启动时不再重复查询。 */
 private suspend fun NikonCamera.resolveLiveViewImageOperation() {
     if (liveViewImageOperation != null) return
-    val supportsEnhanced = cachedDeviceInfo?.operations
-        ?.contains(Lab.NK_GET_LIVE_VIEW_IMG_EX) == true
-    liveViewImageOperation = if (supportsEnhanced) {
-        Lab.NK_GET_LIVE_VIEW_IMG_EX
-    } else {
-        Lab.NK_GET_LIVE_VIEW_IMG
-    }
+    liveViewImageOperation = preferredLiveViewImageOperation(cachedDeviceInfo?.operations)
 }
 
 /**
@@ -1532,37 +635,39 @@ suspend fun NikonCamera.labStartLiveView(log: suspend (String) -> Unit): Boolean
     log("LiveView frames: ${Lab.INTEREST_OPS[frameOperation] ?: hex4(frameOperation)}")
     // 0x2019 忙 / 0xA004 InvalidStatus（上一次 EndLiveView 后相机内部状态未落定时常见）
     // 都值得短暂重试。
-    var rc = labCommand(Lab.NK_START_LIVE_VIEW).first
-    var tries = 0
-    while ((rc == Lab.DEVICE_BUSY || rc == 0xA004) && tries < 5) {
-        delay(300)
-        rc = labCommand(Lab.NK_START_LIVE_VIEW).first
-        tries++
-    }
+    val startResult = runLiveViewStartCommand(
+        command = { labCommand(Lab.NK_START_LIVE_VIEW).first },
+        pause = { delay(it) },
+    )
+    val rc = startResult.responseCode
+    val tries = startResult.completedRetries
     log((if (rc == Lab.OK) "" else "!! ") +
         "StartLiveView(0x9201) resp=${hex4(rc)}${if (tries > 0) " after $tries busy-retries" else ""}")
-    if (rc != Lab.OK) {
+    if (!liveViewSessionAccepted(startResult, readyResult = null)) {
         // 失败才读禁止条件用于诊断——成功路径省掉这条往返，进页更快。
         val (prc, pd) = labCommand(Lab.GET_DEVICE_PROP_VALUE, Lab.PROP_NK_LV_PROHIBIT)
         if (prc == Lab.OK && pd != null && pd.size >= 4) {
-            log("!! LV prohibit condition = ${hex8(Cur(pd).u32())}")
+            log("!! LV prohibit condition = ${hex8(decodePtpUInt32(pd))}")
         }
         return false
     }
 
     val t0 = System.currentTimeMillis()
-    var ready = rc
-    while (System.currentTimeMillis() - t0 < 4000) {
-        ready = labCommand(Lab.NK_DEVICE_READY).first
-        if (ready != Lab.DEVICE_BUSY) break
-        delay(20)   // 相机通常 20-80ms 就绪，20ms 步进能少等半拍
-    }
+    val readyResult = runLiveViewReadyWait(
+        startedAtMs = t0,
+        currentTimeMs = System::currentTimeMillis,
+        command = { labCommand(Lab.NK_DEVICE_READY).first },
+        pause = { delay(it) },
+    )
     // 就绪属正常路径不记日志（StartLiveView 那条已标记会话启动）；没等到才值得留痕。
-    if (ready != Lab.OK) {
-        log("!! DeviceReady(0x90C8) resp=${hex4(ready)} after ${System.currentTimeMillis() - t0}ms")
+    if (readyResult.responseCode != Lab.OK) {
+        log(
+            "!! DeviceReady(0x90C8) resp=${hex4(readyResult.responseCode)} " +
+                "after ${readyResult.elapsedMs}ms"
+        )
     }
     liveViewReadyAtElapsedMs = SystemClock.elapsedRealtime()
-    return true
+    return liveViewSessionAccepted(startResult, readyResult)
 }
 
 suspend fun NikonCamera.labEndLiveView(): Int {
@@ -1613,23 +718,15 @@ suspend fun NikonCamera.labGrabFrame(): LiveViewPacket? =
 
             var operation = liveViewImageOperation ?: Lab.NK_GET_LIVE_VIEW_IMG
             var (rc, data) = receive(operation)
-            var soi = data?.let(::findJpegStart) ?: -1
-            val enhancedFailure =
-                operation == Lab.NK_GET_LIVE_VIEW_IMG_EX &&
-                (
-                    (rc != Lab.OK && rc != Lab.DEVICE_BUSY && rc != Lab.NK_NOT_LIVE_VIEW) ||
-                        (rc == Lab.OK && soi < 0)
-                    )
-            if (operation == Lab.NK_GET_LIVE_VIEW_IMG_EX && rc == Lab.OK && soi >= 0) {
-                liveViewEnhancedFailureCount = 0
-            } else if (enhancedFailure) {
-                liveViewEnhancedFailureCount = if (rc == PtpConstants.OPERATION_NOT_SUPPORTED) {
-                    2
-                } else {
-                    liveViewEnhancedFailureCount + 1
-                }
-            }
-            if (enhancedFailure && liveViewEnhancedFailureCount >= 2) {
+            var soi = data?.let(::findLiveViewJpegStart) ?: -1
+            val enhancedDecision = liveViewEnhancedFrameDecision(
+                operation = operation,
+                responseCode = rc,
+                jpegFound = soi >= 0,
+                previousFailureCount = liveViewEnhancedFailureCount,
+            )
+            liveViewEnhancedFailureCount = enhancedDecision.failureCount
+            if (enhancedDecision.fallbackToBasic) {
                 // 明确不支持立即降级；其它错误（包括偶发空/坏首帧）连续两次才降级，
                 // 避免支持增强帧的机型因一次传输抖动永久丢失 AF 元数据。
                 operation = Lab.NK_GET_LIVE_VIEW_IMG
@@ -1638,7 +735,7 @@ suspend fun NikonCamera.labGrabFrame(): LiveViewPacket? =
                 val fallback = receive(operation)
                 rc = fallback.first
                 data = fallback.second
-                soi = data?.let(::findJpegStart) ?: -1
+                soi = data?.let(::findLiveViewJpegStart) ?: -1
             }
 
             if (rc == Lab.DEVICE_BUSY) return@withContext null
@@ -1654,14 +751,6 @@ suspend fun NikonCamera.labGrabFrame(): LiveViewPacket? =
             )
         }
     }
-
-internal fun trackingMotionDetected(frames: List<LiveViewFocusFrame>): Boolean {
-    if (frames.size < 3) return false
-    val xRange = frames.maxOf { it.centerX } - frames.minOf { it.centerX }
-    val yRange = frames.maxOf { it.centerY } - frames.minOf { it.centerY }
-    // 小于约 1.5% 画幅的变化可能只是机身框坐标取整/轻微抖动，不能作为追踪成立证据。
-    return xRange >= 0.015f || yRange >= 0.015f
-}
 
 private data class TrackingProbeCapture(
     val packets: List<LiveViewPacket>,
@@ -2012,7 +1101,7 @@ suspend fun NikonCamera.runLabProbe(
     if (Lab.NK_GET_VENDOR_PROP_CODES in ops) {
         val (rc, d) = labCommand(Lab.NK_GET_VENDOR_PROP_CODES)
         if (rc == Lab.OK && d != null) {
-            val parsed = runCatching { Cur(d).u16Array().toSet() }
+            val parsed = runCatching { parseVendorCodes16(d) }
             parsed.onSuccess {
                 vendorProps90ca = it
                 logProbeCodes(log, "GetVendorPropCodes(0x90CA).properties", it, Lab.INTEREST_PROPS)
@@ -2114,7 +1203,7 @@ suspend fun NikonCamera.runLabProbe(
     var valueOkCount = 0
     val digitalZoomDesc = mutableMapOf<Int, String>()
     val digitalZoomValue = mutableMapOf<Int, String>()
-    val digitalZoomParsedDesc = mutableMapOf<Int, ProbePropDescData>()
+    val digitalZoomParsedDesc = mutableMapOf<Int, PtpDevicePropDescriptor>()
     val digitalZoomDescRoute = mutableMapOf<Int, Int>()
     val digitalZoomValueRoute = mutableMapOf<Int, Int>()
     val digitalZoomValueRaw = mutableMapOf<Int, ByteArray>()
@@ -2314,7 +1403,7 @@ suspend fun NikonCamera.runLabProbe(
             val original = digitalZoomValueRaw[prop]
             val valueRoute = digitalZoomValueRoute[prop]
             val descRoute = digitalZoomDescRoute[prop]
-            val scalarBytes = desc?.let { scalarSize(it.dataType) }
+            val scalarBytes = desc?.let { ptpScalarSize(it.dataType) }
             val writeRoute =
                 if (
                     descRoute == Lab.GET_DEVICE_PROP_DESC &&
@@ -2348,7 +1437,7 @@ suspend fun NikonCamera.runLabProbe(
             val activeValueRoute = checkNotNull(valueRoute)
             val activeWriteRoute = checkNotNull(writeRoute)
             val candidates = digitalZoomProbeValues(activeDesc).map {
-                it to encodeScalar(activeDesc.dataType, it)
+                it to encodePtpScalar(activeDesc.dataType, it)
             }.filter { (_, raw) -> !raw.contentEquals(originalRaw) }
             if (candidates.isEmpty()) {
                 digitalZoomSweepResult[prop] = "SKIP(no-alternate-enum-or-range-value)"

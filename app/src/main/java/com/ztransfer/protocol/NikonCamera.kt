@@ -11,6 +11,13 @@ import android.os.SystemClock
 import androidx.exifinterface.media.ExifInterface
 import com.ztransfer.BuildConfig
 import com.ztransfer.R
+import com.ztransfer.catalog.cameraThumbnailCacheIdentity
+import com.ztransfer.catalog.selectNewestCameraFileHeadIndex
+import com.ztransfer.connection.StaInitiatorIdentity
+import com.ztransfer.connection.hasUsableStaAlbumStorage
+import com.ztransfer.connection.isExpectedStaResponder
+import com.ztransfer.connection.isStaPairingOnlyOperationSet
+import com.ztransfer.connection.shouldForceStaProfilePairing
 import com.ztransfer.diagnostics.FileOrderProbe
 import com.ztransfer.diagnostics.PhotoGenerationProbe
 import kotlinx.coroutines.CancellationException
@@ -34,25 +41,27 @@ import java.io.OutputStream
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-
-private fun normalizedCameraIdentifier(value: String?): String? {
-    val normalized = value?.trim()?.takeIf(String::isNotEmpty) ?: return null
-    when (normalized.lowercase()) {
-        "unknown", "none", "null", "n/a" -> return null
-    }
-    // 全 0（可夹分隔符）是部分设备在没有真实序列号时使用的占位值。
-    return normalized.takeIf { text ->
-        text.any { character -> character.isLetter() || (character.isDigit() && character != '0') }
-    }
-}
+import java.util.Locale
 
 /** Maximum JPEG prefix retained while a fresh file is streamed to disk for EXIF parsing. */
 private const val EXIF_HEADER_CAPTURE_BYTES = 256 * 1024
+
+/** Keeps Android fallback names/dates identical to the pre-KMP default-format-locale behavior. */
+private fun formatCameraMetadataDecimalForAndroid(value: Int, width: Int): String =
+    formatAndroidCameraMetadataDecimal(
+        value = value,
+        width = width,
+        locale = Locale.getDefault(Locale.Category.FORMAT),
+    )
+
+internal fun formatAndroidCameraMetadataDecimal(
+    value: Int,
+    width: Int,
+    locale: Locale,
+): String = String.format(locale, "%0${width}d", value)
 
 /** 写入本地文件失败（非相机连接错误），用于区分"掉线"与"磁盘/存储"问题。 */
 class OutputWriteException(message: String, cause: Throwable) : Exception(message, cause)
@@ -66,78 +75,8 @@ class CameraRefusedException(message: String) : Exception(message)
  * 时间相同保持卡槽输入顺序稳定，不再拿不透明的 handle 数值打破平局。
  */
 internal fun selectNewestFileHeadIndex(
-    heads: List<NikonCamera.FileInfo?>,
-): Int? {
-    var selected = -1
-    heads.forEachIndexed { index, candidate ->
-        if (candidate == null) return@forEachIndexed
-        if (selected < 0) {
-            selected = index
-            return@forEachIndexed
-        }
-        val selectedFile = heads[selected] ?: return@forEachIndexed
-        val candidateDate = candidate.captureDate
-        val selectedDate = selectedFile.captureDate
-        val candidateIsNewer = when {
-            candidateDate == null && selectedDate != null -> true
-            candidateDate != null && selectedDate == null -> false
-            candidateDate == null -> false
-            else -> candidateDate > checkNotNull(selectedDate)
-        }
-        if (candidateIsNewer) selected = index
-    }
-    return selected.takeIf { it >= 0 }
-}
-
-internal data class ParsedObjectCacheIdentity(
-    val fileName: String,
-    val captureDate: String?,
-    val complete: Boolean,
-)
-
-private fun hasUtf16NullTerminator(data: ByteArray, offset: Int, codeUnits: Int): Boolean {
-    if (codeUnits <= 0 || codeUnits > (data.size - offset) / 2) return false
-    val terminatorOffset = offset + codeUnits * 2 - 2
-    return data[terminatorOffset] == 0.toByte() && data[terminatorOffset + 1] == 0.toByte()
-}
-
-/** 只解析参与磁盘缓存身份的 ObjectInfo 字段；载荷不完整时保留 UI 兜底值但禁止缓存清理。 */
-internal fun parseObjectCacheIdentity(
-    handle: Int,
-    extension: String,
-    data: ByteArray,
-): ParsedObjectCacheIdentity {
-    val fallbackName = "DSC_%04d%s".format(handle and 0xFFFF, extension)
-    if (data.size < 53) return ParsedObjectCacheIdentity(fallbackName, null, false)
-
-    val nameLen = data[52].toInt() and 0xFF
-    val nameFieldComplete = hasUtf16NullTerminator(data, 53, nameLen)
-    val decodedFileName = if (nameFieldComplete) {
-        String(data, 53, nameLen * 2, Charsets.UTF_16LE).trimEnd('\u0000')
-    } else null
-    val fileName = decodedFileName?.takeIf(String::isNotEmpty) ?: fallbackName
-    if (!nameFieldComplete || decodedFileName.isNullOrEmpty()) {
-        return ParsedObjectCacheIdentity(fileName, null, false)
-    }
-
-    val dateOffset = 53 + nameLen * 2
-    if (data.size <= dateOffset) return ParsedObjectCacheIdentity(fileName, null, false)
-    val dateLen = data[dateOffset].toInt() and 0xFF
-    if (dateLen == 0) return ParsedObjectCacheIdentity(fileName, null, true)
-    if (dateLen > (data.size - dateOffset - 1) / 2) {
-        return ParsedObjectCacheIdentity(fileName, null, false)
-    }
-    if (!hasUtf16NullTerminator(data, dateOffset + 1, dateLen)) {
-        return ParsedObjectCacheIdentity(fileName, null, false)
-    }
-    val date = String(
-        data,
-        dateOffset + 1,
-        dateLen * 2,
-        Charsets.UTF_16LE,
-    ).trimEnd('\u0000').takeIf { it.length >= 8 }
-    return ParsedObjectCacheIdentity(fileName, date, date != null)
-}
+    heads: List<CameraFileInfo?>,
+): Int? = selectNewestCameraFileHeadIndex(heads)
 
 /**
  * 续传无法进行：已有半成品，但本次下载走不了分块路径（相机不支持 GetPartialObjectEx，
@@ -145,34 +84,6 @@ internal fun parseObjectCacheIdentity(
  * 续传偏移的输出流，故绝不静默降级——抛此异常让调用方删掉半成品、从头重下。
  */
 class ResumeUnavailableException : Exception()
-
-/**
- * FHD 能力判断只区分协议明确不支持与可恢复失败。相机忙、handle 失效、空数据以及厂商
- * 临时错误都不能被升级成整场会话不支持，否则后台预取的一次失败会毒化后续大图预览。
- */
-internal enum class FhdResponseDisposition {
-    SUCCESS,
-    TRANSIENT_FAILURE,
-    UNSUPPORTED,
-}
-
-internal fun classifyFhdResponse(
-    responseCode: Int,
-    hasPayload: Boolean,
-): FhdResponseDisposition = when {
-    responseCode == PtpConstants.RESPONSE_OK && hasPayload -> FhdResponseDisposition.SUCCESS
-    responseCode == PtpConstants.OPERATION_NOT_SUPPORTED -> FhdResponseDisposition.UNSUPPORTED
-    else -> FhdResponseDisposition.TRANSIENT_FAILURE
-}
-
-internal fun updateFhdSupport(
-    current: Boolean?,
-    disposition: FhdResponseDisposition,
-): Boolean? = when (disposition) {
-    FhdResponseDisposition.SUCCESS -> true
-    FhdResponseDisposition.UNSUPPORTED -> if (current == true) true else false
-    FhdResponseDisposition.TRANSIENT_FAILURE -> current
-}
 
 /**
  * 单命令通道的轻量调度器。普通命令仍直接使用 [mutex]；交互式大图/EXIF 在排队前
@@ -236,48 +147,6 @@ internal class CameraIoGate(
     }
 }
 
-internal fun shouldUsePartialObjectDownload(
-    partialObjectSupported: Boolean?,
-    effectiveSize: Long,
-    resumeOffset: Long = 0L,
-    isUsbConnection: Boolean = false,
-    preferHighThroughput: Boolean = false,
-    forcePartial: Boolean = false,
-): Boolean = partialObjectSupported != false &&
-    effectiveSize > 0L && effectiveSize != PtpConstants.SIZE_UNKNOWN &&
-    (
-        forcePartial ||
-            !(isUsbConnection || preferHighThroughput) ||
-            resumeOffset > 0L ||
-            effectiveSize > NikonCamera.HIGH_THROUGHPUT_FULL_OBJECT_THRESHOLD
-        )
-
-internal fun downloadChunkSize(
-    effectiveSize: Long,
-    isUsbConnection: Boolean = false,
-    preferHighThroughput: Boolean = false,
-): Long =
-    if (isUsbConnection || preferHighThroughput) {
-        NikonCamera.HIGH_THROUGHPUT_CHUNK_SIZE
-    } else if (effectiveSize > NikonCamera.LARGE_FILE_THRESHOLD) {
-        NikonCamera.LARGE_FILE_CHUNK_SIZE
-    } else {
-        NikonCamera.CHUNK_SIZE
-    }
-
-internal fun endToEndBytesPerSecond(
-    transferredBytes: Long,
-    elapsedMs: Long,
-): Long {
-    if (transferredBytes <= 0L || elapsedMs <= 0L) return 0L
-    return (transferredBytes.toDouble() * 1_000.0 / elapsedMs.toDouble())
-        .toLong()
-        .coerceAtLeast(0L)
-}
-
-internal fun transferredBytesThisAttempt(downloaded: Long, resumeOffset: Long): Long =
-    (downloaded - resumeOffset).coerceAtLeast(0L)
-
 internal class PairingCompletedException : Exception("Nikon pairing completed; reconnect required")
 
 internal class UnexpectedStaResponderException(actualResponderGuid: String?) :
@@ -286,202 +155,16 @@ internal class UnexpectedStaResponderException(actualResponderGuid: String?) :
 internal const val PTPIP_IDENTITY_PREFERENCES = "ptpip_identity"
 internal const val STA_PAIRING_MARKER_PREFIX = "sta_paired_"
 
-internal fun isStaPairingOnlyOperationSet(operations: Set<Int>): Boolean = operations == setOf(
-    PtpConstants.GET_DEVICE_INFO,
-    PtpConstants.OPEN_SESSION,
-    PtpConstants.CLOSE_SESSION,
-    PtpConstants.NK_PAIRING_QUERY,
-    PtpConstants.NK_PAIRING_RESULT,
-)
-
-internal fun shouldForceStaProfilePairing(
-    storageResponse: Int,
-    forceProfilePairing: Boolean,
-    allowPairing: Boolean,
-    protocolPairingMarkerExists: Boolean,
-): Boolean = storageResponse == PtpConstants.RESPONSE_OK &&
-    forceProfilePairing && allowPairing &&
-    !protocolPairingMarkerExists
-
-internal fun isExpectedStaResponder(
-    expectedResponderGuid: String?,
-    actualResponderGuid: String?,
-): Boolean = expectedResponderGuid == null || expectedResponderGuid == actualResponderGuid
-
-private fun cameraBaseFileName(value: String): String? {
-    val baseName = value.substringAfterLast('/').substringAfterLast('\\').trim()
-    return baseName.takeIf { name ->
-        name.isNotEmpty() &&
-            name.length <= 255 &&
-            name.none { it.code < 0x20 || it == ':' }
-    }
-}
-
 /** PTP/IP Event payload: u16 code + u32 transactionId + optional u32 parameters. */
 internal fun parsePtpIpEvent(payload: ByteArray?): Pair<Int, Long>? {
-    if (payload == null || payload.size < 6) return null
-    val code = (payload[0].toInt() and 0xFF) or
-        ((payload[1].toInt() and 0xFF) shl 8)
-    val firstParameter = if (payload.size >= 10) {
-        var value = 0L
-        repeat(4) { index ->
-            value = value or ((payload[6 + index].toLong() and 0xFF) shl (index * 8))
-        }
-        value
-    } else {
-        0L
-    }
-    return code to firstParameter
-}
-
-/** Decodes a standalone PTP string and rejects truncated or unsafe filename values. */
-internal fun parsePtpObjectFileName(data: ByteArray, offset: Int = 0): Pair<String, Int>? {
-    if (offset !in data.indices) return null
-    val codeUnits = data[offset].toInt() and 0xFF
-    if (codeUnits <= 1) return null
-    val byteCount = codeUnits * 2
-    val valueOffset = offset + 1
-    if (valueOffset + byteCount > data.size) return null
-    if (!hasUtf16NullTerminator(data, valueOffset, codeUnits)) return null
-    val decoded = String(data, valueOffset, byteCount, Charsets.UTF_16LE).trimEnd('\u0000')
-    val fileName = cameraBaseFileName(decoded) ?: return null
-    return fileName to (valueOffset + byteCount)
-}
-
-internal data class EmbeddedCameraFileName(
-    val offset: Int,
-    val value: String,
-    val encoding: String,
-)
-
-private val CAMERA_MEDIA_EXTENSIONS = setOf("jpg", "jpeg", "nef", "mov", "mp4")
-
-private fun isPlausibleCameraFileName(value: String): Boolean {
-    val dot = value.lastIndexOf('.')
-    if (dot !in 1 until value.lastIndex) return false
-    val stem = value.substring(0, dot)
-    val extension = value.substring(dot + 1).lowercase()
-    return extension in CAMERA_MEDIA_EXTENSIONS &&
-        stem.length in 2..32 &&
-        stem.any(Char::isDigit) &&
-        stem.all { it.isLetterOrDigit() || it == '_' || it == '-' }
-}
-
-/** Finds filename-shaped PTP strings or plain ASCII fields in Nikon metadata/file headers. */
-internal fun findEmbeddedCameraFileNames(
-    data: ByteArray,
-    includePtpStrings: Boolean = true,
-): List<EmbeddedCameraFileName> {
-    val results = LinkedHashMap<String, EmbeddedCameraFileName>()
-    if (includePtpStrings) {
-        data.indices.forEach { offset ->
-            val declaredLength = data[offset].toInt() and 0xFF
-            if (declaredLength !in 6..40) return@forEach
-            parsePtpObjectFileName(data, offset)?.first
-                ?.takeIf(::isPlausibleCameraFileName)
-                ?.let { name ->
-                    results.putIfAbsent(
-                        "$offset:$name",
-                        EmbeddedCameraFileName(offset, name, "ptp-string"),
-                    )
-                }
-        }
-    }
-
-    fun isStemByte(value: Int): Boolean =
-        value in 'A'.code..'Z'.code ||
-            value in 'a'.code..'z'.code ||
-            value in '0'.code..'9'.code ||
-            value == '_'.code || value == '-'.code
-
-    var dot = 2
-    while (dot + 4 <= data.size) {
-        if (data[dot] != '.'.code.toByte()) {
-            dot++
-            continue
-        }
-        var end = dot + 1
-        while (end < data.size && end - dot <= 5 && isStemByte(data[end].toInt() and 0xFF)) end++
-        var start = dot - 1
-        while (start >= 0 && dot - start <= 32 && isStemByte(data[start].toInt() and 0xFF)) start--
-        start++
-        if (start < dot && end > dot + 1) {
-            val candidate = data.copyOfRange(start, end).toString(Charsets.US_ASCII)
-            if (isPlausibleCameraFileName(candidate)) {
-                results.putIfAbsent(
-                    "$start:$candidate",
-                    EmbeddedCameraFileName(start, candidate, "ascii"),
-                )
-            }
-        }
-        dot++
-    }
-    return results.values.toList()
-}
-
-/** Parses GetObjectPropList queried specifically for ObjectFileName (0xDC07). */
-internal fun parseObjectFileNamePropertyList(data: ByteArray): Map<Int, String> {
-    fun int32Le(offset: Int): Int =
-        (data[offset].toInt() and 0xFF) or
-            ((data[offset + 1].toInt() and 0xFF) shl 8) or
-            ((data[offset + 2].toInt() and 0xFF) shl 16) or
-            ((data[offset + 3].toInt() and 0xFF) shl 24)
-
-    fun uint16Le(offset: Int): Int =
-        (data[offset].toInt() and 0xFF) or
-            ((data[offset + 1].toInt() and 0xFF) shl 8)
-
-    if (data.size < 4) return emptyMap()
-    val count = int32Le(0).toLong() and 0xFFFFFFFFL
-    if (count > (data.size - 4) / 9L) return emptyMap()
-    val names = LinkedHashMap<Int, String>(count.toInt().coerceAtMost(4096))
-    var offset = 4
-    repeat(count.toInt()) {
-        if (offset + 8 > data.size) return emptyMap()
-        val handle = int32Le(offset)
-        val propertyCode = uint16Le(offset + 4)
-        val dataType = uint16Le(offset + 6)
-        offset += 8
-        if (propertyCode != PtpConstants.OBJECT_PROP_OBJECT_FILE_NAME || dataType != 0xFFFF) {
-            return emptyMap()
-        }
-        val parsed = parsePtpObjectFileName(data, offset) ?: return emptyMap()
-        names[handle] = parsed.first
-        offset = parsed.second
-    }
-    return names
-}
-
-internal fun hasUsableStaAlbumStorage(response: Int, storageIds: List<Int>): Boolean =
-    response == PtpConstants.RESPONSE_OK && storageIds.isNotEmpty()
-
-/** STA-only initiator identities. The album identity never replaces the paired computer identity. */
-internal enum class StaInitiatorIdentity {
-    PAIRED_COMPUTER,
-    ALBUM_EXPLORER,
+    val event = PtpIpProtocolCodec.decodeEvent(payload) ?: return null
+    return event.code to event.firstParameter
 }
 
 /** File type fallback for paired STA sessions where Nikon denies ObjectInfo. */
-internal fun staDirectObjectExtension(header: ByteArray): String = when {
-    header.size >= 2 && header[0] == 0xFF.toByte() && header[1] == 0xD8.toByte() -> ".jpg"
-    header.size >= 4 &&
-        ((header[0] == 'I'.code.toByte() && header[1] == 'I'.code.toByte() &&
-            header[2] == 0x2A.toByte() && header[3] == 0.toByte()) ||
-            (header[0] == 'M'.code.toByte() && header[1] == 'M'.code.toByte() &&
-                header[2] == 0.toByte() && header[3] == 0x2A.toByte())) -> ".nef"
-    header.size >= 12 && header.copyOfRange(4, 8).contentEquals("ftyp".toByteArray()) -> {
-        val brand = header.copyOfRange(8, 12).toString(Charsets.US_ASCII)
-        if (brand == "qt  ") ".mov" else ".mp4"
-    }
-    else -> ".bin"
-}
-
 /** Converts EXIF `yyyy:MM:dd HH:mm:ss` into the PTP date form used by the existing UI. */
-internal fun staDirectCaptureDate(exifDate: String?): String? {
-    val digits = exifDate?.filter(Char::isDigit) ?: return null
-    if (digits.length < 14) return null
-    return digits.take(8) + "T" + digits.substring(8, 14)
-}
+internal fun staDirectCaptureDate(exifDate: String?): String? =
+    com.ztransfer.preview.staDirectCaptureDate(exifDate)
 
 /**
  * Builds a complete minimal JPEG containing only SOI + the EXIF APP1 segment + EOI.
@@ -489,62 +172,6 @@ internal fun staDirectCaptureDate(exifDate: String?): String? {
  * original-file prefix is intentionally truncated. Feeding this envelope to ExifInterface avoids
  * making it parse an incomplete image scan.
  */
-private fun jpegExifSegmentRange(header: ByteArray): IntRange? {
-    if (header.size < 10 || header[0] != 0xFF.toByte() || header[1] != 0xD8.toByte()) return null
-    var offset = 2
-    while (offset + 4 <= header.size) {
-        val markerStart = offset
-        if (header[offset] != 0xFF.toByte()) return null
-        while (offset < header.size && header[offset] == 0xFF.toByte()) offset++
-        if (offset >= header.size) return null
-        val marker = header[offset].toInt() and 0xFF
-        offset++
-        if (marker == 0xD9 || marker == 0xDA) return null
-        if (marker == 0x01 || marker in 0xD0..0xD7) continue
-        if (offset + 2 > header.size) return null
-        val segmentLength =
-            ((header[offset].toInt() and 0xFF) shl 8) or (header[offset + 1].toInt() and 0xFF)
-        if (segmentLength < 2) return null
-        val segmentEnd = offset + segmentLength
-        if (segmentEnd > header.size) return null
-        val payloadOffset = offset + 2
-        val isExif = marker == 0xE1 && payloadOffset + 6 <= segmentEnd &&
-            header[payloadOffset] == 'E'.code.toByte() &&
-            header[payloadOffset + 1] == 'x'.code.toByte() &&
-            header[payloadOffset + 2] == 'i'.code.toByte() &&
-            header[payloadOffset + 3] == 'f'.code.toByte() &&
-            header[payloadOffset + 4] == 0.toByte() &&
-            header[payloadOffset + 5] == 0.toByte()
-        if (isExif) {
-            return markerStart until segmentEnd
-        }
-        offset = segmentEnd
-    }
-    return null
-}
-
-internal fun jpegExifEnvelope(header: ByteArray): ByteArray? {
-    val segment = jpegExifSegmentRange(header) ?: return null
-    val segmentBytes = segment.last - segment.first + 1
-    return ByteArray(2 + segmentBytes + 2).also { envelope ->
-        envelope[0] = 0xFF.toByte()
-        envelope[1] = 0xD8.toByte()
-        header.copyInto(
-            envelope,
-            destinationOffset = 2,
-            startIndex = segment.first,
-            endIndex = segment.last + 1,
-        )
-        envelope[envelope.lastIndex - 1] = 0xFF.toByte()
-        envelope[envelope.lastIndex] = 0xD9.toByte()
-    }
-}
-
-internal fun needsStaDirectJpegHeaderExpansion(
-    prefix: ByteArray,
-    maximumHeaderBytes: Int,
-): Boolean = prefix.size < maximumHeaderBytes && jpegExifSegmentRange(prefix) == null
-
 /** Bounded JPEG marker audit used to decide whether an independent MPF preview really exists. */
 internal fun jpegContainerDiagnostics(bytes: ByteArray): String {
     if (bytes.size < 4 || bytes[0] != 0xFF.toByte() || bytes[1] != 0xD8.toByte()) {
@@ -602,651 +229,29 @@ internal fun jpegContainerDiagnostics(bytes: ByteArray): String {
     return segments.joinToString(",").ifEmpty { "empty" }
 }
 
-internal data class JpegMpfPreviewReference(
-    val offset: Long,
-    val length: Int,
-    val imageType: Int,
-)
-
-/**
- * Parses the MP Index IFD in a JPEG APP2 `MPF\0` segment. MP image offsets are relative to the
- * TIFF byte-order field at the start of the MP header; only independently stored large-thumbnail
- * JPEGs are returned. The primary image at offset 0 is deliberately excluded.
- */
-internal fun parseJpegMpfPreviews(
-    bytes: ByteArray,
-    objectSize: Long = Long.MAX_VALUE,
-): List<JpegMpfPreviewReference> {
-    data class MpfSegment(val tiffBase: Int, val end: Int)
-
-    fun findMpfSegment(): MpfSegment? {
-        if (bytes.size < 4 || bytes[0] != 0xFF.toByte() || bytes[1] != 0xD8.toByte()) return null
-        var offset = 2
-        while (offset + 1 < bytes.size) {
-            while (offset < bytes.size && bytes[offset] == 0xFF.toByte()) offset++
-            if (offset >= bytes.size) return null
-            val marker = bytes[offset].toInt() and 0xFF
-            offset++
-            if (marker == 0xD9 || marker == 0xDA) return null
-            if (marker == 0x01 || marker in 0xD0..0xD7) continue
-            if (offset + 2 > bytes.size) return null
-            val segmentLength = ((bytes[offset].toInt() and 0xFF) shl 8) or
-                (bytes[offset + 1].toInt() and 0xFF)
-            if (segmentLength < 2 || offset.toLong() + segmentLength > bytes.size.toLong()) {
-                return null
-            }
-            val payload = offset + 2
-            if (marker == 0xE2 && segmentLength >= 14 &&
-                bytes[payload] == 'M'.code.toByte() &&
-                bytes[payload + 1] == 'P'.code.toByte() &&
-                bytes[payload + 2] == 'F'.code.toByte() &&
-                bytes[payload + 3] == 0.toByte()
-            ) {
-                return MpfSegment(tiffBase = payload + 4, end = offset + segmentLength)
-            }
-            offset += segmentLength
-        }
-        return null
+internal fun staDirectVideoCaptureDate(bytes: ByteArray): String? =
+    staDirectVideoCaptureSeconds(bytes)?.let { unixSeconds ->
+        runCatching { STA_DIRECT_DATE_FORMATTER.format(Instant.ofEpochSecond(unixSeconds)) }.getOrNull()
     }
 
-    val segment = findMpfSegment() ?: return emptyList()
-    val littleEndian = when {
-        bytes[segment.tiffBase] == 'I'.code.toByte() &&
-            bytes[segment.tiffBase + 1] == 'I'.code.toByte() -> true
-        bytes[segment.tiffBase] == 'M'.code.toByte() &&
-            bytes[segment.tiffBase + 1] == 'M'.code.toByte() -> false
-        else -> return emptyList()
-    }
+internal typealias NefPreviewReference = com.ztransfer.preview.NefPreviewReference
 
-    fun u16(offset: Int): Int? {
-        if (offset < segment.tiffBase || offset + 2 > segment.end) return null
-        val a = bytes[offset].toInt() and 0xFF
-        val b = bytes[offset + 1].toInt() and 0xFF
-        return if (littleEndian) a or (b shl 8) else (a shl 8) or b
-    }
-
-    fun u32(offset: Int): Long? {
-        if (offset < segment.tiffBase || offset + 4 > segment.end) return null
-        var value = 0L
-        if (littleEndian) {
-            repeat(4) { index ->
-                value = value or ((bytes[offset + index].toLong() and 0xFF) shl (index * 8))
-            }
-        } else {
-            repeat(4) { index ->
-                value = (value shl 8) or (bytes[offset + index].toLong() and 0xFF)
-            }
-        }
-        return value
-    }
-
-    if (u16(segment.tiffBase + 2) != 42) return emptyList()
-    val ifdOffset = u32(segment.tiffBase + 4) ?: return emptyList()
-    val ifdStartLong = segment.tiffBase.toLong() + ifdOffset
-    if (ifdStartLong !in segment.tiffBase.toLong() until segment.end.toLong()) return emptyList()
-    val ifdStart = ifdStartLong.toInt()
-    val entryCount = u16(ifdStart) ?: return emptyList()
-    if (entryCount > 64 || ifdStart.toLong() + 2L + entryCount.toLong() * 12L > segment.end) {
-        return emptyList()
-    }
-
-    var declaredImageCount: Int? = null
-    var mpEntryOffset: Int? = null
-    var mpEntryBytes = 0
-    repeat(entryCount) { index ->
-        val entry = ifdStart + 2 + index * 12
-        val tag = u16(entry) ?: return@repeat
-        val type = u16(entry + 2) ?: return@repeat
-        val count = u32(entry + 4) ?: return@repeat
-        when (tag) {
-            0xB001 -> if (type == 4 && count == 1L) {
-                declaredImageCount = u32(entry + 8)?.toInt()
-            }
-            0xB002 -> if (type == 7 && count in 16L..(16L * 64L) && count % 16L == 0L) {
-                val relative = u32(entry + 8) ?: return@repeat
-                val absolute = segment.tiffBase.toLong() + relative
-                if (absolute >= segment.tiffBase && absolute + count <= segment.end) {
-                    mpEntryOffset = absolute.toInt()
-                    mpEntryBytes = count.toInt()
-                }
-            }
-        }
-    }
-
-    val entriesStart = mpEntryOffset ?: return emptyList()
-    val availableCount = mpEntryBytes / 16
-    val imageCount = minOf(declaredImageCount ?: availableCount, availableCount, 64)
-    val previews = ArrayList<JpegMpfPreviewReference>(imageCount)
-    repeat(imageCount) { index ->
-        val entry = entriesStart + index * 16
-        val attributes = u32(entry) ?: return@repeat
-        val length = u32(entry + 4) ?: return@repeat
-        val relativeOffset = u32(entry + 8) ?: return@repeat
-        val imageFormat = (attributes ushr 24) and 0x07
-        val imageType = (attributes and 0x00FFFFFF).toInt()
-        val absoluteOffset = segment.tiffBase.toLong() + relativeOffset
-        if (imageFormat == 0L && imageType in 0x010001..0x010005 &&
-            relativeOffset > 0L &&
-            length in 4L..STA_DIRECT_MAX_EMBEDDED_PREVIEW_BYTES.toLong() &&
-            absoluteOffset > 0L && absoluteOffset + length <= objectSize
-        ) {
-            previews += JpegMpfPreviewReference(
-                offset = absoluteOffset,
-                length = length.toInt(),
-                imageType = imageType,
-            )
-        }
-    }
-    return previews.distinct().sortedWith(
-        compareBy<JpegMpfPreviewReference> {
-            when (it.imageType) {
-                0x010002 -> 0 // exact FHD
-                0x010003 -> 1 // 4K if FHD is absent
-                0x010001 -> 2 // VGA is still better than the EXIF thumbnail
-                else -> 3
-            }
-        }.thenBy(JpegMpfPreviewReference::length),
-    )
-}
-
-internal data class NikonMakerFileInfo(
-    val directoryNumber: Int,
-    val fileNumber: Int,
-)
-
-internal data class NikonFileNumberAnchor(
-    val handleSequence: Int,
-    val directoryNumber: Int,
-    val fileNumber: Int,
-)
-
-/**
- * Nikon's paired-STA handles retain the camera's monotonically increasing 24-bit file sequence;
- * the high byte only identifies JPG/RAW/video. A MakerNote FileInfo record therefore anchors the
- * exact DCF number for neighbouring objects, including MP4 files that carry no EXIF MakerNote.
- */
-internal fun deriveNikonMakerFileInfo(
-    anchor: NikonFileNumberAnchor,
-    handle: Int,
-): NikonMakerFileInfo? {
-    val sequence = handle and 0x00FFFFFF
-    val delta = sequence.toLong() - anchor.handleSequence.toLong()
-    val absoluteFileNumber = anchor.fileNumber.toLong() + delta
-    val directoryDelta = Math.floorDiv(absoluteFileNumber, 10_000L)
-    val fileNumber = Math.floorMod(absoluteFileNumber, 10_000L).toInt()
-    val directoryNumber = anchor.directoryNumber.toLong() + directoryDelta
-    return NikonMakerFileInfo(directoryNumber.toInt(), fileNumber).takeIf {
-        directoryNumber in 99L..999L
-    }
-}
-
-internal fun nikonDefaultCameraFileName(
-    fileInfo: NikonMakerFileInfo,
-    extension: String,
-): String? {
-    val normalizedExtension = extension.removePrefix(".").uppercase()
-    if (normalizedExtension.lowercase() !in CAMERA_MEDIA_EXTENSIONS) return null
-    return "DSC_%04d.%s".format(fileInfo.fileNumber, normalizedExtension)
-}
-
-/**
- * Nikon 0x9434 的 Z 系列对象索引记录。载荷为 u32 version、u32 count，随后每项 16 字节：
- * handle、4 字节保留值、0/秒/分/时/日/月/年(u16 LE)。只接受完整且有效的记录，未知固件
- * 布局直接返回空表，让调用方安全回退到逐对象文件头解析。
- */
-internal fun parseNikonObjectsMetadataCaptureDates(data: ByteArray?): Map<Int, String> {
-    if (data == null || data.size < 8) return emptyMap()
-    fun u32(offset: Int): Int =
-        (data[offset].toInt() and 0xFF) or
-            ((data[offset + 1].toInt() and 0xFF) shl 8) or
-            ((data[offset + 2].toInt() and 0xFF) shl 16) or
-            ((data[offset + 3].toInt() and 0xFF) shl 24)
-
-    val version = u32(0)
-    val count = u32(4)
-    if (version != 100 || count <= 0 || count > (data.size - 8) / 16 ||
-        8L + count * 16L != data.size.toLong()
-    ) {
-        return emptyMap()
-    }
-    val result = LinkedHashMap<Int, String>(count)
-    repeat(count) { index ->
-        val offset = 8 + index * 16
-        val handle = u32(offset)
-        val second = data[offset + 9].toInt() and 0xFF
-        val minute = data[offset + 10].toInt() and 0xFF
-        val hour = data[offset + 11].toInt() and 0xFF
-        val day = data[offset + 12].toInt() and 0xFF
-        val month = data[offset + 13].toInt() and 0xFF
-        val year = (data[offset + 14].toInt() and 0xFF) or
-            ((data[offset + 15].toInt() and 0xFF) shl 8)
-        if (handle != 0 && year in 1990..2200 && month in 1..12 && day in 1..31 &&
-            hour in 0..23 && minute in 0..59 && second in 0..60
-        ) {
-            result[handle] = "%04d%02d%02dT%02d%02d%02d".format(
-                year, month, day, hour, minute, second,
-            )
-        }
-    }
-    return result
-}
-
-/** Z30 配对 STA 的 handle 高字节是媒体种类；未知值必须回退读文件头，不能猜格式。 */
-internal fun staDirectExtensionFromHandle(handle: Int): String? = when (handle ushr 24 and 0xFF) {
-    0x29 -> ".jpg"
-    0x09 -> ".nef"
-    0x61 -> ".mp4"
-    else -> null
-}
-
-/**
- * Reads Nikon MakerNote tag 0x00B8 (FileInfo) from a bounded JPEG/NEF prefix.
- * FileInfo contains the DCF directory and four-digit file number even when paired STA denies
- * ObjectInfo. It intentionally does not guess the camera-configurable three-character prefix.
- */
-internal fun nikonMakerFileInfo(bytes: ByteArray): NikonMakerFileInfo? {
-    fun tiffStart(): Int? {
-        if (bytes.size >= 8 &&
-            ((bytes[0] == 'I'.code.toByte() && bytes[1] == 'I'.code.toByte()) ||
-                (bytes[0] == 'M'.code.toByte() && bytes[1] == 'M'.code.toByte()))
-        ) {
-            return 0
-        }
-        if (bytes.size < 12 || bytes[0] != 0xFF.toByte() || bytes[1] != 0xD8.toByte()) return null
-        var offset = 2
-        while (offset + 4 <= bytes.size) {
-            if (bytes[offset] != 0xFF.toByte()) return null
-            while (offset < bytes.size && bytes[offset] == 0xFF.toByte()) offset++
-            if (offset >= bytes.size) return null
-            val marker = bytes[offset].toInt() and 0xFF
-            offset++
-            if (marker == 0xD9 || marker == 0xDA) return null
-            if (marker == 0x01 || marker in 0xD0..0xD7) continue
-            if (offset + 2 > bytes.size) return null
-            val length = ((bytes[offset].toInt() and 0xFF) shl 8) or
-                (bytes[offset + 1].toInt() and 0xFF)
-            if (length < 2 || offset + length > bytes.size) return null
-            val payload = offset + 2
-            if (marker == 0xE1 && payload + 14 <= offset + length &&
-                bytes.copyOfRange(payload, payload + 6).contentEquals(
-                    byteArrayOf('E'.code.toByte(), 'x'.code.toByte(), 'i'.code.toByte(),
-                        'f'.code.toByte(), 0, 0),
-                )
-            ) {
-                return payload + 6
-            }
-            offset += length
-        }
-        return null
-    }
-
-    data class Entry(val type: Int, val count: Long, val value: Long, val inlineOffset: Int)
-
-    fun byteOrder(base: Int): Boolean? = when {
-        base + 8 > bytes.size -> null
-        bytes[base] == 'I'.code.toByte() && bytes[base + 1] == 'I'.code.toByte() -> true
-        bytes[base] == 'M'.code.toByte() && bytes[base + 1] == 'M'.code.toByte() -> false
-        else -> null
-    }
-
-    fun u16(offset: Int, littleEndian: Boolean): Int? {
-        if (offset < 0 || offset + 2 > bytes.size) return null
-        val a = bytes[offset].toInt() and 0xFF
-        val b = bytes[offset + 1].toInt() and 0xFF
-        return if (littleEndian) a or (b shl 8) else (a shl 8) or b
-    }
-
-    fun u32(offset: Int, littleEndian: Boolean): Long? {
-        if (offset < 0 || offset + 4 > bytes.size) return null
-        var value = 0L
-        if (littleEndian) {
-            repeat(4) { index ->
-                value = value or ((bytes[offset + index].toLong() and 0xFF) shl (index * 8))
-            }
-        } else {
-            repeat(4) { index ->
-                value = (value shl 8) or (bytes[offset + index].toLong() and 0xFF)
-            }
-        }
-        return value
-    }
-
-    fun findEntry(ifdOffset: Int, littleEndian: Boolean, tag: Int): Entry? {
-        if (ifdOffset < 0 || ifdOffset.toLong() + 2L > bytes.size.toLong()) return null
-        val count = u16(ifdOffset, littleEndian) ?: return null
-        val entriesEnd = ifdOffset.toLong() + 2L + count.toLong() * 12L + 4L
-        if (count > 512 || entriesEnd > bytes.size.toLong()) return null
-        repeat(count) { index ->
-            val entry = ifdOffset + 2 + index * 12
-            if (u16(entry, littleEndian) == tag) {
-                return Entry(
-                    type = u16(entry + 2, littleEndian) ?: return null,
-                    count = u32(entry + 4, littleEndian) ?: return null,
-                    value = u32(entry + 8, littleEndian) ?: return null,
-                    inlineOffset = entry + 8,
-                )
-            }
-        }
-        return null
-    }
-
-    fun entryDataOffset(base: Int, entry: Entry, requiredBytes: Int): Int? {
-        if (requiredBytes < 0) return null
-        val unitSize = when (entry.type) {
-            1, 2, 7 -> 1
-            3 -> 2
-            4, 9 -> 4
-            5, 10 -> 8
-            else -> return null
-        }
-        if (entry.count <= 0 || entry.count > Int.MAX_VALUE.toLong() / unitSize) return null
-        val declaredBytes = entry.count * unitSize
-        if (declaredBytes < requiredBytes.toLong()) return null
-        val offset = if (declaredBytes <= 4) {
-            entry.inlineOffset
-        } else {
-            val absolute = base.toLong() + entry.value
-            absolute.takeIf { it in 0L..Int.MAX_VALUE.toLong() }?.toInt() ?: return null
-        }
-        return offset.takeIf {
-            it >= 0 && it.toLong() + requiredBytes.toLong() <= bytes.size.toLong()
-        }
-    }
-
-    fun relativeOffset(base: Int, relative: Long): Int? {
-        val absolute = base.toLong() + relative
-        return absolute.takeIf { it in 0L until bytes.size.toLong() }?.toInt()
-    }
-
-    val outerBase = tiffStart() ?: return null
-    val outerLittle = byteOrder(outerBase) ?: return null
-    if (u16(outerBase + 2, outerLittle) != 42) return null
-    val ifd0 = relativeOffset(outerBase, u32(outerBase + 4, outerLittle) ?: return null)
-        ?: return null
-    val exifPointer = findEntry(ifd0, outerLittle, 0x8769) ?: return null
-    if (exifPointer.type != 4 || exifPointer.count != 1L) return null
-    val exifIfd = relativeOffset(outerBase, exifPointer.value) ?: return null
-    val makerEntry = findEntry(exifIfd, outerLittle, 0x927C) ?: return null
-    val makerOffset = entryDataOffset(outerBase, makerEntry, requiredBytes = 18) ?: return null
-    if (bytes[makerOffset] != 'N'.code.toByte() ||
-        bytes[makerOffset + 1] != 'i'.code.toByte() ||
-        bytes[makerOffset + 2] != 'k'.code.toByte() ||
-        bytes[makerOffset + 3] != 'o'.code.toByte() ||
-        bytes[makerOffset + 4] != 'n'.code.toByte() ||
-        bytes[makerOffset + 5] != 0.toByte()
-    ) {
-        return null
-    }
-
-    val makerBase = makerOffset + 10
-    val makerLittle = byteOrder(makerBase) ?: return null
-    if (u16(makerBase + 2, makerLittle) != 42) return null
-    val makerIfd = relativeOffset(makerBase, u32(makerBase + 4, makerLittle) ?: return null)
-        ?: return null
-    val fileInfoEntry = findEntry(makerIfd, makerLittle, 0x00B8) ?: return null
-    val fileInfo = entryDataOffset(makerBase, fileInfoEntry, requiredBytes = 10) ?: return null
-
-    fun candidate(littleEndian: Boolean): NikonMakerFileInfo? {
-        val directory = u16(fileInfo + 6, littleEndian) ?: return null
-        val file = u16(fileInfo + 8, littleEndian) ?: return null
-        return NikonMakerFileInfo(directory, file).takeIf {
-            it.directoryNumber in 99..999 && it.fileNumber in 0..9999
-        }
-    }
-    val little = candidate(true)
-    val big = candidate(false)
-    return when {
-        little != null && big == null -> little
-        big != null && little == null -> big
-        makerLittle -> little ?: big
-        else -> big ?: little
-    }
-}
-
-/** Reads QuickTime/MP4 `mvhd.creation_time` (seconds since 1904-01-01, big-endian). */
-internal fun staDirectVideoCaptureDate(bytes: ByteArray): String? {
-    var index = 0
-    while (index + 12 <= bytes.size) {
-        if (bytes[index] == 'm'.code.toByte() &&
-            bytes[index + 1] == 'v'.code.toByte() &&
-            bytes[index + 2] == 'h'.code.toByte() &&
-            bytes[index + 3] == 'd'.code.toByte()
-        ) {
-            val version = bytes[index + 4].toInt() and 0xFF
-            val creationOffset = index + 8
-            val byteCount = if (version == 0) 4 else if (version == 1) 8 else return null
-            if (creationOffset + byteCount > bytes.size) return null
-            var secondsSince1904 = 0L
-            repeat(byteCount) { offset ->
-                secondsSince1904 = (secondsSince1904 shl 8) or
-                    (bytes[creationOffset + offset].toLong() and 0xFF)
-            }
-            val unixSeconds = secondsSince1904 - QUICKTIME_EPOCH_OFFSET_SECONDS
-            if (unixSeconds <= 0L) return null
-            return runCatching {
-                STA_DIRECT_DATE_FORMATTER.format(Instant.ofEpochSecond(unixSeconds))
-            }.getOrNull()
-        }
-        index++
-    }
-    return null
-}
-
-internal data class NefPreviewReference(val offset: Long, val length: Int)
-
-internal data class StaDirectRawThumbnailProbePlan(
-    val initialBytes: Int,
-    val maximumBytes: Int,
-)
-
-internal fun staDirectRawThumbnailProbePlan(
-    availableBytes: Long,
-    previousThumbnailBytes: Int,
-): StaDirectRawThumbnailProbePlan? {
-    if (availableBytes <= 0L) return null
-    val previous = previousThumbnailBytes.coerceAtLeast(0).toLong()
-    val maximum = minOf(
-        availableBytes,
-        maxOf(192L * 1024, previous + 64L * 1024),
-        Int.MAX_VALUE.toLong(),
-    ).toInt()
-    val initial = minOf(
-        maximum.toLong(),
-        maxOf(128L * 1024, previous + 16L * 1024),
-    ).toInt()
-    return StaDirectRawThumbnailProbePlan(initial, maximum)
-}
-
-/** Returns the exact range of the largest complete JPEG embedded in a bounded RAW prefix. */
+/** Pure RAW parsing is shared; Android IO and preview selection remain unchanged. */
 internal fun largestEmbeddedJpegRange(
     bytes: ByteArray,
     validLength: Int = bytes.size,
-): NefPreviewReference? {
-    val limit = validLength.coerceIn(0, bytes.size)
-    var bestStart = -1
-    var bestEnd = -1
-    var start = -1
-    var index = 0
-    while (index + 1 < limit) {
-        val first = bytes[index].toInt() and 0xFF
-        val second = bytes[index + 1].toInt() and 0xFF
-        if (first == 0xFF && second == 0xD8) {
-            start = index
-            index += 2
-            continue
-        }
-        if (start >= 0 && first == 0xFF && second == 0xD9) {
-            val end = index + 2
-            if (end - start > bestEnd - bestStart) {
-                bestStart = start
-                bestEnd = end
-            }
-            start = -1
-            index += 2
-            continue
-        }
-        index++
-    }
-    return if (bestStart >= 0) {
-        NefPreviewReference(bestStart.toLong(), bestEnd - bestStart)
-    } else {
-        null
-    }
-}
+): NefPreviewReference? = com.ztransfer.preview.largestEmbeddedJpegRange(bytes, validLength)
 
-/** Returns the largest complete JPEG embedded in a bounded RAW prefix. */
 internal fun largestEmbeddedJpeg(bytes: ByteArray): ByteArray? =
-    largestEmbeddedJpegRange(bytes)?.let { range ->
-        bytes.copyOfRange(range.offset.toInt(), range.offset.toInt() + range.length)
-    }
+    com.ztransfer.preview.largestEmbeddedJpeg(bytes)
 
-internal data class NefHeaderMetadata(
-    val captureDate: String?,
-    val previews: List<NefPreviewReference>,
-)
+internal typealias NefHeaderMetadata = com.ztransfer.preview.NefHeaderMetadata
 
-/** Parses the bounded TIFF directory tree and returns exact embedded-JPEG ranges. */
 internal fun parseNefHeaderMetadata(
     bytes: ByteArray,
     validLength: Int = bytes.size,
-): NefHeaderMetadata {
-    val limit = validLength.coerceIn(0, bytes.size)
-    if (limit < 8) return NefHeaderMetadata(null, emptyList())
-    val littleEndian = when {
-        bytes[0] == 'I'.code.toByte() && bytes[1] == 'I'.code.toByte() -> true
-        bytes[0] == 'M'.code.toByte() && bytes[1] == 'M'.code.toByte() -> false
-        else -> return NefHeaderMetadata(null, emptyList())
-    }
+): NefHeaderMetadata = com.ztransfer.preview.parseNefHeaderMetadata(bytes, validLength)
 
-    fun u16(offset: Int): Int? {
-        if (offset < 0 || offset + 2 > limit) return null
-        val first = bytes[offset].toInt() and 0xFF
-        val second = bytes[offset + 1].toInt() and 0xFF
-        return if (littleEndian) first or (second shl 8) else (first shl 8) or second
-    }
-    fun u32(offset: Int): Long? {
-        if (offset < 0 || offset + 4 > limit) return null
-        var value = 0L
-        if (littleEndian) {
-            repeat(4) { index ->
-                value = value or ((bytes[offset + index].toLong() and 0xFF) shl (index * 8))
-            }
-        } else {
-            repeat(4) { index ->
-                value = (value shl 8) or (bytes[offset + index].toLong() and 0xFF)
-            }
-        }
-        return value
-    }
-    if (u16(2) != 42) return NefHeaderMetadata(null, emptyList())
-
-    val previews = ArrayList<NefPreviewReference>()
-    val visited = HashSet<Int>()
-    var bestDate: Pair<Int, String>? = null
-
-    fun typeSize(type: Int): Int = when (type) {
-        1, 2, 7 -> 1
-        3 -> 2
-        4, 9 -> 4
-        5, 10 -> 8
-        else -> 0
-    }
-
-    fun valueOffset(entryOffset: Int, type: Int, count: Long): Int? {
-        val unit = typeSize(type)
-        if (unit == 0 || count <= 0 || count > Int.MAX_VALUE / unit) return null
-        val byteCount = count.toInt() * unit
-        return if (byteCount <= 4) entryOffset + 8 else u32(entryOffset + 8)?.toInt()
-    }
-
-    fun numericValues(entryOffset: Int, type: Int, count: Long): List<Long> {
-        if (type != 3 && type != 4) return emptyList()
-        val start = valueOffset(entryOffset, type, count) ?: return emptyList()
-        val step = if (type == 3) 2 else 4
-        if (count > 64 || start < 0 || start + count * step > limit) return emptyList()
-        return (0 until count.toInt()).mapNotNull { index ->
-            if (type == 3) u16(start + index * step)?.toLong() else u32(start + index * step)
-        }
-    }
-
-    fun asciiValue(entryOffset: Int, type: Int, count: Long): String? {
-        if (type != 2 || count <= 1 || count > 128) return null
-        val start = valueOffset(entryOffset, type, count) ?: return null
-        val length = count.toInt()
-        if (start < 0 || start + length > limit) return null
-        return bytes.copyOfRange(start, start + length)
-            .toString(Charsets.US_ASCII)
-            .trimEnd('\u0000', ' ')
-            .takeIf(String::isNotBlank)
-    }
-
-    fun parseIfd(ifdOffset: Int, depth: Int) {
-        if (depth > 8 || ifdOffset < 8 || !visited.add(ifdOffset)) return
-        val count = u16(ifdOffset) ?: return
-        if (count > 512) return
-        val entriesStart = ifdOffset + 2
-        if (entriesStart + count * 12 + 4 > limit) return
-
-        var jpegOffsets = emptyList<Long>()
-        var jpegLengths = emptyList<Long>()
-        var stripOffsets = emptyList<Long>()
-        var stripLengths = emptyList<Long>()
-        var compression: Long? = null
-        val childIfds = ArrayList<Int>()
-
-        repeat(count) { index ->
-            val entry = entriesStart + index * 12
-            val tag = u16(entry) ?: return@repeat
-            val type = u16(entry + 2) ?: return@repeat
-            val valueCount = u32(entry + 4) ?: return@repeat
-            val values = numericValues(entry, type, valueCount)
-            when (tag) {
-                0x0103 -> compression = values.firstOrNull()
-                0x0111 -> stripOffsets = values
-                0x0117 -> stripLengths = values
-                0x014A, 0x8769 -> values.mapTo(childIfds) { it.toInt() }
-                0x0201 -> jpegOffsets = values
-                0x0202 -> jpegLengths = values
-                0x0132, 0x9003, 0x9004 -> {
-                    val priority = when (tag) {
-                        0x9003 -> 3
-                        0x9004 -> 2
-                        else -> 1
-                    }
-                    asciiValue(entry, type, valueCount)?.let { raw ->
-                        staDirectCaptureDate(raw)?.let { date ->
-                            if (bestDate == null || priority > checkNotNull(bestDate).first) {
-                                bestDate = priority to date
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        fun addRanges(offsets: List<Long>, lengths: List<Long>) {
-            offsets.zip(lengths).forEach { (offset, length) ->
-                if (offset > 0L && length in 4..STA_DIRECT_MAX_EMBEDDED_PREVIEW_BYTES.toLong()) {
-                    previews += NefPreviewReference(offset, length.toInt())
-                }
-            }
-        }
-        addRanges(jpegOffsets, jpegLengths)
-        if (compression == 6L) addRanges(stripOffsets, stripLengths)
-
-        val nextIfdOffset = u32(entriesStart + count * 12)?.toInt() ?: 0
-        if (nextIfdOffset > 0) childIfds += nextIfdOffset
-        childIfds.forEach { child -> parseIfd(child, depth + 1) }
-    }
-
-    parseIfd(u32(4)?.toInt() ?: return NefHeaderMetadata(null, emptyList()), 0)
-    return NefHeaderMetadata(
-        captureDate = bestDate?.second,
-        previews = previews.distinct().sortedByDescending(NefPreviewReference::length),
-    )
-}
-
-private const val QUICKTIME_EPOCH_OFFSET_SECONDS = 2_082_844_800L
 private const val STA_DIRECT_MAX_EMBEDDED_PREVIEW_BYTES = 16 * 1024 * 1024
 private val STA_DIRECT_DATE_FORMATTER: DateTimeFormatter =
     DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss").withZone(ZoneId.systemDefault())
@@ -1287,7 +292,7 @@ class NikonCamera(private val context: Context) {
     private val staDirectThumbnails = LinkedHashMap<Int, ByteArray>(16, 0.75f, true)
     private var staDirectThumbnailBytes = 0
     private val staDirectNoThumbnail = HashSet<Int>()
-    private val staDirectFiles = HashMap<Int, FileInfo>()
+    private val staDirectFiles = HashMap<Int, CameraFileInfo>()
     private val staDirectJpegMpfPreviews = HashMap<Int, List<JpegMpfPreviewReference>>()
     private val staDirectRawPreviews = HashMap<Int, List<NefPreviewReference>>()
     // Same-camera NEFs usually place their grid JPEG at a stable offset. This session-only hint is
@@ -1388,14 +393,13 @@ class NikonCamera(private val context: Context) {
      */
     val thumbnailCacheIdentity: String
         get() {
-            val manufacturer = deviceManufacturer.orEmpty().trim()
-            val model = deviceModel.orEmpty().trim()
             val transportId = if (usbPtp != null) usbDeviceSerial else responderGuid
-            val physicalId = normalizedCameraIdentifier(cachedDeviceInfo?.serial)
-                ?: normalizedCameraIdentifier(transportId)
-                // 极少数机身不报告任何序列身份；仍维持按型号隔离，不退回全局混存。
-                ?: "unknown-device"
-            return "$manufacturer\u0000$model\u0000$physicalId"
+            return cameraThumbnailCacheIdentity(
+                manufacturer = deviceManufacturer,
+                model = deviceModel,
+                reportedSerial = cachedDeviceInfo?.serial,
+                fallbackPhysicalId = transportId,
+            )
         }
     val connectionType: CameraConnectionType
         get() = if (usbPtp != null) CameraConnectionType.USB else CameraConnectionType.WIFI
@@ -1456,12 +460,13 @@ class NikonCamera(private val context: Context) {
         // 每块仍是独立 PTP 事务，块间释放相机通道供当前 FHD / EXIF 使用。
         // 也是断点续传的检查点粒度；旧版本留下的 64MB 对齐半成品仍天然兼容。
         // internal: TransferViewModel 引用此值做续传偏移对齐。
-        const val CHUNK_SIZE = 4L * 1024 * 1024
-        const val HIGH_THROUGHPUT_FULL_OBJECT_THRESHOLD = 128L * 1024 * 1024
+        const val CHUNK_SIZE = TRANSFER_RESUME_CHUNK_SIZE
+        const val HIGH_THROUGHPUT_FULL_OBJECT_THRESHOLD =
+            TRANSFER_HIGH_THROUGHPUT_FULL_OBJECT_THRESHOLD
         /** USB and the visible transfer screen avoid repeated camera-side PartialObject setup. */
-        const val HIGH_THROUGHPUT_CHUNK_SIZE = 64L * 1024 * 1024
-        const val LARGE_FILE_THRESHOLD = 512L * 1024 * 1024
-        const val LARGE_FILE_CHUNK_SIZE = 32L * 1024 * 1024
+        const val HIGH_THROUGHPUT_CHUNK_SIZE = TRANSFER_HIGH_THROUGHPUT_CHUNK_SIZE
+        const val LARGE_FILE_THRESHOLD = TRANSFER_LARGE_FILE_THRESHOLD
+        const val LARGE_FILE_CHUNK_SIZE = TRANSFER_LARGE_FILE_CHUNK_SIZE
         private const val FHD_DEVICE_BUSY_RETRIES = 2
         private const val FHD_DEVICE_BUSY_RETRY_DELAY_MS = 160L
     }
@@ -1514,12 +519,10 @@ class NikonCamera(private val context: Context) {
                 )
             }
 
-            val payload = ack.payload ?: return@withContext Result.failure(Exception(context.getString(R.string.error_handshake_empty)))
-            val sessionId = payload.getIntLE(0)
-            if (payload.size >= 20) {
-                responderGuid = payload.copyOfRange(4, 20)
-                    .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xFF) }
-            }
+            val initAck = PtpIpProtocolCodec.decodeInitCommandAck(ack.payload)
+                ?: return@withContext Result.failure(Exception(context.getString(R.string.error_handshake_empty)))
+            val sessionId = initAck.connectionNumber
+            initAck.responderGuidHex?.let { responderGuid = it }
 
             evtSocket = newSocket().apply {
                 soTimeout = SO_TIMEOUT_MS
@@ -1527,11 +530,7 @@ class NikonCamera(private val context: Context) {
             }
             evtInput = evtSocket!!.getInputStream()
 
-            val evtInit = ByteBuffer.allocate(12).order(ByteOrder.LITTLE_ENDIAN).apply {
-                putInt(12)
-                putInt(PtpConstants.INIT_EVT_REQ)
-                putInt(sessionId)
-            }.array()
+            val evtInit = PtpIpProtocolCodec.encodeInitEventRequest(sessionId)
             evtSocket!!.getOutputStream().write(evtInit)
             evtSocket!!.getOutputStream().flush()
 
@@ -1658,14 +657,11 @@ class NikonCamera(private val context: Context) {
                     ) else Exception(context.getString(R.string.error_handshake_bad_ack))
                 )
             }
-            val payload = commandAck.payload ?: return@withContext Result.failure(
+            val initAck = PtpIpProtocolCodec.decodeInitCommandAck(commandAck.payload) ?: return@withContext Result.failure(
                 Exception(context.getString(R.string.error_handshake_empty))
             )
-            val connectionNumber = payload.getIntLE(0)
-            if (payload.size >= 20) {
-                responderGuid = payload.copyOfRange(4, 20)
-                    .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xFF) }
-            }
+            val connectionNumber = initAck.connectionNumber
+            initAck.responderGuidHex?.let { responderGuid = it }
             if (!isExpectedStaResponder(expectedResponderGuid, responderGuid)) {
                 staDiagnosticLines +=
                     "responder=UNEXPECTED expected=$expectedResponderGuid actual=$responderGuid"
@@ -1676,11 +672,7 @@ class NikonCamera(private val context: Context) {
                 connect(InetSocketAddress(ip, PtpConstants.PTP_PORT), CONNECT_TIMEOUT_MS)
             }
             evtInput = evtSocket!!.getInputStream()
-            val eventInit = ByteBuffer.allocate(12).order(ByteOrder.LITTLE_ENDIAN).apply {
-                putInt(12)
-                putInt(PtpConstants.INIT_EVT_REQ)
-                putInt(connectionNumber)
-            }.array()
+            val eventInit = PtpIpProtocolCodec.encodeInitEventRequest(connectionNumber)
             evtSocket!!.getOutputStream().write(eventInit)
             evtSocket!!.getOutputStream().flush()
             val eventAck = evtReader.readPacket(evtInput!!)
@@ -1870,11 +862,7 @@ class NikonCamera(private val context: Context) {
                         val drainResponse = recvRespWithPayload().first
 
                         liveViewImageOperation =
-                            if (cachedDeviceInfo?.operations?.contains(0x9428) == true) {
-                                0x9428
-                            } else {
-                                0x9203
-                            }
+                            preferredLiveViewImageOperation(cachedDeviceInfo?.operations)
                         val eventReaderStarted = transport.startEventReader()
 
                         transport.readTimeoutMs = SO_TIMEOUT_MS
@@ -1943,8 +931,7 @@ class NikonCamera(private val context: Context) {
                 if (respCode != PtpConstants.RESPONSE_OK || data == null || data.size < 4) {
                     return@withContext emptyList()
                 }
-                val count = data.getIntLE(0)
-                (0 until count).map { data.getIntLE(4 + it * 4) }
+                parsePtpUInt32Array(data) ?: emptyList()
             } catch (_: Exception) {
                 emptyList()
             }
@@ -1982,8 +969,9 @@ class NikonCamera(private val context: Context) {
                         payloadBytes = data?.size ?: 0,
                     )
                 }
-                val count = data.getIntLE(0)
-                if (count < 0 || count > (data.size - 4) / 4) {
+                val storageIds = parsePtpUInt32Array(data)
+                if (storageIds == null) {
+                    val count = data.getIntLE(0)
                     return@withContext StorageIdsResult(
                         storageIds = emptyList(),
                         successful = false,
@@ -1993,7 +981,7 @@ class NikonCamera(private val context: Context) {
                     )
                 }
                 StorageIdsResult(
-                    storageIds = (0 until count).map { data.getIntLE(4 + it * 4) },
+                    storageIds = storageIds,
                     successful = true,
                     responseCode = response,
                     payloadBytes = data.size,
@@ -2061,9 +1049,9 @@ class NikonCamera(private val context: Context) {
                         payloadBytes = data?.size ?: 0,
                     )
                 }
-                val count = data.getIntLE(0)
-                // 先用除法校验，避免损坏载荷里的 count 在 count * 4 时整型溢出。
-                if (count < 0 || count > (data.size - 4) / 4) {
+                val handles = parsePtpUInt32Array(data)
+                if (handles == null) {
+                    val count = data.getIntLE(0)
                     return@withContext ObjectHandlesResult(
                         handles = emptyList(),
                         successful = false,
@@ -2073,7 +1061,7 @@ class NikonCamera(private val context: Context) {
                     )
                 }
                 ObjectHandlesResult(
-                    handles = (0 until count).map { data.getIntLE(4 + it * 4) },
+                    handles = handles,
                     successful = true,
                     responseCode = respCode,
                     payloadBytes = data.size,
@@ -2089,23 +1077,6 @@ class NikonCamera(private val context: Context) {
                     error = "${error.javaClass.simpleName}:${error.message.orEmpty()}",
                 )
             }
-        }
-    }
-
-    data class FileInfo(
-        val handle: Int,
-        val size: Long,
-        val fileName: String,
-        /** PTP DateTime 完整串（YYYYMMDDThhmmss…，至少 8 位日期）；分组取前 8 位，组内按完整串排序。 */
-        val captureDate: String?,
-        /** 机内"保护"(🔑)标记（ObjectInfo ProtectionStatus ≠ 0）。摄影师机内选片的常用手段。 */
-        val isProtected: Boolean = false,
-        /** 文件所在的 PTP StorageID；备份模式去重后可能同时属于两张卡。 */
-        val storageIds: Set<Int> = emptySet(),
-    ) {
-        /** 归一化扩展名：小写且带前导点（如 ".jpg"）；无扩展名返回 ""。UI 按此比较颜色/图标。 */
-        val extension: String = fileName.lastIndexOf('.').let { dot ->
-            if (dot < 0) "" else fileName.substring(dot).lowercase()
         }
     }
 
@@ -2400,7 +1371,7 @@ class NikonCamera(private val context: Context) {
     suspend fun streamFileInfo(
         handles: List<Int>,
         batchSize: Int = 20,
-        onBatch: suspend (List<FileInfo>, Int, Int) -> Unit
+        onBatch: suspend (List<CameraFileInfo>, Int, Int) -> Unit
     ): Boolean = withContext(Dispatchers.IO) {
         val loadContext = coroutineContext
         val total = handles.size
@@ -2447,7 +1418,7 @@ class NikonCamera(private val context: Context) {
         handles: List<Int>,
         storageIds: List<Int> = emptyList(),
         batchSize: Int = 12,
-        onBatch: suspend (List<FileInfo>, Int, Int) -> Unit,
+        onBatch: suspend (List<CameraFileInfo>, Int, Int) -> Unit,
     ): Boolean = withContext(Dispatchers.IO) {
         check(staDirectObjectReadValidated) { "STA direct object reads were not validated" }
         require(batchSize > 0) { "batchSize must be positive" }
@@ -2503,7 +1474,7 @@ class NikonCamera(private val context: Context) {
         newestFirstHandlesByStorage: List<Pair<Int, List<Int>>>,
         storageIds: List<Int> = newestFirstHandlesByStorage.map { it.first },
         batchSize: Int = 12,
-        onBatch: suspend (List<FileInfo>, Int, Int) -> Unit,
+        onBatch: suspend (List<CameraFileInfo>, Int, Int) -> Unit,
     ): Boolean = withContext(Dispatchers.IO) {
         check(staDirectObjectReadValidated) { "STA direct object reads were not validated" }
         require(batchSize > 0) { "batchSize must be positive" }
@@ -2519,7 +1490,7 @@ class NikonCamera(private val context: Context) {
 
         val total = groups.sumOf { it.second.size }
         val cursors = IntArray(groups.size)
-        val heads = MutableList<FileInfo?>(groups.size) { null }
+        val heads = MutableList<CameraFileInfo?>(groups.size) { null }
         var completed = 0
         var allSucceeded = true
 
@@ -2601,7 +1572,10 @@ class NikonCamera(private val context: Context) {
             sendCmd(PtpConstants.NK_GET_OBJECTS_METADATA, storageId, 0, 0)
             val (response, data) = recvRespWithPayload()
             val dates = if (response == PtpConstants.RESPONSE_OK) {
-                parseNikonObjectsMetadataCaptureDates(data)
+                parseNikonObjectsMetadataCaptureDates(
+                    data,
+                    ::formatCameraMetadataDecimalForAndroid,
+                )
             } else emptyMap()
             staDirectCaptureDates.putAll(dates)
             reports += "0x%08X:%s/%dB/%d".format(
@@ -2678,14 +1652,20 @@ class NikonCamera(private val context: Context) {
         val fileName = staDirectOriginalFileNames[handle]
             ?: fileNumberAnchor
                 ?.let { deriveNikonMakerFileInfo(it, handle) }
-                ?.let { nikonDefaultCameraFileName(it, extension) }
+                ?.let {
+                    nikonDefaultCameraFileName(
+                        it,
+                        extension,
+                        ::formatCameraMetadataDecimalForAndroid,
+                    )
+                }
             ?: return readStaDirectObjectHeaderInternal(
                 handle = handle,
                 preferredFileNumberAnchor = fileNumberAnchor,
                 allowSessionFileNumberAnchor = storageId == null,
             )
         return StaDirectObjectHeader(
-            file = FileInfo(
+            file = CameraFileInfo(
                 handle = handle,
                 size = size,
                 fileName = fileName,
@@ -2745,7 +1725,7 @@ class NikonCamera(private val context: Context) {
     }
 
     private data class StaDirectObjectHeader(
-        val file: FileInfo?,
+        val file: CameraFileInfo?,
         val thumbnail: ByteArray?,
         val successful: Boolean,
         val thumbnailChecked: Boolean = true,
@@ -2902,7 +1882,11 @@ class NikonCamera(private val context: Context) {
             deriveNikonMakerFileInfo(anchor, handle)
         }
         val derivedFileName = derivedFileInfo?.let { fileInfo ->
-            nikonDefaultCameraFileName(fileInfo, detectedExtension)
+            nikonDefaultCameraFileName(
+                fileInfo,
+                detectedExtension,
+                ::formatCameraMetadataDecimalForAndroid,
+            )
         }
         val originalFileName = protocolFileName ?: embeddedFileName ?: derivedFileName
         originalFileName?.let { staDirectOriginalFileNames[handle] = it }
@@ -3048,7 +2032,7 @@ class NikonCamera(private val context: Context) {
             append(extension)
         }
         return StaDirectObjectHeader(
-            file = FileInfo(
+            file = CameraFileInfo(
                 handle = handle,
                 size = size,
                 fileName = fileName,
@@ -3188,7 +2172,7 @@ class NikonCamera(private val context: Context) {
     }
 
     /** Must be called while [ioMutex] is held; invoked only for a visible RAW thumbnail. */
-    private fun readStaDirectRawThumbnailInternal(file: FileInfo): ByteArray? {
+    private fun readStaDirectRawThumbnailInternal(file: CameraFileInfo): ByteArray? {
         fun readReference(reference: NefPreviewReference): ByteArray? =
             readStaDirectPartialInternal(
                 handle = file.handle,
@@ -3396,7 +2380,7 @@ class NikonCamera(private val context: Context) {
     }
 
     /** Must be called while [ioMutex] is held; selects the smallest indexed RAW preview that is FHD. */
-    private fun readStaDirectRawPreviewInternal(file: FileInfo): ByteArray? {
+    private fun readStaDirectRawPreviewInternal(file: CameraFileInfo): ByteArray? {
         fun readReference(reference: NefPreviewReference): ByteArray? =
             readStaDirectPartialInternal(
                 handle = file.handle,
@@ -3564,7 +2548,7 @@ class NikonCamera(private val context: Context) {
     }
 
     /** Must be called while [ioMutex] is held; never reads the full video. */
-    private fun readStaDirectVideoThumbnailInternal(file: FileInfo): ByteArray? {
+    private fun readStaDirectVideoThumbnailInternal(file: CameraFileInfo): ByteArray? {
         val requestSize = minOf(
             file.size,
             STA_DIRECT_VIDEO_THUMBNAIL_PREFIX_BYTES.toLong(),
@@ -3625,7 +2609,7 @@ class NikonCamera(private val context: Context) {
     suspend fun streamMergedFileInfo(
         newestFirstHandlesByStorage: List<List<Int>>,
         batchSize: Int = 20,
-        onBatch: suspend (List<FileInfo>, Int, Int) -> Unit,
+        onBatch: suspend (List<CameraFileInfo>, Int, Int) -> Unit,
     ): Boolean = withContext(Dispatchers.IO) {
         require(batchSize > 0) { "batchSize must be positive" }
         val groups = newestFirstHandlesByStorage.filter { it.isNotEmpty() }
@@ -3634,13 +2618,13 @@ class NikonCamera(private val context: Context) {
         val loadContext = coroutineContext
         val total = groups.sumOf { it.size }
         val cursors = IntArray(groups.size)
-        val heads = MutableList<FileInfo?>(groups.size) { null }
+        val heads = MutableList<CameraFileInfo?>(groups.size) { null }
         var completed = 0
         var allObjectInfoSucceeded = true
 
         while (completed < total) {
             val requestedHandles = ArrayList<Int>(batchSize)
-            val observedFiles = ArrayList<FileInfo>(batchSize)
+            val observedFiles = ArrayList<CameraFileInfo>(batchSize)
             val probeStartedAtMs = if (FileOrderProbe.enabled) SystemClock.elapsedRealtime() else 0L
             val completedBeforeBatch = completed
 
@@ -3703,7 +2687,7 @@ class NikonCamera(private val context: Context) {
     }
 
     internal data class ObjectInfoResult(
-        val file: FileInfo?,
+        val file: CameraFileInfo?,
         /** false 只表示 PTP/载荷失败；成功返回的文件夹等非媒体对象仍为 true。 */
         val successful: Boolean,
     )
@@ -3711,47 +2695,40 @@ class NikonCamera(private val context: Context) {
     internal fun getObjectInfoInternal(handle: Int): ObjectInfoResult {
         sendCmd(PtpConstants.GET_OBJECT_INFO, handle)
         val (respCode, data) = recvRespWithPayload()
-        if (respCode != PtpConstants.RESPONSE_OK || data == null || data.size < 53) {
+        if (respCode != PtpConstants.RESPONSE_OK || data == null) {
             return ObjectInfoResult(null, false)
         }
-
-        val storageId = data.getIntLE(0)
-        val format = data.getUShortLE(4)
+        val parsed = parsePtpObjectInfo(
+            handle,
+            data,
+            ::formatCameraMetadataDecimalForAndroid,
+        ) ?: return ObjectInfoResult(null, false)
         // 关联对象（0x3001 = 文件夹）不是文件，一律不收录：常见机型的全量枚举可能不含它，
         // 但换卡/目录滚动时相机新建文件夹会带 ObjectAdded 事件，实时新增路径必须拦住，
         // 否则列表会冒出一个 0 字节的"100NIKON"条目。
-        if (format == 0x3001) return ObjectInfoResult(null, true)
+        if (parsed.isAssociation) return ObjectInfoResult(null, true)
         // PTP ObjectInfo 的大小字段是 32 位无符号；>4GB 的对象（长视频）相机报 0xFFFFFFFF（未知）。
-        val size = data.getIntLE(8).toLong() and 0xFFFFFFFFL
-        val ext = PtpConstants.getExt(format)
-
-        val cacheIdentity = parseObjectCacheIdentity(handle, ext, data)
-
         // ProtectionStatus(偏移 6,u16) 与文件同载荷,解析零额外流量。
         //（ObjectInfo 里还有两组刻意不用的字段:SequenceNumber(48)——机型可能恒填 0、
         // 语义不统一,连拍检测走"文件编号 + 秒级时间戳"的自有算法(computeBurstHandles);
         // ImagePixWidth/Height(26/30)——竖拍存的也是传感器原生横向像素,方向只在
         // EXIF Orientation 里且依赖机内"自动旋转图像"设置,判不出构图。）
-        val isProtected = data.getUShortLE(6) != 0
-
         return ObjectInfoResult(
-            file = FileInfo(
-                handle = handle,
-                size = size,
-                fileName = cacheIdentity.fileName,
-                captureDate = cacheIdentity.captureDate,
-                isProtected = isProtected,
-                storageIds = if (storageId == 0 || storageId == -1) emptySet() else setOf(storageId),
+            file = CameraFileInfo(
+                handle = parsed.handle,
+                size = parsed.size,
+                fileName = checkNotNull(parsed.fileName),
+                captureDate = parsed.captureDate,
+                isProtected = parsed.isProtected,
+                storageIds = if (parsed.storageId == 0 || parsed.storageId == -1) {
+                    emptySet()
+                } else {
+                    setOf(parsed.storageId)
+                },
             ),
-            successful = cacheIdentity.complete,
+            successful = parsed.identityComplete,
         )
     }
-
-    data class DownloadProgress(
-        val downloaded: Long,
-        val total: Long,
-        val bytesPerSecond: Long,
-    )
 
     /** 查询 >4GB 文件的真实大小；仅由下载事务在相机通道保护内调用。 */
     private fun getObjectSizeInternal(handle: Int): Long? {
@@ -3765,17 +2742,6 @@ class NikonCamera(private val context: Context) {
         log { "GetObjectSize handle=$handle size=$size" }
         return if (size > 0) size else null
     }
-
-    /** 单文件下载完成后的统计；速度由保存层按同一端到端时间范围计算。 */
-    data class DownloadStats(
-        val bytes: Long,
-        /** 本次实际从相机读取的字节数，不包含续传前已经存在的部分。 */
-        val transferredBytes: Long,
-        /** 本文件进入协议下载流程的单调时钟时间戳（包含块间让路时间）。 */
-        val startedAtElapsedMs: Long,
-        /** Fresh downloads retain a bounded JPEG prefix so export can parse camera EXIF directly. */
-        val headerPrefix: ByteArray? = null,
-    )
 
     /**
      * 下载文件到 [output]。[totalSize] 为 ObjectInfo 中的文件大小（0/SIZE_UNKNOWN=未知）；
@@ -3957,13 +2923,14 @@ class NikonCamera(private val context: Context) {
             try {
                 // 对 >4GB 文件（ObjectInfo 报 SIZE_UNKNOWN）用 GetObjectSize 取真实 64 位大小。
                 var effectiveSize = totalSize
-                if (totalSize == PtpConstants.SIZE_UNKNOWN || totalSize <= 0L) {
-                    transferTransaction { getObjectSizeInternal(handle) }?.takeIf { it > 0 }?.let {
-                        effectiveSize = it
+                if (shouldQueryTransferSize(totalSize)) {
+                    val queriedSize = transferTransaction { getObjectSizeInternal(handle) }
+                    effectiveSize = resolvedTransferSize(totalSize, queriedSize)
+                    queriedSize?.takeIf { it > 0L }?.let {
                         log { "DL_SIZE resolved: $totalSize -> $it via GetObjectSize" }
                     }
                 }
-                val sizeKnown = effectiveSize > 0L && effectiveSize != PtpConstants.SIZE_UNKNOWN
+                val sizeKnown = isKnownTransferSize(effectiveSize)
                 val preferHighThroughput = preferHighThroughputAtStart()
                 // 浏览时 Wi-Fi 保持小分块让路；USB 及传输页可见时的 Wi-Fi 使用高吞吐策略。
                 // 此处已经冻结本文件快照，页面切换不会中途换道。
@@ -3992,7 +2959,7 @@ class NikonCamera(private val context: Context) {
                 )
 
                 // 请求了续传却走不了分块：全量只能从 0 填，会写坏已定位的流。拒绝，让调用方重下。
-                if (resumeOffset > 0 && !usePartial) {
+                if (isResumeUnavailable(resumeOffset, usePartial)) {
                     return@withContext Result.failure(ResumeUnavailableException())
                 }
 
@@ -4027,30 +2994,45 @@ class NikonCamera(private val context: Context) {
                                     got,
                                 ),
                             )
-                            // 只有相机明确表示不支持操作码，且流仍在 0，才能安全回退全量。
-                            // 设备忙等瞬时错误直接失败，绝不把当前文件降级成不可插队的整传。
-                            if (first && got == 0L && resumeOffset == 0L &&
-                                resp == PtpConstants.OPERATION_NOT_SUPPORTED
-                            ) {
+                        }
+                        when (
+                            classifyPartialObjectResponse(
+                                responseCode = resp,
+                                isFirstChunk = first,
+                                receivedBytes = got,
+                                resumeOffset = resumeOffset,
+                            )
+                        ) {
+                            PartialObjectResponseAction.FALLBACK_TO_FULL_OBJECT -> {
                                 partialObjectSupported = false
                                 fellBack = true
                                 log { "DL_PARTIAL unsupported, full fallback" }
                                 break
                             }
-                            return@withContext failed(resp)
+
+                            PartialObjectResponseAction.FAIL ->
+                                return@withContext failed(resp)
+
+                            PartialObjectResponseAction.ACCEPT -> Unit
                         }
                         partialObjectSupported = true
                         // 逐块校验：声明长度与实收不符 = 短读，立即失败（不吞不跳）。
-                        if (chunkExpected > 0 && got != chunkExpected) return@withContext incomplete(got, chunkExpected)
+                        if (!isPartialChunkLengthComplete(got, chunkExpected)) {
+                            return@withContext incomplete(got, chunkExpected)
+                        }
                         // OK 但零字节：相机不再推进，避免死循环。
-                        if (got == 0L) return@withContext incomplete(totalDownloaded, effectiveSize)
+                        if (!hasPartialChunkProgress(got)) {
+                            return@withContext incomplete(totalDownloaded, effectiveSize)
+                        }
                         // 按【实收字节】推进，而非请求量——短读也不会跳过未收到的区间。
                         offset += got
                         first = false
                     }
                     if (!fellBack) {
                         // 全文件完整性：分块模式的最终防线（此前只有逐块校验）。
-                        if (totalDownloaded != effectiveSize) return@withContext incomplete(totalDownloaded, effectiveSize)
+                        if (!isPartialDownloadComplete(totalDownloaded, effectiveSize)) {
+                            return@withContext incomplete(totalDownloaded, effectiveSize)
+                        }
                         noteStaDownload(
                             "complete handle=0x%08X bytes=%d".format(handle, totalDownloaded),
                         )
@@ -4074,7 +3056,7 @@ class NikonCamera(private val context: Context) {
                 )
                 if (resp != PtpConstants.RESPONSE_OK) return@withContext failed(resp)
                 // 相机异常提前结束数据阶段：声明大小与实收不符则判残缺。SIZE_UNKNOWN/未声明放行。
-                if (expected > 0 && expected != PtpConstants.SIZE_UNKNOWN && totalDownloaded != expected) {
+                if (!isFullObjectLengthComplete(totalDownloaded, expected)) {
                     return@withContext incomplete(totalDownloaded, expected)
                 }
                 Result.success(buildStats())
@@ -4189,7 +3171,7 @@ class NikonCamera(private val context: Context) {
         sendCmd(PtpConstants.GET_STORAGE_IDS)
         val (storageResponse, storageData) = recvRespWithPayload()
         staStorageProbeReached = true
-        val initialStorageIds = parseUInt32Array(storageData)
+        val initialStorageIds = parsePtpUInt32Array(storageData).orEmpty()
         staDiagnosticLines +=
             "GetStorageIDs=${hexResponse(storageResponse)} ids=${formatStorageIds(initialStorageIds)}"
         if (shouldForceStaProfilePairing(
@@ -4271,7 +3253,7 @@ class NikonCamera(private val context: Context) {
 
                 sendCmd(PtpConstants.GET_STORAGE_IDS)
                 val (modeStorageResponse, modeStorageData) = recvRespWithPayload()
-                val modeStorageIds = parseUInt32Array(modeStorageData)
+                val modeStorageIds = parsePtpUInt32Array(modeStorageData).orEmpty()
                 staDiagnosticLines +=
                     "mode:GetStorageIDs=${hexResponse(modeStorageResponse)} " +
                         "ids=${formatStorageIds(modeStorageIds)}"
@@ -4308,7 +3290,7 @@ class NikonCamera(private val context: Context) {
     private fun validateStaObjectAccess(label: String, storageIds: List<Int>): Boolean {
         sendCmd(PtpConstants.GET_OBJECT_HANDLES, -1, -1, 0)
         val (handlesResponse, handlesData) = recvRespWithPayload()
-        val handles = parseUInt32Array(handlesData)
+        val handles = parsePtpUInt32Array(handlesData).orEmpty()
         staObjectHandlesObserved = staObjectHandlesObserved || handles.isNotEmpty()
         staEmptyObjectListObserved = staEmptyObjectListObserved ||
             (handlesResponse == PtpConstants.RESPONSE_OK &&
@@ -4482,48 +3464,22 @@ class NikonCamera(private val context: Context) {
     private fun formatStorageIds(ids: List<Int>): String =
         "${ids.size}[${ids.joinToString(",") { "0x%08X".format(it) }}]"
 
-    /** Safely parses a PTP AUINT32 without trusting a malformed count field. */
-    private fun parseUInt32Array(data: ByteArray?): List<Int> {
-        if (data == null || data.size < 4) return emptyList()
-        val count = data.getIntLE(0)
-        if (count < 0 || count > (data.size - 4) / 4) return emptyList()
-        return List(count) { index -> data.getIntLE(4 + index * 4) }
-    }
-
     /** Existing camera-hotspot InitCommandRequest; keep byte-for-byte behavior unchanged. */
     private fun makeInitReq(): ByteArray {
         val hostname = "NikonPTP"
-        val nameBytes = hostname.toByteArray(Charsets.UTF_16LE) + byteArrayOf(0, 0)
         val guid = ByteArray(16).also { java.security.SecureRandom().nextBytes(it) }
-        val length = 8 + 16 + nameBytes.size + 2
-        val pkt = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN).apply {
-            putInt(length)
-            putInt(PtpConstants.INIT_CMD_REQ)
-            put(guid)
-            put(nameBytes)
-            putShort(1)
-        }.array()
-        return pkt
+        return PtpIpProtocolCodec.encodeLegacyInitCommandRequest(guid, hostname)
     }
 
     /** Nikon PC/STA mode needs a stable initiator and the standard 32-bit protocol version. */
     private fun makeStaInitReq(identity: StaInitiatorIdentity): ByteArray {
-        val nameBytes = "ZTransfer".toByteArray(Charsets.UTF_16LE) + byteArrayOf(0, 0)
         val guid = persistentInitiatorId(
             when (identity) {
                 StaInitiatorIdentity.PAIRED_COMPUTER -> "initiator_id"
                 StaInitiatorIdentity.ALBUM_EXPLORER -> "sta_album_explorer_id"
             },
         )
-        val length = 8 + 16 + nameBytes.size + 4
-        val pkt = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN).apply {
-            putInt(length)
-            putInt(PtpConstants.INIT_CMD_REQ)
-            put(guid)
-            put(nameBytes)
-            putInt(0x00010000)
-        }.array()
-        return pkt
+        return PtpIpProtocolCodec.encodeStandardInitCommandRequest(guid, "ZTransfer")
     }
 
     internal fun sendCmd(code: Int, vararg params: Int) {
@@ -4531,17 +3487,11 @@ class NikonCamera(private val context: Context) {
             usb.sendCommand(code, nextTid(), params)
             return
         }
-        val paramCount = params.size.coerceAtMost(5)
-        val pkt = ByteBuffer.allocate(18 + paramCount * 4).order(ByteOrder.LITTLE_ENDIAN).apply {
-            putInt(18 + paramCount * 4)
-            putInt(PtpConstants.CMD_REQUEST)
-            putInt(1)
-            putShort(code.toShort())
-            putInt(nextTid())
-            for (i in 0 until paramCount) {
-                putInt(params[i])
-            }
-        }.array()
+        val pkt = PtpIpProtocolCodec.encodeCommandRequest(
+            operationCode = code,
+            transactionId = nextTid(),
+            parameters = params,
+        )
         cmdOutput?.write(pkt)
         cmdOutput?.flush()
     }
@@ -4558,37 +3508,19 @@ class NikonCamera(private val context: Context) {
             usb.sendData(code, t, data)
             return
         }
-        val paramCount = params.size.coerceAtMost(5)
-        val pkt = ByteBuffer.allocate(18 + paramCount * 4 + 20 + 12 + data.size)
-            .order(ByteOrder.LITTLE_ENDIAN).apply {
-                // CMD_REQUEST，dataPhaseInfo=2（本事务带 data-out 阶段）
-                putInt(18 + paramCount * 4)
-                putInt(PtpConstants.CMD_REQUEST)
-                putInt(2)
-                putShort(code.toShort())
-                putInt(t)
-                for (i in 0 until paramCount) putInt(params[i])
-                // Start-Data：TID + 总长（64 位）
-                putInt(20)
-                putInt(PtpConstants.START_DATA_PACKET)
-                putInt(t)
-                putLong(data.size.toLong())
-                // End-Data：TID + 数据
-                putInt(12 + data.size)
-                putInt(PtpConstants.END_DATA_PACKET)
-                putInt(t)
-                put(data)
-            }.array()
+        val pkt = PtpIpProtocolCodec.encodeCommandWithData(
+            operationCode = code,
+            transactionId = t,
+            data = data,
+            parameters = params,
+        )
         cmdOutput?.write(pkt)
         cmdOutput?.flush()
     }
 
     /** 应答 PING。命令通道传 [cmdOutput]，事件通道传其自身输出流（各自独立，无并发冲突）。 */
     private fun sendPong(output: OutputStream?) {
-        val pong = ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN).apply {
-            putInt(8)
-            putInt(PtpConstants.PONG)
-        }.array()
+        val pong = PtpIpPacketCodec.encode(PtpConstants.PONG)
         output?.write(pong)
         output?.flush()
     }
@@ -4600,7 +3532,7 @@ class NikonCamera(private val context: Context) {
             val packet = cmdReader.readPacketRaw(cmdInput!!)
             when (packet.type) {
                 PtpConstants.CMD_RESPONSE ->
-                    return if (packet.payloadLen >= 2) packet.buffer.getUShortLE(0) else 0
+                    return PtpIpProtocolCodec.decodeResponseCode(packet.buffer, packet.payloadLen)
                 PtpConstants.PING -> sendPong(cmdOutput)
             }
         }
@@ -4614,7 +3546,7 @@ class NikonCamera(private val context: Context) {
             val packet = cmdReader.readPacket(cmdInput!!)
             when (packet.type) {
                 PtpConstants.CMD_RESPONSE -> {
-                    val respCode = packet.payload?.getUShortLE(0) ?: 0
+                    val respCode = packet.payload?.let { PtpIpProtocolCodec.decodeResponseCode(it) } ?: 0
                     return respCode to buffer?.toByteArray()
                 }
                 PtpConstants.DATA_PACKET, PtpConstants.END_DATA_PACKET -> {
@@ -4658,11 +3590,7 @@ class NikonCamera(private val context: Context) {
 
     /** PTP/IP Cancel 包：请求相机中止当前事务（[tid] 为最后发出的事务号）的数据阶段。 */
     private fun sendCancel() {
-        val pkt = ByteBuffer.allocate(12).order(ByteOrder.LITTLE_ENDIAN).apply {
-            putInt(12)
-            putInt(PtpConstants.CANCEL)
-            putInt(tid)
-        }.array()
+        val pkt = PtpIpProtocolCodec.encodeCancelRequest(tid)
         cmdOutput?.write(pkt)
         cmdOutput?.flush()
     }

@@ -2,7 +2,7 @@ package com.ztransfer.ui.screen
 
 import com.ztransfer.protocol.CameraConnectionType
 import com.ztransfer.viewmodel.CameraState
-import com.ztransfer.viewmodel.StaConnectionStatus
+import com.ztransfer.connection.StaConnectionStatus
 import com.ztransfer.viewmodel.TransferState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals

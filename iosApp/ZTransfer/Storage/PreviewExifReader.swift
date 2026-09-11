@@ -1,0 +1,165 @@
+import Foundation
+import CoreGraphics
+import ImageIO
+import Darwin
+import ZTransferShared
+
+/// Shared cancellation flag: ImageIO may invoke a C callback without the originating Swift task.
+final class PreviewExifReadCancellation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cancelled = false
+    func cancel() { lock.lock(); cancelled = true; lock.unlock() }
+    var isCancelled: Bool { lock.lock(); defer { lock.unlock() }; return cancelled }
+}
+
+/// Owns a duplicate of an already-validated descriptor, never reopens a URL or maps a whole RAW.
+final class PreviewExifFileReader: PreviewExifByteSource {
+    private let descriptor: Int32
+    private let size: Int64
+    private let cancellation: PreviewExifReadCancellation
+    private let lock = NSLock()
+    private var readFailure = false
+    var failed: Bool { lock.lock(); defer { lock.unlock() }; return readFailure }
+
+    init(fileDescriptor: Int32, size: Int64, cancellation: PreviewExifReadCancellation) throws {
+        let duplicate = Darwin.dup(fileDescriptor)
+        guard duplicate >= 0 else { throw OriginalIndexError.incompleteMetadata }
+        guard Darwin.fcntl(duplicate, F_SETFD, FD_CLOEXEC) >= 0 else {
+            _ = Darwin.close(duplicate); throw OriginalIndexError.incompleteMetadata
+        }
+        self.descriptor = duplicate; self.size = size; self.cancellation = cancellation
+    }
+    deinit { _ = Darwin.close(descriptor) }
+    private func fail() { lock.lock(); readFailure = true; lock.unlock() }
+
+    func read(offset: Int64, count: Int32) -> KotlinByteArray? {
+        guard count >= 0, count <= PreviewExifRationalReader.shared.maximumReadBytes else { return nil }
+        if count == 0 { return NativePreviewExifRationalBridge.shared.bytes(data: NSData()) }
+        var data = Data(count: Int(count))
+        let loaded = data.withUnsafeMutableBytes { buffer in
+            read(into: buffer.baseAddress!, position: offset, count: buffer.count)
+        }
+        guard loaded == Int(count) else { return nil }
+        return NativePreviewExifRationalBridge.shared.bytes(data: data as NSData)
+    }
+
+    func read(into buffer: UnsafeMutableRawPointer, position: Int64, count: Int) -> Int {
+        guard !cancellation.isCancelled, !failed, position >= 0, position <= size, count > 0 else { return 0 }
+        let requested = Int(min(Int64(count), size - position))
+        var loaded = 0
+        while loaded < requested {
+            if cancellation.isCancelled { return loaded }
+            let amount = Darwin.pread(descriptor, buffer.advanced(by: loaded), min(requested - loaded, 64 * 1024), position + Int64(loaded))
+            if amount < 0 && errno == EINTR { continue }
+            if amount <= 0 { fail(); return loaded }
+            loaded += amount
+        }
+        return loaded
+    }
+}
+
+/// Immutable, already-bounded camera header; never used for local descriptor reads.
+private final class PreviewExifHeaderReader: PreviewExifByteSource {
+    let data: Data
+    init(_ data: Data) { self.data = data }
+    func read(offset: Int64, count: Int32) -> KotlinByteArray? {
+        guard !Task.isCancelled, offset >= 0, offset <= Int64(data.count), count >= 0,
+              Int64(count) <= Int64(data.count) - offset else { return nil }
+        return NativePreviewExifRationalBridge.shared.bytes(data: data.subdata(in: Int(offset)..<(Int(offset) + Int(count))) as NSData)
+    }
+}
+
+/// ImageIO extraction only. Preview fields, Float/GPS fallback and locale rendering use shared.
+enum PreviewExifReader {
+    static func metadata(header: Data, locale: Locale = .current) throws -> PhotoExif? {
+        try Task.checkCancellation()
+        guard header.count >= 2, header.count <= 2 * 1024 * 1024 else { return nil }
+        let raw = NativePreviewExifRationalBridge.shared.readHeader(source: PreviewExifHeaderReader(header), size: Int64(header.count))
+        try Task.checkCancellation()
+        guard raw.complete || raw.partial else { return nil }
+        let source = CGImageSourceCreateWithData(header as CFData, [kCGImageSourceShouldCache: false] as CFDictionary)
+        let properties = source.flatMap { CGImageSourceCopyPropertiesAtIndex($0, 0, nil) as? [String: Any] } ?? [:]
+        let result = metadata(properties, locale: locale, rawRationals: raw)
+        try Task.checkCancellation()
+        return result
+    }
+
+    static func metadata(fileDescriptor: Int32, size: Int64, cancellation: PreviewExifReadCancellation, locale: Locale = .current) throws -> PhotoExif? {
+        try Task.checkCancellation()
+        guard !cancellation.isCancelled else { throw CancellationError() }
+        guard size > 0 else { throw PreviewImageError.invalidImage }
+        let reader = try PreviewExifFileReader(fileDescriptor: fileDescriptor, size: size, cancellation: cancellation)
+        let rationals = NativePreviewExifRationalBridge.shared.read(source: reader, size: size)
+        if cancellation.isCancelled { throw CancellationError() }
+        guard rationals.complete else { throw PreviewImageError.invalidImage }
+        let info = Unmanaged.passRetained(reader).toOpaque()
+        var callbacks = CGDataProviderDirectCallbacks(version: 0, getBytePointer: nil, releaseBytePointer: nil,
+            getBytesAtPosition: { info, buffer, position, count in
+                guard let info else { return 0 }
+                return Unmanaged<PreviewExifFileReader>.fromOpaque(info).takeUnretainedValue().read(into: buffer, position: position, count: count)
+            }, releaseInfo: { info in
+                if let info { Unmanaged<PreviewExifFileReader>.fromOpaque(info).release() }
+            })
+        guard let provider = CGDataProvider(directInfo: info, size: size, callbacks: &callbacks) else {
+            Unmanaged<PreviewExifFileReader>.fromOpaque(info).release()
+            throw PreviewImageError.invalidImage
+        }
+        let result: PhotoExif?
+        if let source = CGImageSourceCreateWithDataProvider(provider, [kCGImageSourceShouldCache: false] as CFDictionary),
+           CGImageSourceGetCount(source) > 0,
+           let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any] {
+            result = metadata(properties, locale: locale, rawRationals: rationals)
+        } else {
+            // A valid TIFF/NEF metadata directory need not contain a decodable image in this
+            // range. The bounded shared reader still owns tag selection and original rules.
+            result = metadata([:], locale: locale, rawRationals: rationals)
+        }
+        if cancellation.isCancelled { throw CancellationError() }
+        if reader.failed { throw OriginalIndexError.incompleteMetadata }
+        try Task.checkCancellation()
+        return result
+    }
+
+    /// Dictionary-only calls are property-mapping probes, not evidence of raw numeric parity.
+    static func metadata(_ properties: [String: Any], locale: Locale = .current, rawRationals: PreviewExifRationalValues? = nil) -> PhotoExif? {
+        let tiff = properties[kCGImagePropertyTIFFDictionary as String] as? [String: Any] ?? [:]
+        let exif = properties[kCGImagePropertyExifDictionary as String] as? [String: Any] ?? [:]
+        let gps = properties[kCGImagePropertyGPSDictionary as String] as? [String: Any] ?? [:]
+        func text(_ dictionary: [String: Any], _ key: CFString) -> String? {
+            if let number = dictionary[key as String] as? NSNumber {
+                guard CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
+                return number.stringValue
+            }
+            return dictionary[key as String] as? String
+        }
+        func number(_ dictionary: [String: Any], _ key: CFString) -> Double {
+            guard let raw = text(dictionary, key) else { return .nan }
+            return Double(raw) ?? .nan
+        }
+        let values = NativePreviewExifValues()
+        let fields: [(PreviewExifTag, [String: Any], CFString)] = [
+            (.fNumber, exif, kCGImagePropertyExifFNumber), (.apertureValue, exif, kCGImagePropertyExifApertureValue),
+            (.exposureTime, exif, kCGImagePropertyExifExposureTime), (.exposureBiasValue, exif, kCGImagePropertyExifExposureBiasValue),
+            (.focalLength, exif, kCGImagePropertyExifFocalLength), (.lensModel, exif, kCGImagePropertyExifLensModel),
+            (.datetimeOriginal, exif, kCGImagePropertyExifDateTimeOriginal), (.datetimeDigitized, exif, kCGImagePropertyExifDateTimeDigitized),
+            (.datetime, tiff, kCGImagePropertyTIFFDateTime), (.gpsLatitude, gps, kCGImagePropertyGPSLatitude),
+            (.gpsLatitudeRef, gps, kCGImagePropertyGPSLatitudeRef), (.gpsLongitude, gps, kCGImagePropertyGPSLongitude),
+            (.gpsLongitudeRef, gps, kCGImagePropertyGPSLongitudeRef),
+        ]
+        for (tag, dictionary, key) in fields { values.set(tag: tag, value: text(dictionary, key)) }
+        let iso: String?
+        if let ratings = exif[kCGImagePropertyExifISOSpeedRatings as String] as? [NSNumber],
+           ratings.allSatisfy({ CFGetTypeID($0) != CFBooleanGetTypeID() }) {
+            iso = ratings.map { $0.stringValue }.joined(separator: ",")
+        } else { iso = text(exif, kCGImagePropertyExifISOSpeedRatings) }
+        values.set(tag: .photographicSensitivity, value: iso)
+        values.setImageIoCoordinates(latitude: number(gps, kCGImagePropertyGPSLatitude), latitudeReference: text(gps, kCGImagePropertyGPSLatitudeRef),
+            longitude: number(gps, kCGImagePropertyGPSLongitude), longitudeReference: text(gps, kCGImagePropertyGPSLongitudeRef))
+        let altitudeRef = number(gps, kCGImagePropertyGPSAltitudeRef)
+        values.setImageIoAltitude(value: number(gps, kCGImagePropertyGPSAltitude),
+            reference: altitudeRef.isFinite && altitudeRef >= 0 && altitudeRef <= Double(Int32.max) &&
+                altitudeRef.rounded(.towardZero) == altitudeRef ? Int32(altitudeRef) : -1)
+        rawRationals?.applyTo(values: values)
+        return NativePreviewExifBridge.shared.metadata(values: values, formatter: ApplePreviewExifFormatter(locale: locale))
+    }
+}

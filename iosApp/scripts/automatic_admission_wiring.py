@@ -1,0 +1,13 @@
+"""Batch-58 exact automatic admission additions; manual/worker code retains its old baseline."""
+CHANGES = {}
+CHANGES['iosApp/ZTransfer/Network/CameraOriginalQueue.swift'] = [('            accepted += 1\n        }\n        if accepted > 0 {\n            publish()\n            if core.shouldAutoStart(deferred: deferred) { start() }\n        }\n        return accepted\n    }\n\n    /// Admission only. The event owner supplies newly discovered rows, never the initial whole catalog.\n    /// As on Android, automatic transfer requires an enabled option and an explicit directory target.\n    func enqueueNewMedia(_ infos: [PtpObjectInfo], files: [CameraFileInfo], enabled: Bool,\n                         byDate: Bool, dayKey: Int32, deferred: Bool) -> Int {\n        guard !Task.isCancelled, enabled, destination != nil, infos.count == files.count else { return 0 }\n        let accepted = Int(core.enqueueNewMedia(infos: infos, files: files, byDate: byDate, dayKey: dayKey))\n        if accepted > 0 {\n            publish()\n', '            accepted += 1\n        }\n        if accepted > 0 {\n            publish()\n')]
+CHANGES['shared/src/commonMain/kotlin/com/ztransfer/viewmodel/NativeOriginalTransferQueue.kt'] = [("            nextId == Long.MAX_VALUE) return null\n        return enqueueFile(file.copy(storageIds = file.storageIds.toSet()), byDate, dayKey)\n    }\n\n    /** Automatic events use Android's existing identity suppression; manual enqueue stays repeatable. */\n    fun enqueueNewMedia(infos: List<PtpObjectInfo>, files: List<CameraFileInfo>, byDate: Boolean, dayKey: Int): Int {\n        if (infos.size != files.size) return 0\n        val metadata = LinkedHashMap<CameraFileInfo, PtpObjectInfo>()\n        files.indices.forEach { index -> metadata.getOrPut(files[index]) { infos[index] } }\n        return newMediaQueueCandidates(files, tasks).count { file ->\n            isAutoTransferMedia(file) && enqueueCatalog(checkNotNull(metadata[file]), file, byDate, dayKey) != null\n        }\n    }\n\n", '            nextId == Long.MAX_VALUE) return null\n        return enqueueFile(file.copy(storageIds = file.storageIds.toSet()), byDate, dayKey)\n    }\n\n')]
+
+
+def previous_automatic_source(path, value):
+    from event_history_wiring import previous_event_history_source
+    value = previous_event_history_source(path, value)
+    for new, old in CHANGES.get(path, ()):
+        assert value.count(new) == 1, (path, new)
+        value = value.replace(new, old, 1)
+    return value

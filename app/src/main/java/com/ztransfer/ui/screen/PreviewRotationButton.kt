@@ -21,18 +21,5 @@ internal fun PreviewRotationButton(
     modifier: Modifier = Modifier,
     buttonSize: Dp = 44.dp,
 ) {
-    val colors = AppTheme.colors
-    GlassButton(
-        onClick = onClick,
-        modifier = modifier.size(buttonSize),
-        shape = CircleShape,
-        contentPadding = PaddingValues(buttonSize / 4f),
-    ) {
-        Icon(
-            imageVector = Icons.Default.RotateLeft,
-            contentDescription = stringResource(R.string.cd_rotate_photo),
-            tint = colors.accentBlue,
-            modifier = Modifier.size(buttonSize / 2f),
-        )
-    }
+    SharedPreviewRotationButton(onClick, { stringResource(R.string.cd_rotate_photo) }, modifier, buttonSize)
 }

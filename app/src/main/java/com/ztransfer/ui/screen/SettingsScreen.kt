@@ -63,6 +63,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.rounded.Star
@@ -153,6 +154,9 @@ import com.ztransfer.frame.photoFrameTimePatternExample
 import com.ztransfer.frame.resolvedPhotoFrameMetadataSettings
 import com.ztransfer.filter.PhotoFilterPreset
 import com.ztransfer.filter.BuiltInPhotoFilters
+import com.ztransfer.filter.PhotoFilterCategory
+import com.ztransfer.filter.orderForCategory
+import com.ztransfer.filter.builtInPhotoFilterNameResId
 import com.ztransfer.filter.PhotoFilterRenderer
 import com.ztransfer.filter.PhotoFilterSelection
 import com.ztransfer.filter.normalizePhotoFilterIntensity
@@ -478,6 +482,7 @@ fun SettingsOverlay(
             .navigationBarsPadding()   // 小屏时面板底部不顶进导航栏
             .fillMaxWidth(),
         animateScale = false,
+        genieFromAnchor = true,
         overlayContent = {
             if (showMainSettingsInfo) {
                 MainSettingsInfoBubble(
@@ -505,7 +510,7 @@ fun SettingsOverlay(
             ) {
                 Surface(
                     shape = RoundedCornerShape(18.dp),
-                    color = colors.glassSurfaceHeavy,
+                    color = colors.glassSurface.copy(alpha = 0.92f),
                     shadowElevation = 6.dp,
                     border = BorderStroke(1.dp, colors.glassPanelBorder)
                 ) {
@@ -526,26 +531,26 @@ fun SettingsOverlay(
             if (settingsPage == SettingsPage.EFFECTS) commitPhotoEffectsDraft()
             settingsPage = SettingsPage.MAIN
         }
+        // Detail navigation is a short directional push, not another popup opening.
+        val pageTravel = with(density) { 24.dp.roundToPx() }
         AnimatedContent(
             targetState = settingsPage,
             transitionSpec = {
                 val enteringEditor = targetState != SettingsPage.MAIN
-                val enter = if (enteringEditor) {
-                    slideInHorizontally(Motion.pageSlide) { it / 3 }
-                } else {
-                    slideInHorizontally(Motion.pageSlide) { -it / 3 }
+                val direction = if (enteringEditor) 1 else -1
+                val enter = slideInHorizontally(tween(240, easing = FastOutSlowInEasing)) {
+                    direction * pageTravel
                 }
-                val exit = if (enteringEditor) {
-                    slideOutHorizontally(Motion.pageSlide) { -it / 3 }
-                } else {
-                    slideOutHorizontally(Motion.pageSlide) { it / 3 }
+                val exit = slideOutHorizontally(tween(200, easing = FastOutSlowInEasing)) {
+                    -direction * pageTravel
                 }
-                (enter + fadeIn(Motion.overlayExpand))
-                    .togetherWith(exit + fadeOut(Motion.overlayCollapse))
+                (enter + fadeIn(tween(180, delayMillis = 40)))
+                    .togetherWith(exit + fadeOut(tween(100)))
+                    .apply { targetContentZIndex = if (enteringEditor) 1f else 0f }
                     .using(
                         SizeTransform(
-                            clip = false,
-                            sizeAnimationSpec = { _, _ -> tween(340, easing = FastOutSlowInEasing) },
+                            clip = true,
+                            sizeAnimationSpec = { _, _ -> tween(240, easing = FastOutSlowInEasing) },
                         )
                     )
             },
@@ -901,154 +906,26 @@ fun SettingsOverlay(
             }
             Spacer(Modifier.height(14.dp))
 
-            // ---------- 传输目录：标题、单行路径与更改按钮并排；未设置时保留橙色强调 ----------
-            SettingsCard(
-                modifier = Modifier.graphicsLayer {
-                    val scale = 1f + directoryAttentionProgress.value * 0.008f
-                    scaleX = scale
-                    scaleY = scale
-                },
-                borderColor = if (dirText == null) {
-                    colors.accentOrange.copy(alpha = 0.8f)
-                } else {
-                    colors.glassPanelBorder
-                },
-                attentionColor = colors.accentOrange.takeIf { directoryAttentionActive },
-                attentionProgress = directoryAttentionProgress.value,
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Default.LocationOn,
-                        contentDescription = null,
-                        tint = if (dirText != null) colors.statusConnected else colors.accentOrange,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(Modifier.width(10.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        SectionLabel(stringResource(R.string.transfer_directory))
-                        Text(
-                            text = dirText ?: stringResource(
-                                if (directoryAttentionActive) {
-                                    R.string.dir_please_set
-                                } else {
-                                    R.string.dir_not_set
-                                }
-                            ),
-                            style = if (directoryAttentionActive) {
-                                MaterialTheme.typography.labelLarge
-                            } else {
-                                MaterialTheme.typography.bodySmall
-                            },
-                            fontWeight = if (directoryAttentionActive) {
-                                FontWeight.Bold
-                            } else {
-                                FontWeight.Normal
-                            },
-                            color = if (dirText != null) colors.onSurfaceVariant else colors.accentOrange,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    Spacer(Modifier.width(10.dp))
-                    GlassButton(
-                        onClick = { directoryPicker.launch(null) },
-                        shape = RoundedCornerShape(12.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp),
-                        modifier = Modifier.height(30.dp)
-                    ) {
-                        Text(
-                            stringResource(if (dirText != null) R.string.change_directory else R.string.choose_directory),
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = colors.onBackground
-                        )
-                    }
-                }
-
-                CardDivider()
-
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    BooleanSettingsWheel(
-                        label = stringResource(R.string.organize_transfers_by_date),
-                        checked = state.organizeTransfersByDate,
-                        onCheckedChange = viewModel::setOrganizeTransfersByDate,
-                        hapticsEnabled = state.hapticsEnabled,
-                        enabled = state.transferDirUri != null,
-                        modifier = Modifier.weight(1f),
-                    )
-                    BooleanSettingsWheel(
-                        label = stringResource(R.string.auto_transfer_new_media),
-                        checked = state.autoTransferNewMedia,
-                        onCheckedChange = viewModel::setAutoTransferNewMedia,
-                        hapticsEnabled = state.hapticsEnabled,
-                        enabled = state.transferDirUri != null,
-                        modifier = Modifier.weight(1f),
-                    )
-                    BooleanSettingsWheel(
-                        label = stringResource(R.string.defer_transfer_start),
-                        checked = state.deferTransferStart,
-                        onCheckedChange = viewModel::setDeferTransferStart,
-                        hapticsEnabled = state.hapticsEnabled,
-                        enabled = state.transferDirUri != null,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(8.dp))
-
-            Spacer(Modifier.height(8.dp))
-
-            // ---------- 照片列表：布局和操作方式 ----------
-            val photoInteractionChoices = listOf(
-                false to stringResource(R.string.tap_transfer_hold_preview),
-                true to stringResource(R.string.tap_preview_hold_transfer),
+            SharedTransferDirectorySettingsCard(
+                dirText = dirText, hasDirectory = state.transferDirUri != null,
+                directoryAttentionActive = directoryAttentionActive, attentionProgress = directoryAttentionProgress.value,
+                organizeByDate = state.organizeTransfersByDate, autoTransfer = state.autoTransferNewMedia,
+                deferStart = state.deferTransferStart, hapticsEnabled = state.hapticsEnabled,
+                text = AndroidSettingsControlsText, selectDirectory = { directoryPicker.launch(null) },
+                onOrganizeByDate = viewModel::setOrganizeTransfersByDate,
+                onAutoTransfer = viewModel::setAutoTransferNewMedia, onDeferStart = viewModel::setDeferTransferStart,
             )
-            SettingsCard {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    ReleaseCommitWheel(
-                        options = PHOTO_COLUMN_OPTIONS,
-                        selected = state.thumbnailColumns,
-                        optionLabel = { it.toString() },
-                        onValueCommitted = viewModel::setThumbnailColumns,
-                        onDetent = haptics::tick,
-                        label = stringResource(R.string.columns),
-                        modifier = Modifier.weight(1f),
-                    )
-                    BooleanSettingsWheel(
-                        label = stringResource(R.string.collapse_burst_photos),
-                        checked = state.collapseBurstPhotos,
-                        onCheckedChange = viewModel::setCollapseBurstPhotos,
-                        hapticsEnabled = state.hapticsEnabled,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
 
-                CardDivider()
+            Spacer(Modifier.height(8.dp))
 
-                val selectedPhotoInteraction = photoInteractionChoices.first {
-                    it.first == state.tapToPreview
-                }
-                ReleaseCommitWheel(
-                    options = photoInteractionChoices,
-                    selected = selectedPhotoInteraction,
-                    optionLabel = { (_, label) -> label },
-                    onValueCommitted = { (tapToPreview, _) ->
-                        viewModel.setTapToPreview(tapToPreview)
-                    },
-                    onDetent = haptics::tick,
-                    label = stringResource(R.string.photo_interaction),
-                    optionRowHeight = 32.dp,
-                    optionMaxLines = 2,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
+            Spacer(Modifier.height(8.dp))
+
+            SharedPhotoListSettingsCard(
+                columns = state.thumbnailColumns, collapseBursts = state.collapseBurstPhotos,
+                tapToPreview = state.tapToPreview, hapticsEnabled = state.hapticsEnabled,
+                text = AndroidSettingsControlsText, onColumns = viewModel::setThumbnailColumns,
+                onCollapseBursts = viewModel::setCollapseBurstPhotos, onTapToPreview = viewModel::setTapToPreview,
+            )
 
             Spacer(Modifier.height(8.dp))
 
@@ -1186,102 +1063,13 @@ fun SettingsOverlay(
             Spacer(Modifier.height(8.dp))
             }
 
-            // ---------- 明暗、语言、按钮材质：同款拨轮，全部只在松手后提交 ----------
-            val themeChoices = ThemeMode.entries.map { mode ->
-                mode to stringResource(
-                    when (mode) {
-                        ThemeMode.SYSTEM -> R.string.theme_system
-                        ThemeMode.DARK -> R.string.theme_dark
-                        ThemeMode.LIGHT -> R.string.theme_light
-                    }
-                )
-            }
-            val selectedTheme = themeChoices.first { it.first == state.themeMode }
-            val languages = listOf(
-                AppLocale.SYSTEM to stringResource(R.string.language_system),
-                "en" to "English",
-                "zh-Hans" to "简体中文",
-                "zh-Hant" to "繁體中文",
+            SharedAppearanceSettingsCard(
+                themeMode = state.themeMode, appLanguage = state.appLanguage, systemLanguageValue = AppLocale.SYSTEM,
+                skinPreset = state.skinPreset, hapticsEnabled = state.hapticsEnabled, keepScreenOn = state.keepScreenOn,
+                text = AndroidSettingsControlsText, onTheme = viewModel::setThemeMode,
+                onLanguage = viewModel::setAppLanguage, onSkin = viewModel::setSkinPreset,
+                onHaptics = viewModel::setHapticsEnabled, onKeepScreenOn = viewModel::setKeepScreenOn, close = close,
             )
-            val selectedLanguage = languages.firstOrNull { it.first == state.appLanguage }
-                ?: languages.first()
-            val skinChoices = ButtonSkinDisplayOrder.map { skin ->
-                skin to stringResource(skin.displayNameResId)
-            }
-            val selectedSkin = skinChoices.first { it.first == state.skinPreset }
-            SettingsCard {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    ReleaseCommitWheel(
-                        options = themeChoices,
-                        selected = selectedTheme,
-                        optionLabel = { it.second },
-                        onValueCommitted = { viewModel.setThemeMode(it.first) },
-                        onDetent = haptics::tick,
-                        label = stringResource(R.string.light_dark_mode),
-                        wheelHeight = COMPACT_SETTINGS_WHEEL_HEIGHT,
-                        optionRowHeight = COMPACT_SETTINGS_WHEEL_ROW_HEIGHT,
-                        optionFontSize = COMPACT_SETTINGS_WHEEL_FONT_SIZE,
-                        modifier = Modifier.weight(APPEARANCE_COMPACT_WHEEL_WEIGHT),
-                    )
-                    ReleaseCommitWheel(
-                        options = languages,
-                        selected = selectedLanguage,
-                        optionLabel = { it.second },
-                        onValueCommitted = { language ->
-                            if (language.first != state.appLanguage) {
-                                viewModel.setAppLanguage(language.first)
-                                close()
-                            }
-                        },
-                        onDetent = haptics::tick,
-                        label = stringResource(R.string.language),
-                        wheelHeight = COMPACT_SETTINGS_WHEEL_HEIGHT,
-                        optionRowHeight = COMPACT_SETTINGS_WHEEL_ROW_HEIGHT,
-                        optionFontSize = COMPACT_SETTINGS_WHEEL_FONT_SIZE,
-                        modifier = Modifier.weight(APPEARANCE_COMPACT_WHEEL_WEIGHT),
-                    )
-                    ReleaseCommitWheel(
-                        options = skinChoices,
-                        selected = selectedSkin,
-                        optionLabel = { it.second },
-                        onValueCommitted = { viewModel.setSkinPreset(it.first) },
-                        onDetent = haptics::tick,
-                        label = stringResource(R.string.button_style),
-                        wheelHeight = COMPACT_SETTINGS_WHEEL_HEIGHT,
-                        optionRowHeight = COMPACT_SETTINGS_WHEEL_ROW_HEIGHT,
-                        optionFontSize = COMPACT_SETTINGS_WHEEL_FONT_SIZE,
-                        modifier = Modifier.weight(BUTTON_STYLE_WHEEL_WEIGHT),
-                    )
-                }
-
-                CardDivider()
-
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    BooleanSettingsWheel(
-                        label = stringResource(R.string.haptic_feedback),
-                        checked = state.hapticsEnabled,
-                        onCheckedChange = viewModel::setHapticsEnabled,
-                        hapticsEnabled = state.hapticsEnabled,
-                        isHapticsPreference = true,
-                        compact = true,
-                        modifier = Modifier.weight(1f),
-                    )
-                    BooleanSettingsWheel(
-                        label = stringResource(R.string.keep_screen_on),
-                        checked = state.keepScreenOn,
-                        onCheckedChange = viewModel::setKeepScreenOn,
-                        hapticsEnabled = state.hapticsEnabled,
-                        compact = true,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-            }
 
             Spacer(Modifier.height(14.dp))
 
@@ -1411,7 +1199,7 @@ internal fun PhotoEffectsInfoBubble(
     val panelTop = anchorBounds?.let {
         with(density) { it.bottom.toDp() } - parentTopInset + 8.dp
     } ?: 64.dp
-    val guidance = listOf(gestureHint, stringResource(R.string.photo_effects_wheel_hint))
+    val guidance = listOf(gestureHint, stringResource(R.string.photo_effects_wheel_hint), stringResource(R.string.photo_effects_full_chooser_hint))
         .filter { it.isNotBlank() }
         .joinToString("\n")
     val items = buildList {
@@ -1537,6 +1325,8 @@ internal fun PhotoFilterEditor(
     val filterAccent = colors.accentBlue
     val favoritePalette = rememberPhotoEffectFavoriteButtonPalette()
     val haptics = rememberHaptics(hapticsEnabled)
+    var showFullChooser by rememberSaveable { mutableStateOf(false) }
+    var chooserCategory by rememberSaveable { mutableStateOf(PhotoFilterCategory.ALL.name) }
     val selected = filters.firstOrNull { it.id == selectedId }
     val normalizedIntensity = normalizePhotoFilterIntensity(intensityPercent)
     val intensityChoices = remember { (100 downTo 2 step 2).toList() }
@@ -1590,6 +1380,7 @@ internal fun PhotoFilterEditor(
                 wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
                 accentColor = filterAccent,
                 modifier = Modifier.weight(PHOTO_EFFECTS_PRIMARY_WHEEL_WEIGHT),
+                onLongClick = { showFullChooser = true },
             )
             ReleaseCommitWheel(
                 options = intensityChoices,
@@ -1620,6 +1411,92 @@ internal fun PhotoFilterEditor(
                     }
                 },
             )
+        }
+    }
+    if (showFullChooser) {
+        val category = PhotoFilterCategory.entries.firstOrNull { it.name == chooserCategory } ?: PhotoFilterCategory.ALL
+        val favoriteKeys = favoriteFilters.map { it.catalogKey }
+        val chooserFilters = filters.orderForCategory(category, favoriteKeys) { BuiltInPhotoFilters.catalogKey(it.id) ?: it.id }
+        Dialog(
+            onDismissRequest = { showFullChooser = false },
+            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+        ) {
+            Surface(
+                modifier = Modifier.padding(horizontal = 24.dp).width(280.dp),
+                shape = RoundedCornerShape(18.dp),
+                color = colors.glassSurface.copy(alpha = 0.92f),
+                border = BorderStroke(1.dp, colors.glassPanelBorder),
+                shadowElevation = 6.dp,
+            ) {
+                // Match the painted row and touch target so Material's minimum target does
+                // not add invisible space between cards. No title or action slots here.
+                CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 44.dp) {
+                Row(
+                    Modifier.padding(10.dp).heightIn(max = 380.dp).fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Column(
+                        modifier = Modifier.width(84.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        PhotoFilterCategory.entries.forEach { item ->
+                            val selectedCategory = item == category
+                            Surface(
+                                onClick = { chooserCategory = item.name },
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (selectedCategory) filterAccent.copy(alpha = 0.18f) else Color.Transparent,
+                                modifier = Modifier.fillMaxWidth().heightIn(min = 40.dp),
+                            ) {
+                                Box(contentAlignment = Alignment.CenterStart) {
+                                Text(
+                                    text = item.title,
+                                    color = if (selectedCategory) filterAccent else colors.onSurfaceVariant,
+                                    fontWeight = if (selectedCategory) FontWeight.SemiBold else FontWeight.Normal,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                )
+                                }
+                            }
+                        }
+                    }
+                    Column(
+                        modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        chooserFilters.forEach { preset ->
+                            val isSelected = enabled && preset.id == selectedId
+                            val isFavorite = favoriteKeys.contains(BuiltInPhotoFilters.catalogKey(preset.id))
+                            Surface(
+                                onClick = {
+                                    onSelected(preset.id)
+                                    onIntensityChanged(preset.id, rememberedIntensity(preset.id))
+                                    showFullChooser = false
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (isSelected) filterAccent.copy(alpha = 0.14f) else Color.Transparent,
+                                modifier = Modifier.fillMaxWidth().heightIn(min = 40.dp),
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    if (isFavorite) {
+                                        Icon(Icons.Rounded.Star, contentDescription = null, tint = colors.accentYellow, modifier = Modifier.size(18.dp))
+                                        Spacer(Modifier.width(8.dp))
+                                    }
+                                    Text(
+                                        text = photoFilterDisplayName(preset),
+                                        color = colors.onBackground,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                }
+            }
         }
     }
 }
@@ -1798,7 +1675,7 @@ private fun FittedRotatingBitmap(
 
 @Composable
 private fun photoFilterDisplayName(filter: PhotoFilterPreset): String =
-    BuiltInPhotoFilters.nameResId(filter.id)?.let { stringResource(it) } ?: filter.name
+    builtInPhotoFilterNameResId(filter.id)?.let { stringResource(it) } ?: filter.name
 
 @Composable
 internal fun PhotoFrameWatermarkEditor(
@@ -3041,7 +2918,7 @@ internal fun PhotoEffectsRenderedPreview(
                     modifier = Modifier.fillMaxSize(),
                 )
                 Surface(
-                    color = colors.glassSurfaceHeavy,
+                    color = colors.glassSurface.copy(alpha = 0.92f),
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.align(Alignment.BottomCenter),
                 ) {
@@ -3055,7 +2932,7 @@ internal fun PhotoEffectsRenderedPreview(
             }
             if (previewFailed && preview != null) {
                 Surface(
-                    color = colors.glassSurfaceHeavy,
+                    color = colors.glassSurface.copy(alpha = 0.92f),
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.align(Alignment.BottomCenter),
                 ) {
@@ -3097,7 +2974,7 @@ private fun PhotoEffectsPreviewLayer(
 private const val PHOTO_EFFECTS_PREVIEW_LANDSCAPE_ASPECT_RATIO = 4f / 3f
 private const val PHOTO_EFFECTS_PREVIEW_PORTRAIT_ASPECT_RATIO = 3f / 4f
 private val PHOTO_EFFECTS_CONTROL_HEIGHT = 50.dp
-// 顶部两行共用 4:3 栅格：名称类波轮更舒展，数值/开关波轮更紧凑，收藏方钮保持对齐。
+// 顶部两行共用 4:3 栅格：名称类拨轮更舒展，数值/开关拨轮更紧凑，收藏方钮保持对齐。
 private const val PHOTO_EFFECTS_PRIMARY_WHEEL_WEIGHT = 4f
 private const val PHOTO_EFFECTS_SECONDARY_WHEEL_WEIGHT = 3f
 // 与相机 FHD 预览源保持一致，避免高密度屏幕或放大查看时出现二次缩放模糊。
@@ -3297,10 +3174,10 @@ private fun createPhotoFramePreviewSource(): Bitmap {
 }
 
 /**
- * 设置页布尔波轮统一入口：档位真正改变时才触发轻触反馈。
+ * 设置页布尔拨轮统一入口：档位真正改变时才触发轻触反馈。
  *
- * 触感反馈波轮本身始终允许播放这一次确认反馈，这样从关闭切到开启时，
- * 用户能够立即知道设置已经生效；其余布尔波轮严格受全局触感偏好控制。
+ * 触感反馈拨轮本身始终允许播放这一次确认反馈，这样从关闭切到开启时，
+ * 用户能够立即知道设置已经生效；其余布尔拨轮严格受全局触感偏好控制。
  */
 @Composable
 private fun BooleanSettingsWheel(
@@ -3313,39 +3190,12 @@ private fun BooleanSettingsWheel(
     isHapticsPreference: Boolean = false,
     compact: Boolean = false,
 ) {
-    val colors = AppTheme.colors
-    val wheelHaptics = rememberHaptics(hapticsEnabled || isHapticsPreference)
-    val offLabel = stringResource(R.string.setting_off)
-    val onLabel = stringResource(R.string.setting_on)
-    ReleaseCommitWheel(
-        options = BOOLEAN_SETTINGS_OPTIONS,
-        selected = checked,
-        optionLabel = { value -> if (value) onLabel else offLabel },
-        onValueCommitted = onCheckedChange,
-        onDetent = wheelHaptics::tick,
-        label = label,
-        accentColor = if (checked) colors.accentBlue else colors.statusWaiting,
-        emphasized = checked,
-        wheelHeight = if (compact) {
-            COMPACT_SETTINGS_WHEEL_HEIGHT
-        } else {
-            BOOLEAN_SETTINGS_WHEEL_HEIGHT
-        },
-        optionRowHeight = if (compact) COMPACT_SETTINGS_WHEEL_ROW_HEIGHT else 18.dp,
-        optionFontSize = if (compact) COMPACT_SETTINGS_WHEEL_FONT_SIZE else 14.sp,
-        modifier = modifier,
-        enabled = enabled,
-    )
+    SharedBooleanSettingsWheel(label, checked, onCheckedChange, hapticsEnabled, modifier, enabled, isHapticsPreference, compact, AndroidSettingsControlsText)
 }
 
-private val BOOLEAN_SETTINGS_OPTIONS = listOf(false, true)
-private val BOOLEAN_SETTINGS_WHEEL_HEIGHT = 50.dp
-private val COMPACT_SETTINGS_WHEEL_HEIGHT = 42.dp
-private val COMPACT_SETTINGS_WHEEL_ROW_HEIGHT = 16.dp
-private val COMPACT_SETTINGS_WHEEL_FONT_SIZE = 13.sp
-private const val APPEARANCE_COMPACT_WHEEL_WEIGHT = 3f
-private const val BUTTON_STYLE_WHEEL_WEIGHT = 4f
-private val PHOTO_COLUMN_OPTIONS = listOf(2, 3, 4)
+private val COMPACT_SETTINGS_WHEEL_HEIGHT = SettingsCompactWheelHeight
+private val COMPACT_SETTINGS_WHEEL_ROW_HEIGHT = SettingsCompactWheelRowHeight
+private val COMPACT_SETTINGS_WHEEL_FONT_SIZE = SettingsCompactWheelFontSize
 
 internal enum class GpsStatusButtonState {
     OFF,
@@ -3559,7 +3409,7 @@ private fun GpsResetPairingDialog(
     Dialog(onDismissRequest = onDismiss) {
         Surface(
             shape = GPS_PANEL_SHAPE,
-            color = colors.glassSurfaceHeavy,
+            color = colors.glassSurface.copy(alpha = 0.92f),
             border = BorderStroke(1.dp, colors.glassPanelBorder),
             tonalElevation = 6.dp,
         ) {
@@ -4850,98 +4700,13 @@ private fun SettingsCard(
     onClick: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    val shape = RoundedCornerShape(14.dp)
-    val interactionSource = remember { MutableInteractionSource() }
-    val pressed by interactionSource.collectIsPressedAsState()
-    val enhancedPress = pressAccentColor != null
-    val pressScale by animateFloatAsState(
-        targetValue = if (pressed && enabled && onClick != null) {
-            if (enhancedPress) 0.982f else 0.992f
-        } else {
-            1f
-        },
-        animationSpec = if (pressed) tween(80) else Motion.bouncy(),
-        label = "settingsCardPress",
-    )
-    val pressProgress by animateFloatAsState(
-        targetValue = if (pressed && enabled && onClick != null && enhancedPress) 1f else 0f,
-        animationSpec = if (pressed) tween(90) else Motion.bouncy(),
-        label = "settingsCardPressHighlight",
-    )
-    val normalizedAttention = attentionProgress.coerceIn(0f, 1f)
-    val effectiveBorderColor = when {
-        pressAccentColor != null && pressProgress > 0f -> pressAccentColor.copy(
-            alpha = 0.52f + 0.30f * pressProgress,
-        )
-        attentionColor != null -> attentionColor.copy(
-            alpha = 0.72f + 0.26f * normalizedAttention,
-        )
-        else -> borderColor
-    }
-    val effectiveBorderWidth = when {
-        pressProgress > 0f -> 1f + 0.45f * pressProgress
-        attentionColor != null -> 1.25f + 0.75f * normalizedAttention
-        else -> 1f
-    }
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .graphicsLayer {
-                scaleX = pressScale
-                scaleY = pressScale
-            }
-            .clip(shape)
-            .then(
-                if (onClick != null) {
-                    Modifier.clickable(
-                        enabled = enabled,
-                        interactionSource = interactionSource,
-                        indication = null,
-                        onClick = onClick,
-                    )
-                } else {
-                    Modifier
-                }
-            )
-            // onBackground 极低透明度：深色主题下是白色微提亮、浅色下是黑色微压暗，两套都成立。
-            .background(AppTheme.colors.onBackground.copy(alpha = 0.04f))
-            .then(
-                tintColor?.let { accent ->
-                    Modifier.background(accent.copy(alpha = 0.040f))
-                } ?: Modifier
-            )
-            .then(
-                attentionColor?.let { accent ->
-                    Modifier.background(
-                        accent.copy(alpha = 0.055f + 0.075f * normalizedAttention)
-                    )
-                } ?: Modifier
-            )
-            .then(
-                pressAccentColor?.let { accent ->
-                    Modifier.background(accent.copy(alpha = 0.10f * pressProgress))
-                } ?: Modifier
-            )
-            .border(
-                width = effectiveBorderWidth.dp,
-                color = effectiveBorderColor,
-                shape = shape,
-            )
-            .padding(12.dp),
-        content = content
-    )
+    SharedSettingsCard(modifier, borderColor, tintColor, pressAccentColor, attentionColor, attentionProgress, enabled, onClick, content)
 }
 
 /** 卡片内子项之间的细分隔线（上下留呼吸间距）。 */
 @Composable
 private fun CardDivider() {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 8.dp)
-            .height(1.dp)
-            .background(AppTheme.colors.glassPanelBorder)
-    )
+    SharedCardDivider()
 }
 
 /**
@@ -5084,11 +4849,63 @@ private fun SectionLabel(
     modifier: Modifier = Modifier,
     color: Color = AppTheme.colors.onBackground,
 ) {
-    Text(
-        text,
-        modifier = modifier,
-        style = MaterialTheme.typography.titleSmall,
-        fontWeight = FontWeight.SemiBold,
-        color = color,
-    )
+    SharedSectionLabel(text, modifier, color)
 }
+
+/** Android keeps the original resource and skin-label resolution. */
+private object AndroidSettingsControlsText : SettingsControlsText {
+    @Composable override fun label(key: SettingsTextKey): String = stringResource(when (key) {
+        SettingsTextKey.auto_transfer_new_media -> R.string.auto_transfer_new_media
+        SettingsTextKey.button_style -> R.string.button_style
+        SettingsTextKey.change_directory -> R.string.change_directory
+        SettingsTextKey.choose_directory -> R.string.choose_directory
+        SettingsTextKey.collapse_burst_photos -> R.string.collapse_burst_photos
+        SettingsTextKey.columns -> R.string.columns
+        SettingsTextKey.defer_transfer_start -> R.string.defer_transfer_start
+        SettingsTextKey.dir_not_set -> R.string.dir_not_set
+        SettingsTextKey.dir_please_set -> R.string.dir_please_set
+        SettingsTextKey.haptic_feedback -> R.string.haptic_feedback
+        SettingsTextKey.keep_screen_on -> R.string.keep_screen_on
+        SettingsTextKey.language -> R.string.language
+        SettingsTextKey.language_system -> R.string.language_system
+        SettingsTextKey.light_dark_mode -> R.string.light_dark_mode
+        SettingsTextKey.organize_transfers_by_date -> R.string.organize_transfers_by_date
+        SettingsTextKey.photo_interaction -> R.string.photo_interaction
+        SettingsTextKey.setting_off -> R.string.setting_off
+        SettingsTextKey.setting_on -> R.string.setting_on
+        SettingsTextKey.tap_preview_hold_transfer -> R.string.tap_preview_hold_transfer
+        SettingsTextKey.tap_transfer_hold_preview -> R.string.tap_transfer_hold_preview
+        SettingsTextKey.theme_dark -> R.string.theme_dark
+        SettingsTextKey.theme_light -> R.string.theme_light
+        SettingsTextKey.theme_system -> R.string.theme_system
+        SettingsTextKey.transfer_directory -> R.string.transfer_directory
+    })
+    @Composable override fun skinLabel(skin: SkinPreset): String = stringResource(skin.displayNameResId)
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

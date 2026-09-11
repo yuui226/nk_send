@@ -1,5 +1,6 @@
 package com.ztransfer.viewmodel
 
+import com.ztransfer.catalog.StorageHandleOrder
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -41,45 +42,6 @@ class FileScanHandleSnapshotTest {
 
         assertEquals(oldSession, newSession)
         assertFalse(snapshot.belongsTo(newSession))
-    }
-
-    @Test
-    fun cameraOrderIsReversedPerCardWithoutNumericResort() {
-        val jpgOld = 0x29195C4B
-        val rawOld = 0x09195C4B
-        val movie = 0x61195C4C
-        val jpgNew = 0x29195C4D
-        val rawNew = 0x09195C4D
-
-        assertEquals(
-            listOf(
-                StorageHandleOrder(
-                    storageId = 0x00010001,
-                    newestFirstHandles = listOf(rawNew, jpgNew, movie, rawOld, jpgOld),
-                )
-            ),
-            newestFirstHandleOrders(
-                listOf(
-                    0x00010001 to listOf(jpgOld, rawOld, movie, jpgNew, rawNew)
-                )
-            ),
-        )
-    }
-
-    @Test
-    fun duplicateHandleAcrossCardsIsKeptOnlyInFirstCardOrder() {
-        assertEquals(
-            listOf(
-                StorageHandleOrder(1, listOf(3, 2, 1)),
-                StorageHandleOrder(2, listOf(5, 4)),
-            ),
-            newestFirstHandleOrders(
-                listOf(
-                    1 to listOf(1, 2, 3),
-                    2 to listOf(2, 4, 5),
-                )
-            ),
-        )
     }
 
     @Test

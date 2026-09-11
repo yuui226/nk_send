@@ -760,7 +760,7 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
                 longitude = candidate.longitude,
                 altitudeMeters = altitude,
                 satellites = satellites,
-                timestamp = Instant.now(),
+                timestamp = Instant.now().toGeoUtcDateTime(),
             )
         }.getOrNull() ?: return
         geoWriteInFlight = true

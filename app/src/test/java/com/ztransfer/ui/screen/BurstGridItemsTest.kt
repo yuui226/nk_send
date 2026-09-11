@@ -1,12 +1,12 @@
 package com.ztransfer.ui.screen
 
-import com.ztransfer.protocol.NikonCamera
+import com.ztransfer.protocol.CameraFileInfo
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class BurstGridItemsTest {
-    private fun file(handle: Int) = NikonCamera.FileInfo(
+    private fun file(handle: Int) = CameraFileInfo(
         handle = handle,
         size = 1_000L,
         fileName = "DSC_${handle.toString().padStart(4, '0')}.JPG",

@@ -1,5 +1,6 @@
 package com.ztransfer.viewmodel
 
+import com.ztransfer.catalog.THUMBNAIL_CAMERA_CACHE_MAX_IDLE_MS
 import java.io.File
 import java.nio.file.Files
 import org.junit.After
@@ -181,9 +182,16 @@ class ThumbnailDiskCacheTest {
     fun `photo keys are stable and do not collide after filename sanitization`() {
         val first = thumbnailCacheFileName("照片 1.JPG", 123L, "20260812T120000")
         val same = thumbnailCacheFileName("照片 1.JPG", 123L, "20260812T120000")
+        val emptyDate = thumbnailCacheFileName("照片 1.JPG", 123L, "")
+        val nullDate = thumbnailCacheFileName("照片 1.JPG", 123L, null)
         val different = thumbnailCacheFileName("照片-1.JPG", 123L, "20260812T120000")
 
         assertEquals(first, same)
+        assertEquals(
+            "55766806312b959f9c99f618580f66c5a12d635a9d777f6792191173da0c160e.jpg",
+            first,
+        )
+        assertEquals(emptyDate, nullDate)
         assertNotEquals(first, different)
         assertTrue(first.matches(Regex("[0-9a-f]{64}\\.jpg")))
     }
@@ -195,8 +203,26 @@ class ThumbnailDiskCacheTest {
         val differentObject = staThumbnailCacheFileName(0x291961F4, 12_345L)
 
         assertEquals(beforeMetadata, afterMetadata)
+        assertEquals(
+            "f533c5ce2cb31ff9cd9a0d3a4573830eda5ae72a15affcc4ee12ce8f8b39ceda.jpg",
+            beforeMetadata,
+        )
+        assertEquals(
+            "2a1f8c3cda06810cad52b38e205d45bb845c101725ee300277c640699fd392f1.jpg",
+            staThumbnailCacheFileName(-1, 12_345L),
+        )
         assertNotEquals(beforeMetadata, differentObject)
         assertTrue(beforeMetadata.matches(Regex("[0-9a-f]{64}\\.jpg")))
+    }
+
+    @Test
+    fun `camera directory identity remains byte compatible`() {
+        val camera = ThumbnailDiskCache(newRoot()).openCamera("nikon-z6iii-serial-a")
+
+        assertEquals(
+            "camera_e8031fc6623b0f70dce48b7ed6c87367fa88bd3cbaf9faeee7c950bf7ee73957",
+            camera.directory.name,
+        )
     }
 
     private fun newRoot(): File = Files.createTempDirectory("thumbnail-cache-test").toFile()
