@@ -114,6 +114,13 @@ class SettingsPopupAnimationTest(unittest.TestCase):
         self.assertEqual(apply_genie_filter(baseline("1403f34", path)),
                          (ROOT / path).read_text(encoding="utf8"))
 
+    def test_thumbnail_completion_finishes_ring_before_check(self):
+        grid = (ROOT / "shared/src/commonMain/kotlin/com/ztransfer/ui/screen/SharedThumbnailGrid.kt").read_text(encoding="utf8")
+        self.assertIn("targetProgress = transferCardProgressTarget(task.status, liveProgress)", grid)
+        self.assertIn("val visualStatus = if (task.status == TransferStatus.COMPLETED", grid)
+        self.assertIn("animatedProgress.value < 0.999f", grid)
+        self.assertIn("if (task.status == TransferStatus.TRANSFERING)", grid)
+
 
 if __name__ == "__main__":
     unittest.main()

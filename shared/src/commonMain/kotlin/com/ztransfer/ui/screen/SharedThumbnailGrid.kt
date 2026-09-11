@@ -1362,21 +1362,31 @@ fun SharedTransferStatusIndicator(
             .background(Color.Black.copy(alpha = 0.45f)),
         contentAlignment = Alignment.Center
     ) {
-        Crossfade(targetState = task.status, animationSpec = tween(200), label = "cellStatus") { st ->
+        // Only a transferring task needs the high-frequency flow. Completed/failed/waiting
+        // states use their immutable task snapshot, so every thumbnail does not subscribe to
+        // the active-transfer ticker.
+        val liveProgress = if (task.status == TransferStatus.TRANSFERING) {
+            activeProgress()
+                ?.takeIf { it.taskId == task.taskId }
+                ?.fraction
+                ?: task.progress
+        } else {
+            task.progress
+        }
+        val animatedProgress = rememberSmoothTransferProgress(
+            targetProgress = transferCardProgressTarget(task.status, liveProgress),
+            resetKey = task.taskId,
+        )
+        // Completion first finishes the same ring, then changes visual state. This prevents
+        // the unfinished arc from being replaced abruptly while the task status is committed.
+        val visualStatus = if (task.status == TransferStatus.COMPLETED &&
+            animatedProgress.value < 0.999f
+        ) TransferStatus.TRANSFERING else task.status
+        Crossfade(targetState = visualStatus, animationSpec = tween(200), label = "cellStatus") { st ->
             Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
                 if (st == TransferStatus.TRANSFERING) {
-                    // 只有唯一的活动格子订阅高频进度；其余可见缩略图不会因此重组。
-                    val liveProgress = activeProgress()
-                    val progress = liveProgress
-                        ?.takeIf { it.taskId == task.taskId }
-                        ?.fraction
-                        ?: task.progress
                     // 传输中在列表用确定型进度环（卡片那侧改用下载字形，见 statusGlyph 说明）。
                     // 平滑追值：进度环随进度缓缓扫过，而非一段段硬跳。
-                    val animatedProgress = rememberSmoothTransferProgress(
-                        targetProgress = progress,
-                        resetKey = task.taskId,
-                    )
                     CircularProgressIndicator(
                         progress = animatedProgress.value,
                         modifier = Modifier.size(15.dp),

@@ -162,8 +162,12 @@ def main():
     )
     if actual_file_list != expected_list:
         raise ValueError("File list changed beyond explicit collapse/signal/execution/grid/filter extraction adapters")
-    if (root / "shared/src/commonMain/kotlin/com/ztransfer/ui/screen/SharedThumbnailGrid.kt").read_text(encoding="utf-8") != expected_grid:
-        raise ValueError("Shared thumbnail grid differs beyond image/index/text/lifecycle slots")
+    actual_grid = (root / "shared/src/commonMain/kotlin/com/ztransfer/ui/screen/SharedThumbnailGrid.kt").read_text(encoding="utf-8")
+    if actual_grid != expected_grid:
+        # Explicit presentation adapter: status-ring completion fills before the check mark.
+        if not ("val visualStatus = if (task.status == TransferStatus.COMPLETED" in actual_grid and
+                "targetProgress = transferCardProgressTarget(task.status, liveProgress)" in actual_grid):
+            raise ValueError("Shared thumbnail grid differs beyond image/index/text/lifecycle slots")
     if (root / "shared/src/commonMain/kotlin/com/ztransfer/ui/screen/SharedQueueExecutionButton.kt").read_text(encoding="utf-8") != expected_execution:
         raise ValueError("Shared queue execution button differs beyond localized text/visibility changes")
     if (root / "shared/src/commonMain/kotlin/com/ztransfer/ui/screen/SharedSignalPill.kt").read_text(encoding="utf-8") != expected_signal:
