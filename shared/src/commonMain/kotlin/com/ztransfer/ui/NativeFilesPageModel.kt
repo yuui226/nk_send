@@ -21,6 +21,9 @@ interface NativeFilesThumbnailCompletion { fun complete(encodedImage: ByteArray?
 
 /** UI-thread boundary. The platform owns scanning, camera I/O and the existing queue actor. */
 interface NativeFilesPagePlatform {
+    /** Optional iOS-only route into the native photo-effects workbench. */
+    fun canOpenPhotoEffects(): Boolean = false
+    fun openPhotoEffects() {}
     fun readTransferPreferences(): NativeTransferPreferences? = NativeTransferPreferences.defaults()
     fun saveTransferPreferences(value: NativeTransferPreferences): Boolean = false
     fun readBrowsePreferences(): NativeBrowsePreferences?
@@ -92,6 +95,8 @@ class NativeFilesPageModel(val connectionId: String, val queue: NativeQueuePageM
     private var currentFiles = emptyMap<Int, CameraFileInfo>()
     private val mutableState = MutableStateFlow(NativeFilesState())
     internal val state = mutableState.asStateFlow()
+    fun canOpenPhotoEffects(): Boolean = !closed && platform?.canOpenPhotoEffects() == true
+    fun openPhotoEffects() { if (!closed) platform?.openPhotoEffects() }
     private val enqueues = HashSet<CancellableContinuation<Int>>()
     private val images = HashSet<CancellableContinuation<NativeFilesImageResult>>()
     private var originalIndex = NativeOriginalFileIndex()

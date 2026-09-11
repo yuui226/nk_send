@@ -46,6 +46,8 @@ final class CameraHandshakeProbe: ObservableObject {
     @Published private(set) var queueSnapshot: OriginalQueueSnapshot?
     @Published var queuePage: OriginalQueuePageBridge?
     @Published var filesPage: OriginalFilesPageBridge?
+    /// Injected by ContentView so the shared settings overlay can open the native workbench.
+    var photoEffectsHandler: (() -> Void)?
     private var browseSession: NativeBrowseSession?
     private var workspaceNavigation: UInt64 = 0
     var canOpenSharedWorkspace: Bool {
@@ -589,6 +591,7 @@ final class CameraHandshakeProbe: ObservableObject {
                 self.selectQueueDirectory(url, completion: completion)
             }, automaticTransfer: automaticTransfer,
             automaticTransferTargetAvailable: savesToSelectedDirectory && queueDestinationError == nil,
+            openPhotoEffects: photoEffectsHandler,
             browseSession: browseSession, rememberBrowseSession: { [weak self] value in
                 guard let self, self.apConnection === connection else { return }
                 self.browseSession = value

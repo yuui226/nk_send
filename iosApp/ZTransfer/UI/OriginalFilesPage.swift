@@ -23,6 +23,7 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
     private let automaticTransferTargetAvailable: Bool
     private let directorySelection: ((URL, @escaping (String?) -> Void) -> Void)?
     private let sandboxSelection: ((@escaping (String?) -> Void) -> Void)?
+    private let photoEffectsHandler: (() -> Void)?
     private var directoryPicker: (request: Int64, controller: UIDocumentPickerViewController)?
     private var refreshTask: Task<Void, Never>?
     private(set) var originalIndexTask: Task<Void, Never>?
@@ -55,7 +56,8 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
          directoryMessage: String? = nil, selectDirectory: ((URL, @escaping (String?) -> Void) -> Void)? = nil,
          automaticTransfer: CameraAutomaticTransferCoordinator? = nil, automaticTransferTargetAvailable: Bool = false,
          browseSession: NativeBrowseSession? = nil, rememberBrowseSession: ((NativeBrowseSession) -> Void)? = nil,
-         useSandbox: ((@escaping (String?) -> Void) -> Void)? = nil) {
+         useSandbox: ((@escaping (String?) -> Void) -> Void)? = nil,
+         openPhotoEffects: (() -> Void)? = nil) {
         self.connectionID = connectionID; self.catalog = catalog; self.queue = queue; self.previews = previews
         self.exifSource = exifSource; self.exifCache = exifCache
         self.originals = originals ?? queue // One immutable source for the entire page/preview lifetime.
@@ -65,6 +67,7 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
         self.automaticTransferTargetAvailable = automaticTransferTargetAvailable
         self.directorySelection = selectDirectory
         self.sandboxSelection = useSandbox
+        self.photoEffectsHandler = openPhotoEffects
         self.rememberBrowseSession = rememberBrowseSession
         queuePage = OriginalQueuePageBridge(connectionID: connectionID, queue: queue, previews: previews, stationMode: stationMode)
         super.init()
@@ -76,6 +79,9 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
             precondition(model.directory.attach(platform: self, description: directoryDescription, message: directoryMessage))
         }
     }
+
+    func canOpenPhotoEffects() -> Bool { !closed && photoEffectsHandler != nil }
+    func openPhotoEffects() { guard !closed else { return }; photoEffectsHandler?() }
 
     func selectDirectory(requestId: Int64) {
         guard !closed, directoryPicker == nil, directorySelection != nil,

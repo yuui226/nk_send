@@ -15,7 +15,10 @@ struct ContentView: View {
         CameraWorkspace(bridge: workspace)
             .photoEffectsPresentation(photoEffectsPresentation)
             .preferredColorScheme(appearance.colorScheme)
-            .onAppear { appearance.start() }
+            .onAppear {
+                appearance.start()
+                workspace.session.photoEffectsHandler = { photoEffectsPresentation.present() }
+            }
             #if DEBUG
             .overlay(alignment: .topTrailing) {
                 Button("开发诊断") { showDiagnostics = true }

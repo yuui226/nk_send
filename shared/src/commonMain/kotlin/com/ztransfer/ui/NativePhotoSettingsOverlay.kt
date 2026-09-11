@@ -43,6 +43,11 @@ internal fun NativePhotoSettingsOverlay(model: NativeFilesPageModel, layout: Nat
                     Icon(Icons.Default.Close, text.close, tint = AppTheme.colors.onSurfaceVariant)
                 }
             }
+            if (model.canOpenPhotoEffects()) {
+                TextButton(onClick = { model.openPhotoEffects(); close() }) {
+                    Text(nativeActionText(appearanceState.resolvedLanguage, "照片效果", "Photo effects", "照片效果"))
+                }
+            }
             Spacer(Modifier.height(14.dp))
             SharedPhotoListSettingsCard(layout.columns, layout.collapseBursts, layout.tapToPreview, appearanceState.hapticsEnabled, text,
                 onColumns = { model.changeLayout(it, model.layout.value.collapseBursts) },
