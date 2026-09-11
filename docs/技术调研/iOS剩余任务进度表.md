@@ -114,7 +114,7 @@ git rev-list --left-right --count HEAD...origin/research/ios
 
 ### 2026-09-12 Android 基线同步与 iOS 未完成项
 
-本次按实际仓库状态重新核对：`master` 当前为 `12e3c4e`（已合并并推送 iOS 研究分支），`origin/master` 与之同步；`research/ios` 当前为 `597624a`，工作区干净。下面的 Android 功能已经进入共同产品基线，但 iOS 尚未实现或验收，不计入 W01—W50 的 Windows 分数。
+本次按实际仓库状态重新核对：`master` 当前为 `12e3c4e`（已合并并推送 iOS 研究分支），`origin/master` 与之同步；`research/ios` 当前为 `6a9c846`，工作区干净。下面的 Android 功能已经进入共同产品基线，但 iOS 尚未实现或验收，不计入 W01—W50 的 Windows 分数。
 
 | Android 已提交能力 | Android 证据 | iOS 同步缺口（当前仍未完成） |
 |---|---|---|
@@ -134,12 +134,13 @@ git rev-list --left-right --count HEAD...origin/research/ios
 | iOS 滤镜目录原生适配 | `NativePhotoFilterCatalog` 增加供 Swift 使用的稳定标量元数据接口；新增 `PhotoFilterCatalogStore`，统一分类、收藏顺序、收藏分类、强度归一化和 UserDefaults 持久化；新增 Xcode 源码与 XCTest 注册 | `NativePhotoFilterTest` 新增目录元数据覆盖；共享测试目标编译通过；`iosApp/scripts/check_structure.py` 通过，当前 XCTest 已登记并明确待 Mac 实际执行 | iOS 两处实际拨轮长按 UI、滤镜选中回写、强度/预览接线和 Apple 编译/真机证据仍待完成；因此 IOS-E02/IOS-U08 不计完成 |
 | iOS 共享滤镜选择面板 | 新增 `PhotoFilterWheelLauncher` 与 `PhotoFilterPickerView`：长按拨轮打开，左侧分类、右侧滤镜卡片；收藏置顶、黄色星标、选中高亮；选择一次性回传滤镜身份与当前强度；已注册 Xcode 主目标 | `iosApp/scripts/check_structure.py` 通过；`PhotoFilterCatalogTests` 增加身份/强度原子回传覆盖；共享 `NativePhotoFilterTest` 定向测试 `BUILD SUCCESSFUL`；Swift/XCTest 仍待 Mac 实际编译运行 | 设置窗口和照片工作台的真实拨轮宿主、预览渲染回写及两处无障碍/动态语言接线仍待完成；本项只完成共享 UI 面板，不计完整照片效果项 |
 | 反挤压共享策略 | 新增 `DesqueezePolicy`，统一 1.0/1.33/1.5/1.8/2.0 循环、默认图标态、1.33 显示为 1.3、比例计算和非法值归一化，供 iOS 接入 | `DesqueezePolicyTest` 针对性测试 `BUILD SUCCESSFUL`；未改 Android 页面和取景器实现 | iOS 取景器按钮、真实画面缩放、覆盖层对齐、横竖屏布局和真机证据仍待完成 |
+| iOS 反挤压控件适配 | 新增 `IOSDesqueezeControlModel` 与固定尺寸 `IOSDesqueezeButton`；点击循环复用 shared policy，默认显示图标，激活后只显示紧凑数值，提供无障碍名称/值 | 新增 `DesqueezeControlTests` 覆盖循环、1.33 显示、非法值归一化和回到默认；`iosApp/scripts/check_structure.py` 通过；Swift/取景器真实画面接线待 Mac | 正式 iOS 取景器页面接入、真实画面横向缩放、网格/斑马纹/对焦标记对齐和横竖屏布局仍待完成 |
 | iOS 批量效果并发协调 | 新增 `PhotoEffectsBatchCoordinator`，固定选择快照、最多两路 worker、完成/成功/失败计数和失败继续；渲染与保存通过闭包注入，后续接共享滤镜内核与 PhotoKit | 新增 XCTest 覆盖空选择、失败继续、每项只处理一次和并发峰值不超过 2；`iosApp/scripts/check_structure.py` 通过，当前 XCTest 已登记并明确待 Mac 实际执行 | iOS PHPicker 多选、横向预览、按钮状态动画、实际渲染/导出/PhotoKit 回执仍待完成 |
 | iOS 工作台批量状态模型 | 新增 `PhotoEffectsBatchSession`，固定选择快照、去重并保留选择数量；横向预览索引循环；生成中显示 completed/total，完成后显示 saved/failed；复用两路并发协调器且不提供停止按钮 | 新增 XCTest 覆盖选择去重、首尾循环、固定分母、失败继续和最终统计；`iosApp/scripts/check_structure.py` 通过，当前 XCTest 已登记并明确待 Mac 实际执行 | PHPicker 多选桥接、真实缩略图分页、滤镜参数/预览接线、导出与 PhotoKit/Files 回执仍待完成 |
 | iOS 工作台系统选图与预览容器 | 新增 `PhotoEffectsPicker`：系统 `PHPicker` 图片多选、不限数量、保留顺序并复制临时文件；新增 `PhotoEffectsPreviewPager`，横向分页绑定同一预览索引；生成按钮文案复用 session 的“生成中 x/y”状态 | `iosApp/scripts/check_structure.py` 通过，新增 Swift 文件已注册；Apple PhotosUI 编译、真实授权和大批量内存行为待 Mac | 工作台正式页面接线、渲染结果展示、PhotoKit/Files 保存回执和错误提示仍待完成 |
 | iOS 滤镜帮助文案 | 新增 `NativePhotoEffectsText`，为简体中文、繁体中文和英文统一提供“拨轮快速调节”和“长按照片滤镜拨轮：按分类选择滤镜”两条文案 | 新增 `NativePhotoEffectsTextTest` 覆盖三语；未改 Android 资源和页面 | iOS 两处灯泡实际 UI 接线、动态语言刷新和无障碍朗读标签仍待完成 |
 
-本次完成 1 个可独立验收的 Windows 源码子任务：工作台系统选图与预览容器。Android 同步主线仍有 4 个产品项待 iOS 完整接入（滤镜 UI、批量照片效果、反挤压、术语/帮助）；滤镜项已具备共享目录和可复用选择面板，批量项已具备状态、调度、系统多选和分页容器，仍待真实页面接线。共享专项测试已分别通过 `:shared:testDebugUnitTest --tests com.ztransfer.filter.NativePhotoFilterTest`、`:shared:testDebugUnitTest --tests com.ztransfer.protocol.DesqueezePolicyTest` 与 `--tests com.ztransfer.ui.NativePhotoEffectsTextTest`。官方 Mac/真机验收仍为 **12 / 12 项待验（M01—M12）**，本次没有减少该数量。
+本次完成 1 个可独立验收的 Windows 源码子任务：iOS 反挤压控件适配。Android 同步主线仍有 4 个产品项待 iOS 完整接入（滤镜 UI、批量照片效果、反挤压、术语/帮助）；滤镜项已具备共享目录和可复用选择面板，批量项已具备状态、调度、系统多选和分页容器，反挤压项已具备共享循环控件，均仍待正式页面接线。共享专项测试已分别通过 `:shared:testDebugUnitTest --tests com.ztransfer.filter.NativePhotoFilterTest`、`:shared:testDebugUnitTest --tests com.ztransfer.protocol.DesqueezePolicyTest` 与 `--tests com.ztransfer.ui.NativePhotoEffectsTextTest`。官方 Mac/真机验收仍为 **12 / 12 项待验（M01—M12）**，本次没有减少该数量。
 
 ## 更新规则
 
