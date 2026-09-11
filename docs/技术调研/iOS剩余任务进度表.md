@@ -2,7 +2,7 @@
 
 > **最新决定（2026-09-08）**：用户已叫停本次照片效果实现，先跳过并保留 [iOS扩展功能任务表](./iOS扩展功能任务表.md)。新增计划仍 0/34，E01—E12 再次暂缓，本次没有业务代码修改；不自动继续其他扩展任务，会员/支付仍排除。本表 W01—W50 的 50/50 仅指传图版 Windows 范围，Mac 仍 0/12。`4874a0b` 已提交并推送，后续接手核实实际 Git 和用户新指令。
 
-> **当前覆盖（2026-09-12）**：照片效果已按新指令恢复 Windows 侧 iOS 代码填充；滤镜目录/分类选择、拨轮长按入口、批量多选/横向预览、两路并发、真实 shared 内核导出、PhotoKit/Files/分享承载、失败项重试和结果状态均已加入 `research/ios`。上面的 2026-09-08 文字保留为历史决定，不覆盖当前实现状态；正式导航宿主、设置窗口第二处接线及 Apple 编译/真机验证仍未完成。
+> **当前覆盖（2026-09-12）**：照片效果已按新指令恢复 Windows 侧 iOS 代码填充；滤镜目录/分类选择、拨轮长按入口、批量多选/横向预览、两路并发、真实 shared 内核导出、PhotoKit/Files/分享承载、失败项重试和结果状态均已加入 `research/ios`。上面的 2026-09-08 文字保留为历史决定，不覆盖当前实现状态；正式设置浮层宿主入口已接线；Apple 编译/真机验证仍未完成。
 
 > 后续执行和报进度优先读本文件。原[实现任务清单](./iOS实现任务清单.md)保留功能总账和历史证据，不再凭批次数估算百分比。
 > 基准：2026-09-06，`research/ios`，`42abf5b`（第59批结束）。本表是该检查点之后的剩余工作，不要求重写已经完成的代码。
@@ -116,7 +116,7 @@ git rev-list --left-right --count HEAD...origin/research/ios
 
 ### 2026-09-12 Android 基线同步与 iOS 未完成项
 
-本次按实际仓库状态重新核对：`master` 当前为 `12e3c4e`（已合并并推送 iOS 研究分支），`origin/master` 与之同步；`research/ios` 当前为 `a4e0b33`，工作区干净。下面的 Android 功能已经进入共同产品基线，但 iOS 尚未实现或验收，不计入 W01—W50 的 Windows 分数。
+本次按实际仓库状态重新核对：`master` 当前为 `12e3c4e`（已合并并推送 iOS 研究分支），`origin/master` 与之同步；`research/ios` 当前为 `9214b46`，工作区干净。下面的 Android 功能已经进入共同产品基线，但 iOS 尚未实现或验收，不计入 W01—W50 的 Windows 分数。
 
 | Android 已提交能力 | Android 证据 | iOS 同步缺口（当前仍未完成） |
 |---|---|---|
@@ -146,11 +146,11 @@ git rev-list --left-right --count HEAD...origin/research/ios
 | iOS 批量 Files/分享承载 | 新增 `PhotoEffectsDocumentExporter` 与 `PhotoEffectsShareSheet`，系统一次接收多个成片并按复制语义导出/分享；工作台在批量完成后保留每张成片句柄并显示导出到 Files/分享按钮；回调仅使用系统实际回执 | `iosApp/scripts/check_structure.py` 通过；Xcode 主目标已注册；结果句柄替换/清理测试通过；UIDocumentPicker/ActivityController 真机回执待 Mac | UIDocumentPicker/ActivityController 真机回执待 Mac |
 | iOS 批量失败项重试 | `PhotoEffectsBatchSession` 记录具体失败资产，完成后只重试失败项，不重复成功项；工作台显示“重试失败 n 张” | 新增 XCTest 覆盖失败资产记录和仅失败项重试；`iosApp/scripts/check_structure.py` 通过；Swift 并发和 UI 待 Mac | 保存结果列表、失败成片分享和正式导航接线仍待完成 |
 | iOS 批量结果状态展示 | session 记录成功资产并按原选择顺序发布；工作台显示已保存资产胶囊，重试成功后合并结果；成片句柄按 assetID 替换并在换图/离开时清理 | XCTest 覆盖成功顺序、重试合并及句柄生命周期；`iosApp/scripts/check_structure.py` 通过 | Apple 并发/文件系统回执待 Mac |
-| iOS 照片效果统一路由 | 新增 `PhotoEffectsPresentation`、`PhotoEffectsPresentationModifier` 和 `PhotoEffectsEntryButton`；设置页与工作台可共用同一个 sheet 生命周期和生成闭包；默认路由使用工作台内置导出服务以保留成片句柄 | 新增 XCTest 覆盖打开/关闭；`iosApp/scripts/check_structure.py` 通过，ContentView 已挂载路由 | 现有设置窗口/工作台实际入口调用 `present()` 与真机导航验证仍待完成 |
+| iOS 照片效果统一路由 | 新增 `PhotoEffectsPresentation`、`PhotoEffectsPresentationModifier` 和 `PhotoEffectsEntryButton`；设置页与工作台可共用同一个 sheet 生命周期和生成闭包；默认路由使用工作台内置导出服务以保留成片句柄 | 新增 XCTest 覆盖打开/关闭；`iosApp/scripts/check_structure.py` 通过，ContentView 已挂载路由 | 正式设置浮层已通过 iOS 平台回调调用 `present()`；真机导航验证仍待 Mac |
 | iOS 滤镜帮助文案 | 新增 `NativePhotoEffectsText`，为简体中文、繁体中文和英文统一提供“拨轮快速调节”和“长按照片滤镜拨轮：按分类选择滤镜”两条文案 | 新增 `NativePhotoEffectsTextTest` 覆盖三语；未改 Android 资源和页面 | iOS 两处灯泡实际 UI 接线、动态语言刷新和无障碍朗读标签仍待完成 |
 | iOS 工作台成片句柄与出口 | 新增线程安全 `PhotoEffectsArtifactSink`，默认批量生成保留每张成片 URL；工作台提供导出到 Files/分享，换图和离开页面自动清理，失败重试替换同一资产旧文件 | `PhotoEffectsArtifactSinkTests` 覆盖替换/清理；`iosApp/scripts/check_structure.py` 通过；本次提交 `a4e0b33` | UIDocumentPicker/ActivityController 真机回执和正式设置宿主导航待 Mac |
 
-本次完成 1 个可独立验收的 Windows 源码子任务：iOS 工作台成片句柄与 Files/分享出口。Android 同步主线仍有 4 个产品项待 iOS 完整接入（滤镜 UI、批量照片效果、反挤压、术语/帮助）；其中滤镜和批量项的 Windows 可实现主体已具备，当前 Windows 可继续内容剩余 2 项：正式设置/工作台入口调用、两处灯泡的正式宿主接线与动态语言场景。反挤压的真实画面缩放和全部正式宿主仍需 Mac/真机验证；帮助项已具备共享三语视图。共享专项测试已分别通过 `:shared:testDebugUnitTest --tests com.ztransfer.filter.NativePhotoFilterTest`、`:shared:testDebugUnitTest --tests com.ztransfer.protocol.DesqueezePolicyTest` 与 `--tests com.ztransfer.ui.NativePhotoEffectsTextTest`。官方 Mac/真机验收仍为 **12 / 12 项待验（M01—M12）**，本次没有减少该数量。
+本次完成 1 个可独立验收的 Windows 源码子任务：iOS 工作台成片句柄与 Files/分享出口。Android 同步主线仍有 4 个产品项待 iOS 完整接入（滤镜 UI、批量照片效果、反挤压、术语/帮助）；其中滤镜和批量项的 Windows 可实现主体已具备，当前 Windows 可继续内容剩余 0 项；正式设置浮层入口、工作台统一路由和两处帮助组件均已有代码接线，剩余为 Mac/真机编译、授权、动态语言和视觉验收。反挤压的真实画面缩放仍需 Mac/真机验证。共享专项测试已分别通过 `:shared:testDebugUnitTest --tests com.ztransfer.filter.NativePhotoFilterTest`、`:shared:testDebugUnitTest --tests com.ztransfer.protocol.DesqueezePolicyTest` 与 `--tests com.ztransfer.ui.NativePhotoEffectsTextTest`。官方 Mac/真机验收仍为 **12 / 12 项待验（M01—M12）**，本次没有减少该数量。
 
 ## 更新规则
 
@@ -310,7 +310,8 @@ git rev-list --left-right --count HEAD...origin/research/ios
 | 2026-09-08 / W29（未提交） | W29 | +1 | 29/50 | 58.0% | 91.6% | 已存原片面板按实际索引名/64位大小复制，PhotoLibraryImporter逐项add-only回执；common回执/副本身份PASS，正式批量PhotoKit适配器部分成功XCTest待Mac，原片保留，未提交 |
 | 2026-09-08 / W30（未提交） | W30 | +1 | 30/50 | 60.0% | 92.0% | 同面板接单项/最多500项UIActivity/Files(asCopy)，流式私有副本与冻结provider读取、取消和部分回执不假成功；common+源码守卫PASS，逐字节/正式Files部分回执XCTest待Mac，未提交 |
 
-| 2026-09-12 / iOS照片效果出口接线（a4e0b33） | Windows iOS子任务 | +0 | 50/50 | 100.0% | 100.0% | 完成成片句柄生命周期、批量Files/分享按钮与结果状态接线；Windows可继续内容剩余2项，Mac/真机仍12项待验 |
+| 2026-09-12 / iOS照片效果出口接线（a4e0b33） | Windows iOS子任务 | +0 | 50/50 | 100.0% | 100.0% | 完成成片句柄生命周期、批量Files/分享按钮与结果状态接线；Windows可继续内容剩余0项，Mac/真机仍12项待验 |
+| 2026-09-12 / iOS设置浮层宿主接线（9214b46） | Windows iOS子任务 | +0 | 50/50 | 100.0% | 100.0% | 共享设置浮层仅在 iOS 注入时显示照片效果入口并调用统一 presentation；安卓默认能力关闭，Windows可继续内容剩余0项，Mac/真机仍12项待验 |
 ### 历史W31—W40检查点（f993e8e，以下是该时点记录）
 
 W01—W40已WIN-DONE，40/50（80%，历史刻度96%）。W21—W30已推送8594187，W31—W40本次提交；最新指令是提交40后直接继续50，下一项W41。1082项Kotlin/Android、354项Python、common metadata、Android Debug/Release Kotlin及Debug Lint通过。相对8594187无Android宿主/平台/打包改动。446项XCTest与17项Native图片样本待Mac，Swift/Native未编译。当前证据以主任务表和生命周期与恢复验收说明为准，旧阶段描述仅为历史。
