@@ -114,7 +114,7 @@ git rev-list --left-right --count HEAD...origin/research/ios
 
 ### 2026-09-12 Android 基线同步与 iOS 未完成项
 
-本次按实际仓库状态重新核对：`master` 当前为 `12e3c4e`（已合并并推送 iOS 研究分支），`origin/master` 与之同步；`research/ios` 当前为 `2e31588`，工作区干净。下面的 Android 功能已经进入共同产品基线，但 iOS 尚未实现或验收，不计入 W01—W50 的 Windows 分数。
+本次按实际仓库状态重新核对：`master` 当前为 `12e3c4e`（已合并并推送 iOS 研究分支），`origin/master` 与之同步；`research/ios` 当前为 `d0742e2`，工作区干净。下面的 Android 功能已经进入共同产品基线，但 iOS 尚未实现或验收，不计入 W01—W50 的 Windows 分数。
 
 | Android 已提交能力 | Android 证据 | iOS 同步缺口（当前仍未完成） |
 |---|---|---|
