@@ -13,7 +13,7 @@ final class PhotoEffectsPresentation: ObservableObject {
 @MainActor
 struct PhotoEffectsPresentationModifier: ViewModifier {
     @ObservedObject var presentation: PhotoEffectsPresentation
-    let generateAndSave: @Sendable (IOSPhotoEffectAsset, IOSPhotoFilterSelection) async throws -> Bool
+    let generateAndSave: (@Sendable (IOSPhotoEffectAsset, IOSPhotoFilterSelection) async throws -> Bool)?
 
     func body(content: Content) -> some View {
         content.sheet(isPresented: Binding(
@@ -30,9 +30,7 @@ struct PhotoEffectsPresentationModifier: ViewModifier {
 extension View {
     func photoEffectsPresentation(
         _ presentation: PhotoEffectsPresentation,
-        generateAndSave: @escaping @Sendable (IOSPhotoEffectAsset, IOSPhotoFilterSelection) async throws -> Bool = { asset, selection in
-            try await PhotoEffectsExportService().generateAndSave(asset, selection: selection)
-        }
+        generateAndSave: (@escaping @Sendable (IOSPhotoEffectAsset, IOSPhotoFilterSelection) async throws -> Bool)? = nil
     ) -> some View {
         modifier(PhotoEffectsPresentationModifier(presentation: presentation, generateAndSave: generateAndSave))
     }

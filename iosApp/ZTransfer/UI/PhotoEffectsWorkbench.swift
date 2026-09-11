@@ -11,19 +11,24 @@ struct PhotoEffectsWorkbench: View {
     @State private var selection: IOSPhotoFilterSelection?
     @State private var pickerPresented = false
     @State private var intensity = 80.0
+    @State private var artifactFiles: [PhotoEffectsRenderedFile] = []
+    @State private var filesExportPresented = false
+    @State private var sharePresented = false
+    @State private var exportStatus = ""
 
-    private let generateAndSave: @Sendable (IOSPhotoEffectAsset, IOSPhotoFilterSelection) async throws -> Bool
+    private let customGenerateAndSave: (@Sendable (IOSPhotoEffectAsset, IOSPhotoFilterSelection) async throws -> Bool)?
+    private let exportService = PhotoEffectsExportService()
+    private let artifactSink: PhotoEffectsArtifactSink
 
     init(
         session: PhotoEffectsBatchSession = PhotoEffectsBatchSession(),
         catalog: PhotoFilterCatalogStore = PhotoFilterCatalogStore(),
-        generateAndSave: @escaping @Sendable (IOSPhotoEffectAsset, IOSPhotoFilterSelection) async throws -> Bool = { asset, selection in
-            try await PhotoEffectsExportService().generateAndSave(asset, selection: selection)
-        }
+        generateAndSave: (@escaping @Sendable (IOSPhotoEffectAsset, IOSPhotoFilterSelection) async throws -> Bool)? = nil
     ) {
         _session = StateObject(wrappedValue: session)
         _catalog = StateObject(wrappedValue: catalog)
-        self.generateAndSave = generateAndSave
+        self.customGenerateAndSave = generateAndSave
+        self.artifactSink = PhotoEffectsArtifactSink()
     }
 
     var body: some View {
@@ -98,7 +103,18 @@ struct PhotoEffectsWorkbench: View {
                     Button(session.generateButtonTitle) {
                         session.generateAndSave { asset in
                             guard let selection else { return false }
-                            return try await generateAndSave(asset, selection)
+                            if let customGenerateAndSave {
+                                return try await customGenerateAndSave(asset, selection)
+                            }
+                            let artifact = try await exportService.render(asset, selection: selection)
+                            artifactSink.replace(artifact)
+                            do {
+                                try await exportService.saveToPhotos(artifact)
+                                return true
+                            } catch {
+                                artifactSink.remove(assetID: artifact.assetID)
+                                return false
+                            }
                         }
                     }
                     .buttonStyle(.borderedProminent)
@@ -123,16 +139,49 @@ struct PhotoEffectsWorkbench: View {
                         .padding(.horizontal)
                     }
                 }
+
+                if !artifactFiles.isEmpty {
+                    HStack(spacing: 10) {
+                        Button("导出到 Files") { filesExportPresented = true }
+                        Button("分享") { sharePresented = true }
+                    }
+                    .buttonStyle(.bordered)
+                    if !exportStatus.isEmpty {
+                        Text(exportStatus)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
         }
         .padding(.vertical, 12)
         .sheet(isPresented: $pickerPresented) {
             PhotoEffectsPicker { values in
+                artifactSink.clear()
+                artifactFiles = []
+                exportStatus = ""
                 session.replaceSelection(values)
                 renderCurrent()
             }
         }
         .onChange(of: session.previewIndex) { _ in renderCurrent() }
+        .onChange(of: session.status) { _ in
+            let byID = Dictionary(uniqueKeysWithValues: artifactSink.snapshot().map { ($0.assetID, $0) })
+            artifactFiles = session.assets.compactMap { byID[$0.id] }
+        }
+        .sheet(isPresented: $filesExportPresented) {
+            PhotoEffectsDocumentExporter(files: artifactFiles.map(\.url)) { urls in
+                filesExportPresented = false
+                exportStatus = urls.map { "已接收 \($0.count) 个文件" } ?? "已取消导出"
+            }
+        }
+        .sheet(isPresented: $sharePresented) {
+            PhotoEffectsShareSheet(files: artifactFiles.map(\.url)) {
+                sharePresented = false
+                exportStatus = "分享面板已关闭"
+            }
+        }
+        .onDisappear { artifactSink.clear() }
     }
 
     private func choose(_ value: IOSPhotoFilterSelection) {
