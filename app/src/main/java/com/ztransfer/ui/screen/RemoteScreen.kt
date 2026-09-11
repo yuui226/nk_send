@@ -4610,11 +4610,20 @@ private fun DesqueezeToolButton(multiplier: Float, onSelect: (Float) -> Unit) {
         ) {
             Text(if (multiplier > 1.001f) "${multiplier}×" else "1×", fontSize = 12.sp, fontWeight = FontWeight.Bold)
         }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
             REMOTE_DESQUEEZE_OPTIONS.forEach { option ->
                 DropdownMenuItem(
-                    text = { Text(if (option == 1f) "关闭（原始）" else "${option}× 反挤压") },
-                    onClick = { onSelect(option); expanded = false }
+                    text = {
+                        Text(
+                            if (option == 1f) "关闭（原始）" else "${option}× 反挤压",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = AppTheme.colors.onBackground,
+                        )
+                    },
+                    onClick = { onSelect(option); expanded = false },
                 )
             }
         }
