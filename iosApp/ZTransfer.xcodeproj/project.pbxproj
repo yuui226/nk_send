@@ -73,6 +73,7 @@
 		7A130000000000000000000F /* PhotoEffectsPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1300000000000000000010 /* PhotoEffectsPicker.swift */; };
 		7A1300000000000000000011 /* DesqueezeControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1300000000000000000012 /* DesqueezeControl.swift */; };
 		7A1300000000000000000013 /* DesqueezeControlTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1300000000000000000014 /* DesqueezeControlTests.swift */; };
+		7A1300000000000000000015 /* PhotoEffectsHelp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1300000000000000000016 /* PhotoEffectsHelp.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -148,6 +149,7 @@
 		7A1300000000000000000010 /* PhotoEffectsPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Storage/PhotoEffectsPicker.swift; sourceTree = "<group>"; };
 		7A1300000000000000000012 /* DesqueezeControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UI/DesqueezeControl.swift; sourceTree = "<group>"; };
 		7A1300000000000000000014 /* DesqueezeControlTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesqueezeControlTests.swift; sourceTree = "<group>"; };
+		7A1300000000000000000016 /* PhotoEffectsHelp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UI/PhotoEffectsHelp.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -231,6 +233,7 @@
 				7A130000000000000000000C /* PhotoEffectsBatchSession.swift */,
 				7A1300000000000000000010 /* PhotoEffectsPicker.swift */,
 				7A1300000000000000000012 /* DesqueezeControl.swift */,
+				7A1300000000000000000016 /* PhotoEffectsHelp.swift */,
 				7A1200000000000000000057 /* PhotoMetadataReader.swift */,
 				7A1200000000000000000069 /* PreviewExifReader.swift */,
 				7A1200000000000000000055 /* BluetoothProbeView.swift */,
@@ -467,6 +470,7 @@
 				7A130000000000000000000B /* PhotoEffectsBatchSession.swift in Sources */,
 				7A130000000000000000000F /* PhotoEffectsPicker.swift in Sources */,
 				7A1300000000000000000011 /* DesqueezeControl.swift in Sources */,
+				7A1300000000000000000015 /* PhotoEffectsHelp.swift in Sources */,
 				7A1200000000000000000056 /* PhotoMetadataReader.swift in Sources */,
 				7A1200000000000000000068 /* PreviewExifReader.swift in Sources */,
 				7A120000000000000000006A /* AppAppearanceSettings.swift in Sources */,
