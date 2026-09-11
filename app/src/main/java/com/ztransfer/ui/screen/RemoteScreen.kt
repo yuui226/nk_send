@@ -2478,7 +2478,7 @@ private fun RemoteContent(
                 showLevel = showLevel,
                 levelRoll = levelRoll,
                 desqueezeMultiplier = desqueezeMultiplier,
-                modifier = Modifier.fillMaxWidth().aspectRatio(viewfinderAspect)
+                modifier = Modifier.fillMaxWidth().aspectRatio(viewfinderAspect * desqueezeMultiplier)
             )
             Spacer(Modifier.height(8.dp))
             // Row 1: overlay tools (left) + screen actions (right)
@@ -2677,16 +2677,17 @@ private fun RemoteContent(
 
                 fun fitWithin(
                     availableWidth: androidx.compose.ui.unit.Dp,
-                    availableHeight: androidx.compose.ui.unit.Dp
+                    availableHeight: androidx.compose.ui.unit.Dp,
+                    aspectRatio: Float = viewfinderAspect * desqueezeMultiplier,
                 ): Pair<androidx.compose.ui.unit.Dp, androidx.compose.ui.unit.Dp> {
                     val width = availableWidth.coerceAtLeast(0.dp)
                     val height = availableHeight.coerceAtLeast(0.dp)
                     if (width == 0.dp || height == 0.dp) return 0.dp to 0.dp
-                    val heightAtFullWidth = width / viewfinderAspect
+                    val heightAtFullWidth = width / aspectRatio
                     return if (heightAtFullWidth <= height) {
                         width to heightAtFullWidth
                     } else {
-                        (height * viewfinderAspect) to height
+                        (height * aspectRatio) to height
                     }
                 }
 
@@ -3778,6 +3779,7 @@ private fun ViewfinderImage(
         if (liveFrame != null) {
             val imageWidth = liveFrame.image.width
             val imageHeight = liveFrame.image.height
+            val displayAspectRatio = imageWidth.toFloat() / imageHeight * desqueezeMultiplier
             // StartTracking 使用增强帧头 +16/+18 的完整画面坐标；普通 ChangeAfArea
             // 使用 +28/+30 的显示 AF 网格。两套坐标纵横比接近但量级完全不同，不能混用。
             val trackingCoordinateWidth =
@@ -3804,7 +3806,7 @@ private fun ViewfinderImage(
                             val imageRect = fitCenterRect(
                                 size.width.toFloat(),
                                 size.height.toFloat(),
-                                imageWidth.toFloat() / imageHeight * desqueezeMultiplier
+                                displayAspectRatio
                             )
                             if (tap.x in imageRect.left..imageRect.right &&
                                 tap.y in imageRect.top..imageRect.bottom
@@ -3844,7 +3846,12 @@ private fun ViewfinderImage(
                     contentScale = ContentScale.Fit,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .aspectRatio(imageWidth.toFloat() / imageHeight * desqueezeMultiplier)
+                        .aspectRatio(displayAspectRatio)
+                        .graphicsLayer {
+                            // An anamorphic frame is encoded horizontally compressed. Fit it
+                            // into the corrected viewport first, then restore its pixel width.
+                            scaleX = desqueezeMultiplier
+                        }
                 )
             }
             // 暗角：四周极淡压暗，画面"坐进"边框（相机目镜语言），角标叠其上不受影响。
@@ -3866,14 +3873,14 @@ private fun ViewfinderImage(
             )
             FramingGridOverlay(
                 grid = grid,
-                imageAspectRatio = liveFrame.image.width.toFloat() / liveFrame.image.height,
+                imageAspectRatio = displayAspectRatio,
                 modifier = Modifier.matchParentSize()
             )
             // 斑马纹跟随帧上的掩码走：掩码在解码线程按节流计算，这里只做裁剪绘制。
             if (showZebra) {
                 ViewfinderZebraOverlay(
                     mask = liveFrame.zebraMask,
-                    imageAspectRatio = imageWidth.toFloat() / imageHeight,
+                    imageAspectRatio = displayAspectRatio,
                     modifier = Modifier.matchParentSize()
                 )
             }
@@ -3882,7 +3889,7 @@ private fun ViewfinderImage(
                     feedback = tapFocusFeedback,
                     point = tapFocusPoint,
                     nonce = tapFocusNonce,
-                    imageAspectRatio = imageWidth.toFloat() / imageHeight,
+                    imageAspectRatio = displayAspectRatio,
                     modifier = Modifier.matchParentSize()
                 )
             } else if (afHeld) {
@@ -3894,7 +3901,7 @@ private fun ViewfinderImage(
                     },
                     point = afFocusPoint,
                     nonce = tapFocusNonce,
-                    imageAspectRatio = imageWidth.toFloat() / imageHeight,
+                    imageAspectRatio = displayAspectRatio,
                     modifier = Modifier.matchParentSize()
                 )
             }
@@ -3918,7 +3925,7 @@ private fun ViewfinderImage(
                     cameraFrame = cameraFrame,
                     nonce = marker.confirmedAtElapsedMs,
                     visible = markerVisible,
-                    imageAspectRatio = imageWidth.toFloat() / imageHeight,
+                    imageAspectRatio = displayAspectRatio,
                     modifier = Modifier.matchParentSize()
                 )
             }
