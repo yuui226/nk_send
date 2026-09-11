@@ -33,4 +33,17 @@ class NativePhotoFilterTest {
         assertNull(NativePhotoFilterCatalog.selection(-1, 80))
         assertNull(NativePhotoFilterCatalog.selection(BuiltInPhotoFilters.all.size, 80))
     }
+
+    @Test fun catalogExposesStableScalarMetadataForNativeClients() {
+        val count = NativePhotoFilterCatalog.count()
+        assertTrue(count > 0)
+        for (index in 0 until count) {
+            assertTrue(assertNotNull(NativePhotoFilterCatalog.id(index)).isNotBlank())
+            assertTrue(assertNotNull(NativePhotoFilterCatalog.name(index)).isNotBlank())
+            assertTrue(assertNotNull(NativePhotoFilterCatalog.categoryTitle(index)).isNotBlank())
+            assertTrue(assertNotNull(NativePhotoFilterCatalog.catalogKey(index)).isNotBlank())
+        }
+        assertNull(NativePhotoFilterCatalog.id(-1))
+        assertNull(NativePhotoFilterCatalog.categoryTitle(count))
+    }
 }

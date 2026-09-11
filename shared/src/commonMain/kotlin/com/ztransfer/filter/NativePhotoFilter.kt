@@ -18,4 +18,12 @@ object NativePhotoFilterCatalog {
     fun count(): Int = BuiltInPhotoFilters.all.size
     fun selection(index: Int, intensityPercent: Int): PhotoFilterSelection? =
         BuiltInPhotoFilters.all.getOrNull(index)?.let { PhotoFilterSelection(it, intensityPercent) }
+
+    /** Stable scalar accessors for Swift/iOS; avoids leaking Kotlin collection wrappers into UI. */
+    fun id(index: Int): String? = BuiltInPhotoFilters.all.getOrNull(index)?.id
+    fun name(index: Int): String? = BuiltInPhotoFilters.all.getOrNull(index)?.name
+    fun categoryTitle(index: Int): String? = BuiltInPhotoFilters.all.getOrNull(index)?.category()?.title
+    fun catalogKey(index: Int): String? = BuiltInPhotoFilters.all.getOrNull(index)?.let {
+        BuiltInPhotoFilters.catalogKey(it.id)
+    }
 }
