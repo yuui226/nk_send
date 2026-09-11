@@ -105,6 +105,24 @@ struct PhotoEffectsWorkbench: View {
                     .disabled(session.isGenerating || selection == nil)
                 }
                 .padding(.horizontal)
+
+                if !session.completedAssets.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            Label("已保存", systemImage: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                            ForEach(session.completedAssets) { asset in
+                                Text(asset.displayName)
+                                    .font(.caption)
+                                    .lineLimit(1)
+                                    .padding(.horizontal, 9)
+                                    .frame(height: 28)
+                                    .background(Color.green.opacity(0.10), in: Capsule())
+                            }
+                        }
+                        .padding(.horizontal)
+                    }
+                }
             }
         }
         .padding(.vertical, 12)

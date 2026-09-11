@@ -38,6 +38,7 @@ final class PhotoEffectsBatchSessionTests: XCTestCase {
         XCTAssertEqual(session.selectedCount, 3)
         XCTAssertEqual(Set(processed), Set(["a", "b", "c"]))
         XCTAssertEqual(session.status, .finished(saved: 2, failed: 1))
+        XCTAssertEqual(session.completedAssets.map(\.id), ["a", "c"])
     }
 
     @MainActor
@@ -65,5 +66,6 @@ final class PhotoEffectsBatchSessionTests: XCTestCase {
         XCTAssertEqual(attempts["b"], 2)
         XCTAssertEqual(session.failedAssets, [])
         XCTAssertEqual(session.status, .finished(saved: 1, failed: 0))
+        XCTAssertEqual(session.completedAssets.map(\.id), ["a", "b"])
     }
 }

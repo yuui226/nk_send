@@ -21,9 +21,11 @@ final class PhotoEffectsBatchSession: ObservableObject {
     @Published private(set) var previewIndex = 0
     @Published private(set) var status: IOSPhotoEffectsBatchStatus = .idle
     @Published private(set) var failedAssets: [IOSPhotoEffectAsset] = []
+    @Published private(set) var completedAssets: [IOSPhotoEffectAsset] = []
 
     private let coordinator: PhotoEffectsBatchCoordinator
     private var generationTask: Task<Void, Never>?
+    private var successfulIDs = Set<String>()
 
     init(coordinator: PhotoEffectsBatchCoordinator = PhotoEffectsBatchCoordinator()) {
         self.coordinator = coordinator
@@ -54,6 +56,8 @@ final class PhotoEffectsBatchSession: ObservableObject {
         assets = values.filter { seen.insert($0.id).inserted }
         previewIndex = 0
         failedAssets = []
+        completedAssets = []
+        successfulIDs = []
         status = .idle
     }
 
@@ -79,6 +83,8 @@ final class PhotoEffectsBatchSession: ObservableObject {
     func generateAndSave(_ operation: @escaping @Sendable (IOSPhotoEffectAsset) async throws -> Bool) {
         guard !assets.isEmpty, !isGenerating else { return }
         failedAssets = []
+        completedAssets = []
+        successfulIDs = []
         startGeneration(items: assets, operation: operation)
     }
 
@@ -104,11 +110,10 @@ final class PhotoEffectsBatchSession: ObservableObject {
             do {
                 let trackedOperation: @Sendable (IOSPhotoEffectAsset) async throws -> Bool = { [weak self] asset in
                     let saved = try await operation(asset)
-                    if !saved {
-                        await MainActor.run { [weak self] in
-                            guard let self, !self.failedAssets.contains(where: { $0.id == asset.id }) else { return }
-                            self.failedAssets.append(asset)
-                        }
+                    await MainActor.run { [weak self] in
+                        guard let self else { return }
+                        if saved { self.successfulIDs.insert(asset.id) }
+                        else if !self.failedAssets.contains(where: { $0.id == asset.id }) { self.failedAssets.append(asset) }
                     }
                     return saved
                 }
@@ -120,8 +125,10 @@ final class PhotoEffectsBatchSession: ObservableObject {
                 }, generateAndSave: trackedOperation)
                 guard !Task.isCancelled else { return }
                 await MainActor.run { [weak self] in
-                    self?.status = .finished(saved: result.saved, failed: result.failed)
-                    self?.generationTask = nil
+                    guard let self else { return }
+                    self.status = .finished(saved: result.saved, failed: result.failed)
+                    self.completedAssets = self.assets.filter { self.successfulIDs.contains($0.id) }
+                    self.generationTask = nil
                 }
             } catch is CancellationError {
                 await MainActor.run { [weak self] in self?.generationTask = nil }
