@@ -4611,6 +4611,7 @@ private fun DesqueezeToolButton(multiplier: Float, onSelect: (Float) -> Unit) {
         active = multiplier > 1.001f,
         contentDescription = "反挤压倍率 ${desqueezeDisplayValue(multiplier)}，点击切换",
         onClick = { onSelect(nextMultiplier) },
+        modifier = Modifier.size(36.dp),
     ) {
         if (multiplier > 1.001f) {
             Text(desqueezeDisplayValue(multiplier), fontSize = 12.sp, fontWeight = FontWeight.Bold)
@@ -4665,6 +4666,7 @@ internal fun TopIconToggle(
     active: Boolean,
     contentDescription: String,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
     content: @Composable () -> Unit
 ) {
     val colors = AppTheme.colors
@@ -4675,7 +4677,7 @@ internal fun TopIconToggle(
         showSheen = false,
         shadowElevation = 0.dp,
         contentPadding = PaddingValues(8.dp),
-        modifier = Modifier
+        modifier = modifier
             .defaultMinSize(minWidth = 36.dp, minHeight = 36.dp)
             .semantics { this.contentDescription = contentDescription }
     ) {
