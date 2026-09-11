@@ -516,7 +516,7 @@
     <string name="purchase_back_to_plans">Back to plans</string>
 
     <!-- Check for updates (settings footer) -->
-    <string name="check_update">Check for updates</string>
+    <string name="check_update">Update</string>
     <string name="checking_update">Checking…</string>
     <string name="update_latest">Up to date</string>
     <string name="update_check_failed">Check failed. Check your network.</string>
