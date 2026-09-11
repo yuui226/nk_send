@@ -35,6 +35,15 @@ final class PhotoEffectsBatchSession: ObservableObject {
         return false
     }
 
+    var generateButtonTitle: String {
+        switch status {
+        case .idle: return "生成并保存"
+        case let .generating(completed, total): return "生成中 (completed)/(total)"
+        case let .finished(saved, failed):
+            return failed == 0 ? "已完成 (saved) 张" : "完成 (saved) 张，失败 (failed) 张"
+        }
+    }
+
     /// Replaces the picker result as one transaction and resets the horizontal preview to the
     /// first item. Duplicate identifiers are ignored while preserving picker order.
     func replaceSelection(_ values: [IOSPhotoEffectAsset]) {
@@ -54,6 +63,11 @@ final class PhotoEffectsBatchSession: ObservableObject {
     func movePreview(by offset: Int) {
         guard assets.count > 1 else { return }
         previewIndex = (previewIndex + offset).positiveModulo(assets.count)
+    }
+
+    func setPreviewIndex(_ value: Int) {
+        guard !assets.isEmpty else { previewIndex = 0; return }
+        previewIndex = min(max(value, 0), assets.count - 1)
     }
 
     /// Starts one fixed snapshot. There is intentionally no stop action in the UI; cancellation
