@@ -4269,6 +4269,7 @@ private fun FilterOverlay(
             .padding(start = panelStart, top = panelTop)
             .width(panelWidth),
         animateScale = false,
+        morphFromAnchor = true,
         shape = RoundedCornerShape(16.dp),
         dim = false,
     ) { _ ->
