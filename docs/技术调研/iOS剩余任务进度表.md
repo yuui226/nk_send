@@ -36,6 +36,8 @@
 
 **追加验证（2026-09-12）**：`swiftc` 与 `xcodebuild` 在当前 Windows 环境均不存在；可执行的 shared 定向回归 `:shared:testDebugUnitTest --tests com.ztransfer.ui.NativeConnectionHomeTest --tests com.ztransfer.filter.NativePhotoFilterTest` 输出 `BUILD SUCCESSFUL in 20s`。这只证明 shared/Android 编译测试，不替代 Apple 编译。
 
+**账本一致性验证（2026-09-12）**：新增 `python -B -m unittest iosApp/scripts/test_progress_ledger.py`，2 项通过；测试锁定 C01—C09 明细顺序、当前 7/9 与 C07/C08 剩余项，以及扩展表 E/G/R/X 的行数和 0/34 完成计数。
+
 **C07 核对记录（2026-09-12）**：共享层已存在 `PhotoFrameLayouts.kt`、`PhotoFrameWatermarkPolicy.kt`、`PhotoFrameMetadataSettings.kt` 和 `PhotoFrameOutputIdentity.kt`，但实际绘制/编码调用仅见于 Android `app/src/main/java/com/ztransfer/frame/PhotoFrameExporter.kt`；iOS 当前 `PhotoEffectsExportService.swift` 只调用 shared 滤镜内核，未接入相框布局、水印内容/资源、元数据绘制或效果队列。iOS 资源目录也没有对应水印资源和持久化适配。C07 保持未完成，下一步必须建立真实的 Apple 绘制/资源/配置链并接入现有批量导出，不能用空入口或单独演示组件代替。
 
 > **最新决定（2026-09-08）**：用户已叫停本次照片效果实现，先跳过并保留 [iOS扩展功能任务表](./iOS扩展功能任务表.md)。新增计划仍 0/34，E01—E12 再次暂缓，本次没有业务代码修改；不自动继续其他扩展任务，会员/支付仍排除。本表 W01—W50 的 50/50 仅指传图版 Windows 范围，Mac 仍 0/12。`4874a0b` 已提交并推送，后续接手核实实际 Git 和用户新指令。
