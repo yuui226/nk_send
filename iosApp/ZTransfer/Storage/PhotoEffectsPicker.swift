@@ -64,7 +64,7 @@ final class PhotoEffectsPickerLoad: @unchecked Sendable {
                         finish(.success(asset))
                     } catch { finish(.failure(error)) }
                 }
-                install(pending)
+                if let pending { install(pending) }
             }
         } onCancel: { self.cancel() }
     }
