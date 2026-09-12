@@ -63,6 +63,8 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
@@ -527,6 +529,8 @@ object RemoteTrialNotice {
 private const val DEFAULT_VIEWFINDER_ASPECT = 3f / 2f
 private const val BATTERY_REFRESH_INTERVAL_MS = 120_000L
 private const val REMOTE_AUDIO_LEVELS_VISIBLE_KEY = "remote_audio_levels_visible"
+private const val REMOTE_DESQUEEZE_MULTIPLIER_KEY = "remote_desqueeze_multiplier"
+private val REMOTE_DESQUEEZE_OPTIONS = listOf(1f, 1.33f, 1.5f, 1.8f, 2f)
 
 @Composable
 private fun RemoteContent(
@@ -617,6 +621,13 @@ private fun RemoteContent(
         mutableStateOf(
             remotePreferences.getBoolean(REMOTE_AUDIO_LEVELS_VISIBLE_KEY, true)
         )
+    }
+    var desqueezeMultiplier by remember {
+        mutableFloatStateOf(remotePreferences.getFloat(REMOTE_DESQUEEZE_MULTIPLIER_KEY, 1f).coerceIn(1f, 2f))
+    }
+    fun setDesqueezeMultiplier(value: Float) {
+        desqueezeMultiplier = value
+        remotePreferences.edit().putFloat(REMOTE_DESQUEEZE_MULTIPLIER_KEY, value).apply()
     }
     fun toggleAudioLevels() {
         showAudioLevels = !showAudioLevels
@@ -2459,6 +2470,7 @@ private fun RemoteContent(
                 showZebra = showZebra,
                 showLevel = showLevel,
                 levelRoll = levelRoll,
+                desqueezeMultiplier = desqueezeMultiplier,
                 modifier = Modifier.fillMaxWidth().aspectRatio(viewfinderAspect)
             )
             Spacer(Modifier.height(8.dp))
@@ -2510,6 +2522,9 @@ private fun RemoteContent(
                         active = showAudioLevels,
                         onClick = ::toggleAudioLevels
                     )
+                })
+                add(@Composable {
+                    DesqueezeToolButton(desqueezeMultiplier, ::setDesqueezeMultiplier)
                 })
                 add(@Composable {
                     TopIconToggle(
@@ -2761,6 +2776,7 @@ private fun RemoteContent(
                     showLevel = showLevel,
                     levelRoll = levelRoll,
                     showEmbeddedAudioMeter = !audioMeterOutside,
+                    desqueezeMultiplier = desqueezeMultiplier,
                     modifier = Modifier
                         .offset(x = imageX, y = imageY)
                         .size(width = imageWidth, height = imageHeight)
@@ -2850,6 +2866,7 @@ private fun RemoteContent(
                                     active = showAudioLevels,
                                     onClick = ::toggleAudioLevels
                                 )
+                                DesqueezeToolButton(desqueezeMultiplier, ::setDesqueezeMultiplier)
                                 TopIconToggle(
                                     active = showHistogram,
                                     contentDescription = stringResource(R.string.cd_remote_histogram),
@@ -3456,6 +3473,7 @@ private fun RemoteViewfinderPanel(
     /** 相机机身滚转角；null=没有可用角度，水平仪什么都不画。 */
     levelRoll: Float? = null,
     showEmbeddedAudioMeter: Boolean = true,
+    desqueezeMultiplier: Float = 1f,
     modifier: Modifier = Modifier
 ) {
     val colors = AppTheme.colors
@@ -3478,7 +3496,8 @@ private fun RemoteViewfinderPanel(
             confirmedFocusMarker = confirmedFocusMarker,
             subjectTrackingActive = subjectTrackingActive,
             onTapFocus = onTapFocus,
-            showZebra = showZebra
+            showZebra = showZebra,
+            desqueezeMultiplier = desqueezeMultiplier
         )
 
         if (showEmbeddedAudioMeter) {
@@ -3744,7 +3763,8 @@ private fun ViewfinderImage(
     confirmedFocusMarker: ConfirmedFocusMarker?,
     subjectTrackingActive: Boolean,
     onTapFocus: (ViewfinderTap) -> Unit,
-    showZebra: Boolean
+    showZebra: Boolean,
+    desqueezeMultiplier: Float = 1f
 ) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         val liveFrame = frameProvider()
@@ -3777,7 +3797,7 @@ private fun ViewfinderImage(
                             val imageRect = fitCenterRect(
                                 size.width.toFloat(),
                                 size.height.toFloat(),
-                                imageWidth.toFloat() / imageHeight
+                                imageWidth.toFloat() / imageHeight * desqueezeMultiplier
                             )
                             if (tap.x in imageRect.left..imageRect.right &&
                                 tap.y in imageRect.top..imageRect.bottom
@@ -3815,7 +3835,9 @@ private fun ViewfinderImage(
                     bitmap = liveFrame.image,
                     contentDescription = null,
                     contentScale = ContentScale.Fit,
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(imageWidth.toFloat() / imageHeight * desqueezeMultiplier)
                 )
             }
             // 暗角：四周极淡压暗，画面"坐进"边框（相机目镜语言），角标叠其上不受影响。
@@ -4616,6 +4638,29 @@ private fun AdaptiveRemoteToolBar(
                     }
                 }
                 y += rowHeight + rowGapPx
+            }
+        }
+    }
+}
+
+/** 视频模式专属的反挤压倍率控制；只覆盖取景器，不改变原有工具栏测量边界。 */
+@Composable
+private fun DesqueezeToolButton(multiplier: Float, onSelect: (Float) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        TopIconToggle(
+            active = multiplier > 1.001f,
+            contentDescription = "反挤压倍率 ${multiplier}x",
+            onClick = { expanded = true }
+        ) {
+            Text(if (multiplier > 1.001f) "${multiplier}×" else "1×", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            REMOTE_DESQUEEZE_OPTIONS.forEach { option ->
+                DropdownMenuItem(
+                    text = { Text(if (option == 1f) "关闭（原始）" else "${option}× 反挤压") },
+                    onClick = { onSelect(option); expanded = false }
+                )
             }
         }
     }
