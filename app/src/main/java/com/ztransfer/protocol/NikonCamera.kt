@@ -39,6 +39,7 @@ import java.nio.ByteOrder
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 private fun normalizedCameraIdentifier(value: String?): String? {
     val normalized = value?.trim()?.takeIf(String::isNotEmpty) ?: return null
@@ -53,6 +54,17 @@ private fun normalizedCameraIdentifier(value: String?): String? {
 
 /** Maximum JPEG prefix retained while a fresh file is streamed to disk for EXIF parsing. */
 private const val EXIF_HEADER_CAPTURE_BYTES = 256 * 1024
+
+/**
+ * Formats camera metadata numbers with Android's format locale.  The pre-shared Android
+ * implementation used String.format for fallback names and dates; keeping the locale explicit
+ * preserves that behavior even when the process default locale is changed by another layer.
+ */
+private fun formatCameraMetadataDecimalForAndroid(value: Int, width: Int): String =
+    formatAndroidCameraMetadataDecimal(value, width, Locale.getDefault(Locale.Category.FORMAT))
+
+internal fun formatAndroidCameraMetadataDecimal(value: Int, width: Int, locale: Locale): String =
+    String.format(locale, "%0${width}d", value)
 
 /** 写入本地文件失败（非相机连接错误），用于区分"掉线"与"磁盘/存储"问题。 */
 class OutputWriteException(message: String, cause: Throwable) : Exception(message, cause)
@@ -106,8 +118,9 @@ internal fun parseObjectCacheIdentity(
     handle: Int,
     extension: String,
     data: ByteArray,
+    formatPaddedDecimal: (value: Int, width: Int) -> String = ::formatCameraMetadataDecimalForAndroid,
 ): ParsedObjectCacheIdentity {
-    val fallbackName = "DSC_%04d%s".format(handle and 0xFFFF, extension)
+    val fallbackName = "DSC_${formatPaddedDecimal(handle and 0xFFFF, 4)}$extension"
     if (data.size < 53) return ParsedObjectCacheIdentity(fallbackName, null, false)
 
     val nameLen = data[52].toInt() and 0xFF
@@ -783,10 +796,11 @@ internal fun deriveNikonMakerFileInfo(
 internal fun nikonDefaultCameraFileName(
     fileInfo: NikonMakerFileInfo,
     extension: String,
+    formatPaddedDecimal: (value: Int, width: Int) -> String = ::formatCameraMetadataDecimalForAndroid,
 ): String? {
     val normalizedExtension = extension.removePrefix(".").uppercase()
     if (normalizedExtension.lowercase() !in CAMERA_MEDIA_EXTENSIONS) return null
-    return "DSC_%04d.%s".format(fileInfo.fileNumber, normalizedExtension)
+    return "DSC_${formatPaddedDecimal(fileInfo.fileNumber, 4)}.$normalizedExtension"
 }
 
 /**
@@ -794,7 +808,10 @@ internal fun nikonDefaultCameraFileName(
  * handle、4 字节保留值、0/秒/分/时/日/月/年(u16 LE)。只接受完整且有效的记录，未知固件
  * 布局直接返回空表，让调用方安全回退到逐对象文件头解析。
  */
-internal fun parseNikonObjectsMetadataCaptureDates(data: ByteArray?): Map<Int, String> {
+internal fun parseNikonObjectsMetadataCaptureDates(
+    data: ByteArray?,
+    formatPaddedDecimal: (value: Int, width: Int) -> String = ::formatCameraMetadataDecimalForAndroid,
+): Map<Int, String> {
     if (data == null || data.size < 8) return emptyMap()
     fun u32(offset: Int): Int =
         (data[offset].toInt() and 0xFF) or
@@ -823,9 +840,15 @@ internal fun parseNikonObjectsMetadataCaptureDates(data: ByteArray?): Map<Int, S
         if (handle != 0 && year in 1990..2200 && month in 1..12 && day in 1..31 &&
             hour in 0..23 && minute in 0..59 && second in 0..60
         ) {
-            result[handle] = "%04d%02d%02dT%02d%02d%02d".format(
-                year, month, day, hour, minute, second,
-            )
+            result[handle] = buildString(15) {
+                append(formatPaddedDecimal(year, 4))
+                append(formatPaddedDecimal(month, 2))
+                append(formatPaddedDecimal(day, 2))
+                append('T')
+                append(formatPaddedDecimal(hour, 2))
+                append(formatPaddedDecimal(minute, 2))
+                append(formatPaddedDecimal(second, 2))
+            }
         }
     }
     return result
