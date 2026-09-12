@@ -20,6 +20,18 @@
 
 每完成一组在本节更新状态、验证和提交，并播报本表剩余组数；本表不替代 E/G/R/X 功能验收。Mac M01—M12 仍全部待验。此前已推送文档中的“0 项”保留为错误历史记录，不能继续引用为当前状态。
 
+### Mac 接续指引（2026-09-12）
+
+当前 Windows 交接点为 `research/ios`，最近源码提交为 `787788f`（切到 Mac 后以 `git log -1` 和远端实际状态为准）。Mac 新会话直接按以下顺序接续，不要回退或重置分支：
+
+1. 在仓库根目录执行 `git checkout research/ios`、`git pull --ff-only`，确认工作区干净；先读本表、[iOS扩展功能任务表](./iOS扩展功能任务表.md)、[最终交接包](../测试与验证/iOS传图版最终交接与验收包.md) 和 [Mac首次操作指南](../测试与验证/iOS首次Mac操作指南.md)。
+2. 先运行 `python3 iosApp/scripts/verify_on_mac.py --preflight-only` 检查 Xcode、Swift、JDK 17、Android SDK 35 和可用 iOS 16+ 模拟器；环境通过后再运行不带参数的 `python3 iosApp/scripts/verify_on_mac.py`。日志、`Tests.xcresult`、两架构编译结果和 `report.json` 需保留在被忽略的 `iosApp/build/verification/`。
+3. 首先结项 M01/M02：实际编译 `ZTransferShared`、Debug/Release 模拟器和设备架构，运行全部 XCTest 与 `:shared:iosSimulatorArm64Test`。任何 Swift/Kotlin/Native 桥接错误回开对应 C01—C06，不能把结构门禁结果当作 Apple 通过。
+4. M01/M02 通过后继续 C07/E05—E12：以 `NativePhotoFrameBridge` 和 `PhotoFrameLayouts` 为唯一几何来源，在 `PhotoEffectsExportService` 的实际批量导出链接入相框、水印、字体/资源、元数据和稳定成片身份；完成前不得把 C07 或 E 项改成完成。
+5. C08 只能逐项补充经过审阅的逆转换；禁止刷新旧 SHA、删断言、跳过失败，保留历史检查点保护。每解决一个独立范围，更新本表证据、测试结果、提交号和剩余数量后再提交推送。
+
+Mac 接手时的事实状态：Windows 可执行检查均已通过；`swiftc`/`xcodebuild` 在 Windows 不可用；当前 7/9 组完成、C07/C08 未完成，扩展任务 0/34，Mac M01—M12 为 0/12。Android 宿主、`androidMain`、构建脚本相对 master 无改动。
+
 **C02 检查记录（2026-09-12）**：`check_structure.py` 通过，58 个 App Swift / 17 个测试文件各注册一次，480 个 XCTest 方法仅存在、未运行；`git diff --check` 通过。测试覆盖并发上限/独立游标、异常与返回失败重试、生成中换图拒绝、旧代次/取消回调、进度终态、会话释放，以及图库串行回执、权限复用、取消等待、失败后继续。此批相对 `836eaed` 只改 iOS 源码、工程登记、测试与本进度文档，未改 Android/shared、原片 PhotoLibraryImporter 或打包脚本，不需 Android 行为复测；Mac 需运行上述样本及多选批量保存/部分失败重试。未重跑历史全套源码守卫，已有 `383 tests / 88 failures` 待 C08 归档修复，不能称全套通过。
 
 **C03 检查记录（2026-09-12）**：`check_structure.py` 通过，58 个 App Swift / 16 个测试文件，477 个 XCTest 方法仅登记、未运行；`git diff --check` 通过。输入目录只包含应用自己的副本，不按猜测的前缀删除外部文件；生成文件接管所有权时明确使用 `ownedURL`，部分生成文件失败也随引用释放回收。原片导出器和图库导入器未改，新增的 Files/分享协调器保留成片快照至面板释放。相对 `411dea5` 只改 iOS 与本文档，Android/shared 无改动；Mac 需验证 iCloud 载入中取消/重选、全失败与部分失败、生成期间离开、结果重选、Files/分享回执前后的文件存在性。C04 的原尺寸渲染/预览和 C08 的历史全套失败仍未关闭。

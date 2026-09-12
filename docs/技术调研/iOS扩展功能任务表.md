@@ -12,6 +12,10 @@
 - WIN-DONE 必须有正式入口、实际接线、错误/取消处理、适用 Windows 验证和 Apple 待验样本；不能用接口、占位页、源码搜索或未执行 XCTest 代替功能完成。VERIFIED 还需关联 Mac/真机证据。
 - 分组完成：E 0/12，G 0/8，R 0/10，X 0/4。下方六组新功能真机验收另计 0/6，不混入 Windows 百分比，也不替代原 Mac 0/12。
 
+### Mac 接续摘要（2026-09-12）
+
+从 `research/ios` 最新提交继续（当前已知交接点 `787788f`，以实际 `git log -1` 为准）。先按主表的 Mac 接续指引运行 `verify_on_mac.py --preflight-only`，环境通过后运行完整脚本，优先完成 M01/M02 的 Native framework、Swift 编译、模拟器 XCTest 和 Debug/Release 两架构构建。随后再处理 E05—E12 的真实 Apple 相框/水印/元数据/队列链；`NativePhotoFrameBridge` 只提供共享几何契约，不能计作相框成片完成。C08 历史守卫必须逐文件补审阅后的逆转换，禁止刷新 SHA 或删除断言。每完成一项更新主表和本表状态、证据、提交号及剩余数量。
+
 ## 范围与实现约束
 
 1. 两处效果共用同一套配置、渲染及成片输出管线，不实现两套编辑器逻辑。优先复用 commonMain 中 filter/frame/effects 规则；Apple 仅实现图片、字体、文件和系统适配。
