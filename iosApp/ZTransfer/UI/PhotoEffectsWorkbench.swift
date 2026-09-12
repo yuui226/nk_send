@@ -17,7 +17,6 @@ struct PhotoEffectsWorkbench: View {
     @State private var exportStatus = ""
 
     private let customGenerateAndSave: (@Sendable (IOSPhotoEffectAsset, IOSPhotoFilterSelection) async throws -> Bool)?
-    private let exportService = PhotoEffectsExportService()
     private let artifactSink: PhotoEffectsArtifactSink
 
     init(
@@ -41,6 +40,7 @@ struct PhotoEffectsWorkbench: View {
                 if !session.assets.isEmpty {
                     Button("重新选择") { pickerPresented = true }
                         .buttonStyle(.bordered)
+                        .disabled(session.isGenerating)
                 }
             }
             .padding(.horizontal)
@@ -100,23 +100,7 @@ struct PhotoEffectsWorkbench: View {
                         }
                         .buttonStyle(.bordered)
                     }
-                    Button(session.generateButtonTitle) {
-                        session.generateAndSave { asset in
-                            guard let selection else { return false }
-                            if let customGenerateAndSave {
-                                return try await customGenerateAndSave(asset, selection)
-                            }
-                            let artifact = try await exportService.render(asset, selection: selection)
-                            artifactSink.replace(artifact)
-                            do {
-                                try await exportService.saveToPhotos(artifact)
-                                return true
-                            } catch {
-                                artifactSink.remove(assetID: artifact.assetID)
-                                return false
-                            }
-                        }
-                    }
+                    Button(session.generateButtonTitle, action: startGeneration)
                     .buttonStyle(.borderedProminent)
                     .disabled(session.isGenerating || selection == nil)
                 }
@@ -146,6 +130,7 @@ struct PhotoEffectsWorkbench: View {
                         Button("分享") { sharePresented = true }
                     }
                     .buttonStyle(.bordered)
+                    .disabled(session.isGenerating)
                     if !exportStatus.isEmpty {
                         Text(exportStatus)
                             .font(.caption)
@@ -157,10 +142,10 @@ struct PhotoEffectsWorkbench: View {
         .padding(.vertical, 12)
         .sheet(isPresented: $pickerPresented) {
             PhotoEffectsPicker { values in
+                guard session.replaceSelection(values) else { return }
                 artifactSink.clear()
                 artifactFiles = []
                 exportStatus = ""
-                session.replaceSelection(values)
                 renderCurrent()
             }
         }
@@ -182,6 +167,30 @@ struct PhotoEffectsWorkbench: View {
             }
         }
         .onDisappear { artifactSink.clear() }
+    }
+
+    private func startGeneration() {
+        guard !session.isGenerating, let selection else { return }
+        artifactSink.clear()
+        artifactFiles = []
+        exportStatus = ""
+        let publisher = session.photosPublisher
+        session.generateAndSave { [selection, customGenerateAndSave, artifactSink, publisher] asset in
+            if let customGenerateAndSave {
+                return try await customGenerateAndSave(asset, selection)
+            }
+            // Two renderers share one serialized publisher, including the permission request.
+            let exportService = PhotoEffectsExportService(publisher: publisher)
+            let artifact = try await exportService.render(asset, selection: selection)
+            do {
+                try await exportService.saveToPhotos(artifact)
+                artifactSink.replace(artifact)
+                return true
+            } catch {
+                await exportService.remove(artifact)
+                throw error
+            }
+        }
     }
 
     private func choose(_ value: IOSPhotoFilterSelection) {

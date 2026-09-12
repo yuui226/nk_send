@@ -13,8 +13,8 @@ enum IOSPhotoEffectsBatchStatus: Equatable, Sendable {
     case finished(saved: Int, failed: Int)
 }
 
-/// Main-actor state for the workbench. It deliberately separates the selected asset snapshot
-/// from generation progress: the selection count never shrinks while a batch is running.
+/// The selected set stays fixed during a batch. Failures and successes refer to real asset IDs,
+/// while a generation token rejects late callbacks after the workbench has been closed.
 @MainActor
 final class PhotoEffectsBatchSession: ObservableObject {
     @Published private(set) var assets: [IOSPhotoEffectAsset] = []
@@ -23,9 +23,13 @@ final class PhotoEffectsBatchSession: ObservableObject {
     @Published private(set) var failedAssets: [IOSPhotoEffectAsset] = []
     @Published private(set) var completedAssets: [IOSPhotoEffectAsset] = []
 
+    let photosPublisher = PhotoEffectsPhotosPublisher()
     private let coordinator: PhotoEffectsBatchCoordinator
     private var generationTask: Task<Void, Never>?
+    private var generation: UInt64 = 0
     private var successfulIDs = Set<String>()
+    private var failedIDs = Set<String>()
+    private var lastOperation: (@Sendable (IOSPhotoEffectAsset) async throws -> Bool)?
 
     init(coordinator: PhotoEffectsBatchCoordinator = PhotoEffectsBatchCoordinator()) {
         self.coordinator = coordinator
@@ -37,8 +41,7 @@ final class PhotoEffectsBatchSession: ObservableObject {
         if case .generating = status { return true }
         return false
     }
-
-    var canRetryFailed: Bool { !failedAssets.isEmpty && !isGenerating }
+    var canRetryFailed: Bool { !failedAssets.isEmpty && !isGenerating && lastOperation != nil }
 
     var generateButtonTitle: String {
         switch status {
@@ -49,28 +52,27 @@ final class PhotoEffectsBatchSession: ObservableObject {
         }
     }
 
-    /// Replaces the picker result as one transaction and resets the horizontal preview to the
-    /// first item. Duplicate identifiers are ignored while preserving picker order.
-    func replaceSelection(_ values: [IOSPhotoEffectAsset]) {
+    @discardableResult
+    func replaceSelection(_ values: [IOSPhotoEffectAsset]) -> Bool {
+        guard !isGenerating else { return false }
         var seen = Set<String>()
         assets = values.filter { seen.insert($0.id).inserted }
         previewIndex = 0
-        failedAssets = []
-        completedAssets = []
-        successfulIDs = []
-        status = .idle
+        resetResults()
+        return true
     }
 
     func removeCurrent() {
         guard !isGenerating, assets.indices.contains(previewIndex) else { return }
         assets.remove(at: previewIndex)
         previewIndex = min(previewIndex, max(assets.count - 1, 0))
-        status = .idle
+        resetResults()
     }
 
     func movePreview(by offset: Int) {
         guard assets.count > 1 else { return }
-        previewIndex = (previewIndex + offset).positiveModulo(assets.count)
+        let step = offset % assets.count
+        previewIndex = (previewIndex + step + assets.count) % assets.count
     }
 
     func setPreviewIndex(_ value: Int) {
@@ -78,76 +80,97 @@ final class PhotoEffectsBatchSession: ObservableObject {
         previewIndex = min(max(value, 0), assets.count - 1)
     }
 
-    /// Starts one fixed snapshot. There is intentionally no stop action in the UI; cancellation
-    /// is reserved for lifecycle teardown and never reports a partial save as finished.
-    func generateAndSave(_ operation: @escaping @Sendable (IOSPhotoEffectAsset) async throws -> Bool) {
-        guard !assets.isEmpty, !isGenerating else { return }
+    @discardableResult
+    func generateAndSave(_ operation: @escaping @Sendable (IOSPhotoEffectAsset) async throws -> Bool) -> Task<Void, Never>? {
+        guard !assets.isEmpty, !isGenerating else { return nil }
+        resetResults()
+        return startGeneration(items: assets, operation: operation)
+    }
+
+    @discardableResult
+    func retryFailed() -> Task<Void, Never>? {
+        guard canRetryFailed, let operation = lastOperation else { return nil }
+        let retry = failedAssets
+        failedIDs.removeAll()
+        failedAssets = []
+        return startGeneration(items: retry, operation: operation)
+    }
+
+    /// Lifecycle teardown only. The product UI deliberately has no stop button.
+    func cancelForDismissal() {
+        generation &+= 1
+        generationTask?.cancel()
+        generationTask = nil
+        lastOperation = nil
+        status = .idle
+    }
+
+    private func resetResults() {
+        generation &+= 1
+        successfulIDs.removeAll()
+        failedIDs.removeAll()
         failedAssets = []
         completedAssets = []
-        successfulIDs = []
-        startGeneration(items: assets, operation: operation)
+        lastOperation = nil
+        status = .idle
     }
 
-    func retryFailed() {
-        guard canRetryFailed, let operation = lastOperation else { return }
-        let retry = failedAssets
-        failedAssets = []
-        startGeneration(items: retry, operation: operation)
+    private func record(_ asset: IOSPhotoEffectAsset, saved: Bool, token: UInt64) {
+        guard generation == token, isGenerating else { return }
+        if saved { successfulIDs.insert(asset.id); failedIDs.remove(asset.id) }
+        else { failedIDs.insert(asset.id) }
+        completedAssets = assets.filter { successfulIDs.contains($0.id) }
+        failedAssets = assets.filter { failedIDs.contains($0.id) }
     }
 
-    private var lastOperation: (@Sendable (IOSPhotoEffectAsset) async throws -> Bool)?
+    private func publish(_ progress: IOSPhotoEffectsBatchProgress, token: UInt64) {
+        guard generation == token, isGenerating else { return }
+        status = .generating(completed: progress.completed, total: progress.total)
+    }
+
+    private func finish(token: UInt64) {
+        guard generation == token, isGenerating else { return }
+        status = .finished(saved: completedAssets.count, failed: failedAssets.count)
+        generationTask = nil
+    }
+
+    private func cancelled(token: UInt64) {
+        guard generation == token else { return }
+        generationTask = nil
+        lastOperation = nil
+        status = .idle
+    }
 
     private func startGeneration(
         items: [IOSPhotoEffectAsset],
         operation: @escaping @Sendable (IOSPhotoEffectAsset) async throws -> Bool
-    ) {
-        guard !items.isEmpty, !isGenerating else { return }
-        let snapshot = items
+    ) -> Task<Void, Never> {
+        generation &+= 1
+        let token = generation
+        let coordinator = coordinator
         lastOperation = operation
-        status = .generating(completed: 0, total: snapshot.count)
-        generationTask = Task { [weak self] in
-            guard let self else { return }
+        status = .generating(completed: 0, total: items.count)
+        let task = Task { [weak self] in
             do {
-                let trackedOperation: @Sendable (IOSPhotoEffectAsset) async throws -> Bool = { [weak self] asset in
-                    let saved = try await operation(asset)
-                    await MainActor.run { [weak self] in
-                        guard let self else { return }
-                        if saved { self.successfulIDs.insert(asset.id) }
-                        else if !self.failedAssets.contains(where: { $0.id == asset.id }) { self.failedAssets.append(asset) }
-                    }
+                _ = try await coordinator.process(items, onProgress: { [weak self] progress in
+                    await self?.publish(progress, token: token)
+                }, generateAndSave: { [weak self] asset in
+                    let saved: Bool
+                    do { saved = try await operation(asset) }
+                    catch is CancellationError { throw CancellationError() }
+                    catch { saved = false }
+                    await self?.record(asset, saved: saved, token: token)
                     return saved
-                }
-                let result = try await coordinator.process(snapshot, onProgress: { progress in
-                    Task { @MainActor [weak self] in
-                        guard let self else { return }
-                        self.status = .generating(completed: progress.completed, total: progress.total)
-                    }
-                }, generateAndSave: trackedOperation)
-                guard !Task.isCancelled else { return }
-                await MainActor.run { [weak self] in
-                    guard let self else { return }
-                    self.status = .finished(saved: result.saved, failed: result.failed)
-                    self.completedAssets = self.assets.filter { self.successfulIDs.contains($0.id) }
-                    self.generationTask = nil
-                }
-            } catch is CancellationError {
-                await MainActor.run { [weak self] in self?.generationTask = nil }
+                })
+                try Task.checkCancellation()
+                self?.finish(token: token)
             } catch {
-                await MainActor.run { [weak self] in
-                    guard let self else { return }
-                    self.status = .finished(saved: 0, failed: snapshot.count)
-                    self.generationTask = nil
-                }
+                self?.cancelled(token: token)
             }
         }
+        generationTask = task
+        return task
     }
 
     deinit { generationTask?.cancel() }
-}
-
-private extension Int {
-    func positiveModulo(_ modulus: Int) -> Int {
-        let value = self % modulus
-        return value >= 0 ? value : value + modulus
-    }
 }

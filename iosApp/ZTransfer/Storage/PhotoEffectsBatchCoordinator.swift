@@ -9,59 +9,49 @@ struct IOSPhotoEffectsBatchProgress: Equatable, Sendable {
     var isFinished: Bool { completed == total }
 }
 
-/// Owns the bounded batch schedule used by the iOS photo-effects UI. Rendering and persistence
-/// stay injected so the coordinator can use the shared filter kernel and PhotoKit independently.
+/// Each invocation owns its cursor and counters. Only two operations are in flight, even for a
+/// large selection; awaiting progress keeps its final publication ahead of the completion state.
 actor PhotoEffectsBatchCoordinator {
-    private var nextIndex = 0
-    private var progress = IOSPhotoEffectsBatchProgress(total: 0, completed: 0, saved: 0)
-
     func process<Item: Sendable>(
         _ items: [Item],
-        onProgress: @escaping @Sendable (IOSPhotoEffectsBatchProgress) -> Void,
-        generateAndSave: @escaping @Sendable (Item) async throws -> Bool,
+        onProgress: @escaping @Sendable (IOSPhotoEffectsBatchProgress) async -> Void,
+        generateAndSave: @escaping @Sendable (Item) async throws -> Bool
     ) async throws -> IOSPhotoEffectsBatchProgress {
         let snapshot = items
-        nextIndex = 0
-        progress = IOSPhotoEffectsBatchProgress(total: snapshot.count, completed: 0, saved: 0)
-        onProgress(progress)
-        guard !snapshot.isEmpty else { return progress }
+        var progress = IOSPhotoEffectsBatchProgress(total: snapshot.count, completed: 0, saved: 0)
+        try Task.checkCancellation()
+        await onProgress(progress)
 
-        let workerCount = min(2, snapshot.count)
-        try await withThrowingTaskGroup(of: Void.self) { group in
-            for _ in 0..<workerCount {
-                group.addTask { [weak self] in
-                    guard let self else { return }
-                    while let index = await self.takeNext(count: snapshot.count) {
-                        try Task.checkCancellation()
-                        let saved: Bool
-                        do {
-                            saved = try await generateAndSave(snapshot[index])
-                        } catch is CancellationError {
-                            throw CancellationError()
-                        } catch {
-                            saved = false
-                        }
-                        await self.settle(saved: saved, onProgress: onProgress)
-                    }
+        return try await withThrowingTaskGroup(of: Bool.self) { group in
+            var nextIndex = 0
+            for _ in 0..<min(2, snapshot.count) {
+                let item = snapshot[nextIndex]
+                nextIndex += 1
+                group.addTask { try await Self.generate(item, operation: generateAndSave) }
+            }
+
+            while let saved = try await group.next() {
+                try Task.checkCancellation()
+                progress = IOSPhotoEffectsBatchProgress(total: snapshot.count,
+                    completed: progress.completed + 1, saved: progress.saved + (saved ? 1 : 0))
+                await onProgress(progress)
+                try Task.checkCancellation()
+                if nextIndex < snapshot.count {
+                    let item = snapshot[nextIndex]
+                    nextIndex += 1
+                    group.addTask { try await Self.generate(item, operation: generateAndSave) }
                 }
             }
-            try await group.waitForAll()
+            return progress
         }
-        return progress
     }
 
-    private func takeNext(count: Int) -> Int? {
-        guard nextIndex < count else { return nil }
-        defer { nextIndex += 1 }
-        return nextIndex
-    }
-
-    private func settle(
-        saved: Bool,
-        onProgress: @escaping @Sendable (IOSPhotoEffectsBatchProgress) -> Void,
-    ) {
-        progress = IOSPhotoEffectsBatchProgress(total: progress.total, completed: progress.completed + 1,
-                                                saved: progress.saved + (saved ? 1 : 0))
-        onProgress(progress)
+    nonisolated private static func generate<Item: Sendable>(
+        _ item: Item, operation: @Sendable (Item) async throws -> Bool
+    ) async throws -> Bool {
+        try Task.checkCancellation()
+        do { return try await operation(item) }
+        catch is CancellationError { throw CancellationError() }
+        catch { return false }
     }
 }
