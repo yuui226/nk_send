@@ -61,6 +61,7 @@ fun AnchorPopup(
     panelModifier: Modifier,
     panelAlignment: Alignment = Alignment.TopStart,
     animateScale: Boolean = true,
+    morphFromAnchor: Boolean = false,
     shape: Shape = RoundedCornerShape(20.dp),
     // 遮罩是否压暗背景：大面板（设置）保持压暗聚焦；小面板（筛选下拉）传 false——
     // 全屏变暗对几个胶囊的下拉太兴师动众，遮罩仍在（点外部收起、拦滚动穿透），只是透明。
@@ -145,7 +146,11 @@ fun AnchorPopup(
                     } else {
                         CompositingStrategy.ModulateAlpha
                     }
-                    val s = if (animateScale) 0.96f + 0.04f * p else 1f
+                    val s = when {
+                        morphFromAnchor -> 0.92f + 0.08f * p
+                        animateScale -> 0.96f + 0.04f * p
+                        else -> 1f
+                    }
                     scaleX = s
                     scaleY = s
                     alpha = p
