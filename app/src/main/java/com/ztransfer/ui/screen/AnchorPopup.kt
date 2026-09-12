@@ -50,7 +50,7 @@ private class PopupAnimationState(
  * 通用「从按钮变形弹出」的毛玻璃浮层外壳（设置面板与筛选面板共用）。
  *
  * 默认以触发按钮 [anchorBounds]（同一 Compose 根坐标系）为原点轻量缩放淡入。
- * [morphFromAnchor] 用于设置和筛选：整块内容向按钮下缘斜向收束。
+ * [genieFromAnchor] 用于设置和筛选：整块内容向按钮下缘斜向收束。
  * 内容始终按最终尺寸排版，动画只更新绘制和图层，不逐帧重排大型设置内容树。
  * 遮罩随进度淡入，点击遮罩 / 返回键触发收回。
  *
@@ -66,7 +66,7 @@ fun AnchorPopup(
     panelModifier: Modifier,
     panelAlignment: Alignment = Alignment.TopStart,
     animateScale: Boolean = true,
-    morphFromAnchor: Boolean = false,
+    genieFromAnchor: Boolean = false,
     shape: Shape = RoundedCornerShape(20.dp),
     // 遮罩是否压暗背景：大面板（设置）保持压暗聚焦；小面板（筛选下拉）传 false——
     // 全屏变暗对几个胶囊的下拉太兴师动众，遮罩仍在（点外部收起、拦滚动穿透），只是透明。
@@ -75,7 +75,7 @@ fun AnchorPopup(
     content: @Composable BoxScope.(close: () -> Unit) -> Unit
 ) {
     val colors = AppTheme.colors
-    val genieLayer = if (morphFromAnchor) rememberGraphicsLayer() else null
+    val genieLayer = if (genieFromAnchor) rememberGraphicsLayer() else null
 
     // 入场进度：0=不可见，1=完全展开。
     val progress = remember { Animatable(0f) }
@@ -88,7 +88,7 @@ fun AnchorPopup(
         if (!animationState.closing) {
             animationState.closing = true
             animationScope.launch {
-                progress.animateTo(0f, if (morphFromAnchor) {
+                progress.animateTo(0f, if (genieFromAnchor) {
                     tween((GENIE_COLLAPSE_DURATION_MS * progress.value).toInt().coerceAtLeast(1),
                         easing = GenieCollapseEasing)
                 } else Motion.overlayCollapse)
@@ -126,7 +126,7 @@ fun AnchorPopup(
                         animationScope.launch {
                             withFrameNanos { }
                             if (!animationState.closing) {
-                                progress.animateTo(1f, if (morphFromAnchor) {
+                                progress.animateTo(1f, if (genieFromAnchor) {
                                     tween(GENIE_EXPAND_DURATION_MS,
                                         easing = GenieExpandEasing)
                                 } else Motion.overlayExpand)
@@ -152,7 +152,7 @@ fun AnchorPopup(
                         // Group alpha in BOTH directions: nested badge/shadow/sheen must not
                         // accumulate opacity independently and appear before the surrounding text.
                         compositingStrategy = CompositingStrategy.Auto
-                        if (morphFromAnchor) {
+                        if (genieFromAnchor) {
                             // The complete, unscaled surface is warped by the outer layer.
                             alpha = 1f
                             scaleX = 1f

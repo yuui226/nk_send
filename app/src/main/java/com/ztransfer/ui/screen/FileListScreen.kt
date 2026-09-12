@@ -2012,6 +2012,9 @@ fun FileListScreen(
                     },
                     activeProgressFlow = transferViewModel.activeTransferProgress,
                     queueTargetBounds = queueTargetBounds,
+                    onQueueFlightStarted = onQueueFlightStarted,
+                    onQueueFlightFinished = onQueueFlightFinished,
+                    onQueueFlightsCancelled = onQueueFlightsCancelled,
                     onQueueFlightCaught = onQueueFlightCaught,
                     onTransfer = onTransferFromPreview,
                     onTransferBurst = onTransferBurstPreview,
@@ -4269,7 +4272,7 @@ private fun FilterOverlay(
             .padding(start = panelStart, top = panelTop)
             .width(panelWidth),
         animateScale = false,
-        morphFromAnchor = true,
+        genieFromAnchor = true,
         shape = RoundedCornerShape(16.dp),
         dim = false,
     ) { _ ->

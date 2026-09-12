@@ -480,7 +480,7 @@ fun SettingsOverlay(
             .navigationBarsPadding()   // 小屏时面板底部不顶进导航栏
             .fillMaxWidth(),
         animateScale = false,
-        morphFromAnchor = true,
+        genieFromAnchor = true,
         overlayContent = {
             if (showMainSettingsInfo) {
                 MainSettingsInfoBubble(
