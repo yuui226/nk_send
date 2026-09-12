@@ -93,10 +93,11 @@ actor PhotoEffectsExportService {
               ] as CFDictionary),
               let image = CGImageSourceCreateImageAtIndex(source, 0, [
                   kCGImageSourceShouldCacheImmediately: true,
-              ] as CFDictionary),
-              let filter = NativePhotoFilterCatalog.shared.selection(
-                  index: selection.index, intensityPercent: Int32(selection.intensityPercent)
-              ) else { throw PhotoEffectsExportError.invalidSource }
+              ] as CFDictionary) else { throw PhotoEffectsExportError.invalidSource }
+
+        guard let filter = NativePhotoFilterCatalog.shared.selection(
+            index: selection.index, intensityPercent: Int32(selection.intensityPercent)
+        ) else { throw PhotoEffectsExportError.unsupportedFilter }
 
         let rendered = try await renderer.renderExport(image, selection: filter)
         try Task.checkCancellation()

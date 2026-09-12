@@ -22,6 +22,8 @@ IOS_EFFECT_FILES = (
     "iosApp/ZTransfer/Storage/PhotoFilterCatalogStore.swift",
     "iosApp/ZTransfer/UI/PhotoEffectsPresentation.swift",
     "iosApp/ZTransfer/UI/PhotoEffectsWorkbench.swift",
+    "shared/src/commonMain/kotlin/com/ztransfer/frame/NativePhotoFrameBridge.kt",
+    "shared/src/commonTest/kotlin/com/ztransfer/frame/NativePhotoFrameBridgeTest.kt",
 )
 
 
@@ -46,8 +48,13 @@ def verify() -> None:
         raise AssertionError("Photo-effects preview owner is not unique")
     if presentation.count("PhotoEffectsWorkbench") != 1:
         raise AssertionError("Photo-effects presentation does not have one workbench owner")
+    exporter = (ROOT / "iosApp/ZTransfer/Storage/PhotoEffectsExportService.swift").read_text(encoding="utf-8")
+    if exporter.count("throw PhotoEffectsExportError.unsupportedFilter") != 1:
+        raise AssertionError("Unsupported filters are not reported separately from invalid sources")
+    if exporter.index("throw PhotoEffectsExportError.invalidSource") > exporter.index("throw PhotoEffectsExportError.unsupportedFilter"):
+        raise AssertionError("Source validation must happen before filter validation")
     print("PASS Android/build scope unchanged relative to master")
-    print("PASS iOS photo-effects production files and single presentation owner are present")
+    print("PASS iOS photo-effects production files, frame bridge and single presentation owner are present")
     print("NOTE Apple Swift compilation, shared bridge export names, frame/watermark rendering and device behavior remain unverified")
 
 
