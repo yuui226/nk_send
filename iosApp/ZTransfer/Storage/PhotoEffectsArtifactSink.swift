@@ -1,16 +1,15 @@
 import Foundation
 
 /// Thread-safe bridge from the two batch workers back to the main-actor workbench. One artifact
-/// per asset is retained; replacing it removes the previous temporary file first.
+/// per asset is retained. Files are reclaimed only after the sink, workers and any system export
+/// sheet have all released their copies, so clearing a selection cannot invalidate a provider URL.
 final class PhotoEffectsArtifactSink: @unchecked Sendable {
     private let lock = NSLock()
     private var storage: [String: PhotoEffectsRenderedFile] = [:]
 
     func replace(_ file: PhotoEffectsRenderedFile) {
         lock.lock(); defer { lock.unlock() }
-        if let previous = storage.updateValue(file, forKey: file.assetID) {
-            try? FileManager.default.removeItem(at: previous.url)
-        }
+        storage[file.assetID] = file
     }
 
     func snapshot() -> [PhotoEffectsRenderedFile] {
@@ -20,13 +19,11 @@ final class PhotoEffectsArtifactSink: @unchecked Sendable {
 
     func remove(assetID: String) {
         lock.lock(); defer { lock.unlock() }
-        guard let file = storage.removeValue(forKey: assetID) else { return }
-        try? FileManager.default.removeItem(at: file.url)
+        storage.removeValue(forKey: assetID)
     }
 
     func clear() {
         lock.lock(); defer { lock.unlock() }
-        storage.values.forEach { try? FileManager.default.removeItem(at: $0.url) }
         storage.removeAll()
     }
 }

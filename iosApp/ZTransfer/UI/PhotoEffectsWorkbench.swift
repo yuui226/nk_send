@@ -17,7 +17,7 @@ struct PhotoEffectsWorkbench: View {
     @State private var exportStatus = ""
 
     private let customGenerateAndSave: (@Sendable (IOSPhotoEffectAsset, IOSPhotoFilterSelection) async throws -> Bool)?
-    private let artifactSink: PhotoEffectsArtifactSink
+    private var artifactSink: PhotoEffectsArtifactSink { session.artifacts }
 
     init(
         session: PhotoEffectsBatchSession = PhotoEffectsBatchSession(),
@@ -27,7 +27,6 @@ struct PhotoEffectsWorkbench: View {
         _session = StateObject(wrappedValue: session)
         _catalog = StateObject(wrappedValue: catalog)
         self.customGenerateAndSave = generateAndSave
-        self.artifactSink = PhotoEffectsArtifactSink()
     }
 
     var body: some View {
@@ -131,21 +130,29 @@ struct PhotoEffectsWorkbench: View {
                     }
                     .buttonStyle(.bordered)
                     .disabled(session.isGenerating)
-                    if !exportStatus.isEmpty {
-                        Text(exportStatus)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
                 }
+            }
+            if !exportStatus.isEmpty {
+                Text(exportStatus)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal)
             }
         }
         .padding(.vertical, 12)
         .sheet(isPresented: $pickerPresented) {
-            PhotoEffectsPicker { values in
+            PhotoEffectsPicker { result in
+                pickerPresented = false
+                guard case let .selected(values, failedCount) = result else { return }
+                guard !values.isEmpty else {
+                    exportStatus = "未能读取所选照片，请重新选择。"
+                    return
+                }
                 guard session.replaceSelection(values) else { return }
                 artifactSink.clear()
                 artifactFiles = []
-                exportStatus = ""
+                exportStatus = failedCount == 0 ? "" : "\(failedCount) 张照片未能读取，其余已载入。"
+                previews.clear()
                 renderCurrent()
             }
         }
@@ -155,18 +162,17 @@ struct PhotoEffectsWorkbench: View {
             artifactFiles = session.assets.compactMap { byID[$0.id] }
         }
         .sheet(isPresented: $filesExportPresented) {
-            PhotoEffectsDocumentExporter(files: artifactFiles.map(\.url)) { urls in
+            PhotoEffectsDocumentExporter(files: artifactFiles) { urls in
                 filesExportPresented = false
                 exportStatus = urls.map { "已接收 \($0.count) 个文件" } ?? "已取消导出"
             }
         }
         .sheet(isPresented: $sharePresented) {
-            PhotoEffectsShareSheet(files: artifactFiles.map(\.url)) {
+            PhotoEffectsShareSheet(files: artifactFiles) {
                 sharePresented = false
                 exportStatus = "分享面板已关闭"
             }
         }
-        .onDisappear { artifactSink.clear() }
     }
 
     private func startGeneration() {
@@ -182,14 +188,9 @@ struct PhotoEffectsWorkbench: View {
             // Two renderers share one serialized publisher, including the permission request.
             let exportService = PhotoEffectsExportService(publisher: publisher)
             let artifact = try await exportService.render(asset, selection: selection)
-            do {
-                try await exportService.saveToPhotos(artifact)
-                artifactSink.replace(artifact)
-                return true
-            } catch {
-                await exportService.remove(artifact)
-                throw error
-            }
+            try await exportService.saveToPhotos(artifact)
+            artifactSink.replace(artifact)
+            return true
         }
     }
 

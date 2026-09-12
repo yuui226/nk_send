@@ -5,6 +5,16 @@ struct IOSPhotoEffectAsset: Identifiable, Equatable, Sendable {
     let id: String
     let url: URL
     let displayName: String
+    // A worker keeps its input alive even after the workbench releases the selection.
+    private let inputFiles: PhotoEffectsInputFiles?
+
+    init(id: String, url: URL, displayName: String, inputFiles: PhotoEffectsInputFiles? = nil) {
+        self.id = id; self.url = url; self.displayName = displayName; self.inputFiles = inputFiles
+    }
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.id == rhs.id && lhs.url == rhs.url && lhs.displayName == rhs.displayName
+    }
 }
 
 enum IOSPhotoEffectsBatchStatus: Equatable, Sendable {
@@ -24,6 +34,7 @@ final class PhotoEffectsBatchSession: ObservableObject {
     @Published private(set) var completedAssets: [IOSPhotoEffectAsset] = []
 
     let photosPublisher = PhotoEffectsPhotosPublisher()
+    let artifacts = PhotoEffectsArtifactSink()
     private let coordinator: PhotoEffectsBatchCoordinator
     private var generationTask: Task<Void, Never>?
     private var generation: UInt64 = 0
