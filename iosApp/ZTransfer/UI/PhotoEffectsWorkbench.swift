@@ -23,7 +23,7 @@ struct PhotoEffectsWorkbench: View {
     init(
         session: PhotoEffectsBatchSession = PhotoEffectsBatchSession(),
         catalog: PhotoFilterCatalogStore = PhotoFilterCatalogStore(),
-        generateAndSave: (@escaping @Sendable (IOSPhotoEffectAsset, IOSPhotoFilterSelection) async throws -> Bool)? = nil
+        generateAndSave: (@Sendable (IOSPhotoEffectAsset, IOSPhotoFilterSelection) async throws -> Bool)? = nil
     ) {
         _session = StateObject(wrappedValue: session)
         _catalog = StateObject(wrappedValue: catalog)

@@ -30,7 +30,7 @@ struct PhotoEffectsPresentationModifier: ViewModifier {
 extension View {
     func photoEffectsPresentation(
         _ presentation: PhotoEffectsPresentation,
-        generateAndSave: (@escaping @Sendable (IOSPhotoEffectAsset, IOSPhotoFilterSelection) async throws -> Bool)? = nil
+        generateAndSave: (@Sendable (IOSPhotoEffectAsset, IOSPhotoFilterSelection) async throws -> Bool)? = nil
     ) -> some View {
         modifier(PhotoEffectsPresentationModifier(presentation: presentation, generateAndSave: generateAndSave))
     }

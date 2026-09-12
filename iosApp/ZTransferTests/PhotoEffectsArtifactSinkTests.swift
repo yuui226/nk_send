@@ -1,4 +1,5 @@
 import XCTest
+@testable import ZTransfer
 
 final class PhotoEffectsArtifactSinkTests: XCTestCase {
     func testReplacementRemovesPreviousFileAndClearRemovesLatest() throws {

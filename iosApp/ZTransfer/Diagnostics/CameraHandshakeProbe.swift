@@ -591,14 +591,13 @@ final class CameraHandshakeProbe: ObservableObject {
                 self.selectQueueDirectory(url, completion: completion)
             }, automaticTransfer: automaticTransfer,
             automaticTransferTargetAvailable: savesToSelectedDirectory && queueDestinationError == nil,
-            openPhotoEffects: photoEffectsHandler,
             browseSession: browseSession, rememberBrowseSession: { [weak self] value in
                 guard let self, self.apConnection === connection else { return }
                 self.browseSession = value
             }, useSandbox: { [weak self] completion in
                 guard let self else { completion("连接已关闭 / Connection closed"); return }
                 self.configureQueueDirectory(false, confirmedReset: true, completion: completion)
-            })
+            }, openPhotoEffects: photoEffectsHandler)
         filesPage = page
         Task {
             let snapshot = await queue.snapshot()
