@@ -260,6 +260,7 @@
     <string name="photo_effects_info_description">傳輸原圖後，效果圖另存。</string>
     <string name="photo_effects_gesture_hint">預覽：點擊放大 · 雙擊旋轉 · 長按對比濾鏡前後</string>
     <string name="photo_effects_wheel_hint">撥輪：按住上下拖動可快速調整</string>
+    <string name="photo_effects_full_chooser_hint">長按濾鏡撥輪可按分類選擇</string>
     <string name="photo_filter_off_option">無濾鏡</string>
     <string name="photo_filter_intensity_summary">強度 %1$d%%</string>
     <string name="photo_filter_intensity">濾鏡強度</string>

@@ -264,6 +264,7 @@
     <string name="photo_effects_info_description">After the original is transferred, the edited version is saved separately.</string>
     <string name="photo_effects_gesture_hint">Preview: Tap to enlarge · Double-tap to rotate · Hold to compare</string>
     <string name="photo_effects_wheel_hint">Wheels: Hold and drag vertically for quick adjustments</string>
+    <string name="photo_effects_full_chooser_hint">Hold the photo filter wheel to choose by category</string>
     <string name="photo_filter_off_option">No filter</string>
     <string name="photo_filter_intensity_summary">Intensity %1$d%%</string>
     <string name="photo_filter_intensity">Intensity</string>

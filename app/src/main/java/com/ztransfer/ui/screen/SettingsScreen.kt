@@ -153,6 +153,8 @@ import com.ztransfer.frame.photoFrameTimePatternExample
 import com.ztransfer.frame.resolvedPhotoFrameMetadataSettings
 import com.ztransfer.filter.PhotoFilterPreset
 import com.ztransfer.filter.BuiltInPhotoFilters
+import com.ztransfer.filter.PhotoFilterCategory
+import com.ztransfer.filter.orderForCategory
 import com.ztransfer.filter.PhotoFilterRenderer
 import com.ztransfer.filter.PhotoFilterSelection
 import com.ztransfer.filter.normalizePhotoFilterIntensity
@@ -1537,6 +1539,8 @@ internal fun PhotoFilterEditor(
     val filterAccent = colors.accentBlue
     val favoritePalette = rememberPhotoEffectFavoriteButtonPalette()
     val haptics = rememberHaptics(hapticsEnabled)
+    var showFullChooser by rememberSaveable { mutableStateOf(false) }
+    var chooserCategory by rememberSaveable { mutableStateOf(PhotoFilterCategory.ALL.name) }
     val selected = filters.firstOrNull { it.id == selectedId }
     val normalizedIntensity = normalizePhotoFilterIntensity(intensityPercent)
     val intensityChoices = remember { (100 downTo 2 step 2).toList() }
@@ -1590,6 +1594,7 @@ internal fun PhotoFilterEditor(
                 wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
                 accentColor = filterAccent,
                 modifier = Modifier.weight(PHOTO_EFFECTS_PRIMARY_WHEEL_WEIGHT),
+                onLongClick = { showFullChooser = true },
             )
             ReleaseCommitWheel(
                 options = intensityChoices,
@@ -1620,6 +1625,104 @@ internal fun PhotoFilterEditor(
                     }
                 },
             )
+        }
+    }
+    if (showFullChooser) {
+        val category = PhotoFilterCategory.entries.firstOrNull { it.name == chooserCategory }
+            ?: PhotoFilterCategory.ALL
+        val favoriteKeys = favoriteFilters.map { it.catalogKey }
+        val chooserFilters = filters.orderForCategory(category, favoriteKeys) {
+            BuiltInPhotoFilters.catalogKey(it.id) ?: it.id
+        }
+        Dialog(
+            onDismissRequest = { showFullChooser = false },
+            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+        ) {
+            Surface(
+                modifier = Modifier.padding(horizontal = 24.dp).width(280.dp),
+                shape = RoundedCornerShape(18.dp),
+                color = colors.glassSurface.copy(alpha = 0.92f),
+                border = BorderStroke(1.dp, colors.glassPanelBorder),
+                shadowElevation = 6.dp,
+            ) {
+                CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 44.dp) {
+                    Row(
+                        Modifier.padding(10.dp).heightIn(max = 380.dp).fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Column(
+                            modifier = Modifier.width(84.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            PhotoFilterCategory.entries.forEach { item ->
+                                val selectedCategory = item == category
+                                Surface(
+                                    onClick = { chooserCategory = item.name },
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = if (selectedCategory) filterAccent.copy(alpha = 0.18f)
+                                    else Color.Transparent,
+                                    modifier = Modifier.fillMaxWidth().heightIn(min = 40.dp),
+                                ) {
+                                    Box(contentAlignment = Alignment.CenterStart) {
+                                        Text(
+                                            text = item.title,
+                                            color = if (selectedCategory) filterAccent
+                                            else colors.onSurfaceVariant,
+                                            fontWeight = if (selectedCategory) FontWeight.SemiBold
+                                            else FontWeight.Normal,
+                                            style = MaterialTheme.typography.labelLarge,
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        Column(
+                            modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            chooserFilters.forEach { preset ->
+                                val isSelected = enabled && preset.id == selectedId
+                                val isFavorite = favoriteKeys.contains(
+                                    BuiltInPhotoFilters.catalogKey(preset.id)
+                                )
+                                Surface(
+                                    onClick = {
+                                        onSelected(preset.id)
+                                        onIntensityChanged(preset.id, rememberedIntensity(preset.id))
+                                        showFullChooser = false
+                                    },
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = if (isSelected) filterAccent.copy(alpha = 0.14f)
+                                    else Color.Transparent,
+                                    modifier = Modifier.fillMaxWidth().heightIn(min = 40.dp),
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        if (isFavorite) {
+                                            Icon(
+                                                Icons.Rounded.Star,
+                                                contentDescription = null,
+                                                tint = colors.accentYellow,
+                                                modifier = Modifier.size(18.dp),
+                                            )
+                                            Spacer(Modifier.width(8.dp))
+                                        }
+                                        Text(
+                                            text = photoFilterDisplayName(preset),
+                                            color = colors.onBackground,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
