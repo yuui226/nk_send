@@ -34,6 +34,8 @@
 
 **C09 检查记录（2026-09-12）**：核对 [iOS扩展功能任务表](./iOS扩展功能任务表.md) 与本表及当前 `research/ios` 文件。旧的 2026-09-08“照片效果全部暂停”已保留为历史说明；当前 E01/E03/E04/E10 的 DOING 均明确指向 C01—C06，并注明相框/水印、完整组合和 Apple 验证缺口；E02/E05—E09/E11—E12、G01—G08、R01—R10、X01—X04 仍为 TODO，分组计数和 34 项完成数没有虚增。C09 的 Windows 账本同步完成，Apple 编译、真机和外部决策项不在 Windows 结项范围。
 
+**追加验证（2026-09-12）**：`swiftc` 与 `xcodebuild` 在当前 Windows 环境均不存在；可执行的 shared 定向回归 `:shared:testDebugUnitTest --tests com.ztransfer.ui.NativeConnectionHomeTest --tests com.ztransfer.filter.NativePhotoFilterTest` 输出 `BUILD SUCCESSFUL in 20s`。这只证明 shared/Android 编译测试，不替代 Apple 编译。
+
 > **最新决定（2026-09-08）**：用户已叫停本次照片效果实现，先跳过并保留 [iOS扩展功能任务表](./iOS扩展功能任务表.md)。新增计划仍 0/34，E01—E12 再次暂缓，本次没有业务代码修改；不自动继续其他扩展任务，会员/支付仍排除。本表 W01—W50 的 50/50 仅指传图版 Windows 范围，Mac 仍 0/12。`4874a0b` 已提交并推送，后续接手核实实际 Git 和用户新指令。
 
 > **当前覆盖（2026-09-12）**：照片效果已按新指令恢复 Windows 侧 iOS 代码填充；滤镜目录/分类选择、拨轮长按入口、批量多选/横向预览、两路并发、真实 shared 内核导出、PhotoKit/Files/分享承载、失败项重试和结果状态均已加入 `research/ios`。上面的 2026-09-08 文字保留为历史决定，不覆盖当前实现状态；正式设置浮层宿主入口已接线，并在跳转前关闭原文件页；Apple 编译/真机验证仍未完成。
