@@ -480,6 +480,7 @@ fun SettingsOverlay(
             .navigationBarsPadding()   // 小屏时面板底部不顶进导航栏
             .fillMaxWidth(),
         animateScale = false,
+        morphFromAnchor = true,
         overlayContent = {
             if (showMainSettingsInfo) {
                 MainSettingsInfoBubble(
@@ -528,26 +529,26 @@ fun SettingsOverlay(
             if (settingsPage == SettingsPage.EFFECTS) commitPhotoEffectsDraft()
             settingsPage = SettingsPage.MAIN
         }
+        // Detail navigation is a short directional push, not another popup opening.
+        val pageTravel = with(density) { 24.dp.roundToPx() }
         AnimatedContent(
             targetState = settingsPage,
             transitionSpec = {
                 val enteringEditor = targetState != SettingsPage.MAIN
-                val enter = if (enteringEditor) {
-                    slideInHorizontally(Motion.pageSlide) { it / 3 }
-                } else {
-                    slideInHorizontally(Motion.pageSlide) { -it / 3 }
+                val direction = if (enteringEditor) 1 else -1
+                val enter = slideInHorizontally(tween(240, easing = FastOutSlowInEasing)) {
+                    direction * pageTravel
                 }
-                val exit = if (enteringEditor) {
-                    slideOutHorizontally(Motion.pageSlide) { -it / 3 }
-                } else {
-                    slideOutHorizontally(Motion.pageSlide) { it / 3 }
+                val exit = slideOutHorizontally(tween(200, easing = FastOutSlowInEasing)) {
+                    -direction * pageTravel
                 }
-                (enter + fadeIn(Motion.overlayExpand))
-                    .togetherWith(exit + fadeOut(Motion.overlayCollapse))
+                (enter + fadeIn(tween(180, delayMillis = 40)))
+                    .togetherWith(exit + fadeOut(tween(100)))
+                    .apply { targetContentZIndex = if (enteringEditor) 1f else 0f }
                     .using(
                         SizeTransform(
-                            clip = false,
-                            sizeAnimationSpec = { _, _ -> tween(340, easing = FastOutSlowInEasing) },
+                            clip = true,
+                            sizeAnimationSpec = { _, _ -> tween(240, easing = FastOutSlowInEasing) },
                         )
                     )
             },

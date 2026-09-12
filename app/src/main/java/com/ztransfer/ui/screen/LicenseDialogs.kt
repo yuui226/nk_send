@@ -363,7 +363,7 @@ fun ProDialog(
                         }
 
                         // 定价促销区:红色"限时特惠"角标 + 大号金色现价 + 划线原价,底下压一行
-                        // 摊到每天的脚注——"现在买最便宜"的经典促销排布。
+                        // 年费折算到每月的参考价脚注，不是按月收费。
                         // 价格来自服务端(启动时静默拉,拉不到就用上次缓存),originalFen 为 0
                         // 则退化为单一价格(无角标无划线)。这里显示的只是展示价:真正收多少
                         // 以下单响应为准(见 PurchaseDialog)。
@@ -399,9 +399,7 @@ fun ProDialog(
                                 )
                             }
                         }
-                        // 年费摊到每天当脚注:一年十几块听着是笔钱,一天几分钱不是。
-                        // 压在价格下方而非上方——放上面会和紧跟着的大号金额把同一个数字报两遍。
-                        // 摊完不足 1 分就别报了(那会印出"合每天 ¥0.00")。
+                        // 折算月价显示在上方一年方案卡片内，主购买按钮仍显示实际总价。
                         Spacer(Modifier.height(18.dp))
 
                         // ---- 主行动：全宽金色"立即购买"（与入口徽标同款扫光），拉起支付流程 ----
@@ -1039,33 +1037,27 @@ private fun ProductPlanCard(
                 fontWeight = FontWeight.Bold,
                 color = if (enabled) colors.onBackground else colors.onSurfaceVariant,
             )
-            Text(
-                if (!enabled) {
-                    stringResource(R.string.plan_unavailable)
-                } else if (product == LicenseManager.ProductId.ANNUAL) {
-                    stringResource(R.string.duration_days, price.periodDays)
-                } else {
-                    stringResource(R.string.duration_lifetime)
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = if (product == LicenseManager.ProductId.LIFETIME && enabled) {
-                    colors.accentYellow
-                } else {
-                    colors.onSurfaceVariant
-                },
-                fontWeight = if (product == LicenseManager.ProductId.LIFETIME && enabled) {
-                    FontWeight.Bold
-                } else {
-                    FontWeight.Normal
-                },
-            )
+            // Annual duration is already stated in the title and comparison table.
+            // Keep unavailable notices and the lifetime plan's duration label.
+            if (!enabled || product == LicenseManager.ProductId.LIFETIME) {
+                Text(
+                    if (!enabled) {
+                        stringResource(R.string.plan_unavailable)
+                    } else {
+                        stringResource(R.string.duration_lifetime)
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (enabled) colors.accentYellow else colors.onSurfaceVariant,
+                    fontWeight = if (enabled) FontWeight.Bold else FontWeight.Normal,
+                )
+            }
             if (product == LicenseManager.ProductId.ANNUAL) {
-                val perDayFen = LicenseManager.perDayFen(price)
-                if (perDayFen > 0) {
+                val perMonthFen = LicenseManager.perMonthFen(price)
+                if (perMonthFen > 0) {
                     Text(
                         stringResource(
-                            R.string.pro_price_per_day,
-                            LicenseManager.formatPrice(perDayFen),
+                            R.string.pro_price_per_month,
+                            LicenseManager.formatPrice(perMonthFen),
                         ),
                         style = MaterialTheme.typography.labelSmall,
                         color = colors.onSurfaceVariant,
