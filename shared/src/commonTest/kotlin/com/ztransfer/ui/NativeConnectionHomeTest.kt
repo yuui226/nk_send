@@ -195,6 +195,17 @@ class NativeConnectionHomeTest {
         assertNull(homeSelectedConnection(value.ready, value.presentation().connectionType))
         model.openFiles(); model.openQueue(); assertEquals(0, platform.files + platform.queues)
     }
+
+    @Test fun localPhotoEffectsRouteIsOptionalAndDoesNotPretendCameraReady() {
+        val platform = Platform(); var opened = 0
+        val model = NativeConnectionHomeModel(object : NativeConnectionHomePlatform by platform {
+            override fun canOpenPhotoEffects() = true
+            override fun openPhotoEffects() { opened++ }
+        })
+        assertTrue(model.canOpenPhotoEffects()); assertFalse(model.isReady())
+        model.openPhotoEffects(); assertEquals(1, opened)
+        model.close(); assertFalse(model.canOpenPhotoEffects()); model.openPhotoEffects(); assertEquals(1, opened)
+    }
     @Test fun addressValidationUsesSharedPolicyBeforeStartingOwner() {
         val platform = Platform(); val model = NativeConnectionHomeModel(platform)
         for (bad in listOf("", "https://camera.local", "192.168.1.1:15740", "999.0.0.1")) {

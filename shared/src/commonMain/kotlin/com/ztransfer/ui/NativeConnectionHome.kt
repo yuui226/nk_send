@@ -20,6 +20,9 @@ import kotlinx.coroutines.flow.asStateFlow
 
 /** One platform session owner. No sockets, queue, profile store or permission authority in shared UI. */
 interface NativeConnectionHomePlatform {
+    /** Optional local photo-effects route; camera connection is not required. */
+    fun canOpenPhotoEffects(): Boolean = false
+    fun openPhotoEffects() {}
     fun readConnectionMode(): String?
     fun saveConnectionMode(stationMode: Boolean): Boolean
     fun resetConnectionModeAfterConfirmation(): Boolean = false
@@ -90,6 +93,8 @@ class NativeConnectionHomeModel(platform: NativeConnectionHomePlatform) {
     fun isReady(): Boolean = mutableState.value.ready
     fun currentPhase(): String = mutableState.value.phase
     fun currentAddress(): String = mutableState.value.address
+    fun canOpenPhotoEffects(): Boolean = !closed && platform?.canOpenPhotoEffects() == true
+    fun openPhotoEffects() { if (!closed) platform?.openPhotoEffects() }
     fun publishRecoveryRecord(names: List<String>, completed: Int, unavailable: Boolean, truncated: Boolean) {
         if (closed) return
         recoveryRecordRevision++
@@ -314,6 +319,11 @@ internal fun NativeConnectionHome(model: NativeConnectionHomeModel, language: St
                 }, color = AppTheme.colors.onSurfaceVariant)
             }
             if (appearance != null) TextButton(onClick = { generalSettings = true }) { Text(label("设置", "Settings")) }
+            if (model.canOpenPhotoEffects()) {
+                TextButton(onClick = model::openPhotoEffects) {
+                    Text(label("照片效果", "Photo effects"))
+                }
+            }
             Text(label("连接相机，浏览与传输原片", "Connect your camera to browse and transfer originals"),
                 color = AppTheme.colors.onSurfaceVariant)
             SharedConnectionMethodCard(

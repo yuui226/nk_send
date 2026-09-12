@@ -252,6 +252,21 @@ final class CameraWorkspaceTests: XCTestCase {
         workspace.close()
     }
 
+    @MainActor func testLocalPhotoEffectsRouteWorksBeforeCameraConnectionAndStopsAfterWorkspaceClose() {
+        let owner = CameraHandshakeProbe()
+        var opened = 0
+        owner.photoEffectsHandler = { opened += 1 }
+        let workspace = CameraWorkspaceBridge(session: owner)
+        XCTAssertTrue(workspace.canOpenPhotoEffects())
+        XCTAssertFalse(owner.sessionReady)
+        workspace.openPhotoEffects()
+        XCTAssertEqual(opened, 1)
+        workspace.close()
+        XCTAssertFalse(workspace.canOpenPhotoEffects())
+        workspace.openPhotoEffects()
+        XCTAssertEqual(opened, 1)
+    }
+
     @MainActor func testInvalidProductAddressNeverCreatesRunningSession() {
         let owner = CameraHandshakeProbe()
         for address in ["", "https://camera.local", "1.2.3.999", "camera.local:15740"] {

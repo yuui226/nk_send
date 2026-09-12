@@ -13,7 +13,7 @@
 | C03 系统选图和输入/成片文件所有权 | 源码已修正 / Apple 待编译、测试 | 系统多选保留选择顺序；每次选择独立目录、每张唯一文件名；在 provider 回调内复制，取消只回调一次且丢弃旧代次；取消/全失败保留旧选择；源图由资产持有，成片由 session/工作线程/系统面板持有，最后释放清理，不在子 sheet 的 onDisappear 删除；8 项新增生命周期/系统选图样本待 Mac |
 | C04 预览与原尺寸输出 | 源码已修正 / Apple 待编译、测试 | 预览改用后台方向校正缩略图，缓存键包含源路径/滤镜/强度且最多 6 项；导出改为 256 行分块、保持源尺寸并沿用方向元数据，私有成片通过所有权回收；4 项预览/尺寸/坏文件样本待 Mac |
 | C05 分类、收藏、拨轮及动态语言 | 源码已修正 / Apple 待编译、测试 | 生产目录使用 shared 稳定分类 ID 与收藏排序索引；“全部/收藏/分类”筛选和收藏置顶由同一 common 策略决定；帮助观察 app 有效语言并保留完整语言标签；Swift 分类显示仍待 Mac 对照拨轮长按、拖动及空收藏态 |
-| C06 正式本地入口与相机设置效果 | 未完成 | 无相机连接时入口缺失；设置入口只是关闭原文件页并打开本地选图工作台，不等于相机效果配置/队列接通 |
+| C06 正式本地入口与相机设置效果 | 源码已修正 / Apple 待编译、UI 待验 | 首页在无相机连接时也提供正式照片效果入口；设置浮层复用同一 presentation 路由；相机/文件队列所有者仍不复制，连接态文件页入口保留；Mac 需验证首页、设置浮层、文件页三处的 sheet 互斥和返回行为 |
 | C07 全部边框、水印及队列效果处理 | 未完成 | 按扩展表 E05—E12 核实真实执行链；不得把共享算法存在当作功能完成 |
 | C08 Windows 回归与证据修复 | 未完成 | 之前 Python 全套出现失败，原因未完整归档；旧守卫不得直接刷新指纹或删断言 |
 | C09 扩展范围与任务账本一致性 | 未完成 | GPS/遥控监看等仍有独立组件和暂缓历史；逐项区分未实现、Windows可实现、平台/外部决策和Mac专属验收；同步相关文档 |
@@ -27,6 +27,8 @@
 **C04 检查记录（2026-09-12）**：`check_structure.py` 通过，58 个 App Swift / 17 个测试文件，481 个 XCTest 方法仅登记、未运行；`git diff --check` 通过。预览解码器以 ImageIO thumbnail transform 应用 EXIF 方向并限制最大边，预览缓存按源路径、稳定滤镜 ID 和强度区分且有 LRU 上限；导出不再使用 32MP 的全图拒绝门槛，而是保持源像素尺寸、按 256 行处理滤镜并在每条错误/取消路径释放私有成片。新增 `PhotoEffectsPreviewTests` 的方向/尺寸/坏文件/原尺寸样本待 Mac；原有 `MediaPreviewCompatibilityTests` 仍须运行。相对 `696cb48` 只改 iOS、工程登记、测试与本文档，Android/shared/原片导入器无改动；C04 仍不能称 Apple 编译或真机通过。
 
 **C05 检查记录（2026-09-12）**：`check_structure.py` 通过，58 个 App Swift / 17 个测试文件，481 个 XCTest 方法仅登记、未运行；`git diff --check` 通过。新增 `NativePhotoFilterCatalog.categoryId` 与 `orderedIndexCsv`，以稳定枚举 ID 和标量 CSV 复用 common 的分类/收藏排序，避免 iOS 按中文标题推断（Android 调用语义不变）；`PhotoFilterCatalogStore` 的注入目录只用于单元测试，生产初始化统一走 shared。`PhotoEffectsHelpModel` 改用完整系统语言标签并观察 `AppAppearanceSettings.languageTag`。新增 common 分类测试定向运行成功：`BUILD SUCCESSFUL`；同一次完整 shared 单元测试为 797 项中既有 `DesqueezePolicyTest.kt:13` 失败 1 项，不能称 Android 全套通过。相对 `0849f79` 改动 common/iOS、工程测试登记和本文档，未改 Android 宿主、协议、打包脚本；Mac 需编译生成新 Native 桥后运行 `PhotoFilterCatalogTests`、帮助测试并对照两处拨轮。
+
+**C06 检查记录（2026-09-12）**：`check_structure.py` 通过；新增首页 platform 可选 local photo-effects 路由，iOS `CameraWorkspaceBridge` 将其转发到已有 `PhotoEffectsPresentation`，因此未连接相机时也能打开工作台，关闭 workspace 后回调被拒绝。新增 common `NativeConnectionHomeTest` 路由样本与 iOS `CameraWorkspaceTests` 路由样本；定向 shared 编译测试（`NativeConnectionHomeTest`、`NativePhotoFilterTest`）`BUILD SUCCESSFUL`。相对 `1afda54` 只改 shared/iOS 入口、测试与本文档，未改 Android 宿主/协议/打包脚本；Mac 仍需验证真实 Compose 首页、设置浮层和文件页的 sheet 互斥、返回以及横竖屏表现。C07—C09 未完成。
 
 > **最新决定（2026-09-08）**：用户已叫停本次照片效果实现，先跳过并保留 [iOS扩展功能任务表](./iOS扩展功能任务表.md)。新增计划仍 0/34，E01—E12 再次暂缓，本次没有业务代码修改；不自动继续其他扩展任务，会员/支付仍排除。本表 W01—W50 的 50/50 仅指传图版 Windows 范围，Mac 仍 0/12。`4874a0b` 已提交并推送，后续接手核实实际 Git 和用户新指令。
 

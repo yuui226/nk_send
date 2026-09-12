@@ -78,6 +78,8 @@ final class CameraWorkspaceBridge: NSObject, ObservableObject, NativeConnectionH
     }
 
     func readConnectionMode() -> String? { connectionPreferences.read() }
+    func canOpenPhotoEffects() -> Bool { !closed && session.photoEffectsHandler != nil }
+    func openPhotoEffects() { guard !closed else { return }; session.photoEffectsHandler?() }
     func saveConnectionMode(stationMode: Bool) -> Bool { connectionPreferences.save(stationMode ? "sta" : "ap") }
     func resetConnectionModeAfterConfirmation() -> Bool {
         guard !closed, !session.running, !clearingRecovery else { return false }
