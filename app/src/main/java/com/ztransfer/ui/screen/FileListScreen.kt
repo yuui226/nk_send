@@ -31,6 +31,8 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
@@ -1803,103 +1805,125 @@ fun FileListScreen(
                 .padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            if (previewIndex == null) {
-            // 左：双 Z 标悬浮按钮（原"Z传"文本，换成自绘的尼康 Z 系列标志更简洁），
-            // 本身即为设置入口（点击打开设置弹窗）。毛玻璃观感复用 GlassButton。
-            GlassButton(
-                onClick = {
-                    transferDirectoryAttention = false
-                    showSettings = true
-                },
-                shape = RoundedCornerShape(22.dp),
-                // 顶栏按钮统一 36dp 高（与队列胶囊等一致）；标志 20dp + 上下 8dp 正好填满。
-                // 水平留白略收紧，保留品牌标志的完整呼吸空间。
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                enforceMinimumTouchTarget = false,
-                // 钛合金主题使用品牌黄填充钢印；其余主题仍保留 ZMark 原本的前景色。
-                materialContentColor = colors.accentYellow,
-                modifier = Modifier
-                    .height(36.dp)
-                    .onGloballyPositioned { zAnchor = it.boundsInRoot() }
+            AnimatedVisibility(
+                visible = previewIndex == null,
+                enter = fadeIn(tween(220, delayMillis = 30)) +
+                    slideInHorizontally(
+                        animationSpec = tween(260, easing = FastOutSlowInEasing),
+                        initialOffsetX = { -it / 5 },
+                    ) +
+                    scaleIn(
+                        animationSpec = tween(260, easing = FastOutSlowInEasing),
+                        initialScale = 0.94f,
+                    ),
+                exit = fadeOut(tween(150, easing = LinearEasing)) +
+                    slideOutHorizontally(
+                        animationSpec = tween(210, easing = FastOutSlowInEasing),
+                        targetOffsetX = { -it / 6 },
+                    ) +
+                    scaleOut(
+                        animationSpec = tween(210, easing = FastOutSlowInEasing),
+                        targetScale = 0.96f,
+                    ),
             ) {
-                ZMark(modifier = Modifier.height(20.dp))
-            }
-
-            // 双 Z 标边上的信号按钮（常驻）：在线显示信号条（点击展开 dBm），断开显示
-            // 红色断连图标；断开时点缩略图会放大强调它并弹提示（signalPulse 驱动）。
-            Spacer(modifier = Modifier.width(8.dp))
-            FileListSignalPill(
-                cameraViewModel = cameraViewModel,
-                pulseTrigger = signalPulse,
-            )
-
-            // 信号按钮右侧：类型筛选按钮。信号条展开/收起的宽度动画是逐帧真实布局，
-            // 本按钮随 Row 重排平滑让位，位置天然跟随动画。已设筛选时图标高亮。
-            Spacer(modifier = Modifier.width(8.dp))
-            val buttonSkin = LocalButtonTexturePalette.current?.skin ?: SkinPreset.FROSTED_GLASS
-            val buttonDark = colors.background.luminance() < 0.5f
-            val filterButtonColors = remember(
-                buttonSkin,
-                buttonDark,
-                colors.onBackground,
-                colors.accentYellow,
-            ) {
-                filterButtonPalette(
-                    skin = buttonSkin,
-                    dark = buttonDark,
-                    defaultInactiveIcon = colors.onBackground,
-                    defaultActive = colors.accentYellow,
-                )
-            }
-            val filterMarkColor by animateColorAsState(
-                targetValue = if (filterActive) {
-                    filterButtonColors.activeIcon
-                } else {
-                    filterButtonColors.inactiveIcon
-                },
-                animationSpec = tween(180),
-                label = "filterMarkActive"
-            )
-            val filterMarkFill by animateFloatAsState(
-                targetValue = if (filterActive) 1f else 0f,
-                animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),
-                label = "filterMarkFill",
-            )
-            GlassButton(
-                onClick = {
-                    if (showFilter) {
-                        showFilter = false
-                        openedFilterAnchor = null
-                    } else {
-                        filterAnchor?.let { measuredAnchor ->
-                            openedFilterAnchor = measuredAnchor
-                            showFilter = true
-                        }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // 左：双 Z 标悬浮按钮（原"Z传"文本，换成自绘的尼康 Z 系列标志更简洁），
+                    // 本身即为设置入口（点击打开设置弹窗）。毛玻璃观感复用 GlassButton。
+                    GlassButton(
+                        onClick = {
+                            transferDirectoryAttention = false
+                            showSettings = true
+                        },
+                        shape = RoundedCornerShape(22.dp),
+                        // 顶栏按钮统一 36dp 高（与队列胶囊等一致）；标志 20dp + 上下 8dp 正好填满。
+                        // 水平留白略收紧，保留品牌标志的完整呼吸空间。
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                        enforceMinimumTouchTarget = false,
+                        // 钛合金主题使用品牌黄填充钢印；其余主题仍保留 ZMark 原本的前景色。
+                        materialContentColor = colors.accentYellow,
+                        modifier = Modifier
+                            .height(36.dp)
+                            .onGloballyPositioned { zAnchor = it.boundsInRoot() }
+                    ) {
+                        ZMark(modifier = Modifier.height(20.dp))
                     }
-                },
-                shape = RoundedCornerShape(22.dp),
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
-                enforceMinimumTouchTarget = false,
-                active = filterActive,
-                activeColor = filterButtonColors.activeMaterial,
-                activeOutline = true,
-                // 钛合金按凹刻填色、相机键帽按丝印色处理；其它材质直接沿用图标颜色。
-                materialContentColor = filterMarkColor,
-                modifier = Modifier
-                    .height(36.dp)
-                    // 图标按钮统一采用 40dp 紧凑宽度；实体主题也提前给出同一测量基线，
-                    // 避免不同材质的可见边缘发生偏移。
-                    .widthIn(min = TOP_BAR_COMPACT_BUTTON_MIN_WIDTH)
-                    .onGloballyPositioned { filterAnchor = it.boundsInRoot() }
-            ) {
-                // 自绘筛选标志（与信号条同族的圆头杆件语言）；已设筛选时高亮。
-                FilterMark(
-                    modifier = Modifier.size(19.dp),
-                    color = filterMarkColor,
-                    fillProgress = filterMarkFill,
-                    contentDescription = stringResource(R.string.cd_filter_type)
-                )
-            }
+
+                    // 双 Z 标边上的信号按钮（常驻）：在线显示信号条（点击展开 dBm），断开显示
+                    // 红色断连图标；断开时点缩略图会放大强调它并弹提示（signalPulse 驱动）。
+                    Spacer(modifier = Modifier.width(8.dp))
+                    FileListSignalPill(
+                        cameraViewModel = cameraViewModel,
+                        pulseTrigger = signalPulse,
+                    )
+
+                    // 信号按钮右侧：类型筛选按钮。信号条展开/收起的宽度动画是逐帧真实布局，
+                    // 本按钮随 Row 重排平滑让位，位置天然跟随动画。已设筛选时图标高亮。
+                    Spacer(modifier = Modifier.width(8.dp))
+                    val buttonSkin = LocalButtonTexturePalette.current?.skin ?: SkinPreset.FROSTED_GLASS
+                    val buttonDark = colors.background.luminance() < 0.5f
+                    val filterButtonColors = remember(
+                        buttonSkin,
+                        buttonDark,
+                        colors.onBackground,
+                        colors.accentYellow,
+                    ) {
+                        filterButtonPalette(
+                            skin = buttonSkin,
+                            dark = buttonDark,
+                            defaultInactiveIcon = colors.onBackground,
+                            defaultActive = colors.accentYellow,
+                        )
+                    }
+                    val filterMarkColor by animateColorAsState(
+                        targetValue = if (filterActive) {
+                            filterButtonColors.activeIcon
+                        } else {
+                            filterButtonColors.inactiveIcon
+                        },
+                        animationSpec = tween(180),
+                        label = "filterMarkActive"
+                    )
+                    val filterMarkFill by animateFloatAsState(
+                        targetValue = if (filterActive) 1f else 0f,
+                        animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),
+                        label = "filterMarkFill",
+                    )
+                    GlassButton(
+                        onClick = {
+                            if (showFilter) {
+                                showFilter = false
+                                openedFilterAnchor = null
+                            } else {
+                                filterAnchor?.let { measuredAnchor ->
+                                    openedFilterAnchor = measuredAnchor
+                                    showFilter = true
+                                }
+                            }
+                        },
+                        shape = RoundedCornerShape(22.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                        enforceMinimumTouchTarget = false,
+                        active = filterActive,
+                        activeColor = filterButtonColors.activeMaterial,
+                        activeOutline = true,
+                        // 钛合金按凹刻填色、相机键帽按丝印色处理；其它材质直接沿用图标颜色。
+                        materialContentColor = filterMarkColor,
+                        modifier = Modifier
+                            .height(36.dp)
+                            // 图标按钮统一采用 40dp 紧凑宽度；实体主题也提前给出同一测量基线，
+                            // 避免不同材质的可见边缘发生偏移。
+                            .widthIn(min = TOP_BAR_COMPACT_BUTTON_MIN_WIDTH)
+                            .onGloballyPositioned { filterAnchor = it.boundsInRoot() }
+                    ) {
+                        // 自绘筛选标志（与信号条同族的圆头杆件语言）；已设筛选时高亮。
+                        FilterMark(
+                            modifier = Modifier.size(19.dp),
+                            color = filterMarkColor,
+                            fillProgress = filterMarkFill,
+                            contentDescription = stringResource(R.string.cd_filter_type)
+                        )
+                    }
+                }
             }
 
             // 右侧队列控件由 NavHost 外的共同宿主持有；这里仅保留弹性占位，
