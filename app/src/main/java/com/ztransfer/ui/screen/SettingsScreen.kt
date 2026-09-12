@@ -91,6 +91,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -1522,6 +1523,7 @@ private fun PhotoEffectSummaryItem(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun PhotoFilterEditor(
     filters: List<PhotoFilterPreset>,
@@ -1635,6 +1637,9 @@ internal fun PhotoFilterEditor(
         val chooserFilters = filters.orderForCategory(category, favoriteKeys) {
             BuiltInPhotoFilters.catalogKey(it.id) ?: it.id
         }
+        val dialogMaxHeight = (LocalConfiguration.current.screenHeightDp - 160)
+            .coerceIn(360, 440)
+            .dp
         Dialog(
             onDismissRequest = { showFullChooser = false },
             properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
@@ -1646,13 +1651,14 @@ internal fun PhotoFilterEditor(
                 border = BorderStroke(1.dp, colors.glassPanelBorder),
                 shadowElevation = 6.dp,
             ) {
-                Row(
-                    Modifier.padding(10.dp).heightIn(max = 380.dp).fillMaxWidth(),
+                CompositionLocalProvider(LocalMinimumInteractiveComponentEnforcement provides false) {
+                    Row(
+                        Modifier.padding(10.dp).heightIn(max = dialogMaxHeight).fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Column(
-                            modifier = Modifier.width(84.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.width(84.dp).verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
                         ) {
                             PhotoFilterCategory.entries.forEach { item ->
                                 val selectedCategory = item == category
@@ -1721,6 +1727,7 @@ internal fun PhotoFilterEditor(
                             }
                         }
                     }
+                }
                 }
             }
         }

@@ -63,19 +63,11 @@ internal fun Modifier.geniePopupLayer(
                 drawLayer(layer)
                 return@onDrawWithContent
             }
-            // Only the settled tail can use one draw safely. At the opening edge a full
-            // layer draw would reveal the entire panel before the genie has formed.
-            val renderBands = when {
-                p > 0.94f -> 1
-                p > 0.82f -> 6
-                else -> GENIE_RENDER_BANDS
-            }
-            if (renderBands == 1) {
-                layer.blendMode = BlendMode.SrcOver
-                layer.alpha = panelAlpha
-                drawLayer(layer)
-                return@onDrawWithContent
-            }
+            // Keep the final stretch on the same mesh path. Switching from six bands to a
+            // full-layer draw at p=0.94 creates a visible snap and a short GPU spike on Android.
+            // Six bands are sufficient once the funnel is nearly open; p==1 above still settles
+            // to the normal live draw.
+            val renderBands = if (p > 0.82f) 6 else GENIE_RENDER_BANDS
             val source = requireNotNull(origin)
             val mouthWidth = GENIE_Z_MARK_WIDTH_DP.dp.toPx()
             val rows = Array(renderBands + 1) {

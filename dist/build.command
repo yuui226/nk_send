@@ -108,3 +108,29 @@ if [[ -f "$MAPPING" ]]; then
   cp -f "$MAPPING" "$SCRIPT_DIR/$BASENAME.mapping.txt"
   printf 'Mapping copied to:  %s\n' "$SCRIPT_DIR/$BASENAME.mapping.txt"
 fi
+
+# If an authorized Android device is connected, install the freshly copied release APK.
+# AAB files are for Play upload and cannot be installed with adb.
+if [[ "$KIND" != "apk" ]]; then
+  echo "AAB built; skipping device installation."
+  exit 0
+fi
+# This is intentionally best-effort for a build-only Mac workflow: no device means no install.
+ADB="$(command -v adb || true)"
+if [[ -z "$ADB" ]]; then
+  echo "ADB not found; skipping device installation."
+  exit 0
+fi
+
+FOUND_DEVICE=0
+while IFS= read -r DEVICE; do
+  [[ -z "$DEVICE" ]] && continue
+  FOUND_DEVICE=1
+  printf 'Installing release APK to %s...\n' "$DEVICE"
+  "$ADB" -s "$DEVICE" install -r "$DEST"
+  printf 'Launching ZTransfer release on %s...\n' "$DEVICE"
+  "$ADB" -s "$DEVICE" shell am start -n com.ztransfer/.MainActivity
+done < <("$ADB" devices | awk 'NR > 1 && $2 == "device" { print $1 }')
+if [[ "$FOUND_DEVICE" == 0 ]]; then
+  echo "No authorized ADB device connected; skipping device installation."
+fi
