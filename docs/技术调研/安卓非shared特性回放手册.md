@@ -18,7 +18,7 @@
 |---|---|---|---|---|
 | 1 | 三种连接协议结果保持一致 | `55876fa` | `NikonCamera`、对象元数据解析 | 待回放 |
 | 2 | 队列动作、年度价格、设置弹窗 | `1403f34` | `LicenseManager`、`LicenseDialogs`、`SettingsScreen`、`AnchorPopup` | 已回放 |
-| 3 | 设置/滤镜 Genie 展开收起动画 | `65d2fb1` | `AnchorPopup`、`SettingsScreen`、滤镜弹层 | 进行中 |
+| 3 | 设置/滤镜 Genie 展开收起动画 | `65d2fb1` | `AnchorPopup`、`SettingsScreen`、滤镜弹层 | 已回放 |
 | 4 | 入队飞行动画后的预览计数 | `16551ee` | `FileListScreen`、`PhotoPreview` | 待回放 |
 | 5 | 监看反挤压功能和持久化 | `e25a31e` | `RemoteScreen` | 已回放 |
 | 6 | 反挤压选择器样式和动画 | `1a12d60`、`c07159a`、`e84ed51`、`4be6168` | `RemoteScreen` | 已回放 |
@@ -139,4 +139,4 @@ Android 文件和职责：
 - 每个功能块完成后运行 `git diff --check` 和对应的最小 Android 单元测试；不在中途自动构建或安装。
 - 全部九个功能块完成后，再统一执行 Android 构建、安装和真机回归。
 
-当前状态：Android 已恢复到 `a6b679a`；已回放 6/9 个功能块，Genie 动画仍在进行中，协议一致性和入队计数尚未回放；尚未构建或安装。
+当前状态：Android 已恢复到 `a6b679a`；已回放 7/9 个功能块，协议一致性和入队计数尚未回放；尚未构建或安装。
