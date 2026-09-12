@@ -27,6 +27,17 @@ IOS_EFFECT_FILES = (
 )
 
 
+def stale_wheel_terms() -> list[str]:
+    stale: list[str] = []
+    for root in (ROOT / "iosApp/ZTransfer", ROOT / "shared/src/commonMain"):
+        for path in root.rglob("*"):
+            if path.is_file() and path.suffix in {".swift", ".kt"}:
+                text = path.read_text(encoding="utf-8")
+                if "波轮" in text:
+                    stale.append(str(path.relative_to(ROOT)))
+    return stale
+
+
 def changed_android_paths(base: str = "master") -> list[str]:
     result = subprocess.run(
         ["git", "diff", "--name-only", f"{base}...HEAD", "--", *ANDROID_PATHS],
@@ -59,6 +70,9 @@ def verify() -> None:
     ):
         if token not in exporter:
             raise AssertionError("Filter selection identity is not validated before export: " + token)
+    stale = stale_wheel_terms()
+    if stale:
+        raise AssertionError("旧的滤镜控件术语仍存在于产品源码: " + ", ".join(stale))
     print("PASS Android/build scope unchanged relative to master")
     print("PASS iOS photo-effects production files, frame bridge and single presentation owner are present")
     print("NOTE Apple Swift compilation, shared bridge export names, frame/watermark rendering and device behavior remain unverified")
