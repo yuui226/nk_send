@@ -1646,12 +1646,11 @@ internal fun PhotoFilterEditor(
                 border = BorderStroke(1.dp, colors.glassPanelBorder),
                 shadowElevation = 6.dp,
             ) {
-                CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 44.dp) {
-                    Row(
-                        Modifier.padding(10.dp).heightIn(max = 380.dp).fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Column(
+                Row(
+                    Modifier.padding(10.dp).heightIn(max = 380.dp).fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Column(
                             modifier = Modifier.width(84.dp),
                             verticalArrangement = Arrangement.spacedBy(4.dp),
                         ) {
@@ -1726,7 +1725,6 @@ internal fun PhotoFilterEditor(
             }
         }
     }
-}
 
 internal fun nextPhotoFilterSelections(
     filters: List<PhotoFilterPreset>,
