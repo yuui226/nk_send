@@ -17,14 +17,14 @@
 | 顺序 | 功能块 | 来源提交 | Android 落点 | 状态 |
 |---|---|---|---|---|
 | 1 | 三种连接协议结果保持一致 | `55876fa` | `NikonCamera`、对象元数据解析 | 待回放 |
-| 2 | 队列动作、年度价格、设置弹窗 | `1403f34` | `LicenseManager`、`LicenseDialogs`、`SettingsScreen`、`AnchorPopup` | 待回放 |
-| 3 | 设置/滤镜 Genie 展开收起动画 | `65d2fb1` | `AnchorPopup`、`SettingsScreen`、滤镜弹层 | 待回放 |
+| 2 | 队列动作、年度价格、设置弹窗 | `1403f34` | `LicenseManager`、`LicenseDialogs`、`SettingsScreen`、`AnchorPopup` | 已回放 |
+| 3 | 设置/滤镜 Genie 展开收起动画 | `65d2fb1` | `AnchorPopup`、`SettingsScreen`、滤镜弹层 | 进行中 |
 | 4 | 入队飞行动画后的预览计数 | `16551ee` | `FileListScreen`、`PhotoPreview` | 待回放 |
-| 5 | 监看反挤压功能和持久化 | `e25a31e` | `RemoteScreen` | 待回放 |
-| 6 | 反挤压选择器样式和动画 | `1a12d60`、`c07159a`、`e84ed51`、`4be6168` | `RemoteScreen` | 待回放 |
-| 7 | 反挤压拨轮循环、尺寸和真实缩放 | `7f76531`、`cb296f5`、`ff2188d` | `RemoteScreen` | 待回放 |
-| 8 | 分类滤镜和长按帮助 | `dcc84f7` | `SettingsScreen`、`FileListScreen`、效果浮层、资源文案 | 待回放 |
-| 9 | 工作台多选和批量照片效果 | `e8e429b` | `HomeScreen`、`LocalPhotoEffectsOverlay`、批处理类 | 待回放 |
+| 5 | 监看反挤压功能和持久化 | `e25a31e` | `RemoteScreen` | 已回放 |
+| 6 | 反挤压选择器样式和动画 | `1a12d60`、`c07159a`、`e84ed51`、`4be6168` | `RemoteScreen` | 已回放 |
+| 7 | 反挤压拨轮循环、尺寸和真实缩放 | `7f76531`、`cb296f5`、`ff2188d` | `RemoteScreen` | 已回放 |
+| 8 | 分类滤镜和长按帮助 | `dcc84f7` | `SettingsScreen`、`FileListScreen`、效果浮层、资源文案 | 已回放 |
+| 9 | 工作台多选和批量照片效果 | `e8e429b` | `HomeScreen`、`LocalPhotoEffectsOverlay`、批处理类 | 已回放 |
 
 ## 1. 三种连接协议结果保持一致
 
@@ -139,4 +139,4 @@ Android 文件和职责：
 - 每个功能块完成后运行 `git diff --check` 和对应的最小 Android 单元测试；不在中途自动构建或安装。
 - 全部九个功能块完成后，再统一执行 Android 构建、安装和真机回归。
 
-当前状态：功能清单已整理；Android 已准备恢复到 `a6b679a`；尚未开始上述九项功能回放。
+当前状态：Android 已恢复到 `a6b679a`；已回放 5/9 个功能块，Genie 动画仍在进行中，协议一致性和入队计数尚未回放；尚未构建或安装。
