@@ -328,6 +328,9 @@ internal fun PhotoPreviewOverlay(
     activeProgressFlow: StateFlow<ActiveTransferProgress?>,
     // 根坐标中的真实队列胶囊承载区；预览残影使用它计算与列表一致的弧线落点。
     queueTargetBounds: Rect? = null,
+    onQueueFlightStarted: (Int) -> Unit = {},
+    onQueueFlightFinished: (Int) -> Unit = {},
+    onQueueFlightsCancelled: (Int) -> Unit = {},
     onQueueFlightCaught: () -> Unit = {},
     // 把当前预览文件加入传输队列（父层只负责目录/连接校验与入队；动画留在本层）。
     onTransfer: (NikonCamera.FileInfo) -> Boolean = { false },
@@ -436,6 +439,9 @@ internal fun PhotoPreviewOverlay(
     val currentOnTransfer by rememberUpdatedState(onTransfer)
     val currentOnTransferBurst by rememberUpdatedState(onTransferBurst)
     val currentQueueTargetBounds by rememberUpdatedState(queueTargetBounds)
+    val currentOnQueueFlightStarted by rememberUpdatedState(onQueueFlightStarted)
+    val currentOnQueueFlightFinished by rememberUpdatedState(onQueueFlightFinished)
+    val currentOnQueueFlightsCancelled by rememberUpdatedState(onQueueFlightsCancelled)
     val currentOnQueueFlightCaught by rememberUpdatedState(onQueueFlightCaught)
     val histogramSource = currentHandle?.let(displayedBitmaps::get)
     val previewHistogram by produceState<LuminanceHistogram?>(
@@ -505,6 +511,8 @@ internal fun PhotoPreviewOverlay(
         // 父层先完成目录/连接校验并确认真实入队；被拒绝时不抬图、不放残影、
         // 不触发胶囊接收，避免视觉反馈与实际队列相矛盾。
         if (!enqueue()) return
+        val heldCount = burstFiles?.size ?: 1
+        currentOnQueueFlightStarted(heldCount)
         queueMotionJob?.cancel()
         queueGestureActive = false
         queueAnimating = true
@@ -515,6 +523,7 @@ internal fun PhotoPreviewOverlay(
         queueFlightBurstFiles = burstFiles
 
         queueMotionJob = previewScope.launch {
+            var reachedFlightEnd = false
             try {
                 // 极少数设备的 Compose 帧钟可能暂停；超时只兜底复位视觉状态，
                 // 入队已在上方同步提交，绝不会因动画未返回而锁死后续操作。
@@ -549,6 +558,7 @@ internal fun PhotoPreviewOverlay(
                             }
                             // 与列表 QueueFlightGhost 同一时机：残影真正抵达后才让胶囊接住。
                             currentOnQueueFlightCaught()
+                            reachedFlightEnd = true
                         }
                     }
                 }
@@ -560,6 +570,8 @@ internal fun PhotoPreviewOverlay(
                 queueFlightTarget = null
                 queueAnimating = false
                 queueMotionJob = null
+                if (reachedFlightEnd) currentOnQueueFlightFinished(heldCount)
+                else currentOnQueueFlightsCancelled(heldCount)
             }
         }
     }
