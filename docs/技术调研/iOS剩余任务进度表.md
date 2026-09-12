@@ -30,6 +30,8 @@
 
 **C06 检查记录（2026-09-12）**：`check_structure.py` 通过；新增首页 platform 可选 local photo-effects 路由，iOS `CameraWorkspaceBridge` 将其转发到已有 `PhotoEffectsPresentation`，因此未连接相机时也能打开工作台，关闭 workspace 后回调被拒绝。新增 common `NativeConnectionHomeTest` 路由样本与 iOS `CameraWorkspaceTests` 路由样本；定向 shared 编译测试（`NativeConnectionHomeTest`、`NativePhotoFilterTest`）`BUILD SUCCESSFUL`。相对 `1afda54` 只改 shared/iOS 入口、测试与本文档，未改 Android 宿主/协议/打包脚本；Mac 仍需验证真实 Compose 首页、设置浮层和文件页的 sheet 互斥、返回以及横竖屏表现。C07—C09 未完成。
 
+**C08 检查记录（2026-09-12）**：实际运行 `python -B -m unittest discover -s iosApp/scripts -p 'test_*.py'`，结果为 `Ran 383 tests in 14.459s`、`FAILED (failures=94)`。失败项全部来自历史整文件/抽取守卫链，主要涉及旧检查点之后已经审阅过的 Android UI、shared UI 和 iOS 生命周期文件；当前输出未显示 Python 异常退出或新增照片效果测试失败。不能通过刷新 SHA-256、删除断言或跳过测试来修复，仍需把后续已审阅批次逐层加入可审计逆转换，并保留旧检查点保护；本记录只归档事实，不将 C08 标记为完成。
+
 > **最新决定（2026-09-08）**：用户已叫停本次照片效果实现，先跳过并保留 [iOS扩展功能任务表](./iOS扩展功能任务表.md)。新增计划仍 0/34，E01—E12 再次暂缓，本次没有业务代码修改；不自动继续其他扩展任务，会员/支付仍排除。本表 W01—W50 的 50/50 仅指传图版 Windows 范围，Mac 仍 0/12。`4874a0b` 已提交并推送，后续接手核实实际 Git 和用户新指令。
 
 > **当前覆盖（2026-09-12）**：照片效果已按新指令恢复 Windows 侧 iOS 代码填充；滤镜目录/分类选择、拨轮长按入口、批量多选/横向预览、两路并发、真实 shared 内核导出、PhotoKit/Files/分享承载、失败项重试和结果状态均已加入 `research/ios`。上面的 2026-09-08 文字保留为历史决定，不覆盖当前实现状态；正式设置浮层宿主入口已接线，并在跳转前关闭原文件页；Apple 编译/真机验证仍未完成。
