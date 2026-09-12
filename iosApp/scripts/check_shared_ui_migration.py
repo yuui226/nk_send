@@ -58,6 +58,10 @@ def expected_shared(source, path):
                                 "createTextureImageBitmap(pixels, TILE, TILE)")
     if path in ("screen/ReleaseCommitWheel.kt", "screen/WatermarkPlacementPreference.kt", "screen/TipLightbulbButton.kt"):
         source = source.replace("internal fun ", "fun ").replace("internal data class ", "data class ")
+    if path == "screen/ReleaseCommitWheel.kt":
+        # The product terminology was corrected globally after the original extraction.
+        # Keep this as an explicit mechanical transform so the body guard remains strict.
+        source = source.replace("波轮", "拨轮").rstrip() + "\n"
     return source
 
 
