@@ -14,7 +14,7 @@
 | C04 预览与原尺寸输出 | 源码已修正 / Apple 待编译、测试 | 预览改用后台方向校正缩略图，缓存键包含源路径/滤镜/强度且最多 6 项；导出改为 256 行分块、保持源尺寸并沿用方向元数据，私有成片通过所有权回收；4 项预览/尺寸/坏文件样本待 Mac |
 | C05 分类、收藏、拨轮及动态语言 | 源码已修正 / Apple 待编译、测试 | 生产目录使用 shared 稳定分类 ID 与收藏排序索引；“全部/收藏/分类”筛选和收藏置顶由同一 common 策略决定；帮助观察 app 有效语言并保留完整语言标签；Swift 分类显示仍待 Mac 对照拨轮长按、拖动及空收藏态 |
 | C06 正式本地入口与相机设置效果 | 源码已修正 / Apple 待编译、UI 待验 | 首页在无相机连接时也提供正式照片效果入口；设置浮层复用同一 presentation 路由；相机/文件队列所有者仍不复制，连接态文件页入口保留；Mac 需验证首页、设置浮层、文件页三处的 sheet 互斥和返回行为 |
-| C07 全部边框、水印及队列效果处理 | 未完成 | 按扩展表 E05—E12 核实真实执行链；不得把共享算法存在当作功能完成 |
+| C07 全部边框、水印及队列效果处理 | 未完成 | 已新增 `NativePhotoFrameBridge` 作为 Apple 可调用的共享布局契约并覆盖 13 个预设；仍需在 Mac 接入真实绘制、字体/水印资源、元数据和效果队列，不能把布局契约当作成片完成 |
 | C08 Windows 回归与证据修复 | 未完成 | 之前 Python 全套出现失败，原因未完整归档；旧守卫不得直接刷新指纹或删断言 |
 | C09 扩展范围与任务账本一致性 | Windows 已完成 / Apple 待验 | 已将扩展任务表从旧的“全部暂停”状态对齐到当前代码：E01/E03/E04/E10 标为进行中，其余 E/G/R/X 保持 TODO；34 项完成数仍为 0，未把部分接线计入完成；Mac 专属验收继续单列 |
 
@@ -39,6 +39,8 @@
 **账本一致性验证（2026-09-12）**：新增 `python -B -m unittest iosApp/scripts/test_progress_ledger.py`，2 项通过；测试锁定 C01—C09 明细顺序、当前 7/9 与 C07/C08 剩余项，以及扩展表 E/G/R/X 的行数和 0/34 完成计数。
 
 **C07 核对记录（2026-09-12）**：共享层已存在 `PhotoFrameLayouts.kt`、`PhotoFrameWatermarkPolicy.kt`、`PhotoFrameMetadataSettings.kt` 和 `PhotoFrameOutputIdentity.kt`，但实际绘制/编码调用仅见于 Android `app/src/main/java/com/ztransfer/frame/PhotoFrameExporter.kt`；iOS 当前 `PhotoEffectsExportService.swift` 只调用 shared 滤镜内核，未接入相框布局、水印内容/资源、元数据绘制或效果队列。iOS 资源目录也没有对应水印资源和持久化适配。C07 保持未完成，下一步必须建立真实的 Apple 绘制/资源/配置链并接入现有批量导出，不能用空入口或单独演示组件代替。
+
+**C07 共享契约补充（2026-09-12）**：新增 `shared/src/commonMain/kotlin/com/ztransfer/frame/NativePhotoFrameBridge.kt`，以预设名或稳定文件后缀解析 13 个样式，并统一调用普通/原尺寸布局算法；未知值安全返回空。`NativePhotoFrameBridgeTest` 覆盖全部预设、原尺寸边界和未知值，定向 shared 测试与既有连接/滤镜回归共同 `BUILD SUCCESSFUL`。该提交只补共享几何契约，未声称 iOS 已绘制像素或完成水印/元数据链，C07 仍未完成。
 
 > **最新决定（2026-09-08）**：用户已叫停本次照片效果实现，先跳过并保留 [iOS扩展功能任务表](./iOS扩展功能任务表.md)。新增计划仍 0/34，E01—E12 再次暂缓，本次没有业务代码修改；不自动继续其他扩展任务，会员/支付仍排除。本表 W01—W50 的 50/50 仅指传图版 Windows 范围，Mac 仍 0/12。`4874a0b` 已提交并推送，后续接手核实实际 Git 和用户新指令。
 
