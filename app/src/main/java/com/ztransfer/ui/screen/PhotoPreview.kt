@@ -1255,12 +1255,10 @@ internal fun PhotoPreviewOverlay(
             }
         }
 
-        // 顶部信息带与右侧队列胶囊严格共用 36dp 高度和 6dp 顶边距。文件名左对齐，
-        // 当前照片的传输状态紧跟其后；右侧为胶囊预留最大安全区，长文件名单行省略。
-        // 整条信息带随翻页跟手渐隐/渐显，内容在中点透明时切换，不会硬跳。
-        if (currentItem != null) {
-            val pageNumber = "${pagerState.currentPage + 1}/${previewItems.size}"
-            val title = (currentItem as? PhotoPreviewItem.Photo)?.file?.fileName
+        // 文件名与底部曝光参数共用同一款玻璃信息框。随翻页跟手渐隐/渐显，
+        // 内容在滑过半程、容器已接近透明时切换，避免新旧文件名硬叠在一起。
+        currentFile?.let { file ->
+            val title = file.fileName
             val task = currentFile?.let(queueTaskFor)
             val overlayTask = task?.takeIf { showsQueueStatusOverlay(it.status) }
             val transferred = currentFile?.let(isTransferred) == true
@@ -1269,25 +1267,21 @@ internal fun PhotoPreviewOverlay(
                     .align(Alignment.TopStart)
                     .fillMaxWidth()
                     .statusBarsPadding()
-                    .padding(top = 6.dp, start = 12.dp, end = 184.dp)
-                    .height(36.dp)
-                    .graphicsLayer {
-                        val swipe =
-                            (1f - abs(pagerState.currentPageOffsetFraction) * 2f)
-                                .coerceIn(0f, 1f)
-                        translationX = (overlayBounds?.width ?: 0f) * burstPagerSlide.value
-                        alpha = progress.value * swipe * burstPagerAlpha.value
-                    },
+                    .padding(top = 6.dp, start = 12.dp, end = 184.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    text = title?.let { "$pageNumber  ·  $it" } ?: pageNumber,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = Color.White.copy(alpha = 0.88f),
-                    textAlign = TextAlign.Start,
-                    maxLines = 1,
+                val swipe =
+                    (1f - abs(pagerState.currentPageOffsetFraction) * 2f)
+                        .coerceIn(0f, 1f)
+                PreviewGlassInfoBar(
+                    text = title,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false),
+                    modifier = Modifier
+                        .weight(1f, fill = false)
+                        .graphicsLayer {
+                            translationX = (overlayBounds?.width ?: 0f) * burstPagerSlide.value
+                            alpha = progress.value * swipe * burstPagerAlpha.value
+                        },
                 )
                 if (overlayTask != null || transferred) {
                     Spacer(Modifier.width(8.dp))
@@ -1888,7 +1882,6 @@ private fun ExifMetadataBar(
     exif: PhotoExif,
     modifier: Modifier = Modifier
 ) {
-    val colors = AppTheme.colors
     val parts = listOfNotNull(
         exif.aperture,
         exif.shutterSpeed,
@@ -1898,6 +1891,20 @@ private fun ExifMetadataBar(
     )
     if (parts.isEmpty()) return
     val text = parts.joinToString("\u2009·\u2009")
+    PreviewGlassInfoBar(text = text, modifier = modifier)
+}
+
+/**
+ * 预览页统一的玻璃信息框。文件名和曝光参数必须共用同一容器、字号收缩规则与内边距，
+ * 这样翻页时只替换内容，视觉重量不会在两种信息之间跳变。
+ */
+@Composable
+private fun PreviewGlassInfoBar(
+    text: String,
+    modifier: Modifier = Modifier,
+    overflow: TextOverflow = TextOverflow.Clip,
+) {
+    val colors = AppTheme.colors
     val textMeasurer = rememberTextMeasurer(cacheSize = 4)
     Surface(
         shape = RoundedCornerShape(16.dp),
@@ -1934,7 +1941,7 @@ private fun ExifMetadataBar(
                 textAlign = TextAlign.Center,
                 maxLines = 1,
                 softWrap = false,
-                overflow = TextOverflow.Clip,
+                overflow = overflow,
                 modifier = Modifier.padding(horizontal = horizontalPadding, vertical = 10.dp),
             )
         }
