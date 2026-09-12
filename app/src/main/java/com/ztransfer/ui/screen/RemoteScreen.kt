@@ -62,9 +62,8 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.outlined.AspectRatio
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
@@ -531,6 +530,9 @@ private const val BATTERY_REFRESH_INTERVAL_MS = 120_000L
 private const val REMOTE_AUDIO_LEVELS_VISIBLE_KEY = "remote_audio_levels_visible"
 private const val REMOTE_DESQUEEZE_MULTIPLIER_KEY = "remote_desqueeze_multiplier"
 private val REMOTE_DESQUEEZE_OPTIONS = listOf(1f, 1.33f, 1.5f, 1.8f, 2f)
+
+private fun desqueezeDisplayValue(value: Float): String =
+    if (kotlin.math.abs(value - 1.33f) < 0.01f) "1.3" else value.toString()
 
 @Composable
 private fun RemoteContent(
@@ -2471,7 +2473,7 @@ private fun RemoteContent(
                 showLevel = showLevel,
                 levelRoll = levelRoll,
                 desqueezeMultiplier = desqueezeMultiplier,
-                modifier = Modifier.fillMaxWidth().aspectRatio(viewfinderAspect)
+                modifier = Modifier.fillMaxWidth().aspectRatio(viewfinderAspect * desqueezeMultiplier)
             )
             Spacer(Modifier.height(8.dp))
             // Row 1: overlay tools (left) + screen actions (right)
@@ -2524,9 +2526,6 @@ private fun RemoteContent(
                     )
                 })
                 add(@Composable {
-                    DesqueezeToolButton(desqueezeMultiplier, ::setDesqueezeMultiplier)
-                })
-                add(@Composable {
                     TopIconToggle(
                         active = showHistogram,
                         contentDescription = stringResource(R.string.cd_remote_histogram),
@@ -2548,6 +2547,9 @@ private fun RemoteContent(
                         contentDescription = stringResource(R.string.cd_remote_zebra),
                         onClick = { showZebra = !showZebra }
                     ) { ZebraMark(Modifier.size(18.dp)) }
+                })
+                add(@Composable {
+                    DesqueezeToolButton(desqueezeMultiplier, ::setDesqueezeMultiplier)
                 })
                 add(@Composable {
                     TopIconToggle(
@@ -2670,16 +2672,17 @@ private fun RemoteContent(
 
                 fun fitWithin(
                     availableWidth: androidx.compose.ui.unit.Dp,
-                    availableHeight: androidx.compose.ui.unit.Dp
+                    availableHeight: androidx.compose.ui.unit.Dp,
+                    aspectRatio: Float = viewfinderAspect * desqueezeMultiplier,
                 ): Pair<androidx.compose.ui.unit.Dp, androidx.compose.ui.unit.Dp> {
                     val width = availableWidth.coerceAtLeast(0.dp)
                     val height = availableHeight.coerceAtLeast(0.dp)
                     if (width == 0.dp || height == 0.dp) return 0.dp to 0.dp
-                    val heightAtFullWidth = width / viewfinderAspect
+                    val heightAtFullWidth = width / aspectRatio
                     return if (heightAtFullWidth <= height) {
                         width to heightAtFullWidth
                     } else {
-                        (height * viewfinderAspect) to height
+                        (height * aspectRatio) to height
                     }
                 }
 
@@ -2866,7 +2869,6 @@ private fun RemoteContent(
                                     active = showAudioLevels,
                                     onClick = ::toggleAudioLevels
                                 )
-                                DesqueezeToolButton(desqueezeMultiplier, ::setDesqueezeMultiplier)
                                 TopIconToggle(
                                     active = showHistogram,
                                     contentDescription = stringResource(R.string.cd_remote_histogram),
@@ -2882,6 +2884,7 @@ private fun RemoteContent(
                                     contentDescription = stringResource(R.string.cd_remote_zebra),
                                     onClick = { showZebra = !showZebra }
                                 ) { ZebraMark(Modifier.size(18.dp)) }
+                                DesqueezeToolButton(desqueezeMultiplier, ::setDesqueezeMultiplier)
                                 TopIconToggle(
                                     active = showLevel,
                                     contentDescription = stringResource(R.string.cd_remote_level),
@@ -3771,6 +3774,7 @@ private fun ViewfinderImage(
         if (liveFrame != null) {
             val imageWidth = liveFrame.image.width
             val imageHeight = liveFrame.image.height
+            val displayAspectRatio = imageWidth.toFloat() / imageHeight * desqueezeMultiplier
             // StartTracking 使用增强帧头 +16/+18 的完整画面坐标；普通 ChangeAfArea
             // 使用 +28/+30 的显示 AF 网格。两套坐标纵横比接近但量级完全不同，不能混用。
             val trackingCoordinateWidth =
@@ -3797,7 +3801,7 @@ private fun ViewfinderImage(
                             val imageRect = fitCenterRect(
                                 size.width.toFloat(),
                                 size.height.toFloat(),
-                                imageWidth.toFloat() / imageHeight * desqueezeMultiplier
+                                displayAspectRatio
                             )
                             if (tap.x in imageRect.left..imageRect.right &&
                                 tap.y in imageRect.top..imageRect.bottom
@@ -3837,7 +3841,12 @@ private fun ViewfinderImage(
                     contentScale = ContentScale.Fit,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .aspectRatio(imageWidth.toFloat() / imageHeight * desqueezeMultiplier)
+                        .aspectRatio(displayAspectRatio)
+                        .graphicsLayer {
+                            // An anamorphic frame is encoded horizontally compressed. Fit it
+                            // into the corrected viewport first, then restore its pixel width.
+                            scaleX = desqueezeMultiplier
+                        }
                 )
             }
             // 暗角：四周极淡压暗，画面"坐进"边框（相机目镜语言），角标叠其上不受影响。
@@ -3859,14 +3868,14 @@ private fun ViewfinderImage(
             )
             FramingGridOverlay(
                 grid = grid,
-                imageAspectRatio = liveFrame.image.width.toFloat() / liveFrame.image.height,
+                imageAspectRatio = displayAspectRatio,
                 modifier = Modifier.matchParentSize()
             )
             // 斑马纹跟随帧上的掩码走：掩码在解码线程按节流计算，这里只做裁剪绘制。
             if (showZebra) {
                 ViewfinderZebraOverlay(
                     mask = liveFrame.zebraMask,
-                    imageAspectRatio = imageWidth.toFloat() / imageHeight,
+                    imageAspectRatio = displayAspectRatio,
                     modifier = Modifier.matchParentSize()
                 )
             }
@@ -3875,7 +3884,7 @@ private fun ViewfinderImage(
                     feedback = tapFocusFeedback,
                     point = tapFocusPoint,
                     nonce = tapFocusNonce,
-                    imageAspectRatio = imageWidth.toFloat() / imageHeight,
+                    imageAspectRatio = displayAspectRatio,
                     modifier = Modifier.matchParentSize()
                 )
             } else if (afHeld) {
@@ -3887,7 +3896,7 @@ private fun ViewfinderImage(
                     },
                     point = afFocusPoint,
                     nonce = tapFocusNonce,
-                    imageAspectRatio = imageWidth.toFloat() / imageHeight,
+                    imageAspectRatio = displayAspectRatio,
                     modifier = Modifier.matchParentSize()
                 )
             }
@@ -3911,7 +3920,7 @@ private fun ViewfinderImage(
                     cameraFrame = cameraFrame,
                     nonce = marker.confirmedAtElapsedMs,
                     visible = markerVisible,
-                    imageAspectRatio = imageWidth.toFloat() / imageHeight,
+                    imageAspectRatio = displayAspectRatio,
                     modifier = Modifier.matchParentSize()
                 )
             }
@@ -4643,25 +4652,27 @@ private fun AdaptiveRemoteToolBar(
     }
 }
 
-/** 视频模式专属的反挤压倍率控制；只覆盖取景器，不改变原有工具栏测量边界。 */
+/** 视频模式专属的音频电平显示开关；横向展开让其后的工具自然平滑让位。 */
 @Composable
 private fun DesqueezeToolButton(multiplier: Float, onSelect: (Float) -> Unit) {
-    var expanded by remember { mutableStateOf(false) }
-    Box {
-        TopIconToggle(
-            active = multiplier > 1.001f,
-            contentDescription = "反挤压倍率 ${multiplier}x",
-            onClick = { expanded = true }
-        ) {
-            Text(if (multiplier > 1.001f) "${multiplier}×" else "1×", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-        }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            REMOTE_DESQUEEZE_OPTIONS.forEach { option ->
-                DropdownMenuItem(
-                    text = { Text(if (option == 1f) "关闭（原始）" else "${option}× 反挤压") },
-                    onClick = { onSelect(option); expanded = false }
-                )
-            }
+    val currentIndex = REMOTE_DESQUEEZE_OPTIONS.indices.minByOrNull { index ->
+        kotlin.math.abs(REMOTE_DESQUEEZE_OPTIONS[index] - multiplier)
+    } ?: 0
+    val nextMultiplier = REMOTE_DESQUEEZE_OPTIONS[(currentIndex + 1) % REMOTE_DESQUEEZE_OPTIONS.size]
+    TopIconToggle(
+        active = multiplier > 1.001f,
+        contentDescription = "反挤压倍率 ${desqueezeDisplayValue(multiplier)}，点击切换",
+        onClick = { onSelect(nextMultiplier) },
+        modifier = Modifier.size(36.dp),
+    ) {
+        if (multiplier > 1.001f) {
+            Text(desqueezeDisplayValue(multiplier), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        } else {
+            Icon(
+                imageVector = Icons.Outlined.AspectRatio,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+            )
         }
     }
 }
@@ -4707,6 +4718,7 @@ internal fun TopIconToggle(
     active: Boolean,
     contentDescription: String,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
     content: @Composable () -> Unit
 ) {
     val colors = AppTheme.colors
@@ -4717,7 +4729,7 @@ internal fun TopIconToggle(
         showSheen = false,
         shadowElevation = 0.dp,
         contentPadding = PaddingValues(8.dp),
-        modifier = Modifier
+        modifier = modifier
             .defaultMinSize(minWidth = 36.dp, minHeight = 36.dp)
             .semantics { this.contentDescription = contentDescription }
     ) {
