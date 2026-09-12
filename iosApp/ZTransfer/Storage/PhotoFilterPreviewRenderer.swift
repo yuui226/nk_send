@@ -11,8 +11,8 @@ enum PhotoFilterPreviewError: Error { case invalidSize, allocationFailed, invali
 actor PhotoFilterPreviewRenderer {
     static let maximumPixels = 4 * 1024 * 1024
     /// Export keeps a bounded in-memory buffer while allowing common 12–24MP camera JPEGs.
-    /// Files larger than this are rejected instead of silently downsampling an export.
-    static let maximumExportPixels = 32 * 1024 * 1024
+    /// The output remains at source dimensions; the work is split into scanline tiles below.
+    static let maximumExportPixels = 100 * 1024 * 1024
     private static let chunkPixels = 4096
 
     func render(_ source: CGImage, selection: PhotoFilterSelection) throws -> CGImage {
@@ -20,7 +20,63 @@ actor PhotoFilterPreviewRenderer {
     }
 
     func renderExport(_ source: CGImage, selection: PhotoFilterSelection) throws -> CGImage {
-        try render(source, selection: selection, maximumPixels: Self.maximumExportPixels)
+        try renderTiled(source, selection: selection)
+    }
+
+    private func renderTiled(_ source: CGImage, selection: PhotoFilterSelection) throws -> CGImage {
+        try Task.checkCancellation()
+        let width = source.width, height = source.height
+        guard width > 0, height > 0, width <= Self.maximumExportPixels,
+              height <= Self.maximumExportPixels / width else { throw PhotoFilterPreviewError.invalidSize }
+        let rowBytes = width * 4
+        guard let output = calloc(width * height, 4),
+              let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else {
+            throw PhotoFilterPreviewError.allocationFailed
+        }
+        defer { free(output) }
+        let preserveAlpha = ![CGImageAlphaInfo.none, .noneSkipFirst, .noneSkipLast].contains(source.alphaInfo)
+        let tileHeight = max(1, min(256, height))
+        var y = 0
+        while y < height {
+            try Task.checkCancellation()
+            let currentHeight = min(tileHeight, height - y)
+            guard let tile = calloc(width * currentHeight, 4),
+                  let context = CGContext(data: tile, width: width, height: currentHeight,
+                      bitsPerComponent: 8, bytesPerRow: rowBytes, space: colorSpace,
+                      bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue) else {
+                throw PhotoFilterPreviewError.allocationFailed
+            }
+            do {
+                defer { free(tile) }
+                guard let cropped = source.cropping(to: CGRect(x: 0, y: y, width: width, height: currentHeight)) else {
+                    throw PhotoFilterPreviewError.invalidImage
+                }
+                context.setBlendMode(.copy)
+                context.draw(cropped, in: CGRect(x: 0, y: 0, width: width, height: currentHeight))
+                var input = vImage_Buffer(data: tile, height: vImagePixelCount(currentHeight),
+                                          width: vImagePixelCount(width), rowBytes: rowBytes)
+                var converted = input
+                guard vImageUnpremultiplyData_ARGB8888(&input, &converted, vImage_Flags(kvImageNoFlags)) == kvImageNoError else {
+                    throw PhotoFilterPreviewError.conversionFailed
+                }
+                try Self.filter(tile.assumingMemoryBound(to: UInt8.self), count: width * currentHeight,
+                                selection: selection, preserveAlpha: preserveAlpha)
+                guard vImagePremultiplyData_ARGB8888(&input, &converted, vImage_Flags(kvImageNoFlags)) == kvImageNoError else {
+                    throw PhotoFilterPreviewError.conversionFailed
+                }
+                memcpy(output.advanced(by: y * rowBytes), tile, currentHeight * rowBytes)
+            }
+            y += currentHeight
+        }
+        let bytes = Data(bytes: output, count: width * height * 4)
+        guard let provider = CGDataProvider(data: bytes as CFData),
+              let image = CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32,
+                  bytesPerRow: rowBytes, space: colorSpace,
+                  bitmapInfo: CGBitmapInfo(rawValue: CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue),
+                  provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent) else {
+            throw PhotoFilterPreviewError.invalidImage
+        }
+        return image
     }
 
     private func render(_ source: CGImage, selection: PhotoFilterSelection, maximumPixels: Int) throws -> CGImage {
