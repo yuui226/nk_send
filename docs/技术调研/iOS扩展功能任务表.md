@@ -5,7 +5,7 @@
 
 ## 基线与进度
 
-- 分支 `research/ios`，当前检查点 `68434e0`；HEAD 与 `origin/research/ios` 一致，工作区干净。后续仍以实际 Git 为准，不自动切分支/合并/发布。
+- 分支 `research/ios`，当前检查点 `5319dcf`；HEAD 与 `origin/research/ios` 一致，工作区干净。后续仍以实际 Git 为准，不自动切分支/合并/发布。
 - 原传图范围 W01—W50：50/50 WIN-DONE；原 Mac 验收仍 0/12。Windows 检查通过不等于 Swift 已编译或真机功能通过。
 - **新增 34 个主任务：照片效果 12、GPS 8、遥控/监看/录像 10、公共保障 4。当前仍为 0/34，0%。** C01—C06 是照片效果的 Windows 源码修正和接线证据，尚未满足任一完整 E 项的 WIN-DONE 门槛；已有基础只减少工作量，不直接换算完成项。
 - 状态：TODO → DOING → WIN-DONE → VERIFIED；BLOCKED 记录具体依赖。Windows 进度 = WIN-DONE/VERIFIED 项数 ÷ 34；每项等权，仅表示完成项占比，不表示时间或工作量相同。完成一项更新该行证据及分组总数；缺陷可重开。
