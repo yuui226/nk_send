@@ -53,6 +53,12 @@ def verify() -> None:
         raise AssertionError("Unsupported filters are not reported separately from invalid sources")
     if exporter.index("throw PhotoEffectsExportError.invalidSource") > exporter.index("throw PhotoEffectsExportError.unsupportedFilter"):
         raise AssertionError("Source validation must happen before filter validation")
+    for token in (
+        "catalog.id(index: selection.index) == selection.filterID",
+        "catalog.catalogKey(index: selection.index) == selection.catalogKey",
+    ):
+        if token not in exporter:
+            raise AssertionError("Filter selection identity is not validated before export: " + token)
     print("PASS Android/build scope unchanged relative to master")
     print("PASS iOS photo-effects production files, frame bridge and single presentation owner are present")
     print("NOTE Apple Swift compilation, shared bridge export names, frame/watermark rendering and device behavior remain unverified")

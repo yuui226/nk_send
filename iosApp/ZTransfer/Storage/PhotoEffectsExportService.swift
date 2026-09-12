@@ -95,7 +95,10 @@ actor PhotoEffectsExportService {
                   kCGImageSourceShouldCacheImmediately: true,
               ] as CFDictionary) else { throw PhotoEffectsExportError.invalidSource }
 
-        guard let filter = NativePhotoFilterCatalog.shared.selection(
+        let catalog = NativePhotoFilterCatalog.shared
+        guard catalog.id(index: selection.index) == selection.filterID,
+              catalog.catalogKey(index: selection.index) == selection.catalogKey,
+              let filter = catalog.selection(
             index: selection.index, intensityPercent: Int32(selection.intensityPercent)
         ) else { throw PhotoEffectsExportError.unsupportedFilter }
 
