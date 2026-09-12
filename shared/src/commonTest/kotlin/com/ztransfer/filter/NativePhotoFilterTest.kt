@@ -41,9 +41,20 @@ class NativePhotoFilterTest {
             assertTrue(assertNotNull(NativePhotoFilterCatalog.id(index)).isNotBlank())
             assertTrue(assertNotNull(NativePhotoFilterCatalog.name(index)).isNotBlank())
             assertTrue(assertNotNull(NativePhotoFilterCatalog.categoryTitle(index)).isNotBlank())
+            assertTrue(assertNotNull(NativePhotoFilterCatalog.categoryId(index)).isNotBlank())
             assertTrue(assertNotNull(NativePhotoFilterCatalog.catalogKey(index)).isNotBlank())
         }
         assertNull(NativePhotoFilterCatalog.id(-1))
         assertNull(NativePhotoFilterCatalog.categoryTitle(count))
+        assertNull(NativePhotoFilterCatalog.categoryId(count))
+    }
+
+    @Test fun categoryOrderUsesStableIdsAndFavoriteSequence() {
+        val all = NativePhotoFilterCatalog.orderedIndexCsv("ALL", "")
+        val favorite = NativePhotoFilterCatalog.catalogKey(2)
+        assertNotNull(favorite)
+        val pinned = NativePhotoFilterCatalog.orderedIndexCsv("ALL", favorite)
+        assertTrue(pinned.startsWith("2,"))
+        assertEquals(all.split(',').toSet(), pinned.split(',').toSet())
     }
 }

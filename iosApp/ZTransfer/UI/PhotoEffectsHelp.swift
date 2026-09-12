@@ -5,7 +5,7 @@ import ZTransferShared
 final class PhotoEffectsHelpModel: ObservableObject {
     @Published private(set) var languageTag: String
 
-    init(languageTag: String = Locale.current.languageCode ?? "zh-Hans") {
+    init(languageTag: String = Locale.preferredLanguages.first ?? "zh-Hans") {
         self.languageTag = languageTag
     }
 
@@ -23,6 +23,7 @@ final class PhotoEffectsHelpModel: ObservableObject {
 @MainActor
 struct PhotoEffectsHelpButton: View {
     @StateObject private var model: PhotoEffectsHelpModel
+    @ObservedObject private var appearance = AppAppearanceSettings.shared
     @State private var showingHelp = false
 
     init(model: PhotoEffectsHelpModel = PhotoEffectsHelpModel()) {
@@ -48,6 +49,8 @@ struct PhotoEffectsHelpButton: View {
                 .presentationDetents([.height(190)])
                 .presentationDragIndicator(.visible)
         }
+        .onAppear { model.updateLanguage(appearance.languageTag) }
+        .onChange(of: appearance.languageTag) { model.updateLanguage($0) }
     }
 }
 

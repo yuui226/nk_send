@@ -53,6 +53,7 @@ final class AppAppearanceSettings: NSObject, ObservableObject, NativeAppearanceP
     private var started = false
     private var closed = false
     @Published private(set) var themeName = "SYSTEM"
+    @Published private(set) var languageTag = "en"
     private(set) lazy var model = NativeAppearanceModel(platform: self, systemLanguageTag: systemLanguage())
 
     var colorScheme: ColorScheme? {
@@ -67,7 +68,9 @@ final class AppAppearanceSettings: NSObject, ObservableObject, NativeAppearanceP
         self.notifications = notifications; self.systemLanguage = systemLanguage
         self.screenAwake = screenAwake; self.isApplicationActive = isApplicationActive
         super.init()
-        themeName = model.currentPreferences().themeName
+        let preferences = model.currentPreferences()
+        themeName = preferences.themeName
+        languageTag = effectiveLanguage(for: preferences.appLanguage)
     }
 
     func start() {
@@ -79,6 +82,7 @@ final class AppAppearanceSettings: NSObject, ObservableObject, NativeAppearanceP
         notifications.addObserver(self, selector: #selector(localeChanged), name: NSLocale.currentLocaleDidChangeNotification, object: nil)
         model.updateSystemLanguage(languageTag: systemLanguage())
         model.setApplicationActive(value: isApplicationActive())
+        refreshLanguage()
     }
 
     // UIKit lifecycle notifications are synchronous on the main thread: do not enqueue a stale "active" Task.
@@ -86,6 +90,7 @@ final class AppAppearanceSettings: NSObject, ObservableObject, NativeAppearanceP
         guard !closed else { return }
         model.updateSystemLanguage(languageTag: systemLanguage())
         model.setApplicationActive(value: true)
+        refreshLanguage()
     }
     @objc private func willResignActive(_ notification: Notification) {
         guard !closed else { return }
@@ -95,6 +100,7 @@ final class AppAppearanceSettings: NSObject, ObservableObject, NativeAppearanceP
         DispatchQueue.main.async { [weak self] in
             guard let self, !self.closed else { return }
             self.model.updateSystemLanguage(languageTag: self.systemLanguage())
+            self.refreshLanguage()
         }
     }
 
@@ -116,14 +122,25 @@ final class AppAppearanceSettings: NSObject, ObservableObject, NativeAppearanceP
     func resetAppearanceAfterConfirmation() -> Bool {
         guard !closed, store.resetAfterUserConfirmation() else { return false }
         themeName = store.read()?.themeName ?? "SYSTEM"
+        refreshLanguage()
         return true
     }
     func saveAppearance(value: NativeAppearancePreferences) -> Bool {
         guard !closed else { return false }
         themeName = value.themeName // Live shell changes even if persistence is unavailable.
-        return store.save(value)
+        let saved = store.save(value)
+        refreshLanguage()
+        return saved
     }
     func setScreenAwake(enabled: Bool) { screenAwake(enabled) }
+
+    private func effectiveLanguage(for preference: String) -> String {
+        preference == "system" ? systemLanguage() : preference
+    }
+
+    private func refreshLanguage() {
+        languageTag = effectiveLanguage(for: model.currentPreferences().appLanguage)
+    }
 
     func close() {
         guard !closed else { return }

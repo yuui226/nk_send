@@ -16,8 +16,16 @@ enum IOSPhotoFilterCategory: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    static func fromSharedTitle(_ title: String) -> IOSPhotoFilterCategory {
-        allCases.first { $0.rawValue == title } ?? .color
+    var sharedID: String {
+        switch self {
+        case .all: return "ALL"; case .favorites: return "FAVORITES"; case .landscape: return "LANDSCAPE"
+        case .portrait: return "PORTRAIT"; case .monochrome: return "MONOCHROME"; case .film: return "FILM"
+        case .cinematic: return "CINEMATIC"; case .color: return "COLOR"
+        }
+    }
+
+    static func fromSharedID(_ id: String) -> IOSPhotoFilterCategory {
+        allCases.first { $0.sharedID == id } ?? .color
     }
 }
 
@@ -53,6 +61,8 @@ final class PhotoFilterCatalogStore: ObservableObject {
     @Published var selectedKey: String?
 
     private let defaults: UserDefaults
+    private let usesSharedOrdering: Bool
+    private let nativeCatalog = NativePhotoFilterCatalog.shared
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -65,15 +75,16 @@ final class PhotoFilterCatalogStore: ObservableObject {
             guard let filterID = catalog.id(index: index),
                   let name = catalog.name(index: index) else { continue }
             let key = catalog.catalogKey(index: index) ?? filterID
-            let title = catalog.categoryTitle(index: index) ?? IOSPhotoFilterCategory.color.rawValue
+            let categoryID = catalog.categoryId(index: index) ?? "COLOR"
             loaded.append(IOSPhotoFilterEntry(index: index, filterID: filterID, name: name,
-                                              category: IOSPhotoFilterCategory.fromSharedTitle(title),
+                                              category: IOSPhotoFilterCategory.fromSharedID(categoryID),
                                               catalogKey: key))
         }
         self.entries = loaded
         self.favoriteKeys = Self.restoreFavorites(defaults: defaults, validKeys: Set(loaded.map(\.catalogKey)))
         self.intensities = Self.restoreIntensities(defaults: defaults, validKeys: Set(loaded.map(\.catalogKey)))
         self.selectedKey = loaded.first?.catalogKey
+        self.usesSharedOrdering = true
     }
 
     /// Injectable initializer keeps sorting and persistence tests independent of the generated
@@ -84,9 +95,16 @@ final class PhotoFilterCatalogStore: ObservableObject {
         self.favoriteKeys = Self.restoreFavorites(defaults: defaults, validKeys: Set(entries.map(\.catalogKey)))
         self.intensities = Self.restoreIntensities(defaults: defaults, validKeys: Set(entries.map(\.catalogKey)))
         self.selectedKey = entries.first?.catalogKey
+        self.usesSharedOrdering = false
     }
 
     var visibleEntries: [IOSPhotoFilterEntry] {
+        if usesSharedOrdering {
+            let csv = favoriteKeys.joined(separator: "\u{1F}")
+            let raw = nativeCatalog.orderedIndexCsv(categoryId: category.sharedID, favoriteCatalogKeysCsv: csv)
+            let indexes = raw.split(separator: ",").compactMap { Int32($0) }
+            return indexes.compactMap { index in entries.first { $0.index == index } }
+        }
         let candidates: [IOSPhotoFilterEntry]
         switch category {
         case .all: candidates = entries

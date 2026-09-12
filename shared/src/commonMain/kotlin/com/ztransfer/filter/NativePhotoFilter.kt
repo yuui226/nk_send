@@ -23,7 +23,20 @@ object NativePhotoFilterCatalog {
     fun id(index: Int): String? = BuiltInPhotoFilters.all.getOrNull(index)?.id
     fun name(index: Int): String? = BuiltInPhotoFilters.all.getOrNull(index)?.name
     fun categoryTitle(index: Int): String? = BuiltInPhotoFilters.all.getOrNull(index)?.category()?.title
+    fun categoryId(index: Int): String? = BuiltInPhotoFilters.all.getOrNull(index)?.category()?.name
     fun catalogKey(index: Int): String? = BuiltInPhotoFilters.all.getOrNull(index)?.let {
         BuiltInPhotoFilters.catalogKey(it.id)
     }
+
+    /** Comma-separated indexes keep the Native bridge scalar and stable on Apple platforms. */
+    fun orderedIndexCsv(categoryId: String, favoriteCatalogKeysCsv: String): String {
+        val category = PhotoFilterCategory.values().firstOrNull { it.name == categoryId }
+            ?: PhotoFilterCategory.ALL
+        val favorites = favoriteCatalogKeysCsv.split(FAVORITE_KEY_SEPARATOR).filter(String::isNotBlank)
+        return BuiltInPhotoFilters.all.orderForCategory(category, favorites) {
+            BuiltInPhotoFilters.catalogKey(it.id) ?: it.id
+        }.map { BuiltInPhotoFilters.all.indexOf(it) }.joinToString(",")
+    }
+
+    private const val FAVORITE_KEY_SEPARATOR = "\u001F"
 }
