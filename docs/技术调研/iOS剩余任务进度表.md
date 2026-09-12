@@ -16,7 +16,7 @@
 | C06 正式本地入口与相机设置效果 | 源码已修正 / Apple 待编译、UI 待验 | 首页在无相机连接时也提供正式照片效果入口；设置浮层复用同一 presentation 路由；相机/文件队列所有者仍不复制，连接态文件页入口保留；Mac 需验证首页、设置浮层、文件页三处的 sheet 互斥和返回行为 |
 | C07 全部边框、水印及队列效果处理 | 未完成 | 按扩展表 E05—E12 核实真实执行链；不得把共享算法存在当作功能完成 |
 | C08 Windows 回归与证据修复 | 未完成 | 之前 Python 全套出现失败，原因未完整归档；旧守卫不得直接刷新指纹或删断言 |
-| C09 扩展范围与任务账本一致性 | 未完成 | GPS/遥控监看等仍有独立组件和暂缓历史；逐项区分未实现、Windows可实现、平台/外部决策和Mac专属验收；同步相关文档 |
+| C09 扩展范围与任务账本一致性 | Windows 已完成 / Apple 待验 | 已将扩展任务表从旧的“全部暂停”状态对齐到当前代码：E01/E03/E04/E10 标为进行中，其余 E/G/R/X 保持 TODO；34 项完成数仍为 0，未把部分接线计入完成；Mac 专属验收继续单列 |
 
 每完成一组在本节更新状态、验证和提交，并播报本表剩余组数；本表不替代 E/G/R/X 功能验收。Mac M01—M12 仍全部待验。此前已推送文档中的“0 项”保留为错误历史记录，不能继续引用为当前状态。
 
@@ -31,6 +31,8 @@
 **C06 检查记录（2026-09-12）**：`check_structure.py` 通过；新增首页 platform 可选 local photo-effects 路由，iOS `CameraWorkspaceBridge` 将其转发到已有 `PhotoEffectsPresentation`，因此未连接相机时也能打开工作台，关闭 workspace 后回调被拒绝。新增 common `NativeConnectionHomeTest` 路由样本与 iOS `CameraWorkspaceTests` 路由样本；定向 shared 编译测试（`NativeConnectionHomeTest`、`NativePhotoFilterTest`）`BUILD SUCCESSFUL`。相对 `1afda54` 只改 shared/iOS 入口、测试与本文档，未改 Android 宿主/协议/打包脚本；Mac 仍需验证真实 Compose 首页、设置浮层和文件页的 sheet 互斥、返回以及横竖屏表现。C07—C09 未完成。
 
 **C08 检查记录（2026-09-12）**：实际运行 `python -B -m unittest discover -s iosApp/scripts -p 'test_*.py'`，结果为 `Ran 383 tests in 14.459s`、`FAILED (failures=94)`。失败项全部来自历史整文件/抽取守卫链，主要涉及旧检查点之后已经审阅过的 Android UI、shared UI 和 iOS 生命周期文件；当前输出未显示 Python 异常退出或新增照片效果测试失败。不能通过刷新 SHA-256、删除断言或跳过测试来修复，仍需把后续已审阅批次逐层加入可审计逆转换，并保留旧检查点保护；本记录只归档事实，不将 C08 标记为完成。
+
+**C09 检查记录（2026-09-12）**：核对 [iOS扩展功能任务表](./iOS扩展功能任务表.md) 与本表及当前 `research/ios` 文件。旧的 2026-09-08“照片效果全部暂停”已保留为历史说明；当前 E01/E03/E04/E10 的 DOING 均明确指向 C01—C06，并注明相框/水印、完整组合和 Apple 验证缺口；E02/E05—E09/E11—E12、G01—G08、R01—R10、X01—X04 仍为 TODO，分组计数和 34 项完成数没有虚增。C09 的 Windows 账本同步完成，Apple 编译、真机和外部决策项不在 Windows 结项范围。
 
 > **最新决定（2026-09-08）**：用户已叫停本次照片效果实现，先跳过并保留 [iOS扩展功能任务表](./iOS扩展功能任务表.md)。新增计划仍 0/34，E01—E12 再次暂缓，本次没有业务代码修改；不自动继续其他扩展任务，会员/支付仍排除。本表 W01—W50 的 50/50 仅指传图版 Windows 范围，Mac 仍 0/12。`4874a0b` 已提交并推送，后续接手核实实际 Git 和用户新指令。
 
