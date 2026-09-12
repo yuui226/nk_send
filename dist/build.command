@@ -1,6 +1,21 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+# Finder-launched .command files should disappear after a successful build, while
+# failures must leave the terminal open so the error can be read and copied.
+finish_terminal() {
+  local status=$?
+  trap - EXIT
+  if [[ "$status" -ne 0 ]]; then
+    printf '\nBuild failed (exit %s). The window will stay open.\n' "$status" >&2
+    if [[ -t 0 ]]; then
+      read -r -p 'Press Enter to close this window...' _ || true
+    fi
+  fi
+  exit "$status"
+}
+trap finish_terminal EXIT
+
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 cd "$ROOT_DIR"

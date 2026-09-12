@@ -40,6 +40,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -450,9 +451,8 @@ private val TYPE_BADGE_COLORED_EXTS = setOf(".jpg", ".nef", ".mov", ".mp4")
 // 以 "zzz" 开头保证按键降序排序时排在所有 "yyyyMMdd" 日期之前，与原行为一致。
 private const val UNKNOWN_DATE_KEY = "zzz_unknown"
 
-// 回到顶部：翻过多少条目（含分组头）才算"够深"；点击回顶时先瞬移到该位置再动画收尾。
+// 回到顶部：翻过多少条目（含分组头）才算"够深"。
 private const val BACK_TO_TOP_MIN_INDEX = 30
-private const val BACK_TO_TOP_SNAP_INDEX = 24
 
 /** 正在播放收合动画的分组：[date] + 保留参与动画的前 [keep] 个格子（收起瞬间可见的那部分）。 */
 private data class CollapsingGroup(val date: String, val keep: Int)
@@ -798,7 +798,7 @@ fun FileListScreen(
     val listPadding = PaddingValues(
         start = 12.dp,
         end = 12.dp,
-        top = topInset + 60.dp,
+        top = topInset + 54.dp,
         bottom = bottomInset + 12.dp
     )
 
@@ -1757,12 +1757,49 @@ fun FileListScreen(
                     returningToTop = true
                     scrollScope.launch {
                         try {
-                            // 深位置先瞬移到近处再动画收尾：既有"滚回去"的动效，
-                            // 又不会从几千行外慢慢卷。
-                            if (gridState.firstVisibleItemIndex > BACK_TO_TOP_SNAP_INDEX) {
-                                gridState.scrollToItem(BACK_TO_TOP_SNAP_INDEX)
+                            // LazyGrid 的 animateScrollToItem 会在远距离目标前自动 teleport，
+                            // 用户会看到“先跳一段、再滚一段”。按当前视口行高估算像素距离，
+                            // 改用一次 animateScrollBy，整个过程始终逐帧连续。
+                            val visibleItems = gridState.layoutInfo.visibleItemsInfo
+                            val rowOffsets = visibleItems
+                                .map { it.offset.y }
+                                .distinct()
+                                .sorted()
+                            val rowStep = rowOffsets
+                                .zipWithNext { a, b -> b - a }
+                                .filter { it > 0 }
+                                .average()
+                                .takeIf { it.isFinite() && it > 0.0 }
+                                ?.toFloat()
+                                ?: visibleItems.firstOrNull()?.size?.height?.toFloat()
+                                ?: with(previewDensity) { 120.dp.toPx() }
+                            val columnCount = transferState.thumbnailColumns.coerceIn(1, 4)
+                            val estimatedRows =
+                                (gridState.firstVisibleItemIndex + columnCount - 1) / columnCount
+                            val estimatedDistance = (
+                                estimatedRows * rowStep +
+                                    gridState.firstVisibleItemScrollOffset
+                                ) * 1.45f
+                            val distance = estimatedDistance.coerceAtLeast(
+                                with(previewDensity) { 1_200.dp.toPx() }
+                            )
+                            val duration = (distance / 42f)
+                                .toInt()
+                                .coerceIn(420, 1_050)
+                            gridState.animateScrollBy(
+                                value = -distance,
+                                animationSpec = tween(
+                                    durationMillis = duration,
+                                    easing = FastOutSlowInEasing,
+                                ),
+                            )
+                            // 过量距离会被 LazyGrid 自然截断；这里只处理极端布局变化，
+                            // 不再发起第二段可见滚动。
+                            if (gridState.firstVisibleItemIndex != 0 ||
+                                gridState.firstVisibleItemScrollOffset != 0
+                            ) {
+                                gridState.scrollToItem(0)
                             }
-                            gridState.animateScrollToItem(0)
                         } finally {
                             returningToTop = false
                         }

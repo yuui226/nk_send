@@ -1255,7 +1255,7 @@ internal fun PhotoPreviewOverlay(
             }
         }
 
-        // 文件名与底部曝光参数共用同一款玻璃信息框。随翻页跟手渐隐/渐显，
+        // 文件名与底部曝光参数共用同一套字号收缩规则。随翻页跟手渐隐/渐显，
         // 内容在滑过半程、容器已接近透明时切换，避免新旧文件名硬叠在一起。
         currentFile?.let { file ->
             val title = file.fileName
@@ -1267,15 +1267,21 @@ internal fun PhotoPreviewOverlay(
                     .align(Alignment.TopStart)
                     .fillMaxWidth()
                     .statusBarsPadding()
-                    .padding(top = 6.dp, start = 12.dp, end = 184.dp),
+                    .padding(top = 6.dp, start = 12.dp, end = 184.dp)
+                    // 与右上队列胶囊共用 36dp 顶栏高度，纯文本也保持同一条中心线。
+                    .height(36.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 val swipe =
                     (1f - abs(pagerState.currentPageOffsetFraction) * 2f)
                         .coerceIn(0f, 1f)
-                PreviewGlassInfoBar(
+                PreviewInfoText(
                     text = title,
                     overflow = TextOverflow.Ellipsis,
+                    color = Color.White.copy(alpha = 0.88f),
+                    textAlign = TextAlign.Start,
+                    horizontalPadding = 0.dp,
+                    verticalPadding = 0.dp,
                     modifier = Modifier
                         .weight(1f, fill = false)
                         .graphicsLayer {
@@ -1895,7 +1901,7 @@ private fun ExifMetadataBar(
 }
 
 /**
- * 预览页统一的玻璃信息框。文件名和曝光参数必须共用同一容器、字号收缩规则与内边距，
+ * 预览页统一的玻璃信息框。曝光参数使用该容器；文件名复用其内部的字号收缩规则，
  * 这样翻页时只替换内容，视觉重量不会在两种信息之间跳变。
  */
 @Composable
@@ -1905,7 +1911,6 @@ private fun PreviewGlassInfoBar(
     overflow: TextOverflow = TextOverflow.Clip,
 ) {
     val colors = AppTheme.colors
-    val textMeasurer = rememberTextMeasurer(cacheSize = 4)
     Surface(
         shape = RoundedCornerShape(16.dp),
         color = colors.glassSurfaceHeavy,
@@ -1913,38 +1918,62 @@ private fun PreviewGlassInfoBar(
         border = BorderStroke(1.dp, colors.glassPanelBorder),
         modifier = modifier
     ) {
-        BoxWithConstraints {
-            val horizontalPadding = 14.dp
-            val availableWidthPx = with(LocalDensity.current) {
-                (maxWidth - horizontalPadding * 2).coerceAtLeast(0.dp).roundToPx()
-            }
-            val baseStyle = MaterialTheme.typography.labelLarge
-            val textStyle = remember(text, availableWidthPx, baseStyle) {
-                listOf(
-                    baseStyle,
-                    baseStyle.copy(fontSize = 13.sp, lineHeight = 18.sp),
-                    baseStyle.copy(fontSize = 12.sp, lineHeight = 17.sp),
-                    baseStyle.copy(fontSize = 11.sp, lineHeight = 16.sp),
-                ).firstOrNull { candidate ->
-                    textMeasurer.measure(
-                        text = AnnotatedString(text),
-                        style = candidate,
-                        maxLines = 1,
-                        softWrap = false,
-                    ).size.width <= availableWidthPx
-                } ?: baseStyle.copy(fontSize = 11.sp, lineHeight = 16.sp)
-            }
-            Text(
-                text = text,
-                style = textStyle,
-                color = colors.onBackground,
-                textAlign = TextAlign.Center,
-                maxLines = 1,
-                softWrap = false,
-                overflow = overflow,
-                modifier = Modifier.padding(horizontal = horizontalPadding, vertical = 10.dp),
-            )
+        PreviewInfoText(
+            text = text,
+            overflow = overflow,
+            color = colors.onBackground,
+            textAlign = TextAlign.Center,
+            horizontalPadding = 14.dp,
+            verticalPadding = 10.dp,
+        )
+    }
+}
+
+/** 与曝光参数共用字号收缩规则，但允许文件名使用无容器的轻量显示。 */
+@Composable
+private fun PreviewInfoText(
+    text: String,
+    modifier: Modifier = Modifier,
+    overflow: TextOverflow = TextOverflow.Clip,
+    color: Color,
+    textAlign: TextAlign,
+    horizontalPadding: Dp,
+    verticalPadding: Dp,
+) {
+    val textMeasurer = rememberTextMeasurer(cacheSize = 4)
+    BoxWithConstraints(modifier = modifier) {
+        val availableWidthPx = with(LocalDensity.current) {
+            (maxWidth - horizontalPadding * 2).coerceAtLeast(0.dp).roundToPx()
         }
+        val baseStyle = MaterialTheme.typography.labelLarge
+        val textStyle = remember(text, availableWidthPx, baseStyle) {
+            listOf(
+                baseStyle,
+                baseStyle.copy(fontSize = 13.sp, lineHeight = 18.sp),
+                baseStyle.copy(fontSize = 12.sp, lineHeight = 17.sp),
+                baseStyle.copy(fontSize = 11.sp, lineHeight = 16.sp),
+            ).firstOrNull { candidate ->
+                textMeasurer.measure(
+                    text = AnnotatedString(text),
+                    style = candidate,
+                    maxLines = 1,
+                    softWrap = false,
+                ).size.width <= availableWidthPx
+            } ?: baseStyle.copy(fontSize = 11.sp, lineHeight = 16.sp)
+        }
+        Text(
+            text = text,
+            style = textStyle,
+            color = color,
+            textAlign = textAlign,
+            maxLines = 1,
+            softWrap = false,
+            overflow = overflow,
+            modifier = Modifier.padding(
+                horizontal = horizontalPadding,
+                vertical = verticalPadding,
+            ),
+        )
     }
 }
 
