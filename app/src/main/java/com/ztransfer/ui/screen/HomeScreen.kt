@@ -812,38 +812,8 @@ fun HomeScreen(
                                                 // label rolls out above and the next detent rises
                                                 // from below. Cancellation/failure reverses the
                                                 // motion back to the idle action.
-                                                val direction = if (
-                                                    targetState.ordinal >= initialState.ordinal
-                                                ) {
-                                                    1
-                                                } else {
-                                                    -1
-                                                }
-                                                (
-                                                    slideInVertically(
-                                                        animationSpec = tween(
-                                                            durationMillis = 220,
-                                                            easing = FastOutSlowInEasing,
-                                                        ),
-                                                        initialOffsetY = { height ->
-                                                            height * direction
-                                                        },
-                                                    ) + fadeIn(
-                                                        tween(
-                                                            durationMillis = 150,
-                                                            delayMillis = 35,
-                                                        ),
-                                                    )
-                                                ) togetherWith (
-                                                    slideOutVertically(
-                                                        animationSpec = tween(
-                                                            durationMillis = 190,
-                                                            easing = FastOutSlowInEasing,
-                                                        ),
-                                                        targetOffsetY = { height ->
-                                                            -height * direction
-                                                        },
-                                                    ) + fadeOut(tween(120))
+                                                buttonStateTextTransition(
+                                                    forward = targetState.ordinal >= initialState.ordinal,
                                                 )
                                             },
                                             contentAlignment = Alignment.Center,
