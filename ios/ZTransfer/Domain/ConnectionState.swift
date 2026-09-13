@@ -43,15 +43,28 @@ extension ConnectionState {
         case let .authorization(status):
             next.usbAuthorization = status
             if status == .denied || status == .restricted {
-                next.usbPhase = .unavailable
-                next.errorMessage = nil
-            } else if status == .authorized, next.usbPhase == .unavailable {
+                // Android keeps the USB card selected and exposes the same
+                // actionable permission error until the cable is reattached.
+                let message = "未获得 USB 权限，请重新插线并允许访问"
+                next.usbPhase = .failed(message)
+                next.errorMessage = message
+            } else if status == .authorized,
+                      (next.usbPhase == .unavailable ||
+                       next.usbPhase == .failed("未获得 USB 权限，请重新插线并允许访问")) {
                 next.usbPhase = .waitingForCamera
                 next.errorMessage = nil
             }
         case let .deviceAdded(device):
             if !next.discoveredDevices.contains(device) { next.discoveredDevices.append(device) }
-            if next.selectedDeviceID == nil { next.selectedDeviceID = device.id }
+            if next.selectedDeviceID == nil || next.selectedDeviceID == device.id {
+                next.selectedDeviceID = device.id
+                // A fresh attach is the Android retry boundary: clear the
+                // previous permission/open error and wait for a new attempt.
+                if next.usbPhase != .connected {
+                    next.usbPhase = .waitingForCamera
+                    next.errorMessage = nil
+                }
+            }
         case let .deviceRemoved(id):
             next.discoveredDevices.removeAll { $0.id == id }
             if next.selectedDeviceID == id {

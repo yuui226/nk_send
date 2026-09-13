@@ -30,4 +30,20 @@ final class ConnectionStateTests: XCTestCase {
         XCTAssertNil(state.selectedDeviceID)
         XCTAssertTrue(state.discoveredDevices.isEmpty)
     }
+
+    func testUSBPermissionDenialKeepsActionableErrorOnCard() {
+        let state = ConnectionState().applying(.authorization(.denied))
+        XCTAssertEqual(state.usbAuthorization, .denied)
+        XCTAssertEqual(state.usbPhase, .failed("未获得 USB 权限，请重新插线并允许访问"))
+        XCTAssertEqual(state.errorMessage, "未获得 USB 权限，请重新插线并允许访问")
+    }
+
+    func testUSBReattachClearsPreviousErrorAndWaitsForConnection() {
+        var state = ConnectionState().applying(.authorization(.denied))
+        let device = USBDeviceDescriptor(id: "camera", name: "Nikon", productKind: nil, transportType: "USB")
+        state = state.applying(.deviceAdded(device))
+        XCTAssertEqual(state.usbPhase, .waitingForCamera)
+        XCTAssertNil(state.errorMessage)
+        XCTAssertEqual(state.selectedDeviceID, device.id)
+    }
 }

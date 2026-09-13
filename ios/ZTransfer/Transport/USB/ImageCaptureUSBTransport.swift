@@ -105,13 +105,19 @@ private final class ThrowingContinuationBox<Value: Sendable>: @unchecked Sendabl
 final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Sendable {
     private let browser = ICDeviceBrowser()
     private var cameras: [String: ICCameraDevice] = [:]
+    private var cameraIDsByObject: [ObjectIdentifier: String] = [:]
     /// The object that owns the currently opened session.  ImageCaptureCore can
     /// report a remove/add pair with the same UUID while an old close callback is
     /// still in flight, so closing by UUID alone can close the replacement.
     private var openedCameras: [String: ICCameraDevice] = [:]
+    /// Keep a reference while requestOpenSession is in flight.  A cancelled
+    /// open can still complete later; retaining it lets the non-cancellable
+    /// cleanup issue requestCloseSession just like Android closes NikonCamera
+    /// after a stale OpenSession result.
+    private var openingCameras: [String: ICCameraDevice] = [:]
     private var continuation: AsyncStream<USBTransportEvent>.Continuation?
     private var stream: AsyncStream<USBTransportEvent>?
-    private var thumbnailWaiters: [UInt32: [UUID: CheckedContinuation<Data, Error>]] = [:]
+    private var thumbnailWaiters: [String: [UUID: CheckedContinuation<Data, Error>]] = [:]
     private let thumbnailLock = NSLock()
     private let thumbnailCache = ThumbnailCache()
     private let lock = NSLock()
@@ -150,7 +156,9 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
         browser.stop()
         lock.lock()
         cameras.removeAll()
+        cameraIDsByObject.removeAll()
         openedCameras.removeAll()
+        openingCameras.removeAll()
         lock.unlock()
         finishThumbnailWaiters(with: CameraTransportError.disconnected)
         // Finish outside the lock: AsyncStream invokes onTermination synchronously
@@ -165,16 +173,21 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
 
     func openSession(for id: String) async throws {
         guard let camera = camera(for: id) else { throw CameraTransportError.disconnected }
+        markOpening(camera, for: id)
         let box = ThrowingContinuationBox<Void>()
         try await withTaskCancellationHandler(operation: {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                 box.install(continuation)
                 camera.requestOpenSession(options: nil) { [weak self] error in
                     if let error {
+                        self?.lock.lock()
+                        if self?.openingCameras[id] === camera { self?.openingCameras.removeValue(forKey: id) }
+                        self?.lock.unlock()
                         self?.emit(.failed(id: id, message: error.localizedDescription))
                         _ = box.finish(.failure(error))
                     } else if box.finish(.success(())) {
                         self?.lock.lock()
+                        if self?.openingCameras[id] === camera { self?.openingCameras.removeValue(forKey: id) }
                         self?.openedCameras[id] = camera
                         self?.lock.unlock()
                         self?.emit(.sessionOpened(id: id))
@@ -191,6 +204,7 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
             camera.requestCloseSession(options: nil) { [weak self] _ in
                 self?.lock.lock()
                 if self?.openedCameras[id] === camera { self?.openedCameras.removeValue(forKey: id) }
+                if self?.openingCameras[id] === camera { self?.openingCameras.removeValue(forKey: id) }
                 self?.lock.unlock()
                 self?.emit(.sessionClosed(id: id))
                 continuation.resume()
@@ -200,12 +214,16 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
 
     func sendPTP(command: Data, data: Data? = nil, to id: String) async throws -> (response: Data, payload: Data) {
         guard let camera = camera(for: id) else { throw CameraTransportError.disconnected }
-        return try await withCheckedThrowingContinuation { continuation in
-            camera.requestSendPTPCommand(command, outData: data) { response, payload, error in
-                if let error { continuation.resume(throwing: Self.map(error)) }
-                else { continuation.resume(returning: (response, payload)) }
+        let box = ThrowingContinuationBox<(Data, Data)>()
+        return try await withTaskCancellationHandler(operation: {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<(Data, Data), Error>) in
+                box.install(continuation)
+                camera.requestSendPTPCommand(command, outData: data) { response, payload, error in
+                    if let error { _ = box.finish(.failure(Self.map(error))) }
+                    else { _ = box.finish(.success((response, payload))) }
+                }
             }
-        }
+        }, onCancel: { box.cancel() })
     }
 
     func cameraFiles(for id: String) -> [ICCameraFile] {
@@ -221,6 +239,7 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
         }
         if let image = file.thumbnail, let data = Self.pngData(image) { await thumbnailCache.insert(data, for: cacheKey); return data }
         let requestID = UUID()
+        let waiterKey = "\(deviceID)\u{0}\(handle)"
         return try await withTaskCancellationHandler(operation: {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
                 thumbnailLock.lock()
@@ -228,12 +247,12 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
                     thumbnailLock.unlock()
                     continuation.resume(throwing: CancellationError())
                 } else {
-                    thumbnailWaiters[handle, default: [:]][requestID] = continuation
+                    thumbnailWaiters[waiterKey, default: [:]][requestID] = continuation
                     thumbnailLock.unlock()
                     file.requestThumbnail()
                 }
             }
-        }, onCancel: { [weak self] in self?.cancelThumbnail(handle: handle, requestID: requestID) })
+        }, onCancel: { [weak self] in self?.cancelThumbnail(key: waiterKey, requestID: requestID) })
     }
 
     func read(file: ICCameraFile, offset: Int64, length: Int64) async throws -> Data {
@@ -305,7 +324,11 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
     /// blocking lock API directly from an async function.
     private func openedCamera(for id: String) -> ICCameraDevice? {
         lock.lock(); defer { lock.unlock() }
-        return openedCameras[id] ?? cameras[id]
+        return openedCameras[id] ?? openingCameras[id] ?? cameras[id]
+    }
+
+    private func markOpening(_ camera: ICCameraDevice, for id: String) {
+        lock.lock(); openingCameras[id] = camera; lock.unlock()
     }
 
     private func finishThumbnailWaiters(with error: Error) {
@@ -341,8 +364,32 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
     }
 
     private func descriptor(for camera: ICCameraDevice) -> USBDeviceDescriptor {
-        let id = camera.uuidString ?? camera.name ?? UUID().uuidString
+        let id = stableID(for: camera)
         return USBDeviceDescriptor(id: id, name: camera.name ?? "", productKind: camera.productKind, transportType: camera.transportType)
+    }
+
+    /// UUID is preferred because it survives an unplug/replug.  A few camera
+    /// drivers omit it, so retain a process-stable object identity instead of
+    /// generating a fresh random UUID on every callback (which would make
+    /// didRemove unable to invalidate the selected device).
+    private func stableID(for camera: ICCameraDevice) -> String {
+        let objectID = ObjectIdentifier(camera)
+        lock.lock()
+        let existing = cameraIDsByObject[objectID]
+        let id = camera.uuidString.flatMap { $0.isEmpty ? nil : $0 }
+            ?? camera.name.flatMap { $0.isEmpty ? nil : $0 }
+            ?? existing
+            ?? "usb-\(String(UInt(bitPattern: Unmanaged.passUnretained(camera).toOpaque()), radix: 16))"
+        cameraIDsByObject[objectID] = id
+        lock.unlock()
+        return id
+    }
+
+    private func deviceID(for device: ICDevice) -> String {
+        if let camera = device as? ICCameraDevice { return stableID(for: camera) }
+        if let uuid = device.uuidString, !uuid.isEmpty { return uuid }
+        if let name = device.name, !name.isEmpty { return name }
+        return "usb-device"
     }
 }
 
@@ -358,9 +405,11 @@ extension ImageCaptureUSBTransport: ICDeviceBrowserDelegate {
     }
 
     func deviceBrowser(_ browser: ICDeviceBrowser, didRemove device: ICDevice, moreGoing: Bool) {
-        let id = device.uuidString ?? device.name ?? UUID().uuidString
+        guard let camera = device as? ICCameraDevice else { return }
+        let id = stableID(for: camera)
         lock.lock()
         cameras.removeValue(forKey: id)
+        cameraIDsByObject.removeValue(forKey: ObjectIdentifier(camera))
         lock.unlock()
         finishThumbnailWaiters(with: CameraTransportError.disconnected)
         emit(.deviceRemoved(id: id))
@@ -371,23 +420,26 @@ extension ImageCaptureUSBTransport: ICDeviceDelegate {
     func device(_ device: ICDevice, didOpenSessionWithError error: Error?) {}
     func device(_ device: ICDevice, didCloseSessionWithError error: Error?) {}
     func didRemove(_ device: ICDevice) {}
-    func deviceDidBecomeReady(_ device: ICDevice) { emit(.ready(id: device.uuidString ?? device.name ?? "")) }
+    func deviceDidBecomeReady(_ device: ICDevice) { emit(.ready(id: deviceID(for: device))) }
     func device(_ device: ICDevice, didReceiveStatusInformation status: [ICDeviceStatus : Any]) {}
-    func device(_ device: ICDevice, didEncounterError error: Error?) { emit(.failed(id: device.uuidString, message: error?.localizedDescription ?? "")) }
+    func device(_ device: ICDevice, didEncounterError error: Error?) {
+        emit(.failed(id: deviceID(for: device), message: error?.localizedDescription ?? ""))
+    }
     func device(_ device: ICDevice, didEjectWithError error: Error?) {}
 }
 
 extension ImageCaptureUSBTransport: ICCameraDeviceDelegate {
     func cameraDevice(_ camera: ICCameraDevice, didReceiveThumbnail thumbnail: CGImage?, for item: ICCameraItem, error: Error?) {
         let handle = item.ptpObjectHandle
+        let deviceID = stableID(for: camera)
+        let waiterKey = "\(deviceID)\u{0}\(handle)"
         thumbnailLock.lock()
         let continuations: [CheckedContinuation<Data, Error>]
-        if let values = thumbnailWaiters.removeValue(forKey: handle)?.values { continuations = Array(values) } else { continuations = [] }
+        if let values = thumbnailWaiters.removeValue(forKey: waiterKey)?.values { continuations = Array(values) } else { continuations = [] }
         thumbnailLock.unlock()
         if let error {
             continuations.forEach { $0.resume(throwing: Self.map(error)) }
         } else if let thumbnail, let data = Self.pngData(thumbnail) {
-            let deviceID = camera.uuidString ?? camera.name ?? ""
             Task { await thumbnailCache.insert(data, for: "\(deviceID)\u{0}\(handle)") }
             continuations.forEach { $0.resume(returning: data) }
         } else {
@@ -395,10 +447,10 @@ extension ImageCaptureUSBTransport: ICCameraDeviceDelegate {
         }
     }
 
-    private func cancelThumbnail(handle: UInt32, requestID: UUID) {
+    private func cancelThumbnail(key: String, requestID: UUID) {
         thumbnailLock.lock()
-        let continuation = thumbnailWaiters[handle]?.removeValue(forKey: requestID)
-        if thumbnailWaiters[handle]?.isEmpty == true { thumbnailWaiters.removeValue(forKey: handle) }
+        let continuation = thumbnailWaiters[key]?.removeValue(forKey: requestID)
+        if thumbnailWaiters[key]?.isEmpty == true { thumbnailWaiters.removeValue(forKey: key) }
         thumbnailLock.unlock()
         continuation?.resume(throwing: CancellationError())
     }
@@ -409,7 +461,7 @@ extension ImageCaptureUSBTransport: ICCameraDeviceDelegate {
     func cameraDevice(_ camera: ICCameraDevice, didRenameItems items: [ICCameraItem]) {}
     func cameraDeviceDidChangeCapability(_ camera: ICCameraDevice) {}
     func cameraDevice(_ camera: ICCameraDevice, didReceivePTPEvent eventData: Data) {}
-    func deviceDidBecomeReady(withCompleteContentCatalog device: ICCameraDevice) { emit(.ready(id: device.uuidString ?? device.name ?? "")) }
+    func deviceDidBecomeReady(withCompleteContentCatalog device: ICCameraDevice) { emit(.ready(id: stableID(for: device))) }
     func cameraDeviceDidRemoveAccessRestriction(_ device: ICDevice) {}
     func cameraDeviceDidEnableAccessRestriction(_ device: ICDevice) {}
 }

@@ -123,6 +123,9 @@ final class ConnectionViewModel: ObservableObject {
         usbEventsTask = nil
         usbConnectTask?.cancel()
         usbConnectTask = nil
+        // stop() can race an OpenSession callback.  Ask the service to run its
+        // non-cancellable close path before the transport drops its references.
+        Task { [weak self] in await self?.connectionService.disconnect() }
         usbTransport.stop()
     }
 
@@ -232,6 +235,10 @@ final class ConnectionViewModel: ObservableObject {
             }
             state.usbPhase = .connected
         } catch is CancellationError {
+            // CameraConnectionService may have completed OpenSession just
+            // before cancellation was observed.  Always run its non-cancel-
+            // lable close path so a cancelled USB connect cannot retain PTP.
+            await connectionService.disconnect()
             usbConnectTask = nil
             return
         } catch {
@@ -302,7 +309,10 @@ final class ConnectionViewModel: ObservableObject {
             usbConnectTask = Task { [weak self] in await self?.connectSelectedUSB() }
         case .deviceAdded:
             if state.usbAuthorization == .authorized,
-               previous.usbPhase == .waitingForCamera,
+               state.usbPhase == .waitingForCamera,
+               (previous.usbPhase == .waitingForCamera ||
+                previous.usbPhase == .failed("未获得 USB 权限，请重新插线并允许访问") ||
+                previous.selectedDeviceID != state.selectedDeviceID),
                usbConnectTask == nil {
                 state.usbPhase = .connecting
                 usbConnectTask = Task { [weak self] in await self?.connectSelectedUSB() }
@@ -322,14 +332,36 @@ final class ConnectionViewModel: ObservableObject {
                 }
             }
             break
-        case .ready:
-            break
+        case let .ready(id):
+            // Some ImageCaptureCore camera drivers emit ready without a
+            // second didAdd callback.  Android starts USB connection as soon
+            // as the attached device is usable, so use ready as an equivalent
+            // trigger when authorization and selection are already settled.
+            if state.usbAuthorization == .authorized,
+               state.selectedDeviceID == id,
+               state.usbPhase == .waitingForCamera,
+               usbConnectTask == nil {
+                state.usbPhase = .connecting
+                usbConnectTask = Task { [weak self] in await self?.connectSelectedUSB() }
+            }
         case .sessionOpened:
             break
         case .sessionClosed:
             break
-        case .failed:
-            break
+        case let .failed(id, message):
+            // A transport error after a successful handshake invalidates the
+            // session immediately.  Leaving cameraSession alive would keep
+            // the photo list visible while every subsequent command fails;
+            // Android returns to its disconnected USB state instead.
+            if let id, id == previous.selectedDeviceID, cameraSession != nil {
+                connectionGeneration &+= 1
+                cameraRepository = nil
+                cameraSession = nil
+                usbConnectTask?.cancel()
+                usbConnectTask = nil
+                Task { [weak self] in await self?.connectionService.disconnect() }
+                state.usbPhase = .failed(message)
+            }
         }
     }
 
