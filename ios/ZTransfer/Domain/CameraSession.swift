@@ -90,6 +90,7 @@ actor CameraSession {
     }
 
     func setFHDActive(_ active: Bool) async { await repository.setFHDActive(active) }
+    func setTransfersBusy(_ busy: Bool) async { await repository.setTransfersBusy(busy) }
     func backgroundThumbnailFillAllowed() async -> Bool {
         await repository.backgroundThumbnailFillAllowed()
     }

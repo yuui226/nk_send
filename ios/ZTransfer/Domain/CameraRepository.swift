@@ -41,6 +41,7 @@ actor CameraRepository {
     private var activeForegroundReads = 0
     private var remoteActive = false
     private var fhdActive = false
+    private var transfersBusy = false
     private var activeCatalogScans = 0
     private var catalogLoading: Bool { activeCatalogScans > 0 }
     private var catalogFiles: [UInt32: CameraFile] = [:]
@@ -247,8 +248,10 @@ actor CameraRepository {
 
     func usesDirectThumbnailRead() -> Bool { directReader != nil }
     func backgroundThumbnailFillAllowed() -> Bool {
-        activeForegroundReads == 0 && !remoteActive && !fhdActive
+        activeForegroundReads == 0 && !remoteActive && !fhdActive && !transfersBusy
     }
+
+    func setTransfersBusy(_ busy: Bool) { transfersBusy = busy }
 
     /// Foreground FHD preview has priority over catalog metadata reads.  The
     /// scan keeps its handle snapshot and resumes at the same cursor when the
@@ -702,7 +705,8 @@ actor CameraRepository {
         }
     }
     private var backgroundReadsAllowed: Bool {
-        catalogReady && !catalogLoading && activeForegroundReads == 0 && !remoteActive
+        catalogReady && !catalogLoading && activeForegroundReads == 0 &&
+            !remoteActive && !fhdActive && !transfersBusy
     }
     /// Android's 2 s polling and 10 s handle-only reconciliation. Never turn a
     /// failed/DeviceBusy response into an authoritative empty card.

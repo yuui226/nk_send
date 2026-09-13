@@ -158,6 +158,7 @@ struct PhotoListView: View {
         }
         .onChange(of: queueModel.snapshot.isTransferring) { busy in
             model.setTransferBusy(busy)
+            if let session { Task { await session.setTransfersBusy(busy) } }
         }
         .fullScreenCover(item: $selectedFile) { file in
             if let session {
