@@ -112,12 +112,15 @@ struct SettingsPopupOverlay: View {
         guard let scene = source?.windowScene else { return }
         let window = overlay ?? UIWindow(windowScene: scene)
         overlay = window
+        window.frame = scene.coordinateSpace.bounds
         window.windowLevel = .statusBar + 1
         window.backgroundColor = .clear
         window.isUserInteractionEnabled = false
         let controller = window.rootViewController ?? UIViewController()
         window.rootViewController = controller
         let root = controller.view!
+        root.frame = window.bounds
+        root.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         root.backgroundColor = .clear
         root.subviews.forEach { $0.removeFromSuperview() }
         // safeAreaInsets.top includes the extra inset below the status-bar
