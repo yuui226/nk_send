@@ -4,6 +4,7 @@ import UIKit
 /// Shared wheel mirroring Android ReleaseCommitWheel. Short lists advance on
 /// tap; long lists preview while dragging and commit only after release.
 struct DetentWheel<Option: Hashable>: View {
+    @Environment(\.colorScheme) private var colorScheme
     let label: String
     let options: [Option]
     let selected: Option
@@ -71,16 +72,25 @@ struct DetentWheel<Option: Hashable>: View {
     private var selectedIndex: Int { options.firstIndex(of: selected) ?? 0 }
     private var canDrag: Bool { options.count > 3 }
     private var accent: Color { accentColor ?? ZTransferColors.accentBlue }
+    private var dark: Bool { colorScheme == .dark }
+    private var wheelFill: Color {
+        dark ? Color(white: emphasized ? 0.22 : 0.16).opacity(0.94)
+             : Color.white.opacity(emphasized ? 0.86 : 0.74)
+    }
+    private var wheelBorder: Color {
+        let active = dragging || (emphasized && showEmphasisBorder)
+        return (active ? accent : ZTransferColors.primaryText)
+            .opacity(active ? (dark ? 0.9 : 0.85) : (dark ? 0.28 : 0.10))
+    }
 
     var body: some View {
         GeometryReader { proxy in
             let center = proxy.size.height / 2
             let surface = ZStack {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(Color.white.opacity(emphasized ? 0.86 : 0.74))
+                    .fill(wheelFill)
                     .overlay(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .stroke((dragging || (emphasized && showEmphasisBorder) ? accent : ZTransferColors.primaryText)
-                            .opacity(dragging || emphasized ? 0.85 : 0.10), lineWidth: dragging ? 1.5 : 1))
+                        .stroke(wheelBorder, lineWidth: dragging ? 1.5 : 1))
                 if let ambientEffectColor, ambientEffectAlpha > 0 {
                     RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                         .fill(ambientEffectColor.opacity(ambientEffectAlpha)).allowsHitTesting(false)
@@ -122,8 +132,8 @@ struct DetentWheel<Option: Hashable>: View {
         }
         .frame(height: wheelHeight).opacity(enabled ? 1 : 0.48)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Text(label.isEmpty ? "拨轮" : label))
-        .accessibilityValue(Text(optionLabel(options[selectedIndex]) + (favoriteOption(options[selectedIndex]) ? "，已收藏" : "")))
+        .accessibilityLabel(Text(AppLocalized.text(label.isEmpty ? "拨轮" : label)))
+        .accessibilityValue(Text(AppLocalized.text(optionLabel(options[selectedIndex])) + (favoriteOption(options[selectedIndex]) ? "，已收藏" : "")))
         .accessibilityHint(Text(readOnly ? "只读" : (canDrag ? "上下拖动调整，点击切换" : "点击切换")))
         .accessibilityAddTraits(.isButton)
         .onChange(of: selected) { value in sync(value: value) }
@@ -145,11 +155,17 @@ struct DetentWheel<Option: Hashable>: View {
         let indices = dragging ? Array(max(0, Int(floor(position)) - 1)...min(options.count - 1, Int(ceil(position)) + 1)) : [centerIndex]
         ForEach(indices, id: \.self) { index in
             let distance = abs(CGFloat(index) - position); let active = distance < 0.5
-            let color = (emphasized && active ? accent : ZTransferColors.primaryText).opacity(active ? 1 : 0.38)
+            let color = (emphasized && active ? accent : ZTransferColors.primaryText)
+                .opacity(active ? 1 : (dark ? 0.50 : 0.38))
             HStack(spacing: 4) {
                 if favoriteOption(options[index]) { Image(systemName: "star.fill").font(.system(size: 11)).foregroundStyle((favoriteIconColor ?? accent).opacity(active ? 1 : 0.38)) }
                 if let centerIcon { centerIcon(color) }
-                Text(optionLabel(options[index])).font(.system(size: active ? optionFontSize : max(12, optionFontSize - 2), weight: optionFontWeight ?? (active ? .semibold : .regular))).lineLimit(optionMaxLines).multilineTextAlignment(.center).foregroundStyle(color)
+                Text(AppLocalized.text(optionLabel(options[index])))
+                    .font(.system(size: active ? optionFontSize : max(12, optionFontSize - 2), weight: optionFontWeight ?? (active ? .semibold : .regular)))
+                    .lineLimit(optionMaxLines)
+                    .fixedSize(horizontal: false, vertical: optionMaxLines > 1)
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(color)
             }
             .frame(maxWidth: .infinity).frame(height: rowHeight)
             // ZStack already centers each row. Only move neighboring rows by

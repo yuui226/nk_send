@@ -14,11 +14,12 @@ struct ConnectionPage: View {
     @State private var settingsAnchor: CGRect = .zero
 
     var body: some View {
-        GeometryReader { proxy in
-            let layout = ConnectionLayout(size: proxy.size)
-            ZStack(alignment: .topLeading) {
-                ZTransferColors.background.ignoresSafeArea()
-                HStack(alignment: .top, spacing: ConnectionLayout.cardSpacing) {
+        ZStack {
+            GeometryReader { proxy in
+                let layout = ConnectionLayout(size: proxy.size)
+                ZStack(alignment: .topLeading) {
+                    ZTransferColors.background.ignoresSafeArea()
+                    HStack(alignment: .top, spacing: ConnectionLayout.cardSpacing) {
                     VStack(spacing: ConnectionLayout.gpsSpacing) {
                         ConnectionMethodCard(
                             mode: .usb, state: model.state,
@@ -37,47 +38,52 @@ struct ConnectionPage: View {
                         onWirelessModeChanged: model.select(wirelessMode:),
                         onConnect: { Task { await model.connectSelectedWiFi() } })
                         .frame(width: layout.cardWidth)
-                }
-                .padding(.horizontal, layout.horizontalPadding)
-                .padding(.top, layout.cardsTop)
-
-                Button { showSettings = true } label: {
-                    DoubleZMark(tint: ZTransferColors.primaryText)
-                        .frame(width: 20 * DoubleZMark.aspectRatio, height: 20)
-                        .padding(.horizontal, 14)
-                        .frame(height: 36)
-                }
-                .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
-                .padding(.leading, 12)
-                .padding(.top, 6)
-                .background {
-                    GeometryReader { anchor in
-                        Color.clear.preference(key: SettingsAnchorPreferenceKey.self,
-                                               value: anchor.frame(in: .global))
                     }
-                }
+                    .padding(.horizontal, layout.horizontalPadding)
+                    .padding(.top, layout.cardsTop)
 
-            }
-            .overlay(alignment: .bottom) {
-                ConnectionWorkspaceButton(
-                    enabled: !gpsCoordinator.state.enabled,
-                    action: onOpenWorkspace,
-                )
-                    .padding(.bottom, 18)
-            }
-            .overlay {
-                if showSettings {
-                    SettingsPopupOverlay(
-                        isPresented: $showSettings,
-                        showPhotoEffectsEntry: false,
-                        effectsStore: effectsStore,
-                        directory: directory,
-                        anchor: settingsAnchor
-                    )
+                    Button { showSettings = true } label: {
+                        DoubleZMark(tint: ZTransferColors.primaryText)
+                            .frame(width: 20 * DoubleZMark.aspectRatio, height: 20)
+                            .padding(.horizontal, 14)
+                            .frame(height: 36)
+                    }
+                    .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
+                    .padding(.leading, 12)
+                    .padding(.top, 6)
+                    .background {
+                        GeometryReader { anchor in
+                            Color.clear.preference(key: SettingsAnchorPreferenceKey.self,
+                                                   value: anchor.frame(in: .global))
+                        }
+                    }
+
                 }
+                .overlay(alignment: .bottom) {
+                    ConnectionWorkspaceButton(
+                        enabled: !gpsCoordinator.state.enabled,
+                        action: onOpenWorkspace,
+                    )
+                        .padding(.bottom, 18)
+                }
+                .onPreferenceChange(SettingsAnchorPreferenceKey.self) { settingsAnchor = $0 }
             }
-            .onPreferenceChange(SettingsAnchorPreferenceKey.self) { settingsAnchor = $0 }
+
+            // Keep the scrim outside the safe-area-constrained page overlay.
+            // This lets it dim the complete application surface while the
+            // page's measured card positions remain unchanged.
+            if showSettings {
+                SettingsPopupOverlay(
+                    isPresented: $showSettings,
+                    showPhotoEffectsEntry: false,
+                    effectsStore: effectsStore,
+                    directory: directory,
+                    anchor: settingsAnchor
+                )
+                .ignoresSafeArea()
+            }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onChange(of: gpsCoordinator.state.enabled) { enabled in
             if !enabled { attentionOrigin = Date() }
         }

@@ -30,12 +30,32 @@ enum ZTransferColors {
 struct ZTransferGlassButtonStyle: ButtonStyle {
     var tint: Color = ZTransferColors.primaryText
     var cornerRadius: CGFloat = 22
+    @AppStorage("skinPreset") private var skinPreset = "毛玻璃"
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .foregroundStyle(tint)
-            .background(ZTransferGlassSurface(cornerRadius: cornerRadius, kind: .button))
+            .background(buttonSurface)
             .scaleEffect(configuration.isPressed ? 0.96 : 1)
             .animation(.easeOut(duration: 0.16), value: configuration.isPressed)
+    }
+
+    @ViewBuilder private var buttonSurface: some View {
+        switch skinPreset {
+        case "木纹":
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .fill(LinearGradient(colors: [Color(red: 0.92, green: 0.78, blue: 0.60), Color(red: 0.72, green: 0.52, blue: 0.32)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                .overlay(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous).stroke(Color.brown.opacity(0.34), lineWidth: 1))
+        case "相机按键":
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .fill(LinearGradient(colors: [Color(white: 0.92), Color(white: 0.68)], startPoint: .top, endPoint: .bottom))
+                .overlay(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous).stroke(Color.black.opacity(0.28), lineWidth: 1))
+        case "钛合金":
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .fill(LinearGradient(colors: [Color(white: 0.48), Color(white: 0.22)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                .overlay(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous).stroke(Color.white.opacity(0.30), lineWidth: 1))
+        default:
+            ZTransferGlassSurface(cornerRadius: cornerRadius, kind: .button)
+        }
     }
 }

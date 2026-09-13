@@ -17,7 +17,7 @@ struct SettingsView: View {
     @AppStorage("hapticsEnabled") private var haptics = true
     @AppStorage("keepScreenOn") private var keepScreenOn = true
     @AppStorage("themeMode") private var themeMode = "自动"
-    @AppStorage("appLanguage") private var appLanguage = "自动"
+    @AppStorage("appLanguage") private var appLanguage = "system"
     @AppStorage("skinPreset") private var skinPreset = "毛玻璃"
 
     var showPhotoEffectsEntry: Bool = true
@@ -51,6 +51,14 @@ struct SettingsView: View {
         .sheet(isPresented: $showingPicker) { DirectoryPicker { url in directory.setDirectory(url); showingPicker = false } }
         .sheet(isPresented: $showingEffectsEditor) {
             PhotoEffectsEditorView(initial: effectsStore.settings) { effectsStore.update($0); showingEffectsEditor = false }
+        }
+        .onAppear {
+            // Migrate the early preview value ("自动") to the same BCP-47
+            // tags used by Android so the selection actually changes the app
+            // locale instead of only changing the wheel label.
+            if !["system", "en", "zh-Hans", "zh-Hant"].contains(appLanguage) {
+                appLanguage = "system"
+            }
         }
     }
 
@@ -125,7 +133,7 @@ struct SettingsView: View {
                 ToggleWheel(label: "连拍成组", isOn: $collapseBurst).frame(maxWidth: .infinity)
             }
             SettingsDivider()
-            DetentWheel(label: "照片列表操作", options: [false, true], selected: tapToPreview, optionLabel: { $0 ? "点击：预览\n长按：传输" : "点击：传输\n长按：预览" }, onCommit: { tapToPreview = $0 }, rowHeight: 18, wheelHeight: 50, optionMaxLines: 2)
+                DetentWheel(label: "照片列表操作", options: [false, true], selected: tapToPreview, optionLabel: { $0 ? "点击：预览\n长按：传输" : "点击：传输\n长按：预览" }, onCommit: { tapToPreview = $0 }, rowHeight: 32, wheelHeight: 56, optionMaxLines: 2, optionFontSize: 13)
         }
     }
 
@@ -133,7 +141,14 @@ struct SettingsView: View {
         SettingsCard {
             HStack(spacing: 8) {
                 DetentWheel(label: "明暗", options: ["自动", "深色", "浅色"], selected: themeMode, optionLabel: { $0 }, onCommit: { themeMode = $0 }, rowHeight: 16, wheelHeight: 42, optionFontSize: 13).frame(maxWidth: .infinity)
-                DetentWheel(label: "语言", options: ["自动", "English", "简体中文", "繁體中文"], selected: appLanguage, optionLabel: { $0 }, onCommit: { appLanguage = $0 }, rowHeight: 16, wheelHeight: 42, optionFontSize: 13).frame(maxWidth: .infinity)
+                DetentWheel(label: "语言", options: ["system", "en", "zh-Hans", "zh-Hant"], selected: appLanguage, optionLabel: { language in
+                    switch language {
+                    case "en": return "English"
+                    case "zh-Hans": return "简体中文"
+                    case "zh-Hant": return "繁體中文"
+                    default: return "自动"
+                    }
+                }, onCommit: { appLanguage = $0; onClose?() }, rowHeight: 16, wheelHeight: 42, optionFontSize: 13).frame(maxWidth: .infinity)
                 DetentWheel(label: "按钮风格", options: ["毛玻璃", "木纹", "相机按键", "钛合金"], selected: skinPreset, optionLabel: { $0 }, onCommit: { skinPreset = $0 }, rowHeight: 16, wheelHeight: 42, optionFontSize: 13).frame(maxWidth: .infinity)
             }
             SettingsDivider()

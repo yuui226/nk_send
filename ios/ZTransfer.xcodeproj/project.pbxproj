@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		L10C00000000000000000001 /* Localizable.strings (en) in Resources */ = {isa = PBXBuildFile; fileRef = L10F00000000000000000001 /* Localizable.strings (en) */; };
+		L10C00000000000000000002 /* Localizable.strings (zh-Hans) in Resources */ = {isa = PBXBuildFile; fileRef = L10F00000000000000000002 /* Localizable.strings (zh-Hans) */; };
+		L10C00000000000000000003 /* Localizable.strings (zh-Hant) in Resources */ = {isa = PBXBuildFile; fileRef = L10F00000000000000000003 /* Localizable.strings (zh-Hant) */; };
 		045977539EBCC80962632AF7 /* TransferQueueViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CC8C5625130C6409DD261D3 /* TransferQueueViewModel.swift */; };
 		04FDA089E2E70E83E18527AD /* Np3BitmapFilter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B088B7DE128919633A28EF1C /* Np3BitmapFilter.swift */; };
 		06198A7AC9FA3FCAFFDB49D7 /* RemoteMovieRecording.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FE8BFEAB58818B4214C9EA2 /* RemoteMovieRecording.swift */; };
@@ -106,6 +109,9 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		L10F00000000000000000001 /* Localizable.strings (en) */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = Localizable.strings; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
+		L10F00000000000000000002 /* Localizable.strings (zh-Hans) */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = Localizable.strings; path = zh-Hans.lproj/Localizable.strings; sourceTree = "<group>"; };
+		L10F00000000000000000003 /* Localizable.strings (zh-Hant) */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = Localizable.strings; path = zh-Hant.lproj/Localizable.strings; sourceTree = "<group>"; };
 		03D3B6EEC0B03021E23E7B54 /* GPSProtocolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GPSProtocolTests.swift; sourceTree = "<group>"; };
 		0994973567FB60B02328A65F /* PhotoListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoListView.swift; sourceTree = "<group>"; };
 		0E20FABF2CECBED5A93AB576 /* PTPIPDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PTPIPDiscovery.swift; sourceTree = "<group>"; };
@@ -376,6 +382,9 @@
 			isa = PBXGroup;
 			children = (
 				1FDAFED6652BDAF104D56E54 /* Fonts */,
+				L10F00000000000000000001 /* Localizable.strings (en) */,
+				L10F00000000000000000002 /* Localizable.strings (zh-Hans) */,
+				L10F00000000000000000003 /* Localizable.strings (zh-Hant) */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -518,6 +527,9 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				L10C00000000000000000001 /* Localizable.strings (en) in Resources */,
+				L10C00000000000000000002 /* Localizable.strings (zh-Hans) in Resources */,
+				L10C00000000000000000003 /* Localizable.strings (zh-Hant) in Resources */,
 				76FA040ADFD4573DBDA00991 /* bebas_neue_regular.ttf in Resources */,
 				C127B5B73435A9434E2EEF30 /* cormorant_garamond_medium_italic.ttf in Resources */,
 				481FE39822F171E89584DA10 /* great_vibes_regular.ttf in Resources */,
