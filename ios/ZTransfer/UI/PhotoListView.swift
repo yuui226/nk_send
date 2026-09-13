@@ -134,7 +134,14 @@ struct PhotoListView: View {
                 }
                 .overlay(alignment: .bottomLeading) { remoteEntryOverlay }
                 .overlay(alignment: .top) {
-                    photoListTopControls
+                    // Android's FileListScreen places this floating row inside
+                    // statusBarsPadding().  The list itself is edge-to-edge,
+                    // so the inset must be applied to the overlay rather than
+                    // consuming list content height.
+                    GeometryReader { proxy in
+                        photoListTopControls
+                            .padding(.top, proxy.safeAreaInsets.top)
+                    }
                 }
             }
         }
