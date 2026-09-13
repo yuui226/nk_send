@@ -501,3 +501,9 @@
 
 - `RemoteViewModel` 的监看连接失败提示改为安卓 `connection_failed_short` 资源键；传输队列错误和日期拨轮标签同样改为 `AppLocalized.resource`，不再在 iOS 代码中维护同义文本。
 - 验证：iOS Simulator Debug `xcodebuild` 构建成功；真实远程监看异常路径仍待相机验收。
+
+### 2026-09-14 远程监看扩展帧元数据
+
+- 按安卓 `LiveViewMetadata.kt` 增加 iOS 0x9428 帧头解析：校验头版本/长度/JPEG 边界，解析完整 AF 框表、选中框归一化坐标、对焦判断、焦点坐标网格，以及 512/1024 头型对应的双声道 15 段音频电平。
+- `RemoteViewModel` 与 JPEG 同步发布 `frameMetadata`，停止监看时清理，未知头型或越界字段不生成伪数据。
+- 验证：`xcodebuild test` 125 tests、0 failures；新增元数据解析覆盖通过。远程监看 UI 控件和真实相机帧仍未完成验收。

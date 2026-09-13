@@ -6,6 +6,7 @@ final class RemoteViewModel: ObservableObject {
     @Published private(set) var state = RemoteState()
     @Published private(set) var frameImage: UIImage?
     @Published private(set) var frameData: Data?
+    @Published private(set) var frameMetadata: RemoteLiveViewMetadata?
     @Published private(set) var exposureDescriptors: [RemoteExposureField: RemotePropertyDescriptor] = [:]
     @Published private(set) var movieMode = false
     @Published private(set) var autoISODescriptor: RemotePropertyDescriptor?
@@ -42,8 +43,11 @@ final class RemoteViewModel: ObservableObject {
                 while !Task.isCancelled {
                     do {
                         let payload = try await camera.liveViewFrame(preferEnhanced: true)
-                        guard let data = RemoteFrameParser.jpegData(from: payload),
-                              let image = UIImage(data: data) else {
+                        guard let jpegRange = RemoteFrameParser.jpegRange(in: payload) else {
+                            throw RemoteViewModelError.invalidFrame
+                        }
+                        let data = Data(payload[jpegRange])
+                        guard let image = UIImage(data: data) else {
                             throw RemoteViewModelError.invalidFrame
                         }
                         let now = ContinuousClock.now
@@ -57,6 +61,11 @@ final class RemoteViewModel: ObservableObject {
                         lastFrameAt = now
                         frameData = data
                         frameImage = image
+                        frameMetadata = RemoteFrameParser.metadata(
+                            from: payload,
+                            jpegOffset: jpegRange.lowerBound,
+                            operation: PTPConstants.getLiveViewImageEx
+                        )
                         state = state.applying(.frameReceived(fps: rate))
                     } catch is CancellationError {
                         break
@@ -183,6 +192,7 @@ final class RemoteViewModel: ObservableObject {
         state = state.applying(.cancelled)
         frameImage = nil
         frameData = nil
+        frameMetadata = nil
         lastFrameAt = nil
         state.focus = .init()
     }
