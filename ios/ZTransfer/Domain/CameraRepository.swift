@@ -452,6 +452,12 @@ actor CameraRepository {
         activeCatalogScans += 1
         defer { activeCatalogScans -= 1; scheduleObjectResolver() }
 
+        // CameraViewModel.loadFiles returns before issuing StorageIDs when
+        // remote monitoring owns the channel, and the iOS list must not race
+        // that foreground owner with its first catalog command. FHD pauses
+        // are held until the preview releases the same session.
+        try await waitForForegroundPreview()
+
         // A resume snapshot is valid only for this repository/session.  A fresh
         // scan invalidates old rows and cache state exactly like Android.
         let reusable = resumeSnapshot ?? (preserveExisting ? scanSnapshot : nil)
@@ -580,6 +586,7 @@ actor CameraRepository {
                 groups = groups.map { ($0.storage, $0.handles.filter { !existingHandles.contains($0) }) }
             }
         }
+        try await waitForForegroundPreview()
         if let directReader { try await directReader.prepare(groups: groups) }
 
         var files = existingFiles

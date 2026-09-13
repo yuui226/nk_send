@@ -149,6 +149,12 @@ final class PhotoListViewModel: ObservableObject {
     /// never replaces the current catalog, matching Android's refresh reducer.
     func reload() async {
         loadGeneration &+= 1
+        // CameraViewModel.loadFiles cancels the previous fileLoadJob before
+        // starting a refresh. Without this, the old scan could keep issuing
+        // metadata commands until its next generation check, competing with
+        // the new scan for the same PTP session.
+        loadTask?.cancel()
+        loadTask = nil
         await reload(generation: loadGeneration)
     }
 

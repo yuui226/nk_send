@@ -727,3 +727,10 @@
 - 对照安卓 `TipsBubble`/`AnchorPopup`：指引不是带遮罩的系统弹窗，而是贴着灯泡按钮的毛玻璃气泡；AP 从按钮下方展开，STA 因内容较长向上预留空间并可滚动，点击外部关闭。
 - iOS `STATipsOverlay` 现在接收灯泡按钮全局坐标，去掉遮罩，按 AP/STA 分支读取安卓原始资源，STA 内容在剩余高度内滚动，入口仍使用同一 240ms 锚定缩放淡入和 180ms 收起时序。`ConnectionMethodCard` 通过 GeometryReader 将按钮坐标传回页面。
 - 验证：iOS Simulator Debug 构建成功，`git diff --check` 通过；尚未在模拟器逐点操作确认不同安全区下的坐标，仍需 UI 交互验收，任务 18 保持未完成。
+
+### 2026-09-14 照片列表前台通道抢占起点对账（进行中）
+
+- 对照安卓 `CameraViewModel.loadFiles` 在首次发出 StorageIDs 前检查 `isFileScanPaused()`：iOS `CameraRepository.scanCatalog` 原先只在元数据循环内等待/拒绝远程监看，可能在监看刚接管时先发出 StorageIDs 或准备 STA 直读元数据。
+- 现在扫描入口和直读准备前都经过同一 `waitForForegroundPreview()`：远程监看直接结束本轮并保留后续刷新入口，FHD 等待当前预览释放；不会让目录扫描抢占前台 PTP 通道。`PhotoListViewModel.reload()` 也先取消上一轮 `loadTask`，与安卓 `fileLoadJob?.cancel()` 一致。
+- 依据：安卓 `CameraViewModel.kt:isFileScanPaused/loadFiles`；iOS 修改位置：`CameraRepository.scanCatalog`、`PhotoListViewModel.reload`。
+- 验证：`xcodebuild test -project ios/ZTransfer.xcodeproj -scheme ZTransfer -destination 'platform=iOS Simulator,name=iPhone 17 Pro'`，140 tests、0 failures。尚未用真实监看/FHD 与相机同时操作验证抢占时序，照片列表任务仍保持未完成。
