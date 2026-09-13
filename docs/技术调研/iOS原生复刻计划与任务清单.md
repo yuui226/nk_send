@@ -481,3 +481,4 @@
 - 持久化键继续按安卓定义收敛：相机照片效果从 iOS 私有 JSON 优先改为读取/写回 `ztransfer` 中的 `photo_frame_*`、`photo_filter_*`、`favorite_*` 和 `photo_frame_metadata_settings_v1`；保留旧 JSON 仅作升级回退。传输目录 bookmark 改用安卓同名 `transfer_dir` 键，远程变形/直方图改用 `remote_desqueeze_multiplier`、`preview_histogram_enabled`，水平仪保持会话态不持久化。
 - 缩略图填充队列补上安卓 `seededRevision` 和日期优先级状态：同一扫描代际只播种一次，筛选日期变化才重排未完成项，避免批次回调和扫描收尾重复插入或改变顺序。
 - 本轮仅完成代码级对照和模拟器构建；Android preference 编码/解码尚未用跨平台 fixture 做字节级回归，GPS/远程界面仍需按安卓页面源码和模拟器交互继续核对。
+- 手机照片效果也改用独立的 `local_photo_effects` UserDefaults suite，并使用安卓 `decoration_enabled`、`frame_preset`、`watermark_*`、`filter_*` 和 favorite 键；筛选页、队列页、GPS 页的可见文案继续从 AndroidLocalization 的资源键读取。
