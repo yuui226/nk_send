@@ -672,12 +672,15 @@ enum PhotoEffectsRenderer {
         let title = metadata.identity
         let inlineWatermark = watermark.enabled && watermark.content == .text && watermark.position == .auto ? watermark : nil
         let separate = watermark.enabled && watermark.content == .text && watermark.position != .auto && !photoPlacement(watermark.position) ? watermark : nil
-        let titleFont = UIFont.systemFont(ofSize: min(layout.canvas.width * 0.030, area.width * 0.08), weight: .medium)
-        let detailFont = UIFont.systemFont(ofSize: min(layout.canvas.width * 0.021, area.width * 0.058), weight: .regular)
-        let inlineFont = inlineWatermark.map { watermarkFont($0.font, size: min(layout.canvas.width, layout.canvas.height) * textSizeFraction($0.sizePercent) * 1.35) }
+        let shortEdge = min(layout.canvas.width, layout.canvas.height)
+        let titleFont = UIFont.systemFont(ofSize: min(shortEdge * 0.030, area.width * 0.08), weight: .medium)
+        let detailFont = UIFont.systemFont(ofSize: min(shortEdge * 0.0235, area.width * 0.058), weight: .regular)
+        let lensFont = UIFont.systemFont(ofSize: min(shortEdge * 0.0205, area.width * 0.058), weight: .medium)
+        let inlineFont = inlineWatermark.map { watermarkFont($0.font, size: shortEdge * textSizeFraction($0.sizePercent) * 1.35) }
         let titleAttrs: [NSAttributedString.Key: Any] = [.font: titleFont, .foregroundColor: UIColor.white,
             .shadow: { let s = NSShadow(); s.shadowBlurRadius = 3; s.shadowOffset = CGSize(width: 0, height: 1); s.shadowColor = UIColor.black.withAlphaComponent(0.55); return s }()]
         let detailAttrs: [NSAttributedString.Key: Any] = [.font: detailFont, .foregroundColor: UIColor.white.withAlphaComponent(0.92)]
+        let lensAttrs: [NSAttributedString.Key: Any] = [.font: lensFont, .foregroundColor: UIColor.white.withAlphaComponent(0.92)]
         var detailLines = [String](); if let lens = metadata.lensModel, !lens.isEmpty { detailLines.append(lens) }
         let cameraDetail = [metadata.immersiveDetailLine, metadata.dateTime ?? ""].filter { !$0.isEmpty }.joined(separator: "  ")
         if !cameraDetail.isEmpty { detailLines.append(cameraDetail) }
@@ -686,7 +689,11 @@ enum PhotoEffectsRenderer {
         if !title.isEmpty || inlineWatermark != nil {
             rows.append((title, titleFont, titleAttrs))
         }
-        rows += detailLines.map { ($0, detailFont, detailAttrs) }
+        rows += detailLines.enumerated().map { index, value in
+            index == 0 && metadata.lensModel?.isEmpty == false
+                ? (value, lensFont, lensAttrs)
+                : (value, detailFont, detailAttrs)
+        }
         if let separate { rows.append((separate.displayText, detailFont, detailAttrs)) }
         var photoWatermark = watermark
         if !photoPlacement(photoWatermark.position) { photoWatermark.position = .photoBottomRight }
