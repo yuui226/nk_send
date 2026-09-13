@@ -309,15 +309,6 @@ struct SettingsView: View {
                 }
             }
             Spacer()
-            // iOS does not yet have the Android purchase backend. Keep the
-            // same compact badge footprint without exposing a dead renewal
-            // action in the settings header.
-            Text(AppLocalized.resource("pro_label"))
-                .zTransferTypography(.labelLarge, weight: .bold)
-                .foregroundStyle(.black)
-                .padding(.horizontal, 14)
-                .frame(height: 30)
-                .background(Color.yellow.opacity(0.75), in: Capsule())
             Button { onClose?() } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 18, weight: .medium))
