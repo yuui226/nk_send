@@ -33,6 +33,11 @@ targets:
           - Fonts/great_vibes_regular.ttf
           - Fonts/bebas_neue_regular.ttf
           - Fonts/cormorant_garamond_medium_italic.ttf
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: true
+          UISceneConfigurations: {}
+        UILaunchScreen:
+          UILaunchScreen: {}
     frameworks:
       - ImageCaptureCore
     settings:
