@@ -86,7 +86,10 @@ struct PhotoEffectsControls: View {
             if draft.photoFrameEnabled {
                 DetentWheel(label: AppLocalized.resource("photo_frame_style_short"), options: PhotoFramePreset.allCases,
                             selected: draft.photoFramePreset,
-                            optionLabel: { frameName($0) }, onCommit: { draft.photoFramePreset = $0 }, rowHeight: 28)
+                            optionLabel: { frameName($0) }, onCommit: { value in
+                                draft.photoFramePreset = value
+                                draft.metadata = draft.metadataByPreset[value.rawValue] ?? PhotoFrameMetadataSettings.defaults(for: value)
+                            }, rowHeight: 28)
             }
         }
     }
@@ -122,22 +125,32 @@ struct PhotoEffectsControls: View {
 
     private var metadataCard: some View {
         EditorCard(title: AppLocalized.resource("photo_frame_metadata_button")) {
-            EffectToggle(label: AppLocalized.resource("photo_frame_metadata_date_format"), isOn: binding(\.metadata.showDate))
-            EffectToggle(label: AppLocalized.resource("photo_frame_metadata_time_format"), isOn: binding(\.metadata.showTime))
-            EffectToggle(label: AppLocalized.resource("photo_frame_metadata_focal_length"), isOn: binding(\.metadata.showFocalLength))
-            EffectToggle(label: AppLocalized.resource("photo_frame_metadata_exposure"), isOn: binding(\.metadata.showExposure))
-            EffectToggle(label: AppLocalized.resource("photo_frame_metadata_brand"), isOn: binding(\.metadata.showBrand))
-            EffectToggle(label: AppLocalized.resource("photo_frame_metadata_model"), isOn: binding(\.metadata.showModel))
-            EffectToggle(label: AppLocalized.resource("photo_frame_metadata_lens_model"), isOn: binding(\.metadata.showLensModel))
+            EffectToggle(label: AppLocalized.resource("photo_frame_metadata_date_format"), isOn: metadataBinding(\.showDate))
+            EffectToggle(label: AppLocalized.resource("photo_frame_metadata_time_format"), isOn: metadataBinding(\.showTime))
+            EffectToggle(label: AppLocalized.resource("photo_frame_metadata_focal_length"), isOn: metadataBinding(\.showFocalLength))
+            EffectToggle(label: AppLocalized.resource("photo_frame_metadata_exposure"), isOn: metadataBinding(\.showExposure))
+            EffectToggle(label: AppLocalized.resource("photo_frame_metadata_brand"), isOn: metadataBinding(\.showBrand))
+            EffectToggle(label: AppLocalized.resource("photo_frame_metadata_model"), isOn: metadataBinding(\.showModel))
+            EffectToggle(label: AppLocalized.resource("photo_frame_metadata_lens_model"), isOn: metadataBinding(\.showLensModel))
             if showLocationFields {
-                EffectToggle(label: AppLocalized.resource("photo_frame_metadata_coordinates"), isOn: binding(\.metadata.showCoordinates))
-                EffectToggle(label: AppLocalized.resource("photo_frame_metadata_altitude"), isOn: binding(\.metadata.showAltitude))
+                EffectToggle(label: AppLocalized.resource("photo_frame_metadata_coordinates"), isOn: metadataBinding(\.showCoordinates))
+                EffectToggle(label: AppLocalized.resource("photo_frame_metadata_altitude"), isOn: metadataBinding(\.showAltitude))
             }
         }
     }
 
     private func binding<T>(_ keyPath: WritableKeyPath<PhotoEffectsSettings, T>) -> Binding<T> {
         Binding(get: { draft[keyPath: keyPath] }, set: { draft[keyPath: keyPath] = $0 })
+    }
+
+    private func metadataBinding<T>(_ keyPath: WritableKeyPath<PhotoFrameMetadataSettings, T>) -> Binding<T> {
+        Binding(
+            get: { draft.metadata[keyPath: keyPath] },
+            set: { value in
+                draft.metadata[keyPath: keyPath] = value
+                draft.metadataByPreset[draft.photoFramePreset.rawValue] = draft.metadata
+            },
+        )
     }
     private func frameName(_ value: PhotoFramePreset) -> String {
         switch value {

@@ -176,7 +176,7 @@ final class PhotoEffectsStore: ObservableObject {
             settings = Self.normalized(value)
         } else {
             settings = PhotoEffectsSettings()
-            if scope == .localPhotos, let first = PhotoFilterCatalog.presets.first {
+            if let first = PhotoFilterCatalog.presets.first {
                 settings.selectedFilter = .init(preset: first, intensityPercent: Np3FilterEngine.defaultIntensityPercent)
             }
         }
