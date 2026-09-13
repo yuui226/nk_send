@@ -195,6 +195,25 @@ final class DomainModelTests: XCTestCase {
         XCTAssertEqual(transferUniqueOutputURL(directory: directory, fileName: "DSC_0001.JPG").lastPathComponent, "DSC_0001 (2).JPG")
     }
 
+    func testTransferDirectoryIndexMatchesNameAndSizeAndKeepsPartialSeparate() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let original = directory.appendingPathComponent("DSC_0001 (2).JPG")
+        FileManager.default.createFile(atPath: original.path, contents: Data(repeating: 1, count: 10))
+        let partial = directory.appendingPathComponent(".nkpart_10.20260817T142530_DSC_0001.JPG")
+        FileManager.default.createFile(atPath: partial.path, contents: Data(repeating: 1, count: 4))
+        let index = TransferDirectoryIndex.scan(directory: directory)
+        let file = CameraFile(id: 1, storageID: 1, format: 0x3801, size: 10,
+                              fileName: "DSC_0001.JPG", captureDate: nil, isProtected: false)
+        XCTAssertEqual(index.existingOriginal(for: file)?.lastPathComponent, "DSC_0001 (2).JPG")
+        XCTAssertEqual(index.partials.count, 1)
+        let differentSize = CameraFile(id: file.id, storageID: file.storageID, format: file.format,
+                                       size: 11, fileName: file.fileName, captureDate: file.captureDate,
+                                       isProtected: file.isProtected)
+        XCTAssertNil(index.existingOriginal(for: differentSize))
+    }
+
     func testPhotoFilterAppliesTypeProtectionStorageAndDate() {
         let files = [
             CameraFile(id: 1, storageID: 1, format: 0x3801, size: 1, fileName: "a.JPG", captureDate: "20260913T010203", isProtected: true),

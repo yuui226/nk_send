@@ -267,9 +267,25 @@ actor TransferQueue {
             if changed { publish() }
             return
         }
+        // Build one snapshot for the root and any Android-style dated folders;
+        // each task then reuses it instead of enumerating the directory again.
+        var directoryIndexes: [URL: TransferDirectoryIndex] = [:]
+        let rootIndex = TransferDirectoryIndex.scan(directory: directory)
+        directoryIndexes[directory] = rootIndex
+        if let children = try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: []
+        ) {
+            for child in children where transferDatedFolderName(child.lastPathComponent) {
+                guard (try? child.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { continue }
+                directoryIndexes[child] = TransferDirectoryIndex.scan(directory: child)
+            }
+        }
         while !Task.isCancelled, !pauseAfterCurrentFileRequested {
             guard let index = items.firstIndex(where: { $0.status == .waiting }), let session else { break }
             let itemID = items[index].id
+            let originalSize = items[index].file.size
             items[index].status = .transferring; items[index].error = nil; publish()
             progressSamples[itemID] = (Date(), 0)
             do {
@@ -279,7 +295,10 @@ actor TransferQueue {
                 if items[index].destinationFolderName != nil {
                     try FileManager.default.createDirectory(at: destinationDirectory, withIntermediateDirectories: true)
                 }
-                if let destination = existingTransferDestination(for: items[index].file, in: destinationDirectory) {
+                if directoryIndexes[destinationDirectory] == nil {
+                    directoryIndexes[destinationDirectory] = TransferDirectoryIndex.scan(directory: destinationDirectory)
+                }
+                if let destination = directoryIndexes[destinationDirectory]?.existingOriginal(for: items[index].file) {
                     if let index = items.firstIndex(where: { $0.id == itemID }) {
                         items[index].status = .completed
                         items[index].progress = 1
@@ -296,6 +315,8 @@ actor TransferQueue {
                 if let index = items.firstIndex(where: { $0.id == itemID }) {
                     items[index].status = .completed; items[index].progress = 1; items[index].outputURL = output; publish()
                 }
+                directoryIndexes[destinationDirectory, default: TransferDirectoryIndex.scan(directory: destinationDirectory)]
+                    .addOriginal(output, size: originalSize)
                 progressSamples[itemID] = nil
             } catch is CancellationError {
                 if let index = items.firstIndex(where: { $0.id == itemID }) { items[index].status = .cancelled; publish() }
