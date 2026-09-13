@@ -633,7 +633,7 @@ enum PhotoEffectsRenderer {
             drawSideLabel(cg, text: "▶  20", x: layout.photo.maxX + (layout.canvas.width - layout.photo.maxX) * 0.52, y: layout.photo.minY + layout.photo.height * 0.22, angle: .pi / 2, color: UIColor(red: 0.87, green: 0.65, blue: 0.47, alpha: 1), size: layout.photo.width * 0.028)
             let identity = metadata.identity
             let cameraLine = [identity, metadata.lensModel ?? "", metadata.frameDetailLine, metadata.dateTime ?? ""].filter { !$0.isEmpty }.joined(separator: "   ")
-            drawMetadataRows(cg, area: CGRect(x: layout.photo.minX, y: layout.photo.maxY, width: layout.photo.width, height: layout.canvas.height - layout.photo.maxY), preset: preset, rows: [cameraLine, metadata.locationRow ?? ""].filter { !$0.isEmpty }, watermark: watermark, dark: false, emphasizeFirst: false)
+            drawFilmEdgeInformation(cg, area: CGRect(x: layout.photo.minX, y: layout.photo.maxY, width: layout.photo.width, height: layout.canvas.height - layout.photo.maxY), rows: [cameraLine, metadata.locationRow ?? ""].filter { !$0.isEmpty })
         case .classicSignature:
             if !metadata.identity.isEmpty {
                 let headerArea = CGRect(x: 0, y: 0, width: layout.canvas.width, height: layout.photo.minY)
@@ -798,7 +798,28 @@ enum PhotoEffectsRenderer {
 
     private static func drawSideLabel(_ cg: CGContext, text: String, x: CGFloat, y: CGFloat, angle: CGFloat, color: UIColor, size: CGFloat) {
         cg.saveGState(); cg.translateBy(x: x, y: y); cg.rotate(by: angle)
-        text.draw(at: CGPoint(x: -(text as NSString).size(withAttributes: [.font: UIFont.boldSystemFont(ofSize: size)]).width / 2, y: -size / 2), withAttributes: [.font: UIFont.boldSystemFont(ofSize: size), .foregroundColor: color]); cg.restoreGState()
+        let font = UIFont.boldSystemFont(ofSize: size)
+        let width = (text as NSString).size(withAttributes: [.font: font]).width
+        text.draw(at: CGPoint(x: -width / 2, y: -font.ascender), withAttributes: [.font: font, .foregroundColor: color]); cg.restoreGState()
+    }
+
+    private static func drawFilmEdgeInformation(_ cg: CGContext, area: CGRect, rows: [String]) {
+        guard area.height > 1, !rows.isEmpty else { return }
+        let color = UIColor(red: 0.88, green: 0.67, blue: 0.49, alpha: 1)
+        let baseSize = area.width * 0.016
+        let font = UIFont(name: "HelveticaNeue-Condensed", size: baseSize) ?? UIFont.systemFont(ofSize: baseSize)
+        let gap = area.height * 0.10
+        let heights = rows.map { ($0 as NSString).size(withAttributes: [.font: font]).height }
+        let total = heights.reduce(0, +) + gap * CGFloat(max(0, rows.count - 1))
+        let scale = min(1, area.height / max(total, 1))
+        var y = area.midY - total * scale * 0.5
+        for (index, row) in rows.enumerated() {
+            let rowFont = font.withSize(max(9, font.pointSize * scale))
+            let attrs: [NSAttributedString.Key: Any] = [.font: rowFont, .foregroundColor: color]
+            let width = (row as NSString).size(withAttributes: attrs).width
+            row.draw(at: CGPoint(x: area.midX - width * 0.5, y: y), withAttributes: attrs)
+            y += heights[index] * scale + gap * scale
+        }
     }
 
     // MARK: Watermark placement and sizing
