@@ -1,6 +1,39 @@
 import SwiftUI
 import UIKit
 
+enum LocalOriginalPreviewRoute: Equatable {
+    case directBitmap
+    case rawEmbeddedJPEG
+    case cameraFHD
+}
+
+func localOriginalPreviewRoute(for fileExtension: String) -> LocalOriginalPreviewRoute {
+    switch fileExtension.lowercased() {
+    case ".nef", ".nrw": return .rawEmbeddedJPEG
+    case ".tif", ".tiff": return .cameraFHD
+    case ".mov", ".mp4", ".avi": return .cameraFHD
+    default: return .directBitmap
+    }
+}
+
+private func decodeLocalOriginalPreview(at url: URL, route: LocalOriginalPreviewRoute) -> UIImage? {
+    switch route {
+    case .cameraFHD:
+        return nil
+    case .directBitmap:
+        return UIImage(contentsOfFile: url.path)
+    case .rawEmbeddedJPEG:
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let image = CGImageSourceCreateThumbnailAtIndex(
+                source, 0,
+                [kCGImageSourceCreateThumbnailFromImageAlways: true,
+                 kCGImageSourceCreateThumbnailWithTransform: true,
+                 kCGImageSourceThumbnailMaxPixelSize: 4096] as CFDictionary
+              ) else { return nil }
+        return UIImage(cgImage: image)
+    }
+}
+
 struct PhotoPreviewView: View {
     let session: CameraSession
     let files: [CameraFile]
@@ -146,7 +179,7 @@ struct PhotoPreviewView: View {
     /// preview routes; videos remain thumbnail-only.
     private func localOriginalURL(for file: CameraFile) -> URL? {
         guard let directory,
-              [".jpg", ".jpeg", ".png", ".bmp", ".gif"].contains(file.fileExtension) else { return nil }
+              localOriginalPreviewRoute(for: file.fileExtension) != .cameraFHD else { return nil }
         let destination = transferDestinationDirectory(
             root: directory,
             folderName: organizeByDate ? transferDateFolderName(file.captureDate) : nil
@@ -226,7 +259,10 @@ private struct PreviewImage: View {
             // replaces it with the FHD preview. Keep both requests in flight,
             // but publish the thumbnail as soon as it is available.
             if let localOriginalURL,
-               let localImage = UIImage(contentsOfFile: localOriginalURL.path) {
+               let localImage = decodeLocalOriginalPreview(
+                at: localOriginalURL,
+                route: localOriginalPreviewRoute(for: file.fileExtension)
+               ) {
                 image = localImage
                 highResolutionAlpha = 1
                 return

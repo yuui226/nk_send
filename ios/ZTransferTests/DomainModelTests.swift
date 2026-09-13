@@ -160,6 +160,14 @@ final class DomainModelTests: XCTestCase {
         XCTAssertEqual(decoded.destinationFolderName, "ZT2026-08-17")
     }
 
+    func testLocalOriginalPreviewRoutesMatchAndroidFileTypes() {
+        XCTAssertEqual(localOriginalPreviewRoute(for: ".JPG"), .directBitmap)
+        XCTAssertEqual(localOriginalPreviewRoute(for: ".nef"), .rawEmbeddedJPEG)
+        XCTAssertEqual(localOriginalPreviewRoute(for: ".nrw"), .rawEmbeddedJPEG)
+        XCTAssertEqual(localOriginalPreviewRoute(for: ".tiff"), .cameraFHD)
+        XCTAssertEqual(localOriginalPreviewRoute(for: ".mp4"), .cameraFHD)
+    }
+
     func testPhotoFilterAppliesTypeProtectionStorageAndDate() {
         let files = [
             CameraFile(id: 1, storageID: 1, format: 0x3801, size: 1, fileName: "a.JPG", captureDate: "20260913T010203", isProtected: true),
