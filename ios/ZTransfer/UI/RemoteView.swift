@@ -177,17 +177,20 @@ struct RemoteView: View {
                             .font(.system(size: 11, weight: .bold, design: .monospaced))
                             .opacity(model.hdLiveView ? 1 : 0.6)
                     }
+                    .accessibilityLabel(AppLocalized.resource("dev_hd_liveview"))
                     Button {
                         withAnimation(ZTransferMotion.standard) { showFps.toggle() }
                     } label: {
                         Text("FPS")
                             .font(.system(size: 11, weight: .bold, design: .monospaced))
                     }
+                    .accessibilityLabel(AppLocalized.resource("dev_fps_overlay"))
                     Button {
                         withAnimation(ZTransferMotion.standard) { histogramVisible.toggle() }
                     } label: {
                         Image(systemName: "chart.bar.xaxis")
                     }
+                    .accessibilityLabel(AppLocalized.resource("cd_remote_histogram"))
                     Button {
                         withAnimation(ZTransferMotion.standard) {
                             desqueeze = RemoteDisplayOptions.nextDesqueeze(after: desqueeze)
@@ -205,17 +208,20 @@ struct RemoteView: View {
                     } label: {
                         Image(systemName: "level")
                     }
+                    .accessibilityLabel(AppLocalized.resource("cd_remote_level"))
                     Button {
                         withAnimation(ZTransferMotion.standard) { framingGrid = framingGrid.next }
                     } label: {
                         Image(systemName: "square.grid.3x3")
                     }
+                    .accessibilityLabel(AppLocalized.resource("cd_remote_grid"))
                     if model.movieMode {
                         Button {
                             withAnimation(ZTransferMotion.standard) { audioLevelsVisible.toggle() }
                         } label: {
                             Image(systemName: audioLevelsVisible ? "waveform" : "waveform.slash")
                         }
+                        .accessibilityLabel(AppLocalized.resource("cd_remote_audio_levels"))
                     }
                     Button {
                         withAnimation(ZTransferMotion.standard) {
@@ -225,6 +231,7 @@ struct RemoteView: View {
                     } label: {
                         Image(systemName: zebraVisible ? "rectangle.dashed.badge.record" : "rectangle.dashed")
                     }
+                    .accessibilityLabel(AppLocalized.resource("cd_remote_zebra"))
                 }
                 .foregroundStyle(.white)
                 .padding(.horizontal, 14)
