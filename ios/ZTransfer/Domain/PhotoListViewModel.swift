@@ -20,7 +20,8 @@ final class PhotoListViewModel: ObservableObject {
     private var allFiles: [CameraFile] = []
     private var transferredIDs: Set<UInt32> = []
     var availableFiles: [CameraFile] { allFiles }
-    private let scanCatalog: @Sendable (Bool, Bool, @escaping @Sendable ([CameraFile]) async throws -> Void) async throws -> PhotoScanResult
+    private let scanCatalog: @Sendable (Bool, PhotoScanSnapshot?, Bool, @escaping @Sendable ([CameraFile]) async throws -> Void) async throws -> PhotoScanResult
+    private let resumeSnapshotProvider: @Sendable () async -> PhotoScanSnapshot?
     private let prefetchBatch: @Sendable ([CameraFile]) async -> Set<UInt32>
     private let canFill: @Sendable () async -> Bool
     private let reconcileCache: @Sendable ([CameraFile], Bool) async -> Void
@@ -53,22 +54,26 @@ final class PhotoListViewModel: ObservableObject {
     }
 
     init(repository: CameraRepository) {
-        self.scanCatalog = { preserve, detect, handler in
+        self.scanCatalog = { preserve, snapshot, detect, handler in
             try await repository.scanCatalog(preserveExisting: preserve,
+                                              resumeSnapshot: snapshot,
                                               detectNewHandles: detect,
                                               onBatch: handler)
         }
+        self.resumeSnapshotProvider = { nil }
         self.prefetchBatch = { _ in [] }
         self.canFill = { true }
         self.reconcileCache = { _, _ in }
         observeCatalog(repository)
     }
     init(session: CameraSession) {
-        self.scanCatalog = { preserve, detect, handler in
+        self.scanCatalog = { preserve, snapshot, detect, handler in
             try await session.scanCatalog(preserveExisting: preserve,
+                                          resumeSnapshot: snapshot,
                                           detectNewHandles: detect,
                                           onBatch: handler)
         }
+        self.resumeSnapshotProvider = { await session.scanSnapshotForResume() }
         self.prefetchBatch = { files in
             var settled = Set<UInt32>()
             for file in files {
@@ -141,7 +146,7 @@ final class PhotoListViewModel: ObservableObject {
         isLoadingFiles = true
         loadState = .loading
         loadTask = Task { [weak self] in
-            await self?.reload(generation: generation)
+            await self?.reload(generation: generation, resumeSnapshot: nil)
         }
     }
 
@@ -155,10 +160,10 @@ final class PhotoListViewModel: ObservableObject {
         // the new scan for the same PTP session.
         loadTask?.cancel()
         loadTask = nil
-        await reload(generation: loadGeneration)
+        await reload(generation: loadGeneration, resumeSnapshot: nil)
     }
 
-    private func reload(generation: Int) async {
+    private func reload(generation: Int, resumeSnapshot: PhotoScanSnapshot?) async {
         guard generation == loadGeneration else { return }
         // Android's fill collector is gated by hasCompletedFileScan. Cancel
         // the existing worker for refreshes too, otherwise an old worker can
@@ -173,13 +178,15 @@ final class PhotoListViewModel: ObservableObject {
         do {
             // Pull-to-refresh keeps the published snapshot while Android
             // re-queries handles and removes only confirmed missing objects.
-            let preserveExisting = !allFiles.isEmpty
+            // Android's FHD resume is keyed by the explicit handle snapshot,
+            // not by whether a metadata row happened to reach the UI yet.
+            let preserveExisting = !allFiles.isEmpty || resumeSnapshot != nil
             if !preserveExisting {
                 allFiles.removeAll(keepingCapacity: true)
                 sections.removeAll()
             }
             let accumulator = ScanAccumulator()
-            let result = try await scanCatalog(preserveExisting, preserveExisting) { [weak self] batch in
+            let result = try await scanCatalog(preserveExisting, resumeSnapshot, preserveExisting) { [weak self] batch in
                 guard let self else { throw CancellationError() }
                 try await self.acceptBatch(batch, generation: generation, accumulator: accumulator)
             }
@@ -294,7 +301,9 @@ final class PhotoListViewModel: ObservableObject {
         isLoadingFiles = true
         hasCompletedFileScan = false
         loadTask = Task { [weak self] in
-            await self?.reload(generation: generation)
+            let snapshot = await self?.resumeSnapshotProvider()
+            guard !Task.isCancelled else { return }
+            await self?.reload(generation: generation, resumeSnapshot: snapshot)
         }
     }
 
@@ -331,7 +340,7 @@ final class PhotoListViewModel: ObservableObject {
         isLoadingFiles = true
         hasCompletedFileScan = false
         loadTask = Task { [weak self] in
-            await self?.reload(generation: generation)
+            await self?.reload(generation: generation, resumeSnapshot: nil)
         }
     }
 

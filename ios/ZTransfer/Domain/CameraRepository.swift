@@ -273,6 +273,11 @@ actor CameraRepository {
     }
 
     func usesDirectThumbnailRead() -> Bool { directReader != nil }
+    /// The Android list keeps this handle snapshot when FHD/monitoring cancels
+    /// a scan before the first metadata batch is visible.  The owner must be
+    /// able to pass that exact snapshot back instead of inferring resumability
+    /// from the number of published rows.
+    func scanSnapshotForResume() -> PhotoScanSnapshot? { scanSnapshot }
     func backgroundThumbnailFillAllowed() -> Bool {
         activeForegroundReads == 0 && !remoteActive && !fhdActive && !transfersBusy && !effectPreviewActive
     }
@@ -604,6 +609,11 @@ actor CameraRepository {
         var metadataComplete = true
         var cursors = Array(repeating: 0, count: groups.count)
         var heads = Array<CameraFile?>(repeating: nil, count: groups.count)
+        // A handle becomes resumable only after the batch containing it was
+        // accepted by the list owner.  Android marks the snapshot in the same
+        // accepted section; marking it when ObjectInfo returns would skip rows
+        // if the UI callback is cancelled or the session generation changes.
+        var pendingProcessedHandles: [UInt32] = []
         while true {
             try Task.checkCancellation()
             try await waitForForegroundPreview()
@@ -630,6 +640,7 @@ actor CameraRepository {
             guard let selectedIndex = selectNewestPhotoHeadIndex(heads),
                 let file = heads[selectedIndex] else { break }
             heads[selectedIndex] = nil
+            pendingProcessedHandles.append(file.id)
             let key = logicalIdentity(file)
             indexed[file.id] = file
             if let old = byIdentity[key] {
@@ -648,16 +659,21 @@ actor CameraRepository {
                 files.append(file)
                 batch.append(file)
             }
-            scanSnapshot?.processedHandles.insert(file.id)
             let batchLimit: Int = directReader == nil ? 12 :
                 (directPublishedCount == 0 ? 1 : directPublishedCount < 4 ? 3 : 12)
-            if batch.count >= batchLimit {
-                try await onBatch?(batch)
+            if pendingProcessedHandles.count >= batchLimit {
+                if !batch.isEmpty { try await onBatch?(batch) }
+                scanSnapshot?.processedHandles.formUnion(pendingProcessedHandles)
                 directPublishedCount += batch.count
                 batch.removeAll(keepingCapacity: true)
+                pendingProcessedHandles.removeAll(keepingCapacity: true)
             }
         }
         if !batch.isEmpty { try await onBatch?(batch) }
+        // The final partial batch is accepted only after its callback returns;
+        // duplicate logical rows may have no UI addition but still count as
+        // consumed handles in the resumable Android snapshot.
+        scanSnapshot?.processedHandles.formUnion(pendingProcessedHandles)
         try Task.checkCancellation()
         catalogFiles = Dictionary(files.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         indexedCatalogFiles = indexed

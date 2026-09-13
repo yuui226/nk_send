@@ -29,6 +29,10 @@ actor CameraSession {
 
     func catalog() async throws -> [CameraFile] { try await repository.loadCatalog() }
 
+    func scanSnapshotForResume() async -> PhotoScanSnapshot? {
+        await repository.scanSnapshotForResume()
+    }
+
     func scanCatalog(onBatch: @escaping @Sendable ([CameraFile]) async throws -> Void) async throws {
         _ = try await repository.scanCatalog(onBatch: onBatch)
     }

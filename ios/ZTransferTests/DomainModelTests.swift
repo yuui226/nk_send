@@ -40,6 +40,19 @@ final class DomainModelTests: XCTestCase {
         XCTAssertEqual(selectNewestPhotoHeadIndex([sameDateA, sameDateB]), 0)
     }
 
+    func testPhotoScanSnapshotResumeKeepsOnlyUnprocessedHandlesPerCard() {
+        let snapshot = PhotoScanSnapshot(
+            storageIDs: [1, 2],
+            handleOrders: [(storageID: 1, handles: [11, 10]),
+                           (storageID: 2, handles: [21, 20])],
+            processedHandles: [11, 21],
+            handleQueriesSucceeded: true,
+        )
+
+        XCTAssertEqual(snapshot.remainingHandles.map(\.storageID), [1, 2])
+        XCTAssertEqual(snapshot.remainingHandles.map(\.handles), [[10], [20]])
+    }
+
     func testThumbnailFillQueuePreservesSameDateEnumerationOrder() async {
         let queue = PhotoThumbnailFillQueue()
         let first = CameraFile(id: 1, storageID: 1, format: 0x3801, size: 1,
