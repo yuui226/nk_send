@@ -29,6 +29,31 @@ struct PhotoScanResult: Sendable {
     let metadataComplete: Bool
 }
 
+/// Android's dual-card merge chooses by capture date only. Missing dates are
+/// emitted before dated heads, and equal dates keep storage order; opaque
+/// handle values never participate in the tie-break.
+func selectNewestPhotoHeadIndex(_ heads: [CameraFile?]) -> Int? {
+    var selected: Int?
+    for (index, candidate) in heads.enumerated() {
+        guard let candidate else { continue }
+        guard let selectedIndex = selected, let current = heads[selectedIndex] else {
+            selected = index
+            continue
+        }
+        let candidateIsNewer: Bool
+        switch (candidate.captureDate, current.captureDate) {
+        case (nil, .some):
+            candidateIsNewer = true
+        case (.some, nil), (nil, nil):
+            candidateIsNewer = false
+        case let (.some(candidateDate), .some(currentDate)):
+            candidateIsNewer = candidateDate > currentDate
+        }
+        if candidateIsNewer { selected = index }
+    }
+    return selected
+}
+
 /// Protocol-level camera catalog. It deliberately exposes only operations already used by
 /// the Android NikonCamera path; UI state and transfer policy stay in higher layers.
 actor CameraRepository {
@@ -592,14 +617,7 @@ actor CameraRepository {
                     } catch { metadataComplete = false }
                 }
             }
-            guard let selectedIndex = groups.indices
-                .filter({ heads[$0] != nil })
-                .max(by: { lhs, rhs in
-                    let left = heads[lhs]!.captureDate ?? ""
-                    let right = heads[rhs]!.captureDate ?? ""
-                    if left == right { return lhs > rhs }
-                    return left < right
-                }),
+            guard let selectedIndex = selectNewestPhotoHeadIndex(heads),
                 let file = heads[selectedIndex] else { break }
             heads[selectedIndex] = nil
             let key = logicalIdentity(file)

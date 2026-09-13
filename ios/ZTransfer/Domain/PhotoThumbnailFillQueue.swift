@@ -33,7 +33,7 @@ actor PhotoThumbnailFillQueue {
         seededRevision = revision
         for file in files { filesByID[file.id] = file }
         self.priorityRange = priorityRange
-        let ordered = files.sorted { ($0.captureDate ?? "") > ($1.captureDate ?? "") }
+        let ordered = stableNewestFirst(files)
         for file in ordered where !settled.contains(file.id) && !pending.contains(file.id) && !failed.contains(file.id) {
             enqueue(file.id, priority: priorityRange?.contains(file.captureDate) == true, front: false)
         }
@@ -87,8 +87,9 @@ actor PhotoThumbnailFillQueue {
     }
 
     func retryFailed() {
-        let files = failedOrder.compactMap { filesByID[$0] }
-            .sorted { ($0.captureDate ?? "") > ($1.captureDate ?? "") }
+        // Android keeps the failure insertion order for equal capture times;
+        // Swift's standard sort is not stable, so preserve the explicit order.
+        let files = stableNewestFirst(failedOrder.compactMap { filesByID[$0] })
         failed.removeAll(); failedOrder.removeAll()
         for file in files {
             enqueue(file.id, priority: priorityRange?.contains(file.captureDate) == true, front: false)
@@ -99,8 +100,7 @@ actor PhotoThumbnailFillQueue {
         guard self.priorityRange != range else { return }
         for file in files { filesByID[file.id] = file }
         self.priorityRange = range
-        let unfinished = (priority + regular).compactMap { filesByID[$0] }
-            .sorted { ($0.captureDate ?? "") > ($1.captureDate ?? "") }
+        let unfinished = stableNewestFirst((priority + regular).compactMap { filesByID[$0] })
         priority = unfinished.filter { range?.contains($0.captureDate) == true }.map(\.id)
         regular = unfinished.filter { range?.contains($0.captureDate) != true }.map(\.id)
         pending = Set(unfinished.map(\.id))
@@ -123,5 +123,17 @@ actor PhotoThumbnailFillQueue {
     private func removeFirst(_ queue: inout [UInt32]) -> UInt32 {
         let id = queue.removeFirst()
         return id
+    }
+
+    /// Android's `prioritizedThumbnailFiles` uses a stable newest-first sort.
+    /// The original array order is meaningful for same-time JPG/RAW pairs and
+    /// must survive the sort on platforms whose standard sort is unstable.
+    private func stableNewestFirst(_ files: [CameraFile]) -> [CameraFile] {
+        files.enumerated().sorted { lhs, rhs in
+            let left = lhs.element.captureDate ?? ""
+            let right = rhs.element.captureDate ?? ""
+            if left != right { return left > right }
+            return lhs.offset < rhs.offset
+        }.map(\.element)
     }
 }

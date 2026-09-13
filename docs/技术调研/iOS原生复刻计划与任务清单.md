@@ -71,12 +71,13 @@
 - iOS `PhotoListViewModel` 已先落地扫描状态骨架：每轮递增 generation，取消旧任务，按安卓 `FILE_THUMBNAIL_PIPELINE_BATCH_SIZE=12` 原子发布批次，批次间 `Task.yield()` 让界面渐进更新；旧任务不能覆盖新一轮，失败保留已发布文件，不把不完整扫描当成空列表。
 - 新增 `ios/ZTransfer/Domain/PhotoThumbnailDiskCache.swift`：按相机身份 SHA-256 分目录，普通/STA 句柄键、旧键迁移、原子临时写入、非空校验、90 天相机目录清理和完整扫描后 reconcile。
 - 已修：效果预览释放相机通道后显式唤醒缩略图填充；若填充任务曾因效果预览让路而退出，不再必须依赖筛选或传输状态变化才能恢复。对应 `PhotoListView.requestEffectPreview` 的结束路径与 `PhotoListViewModel.wakeThumbnailFill`。
+- 已修：双卡归并与补漏队列的排序现在逐项对齐安卓 `selectNewestFileHeadIndex` 和 `prioritizedThumbnailFiles`：缺少拍摄时间的卡片先输出，同一时间保持存储卡/相机原始顺序，不使用不透明 handle 数值打破平局。对应 `CameraRepository.selectNewestPhotoHeadIndex`、`PhotoThumbnailFillQueue.stableNewestFirst`、`PhotoListViewModel` 的批次预取路径。
 - 验证：`xcodebuild -project ios/ZTransfer.xcodeproj -scheme ZTransfer -sdk iphonesimulator -configuration Debug CODE_SIGNING_ALLOWED=NO build` 成功。尚未进行真实相机扫描、缓存命中/迁移/清理测试或真机验收；任务状态保持进行中。
 - 新增 `ios/ZTransferTests/PhotoThumbnailDiskCacheTests.swift` 覆盖键稳定性、写入/读取、非空文件和成功扫描后的 reconcile；执行 Xcode 测试时被工程既有的 `ios/ProtocolTests/PTPIPDiscoveryTests.swift` 对 `ZTransferProtocol` 模块依赖阻断，未声称测试通过，待统一修复测试 target 依赖后重跑。
 - `CameraSession.thumbnail(file:)` 已接入 `PhotoThumbnailStore`，列表缩略图现在按安卓顺序查找内存、负缓存、相机磁盘并共享同文件的进行中请求，最后一个等待者取消时会取消底层请求；成功结果写回磁盘。缺少稳定机身序列号时会放弃持久化缓存，避免不同相机串缓存。STA 直读使用 `sta + handle + size` 专用键，普通键仍支持迁移；`prefetchThumbnail` 已接入扫描批次，并按安卓顺序逐项预取新加入列表的文件。仍缺真实相机验证和系统错误码映射。
 - 日期分组已纠正为安卓使用的原始 `YYYYMMDD` 键和 `zzz_unknown` 未知日期键；渲染时才格式化为 `YYYY-MM-DD`，避免折叠状态、未知日期排序和筛选键与安卓分叉。对应 `PhotoCatalog.swift`、`PhotoListView.swift` 及 `DomainModelTests`。
 - `CameraRepository.loadCatalog(onBatch:)` 与 `CameraSession.scanCatalog(onBatch:)` 已把元数据结果按 12 项边界流出；批次回调是可挂起的，`PhotoListViewModel` 在每批发布后逐项执行 `prefetchThumbnail`，因此相机扫描会等待本批预取完成再读取下一批。每批发布前检查 generation/取消，扫描完成后才置 `hasCompletedFileScan`。StorageID/句柄快照、双卡 logicalIdentity 去重和 STA 直读专用缓存键仍待下一阶段接入。
-- 流式扫描后的模拟器 Debug 构建再次成功；Xcode 测试仍受既有 `ZTransferProtocol` target 缺失阻断，未把测试结果记为通过。
+- 流式扫描后的模拟器 Debug 构建再次成功；`xcodebuild ... CODE_SIGNING_ALLOWED=NO test` 已通过 139 项测试，包含双卡缺失日期/同时间稳定顺序和缩略图补漏顺序定向测试。带签名测试仍受测试 target 缺少 Info.plist 的工程配置阻断；未进行真实相机扫描或真机验收。
 
 实现每项功能前先阅读对应安卓入口和状态来源，记录到提交说明中：
 

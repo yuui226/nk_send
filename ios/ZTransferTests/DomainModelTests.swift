@@ -26,6 +26,34 @@ final class DomainModelTests: XCTestCase {
         XCTAssertEqual(sections[1].files.map(\.id), [3, 1])
     }
 
+    func testDualCardHeadSelectionMatchesAndroidMissingDateAndStableTieRules() {
+        let dated = CameraFile(id: 1, storageID: 1, format: 0x3801, size: 1,
+                               fileName: "dated.JPG", captureDate: "20260914T010000", isProtected: false)
+        let missing = CameraFile(id: 2, storageID: 2, format: 0x3801, size: 1,
+                                 fileName: "missing.JPG", captureDate: nil, isProtected: false)
+        XCTAssertEqual(selectNewestPhotoHeadIndex([dated, missing]), 1)
+
+        let sameDateA = CameraFile(id: 3, storageID: 1, format: 0x3801, size: 1,
+                                   fileName: "a.JPG", captureDate: "20260914T020000", isProtected: false)
+        let sameDateB = CameraFile(id: 4, storageID: 2, format: 0x3801, size: 1,
+                                   fileName: "b.JPG", captureDate: "20260914T020000", isProtected: false)
+        XCTAssertEqual(selectNewestPhotoHeadIndex([sameDateA, sameDateB]), 0)
+    }
+
+    func testThumbnailFillQueuePreservesSameDateEnumerationOrder() async {
+        let queue = PhotoThumbnailFillQueue()
+        let first = CameraFile(id: 1, storageID: 1, format: 0x3801, size: 1,
+                               fileName: "a.JPG", captureDate: "20260914T020000", isProtected: false)
+        let second = CameraFile(id: 2, storageID: 1, format: 0x3801, size: 1,
+                                fileName: "b.JPG", captureDate: "20260914T020000", isProtected: false)
+        await queue.beginScan()
+        await queue.seed([first, second])
+        let firstPolled = await queue.poll()
+        let secondPolled = await queue.poll()
+        XCTAssertEqual(firstPolled, first.id)
+        XCTAssertEqual(secondPolled, second.id)
+    }
+
     func testBurstGroupingMatchesConsecutiveNameAndOneSecondRule() {
         let files = (100...102).map { n in
             CameraFile(id: UInt32(n), storageID: 1, format: 0x3801, size: 1,
