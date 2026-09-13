@@ -459,9 +459,20 @@ actor CameraRepository {
                 if staAlbum != nil { throw error }
                 raw = []
             }
-            storageIDs = staAlbum == nil ? raw : Array(Set(raw.filter { $0 != 0 && $0 != .max })).sorted()
+            // Android ignores sentinel/invalid stores and, for non-STA
+            // transports, stores whose low 16 bits are zero. STA also drops
+            // only the sentinel values because its wildcard mapping is
+            // handled by queryStorageID below.
+            storageIDs = Array(Set(raw.filter { id in
+                guard id != 0 && id != .max else { return false }
+                return staAlbum != nil || (id & 0xFFFF) != 0
+            })).sorted()
             if storageIDs.isEmpty {
-                removedHandles = Set(existingHandles)
+                // An empty/failed storage response is not authoritative. The
+                // Android path removes only handles from an established
+                // baseline; a first scan keeps any rows already published by
+                // an earlier partial result.
+                removedHandles = knownHandles.isEmpty ? [] : knownHandles.intersection(existingHandles)
                 for handle in removedHandles {
                     catalogFiles.removeValue(forKey: handle)
                     indexedCatalogFiles.removeValue(forKey: handle)
@@ -602,8 +613,14 @@ actor CameraRepository {
         catalogFiles = Dictionary(files.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         indexedCatalogFiles = indexed
         catalogOrder = files.map(\.id)
-        knownHandles = Set(groups.flatMap(\.handles)).union(Set(existingHandles))
-        catalogStorageIDs = storageIDs
+        // Only a complete handle snapshot is authoritative. Android keeps the
+        // previous baseline after a partial/non-STA response so the next scan
+        // can still compute real additions/removals instead of diffing against
+        // an incomplete list.
+        if handleQueriesSucceeded {
+            knownHandles = Set(groups.flatMap(\.handles)).union(Set(existingHandles))
+            catalogStorageIDs = storageIDs
+        }
         catalogReady = metadataComplete && handleQueriesSucceeded
         lastCatalogCheck = .now
         if catalogReady { scanSnapshot = nil }

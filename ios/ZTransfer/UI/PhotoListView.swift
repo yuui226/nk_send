@@ -8,13 +8,13 @@ struct PhotoListView: View {
     let effectsStore: PhotoEffectsStore
     let onDisconnect: () -> Void
     private let session: CameraSession?
-    @AppStorage("tapToPreview") private var tapToPreview = false
+    @AppStorage("tap_to_preview") private var tapToPreview = false
     @State private var selectedFile: CameraFile?
     @State private var showingFilter = false
     @State private var showingQueue = false
-    @AppStorage("deferTransferStart") private var deferTransferStart = false
-    @AppStorage("collapseBurstPhotos") private var collapseBurstPhotos = true
-    @AppStorage("thumbnailColumns") private var thumbnailColumns = 3
+    @AppStorage("defer_transfer_start") private var deferTransferStart = false
+    @AppStorage("collapse_burst_photos") private var collapseBurstPhotos = true
+    @AppStorage("thumbnail_columns") private var thumbnailColumns = 3
     @State private var expandedBurstIDs: Set<String> = []
     @State private var collapsedDays: Set<String> = []
     @State private var showTopButton = false
@@ -72,7 +72,7 @@ struct PhotoListView: View {
                                 } label: {
                                     HStack(spacing: 6) {
                                         Text(section.day == PhotoCatalogGrouping.unknownDay
-                                             ? String(localized: "未知日期")
+                                             ? AppLocalized.resource("unknown_date")
                                              : formatDateHeader(section.day))
                                             .zTransferText(size: ZTransferMetrics.body, weight: .bold)
                                         Image(systemName: "chevron.down")
@@ -133,7 +133,16 @@ struct PhotoListView: View {
                 }
             }
         }
-        .task { model.load() }
+        .task {
+            model.setNewMediaHandler { files in
+                guard UserDefaults.standard.bool(forKey: "auto_transfer_new_media"), let session,
+                      let directory = directoryStore.directoryURL else { return }
+                let deferStart = UserDefaults.standard.bool(forKey: "defer_transfer_start")
+                queueModel.enqueueAutomatic(files, session: session, directory: directory,
+                                            autoStart: !deferStart)
+            }
+            model.load()
+        }
         .task {
             if let session, let directory = directoryStore.directoryURL { queueModel.start(session: session, directory: directory) }
         }

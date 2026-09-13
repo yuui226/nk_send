@@ -475,4 +475,6 @@
 - 新扫描会清空 iOS 内存缩略图与负缓存但保留磁盘缓存；后台填充和批次预取在远程、前台读取或 FHD 状态激活时让路，避免把扫描阶段误判为可并行填充。
 - EXIF 已按安卓 `loadExif` 接入独立会话缓存：键为 `fileName_size_captureDate`，null、非图片扩展名和确认解析失败进入负缓存；JPEG 读取 128 KiB，NEF/NRW/TIFF 读取最多 2 MiB。STA direct 通过 `STAObjectReader` 的 bounded prefix 缓存复用头部读取；光圈 APEX 回退、快门/ISO/曝光补偿/焦距/日期/GPS 的格式与安卓字段顺序对齐。传输错误和取消不会写入负缓存。
 - 照片列表在传输队列进入 `isTransferring` 时暂停批次预取和后台填充，传输结束、远程监看退出或预览退出时重新唤醒队列；对应 Android 的 `transfersBusyFlow`/远程状态组合门控。
+- 本轮继续对齐加载策略：普通连接的 StorageID 过滤改为丢弃低 16 位为 0 的槽位，STA 仅丢弃 `0/-1`；无可用存储时仅在存在已建立句柄基线时移除缺失项，未建立基线的已发布部分保留。扫描发现新增媒体后按安卓 `FORMAT_EXT` 扩展名过滤，并以 `fileName|size|captureDate` 去重，接入自动传输开关、目录条件和 `deferTransferStart` 启动策略。
+- 验证：iOS Simulator Debug `xcodebuild ... build` 成功，`git diff --check` 通过；真实相机的 StorageID 异常、自动传输和断线恢复仍未验收。
 - 远程监看取得相机通道时，扫描不再等待或继续旧快照，而是中止当前元数据扫描；监看关闭后重新枚举 handles，以覆盖监看期间新增照片，和安卓远程退出后的刷新策略一致。

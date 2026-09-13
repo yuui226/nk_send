@@ -5,7 +5,7 @@ enum AppLocalized {
     /// generated from app/src/main/res/values*/strings.xml; do not hand-edit
     /// or add alternate translations here.
     static func text(_ value: String) -> String {
-        let tag = UserDefaults.standard.string(forKey: "appLanguage") ?? "system"
+        let tag = UserDefaults.standard.string(forKey: "app_language") ?? "system"
         let language: String
         if tag == "en" || (tag == "system" && Locale.current.language.languageCode?.identifier == "en") {
             language = "en"
@@ -22,7 +22,7 @@ enum AppLocalized {
     }
 
     static func resource(_ name: String) -> String {
-        let tag = UserDefaults.standard.string(forKey: "appLanguage") ?? "system"
+        let tag = UserDefaults.standard.string(forKey: "app_language") ?? "system"
         let language: String
         if tag == "en" || (tag == "system" && Locale.current.language.languageCode?.identifier == "en") {
             language = "en"
@@ -55,8 +55,8 @@ struct RootView: View {
     @StateObject private var gpsCoordinator = GPSCoordinator()
     @StateObject private var directoryStore = DirectoryAccessStore()
     @State private var transferQueue = TransferQueue()
-    @AppStorage("themeMode") private var themeMode = "自动"
-    @AppStorage("appLanguage") private var appLanguage = "system"
+    @AppStorage("theme_mode") private var themeMode = "SYSTEM"
+    @AppStorage("app_language") private var appLanguage = "system"
 
     private var locale: Locale {
         switch appLanguage {
@@ -76,7 +76,7 @@ struct RootView: View {
                 HomeWorkspacePagerIOS(connection: connectionModel, effectsStore: effectsStore, gpsCoordinator: gpsCoordinator, directory: directoryStore)
             }
         }
-        .preferredColorScheme(themeMode == "深色" ? .dark : themeMode == "浅色" ? .light : nil)
+        .preferredColorScheme(themeMode == "DARK" ? .dark : themeMode == "LIGHT" ? .light : nil)
         .environment(\.locale, locale)
         .task {
             connectionModel.startUSBDiscovery()

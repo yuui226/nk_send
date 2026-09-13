@@ -35,7 +35,7 @@ struct DetentWheel<Option: Hashable>: View {
     @State private var dragging = false
     @State private var suppressNextTap = false
     @GestureState private var gestureActive = false
-    @AppStorage("hapticsEnabled") private var hapticsEnabled = true
+    @AppStorage("haptics_enabled") private var hapticsEnabled = true
 
     init(label: String, options: [Option], selected: Option,
          optionLabel: @escaping (Option) -> String,

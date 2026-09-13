@@ -8,17 +8,17 @@ struct SettingsView: View {
     @State private var feedbackHint = false
     @State private var showingEffectsEditor = false
     @State private var showingHelp = false
-    @AppStorage("organizeTransfersByDate") private var organizeByDate = false
-    @AppStorage("autoTransferNewMedia") private var autoTransfer = false
-    @AppStorage("deferTransferStart") private var deferStart = false
-    @AppStorage("thumbnailColumns") private var columns = 3
-    @AppStorage("collapseBurstPhotos") private var collapseBurst = true
-    @AppStorage("tapToPreview") private var tapToPreview = false
-    @AppStorage("hapticsEnabled") private var haptics = true
-    @AppStorage("keepScreenOn") private var keepScreenOn = true
-    @AppStorage("themeMode") private var themeMode = "自动"
-    @AppStorage("appLanguage") private var appLanguage = "system"
-    @AppStorage("skinPreset") private var skinPreset = "毛玻璃"
+    @AppStorage("organize_transfers_by_date") private var organizeByDate = false
+    @AppStorage("auto_transfer_new_media") private var autoTransfer = false
+    @AppStorage("defer_transfer_start") private var deferStart = false
+    @AppStorage("thumbnail_columns") private var columns = 3
+    @AppStorage("collapse_burst_photos") private var collapseBurst = true
+    @AppStorage("tap_to_preview") private var tapToPreview = false
+    @AppStorage("haptics_enabled") private var haptics = true
+    @AppStorage("keep_screen_on") private var keepScreenOn = true
+    @AppStorage("theme_mode") private var themeMode = "SYSTEM"
+    @AppStorage("app_language") private var appLanguage = "system"
+    @AppStorage("skin_preset") private var skinPreset = "FROSTED_GLASS"
 
     var showPhotoEffectsEntry: Bool = true
     var onClose: (() -> Void)? = nil
@@ -143,7 +143,13 @@ struct SettingsView: View {
     private var appearanceCard: some View {
         SettingsCard {
             HStack(spacing: 8) {
-                DetentWheel(label: AppLocalized.resource("light_dark_mode"), options: ["自动", "深色", "浅色"], selected: themeMode, optionLabel: { $0 }, onCommit: { themeMode = $0 }, rowHeight: 16, wheelHeight: 42, optionFontSize: 13).frame(maxWidth: .infinity)
+                DetentWheel(label: AppLocalized.resource("light_dark_mode"), options: ["SYSTEM", "DARK", "LIGHT"], selected: themeMode, optionLabel: {
+                    switch $0 {
+                    case "DARK": return AppLocalized.resource("theme_dark")
+                    case "LIGHT": return AppLocalized.resource("theme_light")
+                    default: return AppLocalized.resource("theme_system")
+                    }
+                }, onCommit: { themeMode = $0 }, rowHeight: 16, wheelHeight: 42, optionFontSize: 13).frame(maxWidth: .infinity)
                 DetentWheel(label: AppLocalized.resource("language"), options: ["system", "en", "zh-Hans", "zh-Hant"], selected: appLanguage, optionLabel: { language in
                     switch language {
                     case "en": return "English"
@@ -152,7 +158,14 @@ struct SettingsView: View {
                     default: return "自动"
                     }
                 }, onCommit: { appLanguage = $0; onClose?() }, rowHeight: 16, wheelHeight: 42, optionFontSize: 13).frame(maxWidth: .infinity)
-                DetentWheel(label: AppLocalized.resource("button_style"), options: ["毛玻璃", "木纹", "相机按键", "钛合金"], selected: skinPreset, optionLabel: { $0 }, onCommit: { skinPreset = $0 }, rowHeight: 16, wheelHeight: 42, optionFontSize: 13).frame(maxWidth: .infinity)
+                DetentWheel(label: AppLocalized.resource("button_style"), options: ["FROSTED_GLASS", "WOOD", "CAMERA_CONTROLS", "TITANIUM"], selected: skinPreset, optionLabel: {
+                    switch $0 {
+                    case "WOOD": return AppLocalized.resource("skin_wood")
+                    case "CAMERA_CONTROLS": return AppLocalized.resource("skin_camera_controls")
+                    case "TITANIUM": return AppLocalized.resource("skin_titanium")
+                    default: return AppLocalized.resource("skin_frosted_glass")
+                    }
+                }, onCommit: { skinPreset = $0 }, rowHeight: 16, wheelHeight: 42, optionFontSize: 13).frame(maxWidth: .infinity)
             }
             SettingsDivider()
             HStack(spacing: 8) { ToggleWheel(label: AppLocalized.resource("haptic_feedback"), isOn: $haptics); ToggleWheel(label: AppLocalized.resource("keep_screen_on"), isOn: $keepScreenOn) }

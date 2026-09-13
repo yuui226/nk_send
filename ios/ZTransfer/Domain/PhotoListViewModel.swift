@@ -30,6 +30,7 @@ final class PhotoListViewModel: ObservableObject {
     private var fillTask: Task<Void, Never>?
     private var previewPausedScan = false
     private var transferBusy = false
+    private var newMediaHandler: (([CameraFile]) -> Void)?
     /// A cancelled/old scan must never publish over a newer camera session.
     private var loadGeneration = 0
 
@@ -85,12 +86,26 @@ final class PhotoListViewModel: ObservableObject {
         sections = PhotoCatalogGrouping.byCaptureDay(PhotoFilter.apply(files, state: filter, transferredIDs: transferredIDs))
         let additions = files.filter { !oldIDs.contains($0.id) }
         if !additions.isEmpty {
+            newMediaHandler?(additions.filter(Self.isAutoTransferMedia))
             Task { [weak self] in
                 guard let self else { return }
                 await thumbnailFillQueue.enqueueNew(additions)
                 startThumbnailFillWorker()
             }
         }
+    }
+
+    /// Installs the host-level automatic transfer sink. The handler is kept
+    /// outside the scanner so queue policy remains identical to Android's
+    /// TransferViewModel and does not affect catalog ordering/backpressure.
+    func setNewMediaHandler(_ handler: @escaping ([CameraFile]) -> Void) {
+        newMediaHandler = handler
+    }
+
+    private static func isAutoTransferMedia(_ file: CameraFile) -> Bool {
+        [".jpg", ".tif", ".png", ".bmp", ".gif", ".ico",
+         ".mov", ".avi", ".mp4", ".nef", ".crw", ".cr2", ".cr3",
+         ".arw"].contains(file.fileExtension)
     }
 
     deinit { loadTask?.cancel(); fillTask?.cancel(); catalogUpdatesTask?.cancel() }
@@ -147,6 +162,10 @@ final class PhotoListViewModel: ObservableObject {
             loadState = .loaded
             isLoadingFiles = false
             hasCompletedFileScan = true
+            if !result.addedHandles.isEmpty {
+                let added = result.files.filter { result.addedHandles.contains($0.id) && Self.isAutoTransferMedia($0) }
+                if !added.isEmpty { newMediaHandler?(added) }
+            }
             startThumbnailFillWorker()
         } catch is CancellationError {
             return
