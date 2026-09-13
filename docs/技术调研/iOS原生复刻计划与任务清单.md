@@ -552,3 +552,8 @@
 
 - 安卓 `TransferViewModel` 使用 `preview_rotation_quarter_turns` 保存预览四档旋转方向，并用 `preview_histogram_enabled` 保存直方图开关；iOS 预览现在读取和写回同名键，重新进入或重启后恢复相同显示状态。
 - 验证：Xcode Simulator 测试 127 项、0 failures；未进行跨进程真实偏好迁移验收。
+
+### 2026-09-14 照片预览缩略图优先
+
+- 安卓 `PreviewPage` 先复用可见缩略图，再在 FHD 到位后以 180ms 曲线淡入高清图；iOS 预览现在同时请求缓存/相机缩略图和高清预览，先发布缩略图并按同一时长替换，高清任务期间继续持有 FHD 活跃标记让扫描让路。
+- 验证：Xcode Simulator 测试 127 项、0 failures；真实相机缩略图命中和 FHD 到达顺序仍需设备核对。

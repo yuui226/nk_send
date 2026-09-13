@@ -141,22 +141,52 @@ private struct PreviewImage: View {
     let session: CameraSession
     let file: CameraFile
     let rotationDegrees: Double
+    @State private var thumbnail: UIImage?
     @State private var image: UIImage?
+    @State private var highResolutionAlpha: CGFloat = 0
     @State private var scale: CGFloat = 1
     @State private var offset: CGSize = .zero
 
     var body: some View {
-        Group {
-            if let image { Image(uiImage: image).resizable().scaledToFit() }
-            else { ProgressView().tint(.white) }
+        ZStack {
+            if let thumbnail {
+                Image(uiImage: thumbnail)
+                    .resizable().scaledToFit()
+                    .opacity(image == nil ? 1 : 1 - highResolutionAlpha)
+            }
+            if let image {
+                Image(uiImage: image)
+                    .resizable().scaledToFit()
+                    .opacity(thumbnail == nil ? 1 : highResolutionAlpha)
+            }
+            if thumbnail == nil && image == nil { ProgressView().tint(.white) }
         }
         .scaleEffect(scale).offset(offset).rotationEffect(.degrees(rotationDegrees))
         .gesture(MagnificationGesture().onChanged { scale = min(max($0, 1), 4) }.onEnded { _ in withAnimation(ZTransferMotion.standard) { scale = min(max(scale, 1), 4) } })
         .simultaneousGesture(DragGesture().onChanged { value in if scale > 1 { offset = value.translation } }.onEnded { _ in if scale <= 1 { offset = .zero } })
         .onTapGesture(count: 2) { withAnimation(ZTransferMotion.standard) { scale = scale > 1 ? 1 : 2 } }
-        .task {
-            guard image == nil else { return }
-            if let data = try? await session.preview(handle: file.id), let image = UIImage(data: data) { self.image = image }
+        .task(id: file.id) {
+            thumbnail = nil
+            image = nil
+            highResolutionAlpha = 0
+            await session.setFHDActive(true)
+            defer { Task { await session.setFHDActive(false) } }
+            // Android shows the already cached/low-cost thumbnail first, then
+            // replaces it with the FHD preview. Keep both requests in flight,
+            // but publish the thumbnail as soon as it is available.
+            async let thumbnailData = try? await session.thumbnail(file: file)
+            async let previewData = try? await session.preview(handle: file.id)
+            if let data = await thumbnailData, let thumb = UIImage(data: data) {
+                thumbnail = thumb
+            }
+            if let data = await previewData, let highResolution = UIImage(data: data) {
+                image = highResolution
+                if thumbnail == nil {
+                    highResolutionAlpha = 1
+                } else {
+                    withAnimation(.easeInOut(duration: 0.18)) { highResolutionAlpha = 1 }
+                }
+            }
         }
     }
 }
