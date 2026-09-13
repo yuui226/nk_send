@@ -198,7 +198,10 @@ actor TransferQueue {
               items[index].status == .failed || items[index].status == .cancelled,
               directory != nil else { return nil }
         let old = items[index]
-        let replacement = TransferQueueItem(id: UUID(), file: old.file)
+        let replacement = TransferQueueItem(
+            id: UUID(), file: old.file,
+            destinationFolderName: old.destinationFolderName
+        )
         items[index] = replacement
         publish()
         if worker == nil, let session, let directory, !pauseAfterCurrent {
@@ -236,7 +239,10 @@ actor TransferQueue {
         var replacements = false
         for index in items.indices where items[index].status == .failed || items[index].status == .cancelled {
             let old = items[index]
-            items[index] = TransferQueueItem(id: UUID(), file: old.file)
+            items[index] = TransferQueueItem(
+                id: UUID(), file: old.file,
+                destinationFolderName: old.destinationFolderName
+            )
             replacements = true
         }
         if replacements {
