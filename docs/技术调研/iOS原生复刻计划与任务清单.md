@@ -484,3 +484,4 @@
 - 手机照片效果也改用独立的 `local_photo_effects` UserDefaults suite，并使用安卓 `decoration_enabled`、`frame_preset`、`watermark_*`、`filter_*` 和 favorite 键；筛选页、队列页、GPS 页的可见文案继续从 AndroidLocalization 的资源键读取。
 - 照片效果编辑器切换边框预设时同步切换该预设的元数据草稿；元数据开关写入对应预设映射后再按安卓 12 字段 `|` 编码保存，避免退出编辑器后丢失设置。
 - 设置页、筛选页、队列页、连接页和共用拨轮中剩余的可见操作文案已改为 AndroidLocalization 资源键；照片列表操作的两行内容使用安卓 `tap_transfer_hold_preview` / `tap_preview_hold_transfer` 原文，语言选项保留安卓 SettingsScreen 的四个原始标签。
+- 补齐资源表中遗漏的四个边框名称键（经典签名、艺术装裱、胶片画廊、胶片边框），并按 Android 资源缺失繁体覆盖时的默认英文回退记录，避免拨轮在切换到这些预设时直接显示资源键名。
