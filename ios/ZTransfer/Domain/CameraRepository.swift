@@ -9,8 +9,37 @@ enum CameraRepositoryError: Error, Equatable, Sendable {
 actor CameraRepository {
     private let session: PTPSession
     private var subjectTrackingActive = false
+    private let staAlbum: STAAlbumAccess?
+    private let directReader: STAObjectReader?
+    private var prefetchedStorageIDs: [UInt32]?
+    private var prefetchedHandles: (storageID: UInt32, handles: [UInt32])?
+    private var activeForegroundReads = 0
+    private var remoteActive = false
+    private var activeCatalogScans = 0
+    private var catalogLoading: Bool { activeCatalogScans > 0 }
+    private var catalogFiles: [UInt32: CameraFile] = [:]
+    private var catalogStorageIDs: [UInt32] = []
+    private var knownHandles = Set<UInt32>()
+    private var catalogReady = false
+    private var lastCatalogCheck = ContinuousClock.now
+    private var catalogSyncRequested = false
+    private var pendingObjects: [UInt32: (attempts: Int, ready: ContinuousClock.Instant)] = [:]
+    private var eventResolveTask: Task<Void, Never>?
+    private var catalogContinuations: [UUID: AsyncStream<[CameraFile]>.Continuation] = [:]
 
-    init(session: PTPSession) { self.session = session }
+    init(session: PTPSession, staAlbum: STAAlbumAccess? = nil) {
+        self.session = session; self.staAlbum = staAlbum
+        self.prefetchedStorageIDs = staAlbum?.storageIDs
+        self.prefetchedHandles = staAlbum?.prefetchedHandles
+        self.directReader = staAlbum?.directObjectRead == true ? STAObjectReader(session: session, operations: staAlbum?.deviceInfo?.operations ?? []) : nil
+    }
+
+    deinit { eventResolveTask?.cancel() }
+
+    func keepalive() async -> Bool {
+        if activeForegroundReads > 0 { return true }
+        return await session.keepaliveIfIdle()
+    }
 
     /// Executes Android's tap-focus transaction. Nikon cameras that support
     /// StartTracking receive the tracking coordinates and then one AfDrive;
@@ -86,6 +115,9 @@ actor CameraRepository {
     /// poll as Android RemoteLab. A successful call means the camera is ready
     /// to accept frame requests; callers still wait for the first frame.
     func startLiveView() async throws {
+        remoteActive = true
+        var started = false
+        defer { if !started { remoteActive = false; scheduleObjectResolver() } }
         var attempts = 0
         while true {
             do {
@@ -102,6 +134,7 @@ actor CameraRepository {
             do {
                 _ = try await session.execute(operation: PTPConstants.deviceReady,
                                               timeoutNanoseconds: 1_000_000_000)
+                started = true
                 return
             } catch PTPSessionError.responseCode(let code) where code == PTPConstants.deviceBusy {
                 try await Task.sleep(nanoseconds: 20_000_000)
@@ -111,6 +144,7 @@ actor CameraRepository {
     }
 
     func endLiveView() async {
+        defer { remoteActive = false; scheduleObjectResolver() }
         _ = try? await session.execute(operation: PTPConstants.endLiveView)
     }
 
@@ -167,19 +201,24 @@ actor CameraRepository {
     }
 
     func loadDeviceInfo() async throws -> PTPDeviceInfo {
+        if let info = staAlbum?.deviceInfo { return info }
         let result = try await session.execute(operation: PTPConstants.getDeviceInfo)
         guard let info = PTPDatasetParser.parseDeviceInfo(result.data) else { throw CameraRepositoryError.invalidDataset }
         return info
     }
 
     func loadStorageIDs() async throws -> [UInt32] {
-        let result = try await session.execute(operation: PTPConstants.getStorageIDs)
+        if let ids = prefetchedStorageIDs { prefetchedStorageIDs = nil; return ids }
+        let result = try await catalogCommand(PTPConstants.getStorageIDs)
         guard let ids = PTPDatasetParser.readStorageIDs(result.data) else { throw CameraRepositoryError.invalidDataset }
         return ids
     }
 
     func loadObjectHandles(storageID: UInt32 = 0xFFFFFFFF) async throws -> [UInt32] {
-        let result = try await session.execute(operation: PTPConstants.getObjectHandles, parameters: [storageID, 0xFFFFFFFF, 0])
+        if let prefetch = prefetchedHandles, prefetch.storageID == storageID {
+            prefetchedHandles = nil; return prefetch.handles
+        }
+        let result = try await catalogCommand(PTPConstants.getObjectHandles, [storageID, .max, 0])
         guard let handles = PTPDatasetParser.readObjectHandles(result.data) else { throw CameraRepositoryError.invalidDataset }
         return handles
     }
@@ -191,12 +230,16 @@ actor CameraRepository {
     }
 
     func thumbnail(handle: UInt32) async throws -> Data {
-        try await session.execute(operation: PTPConstants.getThumb, parameters: [handle]).data
+        activeForegroundReads += 1; defer { activeForegroundReads -= 1; scheduleObjectResolver() }
+        if let directReader { return try await directReader.thumbnail(handle: handle) }
+        return try await session.execute(operation: PTPConstants.getThumb, parameters: [handle]).data
     }
 
     /// Android's preview order: FHD picture first, then Nikon large thumb, then
     /// the standard thumbnail when the camera reports the operation unsupported.
     func preview(handle: UInt32) async throws -> Data {
+        activeForegroundReads += 1; defer { activeForegroundReads -= 1; scheduleObjectResolver() }
+        if let directReader { return try await directReader.preview(handle: handle) }
         var lastError: Error?
         for operation in [PTPConstants.getFHDPicture, PTPConstants.getLargeThumb, PTPConstants.getThumb] {
             do {
@@ -210,6 +253,7 @@ actor CameraRepository {
     }
 
     func readPrefix(handle: UInt32, length: Int64) async throws -> Data {
+        activeForegroundReads += 1; defer { activeForegroundReads -= 1; scheduleObjectResolver() }
         let count = max(0, min(length, Int64(UInt32.max)))
         let result = try await session.execute(
             operation: PTPConstants.getPartialObjectEx,
@@ -223,6 +267,7 @@ actor CameraRepository {
     /// cancellation or disconnect never leaves a valid-looking partial file.
     func download(handle: UInt32, size: UInt64, fileName: String, to directory: URL,
                   progress: (@Sendable (Double) -> Void)? = nil) async throws -> URL {
+        activeForegroundReads += 1; defer { activeForegroundReads -= 1; scheduleObjectResolver() }
         let safeName = URL(fileURLWithPath: fileName).lastPathComponent
         let destination = directory.appendingPathComponent(safeName, isDirectory: false)
         let temporary = destination.appendingPathExtension("ztransfer-partial")
@@ -247,8 +292,8 @@ actor CameraRepository {
                 let request = min(chunk, total - offset)
                 let result = try await session.execute(
                     operation: PTPConstants.getPartialObjectEx,
-                    parameters: [handle, UInt32(offset), UInt32(offset >> 32), UInt32(request), UInt32(request >> 32)],
-                    timeoutNanoseconds: 45_000_000_000
+                    parameters: [handle, UInt32(truncatingIfNeeded: offset), UInt32(offset >> 32), UInt32(request), UInt32(request >> 32)],
+                    timeoutNanoseconds: staAlbum == nil ? 45_000_000_000 : 60_000_000_000
                 )
                 try handleForWriting.write(contentsOf: result.data)
                 offset += UInt64(result.data.count)
@@ -267,37 +312,182 @@ actor CameraRepository {
     }
 
     func loadCatalog() async throws -> [CameraFile] {
-        let storageIDs = try await loadStorageIDs()
-        // Android queries each physical card when two storages are present so
-        // the ObjectInfo storage ID remains meaningful for the card filter.
-        // The all-storage sentinel is only used when the camera exposes no
-        // usable card list.
-        let queries = storageIDs.isEmpty ? [UInt32.max] : storageIDs
-        var handles: [UInt32] = []
+        activeCatalogScans += 1
+        defer { activeCatalogScans -= 1; scheduleObjectResolver() }
+        let raw = try await loadStorageIDs()
+        let storageIDs = staAlbum == nil ? raw : Array(Set(raw.filter { $0 != 0 && $0 != .max })).sorted()
+        let queries = staAlbum == nil && storageIDs.isEmpty ? [UInt32.max] : storageIDs
+        var groups: [(storage: UInt32, handles: [UInt32])] = []
         var seen = Set<UInt32>()
-        for storageID in queries {
-            for handle in try await loadObjectHandles(storageID: storageID) where seen.insert(handle).inserted {
-                handles.append(handle)
-            }
+        for storage in queries {
+            let handles = try await loadObjectHandles(storageID: queryStorageID(storage))
+            // The newest-first scan and duplicate suppression match Android.
+            let ordered = staAlbum == nil ? handles : Array(handles.reversed())
+            groups.append((storage, ordered.filter { seen.insert($0).inserted }))
         }
+        if let directReader { try await directReader.prepare(groups: groups) }
         var files: [CameraFile] = []
-        files.reserveCapacity(handles.count)
-        for handle in handles {
-            try Task.checkCancellation()
-            do {
-                files.append(try await loadObjectInfo(handle: handle))
-            } catch is CancellationError {
-                // Android propagates cancellation out of the scan. Do not let a
-                // per-object fallback swallow it and keep issuing PTP commands.
-                throw CancellationError()
-            } catch {
-                // A malformed or inaccessible individual object does not make
-                // the whole Android-style catalog scan fail.
-                continue
+        for group in groups {
+            for handle in group.handles {
+                try Task.checkCancellation()
+                do {
+                    if let directReader { files.append(try await directReader.file(handle: handle, storage: group.storage)) }
+                    else { files.append(try await loadObjectInfo(handle: handle)) }
+                } catch is CancellationError { throw CancellationError() }
+                catch let error as PTPSessionError {
+                    if error == .invalidated || error == .timeout { throw error }
+                } catch { continue }
             }
         }
+        try Task.checkCancellation()
+        catalogFiles = Dictionary(files.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        catalogStorageIDs = queries
+        knownHandles = seen
+        catalogReady = true
+        lastCatalogCheck = .now
         return files
     }
+
+    private func queryStorageID(_ storage: UInt32) -> UInt32 {
+        staAlbum != nil && storage & 0xFFFF == 0 ? .max : storage
+    }
+    private func catalogCommand(_ operation: UInt16, _ parameters: [UInt32] = []) async throws -> PTPResponse {
+        var attempts = 0
+        while true {
+            let response = try await session.executeResponse(operation: operation, parameters: parameters, timeoutNanoseconds: 60_000_000_000)
+            if response.code == PTPConstants.responseOK { return response }
+            attempts += 1
+            if staAlbum != nil && response.code == PTPConstants.deviceBusy && attempts < 3 {
+                try await Task.sleep(nanoseconds: 750_000_000)
+            } else { throw PTPSessionError.responseCode(response.code) }
+        }
+    }
+
+    func catalogUpdates() -> AsyncStream<[CameraFile]> {
+        let id = UUID()
+        return AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
+            catalogContinuations[id] = continuation
+            continuation.onTermination = { [weak self] _ in Task { await self?.removeCatalogListener(id) } }
+        }
+    }
+    private func removeCatalogListener(_ id: UUID) { catalogContinuations.removeValue(forKey: id) }
+    private func publishCatalog() {
+        let files = Array(catalogFiles.values)
+        for continuation in catalogContinuations.values { continuation.yield(files) }
+    }
+    func stopMonitoring() {
+        eventResolveTask?.cancel(); eventResolveTask = nil
+        catalogReady = false; pendingObjects.removeAll()
+        catalogContinuations.values.forEach { $0.finish() }
+        catalogContinuations.removeAll()
+    }
+    func receiveEvent(_ payload: Data) {
+        if let event = STAEvent.socket(payload) { receiveEvent(event) }
+    }
+    private func receiveEvent(_ event: STAEvent) {
+        switch event.code {
+        case 0x4002:
+            guard event.handle != 0, event.handle != .max,
+                  !knownHandles.contains(event.handle), catalogFiles[event.handle] == nil else { return }
+            if pendingObjects[event.handle] == nil { pendingObjects[event.handle] = (0, .now.advanced(by: .milliseconds(90))) }
+            scheduleObjectResolver()
+        case 0x4003:
+            pendingObjects.removeValue(forKey: event.handle)
+            if event.handle != 0 && event.handle != .max && catalogReady && !knownHandles.contains(event.handle) { return }
+            catalogSyncRequested = true
+        default: break
+        }
+    }
+    private var backgroundReadsAllowed: Bool {
+        catalogReady && !catalogLoading && activeForegroundReads == 0 && !remoteActive
+    }
+    /// Android's 2 s polling and 10 s handle-only reconciliation. Never turn a
+    /// failed/DeviceBusy response into an authoritative empty card.
+    func maintainCatalogIfIdle() async {
+        guard staAlbum != nil, backgroundReadsAllowed, !(await session.hasPendingCommand) else { return }
+        if catalogSyncRequested || lastCatalogCheck.duration(to: .now) >= .seconds(10) {
+            catalogSyncRequested = false
+            lastCatalogCheck = .now
+            do { try await syncHandleCatalog() } catch { catalogSyncRequested = true }
+        }
+        guard backgroundReadsAllowed, !Task.isCancelled else { return }
+        do {
+            var result = try await session.executeResponse(operation: PTPConstants.nikonCompatibilityInit, timeoutNanoseconds: 60_000_000_000)
+            var extended = true
+            if result.code == PTPConstants.operationNotSupported {
+                extended = false
+                result = try await session.executeResponse(operation: 0x90C7, timeoutNanoseconds: 60_000_000_000)
+            }
+            if result.code == PTPConstants.responseOK {
+                for event in STAEvent.polled(result.data, extended: extended) ?? [] { receiveEvent(event) }
+            }
+        } catch {}
+        scheduleObjectResolver()
+    }
+    private func syncHandleCatalog() async throws {
+        var current = Set<UInt32>()
+        for query in Set(catalogStorageIDs.map(queryStorageID)).sorted() {
+            let reply = try await session.execute(operation: PTPConstants.getObjectHandles,
+                parameters: [query, .max, 0], timeoutNanoseconds: 60_000_000_000)
+            guard let handles = PTPDatasetParser.readObjectHandles(reply.data) else { throw CameraRepositoryError.invalidDataset }
+            current.formUnion(handles)
+        }
+        guard backgroundReadsAllowed, !Task.isCancelled else { catalogSyncRequested = true; return }
+        let removed = knownHandles.subtracting(current)
+        for handle in removed {
+            catalogFiles.removeValue(forKey: handle); pendingObjects.removeValue(forKey: handle)
+            await directReader?.invalidate(handle: handle)
+        }
+        knownHandles.subtract(removed)
+        if !removed.isEmpty { publishCatalog() }
+        for handle in current.subtracting(knownHandles) { receiveEvent(STAEvent(code: 0x4002, handle: handle)) }
+    }
+    private func scheduleObjectResolver() {
+        guard staAlbum != nil, eventResolveTask == nil, backgroundReadsAllowed,
+              let earliest = pendingObjects.values.map(\.ready).min() else { return }
+        eventResolveTask = Task { [weak self] in
+            do { try await ContinuousClock().sleep(until: earliest) } catch { return }
+            await self?.resolvePendingObjects()
+        }
+    }
+    private func resolvePendingObjects() async {
+        defer { eventResolveTask = nil; scheduleObjectResolver() }
+        guard backgroundReadsAllowed, !Task.isCancelled else { return }
+        let ready = Array(pendingObjects.filter { $0.value.ready <= .now }.keys.sorted().prefix(16))
+        if let directReader, ready.contains(where: { pendingObjects[$0]?.attempts == 0 }) {
+            // Metadata refresh is compact; missing data still falls back to headers.
+            try? await directReader.refreshDates(storageIDs: catalogStorageIDs)
+        }
+        for handle in ready {
+            guard backgroundReadsAllowed, !Task.isCancelled else { return }
+            if knownHandles.contains(handle) { pendingObjects.removeValue(forKey: handle); continue }
+            do {
+                let file: CameraFile
+                if let directReader {
+                    var storage = catalogStorageIDs.count == 1 ? catalogStorageIDs[0] : UInt32.max
+                    if catalogStorageIDs.count > 1 {
+                        for id in catalogStorageIDs {
+                            if try await loadObjectHandles(storageID: queryStorageID(id)).contains(handle) { storage = id; break }
+                        }
+                    }
+                    file = try await directReader.file(handle: handle, storage: storage)
+                } else { file = try await loadObjectInfo(handle: handle) }
+                guard backgroundReadsAllowed, !Task.isCancelled else { return }
+                if pendingObjects.removeValue(forKey: handle) != nil {
+                    knownHandles.insert(handle); catalogFiles[handle] = file; publishCatalog()
+                }
+            } catch {
+                guard var pending = pendingObjects[handle] else { continue }
+                pending.attempts += 1
+                if pending.attempts >= 5 { pendingObjects.removeValue(forKey: handle) }
+                else {
+                    pending.ready = .now.advanced(by: .milliseconds([180, 360, 720, 1400][pending.attempts - 1]))
+                    pendingObjects[handle] = pending
+                }
+            }
+        }
+    }
+
 }
 
 private extension Data {

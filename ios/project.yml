@@ -29,6 +29,9 @@ targets:
         NSPhotoLibraryUsageDescription: 用于读取工作台照片
         NSPhotoLibraryAddUsageDescription: 用于保存工作台生成的效果图
         NSLocalNetworkUsageDescription: 用于连接相机
+        NSBonjourServices:
+          - _ptp._tcp
+          - _nikon._tcp
         UIAppFonts:
           - Fonts/great_vibes_regular.ttf
           - Fonts/bebas_neue_regular.ttf

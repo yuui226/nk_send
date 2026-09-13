@@ -156,12 +156,18 @@
   - 待完成：Z 标/按钮几何、工作台位置和安卓截图逐项测量验收。
 - [ ] **15. USB 卡片状态动画**：不可用、等待插线、发现设备、连接中、已连接、失败和断开状态。
   - 本轮修正：呼吸保留安卓 2.4 秒、0.38/0.82 分段五次平滑曲线和 Wi‑Fi 半周期错位；将逐帧更新移到捕获卡片内容的变换修饰器，后台或禁用时暂停时钟。完整连接成功图标转场及真机帧率仍待验证。
-- [ ] **16. Wi‑Fi/AP/STA 状态占位与后续接入**：先保证文案和不可用态正确，再接入对应链路，不提前臆造成功状态。
-  - 已修：Wi‑Fi 卡片保留安卓布局和文案，但未接入链路时连接按钮置为不可用，避免出现点击无响应的假成功入口。
-  - 已修：新增 `PTPIPCodec` 和 `PTPIPDiscoveryPolicy`，复刻安卓 PTP/IP 包类型、命令封装、局域网 /24 扫描范围和本机地址排除策略。
-  - 已修：新增 `PTPIPSocketTransport`，建立命令/事件双 TCP 通道、初始化握手、分包读取、数据阶段和 PING/PONG；`PTPIPDiscoveryService` 按当前 Wi‑Fi 接口做可取消的 PTP 端口探测，AP/STA 连接入口已接到状态机。
-  - 已修：`ConnectionViewModel.startWiFiDiscovery()` 使用 `NWPathMonitor` 监听 Wi‑Fi，AP 模式在 iOS 可识别的 192.168.1.0/24 相机热点候选网上按安卓 1 秒看护、失败后 3 秒退避持续握手；离开 Wi‑Fi 时仅取消发现中的连接并回到空闲，已建立会话交由传输/心跳处理。`PTPIPDiscoveryPolicy.isCameraHotspotAddress` 有单测覆盖，实际身份仍以 PTP/IP 握手为准。
-  - 待完成：STA/AP 的安卓配对顺序、按钮动作、网络变化恢复和真机错误样本；iOS 没有公开 DHCP gateway API，当前子网门控是平台差异记录，不能勾选。
+- [ ] **16. Wi‑Fi/AP/STA 连接链路**：按安卓实现发现、配对、相册访问判定和连接生命周期。
+  - 2026-09-13 STA 实现依据：完整对照 `NikonCamera.connectSta` / `initializeStaBrowsingSession` / `completeInitialPairing`、`PtpIpDiscovery.discover`、`CameraViewModel.startStaDiscovery` / `tryConnectStaCandidate` / `activateStaCamera` / `startKeepalive`、`StaCameraProfileStore.kt`。安卓代码与资源未修改；本分支仅增加 Swift 实现。
+  - 已落实报文修正：无出站数据命令使用 phase=1；PTP/IP 响应转为标准 PTP 容器时长度为 payload+6。STA 使用持久化的 16 字节 ASCII 身份、ZTransfer、32 位 0x00010000 版本，OpenSession(1) 的事务号从 0 开始；AP 保留其 NikonPTP/随机 GUID/16 位版本报文，OpenSession 改为使用 ACK 会话号，并接受 SessionAlreadyOpen。
+  - 已落实发现：保存 IP 必须匹配实际本地路由且 15740 开放；Bonjour `_ptp._tcp` / `_nikon._tcp` 与最多 /24 的扫描并发，48 个一批、24 个并发探测、450ms 超时。Nikon 握手逐个执行，失败继续下一个候选；预期相机 GUID 不匹配的首个候选留到正常扫描结束后再试。iOS 网络适配绑定已证明的 localAddress，包含个人热点的桥接接口，避免把 STA 限死在 en0/Wi‑Fi 默认路由上。
+  - 已落实身份与配对：两个安装级身份分别保存；只有 0x935A(0x2001) 的成功响应写入每台相机的 `sta_paired_` 标记，路由/旧 paired 字段不能代替协议配对。首次配对按 0x952B → 0x935A → 可选 DeviceInfoChanged（最多 8 秒）→ CloseSession，标记在可选事件等待前同步落盘。重置等待旧连接任务清理完成再清空全部相机档案及身份，保留无线模式。
+  - 已落实重连判断与时序：首次配对等待 6600ms；服务未就绪仅重试一次，等待 1200ms；满足安卓条件后仅尝试一次另一身份，等待 900ms。手动扫描在已有可复用档案时继续看护，扫描重试间隔为 3/8/15/30 秒并封顶。相册验证与协议配对确认同时满足才进入照片列表。取消、切换模式、USB 接管按代次隔离旧任务，清理后再发起新连接。
+  - 已落实相册访问验证：兼容初始化 0x941C、StorageIDs、完整配对能力集合、首/中/末 ObjectInfo 抽样、缩略图/大小/64KiB 部分对象探测、应用模式 1 探测及失败回退模式 0，顺序与分支按安卓。空 handle 列表与非空但不可读分别处理，不能把设备上传队列当成完整相册。验证阶段的 storage/handle 数据供首次列表读取复用；STA 的 DeviceBusy 列表请求按 750ms、最多 3 次处理。
+  - 已接入 STA 直接读取相册：相机拒绝 ObjectInfo 时，使用安卓的文件名属性索引、0x9434 日期索引、Nikon MakerNote 文件号锚点及文件头回退；JPEG 先读 68KiB，必要时补至 128KiB，前缀只取缺少的后段。最近前缀最多 4 个、每个 512KiB，编码缩略图缓存上限 4MiB。预览使用相机 FHD/LargeThumb、JPEG MPF、NEF TIFF 内嵌图索引及有界探针；视频封面使用最多 8MiB 的前缀交给平台解码，临时文件始终清理。下载仍走已有分段传输，修正超过 4GiB 时低 32 位偏移转换溢出。
+  - 已接入连接后维护：事件 socket 持续读取并原通道响应 PING；空闲 10 秒心跳把任意完整响应视为链路存活，前台传输期间跳过。STA 事件进入同一新增/删除入口，90ms 合并、每批最多 16 个、最多 5 次元数据解析及 180/360/720/1400ms 退避；2 秒命令事件兜底、10 秒仅核对 handles，传输/预览/监看及完整扫描期间让路。列表订阅增量目录结果，断开时结束订阅及任务。
+  - 已接入连接按钮的寻找/配对/连接/成功状态与忙碌时点击取消，重置确认窗及相机数使用现有安卓 resource key；无线模式和两个身份/多台相机档案可跨启动保留。STA 灯泡帮助与热点设置入口属于任务 18，不以本次协议接入冒充完成。
+  - 验证（2026-09-13）：`ZTRANSFER_PROTOCOL_ONLY=1 swift test --package-path ios` 共 60 项通过、0 失败；包含安卓配对/档案/重连分支的命令轨迹测试、协议报文、取消与心跳互斥、直接读取索引、MakerNote 双字节序、MPF/NEF/事件格式。iOS 全量 Swift 源码 `swiftc -typecheck` 通过；仅有既有 `Np3BitmapFilter.swift` 指针 Sendable 警告。未运行 App 构建、签名、安装或真机操作，未提交/推送。
+  - 保持本任务未勾选：本项同时覆盖 AP，AP 专用网络门控、失败显示及恢复流程仍需继续对照；iOS 没有公开 DHCP gateway API，已有 AP 子网门控属于此前记录的平台差异。不能把此次 STA 代码接入及协议测试当成整项 AP/STA 验收完成。
 - [ ] **17. 连接结果流转**：成功进入照片列表，失败停留连接页，重复点击、拔线和返回行为与安卓一致。
 - [ ] **18. 连接页弹窗与提示**：权限、失败、帮助和设备信息弹窗的样式、锚点、遮罩、外部点击和关闭动画。
   - 已修：工程补充本地网络权限用途文案，PTP/IP 连接前走系统 Wi‑Fi 网络接口。
@@ -418,3 +424,12 @@
 - 设置遮罩提升到连接页最外层覆盖安全区，状态栏和底部指示区域不再漏出未遮罩的带状区域。
 - 设置面板改用接近安卓 `glassSurfaceHeavy` 的不透明面板材质，避免底层连接页文字穿透；状态栏和 Home 指示区由 UIKit 系统栏遮罩同步覆盖。
 - 版本铭牌使用同一语言环境显示产品名；USB transport 复核了打开/关闭会话取消收尾、重插替换、缩略图等待隔离和 ready 事件过滤。
+
+### 2026-09-13 STA 无线链路对照实现（进行中）
+
+- 已按安卓 `NikonCamera.connectSta`、`CameraViewModel.tryConnectStaCandidate`、`StaCameraProfileStore` 和 `RemoteLab.rcPollEvents` 对齐 iOS：稳定双身份、响应 GUID 校验、配对标记、配对事件等待、配对后 6.6 秒重连、就绪重试、候选地址延后尝试、连接代际取消和断线重连。
+- 已对齐 STA 浏览初始化顺序：OpenSession(transaction 0)、0x941C、GetStorageIDs、精确配对能力集判断、GetObjectHandles 三点校验、ObjectInfo 被拒时 Thumb/Size/PartialObjectEx 直接读取回退、ChangeApplicationMode 探索及失败回滚；相册进入前必须同时满足配对标记和相册访问验证。
+- 已对齐后台行为：事件通道 PING/PONG、ObjectAdded/ObjectRemoved、GetEventEx→GetEvent 回退、2 秒事件轮询、10 秒 handles 对账、DeviceBusy 750ms×2、空闲 GetStorageIDs 保活，以及直接读取模式下的缩略图/预览/元数据/文件名日期回退。
+- 连接页 STA 的指引、帮助弹层、重置配对、热点设置和状态文案均从安卓多语言资源读取；iOS 热点设置使用系统设置入口作为平台等价动作，不新增业务文案。
+- 验证：`ZTRANSFER_PROTOCOL_ONLY=1 swift test --package-path ios`，60 tests、0 failures；全量 iOS Swift 6/iOS 16 simulator 类型检查通过，仅保留既有 `Np3BitmapFilter.swift` 非 Sendable 警告。尚未进行 STA 真机链路验收，未将总任务标记完成。
+- 构建脚本验证：`dist-debug-ios/build.command` 已成功签名、通过局域网 CoreDevice 安装并启动 `ZTransfer-ios-debug-1.82-20260913-210322.app`；脚本现在接受已配对但尚未建立隧道的无线设备，并在无设备时跳过安装而不再无限等待。

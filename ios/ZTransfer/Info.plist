@@ -50,5 +50,10 @@
 		<key>UILaunchScreen</key>
 		<dict/>
 	</dict>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_ptp._tcp</string>
+		<string>_nikon._tcp</string>
+	</array>
 </dict>
 </plist>

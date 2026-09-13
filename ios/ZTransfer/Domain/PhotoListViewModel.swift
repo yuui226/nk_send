@@ -17,12 +17,38 @@ final class PhotoListViewModel: ObservableObject {
     private var transferredIDs: Set<UInt32> = []
     var availableFiles: [CameraFile] { allFiles }
     private let loadCatalog: @Sendable () async throws -> [CameraFile]
+    private var catalogUpdatesTask: Task<Void, Never>?
     private var loadTask: Task<Void, Never>?
 
-    init(repository: CameraRepository) { self.loadCatalog = { try await repository.loadCatalog() } }
-    init(session: CameraSession) { self.loadCatalog = { try await session.catalog() } }
+    init(repository: CameraRepository) {
+        self.loadCatalog = { try await repository.loadCatalog() }
+        observeCatalog(repository)
+    }
+    init(session: CameraSession) {
+        self.loadCatalog = { try await session.catalog() }
+        catalogUpdatesTask = Task { [weak self] in
+            let repository = session.repository
+            for await files in await repository.catalogUpdates() {
+                guard !Task.isCancelled else { return }
+                self?.applyCatalogUpdate(files)
+            }
+        }
+    }
+    private func observeCatalog(_ repository: CameraRepository) {
+        catalogUpdatesTask = Task { [weak self] in
+            for await files in await repository.catalogUpdates() {
+                guard !Task.isCancelled else { return }
+                self?.applyCatalogUpdate(files)
+            }
+        }
+    }
+    private func applyCatalogUpdate(_ files: [CameraFile]) {
+        guard loadState == .loaded else { return }
+        allFiles = files
+        sections = PhotoCatalogGrouping.byCaptureDay(PhotoFilter.apply(files, state: filter, transferredIDs: transferredIDs))
+    }
 
-    deinit { loadTask?.cancel() }
+    deinit { loadTask?.cancel(); catalogUpdatesTask?.cancel() }
 
     func load() {
         loadTask?.cancel()

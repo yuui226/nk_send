@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct ConnectionMethodCard: View {
     let mode: CameraConnectionMode
@@ -8,6 +9,10 @@ struct ConnectionMethodCard: View {
     let attentionOrigin: Date
     var onWirelessModeChanged: ((WirelessMode) -> Void)?
     var onConnect: (() -> Void)?
+    var onResetSTAPairing: (() -> Void)?
+    var onSTAHelpRequested: (() -> Void)?
+    var onSTAHotspotSettings: (() -> Void)?
+    var staHelpViewed = false
 
     private var accent: Color { mode == .usb ? ZTransferColors.accentOrange : ZTransferColors.accentBlue }
     private var isSTA: Bool { state.wirelessMode == .sta }
@@ -19,16 +24,16 @@ struct ConnectionMethodCard: View {
         }
     }
     private var steps: [String] {
-        if mode == .usb { return ["相机电源开启", "使用 USB 数据线连接相机与手机"] }
-        if isSTA { return ["相机连接到手机发起的热点", "点击 连接相机"] }
-        return ["相机开启「与智能设备建立 Wi-Fi 连接」", "手机 Wi-Fi 连接到相机的热点"]
+        if mode == .usb { return [AppLocalized.resource("usb_step_power"), AppLocalized.resource("usb_step_cable")] }
+        if isSTA { return [AppLocalized.resource("sta_step_phone_hotspot"), AppLocalized.resource("sta_step_connect_camera")] }
+        return [AppLocalized.resource("step_camera_wifi"), AppLocalized.resource("step_phone_wifi")]
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
                 modeBadge
-                Text(mode == .usb ? "USB" : "Wi-Fi")
+                Text(AppLocalized.resource(mode == .usb ? "USB" : "connection_wifi"))
                     .zTransferTypography(.titleMedium, weight: .bold)
                     .foregroundStyle(ZTransferColors.primaryText)
             }
@@ -44,7 +49,7 @@ struct ConnectionMethodCard: View {
                 // it, leaving both footer rows and the card outline stationary.
                 Group {
                     if case let .failed(message) = state.wifiPhase {
-                        ConnectionFeedback(title: "未找到相机", message: message)
+                        ConnectionFeedback(title: AppLocalized.resource("sta_camera_not_found_short"), message: message)
                     } else {
                         instructions
                     }
@@ -54,7 +59,7 @@ struct ConnectionMethodCard: View {
             } else {
                 instructions
                 if let failure {
-                    ConnectionFeedback(title: "连接失败", message: failure)
+                    ConnectionFeedback(title: AppLocalized.resource("connection_failed_short"), message: failure)
                         .padding(.top, 12)
                 }
                 Spacer(minLength: 0)
@@ -132,15 +137,36 @@ struct ConnectionMethodCard: View {
         if isSTA {
             VStack(spacing: 8) {
                 HStack {
-                    utilityIcon("lightbulb.fill", tint: ZTransferColors.accentOrange)
+                    Button { onSTAHelpRequested?() } label: {
+                        ZStack(alignment: .topTrailing) {
+                            utilityIcon("lightbulb.fill", tint: ZTransferColors.accentOrange)
+                            if !staHelpViewed {
+                                Circle()
+                                    .fill(ZTransferColors.statusError)
+                                    .frame(width: 7, height: 7)
+                                    .offset(x: -2, y: 2)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(AppLocalized.resource("tip_sta_title"))
                     Spacer(minLength: 0)
-                    ZStack {
+                    Button { onResetSTAPairing?() } label: {
+                      ZStack {
                         utilityIcon("link", tint: ZTransferColors.accentOrange)
                         Path { p in p.move(to: CGPoint(x: 9, y: 9)); p.addLine(to: CGPoint(x: 25, y: 25)) }
                             .stroke(ZTransferColors.accentOrange, style: StrokeStyle(lineWidth: 2, lineCap: .round))
-                    }.frame(width: 34, height: 34)
+                      }.frame(width: 34, height: 34)
+                    }.buttonStyle(.plain)
+                     .disabled(state.wifiPhase == .connected)
+                     .accessibilityLabel(AppLocalized.resource("sta_reset_pairing"))
                     Spacer(minLength: 0)
-                    utilityIcon(ZTransferIcon.settings, tint: ZTransferColors.secondaryText)
+                    Button { onSTAHotspotSettings?() } label: {
+                        utilityIcon(ZTransferIcon.settings, tint: ZTransferColors.secondaryText)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(state.wifiPhase == .connected)
+                    .accessibilityLabel(AppLocalized.resource("sta_hotspot_settings_short"))
                 }
                 Button(action: { onConnect?() }) {
                     Text(staButtonTitle)
@@ -149,11 +175,12 @@ struct ConnectionMethodCard: View {
                         .frame(maxWidth: .infinity).frame(height: 42)
                 }
                 .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 14))
+                .disabled(state.wifiPhase == .connected)
             }
         } else {
             HStack(spacing: 8) {
                 utilityIcon("lightbulb.fill", tint: ZTransferColors.accentOrange, size: 36)
-                Text("Wi-Fi 设置")
+                Text(AppLocalized.resource("open_wifi_settings"))
                     .zTransferTypography(.labelSmall, weight: .semibold)
                     .foregroundStyle(accent)
                     .frame(maxWidth: .infinity).frame(height: 36)
@@ -173,10 +200,11 @@ struct ConnectionMethodCard: View {
 
     private var staButtonTitle: String {
         switch state.wifiPhase {
-        case .discovering: return "正在寻找"
-        case .connecting: return "正在连接"
-        case .connected: return "连接成功"
-        case .idle, .unavailable, .failed: return "连接相机"
+        case .discovering: return AppLocalized.resource("sta_status_searching")
+        case .pairing: return AppLocalized.resource("sta_status_pairing")
+        case .connecting: return AppLocalized.resource("sta_status_connecting")
+        case .connected: return AppLocalized.resource("sta_status_connected")
+        case .idle, .unavailable, .failed: return AppLocalized.resource("sta_connect_action")
         }
     }
     private var failure: String? {

@@ -7,12 +7,11 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		L10C00000000000000000001 /* Localizable.strings (en) in Resources */ = {isa = PBXBuildFile; fileRef = L10F00000000000000000001 /* Localizable.strings (en) */; };
-		L10C00000000000000000002 /* Localizable.strings (zh-Hans) in Resources */ = {isa = PBXBuildFile; fileRef = L10F00000000000000000002 /* Localizable.strings (zh-Hans) */; };
-		L10C00000000000000000003 /* Localizable.strings (zh-Hant) in Resources */ = {isa = PBXBuildFile; fileRef = L10F00000000000000000003 /* Localizable.strings (zh-Hant) */; };
 		045977539EBCC80962632AF7 /* TransferQueueViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CC8C5625130C6409DD261D3 /* TransferQueueViewModel.swift */; };
 		04FDA089E2E70E83E18527AD /* Np3BitmapFilter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B088B7DE128919633A28EF1C /* Np3BitmapFilter.swift */; };
 		06198A7AC9FA3FCAFFDB49D7 /* RemoteMovieRecording.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FE8BFEAB58818B4214C9EA2 /* RemoteMovieRecording.swift */; };
+		075325CEBC09C41F344985F4 /* STAProfileStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FC4F7B00A76D4F318D10B0E /* STAProfileStore.swift */; };
+		0E1739467119ADD78EC6FFB0 /* STAResetPairingOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B84B48793ED342FBA1F6D10 /* STAResetPairingOverlay.swift */; };
 		0E6852CA1F77C714DAAF2215 /* GPSView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0D0D8FBAB87B8180493B22E /* GPSView.swift */; };
 		10BA2D27B0425D2A34F982F2 /* RemoteViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B2971CFDD3F6EBEF2ACA1A8 /* RemoteViewModel.swift */; };
 		16939A4A3006E233A957DD0E /* PTPDatasetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF061766E1A0B9F3060190ED /* PTPDatasetTests.swift */; };
@@ -24,6 +23,7 @@
 		2B14E3B205CBC8ED8289E7EC /* DoubleZMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DF8FBC08956F02D0F24ACFD /* DoubleZMark.swift */; };
 		3155D971BF9B55A0B0AC26A1 /* ZTransferDesign.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8E5F0504E1E56C59E21D761 /* ZTransferDesign.swift */; };
 		3576AE9BA7B2A502352BA26B /* DomainModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9165B39E86D240D0CAB4F2F0 /* DomainModelTests.swift */; };
+		37146E4620ABF1EF97E1867F /* STABrowsingSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78B40BD5B460FA10A033F40D /* STABrowsingSession.swift */; };
 		3987F16AD0DE800CDE55D66E /* PhotoCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7AD9D374C7D0C7B45D77B516 /* PhotoCatalog.swift */; };
 		3A016664A1796B9FA1866062 /* TransferQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CC18517971C48594EE448E6 /* TransferQueue.swift */; };
 		3C86D76849976090B4967FFB /* PhotoEffectsBatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD45F35C4B19629A11F32A1C /* PhotoEffectsBatch.swift */; };
@@ -43,6 +43,7 @@
 		676480E34AEAD2A4C86B50B6 /* CameraSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C31C90D73DDE407941D9C78 /* CameraSession.swift */; };
 		68059AEA1C896EBC6F5103E6 /* ImageCaptureUSBTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C48325DF451C8857DFEA55C /* ImageCaptureUSBTransport.swift */; };
 		6AE2F510FC97396C20F68EE1 /* PTPCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = C88C5ED244217DA340A1F1E5 /* PTPCodec.swift */; };
+		6B6C72F2C9A8B328CE09169E /* STAMediaMetadata.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D246AB34F9D8193AD689AC0 /* STAMediaMetadata.swift */; };
 		6E67243D68222B05469B1AAE /* Np3AndroidGoldenTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB4F9C50800B1AB3BC4C279E /* Np3AndroidGoldenTests.swift */; };
 		6FE585A7A3D1D329FA35CA75 /* PTPIPDiscoveryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C8D85042F86E7CE49C16BF8 /* PTPIPDiscoveryService.swift */; };
 		73A0B84A67659AC4209F4A8F /* RemoteExposureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59F6B50FACC860CB7B9DCBE5 /* RemoteExposureTests.swift */; };
@@ -57,28 +58,36 @@
 		823A11BECB918BA55D0BE52D /* GPSState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37584615FF21622BEB453C72 /* GPSState.swift */; };
 		82C2CB5E5068C162593867DB /* NikonGPSBluetoothClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AC1138C5A091551C7393C0F /* NikonGPSBluetoothClient.swift */; };
 		82C69505CC0D0D6BC02C6A80 /* DirectoryAccessStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BEAA3B6FEB394BB8C05D321 /* DirectoryAccessStore.swift */; };
+		83091CBEAA938F8060B47E03 /* STAObjectReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D07A4A00FD9B80E732050F4 /* STAObjectReader.swift */; };
 		86ED54F4E3D196FAF34BBC0C /* RemoteDisplayOptions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4206A8EDAC8C835E874251CB /* RemoteDisplayOptions.swift */; };
 		873A6B7B39D069D290ECD832 /* DetentWheel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDDA62402A7BB9E32721C7D4 /* DetentWheel.swift */; };
 		890FF18E8A13644E81F3779B /* RemoteState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CF51538A02F76ECB294979E /* RemoteState.swift */; };
 		8D6DA87271A2A18C83AAC752 /* GPSConnectionControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A212849FDB757B232CE3700 /* GPSConnectionControl.swift */; };
 		8FB26966AAE2721DCF13FEF9 /* GPSProtocolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03D3B6EEC0B03021E23E7B54 /* GPSProtocolTests.swift */; };
+		91351516642DECD0536A9CB0 /* STAConnectionCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72757BCC923622558D27F45D /* STAConnectionCoordinator.swift */; };
 		92B56B6C3692F4CAA4989934 /* PTPSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 615EEFA9D6159AC37C5A31C7 /* PTPSession.swift */; };
 		946D307C7E78C2701BC6151F /* RemoteRecordingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF9539324F4DB53B0B922D67 /* RemoteRecordingTests.swift */; };
 		993DCFA6B1D01106479A25F3 /* PhotoEffectsEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C73EF01969DAC563DA91DD0 /* PhotoEffectsEditorView.swift */; };
 		9BD36C93DE99E708A9E68AF5 /* GPSProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = F669891731A2784158CAB73F /* GPSProtocol.swift */; };
+		9D2FA1400CA1F9B6632FFAF8 /* STATipsOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66D3FD27372D4F017D196970 /* STATipsOverlay.swift */; };
 		9D3DFDDB82CBADF50CC379C5 /* PhotoListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0994973567FB60B02328A65F /* PhotoListView.swift */; };
 		9F10C7DAAF507D785DEEA476 /* PTPIPDiscoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2ABA708E06D3141226F21A83 /* PTPIPDiscoveryTests.swift */; };
+		9FB6BCCF7460BB0205C907F2 /* STAProfileAndMetadataTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDD66E5D3F4314C6B66ACD88 /* STAProfileAndMetadataTests.swift */; };
 		A08A2BE34D46BA1F3B8655B9 /* PTPIPCodecTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A0253EE3A7C88ECD34EEACC /* PTPIPCodecTests.swift */; };
 		AAC92E7A80B4911C1DA5126E /* PhotoListViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21FE65A239E26AF1D7198CF5 /* PhotoListViewModel.swift */; };
+		ABD477B9A99ED0F581232D3F /* AndroidLocalization.swift in Sources */ = {isa = PBXBuildFile; fileRef = E765A10B0340558B3B98D1E1 /* AndroidLocalization.swift */; };
 		AE7CD25C554B94537BE4BE8F /* PhotoEffectsRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61DD1A7868ADB6C35411DA6F /* PhotoEffectsRenderer.swift */; };
+		B104166B4E6A8060016636A2 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = F5B0DCD9EF4268A3ACA7C197 /* Localizable.strings */; };
 		B18D3BBA61C09BD246ACA56B /* PTPCodecTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB36939BEE4031E42F768A83 /* PTPCodecTests.swift */; };
 		B2BCDA3EE87598367F1136BF /* ClassicUSBIcon.swift in Sources */ = {isa = PBXBuildFile; fileRef = D403B031ADD1B0F9C560F22D /* ClassicUSBIcon.swift */; };
+		B5DC92C200A313FB028618C6 /* STAConnectionCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BDFC95EFE4D4DCA6606AE2F /* STAConnectionCoordinatorTests.swift */; };
 		B7E26AA94FF197578A633BE6 /* AsyncDeadline.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA7454E422D1473CC4E740CD /* AsyncDeadline.swift */; };
 		B8FB7D2547F6FFA961FEB3CE /* ConnectionViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44ACCD4A54AA0F8443CA869B /* ConnectionViewModel.swift */; };
 		BADF7CD7F32B68DCF3D97C3F /* LocalPhotoEffectsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7580B5DC6E6B426AFDCD70C /* LocalPhotoEffectsView.swift */; };
 		C127B5B73435A9434E2EEF30 /* cormorant_garamond_medium_italic.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 23F79E3B04FE343289768099 /* cormorant_garamond_medium_italic.ttf */; };
 		C2B1F15D120EECDFE3C148D6 /* PhotoExif.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FFDE9BAC912EED3139672E5 /* PhotoExif.swift */; };
 		C3B0EBF639B834E335A187A5 /* PhotoFrameTextLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = D961B6709BEFEB665F1D0932 /* PhotoFrameTextLayout.swift */; };
+		C713BCA63E8BAA59BEB77FAB /* STABrowsingSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15CE2B24C8F035D7C1826919 /* STABrowsingSessionTests.swift */; };
 		CBEB599B28F9477176061658 /* CameraTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94B13A99D0C74F65A242E106 /* CameraTransport.swift */; };
 		CCC3F71A5AF4D6584D1FC2EE /* PhotoFilter.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE7320E831B92FDF16C5A2A8 /* PhotoFilter.swift */; };
 		CDA839B3BA3291E7FA00F976 /* Np3FilterCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66B121CC0D58A97AD69EEF11 /* Np3FilterCatalog.swift */; };
@@ -96,7 +105,7 @@
 		F7DD276D50F864670EB55E91 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4AA2639C7BC0B4B5E3D01734 /* SettingsView.swift */; };
 		F801A3108B643FCDE9658D68 /* ZTransferColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77FF345DD1F232661C243E4F /* ZTransferColors.swift */; };
 		FB665603737D98CF66B03FD9 /* PhotoPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C82DE7EDD874E138885C18B /* PhotoPreviewView.swift */; };
-		A1DROIDLOC0000000000001 /* AndroidLocalization.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1DROIDLOC0000000000002 /* AndroidLocalization.swift */; };
+		FDC455DA213E797E48B4CD02 /* STAEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47F1C6844BE03BFF28A13A05 /* STAEvent.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -110,15 +119,13 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		L10F00000000000000000001 /* Localizable.strings (en) */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = Localizable.strings; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
-		L10F00000000000000000002 /* Localizable.strings (zh-Hans) */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = Localizable.strings; path = zh-Hans.lproj/Localizable.strings; sourceTree = "<group>"; };
-		L10F00000000000000000003 /* Localizable.strings (zh-Hant) */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = Localizable.strings; path = zh-Hant.lproj/Localizable.strings; sourceTree = "<group>"; };
 		03D3B6EEC0B03021E23E7B54 /* GPSProtocolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GPSProtocolTests.swift; sourceTree = "<group>"; };
 		0994973567FB60B02328A65F /* PhotoListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoListView.swift; sourceTree = "<group>"; };
 		0E20FABF2CECBED5A93AB576 /* PTPIPDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PTPIPDiscovery.swift; sourceTree = "<group>"; };
 		0FE8BFEAB58818B4214C9EA2 /* RemoteMovieRecording.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteMovieRecording.swift; sourceTree = "<group>"; };
 		11F6F2458B24ED1BDFC716A4 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		125A2CF683765CC9A3041412 /* RemoteExposureTile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteExposureTile.swift; sourceTree = "<group>"; };
+		15CE2B24C8F035D7C1826919 /* STABrowsingSessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = STABrowsingSessionTests.swift; sourceTree = "<group>"; };
 		1623B90210C055F71FFFB2FD /* CameraConnectionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraConnectionService.swift; sourceTree = "<group>"; };
 		19E7177E4804514D52C91294 /* PTPIPSocketTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PTPIPSocketTransport.swift; sourceTree = "<group>"; };
 		1AC1138C5A091551C7393C0F /* NikonGPSBluetoothClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NikonGPSBluetoothClient.swift; sourceTree = "<group>"; };
@@ -131,6 +138,7 @@
 		2482C61B58C4A4EE95210CDA /* RemoteView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteView.swift; sourceTree = "<group>"; };
 		25DA65AB7E6B869A2B7A6F7B /* RemoteExposureParametersTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteExposureParametersTests.swift; sourceTree = "<group>"; };
 		2ABA708E06D3141226F21A83 /* PTPIPDiscoveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PTPIPDiscoveryTests.swift; sourceTree = "<group>"; };
+		2BDFC95EFE4D4DCA6606AE2F /* STAConnectionCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = STAConnectionCoordinatorTests.swift; sourceTree = "<group>"; };
 		2CC18517971C48594EE448E6 /* TransferQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransferQueue.swift; sourceTree = "<group>"; };
 		3010D83FAA873246AAC42FCF /* PhotoEffectsBatchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoEffectsBatchTests.swift; sourceTree = "<group>"; };
 		33D6747E8BCF4B6F29315432 /* ZTransferTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = ZTransferTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -141,9 +149,12 @@
 		3EE41D0AC8C757C430C5A6B5 /* bebas_neue_regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = bebas_neue_regular.ttf; sourceTree = "<group>"; };
 		4206A8EDAC8C835E874251CB /* RemoteDisplayOptions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteDisplayOptions.swift; sourceTree = "<group>"; };
 		44ACCD4A54AA0F8443CA869B /* ConnectionViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionViewModel.swift; sourceTree = "<group>"; };
+		47F1C6844BE03BFF28A13A05 /* STAEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = STAEvent.swift; sourceTree = "<group>"; };
 		4AA2639C7BC0B4B5E3D01734 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		4B2971CFDD3F6EBEF2ACA1A8 /* RemoteViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteViewModel.swift; sourceTree = "<group>"; };
 		4C31C90D73DDE407941D9C78 /* CameraSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraSession.swift; sourceTree = "<group>"; };
+		4D246AB34F9D8193AD689AC0 /* STAMediaMetadata.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = STAMediaMetadata.swift; sourceTree = "<group>"; };
+		4FC4F7B00A76D4F318D10B0E /* STAProfileStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = STAProfileStore.swift; sourceTree = "<group>"; };
 		538A2FD484D2734CC691DA00 /* ConnectionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionState.swift; sourceTree = "<group>"; };
 		55E5A0EF9EEE6944C08F254E /* ConnectionPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionPage.swift; sourceTree = "<group>"; };
 		59F6B50FACC860CB7B9DCBE5 /* RemoteExposureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteExposureTests.swift; sourceTree = "<group>"; };
@@ -152,15 +163,21 @@
 		61DD1A7868ADB6C35411DA6F /* PhotoEffectsRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoEffectsRenderer.swift; sourceTree = "<group>"; };
 		61F577AFF70C53D32A99AB7B /* ConnectionStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionStateTests.swift; sourceTree = "<group>"; };
 		66B121CC0D58A97AD69EEF11 /* Np3FilterCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Np3FilterCatalog.swift; sourceTree = "<group>"; };
+		66D3FD27372D4F017D196970 /* STATipsOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = STATipsOverlay.swift; sourceTree = "<group>"; };
 		66FA5BCCCA104E827B8A69A1 /* PhotoEffects.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoEffects.swift; sourceTree = "<group>"; };
 		6A0253EE3A7C88ECD34EEACC /* PTPIPCodecTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PTPIPCodecTests.swift; sourceTree = "<group>"; };
 		6C73EF01969DAC563DA91DD0 /* PhotoEffectsEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoEffectsEditorView.swift; sourceTree = "<group>"; };
 		6CF51538A02F76ECB294979E /* RemoteState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteState.swift; sourceTree = "<group>"; };
+		72757BCC923622558D27F45D /* STAConnectionCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = STAConnectionCoordinator.swift; sourceTree = "<group>"; };
+		7530BB4953CDCB614059E626 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
 		77FF345DD1F232661C243E4F /* ZTransferColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZTransferColors.swift; sourceTree = "<group>"; };
+		78B40BD5B460FA10A033F40D /* STABrowsingSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = STABrowsingSession.swift; sourceTree = "<group>"; };
 		7A212849FDB757B232CE3700 /* GPSConnectionControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GPSConnectionControl.swift; sourceTree = "<group>"; };
 		7AD9D374C7D0C7B45D77B516 /* PhotoCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoCatalog.swift; sourceTree = "<group>"; };
+		7B84B48793ED342FBA1F6D10 /* STAResetPairingOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = STAResetPairingOverlay.swift; sourceTree = "<group>"; };
 		7BEAA3B6FEB394BB8C05D321 /* DirectoryAccessStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DirectoryAccessStore.swift; sourceTree = "<group>"; };
 		7C8D85042F86E7CE49C16BF8 /* PTPIPDiscoveryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PTPIPDiscoveryService.swift; sourceTree = "<group>"; };
+		7D07A4A00FD9B80E732050F4 /* STAObjectReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = STAObjectReader.swift; sourceTree = "<group>"; };
 		7F9983A9D8E56D67C98AA6B4 /* PTPSessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PTPSessionTests.swift; sourceTree = "<group>"; };
 		7FF25E1E6430F77DDD7AF2A7 /* PTPIPCodec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PTPIPCodec.swift; sourceTree = "<group>"; };
 		83180466B40E5CA9AE7D2B7E /* ThumbnailCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThumbnailCache.swift; sourceTree = "<group>"; };
@@ -169,6 +186,7 @@
 		9165B39E86D240D0CAB4F2F0 /* DomainModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DomainModelTests.swift; sourceTree = "<group>"; };
 		94B13A99D0C74F65A242E106 /* CameraTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraTransport.swift; sourceTree = "<group>"; };
 		95AB5EA7C8D3692B4E2C4C23 /* PhotoFrameTextLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoFrameTextLayoutTests.swift; sourceTree = "<group>"; };
+		9A396309768005C03C6E4839 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/Localizable.strings"; sourceTree = "<group>"; };
 		9AE1B278336397EAB6029214 /* LocalPhotoBatchViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalPhotoBatchViewModel.swift; sourceTree = "<group>"; };
 		9C82DE7EDD874E138885C18B /* PhotoPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoPreviewView.swift; sourceTree = "<group>"; };
 		9CEBFBB42C89586314B7CDF4 /* CameraRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraRepository.swift; sourceTree = "<group>"; };
@@ -179,6 +197,7 @@
 		B7580B5DC6E6B426AFDCD70C /* LocalPhotoEffectsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalPhotoEffectsView.swift; sourceTree = "<group>"; };
 		B8E5F0504E1E56C59E21D761 /* ZTransferDesign.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZTransferDesign.swift; sourceTree = "<group>"; };
 		BA7454E422D1473CC4E740CD /* AsyncDeadline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsyncDeadline.swift; sourceTree = "<group>"; };
+		BDD66E5D3F4314C6B66ACD88 /* STAProfileAndMetadataTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = STAProfileAndMetadataTests.swift; sourceTree = "<group>"; };
 		C03DEDD0C14571253802D484 /* SettingsPopupOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsPopupOverlay.swift; sourceTree = "<group>"; };
 		C537587F3F20DEE8C60FA711 /* GPSCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GPSCoordinator.swift; sourceTree = "<group>"; };
 		C88C5ED244217DA340A1F1E5 /* PTPCodec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PTPCodec.swift; sourceTree = "<group>"; };
@@ -196,13 +215,14 @@
 		DE7320E831B92FDF16C5A2A8 /* PhotoFilter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoFilter.swift; sourceTree = "<group>"; };
 		DF9539324F4DB53B0B922D67 /* RemoteRecordingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteRecordingTests.swift; sourceTree = "<group>"; };
 		E17D81EDE19E9E8343BD531F /* TransferQueueView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransferQueueView.swift; sourceTree = "<group>"; };
+		E765A10B0340558B3B98D1E1 /* AndroidLocalization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndroidLocalization.swift; sourceTree = "<group>"; };
 		ECDEA795752767FBE8FFC99F /* ZTransferApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZTransferApp.swift; sourceTree = "<group>"; };
+		EDE7552A6B315888DE6033D1 /* zh-Hant */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hant"; path = "zh-Hant.lproj/Localizable.strings"; sourceTree = "<group>"; };
 		F372F3899BF36619208BF340 /* Np3FilterEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Np3FilterEngine.swift; sourceTree = "<group>"; };
 		F669891731A2784158CAB73F /* GPSProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GPSProtocol.swift; sourceTree = "<group>"; };
 		FB4F9C50800B1AB3BC4C279E /* Np3AndroidGoldenTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Np3AndroidGoldenTests.swift; sourceTree = "<group>"; };
 		FCD67906893DA353A437E6A3 /* Np3FilterEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Np3FilterEngineTests.swift; sourceTree = "<group>"; };
 		FDDA62402A7BB9E32721C7D4 /* DetentWheel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetentWheel.swift; sourceTree = "<group>"; };
-		A1DROIDLOC0000000000002 /* AndroidLocalization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndroidLocalization.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -276,6 +296,8 @@
 				C94CCD158034CC3AA6E8F2F0 /* ConnectionMethodCard.swift */,
 				55E5A0EF9EEE6944C08F254E /* ConnectionPage.swift */,
 				7A212849FDB757B232CE3700 /* GPSConnectionControl.swift */,
+				7B84B48793ED342FBA1F6D10 /* STAResetPairingOverlay.swift */,
+				66D3FD27372D4F017D196970 /* STATipsOverlay.swift */,
 			);
 			path = Connection;
 			sourceTree = "<group>";
@@ -363,6 +385,12 @@
 				0E20FABF2CECBED5A93AB576 /* PTPIPDiscovery.swift */,
 				19E7177E4804514D52C91294 /* PTPIPSocketTransport.swift */,
 				615EEFA9D6159AC37C5A31C7 /* PTPSession.swift */,
+				78B40BD5B460FA10A033F40D /* STABrowsingSession.swift */,
+				72757BCC923622558D27F45D /* STAConnectionCoordinator.swift */,
+				47F1C6844BE03BFF28A13A05 /* STAEvent.swift */,
+				4D246AB34F9D8193AD689AC0 /* STAMediaMetadata.swift */,
+				7D07A4A00FD9B80E732050F4 /* STAObjectReader.swift */,
+				4FC4F7B00A76D4F318D10B0E /* STAProfileStore.swift */,
 				83180466B40E5CA9AE7D2B7E /* ThumbnailCache.swift */,
 			);
 			path = PTP;
@@ -384,9 +412,7 @@
 			isa = PBXGroup;
 			children = (
 				1FDAFED6652BDAF104D56E54 /* Fonts */,
-				L10F00000000000000000001 /* Localizable.strings (en) */,
-				L10F00000000000000000002 /* Localizable.strings (zh-Hans) */,
-				L10F00000000000000000003 /* Localizable.strings (zh-Hant) */,
+				F5B0DCD9EF4268A3ACA7C197 /* Localizable.strings */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -413,8 +439,8 @@
 		C03A8A7CE73218F54DD6F1BC /* App */ = {
 			isa = PBXGroup;
 			children = (
+				E765A10B0340558B3B98D1E1 /* AndroidLocalization.swift */,
 				11F6F2458B24ED1BDFC716A4 /* RootView.swift */,
-				A1DROIDLOC0000000000002 /* AndroidLocalization.swift */,
 				ECDEA795752767FBE8FFC99F /* ZTransferApp.swift */,
 			);
 			path = App;
@@ -445,6 +471,9 @@
 				6A0253EE3A7C88ECD34EEACC /* PTPIPCodecTests.swift */,
 				2ABA708E06D3141226F21A83 /* PTPIPDiscoveryTests.swift */,
 				7F9983A9D8E56D67C98AA6B4 /* PTPSessionTests.swift */,
+				15CE2B24C8F035D7C1826919 /* STABrowsingSessionTests.swift */,
+				2BDFC95EFE4D4DCA6606AE2F /* STAConnectionCoordinatorTests.swift */,
+				BDD66E5D3F4314C6B66ACD88 /* STAProfileAndMetadataTests.swift */,
 			);
 			path = ProtocolTests;
 			sourceTree = "<group>";
@@ -511,6 +540,8 @@
 			knownRegions = (
 				Base,
 				en,
+				"zh-Hans",
+				"zh-Hant",
 			);
 			mainGroup = 1678BEB85E7FF85B293CEEA2;
 			minimizedProjectReferenceProxies = 1;
@@ -530,9 +561,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				L10C00000000000000000001 /* Localizable.strings (en) in Resources */,
-				L10C00000000000000000002 /* Localizable.strings (zh-Hans) in Resources */,
-				L10C00000000000000000003 /* Localizable.strings (zh-Hant) in Resources */,
+				B104166B4E6A8060016636A2 /* Localizable.strings in Resources */,
 				76FA040ADFD4573DBDA00991 /* bebas_neue_regular.ttf in Resources */,
 				C127B5B73435A9434E2EEF30 /* cormorant_garamond_medium_italic.ttf in Resources */,
 				481FE39822F171E89584DA10 /* great_vibes_regular.ttf in Resources */,
@@ -563,6 +592,9 @@
 				73A0B84A67659AC4209F4A8F /* RemoteExposureTests.swift in Sources */,
 				946D307C7E78C2701BC6151F /* RemoteRecordingTests.swift in Sources */,
 				79DF53F7FB57B0EF6D965D7C /* RemoteStateTests.swift in Sources */,
+				C713BCA63E8BAA59BEB77FAB /* STABrowsingSessionTests.swift in Sources */,
+				B5DC92C200A313FB028618C6 /* STAConnectionCoordinatorTests.swift in Sources */,
+				9FB6BCCF7460BB0205C907F2 /* STAProfileAndMetadataTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -570,6 +602,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				ABD477B9A99ED0F581232D3F /* AndroidLocalization.swift in Sources */,
 				B7E26AA94FF197578A633BE6 /* AsyncDeadline.swift in Sources */,
 				171B3B7D9317366D04867322 /* CameraConnectionService.swift in Sources */,
 				4E6912D45117355E97EA8583 /* CameraRepository.swift in Sources */,
@@ -624,7 +657,14 @@
 				53050A00F15AA49DE998807E /* RemoteView.swift in Sources */,
 				10BA2D27B0425D2A34F982F2 /* RemoteViewModel.swift in Sources */,
 				7BE96D350B5305152D1CDB16 /* RootView.swift in Sources */,
-				A1DROIDLOC0000000000001 /* AndroidLocalization.swift in Sources */,
+				37146E4620ABF1EF97E1867F /* STABrowsingSession.swift in Sources */,
+				91351516642DECD0536A9CB0 /* STAConnectionCoordinator.swift in Sources */,
+				FDC455DA213E797E48B4CD02 /* STAEvent.swift in Sources */,
+				6B6C72F2C9A8B328CE09169E /* STAMediaMetadata.swift in Sources */,
+				83091CBEAA938F8060B47E03 /* STAObjectReader.swift in Sources */,
+				075325CEBC09C41F344985F4 /* STAProfileStore.swift in Sources */,
+				0E1739467119ADD78EC6FFB0 /* STAResetPairingOverlay.swift in Sources */,
+				9D2FA1400CA1F9B6632FFAF8 /* STATipsOverlay.swift in Sources */,
 				D08D5FC66C3B90DDD388F961 /* SelectedUSBPTPTransport.swift in Sources */,
 				EA2A5E73813646829194CCFC /* SettingsPopupOverlay.swift in Sources */,
 				F7DD276D50F864670EB55E91 /* SettingsView.swift in Sources */,
@@ -649,6 +689,19 @@
 			targetProxy = 1FD425C45D78A47BB624F90F /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
+
+/* Begin PBXVariantGroup section */
+		F5B0DCD9EF4268A3ACA7C197 /* Localizable.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				7530BB4953CDCB614059E626 /* en */,
+				9A396309768005C03C6E4839 /* zh-Hans */,
+				EDE7552A6B315888DE6033D1 /* zh-Hant */,
+			);
+			name = Localizable.strings;
+			sourceTree = "<group>";
+		};
+/* End PBXVariantGroup section */
 
 /* Begin XCBuildConfiguration section */
 		4A2AB9B620A416F7A8674D2C /* Debug */ = {

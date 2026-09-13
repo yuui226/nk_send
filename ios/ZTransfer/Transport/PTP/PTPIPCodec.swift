@@ -71,7 +71,7 @@ enum PTPIPCodec {
     }
 
     /// Wraps a standard PTP command container into Nikon's PTP/IP command packet.
-    static func commandRequest(from ptpCommand: Data, dataPhase: UInt32 = 0) throws -> Data {
+    static func commandRequest(from ptpCommand: Data, dataPhase: UInt32 = 1) throws -> Data {
         guard ptpCommand.count >= 12,
               ptpCommand.readUInt32LE(at: 0) == UInt32(ptpCommand.count),
               ptpCommand.readUInt16LE(at: 4) == 1 else { throw PTPIPCodecError.malformedCommand }
@@ -88,6 +88,28 @@ enum PTPIPCodec {
     static func initEventRequest(connectionNumber: UInt32) throws -> Data {
         var payload = Data(); payload.append(contentsOf: connectionNumber.littleEndianBytes)
         return try encode(type: .initEventRequest, payload: payload)
+    }
+
+    /// NikonCamera.makeStaInitReq: ASCII persistent identity, not UUID bytes.
+    /// AP deliberately retains its different name and two-byte version above.
+    static func staInitCommandRequest(initiatorID: Data) throws -> Data {
+        guard initiatorID.count == 16 else { throw PTPIPCodecError.malformedCommand }
+        var payload = initiatorID
+        payload.append(contentsOf: "ZTransfer".utf16.flatMap { $0.littleEndianBytes })
+        payload.append(contentsOf: [0, 0])
+        payload.append(contentsOf: UInt32(0x00010000).littleEndianBytes)
+        return try encode(type: .initCommandRequest, payload: payload)
+    }
+
+    static func commandResponseContainer(_ payload: Data) throws -> Data {
+        guard payload.count >= 6, (payload.count - 6).isMultiple(of: 4) else {
+            throw PTPIPCodecError.malformedCommand
+        }
+        var result = Data()
+        result.append(contentsOf: UInt32(payload.count + 6).littleEndianBytes)
+        result.append(contentsOf: UInt16(3).littleEndianBytes)
+        result.append(payload)
+        return result
     }
 }
 

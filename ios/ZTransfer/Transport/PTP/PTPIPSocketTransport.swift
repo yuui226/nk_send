@@ -10,43 +10,123 @@ final class PTPIPSocketTransport: @unchecked Sendable, PTPCommandTransport {
     private let command: NWConnection
     private let event: NWConnection
     private let queue = DispatchQueue(label: "com.ztransfer.ptpip")
+    private let lifecycleLock = NSLock()
     private var closed = false
+    private var eventTask: Task<Void, Never>?
+    private(set) var connectionNumber: UInt32 = 0
+    private(set) var responderGUID: String?
+
+    private var isClosed: Bool {
+        lifecycleLock.lock(); defer { lifecycleLock.unlock() }; return closed
+    }
 
     private init(host: String, port: UInt16, command: NWConnection, event: NWConnection) {
         self.host = host; self.port = port; self.command = command; self.event = event
     }
 
-    static func open(host: String, port: UInt16 = 15740) async throws -> PTPIPSocketTransport {
-        let parameters: NWParameters = {
-            let value = NWParameters.tcp
-            value.requiredInterfaceType = .wifi
-            value.prohibitedInterfaceTypes = [.loopback]
-            return value
-        }()
-        let command = NWConnection(host: NWEndpoint.Host(host), port: NWEndpoint.Port(rawValue: port)!, using: parameters)
-        let event = NWConnection(host: NWEndpoint.Host(host), port: NWEndpoint.Port(rawValue: port)!, using: parameters)
+    static func parameters(localAddress: String? = nil, sta: Bool) -> NWParameters {
+        let parameters = NWParameters.tcp
+        // Personal Hotspot's camera traffic can use bridge/ap rather than en0.
+        // Android binds the proven candidate's local address, not the default route.
+        if sta {
+            parameters.prohibitedInterfaceTypes = [.cellular, .loopback]
+            if let localAddress {
+                parameters.requiredLocalEndpoint = .hostPort(host: .init(localAddress), port: .any)
+            }
+        } else {
+            parameters.requiredInterfaceType = .wifi
+            parameters.prohibitedInterfaceTypes = [.loopback]
+        }
+        return parameters
+    }
+
+    static func open(host: String, port: UInt16 = 15740, localAddress: String? = nil,
+                     staInitiatorID: Data? = nil, expectedGUID: String? = nil) async throws -> PTPIPSocketTransport {
+        let parameters = parameters(localAddress: localAddress, sta: staInitiatorID != nil)
+        let command = NWConnection(host: .init(host), port: .init(rawValue: port)!, using: parameters)
+        let event = NWConnection(host: .init(host), port: .init(rawValue: port)!, using: parameters)
         let transport = PTPIPSocketTransport(host: host, port: port, command: command, event: event)
-        try await transport.start(command)
-        try await transport.send(try PTPIPCodec.initCommandRequest())
-        let ack = try await transport.receive(on: command)
-        guard ack.type == .initCommandAck, ack.payload.count >= 4 else { throw PTPSessionError.invalidResponse }
-        let connectionNumber = ack.payload.readUInt32LE(at: 0)
-        try await transport.start(event)
-        try await transport.send(try PTPIPCodec.initEventRequest(connectionNumber: connectionNumber), on: event)
-        let eventAck = try await transport.receive(on: event)
-        guard eventAck.type == .initEventAck else { throw PTPSessionError.invalidResponse }
-        return transport
+        do {
+            try await transport.start(command, timeout: 3_000_000_000)
+            let initialization = try staInitiatorID.map { try PTPIPCodec.staInitCommandRequest(initiatorID: $0) }
+                ?? PTPIPCodec.initCommandRequest()
+            let ack = try await AsyncDeadline.run(nanoseconds: 5_000_000_000, timeoutError: PTPSessionError.timeout) {
+                try await transport.send(initialization)
+                return try await transport.receive(on: command)
+            }
+            if ack.type == .initFail { throw STAConnectionError.cameraRefused }
+            guard ack.type == .initCommandAck, ack.payload.count >= 4 else { throw PTPSessionError.invalidResponse }
+            transport.connectionNumber = ack.payload.readUInt32LE(at: 0)
+            if ack.payload.count >= 20 {
+                transport.responderGUID = ack.payload[4..<20].map { String(format: "%02x", $0) }.joined()
+            }
+            if let expectedGUID, transport.responderGUID != expectedGUID {
+                throw STAConnectionError.unexpectedResponder(expected: expectedGUID, actual: transport.responderGUID)
+            }
+            try await transport.start(event, timeout: 3_000_000_000)
+            let connectionNumber = transport.connectionNumber
+            let eventAck = try await AsyncDeadline.run(nanoseconds: 5_000_000_000, timeoutError: PTPSessionError.timeout) {
+                try await transport.send(try PTPIPCodec.initEventRequest(connectionNumber: connectionNumber), on: event)
+                return try await transport.receive(on: event)
+            }
+            guard eventAck.type == .initEventAck else { throw PTPSessionError.invalidResponse }
+            try Task.checkCancellation()
+            return transport
+        } catch {
+            transport.close()
+            throw error
+        }
     }
 
     func close() {
-        guard !closed else { return }
+        lifecycleLock.lock()
+        guard !closed else { lifecycleLock.unlock(); return }
         closed = true
+        let task = eventTask
+        eventTask = nil
+        lifecycleLock.unlock()
+        task?.cancel()
         command.cancel(); event.cancel()
     }
 
+    /// Only called before starting the continuous reader. Missing pacing events
+    /// never undo the already-acknowledged pairing (NikonCamera.completeInitialPairing).
+    func waitForPairingEvent() async {
+        _ = try? await AsyncDeadline.run(nanoseconds: 8_000_000_000, timeoutError: PTPSessionError.timeout) {
+            while !Task.isCancelled {
+                let packet = try await self.receive(on: self.event)
+                if packet.type == .ping {
+                    try await self.send(try PTPIPCodec.encode(type: .pong), on: self.event)
+                } else if packet.type == .event {
+                    var reader = PTPDataReader(packet.payload)
+                    if reader.readUInt16() == 0x4008 { return }
+                }
+            }
+            throw CancellationError()
+        }
+    }
+
+    func startEvents(onEvent: @escaping @Sendable (Data) async -> Void = { _ in }) {
+        lifecycleLock.lock(); defer { lifecycleLock.unlock() }
+        guard !closed, eventTask == nil else { return }
+        eventTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                while !Task.isCancelled {
+                    let packet = try await self.receive(on: self.event)
+                    if packet.type == .ping {
+                        try await self.send(try PTPIPCodec.encode(type: .pong), on: self.event)
+                    } else if packet.type == .event { await onEvent(packet.payload) }
+                }
+            } catch {
+                // Android detects transport loss on the command keepalive.
+            }
+        }
+    }
+
     func sendPTP(command ptpCommand: Data, data: Data?) async throws -> (response: Data, payload: Data) {
-        guard !closed else { throw PTPSessionError.invalidated }
-        let request = try PTPIPCodec.commandRequest(from: ptpCommand, dataPhase: data == nil ? 0 : 2)
+        guard !isClosed else { throw PTPSessionError.invalidated }
+        let request = try PTPIPCodec.commandRequest(from: ptpCommand, dataPhase: data == nil ? 1 : 2)
         try await send(request)
         if let data {
             let transaction = ptpCommand.readUInt32LE(at: 8)
@@ -61,13 +141,13 @@ final class PTPIPSocketTransport: @unchecked Sendable, PTPCommandTransport {
             switch packet.type {
             case .data, .endData:
                 guard packet.payload.count >= 4 else { throw PTPSessionError.invalidResponse }
+                guard packet.payload.readUInt32LE(at: 0) == ptpCommand.readUInt32LE(at: 8) else {
+                    throw PTPSessionError.invalidResponse
+                }
                 received.append(packet.payload.dropFirst(4))
             case .commandResponse:
                 guard packet.payload.count >= 6 else { throw PTPSessionError.invalidResponse }
-                var response = Data(capacity: packet.payload.count + 4)
-                response.append(contentsOf: UInt32(packet.payload.count + 4).littleEndianBytes)
-                response.append(contentsOf: UInt16(3).littleEndianBytes)
-                response.append(packet.payload)
+                let response = try PTPIPCodec.commandResponseContainer(packet.payload)
                 return (response, received)
             case .ping:
                 try await send(try PTPIPCodec.encode(type: .pong), on: self.command)
@@ -77,17 +157,25 @@ final class PTPIPSocketTransport: @unchecked Sendable, PTPCommandTransport {
         }
     }
 
-    private func start(_ connection: NWConnection) async throws {
+    private func start(_ connection: NWConnection, timeout: UInt64) async throws {
+        try await AsyncDeadline.run(nanoseconds: timeout, timeoutError: PTPSessionError.timeout) {
+            try await self.startConnection(connection)
+        }
+    }
+
+    private func startConnection(_ connection: NWConnection) async throws {
         let flag = OnceFlag()
         try await withTaskCancellationHandler(operation: {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                 connection.stateUpdateHandler = { state in
-                    guard flag.claim() else { return }
                     switch state {
-                    case .ready: continuation.resume()
-                    case .failed(let error): continuation.resume(throwing: error)
-                    case .cancelled: continuation.resume(throwing: PTPSessionError.invalidated)
-                    default: flag.reset()
+                    case .ready:
+                        if flag.claim() { continuation.resume() }
+                    case .failed(let error):
+                        if flag.claim() { continuation.resume(throwing: error) }
+                    case .cancelled:
+                        if flag.claim() { continuation.resume(throwing: PTPSessionError.invalidated) }
+                    default: break
                     }
                 }
                 connection.start(queue: queue)
@@ -138,7 +226,6 @@ private final class OnceFlag: @unchecked Sendable {
     private let lock = NSLock()
     private var claimed = false
     func claim() -> Bool { lock.lock(); defer { lock.unlock() }; guard !claimed else { return false }; claimed = true; return true }
-    func reset() { lock.lock(); claimed = false; lock.unlock() }
 }
 
 private extension Data {

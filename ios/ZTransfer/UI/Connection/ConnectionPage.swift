@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// HomeScreen.kt: measurements use the space inside the system bars. The GPS
 /// detail is an overflow layer so expanding it never moves either card or the
@@ -10,6 +11,9 @@ struct ConnectionPage: View {
     let directory: DirectoryAccessStore
     let onOpenWorkspace: () -> Void
     @State private var showSettings = false
+    @State private var showSTAReset = false
+    @State private var showSTATips = false
+    @AppStorage("sta_connection_help_viewed") private var staHelpViewed = false
     @State private var attentionOrigin = Date()
     @State private var settingsAnchor: CGRect = .zero
 
@@ -36,7 +40,15 @@ struct ConnectionPage: View {
                         dimmed: gpsCoordinator.state.enabled,
                         attentionOrigin: attentionOrigin,
                         onWirelessModeChanged: model.select(wirelessMode:),
-                        onConnect: { Task { await model.connectSelectedWiFi() } })
+                        onConnect: { Task { await model.connectSelectedWiFi() } },
+                        onResetSTAPairing: { Task { await model.refreshSTAProfiles(); showSTAReset = true } },
+                        onSTAHotspotSettings: {
+                            model.cancelWiFiConnection()
+                            if let url = URL(string: UIApplication.openSettingsURLString) {
+                                UIApplication.shared.open(url)
+                            }
+                        },
+                        staHelpViewed: staHelpViewed)
                         .frame(width: layout.cardWidth)
                     }
                     .padding(.horizontal, layout.horizontalPadding)
@@ -72,6 +84,12 @@ struct ConnectionPage: View {
             // Keep the scrim outside the safe-area-constrained page overlay.
             // This lets it dim the complete application surface while the
             // page's measured card positions remain unchanged.
+            if showSTAReset {
+                STAResetPairingOverlay(count: model.pairedCameraCount, models: model.pairedCameraModels,
+                    onConfirm: { showSTAReset = false; Task { await model.resetSTAPairing() } },
+                    onDismiss: { showSTAReset = false })
+                    .ignoresSafeArea()
+            }
             if showSettings {
                 SettingsPopupOverlay(
                     isPresented: $showSettings,
@@ -81,6 +99,10 @@ struct ConnectionPage: View {
                     anchor: settingsAnchor
                 )
                 .ignoresSafeArea()
+            }
+            if showSTATips {
+                STATipsOverlay(isPresented: $showSTATips)
+                    .ignoresSafeArea()
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

@@ -1,122 +1,189 @@
 import Foundation
 import Network
 
-enum PTPIPDiscoveryError: Error, Equatable, Sendable { case notFound }
-
-/// Discovers Nikon PTP/IP endpoints on the active Wi-Fi interface. Discovery
-/// only reports a host with an open PTP port; the protocol handshake remains in
-/// PTPIPSocketTransport so a false positive cannot enter the photo page.
-final class PTPIPDiscoveryService: @unchecked Sendable {
-    private let queue = DispatchQueue(label: "com.ztransfer.ptpip.discovery")
-
-    /// Android AP discovery only probes when the DHCP gateway is 192.168.1.1.
-    /// iOS does not expose DHCP gateway through Network.framework, so use the
-    /// same fixed camera subnet as the conservative candidate gate. The actual
-    /// PTP/IP handshake remains the authoritative identity check.
+/// PtpIpDiscovery.kt: saved route first; mDNS runs alongside bounded subnet
+/// batches. Port probes overlap, but complete Nikon handshakes stay sequential.
+final class PTPIPDiscoveryService: Sendable {
     func isOnCameraHotspot() -> Bool {
-        localWiFiInterfaces().contains { PTPIPDiscoveryPolicy.isCameraHotspotAddress($0.address) }
+        localInterfaces().contains { PTPIPDiscoveryPolicy.isCameraHotspotAddress($0.address) }
     }
 
-    func discover(lastIP: String? = nil, onProgress: @escaping @Sendable (String) -> Void = { _ in }) async -> PTPIPCandidate? {
-        let interfaces = localWiFiInterfaces()
-        var candidates: [PTPIPCandidate] = []
-        if let lastIP, interfaces.contains(where: { PTPIPDiscoveryPolicy.contains(localAddress: $0.address, candidate: lastIP, prefix: $0.prefix) }) {
-            candidates.append(PTPIPCandidate(ip: lastIP, localAddress: interfaces.first!.address))
+    func discover<Value: Sendable>(lastIP: String? = nil,
+        onProgress: @escaping @Sendable (String) async -> Void,
+        tryCandidate: @escaping @Sendable (PTPIPCandidate) async throws -> Value?) async throws -> Value? {
+        let interfaces = localInterfaces()
+        var tried = Set<String>()
+        func tryOnce(_ candidate: PTPIPCandidate) async throws -> Value? {
+            try Task.checkCancellation()
+            guard tried.insert(candidate.ip).inserted else { return nil }
+            await onProgress(candidate.ip)
+            return try await tryCandidate(candidate)
         }
-        for interface in interfaces {
-            candidates.append(contentsOf: PTPIPDiscoveryPolicy.candidates(localAddress: interface.address, routePrefix: interface.prefix))
+        if let lastIP, let route = interfaces.first(where: {
+            PTPIPDiscoveryPolicy.contains(localAddress: $0.address, candidate: lastIP, prefix: $0.prefix)
+        }) {
+            let candidate = PTPIPCandidate(ip: lastIP, localAddress: route.address)
+            if await probe(candidate), let result = try await tryOnce(candidate) { return result }
         }
-        var seen = Set<String>()
-        candidates = candidates.filter { seen.insert($0.ip).inserted }
-        return await withTaskGroup(of: PTPIPCandidate?.self, returning: PTPIPCandidate?.self) { group in
-            var iterator = candidates.makeIterator()
-            let concurrency = min(24, max(1, candidates.count))
-            for _ in 0..<concurrency {
-                guard let candidate = iterator.next() else { break }
-                group.addTask { [weak self] in
-                    await self?.probe(candidate, onProgress: onProgress)
-                }
-            }
-            while let result = await group.next() {
-                if let result { group.cancelAll(); return result }
-                guard let candidate = iterator.next() else { continue }
-                group.addTask { [weak self] in await self?.probe(candidate, onProgress: onProgress) }
+        let mailbox = MDNSResult()
+        let mdns = Task {
+            let addresses = await STABonjourDiscovery.discover()
+            await mailbox.finish(addresses)
+        }
+        defer { mdns.cancel() }
+        var mdnsConsumed = false
+        func tryMDNS(wait: Bool) async throws -> Value? {
+            guard !mdnsConsumed else { return nil }
+            if wait { await withTaskCancellationHandler { await mdns.value } onCancel: { mdns.cancel() } }
+            guard let addresses = await mailbox.addresses else { return nil }
+            mdnsConsumed = true
+            for ip in addresses {
+                let local = interfaces.first {
+                    PTPIPDiscoveryPolicy.contains(localAddress: $0.address, candidate: ip, prefix: $0.prefix)
+                }?.address
+                if let result = try await tryOnce(PTPIPCandidate(ip: ip, localAddress: local)) { return result }
             }
             return nil
         }
+        for route in interfaces {
+            let candidates = PTPIPDiscoveryPolicy.candidates(localAddress: route.address, routePrefix: route.prefix)
+            for offset in stride(from: 0, to: candidates.count, by: 48) {
+                try Task.checkCancellation()
+                if let result = try await tryMDNS(wait: false) { return result }
+                let batch = Array(candidates[offset..<min(offset + 48, candidates.count)])
+                let open = await probeBatch(batch)
+                if let result = try await tryMDNS(wait: false) { return result }
+                for candidate in open {
+                    if let result = try await tryOnce(candidate) { return result }
+                }
+            }
+        }
+        return try await tryMDNS(wait: true)
     }
 
-    private func probe(_ candidate: PTPIPCandidate, onProgress: @escaping @Sendable (String) -> Void) async -> PTPIPCandidate? {
-        onProgress(candidate.ip)
-        let parameters: NWParameters = {
-            let value = NWParameters.tcp
-            value.requiredInterfaceType = .wifi
-            value.prohibitedInterfaceTypes = [.loopback]
-            return value
-        }()
-        let connection = NWConnection(host: NWEndpoint.Host(candidate.ip), port: NWEndpoint.Port(rawValue: 15740)!, using: parameters)
-        let ready = await withTaskCancellationHandler(operation: {
-            await withTaskGroup(of: Bool.self, returning: Bool.self) { group in
-                group.addTask {
-                    await withCheckedContinuation { continuation in
+    private func probeBatch(_ candidates: [PTPIPCandidate]) async -> [PTPIPCandidate] {
+        await withTaskGroup(of: (Int, Bool).self) { group in
+            var next = 0
+            var reachable = Set<Int>()
+            while next < min(24, candidates.count) {
+                let index = next; next += 1
+                group.addTask { (index, await self.probe(candidates[index])) }
+            }
+            while let (index, open) = await group.next() {
+                if open { reachable.insert(index) }
+                if next < candidates.count, !Task.isCancelled {
+                    let index = next; next += 1
+                    group.addTask { (index, await self.probe(candidates[index])) }
+                }
+            }
+            return candidates.indices.filter { reachable.contains($0) }.map { candidates[$0] }
+        }
+    }
+
+    private func probe(_ candidate: PTPIPCandidate) async -> Bool {
+        guard !Task.isCancelled else { return false }
+        let connection = NWConnection(host: .init(candidate.ip), port: .init(rawValue: 15740)!,
+            using: PTPIPSocketTransport.parameters(localAddress: candidate.localAddress, sta: true))
+        defer { connection.cancel() }
+        do {
+            return try await AsyncDeadline.run(nanoseconds: 450_000_000, timeoutError: PTPSessionError.timeout) {
+                try await withTaskCancellationHandler {
+                    try await withCheckedThrowingContinuation { continuation in
                         let flag = ProbeFlag()
                         connection.stateUpdateHandler = { state in
                             switch state {
                             case .ready:
-                                guard flag.claim() else { return }; continuation.resume(returning: true)
+                                if flag.claim() { continuation.resume(returning: true) }
                             case .failed, .cancelled:
-                                guard flag.claim() else { return }; continuation.resume(returning: false)
+                                if flag.claim() { continuation.resume(returning: false) }
                             default: break
                             }
                         }
-                        connection.start(queue: self.queue)
+                        connection.start(queue: .global(qos: .utility))
                     }
-                }
-                group.addTask {
-                    try? await Task.sleep(for: .milliseconds(450))
-                    return false
-                }
-                let result = await group.next() ?? false
-                group.cancelAll()
-                connection.cancel()
-                return result
+                } onCancel: { connection.cancel() }
             }
-        }, onCancel: { connection.cancel() })
-        return ready ? candidate : nil
+        } catch { return false }
     }
 
-    private struct InterfaceAddress {
-        let address: String
-        let prefix: Int
-    }
-
-    private func localWiFiInterfaces() -> [InterfaceAddress] {
+    private struct InterfaceAddress { let address: String; let prefix: Int }
+    private func localInterfaces() -> [InterfaceAddress] {
         var head: UnsafeMutablePointer<ifaddrs>?
         guard getifaddrs(&head) == 0, let first = head else { return [] }
         defer { freeifaddrs(head) }
         var result: [InterfaceAddress] = []
+        var seenSubnets = Set<String>()
         var cursor: UnsafeMutablePointer<ifaddrs>? = first
         while let item = cursor {
             defer { cursor = item.pointee.ifa_next }
-            guard let address = item.pointee.ifa_addr,
-                  address.pointee.sa_family == UInt8(AF_INET),
-                  let name = item.pointee.ifa_name,
-                  String(cString: name) == "en0" || String(cString: name) == "en1",
-                  let netmask = item.pointee.ifa_netmask else { continue }
-            let addressString = withUnsafePointer(to: address.pointee) { pointer in
-                pointer.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { value in
-                    var buffer = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
-                    var sin = value.pointee.sin_addr
-                    return String(cString: inet_ntop(AF_INET, &sin, &buffer, socklen_t(INET_ADDRSTRLEN)))
-                }
-            }
-            let mask = withUnsafePointer(to: netmask.pointee) { pointer in
-                pointer.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee.sin_addr.s_addr }
-            }
-            let prefix = mask.nonzeroBitCount
-            if !addressString.isEmpty, prefix >= 8 { result.append(InterfaceAddress(address: addressString, prefix: prefix)) }
+            let flags = Int32(item.pointee.ifa_flags)
+            guard flags & IFF_UP != 0, flags & (IFF_LOOPBACK | IFF_POINTOPOINT) == 0,
+                  let address = item.pointee.ifa_addr, address.pointee.sa_family == UInt8(AF_INET),
+                  let namePointer = item.pointee.ifa_name, let netmask = item.pointee.ifa_netmask else { continue }
+            let name = String(cString: namePointer).lowercased()
+            guard !["pdp", "wwan", "utun", "tun", "tap", "rmnet", "ccmni", "v4-rmnet", "awdl", "llw"]
+                .contains(where: { name.hasPrefix($0) }) else { continue }
+            let addr = UnsafeRawPointer(address).assumingMemoryBound(to: sockaddr_in.self).pointee
+            let mask = UnsafeRawPointer(netmask).assumingMemoryBound(to: sockaddr_in.self).pointee
+            let hostOrder = UInt32(bigEndian: addr.sin_addr.s_addr)
+            let privateAddress = hostOrder >> 24 == 10 || hostOrder >> 20 == 0xAC1 || hostOrder >> 16 == 0xC0A8
+            let prefix = mask.sin_addr.s_addr.nonzeroBitCount
+            guard privateAddress, (8...30).contains(prefix) else { continue }
+            var ip = addr.sin_addr
+            var buffer = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
+            guard inet_ntop(AF_INET, &ip, &buffer, socklen_t(INET_ADDRSTRLEN)) != nil else { continue }
+            let addressString = String(decoding: buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
+            let scanPrefix = PTPIPDiscoveryPolicy.effectiveScanPrefix(routePrefix: prefix)
+            let scanMask = UInt32.max << (32 - scanPrefix)
+            guard seenSubnets.insert("\(hostOrder & scanMask)/\(scanPrefix)").inserted else { continue }
+            result.append(InterfaceAddress(address: addressString, prefix: prefix))
         }
         return result
+    }
+}
+
+private actor MDNSResult {
+    private(set) var addresses: [String]?
+    func finish(_ values: [String]) { addresses = values }
+}
+
+/// The run-loop adapter is the only platform-specific part of Android's NSD
+/// discovery. Stop browsers/resolvers on cancellation; never retain a scan.
+@MainActor
+private final class STABonjourDiscovery: NSObject, @preconcurrency NetServiceBrowserDelegate, @preconcurrency NetServiceDelegate {
+    private let browser = NetServiceBrowser()
+    private var services: [NetService] = []
+    private var addresses: [String] = []
+
+    static func discover() async -> [String] {
+        for type in ["_ptp._tcp.", "_nikon._tcp."] {
+            guard !Task.isCancelled else { return [] }
+            let scan = STABonjourDiscovery()
+            scan.browser.delegate = scan
+            scan.browser.searchForServices(ofType: type, inDomain: "local.")
+            do { try await Task.sleep(nanoseconds: 1_500_000_000) } catch {}
+            scan.browser.stop()
+            scan.services.forEach { $0.stop() }
+            guard !Task.isCancelled else { return [] }
+            if !scan.addresses.isEmpty { return scan.addresses }
+            do { try await Task.sleep(nanoseconds: 100_000_000) } catch { return [] }
+        }
+        return []
+    }
+    func netServiceBrowser(_ browser: NetServiceBrowser, didFind service: NetService, moreComing: Bool) {
+        services.append(service)
+        service.delegate = self
+        service.resolve(withTimeout: 1.5)
+    }
+    func netServiceDidResolveAddress(_ sender: NetService) {
+        for data in sender.addresses ?? [] where data.count >= MemoryLayout<sockaddr_in>.size {
+            var address = data.withUnsafeBytes { $0.loadUnaligned(as: sockaddr_in.self) }
+            guard address.sin_family == UInt8(AF_INET) else { continue }
+            var buffer = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
+            guard inet_ntop(AF_INET, &address.sin_addr, &buffer, socklen_t(INET_ADDRSTRLEN)) != nil else { continue }
+            let ip = String(decoding: buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
+            if !addresses.contains(ip) { addresses.append(ip) }
+        }
     }
 }
 

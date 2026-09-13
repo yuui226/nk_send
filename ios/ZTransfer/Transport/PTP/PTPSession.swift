@@ -22,18 +22,49 @@ enum PTPSessionError: Error, Equatable, Sendable {
 /// alone cannot provide that guarantee because `await` permits reentrancy.
 actor PTPSession {
     private let transport: PTPCommandTransport
-    private var nextTransactionID: UInt32 = 1
+    private let defaultTimeoutNanoseconds: UInt64
+    private var nextTransactionID: UInt32
     private var executing = false
     private var invalidated = false
     private var waiters: [(id: UUID, continuation: CheckedContinuation<Void, any Error>)] = []
 
-    init(transport: PTPCommandTransport) {
+    init(transport: PTPCommandTransport, firstTransactionID: UInt32 = 1, defaultTimeoutNanoseconds: UInt64 = 15_000_000_000) {
         self.transport = transport
+        self.defaultTimeoutNanoseconds = defaultTimeoutNanoseconds
+        self.nextTransactionID = firstTransactionID
     }
 
-    func execute(operation: UInt16, parameters: [UInt32] = [], data: Data? = nil, timeoutNanoseconds: UInt64 = 15_000_000_000) async throws -> PTPResponse {
+    func execute(operation: UInt16, parameters: [UInt32] = [], data: Data? = nil, timeoutNanoseconds: UInt64? = nil) async throws -> PTPResponse {
+        let response = try await executeResponse(operation: operation, parameters: parameters, data: data,
+                                                 timeoutNanoseconds: timeoutNanoseconds)
+        guard response.code == PTPConstants.responseOK else { throw PTPSessionError.responseCode(response.code) }
+        return response
+    }
+
+    /// Compatibility probes must retain both negative response codes and data,
+    /// exactly like Android's recvRespWithPayload. They do not invalidate I/O.
+    func executeResponse(operation: UInt16, parameters: [UInt32] = [], data: Data? = nil,
+                         timeoutNanoseconds: UInt64? = nil) async throws -> PTPResponse {
         try await acquire()
         defer { release() }
+        return try await perform(operation: operation, parameters: parameters, data: data, timeoutNanoseconds: timeoutNanoseconds ?? defaultTimeoutNanoseconds)
+    }
+
+    var hasPendingCommand: Bool { executing || !waiters.isEmpty }
+
+    func keepaliveIfIdle() async -> Bool {
+        guard !executing, waiters.isEmpty else { return true }
+        executing = true
+        defer { release() }
+        do {
+            _ = try await perform(operation: PTPConstants.getStorageIDs, parameters: [], data: nil,
+                                  timeoutNanoseconds: 60_000_000_000)
+            return true // Any complete response, including DeviceBusy, proves liveness.
+        } catch { return false }
+    }
+
+    private func perform(operation: UInt16, parameters: [UInt32], data: Data?,
+                         timeoutNanoseconds: UInt64) async throws -> PTPResponse {
         // A request cancelled while waiting must never allocate an ID or touch I/O.
         try Task.checkCancellation()
         guard !invalidated else { throw PTPSessionError.invalidated }
@@ -51,7 +82,6 @@ actor PTPSession {
             guard response.transactionID == transactionID else {
                 throw PTPCodecError.transactionMismatch(expected: transactionID, actual: response.transactionID)
             }
-            if response.code != PTPConstants.responseOK { throw PTPSessionError.responseCode(response.code) }
             return PTPResponse(code: response.code, transactionID: transactionID, data: result.payload)
         } catch let error as PTPSessionError {
             // A negative PTP response consumed the complete transaction; busy or
@@ -100,6 +130,11 @@ actor PTPSession {
 
 enum PTPConstants {
     static let responseOK: UInt16 = 0x2001
+    static let sessionAlreadyOpen: UInt16 = 0x201E
+    static let nikonCompatibilityInit: UInt16 = 0x941C
+    static let nikonChangeApplicationMode: UInt16 = 0x9435
+    static let nikonPairingQuery: UInt16 = 0x952B
+    static let nikonPairingResult: UInt16 = 0x935A
     static let deviceBusy: UInt16 = 0x2019
     static let operationNotSupported: UInt16 = 0x2005
     static let getDeviceInfo: UInt16 = 0x1001

@@ -101,12 +101,12 @@ except (OSError, ValueError, TypeError):
 for device in devices:
     props = device.get("hardwareProperties", {})
     connection = device.get("connectionProperties", {})
-    # CoreDevice reports "connected" for a paired wired phone on current
-    # Xcode releases; older versions used "available". Prefer devicectl for
-    # either state so launch can mount/use the matching developer services
-    # instead of falling back to idevicedebug and a manually mounted DDI.
+    # A paired phone may report tunnelState=disconnected before devicectl
+    # acquires its local-network tunnel. It is still a usable CoreDevice and
+    # devicectl will establish that tunnel during install/launch. Accept every
+    # paired iOS device instead of falling back to stale xcdevice IDs.
     if (props.get("platform") == "iOS" and
-            connection.get("tunnelState") in {"connected", "available"}):
+            connection.get("pairingState") == "paired"):
         print(device.get("identifier", ""))
         break
 PY
@@ -146,6 +146,14 @@ PY
     if ! command -v ios-deploy >/dev/null 2>&1; then
       echo "ERROR: iPhone detected but ios-deploy is unavailable. Install it with: brew install ios-deploy" >&2
       exit 1
+    fi
+    # xcdevice may retain a paired phone after it has been unplugged. Confirm
+    # that ios-deploy sees the identifier right now before starting install;
+    # otherwise a Finder-launched script would wait forever for a stale device.
+    if ! ios-deploy --detect 2>/dev/null | grep -Fq "$LEGACY_DEVICE_ID"; then
+      echo "No currently connected iOS device found; skipping installation and launch."
+      echo "iOS Debug build complete."
+      exit 0
     fi
     echo "Installing on legacy iOS device $LEGACY_DEVICE_ID..."
     ios-deploy --id "$LEGACY_DEVICE_ID" --bundle "$APP_ARTIFACT" --no-wifi --nostart

@@ -20,13 +20,14 @@ enum USBConnectionPhase: Equatable, Sendable {
 }
 
 enum WiFiConnectionPhase: Equatable, Sendable {
-    case unavailable, idle, discovering, connecting, connected, failed(String)
+    case unavailable, idle, discovering, pairing, connecting, connected, failed(String)
 }
 
 struct ConnectionState: Equatable, Sendable {
     var selectedMode: CameraConnectionMode = .usb
     var wirelessMode: WirelessMode = .sta
     var usbPhase: USBConnectionPhase = .waitingForCamera
+    var staProgressIP: String?
     var wifiPhase: WiFiConnectionPhase = .idle
     var usbAuthorization: USBAuthorizationState = .notDetermined
     var discoveredDevices: [USBDeviceDescriptor] = []

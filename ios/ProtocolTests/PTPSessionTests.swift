@@ -8,6 +8,27 @@ import XCTest
 
 @MainActor
 final class PTPSessionTests: XCTestCase {
+    func testIdleKeepaliveAcceptsDeviceBusyAsProofOfLife() async throws {
+        let transport = STAScriptTransport([.init(0x1004, response: 0x2019), .init(0x1001)])
+        let session = PTPSession(transport: transport)
+        let alive = await session.keepaliveIfIdle()
+        XCTAssertTrue(alive)
+        _ = try await session.execute(operation: 0x1001)
+        let remaining = await transport.remaining
+        XCTAssertEqual(remaining, 0)
+    }
+
+    func testKeepaliveSkipsAnActiveForegroundCommandInsteadOfQueuingBehindIt() async throws {
+        let transport = HeldTransport()
+        let session = PTPSession(transport: transport)
+        let request = Task { try await session.execute(operation: PTPConstants.getDeviceInfo) }
+        try await transport.waitForRequestCount(1)
+        let alive = await session.keepaliveIfIdle()
+        XCTAssertTrue(alive)
+        await transport.finishNext()
+        _ = try await request.value
+    }
+
     func testConcurrentCallersNeverOverlapCameraIO() async throws {
         let transport = RecordingTransport()
         let session = PTPSession(transport: transport)

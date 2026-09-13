@@ -1,12 +1,17 @@
 // swift-tools-version: 6.0
 import PackageDescription
+import Foundation
 
 // Runs the production PTP code against fixtures without building/signing the App
 // or booting an iOS simulator. It has no external package dependencies.
+let protocolOnly = ProcessInfo.processInfo.environment["ZTRANSFER_PROTOCOL_ONLY"] == "1"
 let package = Package(
     name: "ZTransferProtocol",
     platforms: [.macOS(.v13), .iOS(.v16)],
-    targets: [
+    targets: protocolOnly ? [
+        .target(name: "ZTransferProtocol", path: "ZTransfer/Transport/PTP"),
+        .testTarget(name: "ProtocolTests", dependencies: ["ZTransferProtocol"], path: "ProtocolTests"),
+    ] : [
         .target(name: "ZTransferProtocol", path: "ZTransfer/Transport/PTP"),
         .target(name: "ZTransferGPS", path: "ZTransfer/Domain", sources: ["GPSProtocol.swift"]),
         .target(name: "ZTransferEffects", path: "ZTransfer/Domain", sources: ["PhotoEffects.swift", "PhotoEffectsBatch.swift", "PhotoFrameTextLayout.swift", "Np3FilterEngine.swift", "Np3FilterCatalog.swift", "Np3BitmapFilter.swift"]),
