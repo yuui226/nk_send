@@ -346,6 +346,10 @@ actor TransferQueue {
         case CameraTransportError.timeout:
             // Android normalizes socket timeouts to the same reconnect/resume guidance.
             return AppLocalized.resource("error_camera_connection_lost")
+        case PTPSessionError.timeout, PTPSessionError.invalidated:
+            // PTP session loss has the same retry/resume meaning as the
+            // transport-level disconnect reported by Android.
+            return AppLocalized.resource("error_camera_connection_lost")
         case CameraRepositoryError.invalidDataset:
             return AppLocalized.resource("error_camera_metadata_unavailable")
         default:
