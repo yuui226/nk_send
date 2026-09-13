@@ -338,6 +338,7 @@
 - 彩色档案改用安卓专用的焦段/光圈/ISO/快门顺序与 `f/` 小写格式；签名构建安装启动：`dist-debug-ios/ZTransfer-ios-debug-1.82-20260913-135538.app`。
 - 雾面、影院、胶片画廊补齐安卓对应的底部渐变压暗层及 alpha；签名构建安装启动：`dist-debug-ios/ZTransfer-ios-debug-1.82-20260913-135737.app`。
 - 彩色档案调色板改为最近邻采样并跳过 alpha 小于 128 的像素；签名构建安装启动：`dist-debug-ios/ZTransfer-ios-debug-1.82-20260913-140002.app`。
+- 标准边框信息超出安全区时加入安卓一致的 2% 抗锯齿缩放余量；签名构建安装启动：`dist-debug-ios/ZTransfer-ios-debug-1.82-20260913-140433.app`。
 
 **2/62**。已验收工程骨架和 Swift 6/iOS 16 配置。其余 60 项保留为待完成或进行中。
 
