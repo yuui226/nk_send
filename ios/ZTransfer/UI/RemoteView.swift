@@ -9,9 +9,12 @@ struct RemoteView: View {
     @StateObject private var model: RemoteViewModel
     @State private var zoom: CGFloat = 1
     @State private var selectedField: RemoteExposureField?
-    @AppStorage("remote.desqueeze") private var desqueeze = 1.0
-    @AppStorage("remote.histogram") private var histogramVisible = false
-    @AppStorage("remote.level") private var levelVisible = false
+    // These keys are shared with Android's ztransfer preferences.  The level
+    // overlay is a session control on Android and therefore is deliberately
+    // not persisted.
+    @AppStorage("remote_desqueeze_multiplier") private var desqueeze = 1.0
+    @AppStorage("preview_histogram_enabled") private var histogramVisible = false
+    @State private var levelVisible = false
 
     init(session: CameraSession) {
         _model = StateObject(wrappedValue: RemoteViewModel(camera: session))

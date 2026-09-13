@@ -6,7 +6,10 @@ import UIKit
 final class DirectoryAccessStore: ObservableObject {
     @Published private(set) var directoryURL: URL?
     private let defaults: UserDefaults
-    private let bookmarkKey = "transferDirectoryBookmark"
+    // Android persists this setting under ztransfer/transfer_dir.  The value
+    // is platform-specific (bookmark bytes on iOS, URI text on Android), but
+    // the preference identity remains identical.
+    private let bookmarkKey = "transfer_dir"
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults

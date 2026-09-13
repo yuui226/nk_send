@@ -10,6 +10,11 @@ actor PhotoThumbnailFillQueue {
     private var failed = Set<UInt32>()
     private var settled = Set<UInt32>()
     private var revision = 0
+    // Android seeds the post-scan queue exactly once for each scan revision.
+    // Keeping this guard is important because accepted metadata batches and
+    // the final scan completion can both reach the fill pipeline.
+    private var seededRevision = -1
+    private var priorityRange: PhotoDateRange?
 
     func beginScan() {
         revision &+= 1
@@ -17,9 +22,13 @@ actor PhotoThumbnailFillQueue {
         regular.removeAll(keepingCapacity: true)
         pending.removeAll(keepingCapacity: true)
         failed.removeAll(keepingCapacity: true)
+        priorityRange = nil
     }
 
     func seed(_ files: [CameraFile], priorityRange: PhotoDateRange? = nil) {
+        guard seededRevision != revision else { return }
+        seededRevision = revision
+        self.priorityRange = priorityRange
         let ordered = files.sorted { ($0.captureDate ?? "") > ($1.captureDate ?? "") }
         for file in ordered where !settled.contains(file.id) && !pending.contains(file.id) && !failed.contains(file.id) {
             enqueue(file.id, front: priorityRange?.contains(file.captureDate) == true)
@@ -65,6 +74,8 @@ actor PhotoThumbnailFillQueue {
     }
 
     func updatePriorityRange(_ files: [CameraFile], range: PhotoDateRange?) {
+        guard self.priorityRange != range else { return }
+        self.priorityRange = range
         let ids = Set(files.filter { range?.contains($0.captureDate) == true }.map(\.id))
         let unfinished = priority + regular
         priority = unfinished.filter { ids.contains($0) }

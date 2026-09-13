@@ -22,11 +22,11 @@ struct GPSView: View {
                                 .font(.system(size: 24, weight: .semibold))
                                 .foregroundStyle(coordinator.state.enabled ? ZTransferColors.accentBlue : ZTransferColors.secondaryText)
                             VStack(alignment: .leading, spacing: 3) {
-                                Text("GPS").zTransferText(size: ZTransferMetrics.body, weight: .semibold)
+                                Text(AppLocalized.resource("gps_auto_write")).zTransferText(size: ZTransferMetrics.body, weight: .semibold)
                                 Text(statusText).zTransferText(size: ZTransferMetrics.caption)
                             }
                             Spacer()
-                            Button(coordinator.state.enabled ? "关闭" : "开启") {
+                            Button(AppLocalized.resource(coordinator.state.enabled ? "gps_hold_to_disable" : "gps_enable")) {
                                 coordinator.setEnabled(!coordinator.state.enabled)
                             }
                             .buttonStyle(.borderedProminent)
@@ -34,33 +34,27 @@ struct GPSView: View {
                     }
                     if coordinator.state.enabled {
                         SettingsCardProxy {
-                            DetentWheel(label: "更新频率",
+                            DetentWheel(label: AppLocalized.resource("gps_update_frequency_label"),
                                         options: GPSUpdateFrequency.allCases,
                                         selected: coordinator.frequency,
                                         optionLabel: { $0.title },
                                         onCommit: coordinator.setFrequency,
                                         rowHeight: 30)
                             if let name = coordinator.state.cameraName {
-                                detailRow("相机", name)
+                                detailRow(AppLocalized.text("相机"), name)
                             }
                             if let latitude = coordinator.state.latitude, let longitude = coordinator.state.longitude {
-                                detailRow("位置", String(format: "%.5f, %.5f", latitude, longitude))
+                                detailRow(AppLocalized.text("位置"), String(format: "%.5f, %.5f", latitude, longitude))
                             }
                             if let altitude = coordinator.state.altitudeMeters {
-                                detailRow("海拔", String(format: "%.0f m", altitude))
-                            }
-                            if let accuracy = coordinator.state.accuracyMeters {
-                                detailRow("精度", String(format: "%.0f m", accuracy))
-                            }
-                            if let sent = coordinator.state.lastSentAt {
-                                detailRow("上次更新", sent.formatted(date: .omitted, time: .standard))
+                                detailRow(AppLocalized.text("海拔"), String(format: "%.0f m", altitude))
                             }
                             if coordinator.state.status == .error {
-                                Button("重试") { coordinator.retry() }
+                                Button(AppLocalized.resource("gps_retry")) { coordinator.retry() }
                                     .frame(maxWidth: .infinity, alignment: .trailing)
                             }
                             if coordinator.bluetooth.hasSavedPairing {
-                                Button("清除 GPS 配对", role: .destructive) { showingReset = true }
+                                Button(AppLocalized.resource("gps_clear_pairing"), role: .destructive) { showingReset = true }
                                     .frame(maxWidth: .infinity, alignment: .trailing)
                             }
                         }
@@ -70,14 +64,14 @@ struct GPSView: View {
                 .padding(.vertical, 14)
             }
             .background(ZTransferColors.background.ignoresSafeArea())
-            .navigationTitle("GPS")
+            .navigationTitle(AppLocalized.resource("gps_auto_write"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarLeading) { Button { dismiss() } label: { Image(systemName: "chevron.left") } } }
-            .alert("清除 GPS 配对？", isPresented: $showingReset) {
-                Button("取消", role: .cancel) {}
-                Button("清除 GPS 配对", role: .destructive) { coordinator.bluetooth.clearPairing() }
+            .alert(AppLocalized.resource("gps_clear_pairing_title"), isPresented: $showingReset) {
+                Button(AppLocalized.resource("cancel"), role: .cancel) {}
+                Button(AppLocalized.resource("gps_clear_pairing"), role: .destructive) { coordinator.bluetooth.clearPairing() }
             } message: {
-                Text("将清除已保存的相机身份，下次使用时需要重新配对。")
+                Text(AppLocalized.resource("gps_clear_pairing_message"))
             }
         }
     }
@@ -85,17 +79,16 @@ struct GPSView: View {
     private var statusText: String {
         if let message = coordinator.state.message, coordinator.state.status == .error { return message }
         switch coordinator.state.status {
-        case .off: return "GPS 已关闭"
-        case .starting, .searching: return "正在寻找相机"
-        case .needsCamera: return coordinator.state.message ?? "请打开相机蓝牙"
-        case .connecting: return coordinator.state.message ?? "正在连接相机"
-        case .pairing, .cameraConfirm: return "正在连接相机"
-        case .pairingSuccess, .connected: return "已连接，等待位置更新"
-        case .writing: return "已连接，正在写入位置"
-        case .waitingFix: return "已连接，等待定位"
-        case .ready: return "已连接，自动写入位置"
-        case .apUnavailable: return "AP 模式不可用"
-        case .error: return coordinator.state.message ?? "GPS 连接失败"
+        case .off: return AppLocalized.resource("gps_enable")
+        case .starting, .searching: return AppLocalized.resource("gps_searching")
+        case .needsCamera: return coordinator.state.message ?? AppLocalized.resource("gps_need_camera")
+        case .connecting: return coordinator.state.message ?? AppLocalized.resource("gps_connecting")
+        case .pairing: return AppLocalized.resource("gps_pairing")
+        case .cameraConfirm: return AppLocalized.resource("gps_camera_confirm")
+        case .pairingSuccess, .connected: return AppLocalized.resource("gps_paired_device_status")
+        case .writing, .waitingFix, .ready: return AppLocalized.resource("gps_detail_description")
+        case .apUnavailable: return AppLocalized.resource("gps_ap_unavailable")
+        case .error: return coordinator.state.message ?? AppLocalized.resource("gps_retry")
         }
     }
 

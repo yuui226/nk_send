@@ -478,3 +478,6 @@
 - 本轮继续对齐加载策略：普通连接的 StorageID 过滤改为丢弃低 16 位为 0 的槽位，STA 仅丢弃 `0/-1`；无可用存储时仅在存在已建立句柄基线时移除缺失项，未建立基线的已发布部分保留。扫描发现新增媒体后按安卓 `FORMAT_EXT` 扩展名过滤，并以 `fileName|size|captureDate` 去重，接入自动传输开关、目录条件和 `deferTransferStart` 启动策略。
 - 验证：iOS Simulator Debug `xcodebuild ... build` 成功，`git diff --check` 通过；真实相机的 StorageID 异常、自动传输和断线恢复仍未验收。
 - 远程监看取得相机通道时，扫描不再等待或继续旧快照，而是中止当前元数据扫描；监看关闭后重新枚举 handles，以覆盖监看期间新增照片，和安卓远程退出后的刷新策略一致。
+- 持久化键继续按安卓定义收敛：相机照片效果从 iOS 私有 JSON 优先改为读取/写回 `ztransfer` 中的 `photo_frame_*`、`photo_filter_*`、`favorite_*` 和 `photo_frame_metadata_settings_v1`；保留旧 JSON 仅作升级回退。传输目录 bookmark 改用安卓同名 `transfer_dir` 键，远程变形/直方图改用 `remote_desqueeze_multiplier`、`preview_histogram_enabled`，水平仪保持会话态不持久化。
+- 缩略图填充队列补上安卓 `seededRevision` 和日期优先级状态：同一扫描代际只播种一次，筛选日期变化才重排未完成项，避免批次回调和扫描收尾重复插入或改变顺序。
+- 本轮仅完成代码级对照和模拟器构建；Android preference 编码/解码尚未用跨平台 fixture 做字节级回归，GPS/远程界面仍需按安卓页面源码和模拟器交互继续核对。
