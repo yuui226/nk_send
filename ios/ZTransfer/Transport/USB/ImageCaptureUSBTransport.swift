@@ -154,6 +154,18 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
 
     func stop() {
         browser.stop()
+        // Stopping the browser does not close an ImageCaptureCore session.
+        // Issue close requests before releasing our strong references so a
+        // subsequent attach cannot inherit a stale PTP session.
+        lock.lock()
+        var sessions = openedCameras
+        for (id, camera) in openingCameras where sessions[id] == nil { sessions[id] = camera }
+        lock.unlock()
+        for (id, camera) in sessions {
+            camera.requestCloseSession(options: nil) { [weak self] _ in
+                self?.removeSession(camera, for: id)
+            }
+        }
         lock.lock()
         cameras.removeAll()
         cameraIDsByObject.removeAll()
@@ -180,17 +192,19 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
                 box.install(continuation)
                 camera.requestOpenSession(options: nil) { [weak self] error in
                     if let error {
-                        self?.lock.lock()
-                        if self?.openingCameras[id] === camera { self?.openingCameras.removeValue(forKey: id) }
-                        self?.lock.unlock()
+                        self?.removeOpening(camera, for: id)
                         self?.emit(.failed(id: id, message: error.localizedDescription))
                         _ = box.finish(.failure(error))
                     } else if box.finish(.success(())) {
-                        self?.lock.lock()
-                        if self?.openingCameras[id] === camera { self?.openingCameras.removeValue(forKey: id) }
-                        self?.openedCameras[id] = camera
-                        self?.lock.unlock()
+                        self?.markOpened(camera, for: id)
                         self?.emit(.sessionOpened(id: id))
+                    } else {
+                        // Open completed after its caller was cancelled. The
+                        // late success must be closed before another attempt.
+                        self?.removeOpening(camera, for: id)
+                        camera.requestCloseSession(options: nil) { [weak self] _ in
+                            self?.removeSession(camera, for: id)
+                        }
                     }
                 }
             }
@@ -200,16 +214,20 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
     func closeSession(for id: String) async {
         let camera = openedCamera(for: id)
         guard let camera else { return }
-        await withCheckedContinuation { continuation in
-            camera.requestCloseSession(options: nil) { [weak self] _ in
-                self?.lock.lock()
-                if self?.openedCameras[id] === camera { self?.openedCameras.removeValue(forKey: id) }
-                if self?.openingCameras[id] === camera { self?.openingCameras.removeValue(forKey: id) }
-                self?.lock.unlock()
-                self?.emit(.sessionClosed(id: id))
-                continuation.resume()
+        let box = ThrowingContinuationBox<Void>()
+        _ = try? await withTaskCancellationHandler(operation: {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                box.install(continuation)
+                camera.requestCloseSession(options: nil) { [weak self] _ in
+                    self?.removeSession(camera, for: id)
+                    self?.emit(.sessionClosed(id: id))
+                    _ = box.finish(.success(()))
+                }
             }
-        }
+        }, onCancel: { box.cancel() })
+        // AsyncDeadline may cancel before the framework callback arrives.
+        // Remove ownership now; the late callback remains idempotent.
+        removeSession(camera, for: id)
     }
 
     func sendPTP(command: Data, data: Data? = nil, to id: String) async throws -> (response: Data, payload: Data) {
@@ -331,10 +349,44 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
         lock.lock(); openingCameras[id] = camera; lock.unlock()
     }
 
-    private func finishThumbnailWaiters(with error: Error) {
+    private func removeOpening(_ camera: ICCameraDevice, for id: String) {
+        lock.lock(); defer { lock.unlock() }
+        if openingCameras[id] === camera { openingCameras.removeValue(forKey: id) }
+    }
+
+    private func markOpened(_ camera: ICCameraDevice, for id: String) {
+        lock.lock(); defer { lock.unlock() }
+        if openingCameras[id] === camera { openingCameras.removeValue(forKey: id) }
+        openedCameras[id] = camera
+    }
+
+    private func removeSession(_ camera: ICCameraDevice, for id: String) {
+        lock.lock(); defer { lock.unlock() }
+        if openedCameras[id] === camera { openedCameras.removeValue(forKey: id) }
+        if openingCameras[id] === camera { openingCameras.removeValue(forKey: id) }
+    }
+
+    private func isKnownCamera(_ camera: ICCameraDevice) -> Bool {
+        let id = stableID(for: camera)
+        lock.lock(); defer { lock.unlock() }
+        return cameras[id] === camera
+    }
+
+    private func finishThumbnailWaiters(for deviceID: String? = nil, with error: Error) {
         thumbnailLock.lock()
-        let pending = thumbnailWaiters.values.flatMap { $0.values }
-        thumbnailWaiters.removeAll()
+        let keys: [String]
+        if let deviceID {
+            let prefix = deviceID + "\u{0}"
+            keys = thumbnailWaiters.keys.filter { $0.hasPrefix(prefix) }
+        } else {
+            keys = Array(thumbnailWaiters.keys)
+        }
+        var pending: [CheckedContinuation<Data, Error>] = []
+        for key in keys {
+            if let values = thumbnailWaiters.removeValue(forKey: key) {
+                pending.append(contentsOf: values.values)
+            }
+        }
         thumbnailLock.unlock()
         pending.forEach { $0.resume(throwing: error) }
     }
@@ -397,10 +449,21 @@ extension ImageCaptureUSBTransport: ICDeviceBrowserDelegate {
     func deviceBrowser(_ browser: ICDeviceBrowser, didAdd device: ICDevice, moreComing: Bool) {
         guard let camera = device as? ICCameraDevice else { return }
         let descriptor = descriptor(for: camera)
+        var replaced: ICCameraDevice?
         lock.lock()
+        replaced = cameras[descriptor.id]
         cameras[descriptor.id] = camera
         lock.unlock()
         camera.delegate = self
+        if let replaced, replaced !== camera {
+            // A replug can arrive as add-before-remove with the same UUID.
+            // Invalidate the old session before exposing the replacement.
+            replaced.requestCloseSession(options: nil) { [weak self] _ in
+                self?.removeSession(replaced, for: descriptor.id)
+            }
+            finishThumbnailWaiters(for: descriptor.id, with: CameraTransportError.disconnected)
+            emit(.deviceRemoved(id: descriptor.id))
+        }
         emit(.deviceAdded(descriptor))
     }
 
@@ -411,7 +474,7 @@ extension ImageCaptureUSBTransport: ICDeviceBrowserDelegate {
         cameras.removeValue(forKey: id)
         cameraIDsByObject.removeValue(forKey: ObjectIdentifier(camera))
         lock.unlock()
-        finishThumbnailWaiters(with: CameraTransportError.disconnected)
+        finishThumbnailWaiters(for: id, with: CameraTransportError.disconnected)
         emit(.deviceRemoved(id: id))
     }
 }
@@ -420,7 +483,10 @@ extension ImageCaptureUSBTransport: ICDeviceDelegate {
     func device(_ device: ICDevice, didOpenSessionWithError error: Error?) {}
     func device(_ device: ICDevice, didCloseSessionWithError error: Error?) {}
     func didRemove(_ device: ICDevice) {}
-    func deviceDidBecomeReady(_ device: ICDevice) { emit(.ready(id: deviceID(for: device))) }
+    func deviceDidBecomeReady(_ device: ICDevice) {
+        guard let camera = device as? ICCameraDevice, isKnownCamera(camera) else { return }
+        emit(.ready(id: stableID(for: camera)))
+    }
     func device(_ device: ICDevice, didReceiveStatusInformation status: [ICDeviceStatus : Any]) {}
     func device(_ device: ICDevice, didEncounterError error: Error?) {
         emit(.failed(id: deviceID(for: device), message: error?.localizedDescription ?? ""))
@@ -461,7 +527,10 @@ extension ImageCaptureUSBTransport: ICCameraDeviceDelegate {
     func cameraDevice(_ camera: ICCameraDevice, didRenameItems items: [ICCameraItem]) {}
     func cameraDeviceDidChangeCapability(_ camera: ICCameraDevice) {}
     func cameraDevice(_ camera: ICCameraDevice, didReceivePTPEvent eventData: Data) {}
-    func deviceDidBecomeReady(withCompleteContentCatalog device: ICCameraDevice) { emit(.ready(id: stableID(for: device))) }
+    func deviceDidBecomeReady(withCompleteContentCatalog device: ICCameraDevice) {
+        guard isKnownCamera(device) else { return }
+        emit(.ready(id: stableID(for: device)))
+    }
     func cameraDeviceDidRemoveAccessRestriction(_ device: ICDevice) {}
     func cameraDeviceDidEnableAccessRestriction(_ device: ICDevice) {}
 }

@@ -45,7 +45,10 @@ struct SettingsView: View {
                 .padding(.bottom, 14)
             }
         }
-        .background(ZTransferGlassSurface(cornerRadius: 26, kind: .connection))
+        // Android AnchorPopup uses glassSurfaceHeavy (0.92/0.95 alpha). A
+        // connection-card wash is intentionally translucent and lets the
+        // underlying USB/Wi‑Fi labels bleed through the settings panel.
+        .background(ZTransferGlassSurface(cornerRadius: 26, kind: .panel))
         .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous).stroke(ZTransferColors.primaryText.opacity(0.16), lineWidth: 1))
         .sheet(isPresented: $showingPicker) { DirectoryPicker { url in directory.setDirectory(url); showingPicker = false } }
@@ -194,7 +197,7 @@ struct SettingsView: View {
 
     private var footer: some View {
         HStack(spacing: 8) {
-            VersionPlaque(text: "Z传 v\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.82")")
+            VersionPlaque(text: "\(AppLocalized.text("Z传")) v\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.82")")
             Spacer()
             SettingsFooterButton("反馈") { UIPasteboard.general.string = "953000922"; feedbackHint = true }
         }

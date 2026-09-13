@@ -4,7 +4,7 @@ import SwiftUI
 /// The connection page contains a flat background, so its glass can be drawn
 /// with static composited fills without a live system blur per breathing card.
 struct ZTransferGlassSurface: View {
-    enum Kind { case connection, button }
+    enum Kind { case connection, button, panel }
     @Environment(\.colorScheme) private var colorScheme
     let cornerRadius: CGFloat
     let kind: Kind
@@ -15,12 +15,14 @@ struct ZTransferGlassSurface: View {
         switch kind {
         case .connection: return dark ? Color(white: 30 / 255).opacity(0.45) : .white.opacity(0.85)
         case .button: return dark ? Color(red: 137 / 255, green: 153 / 255, blue: 164 / 255).opacity(0.20) : .white.opacity(0.62)
+        case .panel: return dark ? Color(white: 30 / 255).opacity(0.94) : .white.opacity(0.96)
         }
     }
     private var sheen: [Color] {
         switch kind {
         case .connection: return [.white.opacity(dark ? 0.16 : 0.60), .white.opacity(dark ? 0.04 : 0.10)]
         case .button: return [.white.opacity(dark ? 0.025 : 0.12), .clear]
+        case .panel: return [.white.opacity(dark ? 0.06 : 0.30), .clear]
         }
     }
     var body: some View {
