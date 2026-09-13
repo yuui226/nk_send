@@ -479,8 +479,12 @@ enum PhotoEffectsRenderer {
         let scaledHeights = inkHeights.map { $0 * scale }
         let total = scaledHeights.reduce(0, +) + gap * CGFloat(max(0, rows.count - 1)) * scale
         var cursor = area.midY - total * 0.5
-        let color = lightText ? UIColor(red: 0.97, green: 0.98, blue: 0.99, alpha: 1) : UIColor(red: 0.10, green: 0.12, blue: 0.15, alpha: 1)
-        let muted = lightText ? UIColor(red: 0.86, green: 0.89, blue: 0.91, alpha: 1) : UIColor(red: 0.29, green: 0.31, blue: 0.33, alpha: 1)
+        let color = lightText
+            ? UIColor(red: 250.0 / 255.0, green: 252.0 / 255.0, blue: 253.0 / 255.0, alpha: 1)
+            : UIColor(red: 25.0 / 255.0, green: 31.0 / 255.0, blue: 38.0 / 255.0, alpha: 1)
+        let muted = lightText
+            ? UIColor(red: 220.0 / 255.0, green: 227.0 / 255.0, blue: 233.0 / 255.0, alpha: 1)
+            : UIColor(red: 70.0 / 255.0, green: 79.0 / 255.0, blue: 88.0 / 255.0, alpha: 1)
         for (index, row) in rows.enumerated() {
             let font = fonts[index].withSize(max(9, fonts[index].pointSize * scale))
             var attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: index == 0 ? color : muted]
