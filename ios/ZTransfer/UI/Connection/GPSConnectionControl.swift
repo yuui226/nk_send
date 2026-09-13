@@ -109,47 +109,27 @@ private struct GPSInlinePanel: View {
                 .background(ZTransferColors.accentBlue.opacity(0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(ZTransferColors.accentBlue.opacity(0.22)))
             }
-            GeometryReader { geometry in
-                let controlsWidth = max(0, geometry.size.width - 52)
-                let frequencyWidth = controlsWidth * 0.42
-                let actionWidth = controlsWidth - frequencyWidth - 8
-                HStack(spacing: 8) {
-                    Button { showingReset = true } label: {
-                        Image(systemName: "link.slash")
-                            .symbolRenderingMode(.hierarchical)
-                            .font(.system(size: 18, weight: .medium))
-                            .frame(width: 44, height: 50)
-                    }
-                    .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 14))
-                    .disabled(coordinator.state.enabled || !coordinator.bluetooth.hasSavedPairing)
-                    .opacity(coordinator.state.enabled || !coordinator.bluetooth.hasSavedPairing ? 0.42 : 1)
-                    .frame(width: 44)
-                    DetentWheel(label: AppLocalized.resource("gps_update_frequency_label"), options: GPSUpdateFrequency.allCases,
-                                selected: coordinator.frequency, optionLabel: { $0.title },
-                                onCommit: coordinator.setFrequency, rowHeight: 18, wheelHeight: 50,
-                                enabled: !coordinator.state.enabled, accentColor: ZTransferColors.accentBlue)
-                        .frame(width: frequencyWidth)
-                    Button(statusLabel) {
-                        if holdCompleted { holdCompleted = false; return }
-                        if !coordinator.state.enabled { coordinator.setEnabled(true) }
-                        else if coordinator.state.status == .error { coordinator.retry() }
-                        else if !requiresHoldToDisable && coordinator.state.status != .apUnavailable { coordinator.setEnabled(false) }
-                    }
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(ZTransferColors.primaryText)
-                    .frame(maxWidth: .infinity).frame(height: 50)
-                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14))
-                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(ZTransferColors.secondaryText.opacity(0.15)))
-                    .frame(width: actionWidth)
-                    .onLongPressGesture(minimumDuration: 0.7) {
-                        if coordinator.state.enabled {
-                            holdCompleted = true
-                            coordinator.setEnabled(false)
-                        }
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                GeometryReader { geometry in
+                    // Android uses weights 0.82 / 0.86 / 1.18 with two 8dp
+                    // gaps. Keep those proportions instead of fixing the
+                    // leading control to 44pt, which made the panel diverge
+                    // on narrow phones.
+                    let unit = max(0, geometry.size.width - 16) / 2.86
+                    let leadingWidth = unit * 0.82
+                    let frequencyWidth = unit * 0.86
+                    let actionWidth = unit * 1.18
+                    HStack(spacing: 8) {
+                        leadingControl(width: leadingWidth, now: context.date)
+                            .frame(width: leadingWidth)
+                        frequencyControl(width: frequencyWidth, now: context.date)
+                            .frame(width: frequencyWidth)
+                        statusControl(width: actionWidth)
+                            .frame(width: actionWidth)
                     }
                 }
             }
-            .frame(height: 50)
+            .frame(height: 42)
         }
         .padding(12)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18))
@@ -185,6 +165,78 @@ private struct GPSInlinePanel: View {
         switch coordinator.state.status {
         case .pairingSuccess, .connected, .writing, .waitingFix, .ready: return coordinator.state.enabled
         default: return false
+        }
+    }
+
+    @ViewBuilder
+    private func leadingControl(width: CGFloat, now: Date) -> some View {
+        if !coordinator.state.enabled {
+            Button { showingReset = true } label: {
+                Image(systemName: "link.slash")
+                    .symbolRenderingMode(.hierarchical)
+                    .font(.system(size: 18, weight: .medium))
+                    .frame(maxWidth: .infinity).frame(height: 42)
+            }
+            .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 14))
+            .disabled(!coordinator.bluetooth.hasSavedPairing)
+            .opacity(coordinator.bluetooth.hasSavedPairing ? 1 : 0.42)
+        } else if requiresHoldToDisable {
+            let value = coordinator.state.lastSentAt.map { date in
+                let formatter = DateFormatter()
+                formatter.dateFormat = "HH:mm:ss"
+                formatter.locale = Locale(identifier: "en_US_POSIX")
+                return formatter.string(from: date)
+            } ?? "--:--:--"
+            DetentWheel(label: "", options: [value], selected: value,
+                        optionLabel: { $0 }, onCommit: { _ in }, rowHeight: 16,
+                        wheelHeight: 42, readOnly: true, cornerRadius: 14,
+                        optionFontSize: 13, accentColor: ZTransferColors.accentBlue,
+                        emphasized: coordinator.state.lastSentAt != nil,
+                        showEmphasisBorder: false)
+        } else {
+            Color.clear
+        }
+    }
+
+    @ViewBuilder
+    private func frequencyControl(width: CGFloat, now: Date) -> some View {
+        if requiresHoldToDisable {
+            let remaining = coordinator.state.lastSentAt.map {
+                max(0, Int(ceil(Double(coordinator.frequency.rawValue) - now.timeIntervalSince($0))))
+            }
+            let text = remaining.map { "\($0 / 60):\(String(format: "%02d", $0 % 60))" } ?? "--:--"
+            DetentWheel(label: "", options: [text], selected: text,
+                        optionLabel: { $0 }, onCommit: { _ in }, rowHeight: 16,
+                        wheelHeight: 42, readOnly: true, cornerRadius: 14,
+                        optionFontSize: 13, accentColor: ZTransferColors.statusConnected,
+                        emphasized: true, showEmphasisBorder: false)
+        } else {
+            DetentWheel(label: AppLocalized.resource("gps_update_frequency_label"),
+                        options: GPSUpdateFrequency.allCases, selected: coordinator.frequency,
+                        optionLabel: { $0.title }, onCommit: coordinator.setFrequency,
+                        rowHeight: 16, wheelHeight: 42, enabled: !coordinator.state.enabled,
+                        cornerRadius: 14, optionFontSize: 13,
+                        accentColor: ZTransferColors.accentBlue)
+        }
+    }
+
+    private func statusControl(width: CGFloat) -> some View {
+        Button(statusLabel) {
+            if holdCompleted { holdCompleted = false; return }
+            if !coordinator.state.enabled { coordinator.setEnabled(true) }
+            else if coordinator.state.status == .error { coordinator.retry() }
+            else if !requiresHoldToDisable && coordinator.state.status != .apUnavailable { coordinator.setEnabled(false) }
+        }
+        .font(.system(size: 14, weight: .semibold))
+        .foregroundStyle(ZTransferColors.primaryText)
+        .frame(maxWidth: .infinity).frame(height: 42)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(ZTransferColors.secondaryText.opacity(0.15)))
+        .onLongPressGesture(minimumDuration: 0.7) {
+            if coordinator.state.enabled {
+                holdCompleted = true
+                coordinator.setEnabled(false)
+            }
         }
     }
 }
