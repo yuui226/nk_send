@@ -60,6 +60,12 @@ enum PhotoEffectsRenderer {
                     ? CGRect(x: photo.minX - photo.width * 0.018, y: photo.minY - photo.width * 0.09,
                              width: photo.width * 1.036, height: photo.height + photo.width * 0.18)
                     : photo.insetBy(dx: -inset, dy: -inset)
+                if settings.photoFramePreset == .galleryMat {
+                    // Android lifts the black mat as its own Minimal-style
+                    // surface before drawing the source photo above it.
+                    drawPhotoElevation(cg, rect: outer, radius: 0,
+                                       preset: .minimal, canvasSize: layout.canvas)
+                }
                 cg.setFillColor(UIColor(red: 0.025, green: 0.027, blue: 0.031, alpha: 1).cgColor)
                 cg.fill(outer)
             }
