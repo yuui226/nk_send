@@ -324,6 +324,12 @@ struct PhotoListView: View {
                 Task { @MainActor in
                     guard generation == effectPreviewGeneration else { return }
                     await session.setEffectPreviewActive(false)
+                    // Android's fill collector is resumed by the same state
+                    // transition that releases the effect-preview channel.
+                    // Without an explicit wake, a worker that yielded while
+                    // the preview was active would remain stopped until an
+                    // unrelated filter or transfer change occurred.
+                    model.wakeThumbnailFill()
                 }
             }
             if let data = try? await session.cachedThumbnail(file: file), let image = UIImage(data: data) {
