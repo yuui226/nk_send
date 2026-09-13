@@ -49,8 +49,19 @@ enum PhotoEffectsRenderer {
         return UIGraphicsImageRenderer(size: layout.canvas, format: format).image { renderer in
             let cg = renderer.cgContext
             drawBackdrop(cg, image: image, layout: layout, preset: settings.photoFramePreset)
+            if settings.photoFramePreset == .galleryMat || settings.photoFramePreset == .filmGallery {
+                let photo = layout.photo
+                let inset = min(photo.width, photo.height) * 0.045
+                let outer = settings.photoFramePreset == .filmGallery
+                    ? CGRect(x: photo.minX - photo.width * 0.018, y: photo.minY - photo.width * 0.09,
+                             width: photo.width * 1.036, height: photo.height + photo.width * 0.18)
+                    : photo.insetBy(dx: -inset, dy: -inset)
+                cg.setFillColor(UIColor(red: 0.025, green: 0.027, blue: 0.031, alpha: 1).cgColor)
+                cg.fill(outer)
+            }
             if settings.photoFrameBorderEnabled {
-                drawPhoto(cg, image: image, rect: layout.photo, preset: settings.photoFramePreset)
+                drawPhoto(cg, image: image, rect: layout.photo, preset: settings.photoFramePreset,
+                          metadataBandHeight: layout.canvas.height - layout.metadataTop)
             } else {
                 image.draw(in: layout.photo)
             }
@@ -179,22 +190,22 @@ enum PhotoEffectsRenderer {
         }
     }
 
-    private static func drawPhoto(_ cg: CGContext, image: UIImage, rect: CGRect, preset: PhotoFramePreset) {
+    private static func drawPhoto(_ cg: CGContext, image: UIImage, rect: CGRect, preset: PhotoFramePreset, metadataBandHeight: CGFloat) {
         let radius: CGFloat = switch preset {
         case .colorArchive: rect.width * 0.012
         case .brandInset, .brandGallery: rect.width * 0.014
-        case .mist, .cinema, .minimal, .frosted: rect.width * 0.035
+        case .mist, .cinema, .minimal, .frosted: max(1, metadataBandHeight * 0.26)
         default: rect.width * 0.018
         }
         let path = UIBezierPath(roundedRect: rect, cornerRadius: radius).cgPath
-        if ![.plaque, .immersive, .filmEdge].contains(preset) {
+        if ![.plaque, .immersive, .filmEdge, .classicSignature, .filmGallery].contains(preset) {
             cg.saveGState()
             cg.setShadow(offset: CGSize(width: 0, height: rect.width * 0.009), blur: rect.width * 0.018, color: UIColor.black.withAlphaComponent(0.20).cgColor)
             cg.setFillColor(UIColor.white.cgColor); cg.addPath(path); cg.fillPath()
             cg.restoreGState()
         }
         cg.saveGState(); cg.addPath(path); cg.clip(); image.draw(in: rect); cg.restoreGState()
-        if preset != .plaque && preset != .immersive && preset != .filmEdge {
+        if preset != .plaque && preset != .immersive && preset != .filmEdge && preset != .classicSignature && preset != .filmGallery {
             let stroke = preset == .minimal
                 ? UIColor(red: 0.08, green: 0.11, blue: 0.14, alpha: 0.18)
                 : UIColor(white: 1, alpha: 0.275)
@@ -290,31 +301,39 @@ enum PhotoEffectsRenderer {
             let exposure = [metadata.aperture, metadata.shutter, metadata.iso].compactMap { $0 }.joined(separator: "   ")
             if !exposure.isEmpty { detail = detail.isEmpty ? exposure : detail + "   " + exposure }
         }
-        var rows: [(String, CGFloat, UIFont.Weight)] = []
+        var rows: [(text: String, size: CGFloat, weight: UIFont.Weight, kind: Int)] = []
         let title = [brand, model].filter { !$0.isEmpty }.joined(separator: " ")
-        if !title.isEmpty { rows.append((title, area.width * 0.032, .bold)) }
-        if !lens.isEmpty { rows.append((lens, area.width * 0.0185, .medium)) }
+        if !title.isEmpty { rows.append((title, area.width * 0.032, .bold, 0)) }
+        if !lens.isEmpty { rows.append((lens, area.width * 0.0185, .medium, 1)) }
         let detailWithDate = [detail, settings.showDate ? (metadata.dateTime ?? "") : ""]
             .filter { !$0.isEmpty }.joined(separator: "   ")
-        if !detailWithDate.isEmpty { rows.append((detailWithDate, area.width * 0.020, .regular)) }
-        if let location = metadata.locationRow, !location.isEmpty { rows.append((location, area.width * 0.018, .regular)) }
-        if watermark.enabled && watermark.content == .text && !photoPlacement(watermark.position) { rows.append((watermark.displayText, area.width * textSizeFraction(watermark.sizePercent), .regular)) }
+        if !detailWithDate.isEmpty { rows.append((detailWithDate, area.width * 0.020, .regular, 2)) }
+        if let location = metadata.locationRow, !location.isEmpty { rows.append((location, area.width * 0.018, .regular, 3)) }
+        if watermark.enabled && watermark.content == .text && !photoPlacement(watermark.position) { rows.append((watermark.displayText, area.width * textSizeFraction(watermark.sizePercent), .regular, 4)) }
         guard !rows.isEmpty else { return }
+        let fonts = rows.map { UIFont.systemFont(ofSize: max(9, $0.size), weight: $0.weight) }
+        let inkHeights = fonts.map { $0.ascender + abs($0.descender) }
         let gap = min(area.width * 0.0125, area.height * 0.09)
-        let heights = rows.map { ($0.1 * 1.18) }
-        let total = heights.reduce(0, +) + gap * CGFloat(max(0, rows.count - 1))
-        let scale = min(1, max(0.2, (area.height * 0.84) / max(total, 1)))
-        var y = area.midY - total * scale * 0.5
+        let available = area.height * 0.88
+        let inkTotal = inkHeights.reduce(0, +)
+        let scale = min(1, max(0.2, available / max(inkTotal, 1)))
+        let scaledHeights = inkHeights.map { $0 * scale }
+        let total = scaledHeights.reduce(0, +) + gap * CGFloat(max(0, rows.count - 1)) * scale
+        var cursor = area.midY - total * 0.5
         let color = lightText ? UIColor(red: 0.97, green: 0.98, blue: 0.99, alpha: 1) : UIColor(red: 0.10, green: 0.12, blue: 0.15, alpha: 1)
         let muted = lightText ? UIColor(red: 0.86, green: 0.89, blue: 0.91, alpha: 1) : UIColor(red: 0.29, green: 0.31, blue: 0.33, alpha: 1)
         for (index, row) in rows.enumerated() {
-            let font = UIFont.systemFont(ofSize: max(9, row.1 * scale), weight: row.2)
+            let font = fonts[index].withSize(max(9, fonts[index].pointSize * scale))
             var attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: index == 0 ? color : muted]
-            if row.0 == watermark.displayText && watermark.effect == .shadow { let s = NSShadow(); s.shadowBlurRadius = 3; s.shadowOffset = CGSize(width: 0, height: 1); s.shadowColor = UIColor.black.withAlphaComponent(0.35); attrs[.shadow] = s }
-            let width = (row.0 as NSString).size(withAttributes: attrs).width
-            let x: CGFloat = switch watermark.position { case .left where row.0 == watermark.displayText: area.minX + area.width * 0.07; case .right where row.0 == watermark.displayText: area.maxX - area.width * 0.07 - width; default: area.midX - width * 0.5 }
-            row.0.draw(at: CGPoint(x: x, y: y), withAttributes: attrs)
-            y += (heights[index] + gap) * scale
+            if row.kind == 4 {
+                attrs[.foregroundColor] = watermarkColor(watermark.color, preset).withAlphaComponent(CGFloat(watermark.opacityPercent) / 100)
+                if watermark.effect == .shadow { let s = NSShadow(); s.shadowBlurRadius = 3; s.shadowOffset = CGSize(width: 0, height: 1); s.shadowColor = UIColor.black.withAlphaComponent(0.35); attrs[.shadow] = s }
+            }
+            let width = (row.text as NSString).size(withAttributes: attrs).width
+            let baseline = cursor + font.ascender
+            let x: CGFloat = row.kind == 4 && watermark.position == .left ? area.minX + area.width * 0.07 : row.kind == 4 && watermark.position == .right ? area.maxX - area.width * 0.07 - width : area.midX - width * 0.5
+            row.text.draw(at: CGPoint(x: x, y: baseline - font.ascender), withAttributes: attrs)
+            cursor += scaledHeights[index] + gap * scale
         }
     }
 
@@ -324,26 +343,54 @@ enum PhotoEffectsRenderer {
         cg.setFillColor(UIColor(red: 0.90, green: 0.91, blue: 0.90, alpha: 1).cgColor); cg.fill(CGRect(x: 0, y: band.minY, width: band.width, height: max(1, band.width * 0.0008)))
         let leftPrimary = metadata.normalizedMake.isEmpty ? (metadata.normalizedModel.isEmpty ? (metadata.lensModel ?? "") : metadata.normalizedModel) : metadata.normalizedMake.uppercased()
         let leftSecondary = [metadata.normalizedModel, metadata.lensModel ?? ""].filter { !$0.isEmpty && $0 != leftPrimary }.joined(separator: " · ")
-        let left = [leftPrimary, leftSecondary].filter { !$0.isEmpty }
         let right = [[metadata.frameDetailLine, metadata.dateTime ?? ""].filter { !$0.isEmpty }.joined(separator: "   "), metadata.locationRow ?? ""].filter { !$0.isEmpty }
-        drawTwoColumnRows(cg, band: band, left: left, right: right)
-        if !left.isEmpty && !right.isEmpty {
-            cg.setStrokeColor(UIColor(red: 0.87, green: 0.88, blue: 0.87, alpha: 1).cgColor)
-            cg.setLineWidth(max(1, band.width * 0.001))
-            let inset = band.height * 0.075
-            cg.move(to: CGPoint(x: band.width * 0.575, y: band.minY + inset))
-            cg.addLine(to: CGPoint(x: band.width * 0.575, y: band.maxY - inset)); cg.strokePath()
-        }
+        let sideWatermark = watermark.enabled && watermark.content == .text && !photoPlacement(watermark.position) && watermark.position != .auto ? watermark : nil
+        drawPlaqueInformation(cg, band: band,
+                              leftPrimary: leftPrimary.isEmpty ? nil : leftPrimary,
+                              leftSecondary: leftSecondary.isEmpty ? nil : leftSecondary,
+                              right: right, watermark: sideWatermark)
         if photoPlacement(watermark.position) || watermark.content == .image {
             var photoWatermark = watermark
             if !photoPlacement(photoWatermark.position) { photoWatermark.position = .photoBottomCenter }
             drawWatermark(cg, watermark: photoWatermark, photo: layout.photo, canvas: layout.canvas, preset: .plaque, metadataBand: band)
-        } else if watermark.enabled, watermark.content == .text {
-            let font = watermarkFont(watermark.font, size: min(layout.canvas.width, layout.canvas.height) * textSizeFraction(watermark.sizePercent))
-            let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: watermarkColor(watermark.color, .plaque).withAlphaComponent(CGFloat(watermark.opacityPercent) / 100)]
-            let width = (watermark.displayText as NSString).size(withAttributes: attrs).width
-            let x: CGFloat = watermark.position == .left ? band.minX + band.width * 0.07 : watermark.position == .right ? band.maxX - band.width * 0.07 - width : band.midX - width * 0.5
-            watermark.displayText.draw(at: CGPoint(x: x, y: band.midY - font.lineHeight * 0.5), withAttributes: attrs)
+        }
+    }
+
+    private static func drawPlaqueInformation(_ cg: CGContext, band: CGRect, leftPrimary: String?, leftSecondary: String?, right: [String], watermark: PhotoFrameWatermark?) {
+        let primaryFont = UIFont.systemFont(ofSize: band.width * 0.027, weight: .medium)
+        let secondaryFont = UIFont.systemFont(ofSize: band.width * 0.0165)
+        let rightFont = UIFont.systemFont(ofSize: band.width * 0.0245)
+        let mutedFont = UIFont.systemFont(ofSize: band.width * 0.018)
+        let slots: [(String?, UIFont, UIColor, String?, UIFont, UIColor)] = [
+            (leftPrimary, primaryFont, UIColor(white: 0.07, alpha: 1), right.first, rightFont, UIColor(white: 0.07, alpha: 1)),
+            (leftSecondary, secondaryFont, UIColor(white: 0.40, alpha: 1), right.dropFirst().first, mutedFont, UIColor(white: 0.40, alpha: 1)),
+            (nil, mutedFont, UIColor.clear, right.dropFirst(2).first, mutedFont, UIColor(white: 0.40, alpha: 1)),
+        ]
+        let watermarkSlot = watermark.map { ($0.displayText, watermarkFont($0.font, size: band.width * textSizeFraction($0.sizePercent)), watermarkColor($0.color, .plaque).withAlphaComponent(CGFloat($0.opacityPercent) / 100)) }
+        let slotHeights = slots.map { slot in max(slot.0.map { ($0 as NSString).size(withAttributes: [.font: slot.1]).height } ?? 0, slot.3.map { ($0 as NSString).size(withAttributes: [.font: slot.4]).height } ?? 0) }
+        let allHeights = slotHeights + (watermarkSlot.map { [($0.0 as NSString).size(withAttributes: [.font: $0.1]).height] } ?? [])
+        guard allHeights.contains(where: { $0 > 0 }) else { return }
+        let gap = min(band.width * 0.0115, band.height * 0.095)
+        let total = allHeights.reduce(0, +) + gap * CGFloat(max(0, allHeights.count - 1))
+        let scale = min(1, band.height / max(total, 1))
+        var y = band.midY - total * scale * 0.5
+        for (index, slot) in slots.enumerated() {
+            if let text = slot.0 { let font = slot.1.withSize(max(9, slot.1.pointSize * scale)); text.draw(at: CGPoint(x: band.width * 0.058, y: y), withAttributes: [.font: font, .foregroundColor: slot.2]) }
+            if let text = slot.3 { let font = slot.4.withSize(max(9, slot.4.pointSize * scale)); let width = (text as NSString).size(withAttributes: [.font: font]).width; text.draw(at: CGPoint(x: band.width * 0.94 - width, y: y), withAttributes: [.font: font, .foregroundColor: slot.5]) }
+            y += slotHeights[index] * scale + gap * scale
+        }
+        if let watermark, let slot = watermarkSlot {
+            let font = slot.1.withSize(max(9, slot.1.pointSize * scale)); var attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: slot.2]
+            if watermark.effect == .shadow { let shadow = NSShadow(); shadow.shadowBlurRadius = 3; shadow.shadowOffset = CGSize(width: 0, height: 1); shadow.shadowColor = UIColor.black.withAlphaComponent(0.35); attrs[.shadow] = shadow }
+            let width = (slot.0 as NSString).size(withAttributes: attrs).width
+            let x = watermark.position == .left ? band.minX + band.width * 0.07 : watermark.position == .right ? band.maxX - band.width * 0.07 - width : band.midX - width * 0.5
+            slot.0.draw(at: CGPoint(x: x, y: y), withAttributes: attrs)
+        }
+        if leftPrimary != nil && !right.isEmpty {
+            cg.setStrokeColor(UIColor(red: 0.87, green: 0.88, blue: 0.87, alpha: 1).cgColor)
+            cg.setLineWidth(max(1, band.width * 0.001))
+            let inset = band.height * 0.075
+            cg.move(to: CGPoint(x: band.width * 0.575, y: band.minY + inset)); cg.addLine(to: CGPoint(x: band.width * 0.575, y: band.maxY - inset)); cg.strokePath()
         }
     }
 
@@ -441,7 +488,6 @@ enum PhotoEffectsRenderer {
     private static func drawEditorial(_ cg: CGContext, image: UIImage, layout: Layout, preset: PhotoFramePreset, metadata: PhotoFrameMetadata, watermark: PhotoFrameWatermark, settings: PhotoFrameMetadataSettings) {
         switch preset {
         case .galleryMat:
-            cg.setFillColor(UIColor.black.cgColor); cg.fill(CGRect(x: layout.photo.minX - layout.photo.width * 0.045, y: layout.photo.minY - layout.photo.height * 0.045, width: layout.photo.width * 1.09, height: layout.photo.height * 1.09))
             drawMetadataRows(cg, area: CGRect(x: layout.canvas.width * 0.08, y: layout.photo.maxY + layout.photo.width * 0.045, width: layout.canvas.width * 0.84, height: layout.canvas.height - layout.photo.maxY - layout.photo.width * 0.05), preset: preset, rows: metadata.editorialRows, watermark: watermark, dark: true, emphasizeFirst: false)
         case .colorArchive:
             drawPalette(cg, image: image, layout: layout)
@@ -556,7 +602,6 @@ enum PhotoEffectsRenderer {
     private static func drawFilmStrip(_ cg: CGContext, layout: Layout, metadata: PhotoFrameMetadata) {
         let photo = layout.photo, unit = photo.width, holeW = unit * 0.025, holeH = unit * 0.04, gap = unit * 0.025
         let outer = CGRect(x: photo.minX - unit * 0.018, y: photo.minY - unit * 0.09, width: photo.width + unit * 0.036, height: photo.height + unit * 0.18)
-        cg.setFillColor(UIColor(red: 0.05, green: 0.055, blue: 0.063, alpha: 1).cgColor); cg.fill(outer)
         cg.setFillColor(UIColor(red: 0.22, green: 0.22, blue: 0.24, alpha: 1).cgColor)
         let count = max(3, Int((outer.width - gap) / (holeW + gap)))
         let occupied = CGFloat(count) * holeW + CGFloat(count - 1) * gap, start = outer.midX - occupied / 2
