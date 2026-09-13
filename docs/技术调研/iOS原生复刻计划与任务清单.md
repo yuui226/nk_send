@@ -599,3 +599,9 @@
 - 安卓 `TipLightbulbButton` 使用 `main_settings_help_viewed` 持久化未读状态；首次查看前显示红点和 900ms 往返呼吸，点击入口后立即写入已查看状态。
 - iOS 设置灯泡入口现读取并写回同名键，补齐红点、同周期缩放和点击后持久化清除；该提示不改变帮助浮层内容或设置项状态。
 - 验证：代码待本轮测试完成；未在真机核对材质下的红点裁剪和帧率，任务保持未完成。
+
+### 2026-09-14 设置效果页导航结构对账（进行中）
+
+- 安卓 `SettingsScreen` 的照片效果编辑器属于同一个 `AnchorPopup` 内的二级页面：通过 `AnimatedContent` 横向推入/推出，返回时提交草稿，关闭设置弹窗时也提交当前草稿；不存在从底部出现的系统 sheet。
+- iOS `SettingsView` 已移除 `PhotoEffectsEditorView` 的系统 `.sheet` 入口，改为在设置面板内切换主设置页与照片效果详情页。详情页复用现有 `PhotoEffectsControls`，进入时复制当前配置为草稿，返回或关闭时写回 `PhotoEffectsStore`；页面切换使用 240ms 定向位移与淡入淡出，避免改变安卓的弹窗层级和操作路径。
+- 验证：`xcodebuild -project ios/ZTransfer.xcodeproj -scheme ZTransfer -sdk iphonesimulator -configuration Debug CODE_SIGNING_ALLOWED=NO build` 成功；效果页控件逐项样式、帮助入口和真机帧率仍需继续按安卓源码核对，任务保持未完成。

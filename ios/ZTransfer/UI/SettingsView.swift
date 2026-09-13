@@ -6,7 +6,8 @@ struct SettingsView: View {
     @ObservedObject private var effectsStore: PhotoEffectsStore
     @State private var showingPicker = false
     @State private var feedbackHint = false
-    @State private var showingEffectsEditor = false
+    @State private var settingsPage: SettingsPage = .main
+    @State private var effectsDraft: PhotoEffectsSettings
     @State private var showingHelp = false
     @State private var helpAnchor: CGRect = .zero
     @State private var helpAttentionScale: CGFloat = 1
@@ -26,27 +27,44 @@ struct SettingsView: View {
     var showPhotoEffectsEntry: Bool = true
     var onClose: (() -> Void)? = nil
 
+    private enum SettingsPage {
+        case main
+        case effects
+    }
+
     init(showPhotoEffectsEntry: Bool = true, effectsStore: PhotoEffectsStore = PhotoEffectsStore(), directory: DirectoryAccessStore = DirectoryAccessStore(), onClose: (() -> Void)? = nil) {
         self.showPhotoEffectsEntry = showPhotoEffectsEntry
         self.onClose = onClose
         _effectsStore = ObservedObject(wrappedValue: effectsStore)
         _directory = ObservedObject(wrappedValue: directory)
+        _effectsDraft = State(initialValue: effectsStore.beginDraft())
     }
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            VStack(spacing: 0) {
-                header
-                ScrollView {
-                    VStack(spacing: 10) {
-                        directoryCard
-                        listCard
-                        if showPhotoEffectsEntry { photoEffectsCard }
-                        appearanceCard
-                        footer
+            Group {
+                if settingsPage == .main {
+                    VStack(spacing: 0) {
+                        header
+                        ScrollView { mainSettingsContent }
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 14)
+                    .transition(.asymmetric(
+                        insertion: .move(edge: .leading).combined(with: .opacity),
+                        removal: .move(edge: .leading).combined(with: .opacity)
+                    ))
+                } else {
+                    VStack(spacing: 0) {
+                        effectsHeader
+                        ScrollView {
+                            PhotoEffectsControls(draft: $effectsDraft)
+                                .padding(.horizontal, 16)
+                                .padding(.bottom, 14)
+                        }
+                    }
+                    .transition(.asymmetric(
+                        insertion: .move(edge: .trailing).combined(with: .opacity),
+                        removal: .move(edge: .trailing).combined(with: .opacity)
+                    ))
                 }
             }
 
@@ -68,12 +86,10 @@ struct SettingsView: View {
         .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous).stroke(ZTransferColors.primaryText.opacity(0.16), lineWidth: 1))
         .sheet(isPresented: $showingPicker) { DirectoryPicker { url in directory.setDirectory(url); showingPicker = false } }
-        .sheet(isPresented: $showingEffectsEditor) {
-            PhotoEffectsEditorView(initial: effectsStore.settings) { effectsStore.update($0); showingEffectsEditor = false }
-        }
         .coordinateSpace(name: "settings-panel")
         .onPreferenceChange(SettingsHelpAnchorPreferenceKey.self) { helpAnchor = $0 }
         .animation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.24), value: showingHelp)
+        .animation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.24), value: settingsPage)
         .onAppear {
             // Migrate the early preview value ("自动") to the same BCP-47
             // tags used by Android so the selection actually changes the app
@@ -88,6 +104,67 @@ struct SettingsView: View {
                 }
             }
         }
+    }
+
+    private var mainSettingsContent: some View {
+        VStack(spacing: 10) {
+            directoryCard
+            listCard
+            if showPhotoEffectsEntry { photoEffectsCard }
+            appearanceCard
+            footer
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 14)
+    }
+
+    private var effectsHeader: some View {
+        HStack(spacing: 8) {
+            Button(action: showMainSettings) {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(ZTransferColors.primaryText)
+                    .frame(width: 30, height: 30)
+            }
+            .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 12))
+            Text(AppLocalized.resource("photo_effects"))
+                .zTransferText(size: ZTransferMetrics.title, weight: .bold)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+            Spacer()
+            Button(action: closeSettings) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundStyle(ZTransferColors.secondaryText)
+                    .frame(width: 30, height: 30)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 12)
+        .padding(.bottom, 8)
+    }
+
+    private func showEffectsSettings() {
+        effectsDraft = effectsStore.beginDraft()
+        withAnimation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.24)) {
+            showingHelp = false
+            settingsPage = .effects
+        }
+    }
+
+    private func showMainSettings() {
+        effectsStore.update(effectsDraft)
+        withAnimation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.24)) {
+            settingsPage = .main
+        }
+    }
+
+    private func closeSettings() {
+        if settingsPage == .effects {
+            effectsStore.update(effectsDraft)
+        }
+        onClose?()
     }
 
     private var header: some View {
@@ -239,7 +316,7 @@ struct SettingsView: View {
             case .image: return AppLocalized.resource("photo_frame_image_watermark")
             }
         }()
-        Button { showingEffectsEditor = true } label: {
+        Button(action: showEffectsSettings) {
             SettingsCard {
                 HStack { Text(AppLocalized.resource("photo_effects")).zTransferText(size: ZTransferMetrics.body, weight: .semibold); Spacer(); Image(systemName: "chevron.right").foregroundStyle(ZTransferColors.secondaryText) }
                 Divider().opacity(0.35)
