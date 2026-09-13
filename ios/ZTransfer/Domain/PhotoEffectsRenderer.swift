@@ -387,8 +387,8 @@ enum PhotoEffectsRenderer {
                       height: bandHeight - verticalInset * 2)
     }
 
-    private static func drawFrostedMetadataPanel(_ cg: CGContext, panel: CGRect, canvas: CGSize) {
-        let radius = min(panel.height * 0.31, panel.width * 0.5)
+    private static func drawFrostedMetadataPanel(_ cg: CGContext, panel: CGRect, canvas: CGSize, metadataBandHeight: CGFloat) {
+        let radius = min(metadataBandHeight * 0.26, panel.width * 0.5)
         let path = UIBezierPath(roundedRect: panel, cornerRadius: radius).cgPath
         cg.saveGState()
         cg.setShadow(offset: CGSize(width: 0, height: canvas.height * 0.004),
@@ -404,7 +404,10 @@ enum PhotoEffectsRenderer {
     private static func drawStandardMetadata(_ cg: CGContext, layout: Layout, preset: PhotoFramePreset, metadata: PhotoFrameMetadata, watermark: PhotoFrameWatermark, settings: PhotoFrameMetadataSettings) {
         let area = preset == .frosted ? frostedMetadataPanelBounds(layout) :
             CGRect(x: 0, y: layout.photo.maxY, width: layout.canvas.width, height: layout.canvas.height - layout.photo.maxY)
-        if preset == .frosted { drawFrostedMetadataPanel(cg, panel: area, canvas: layout.canvas) }
+        if preset == .frosted {
+            drawFrostedMetadataPanel(cg, panel: area, canvas: layout.canvas,
+                                     metadataBandHeight: layout.canvas.height - layout.metadataTop)
+        }
         drawAndroidMetadata(cg, area: area, preset: preset, metadata: metadata, watermark: watermark, settings: settings,
                             lightText: preset == .mist || preset == .cinema)
         var photoWatermark = watermark
@@ -485,7 +488,10 @@ enum PhotoEffectsRenderer {
         let band = CGRect(x: 0, y: layout.metadataTop, width: layout.canvas.width, height: layout.canvas.height - layout.metadataTop)
         cg.setFillColor(UIColor(red: 0.992, green: 0.992, blue: 0.988, alpha: 1).cgColor); cg.fill(band)
         cg.setFillColor(UIColor(red: 0.90, green: 0.91, blue: 0.90, alpha: 1).cgColor); cg.fill(CGRect(x: 0, y: band.minY, width: band.width, height: max(1, band.width * 0.0008)))
-        let leftPrimary = metadata.normalizedMake.isEmpty ? (metadata.normalizedModel.isEmpty ? (metadata.lensModel ?? "") : metadata.normalizedModel) : metadata.normalizedMake.uppercased()
+        // Plaque deliberately keeps the camera maker exactly as supplied by
+        // EXIF (Android uppercases it without the standard brand alias map).
+        let rawMake = metadata.make?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let leftPrimary = rawMake.isEmpty ? (metadata.normalizedModel.isEmpty ? (metadata.lensModel ?? "") : metadata.normalizedModel) : rawMake.uppercased()
         let leftSecondary = [metadata.normalizedModel, metadata.lensModel ?? ""].filter { !$0.isEmpty && $0 != leftPrimary }.joined(separator: " · ")
         let right = [[metadata.frameDetailLine, metadata.dateTime ?? ""].filter { !$0.isEmpty }.joined(separator: "   "), metadata.locationRow ?? ""].filter { !$0.isEmpty }
         let sideWatermark = watermark.enabled && watermark.content == .text && !photoPlacement(watermark.position) && watermark.position != .auto ? watermark : nil
