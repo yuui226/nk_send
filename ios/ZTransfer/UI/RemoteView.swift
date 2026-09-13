@@ -12,8 +12,10 @@ struct RemoteView: View {
     // Desqueeze is an Android preference.  The histogram and level overlays
     // are RemoteScreen session controls and deliberately reset on entry.
     @AppStorage("remote_desqueeze_multiplier") private var desqueeze = 1.0
+    @AppStorage("remote_audio_levels_visible") private var audioLevelsVisible = true
     @State private var histogramVisible = false
     @State private var levelVisible = false
+    @State private var framingGrid: IOSViewfinderGrid = .off
 
     init(session: CameraSession) {
         _model = StateObject(wrappedValue: RemoteViewModel(camera: session))
@@ -67,6 +69,25 @@ struct RemoteView: View {
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .allowsHitTesting(false)
                     }
+                    if framingGrid != .off {
+                        IOSFramingGridOverlay(divisions: framingGrid.divisions)
+                            .allowsHitTesting(false)
+                    }
+                    if model.movieMode, audioLevelsVisible,
+                       let levels = model.frameMetadata?.soundLevels {
+                        IOSSoundMeter(levels: levels)
+                            .frame(width: 32, height: 116)
+                            .padding(.leading, 10)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity,
+                                   alignment: .bottomLeading)
+                            .allowsHitTesting(false)
+                    }
+                    if let focusFrame = model.frameMetadata?.selectedFocusFrame,
+                       model.frameMetadata?.focusJudgement != .none {
+                        IOSFocusFrameOverlay(frame: focusFrame,
+                                             aspect: (image.size.width / max(image.size.height, 1)) * CGFloat(desqueeze))
+                            .allowsHitTesting(false)
+                    }
                 } else {
                     ProgressView().tint(.white).frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
@@ -118,6 +139,18 @@ struct RemoteView: View {
                         withAnimation(ZTransferMotion.standard) { levelVisible.toggle() }
                     } label: {
                         Image(systemName: "level")
+                    }
+                    Button {
+                        withAnimation(ZTransferMotion.standard) { framingGrid = framingGrid.next }
+                    } label: {
+                        Image(systemName: "square.grid.3x3")
+                    }
+                    if model.movieMode {
+                        Button {
+                            withAnimation(ZTransferMotion.standard) { audioLevelsVisible.toggle() }
+                        } label: {
+                            Image(systemName: audioLevelsVisible ? "waveform" : "waveform.slash")
+                        }
                     }
                 }
                 .foregroundStyle(.white)
@@ -300,6 +333,110 @@ private struct RemoteHistogramOverlay: View {
             index += step
         }
         return bins
+    }
+}
+
+private enum IOSViewfinderGrid: Equatable {
+    case off, thirds, fourths
+
+    var divisions: Int {
+        switch self {
+        case .off: 0
+        case .thirds: 3
+        case .fourths: 4
+        }
+    }
+
+    var next: Self {
+        switch self {
+        case .off: .thirds
+        case .thirds: .fourths
+        case .fourths: .off
+        }
+    }
+}
+
+private struct IOSFramingGridOverlay: View {
+    let divisions: Int
+
+    var body: some View {
+        Canvas { context, size in
+            guard divisions > 1 else { return }
+            let stroke = StrokeStyle(lineWidth: 0.75, lineCap: .round)
+            let color = Color.white.opacity(0.42)
+            for index in 1..<divisions {
+                let fraction = CGFloat(index) / CGFloat(divisions)
+                var vertical = Path()
+                vertical.move(to: CGPoint(x: size.width * fraction, y: 0))
+                vertical.addLine(to: CGPoint(x: size.width * fraction, y: size.height))
+                context.stroke(vertical, with: .color(color), style: stroke)
+                var horizontal = Path()
+                horizontal.move(to: CGPoint(x: 0, y: size.height * fraction))
+                horizontal.addLine(to: CGPoint(x: size.width, y: size.height * fraction))
+                context.stroke(horizontal, with: .color(color), style: stroke)
+            }
+        }
+    }
+}
+
+private struct IOSFocusFrameOverlay: View {
+    let frame: RemoteLiveViewFocusFrame
+    let aspect: CGFloat
+
+    var body: some View {
+        GeometryReader { proxy in
+            let fitted = min(proxy.size.width / max(aspect, 0.01), proxy.size.height)
+            let imageWidth = fitted * aspect
+            let imageRect = CGRect(x: (proxy.size.width - imageWidth) / 2,
+                                   y: (proxy.size.height - fitted) / 2,
+                                   width: imageWidth, height: fitted)
+            let rect = CGRect(x: imageRect.minX + imageRect.width * CGFloat(frame.centerX - frame.width / 2),
+                              y: imageRect.minY + imageRect.height * CGFloat(frame.centerY - frame.height / 2),
+                              width: imageRect.width * CGFloat(frame.width),
+                              height: imageRect.height * CGFloat(frame.height))
+            let corner = min(rect.width, rect.height) * 0.24
+            Path { path in
+                path.move(to: CGPoint(x: rect.minX, y: rect.minY + corner))
+                path.addLine(to: CGPoint(x: rect.minX, y: rect.minY))
+                path.addLine(to: CGPoint(x: rect.minX + corner, y: rect.minY))
+                path.move(to: CGPoint(x: rect.maxX - corner, y: rect.minY))
+                path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+                path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY + corner))
+                path.move(to: CGPoint(x: rect.minX, y: rect.maxY - corner))
+                path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+                path.addLine(to: CGPoint(x: rect.minX + corner, y: rect.maxY))
+                path.move(to: CGPoint(x: rect.maxX - corner, y: rect.maxY))
+                path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+                path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - corner))
+            }
+            .stroke(.green, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+        }
+    }
+}
+
+private struct IOSSoundMeter: View {
+    let levels: RemoteLiveViewSoundLevels
+
+    var body: some View {
+        HStack(alignment: .bottom, spacing: 4) {
+            meter(levels.currentLeft, peak: levels.peakLeft)
+            meter(levels.currentRight, peak: levels.peakRight)
+        }
+        .padding(.horizontal, 4)
+        .padding(.vertical, 4)
+        .background(.black.opacity(0.56), in: RoundedRectangle(cornerRadius: 7))
+        .overlay(RoundedRectangle(cornerRadius: 7).stroke(.white.opacity(0.14), lineWidth: 0.5))
+    }
+
+    private func meter(_ current: Int, peak: Int) -> some View {
+        VStack(spacing: 2) {
+            ForEach((0...Int(RemoteLiveViewSoundLevels.maxSegment)).reversed(), id: \.self) { segment in
+                Capsule()
+                    .fill(segment <= peak ? (segment >= 12 ? .red : segment >= 9 ? .yellow : .green) : .white.opacity(0.16))
+                    .frame(width: 7, height: 5)
+                    .opacity(segment <= current ? 1 : 0.42)
+            }
+        }
     }
 }
 
