@@ -119,7 +119,9 @@ actor PhotoThumbnailStore {
             ? PhotoThumbnailDiskCache.staCacheFileName(handle: file.id, size: file.size)
             : PhotoThumbnailDiskCache.cacheFileName(fileName: file.fileName, size: file.size, captureDate: file.captureDate)
         let standardKey = PhotoThumbnailDiskCache.cacheFileName(fileName: file.fileName, size: file.size, captureDate: file.captureDate)
-        if negative.contains(key) { return false }
+        // Android's no-thumbnail set is a settled result, not a transient
+        // failure. A disk-fill pass must not keep retrying the same handle.
+        if negative.contains(key) { return true }
         if let store = cameraStore,
            let url = store.find(key, legacyName: PhotoThumbnailDiskCache.legacyCacheFileName(
                fileName: file.fileName, size: file.size, captureDate: file.captureDate
@@ -135,7 +137,11 @@ actor PhotoThumbnailStore {
         do {
             let value = try await awaitFlight(WaiterToken(key: key, flight: flight))
             guard cameraIdentity == expectedIdentity else { throw CancellationError() }
-            guard !value.isEmpty else { negative.insert(key); return false }
+            // An empty GetThumb response is the camera's authoritative
+            // no-thumbnail result. Keep it in the negative cache and report
+            // success so ThumbnailFillQueue can mark the handle settled,
+            // matching Android's `noThumbHandles += handle; return true`.
+            guard !value.isEmpty else { negative.insert(key); return true }
             guard cameraStore?.write(value, as: key) == true else { return false }
             return true
         } catch { throw error }
