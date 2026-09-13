@@ -114,6 +114,30 @@ struct RemoteView: View {
                             .padding(.bottom, 8)
                             .allowsHitTesting(false)
                     }
+                    if model.state.liveViewStable {
+                        HStack(spacing: 4) {
+                            RemoteStatusBadge(
+                                text: RemoteExposureParameters.format(
+                                    .liveViewSelector,
+                                    raw: model.movieMode ? 1 : 0,
+                                ),
+                                weight: .bold,
+                            )
+                            if let focusMode = model.focusModeDescriptor {
+                                RemoteStatusBadge(
+                                    text: RemoteExposureParameters.format(
+                                        .focusMode,
+                                        raw: focusMode.current,
+                                    ),
+                                    weight: .semibold,
+                                )
+                            }
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity,
+                               alignment: .topLeading)
+                        .padding(8)
+                        .allowsHitTesting(false)
+                    }
                 } else {
                     ProgressView().tint(.white).frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
@@ -311,6 +335,20 @@ struct RemoteView: View {
         }
         .padding(.horizontal, 14)
         .foregroundStyle(.white)
+    }
+}
+
+private struct RemoteStatusBadge: View {
+    let text: String
+    let weight: Font.Weight
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 12, weight: weight))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
     }
 }
 

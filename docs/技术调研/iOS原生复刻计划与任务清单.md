@@ -532,3 +532,8 @@
 
 - 安卓 `RemoteScreen` 的 `showFps` 默认值为 `true`，取景器右下角按 `%.1f fps`、10sp 等宽字体、黑色 0.5 背景和 8dp 圆角显示；iOS 增加同一会话态开关和覆盖层，关闭后不再绘制该信息。
 - 验证：待本轮模拟器构建完成；真实监看帧率位置和字体仍需设备画面核对。
+
+### 2026-09-14 远程监看模式徽标
+
+- 安卓 `RemoteViewfinderPanel` 在取景器左上角显示当前照片/录像模式和对焦模式；iOS 现在使用 `liveViewSelector` 与 `focusMode` 的同一协议格式，仅在 `liveViewStable` 时绘制相同的黑底白字徽标，避免加载阶段显示伪状态。
+- 验证：Xcode Simulator 测试 127 项、0 failures；真实相机模式切换和徽标位置仍待设备画面核对。
