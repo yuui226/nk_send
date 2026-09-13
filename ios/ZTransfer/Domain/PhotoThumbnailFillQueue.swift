@@ -17,6 +17,29 @@ actor PhotoThumbnailFillQueue {
     // the final scan completion can both reach the fill pipeline.
     private var seededRevision = -1
     private var priorityRange: PhotoDateRange?
+    private let wakeStream: AsyncStream<Void>
+    private let wakeContinuation: AsyncStream<Void>.Continuation
+
+    init() {
+        var continuation: AsyncStream<Void>.Continuation?
+        wakeStream = AsyncStream(bufferingPolicy: .bufferingNewest(1)) { streamContinuation in
+            continuation = streamContinuation
+        }
+        wakeContinuation = continuation!
+    }
+
+    /// Mirrors Android's conflated `thumbnailFillWake` channel.  A worker
+    /// waits here when the queue is empty instead of exiting, so a later
+    /// object event, filter change, or foreground-owner release resumes the
+    /// same fill lifecycle.
+    func wake() {
+        wakeContinuation.yield(())
+    }
+
+    func waitForWake() async {
+        var iterator = wakeStream.makeAsyncIterator()
+        _ = await iterator.next()
+    }
 
     func beginScan() {
         revision &+= 1

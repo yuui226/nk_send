@@ -28,6 +28,7 @@ final class PhotoListViewModel: ObservableObject {
     private var catalogUpdatesTask: Task<Void, Never>?
     private var loadTask: Task<Void, Never>?
     private var fillTask: Task<Void, Never>?
+    private var fillWorkerActive = false
     private var previewPausedScan = false
     private var transferBusy = false
     private var newMediaHandler: (([CameraFile]) -> Void)?
@@ -130,6 +131,8 @@ final class PhotoListViewModel: ObservableObject {
     func load() {
         loadTask?.cancel()
         fillTask?.cancel()
+        fillTask = nil
+        fillWorkerActive = false
         loadGeneration &+= 1
         let generation = loadGeneration
         allFiles.removeAll(keepingCapacity: true)
@@ -156,6 +159,7 @@ final class PhotoListViewModel: ObservableObject {
         // issue GetThumb while this generation is enumerating handles.
         fillTask?.cancel()
         fillTask = nil
+        fillWorkerActive = false
         await thumbnailFillQueue.beginScan()
         loadState = .loading
         isLoadingFiles = true
@@ -335,10 +339,19 @@ final class PhotoListViewModel: ObservableObject {
     func clearFilter() { setFilter(PhotoFilterState()) }
 
     private func startThumbnailFillWorker() {
-        fillTask?.cancel()
+        if fillWorkerActive {
+            Task { await thumbnailFillQueue.wake() }
+            return
+        }
+        fillWorkerActive = true
         fillTask = Task { [weak self] in
             guard let self else { return }
-            while !Task.isCancelled, let id = await thumbnailFillQueue.poll() {
+            defer { self.fillWorkerActive = false }
+            while !Task.isCancelled {
+                guard let id = await thumbnailFillQueue.poll() else {
+                    await thumbnailFillQueue.waitForWake()
+                    continue
+                }
                 // Android's queue resolves the current file when a task is
                 // consumed. Do not capture a one-time catalog snapshot here:
                 // ObjectAdded can enqueue a file after the worker starts.

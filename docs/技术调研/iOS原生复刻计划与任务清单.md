@@ -500,6 +500,12 @@
 - `ios/ZTransferTests/DomainModelTests.swift` 的队列测试在执行前清理并在结束后恢复 `transferQueue.items.v1`，避免共享标准偏好中的历史任务污染断言；生产队列的持久化实现未改变。
 - 验证：`xcodebuild test -project ios/ZTransfer.xcodeproj -scheme ZTransfer -destination 'platform=iOS Simulator,id=CA046456-B859-45F4-9CB3-2C6E2F8E03B0' CODE_SIGNING_ALLOWED=NO`，125 tests、0 failures。
 
+### 2026-09-14 安卓后台缩略图唤醒语义对账
+
+- 对照 `CameraViewModel.startThumbnailFill`：安卓后台填充任务在队列为空时等待合并唤醒信号，不结束任务；对象新增、筛选日期改变、传输/监看/FHD 让路结束和预览返回都会唤醒同一生命周期。iOS 原先 `PhotoListViewModel.startThumbnailFillWorker` 在 `poll()` 返回空时直接退出，后续只能依赖再次创建任务，和安卓的空队列等待及失败重试时序不同。
+- 已修：`PhotoThumbnailFillQueue` 增加容量为 1 的 `AsyncStream` 唤醒通道；队列为空时 worker 等待 `waitForWake()`，`wake()` 保持安卓合并信号语义。`PhotoListViewModel` 不再重复取消正在运行的 worker，新增媒体、筛选变化和显式恢复只唤醒现有任务；只有前台通道仍被占用时才退出，释放后重新建立 worker。对应安卓的 `thumbnailFillWake`、`collectLatest` 让路和 `retryFailed` 触发点。
+- 验证：新增 `testThumbnailFillQueueWakeReleasesAnEmptyWorker`；`xcodebuild -project ios/ZTransfer.xcodeproj -scheme ZTransfer -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test`，140 tests、0 failures。该测试只证明唤醒语义和编译级行为，真实相机前台抢占、断线重连和磁盘写入时序仍未验收，照片列表任务继续保持未完成。
+
 ### 2026-09-14 安卓资源文案对账
 
 - `TransferQueue` 的目录失效、相机连接中断/超时、照片元数据不可读提示改为直接读取安卓资源键；日期筛选拨轮的年/月/日标签也改为安卓资源键，覆盖系统、英文和繁体语言切换。

@@ -54,6 +54,18 @@ final class DomainModelTests: XCTestCase {
         XCTAssertEqual(secondPolled, second.id)
     }
 
+    func testThumbnailFillQueueWakeReleasesAnEmptyWorker() async {
+        let queue = PhotoThumbnailFillQueue()
+        let waiter = Task {
+            await queue.waitForWake()
+            return true
+        }
+        await Task.yield()
+        await queue.wake()
+        let released = await waiter.value
+        XCTAssertTrue(released)
+    }
+
     func testBurstGroupingMatchesConsecutiveNameAndOneSecondRule() {
         let files = (100...102).map { n in
             CameraFile(id: UInt32(n), storageID: 1, format: 0x3801, size: 1,
