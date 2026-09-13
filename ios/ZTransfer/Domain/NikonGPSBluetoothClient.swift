@@ -30,6 +30,7 @@ final class NikonGPSBluetoothClient: NSObject, ObservableObject {
     private var idQueued = false
     private var savedDevice: UInt32?
     private var savedNonce: UInt32?
+    private var savedPeripheralIdentifier: UUID?
     private var controllerName = "ZTransfer"
     private var pendingGeo: Data?
     private var writeQueue: [(CBCharacteristic, Data)] = []
@@ -52,8 +53,19 @@ final class NikonGPSBluetoothClient: NSObject, ObservableObject {
            let legacy = UserDefaults.standard.object(forKey: "gps.pairing.nonce") {
             storage.set(legacy, forKey: GPSPreferences.nonce)
         }
-        self.savedDevice = savedDevice ?? (storage.object(forKey: GPSPreferences.deviceID) as? NSNumber).map { $0.uint32Value }
-        self.savedNonce = savedNonce ?? (storage.object(forKey: GPSPreferences.nonce) as? NSNumber).map { $0.uint32Value }
+        let storedDevice = (storage.object(forKey: GPSPreferences.deviceID) as? NSNumber).map { $0.uint32Value }
+        let storedNonce = (storage.object(forKey: GPSPreferences.nonce) as? NSNumber).map { $0.uint32Value }
+        if (storedDevice == nil) != (storedNonce == nil) {
+            // Android discards an incomplete identity instead of attempting a
+            // direct reconnect with only one half of the pairing tuple.
+            storage.removeObject(forKey: GPSPreferences.deviceID)
+            storage.removeObject(forKey: GPSPreferences.nonce)
+            storage.removeObject(forKey: GPSPreferences.bleAddress)
+        }
+        self.savedDevice = savedDevice ?? ((storedDevice != nil && storedNonce != nil) ? storedDevice : nil)
+        self.savedNonce = savedNonce ?? ((storedDevice != nil && storedNonce != nil) ? storedNonce : nil)
+        self.savedPeripheralIdentifier = storage.string(forKey: GPSPreferences.bleAddress)
+            .flatMap(UUID.init(uuidString:))
         central = CBCentralManager(delegate: nil, queue: .main)
         super.init()
         central.delegate = self
@@ -65,6 +77,23 @@ final class NikonGPSBluetoothClient: NSObject, ObservableObject {
             return
         }
         guard peripheral == nil else { return }
+        // Android's service first attempts the saved BLE address, then falls
+        // back to a filtered scan when the camera is unavailable. CoreBluetooth
+        // exposes the equivalent through a persisted peripheral UUID.
+        if savedDevice != nil, savedNonce != nil,
+           let savedPeripheralIdentifier,
+           let remembered = central.retrievePeripherals(withIdentifiers: [savedPeripheralIdentifier]).first {
+            peripheral = remembered
+            peripheralIdentifier = remembered.identifier
+            state = .connecting(remembered.name ?? "Nikon")
+            remembered.delegate = self
+            central.connect(remembered)
+        } else {
+            beginScan()
+        }
+    }
+
+    private func beginScan() {
         state = .scanning
         central.scanForPeripherals(withServices: [Self.serviceUUID], options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
     }
@@ -182,6 +211,8 @@ extension NikonGPSBluetoothClient: CBCentralManagerDelegate {
         MainActor.assumeIsolated { [weak self] in
             guard let self else { return }
             self.central.stopScan(); self.peripheral = peripheral; self.peripheralIdentifier = peripheral.identifier
+            self.savedPeripheralIdentifier = peripheral.identifier
+            self.defaults.set(peripheral.identifier.uuidString, forKey: GPSPreferences.bleAddress)
             self.state = .connecting(peripheral.name ?? "Nikon")
             peripheral.delegate = self; self.central.connect(peripheral)
         }

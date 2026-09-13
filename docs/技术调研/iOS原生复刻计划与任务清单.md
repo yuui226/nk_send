@@ -321,6 +321,7 @@
 - [ ] **53. BLE 设备发现与配对**：权限、扫描、连接、断线、重连和设备选择。
   - 已有：`NikonGPSBluetoothClient` 按安卓 UUID 扫描 Nikon 服务，串行发现特征、开启 pair/not1 通知、执行四消息配对并处理重连/断线；控制器 ID 写入保持 32 字节 ASCII 规则。
   - 已修：设备号、nonce 和 BLE 地址使用安卓 `nikon_gps` 配置域的 `device_id`、`nonce`、`ble_address` 键；后续启动会复用身份，清除配对会移除三项身份并停止当前 BLE 会话。
+  - 已修：有完整 Nikon 身份时优先通过保存的 `ble_address`（iOS CoreBluetooth UUID）直连，找不到已保存外设时才按服务 UUID 扫描；扫描发现后立即更新同一键，保持安卓的“直连优先、扫描回退”顺序。
   - 待完成：Classic 配对替代路径、CoreBluetooth 权限文案/系统状态和真实设备回归。
 - [ ] **54. Nikon GPS 数据协议**：坐标、时间、海拔、精度、端序、校验和错误映射。
   - 已修：新增 `GPSProtocol.swift`，逐字节实现 41 字节 GEO payload、坐标方向/度分拆分、海拔符号与 UTC 时间；Nikon 四消息配对的 Blowfish/盐值计算通过安卓捕获向量校验。
