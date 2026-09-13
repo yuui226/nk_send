@@ -230,7 +230,9 @@ enum PhotoEffectsRenderer {
         default: rect.width * 0.018
         }
         let path = UIBezierPath(roundedRect: rect, cornerRadius: radius).cgPath
-        if ![.plaque, .immersive, .filmEdge, .classicSignature, .filmGallery].contains(preset) {
+        if preset == .minimal {
+            drawMinimalPhotoElevation(cg, rect: rect, radius: radius, canvasSize: canvasSize)
+        } else if ![.plaque, .immersive, .filmEdge, .classicSignature, .filmGallery].contains(preset) {
             drawPhotoElevation(cg, rect: rect, radius: radius, preset: preset, canvasSize: canvasSize)
         }
         cg.saveGState(); cg.addPath(path); cg.clip(); image.draw(in: rect); cg.restoreGState()
@@ -250,9 +252,26 @@ enum PhotoEffectsRenderer {
         }
     }
 
-    /// Android renders elevation on a quarter-size transparent proxy using two shadow layers.
-    /// Keeping the proxy small avoids a full-resolution software blur while preserving the same
-    /// soft edge and per-preset shadow strength.
+    /// 简白的照片边缘按安卓成图重做：只保留贴边的接触阴影，
+    /// 不使用会在缩放后形成灰色圆角块的代理阴影图。
+    private static func drawMinimalPhotoElevation(_ cg: CGContext, rect: CGRect, radius: CGFloat, canvasSize: CGSize) {
+        guard rect.width > 0, rect.height > 0 else { return }
+        let path = UIBezierPath(roundedRect: rect, cornerRadius: radius).cgPath
+        cg.saveGState()
+        // The reference has a narrow, low-opacity edge shadow directly below the
+        // photo. Rendering it at canvas resolution keeps the footprint stable at
+        // both preview and export sizes.
+        cg.setFillColor(UIColor(white: 0, alpha: 0.01).cgColor)
+        cg.setShadow(offset: CGSize(width: 0, height: max(1, canvasSize.height * 0.0012)),
+                     blur: max(1, min(canvasSize.width, canvasSize.height) * 0.0028),
+                     color: UIColor(red: 8.0 / 255.0, green: 15.0 / 255.0, blue: 21.0 / 255.0,
+                                    alpha: 0.16).cgColor)
+        cg.addPath(path)
+        cg.fillPath()
+        cg.restoreGState()
+    }
+
+    /// Android renders elevation for the other standard presets on a quarter-size proxy.
     private static func drawPhotoElevation(_ cg: CGContext, rect: CGRect, radius: CGFloat, preset: PhotoFramePreset, canvasSize: CGSize) {
         let strength: CGFloat = switch preset {
         case .cinema: 1.15
@@ -282,7 +301,6 @@ enum PhotoEffectsRenderer {
         guard let proxyCG = proxy.cgImage else { return }
         cg.draw(proxyCG, in: CGRect(origin: .zero, size: canvasSize), byTiling: false)
     }
-
 
     private static func blurredBackground(_ image: UIImage, size: CGSize) -> UIImage {
         guard let source = image.cgImage, size.width > 0, size.height > 0 else { return image }
