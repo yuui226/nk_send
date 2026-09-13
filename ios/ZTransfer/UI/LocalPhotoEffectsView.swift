@@ -222,6 +222,14 @@ private struct LocalWorkbenchControls: View {
         draft.metadata = value
         draft.metadataByPreset[draft.photoFramePreset.rawValue] = value
     }
+    private func updateWatermark(_ update: (inout PhotoFrameWatermark) -> Void) {
+        var value = draft
+        update(&value.watermark)
+        if frameEnabled, let index = value.favoriteFrameEffects.firstIndex(where: { $0.preset == value.photoFramePreset }) {
+            value.favoriteFrameEffects[index].watermark = value.watermark
+        }
+        draft = value
+    }
 
     var body: some View {
         ZStack {
@@ -251,11 +259,12 @@ private struct LocalWorkbenchControls: View {
                                 }, rowHeight: 18, wheelHeight: 50, enabled: draft.photoFilterEnabled)
                     .frame(maxWidth: .infinity)
                     Button {
-                        if let id = selectedFilterID {
-                            let key = filterKey(id)
-                            if draft.favoriteFilterIDs.contains(key) { draft.favoriteFilterIDs.remove(key) }
-                            else { draft.favoriteFilterIDs.insert(key) }
-                        }
+                        guard let id = selectedFilterID else { return }
+                        let key = filterKey(id)
+                        var value = draft
+                        if value.favoriteFilterIDs.contains(key) { value.favoriteFilterIDs.remove(key) }
+                        else { value.favoriteFilterIDs.insert(key) }
+                        draft = value
                     } label: {
                         Image(systemName: selectedFilterID.map(isFavoriteID) == true ? "star.fill" : "star")
                             .font(.system(size: 25, weight: .medium))
@@ -264,6 +273,8 @@ private struct LocalWorkbenchControls: View {
                     }.buttonStyle(.plain)
                     .disabled(selectedFilterID == nil || !draft.photoFilterEnabled)
                     .opacity(selectedFilterID == nil || !draft.photoFilterEnabled ? 0.48 : 1)
+                    .contentShape(Rectangle())
+                    .zIndex(2)
             }
         }
             WorkbenchCard(accent: ZTransferColors.accentOrange) {
@@ -297,15 +308,7 @@ private struct LocalWorkbenchControls: View {
                                 onActivated: { withAnimation(.easeInOut(duration: 0.30)) { metadataExpanded.toggle() } })
                     .frame(maxWidth: .infinity)
                     Button {
-                        guard frameEnabled else { return }
-                        let preset = draft.photoFramePreset
-                        if let index = draft.favoriteFrameEffects.firstIndex(where: { $0.preset == preset }) {
-                            draft.favoriteFrameEffects.remove(at: index)
-                            draft.favoriteFramePresets.remove(preset)
-                        } else {
-                            draft.favoriteFrameEffects.append(.init(preset: preset, watermark: draft.watermark))
-                            draft.favoriteFramePresets.insert(preset)
-                        }
+                        toggleFrameFavorite()
                     } label: {
                         Image(systemName: draft.favoriteFrameEffects.contains(where: { $0.preset == draft.photoFramePreset }) ? "star.fill" : "star")
                             .font(.system(size: 25, weight: .medium))
@@ -314,6 +317,8 @@ private struct LocalWorkbenchControls: View {
                     }.buttonStyle(.plain)
                     .disabled(!frameEnabled)
                     .opacity(frameEnabled ? 1 : 0.48)
+                    .contentShape(Rectangle())
+                    .zIndex(2)
                 }
                 if frameEnabled && metadataExpanded {
                     VStack(spacing: 8) {
@@ -352,7 +357,7 @@ private struct LocalWorkbenchControls: View {
                 HStack(spacing: 8) {
                     DetentWheel(label: "水印", options: [false, true], selected: draft.watermark.enabled,
                                 optionLabel: { $0 ? "开启" : "关闭" }, onCommit: { value in
-                                    draft.watermark.enabled = value
+                                    updateWatermark { $0.enabled = value }
                                     draft.photoFrameEnabled = draft.photoFrameBorderEnabled || value
                                 }, rowHeight: 18, wheelHeight: 50, enabled: true, accentColor: ZTransferColors.accentPurple)
                     DetentWheel(label: "水印设置", options: [false], selected: false,
@@ -366,10 +371,10 @@ private struct LocalWorkbenchControls: View {
                         DetentWheel(label: "水印类型", options: PhotoFrameWatermarkContent.allCases, selected: draft.watermark.content,
                                     optionLabel: { $0 == .text ? "文字" : "图片" }, onCommit: { value in
                                         if value == .image && draft.watermark.imageHash == nil { showingWatermarkPicker = true }
-                                        else { draft.watermark.content = value }
+                                        else { updateWatermark { $0.content = value } }
                                     }, rowHeight: 18, wheelHeight: 50, accentColor: ZTransferColors.accentPurple)
                         if draft.watermark.content == .text {
-                            TextField("水印文字", text: Binding(get: { draft.watermark.text }, set: { draft.watermark.text = String($0.prefix(PhotoFrameWatermark.maxTextLength)) }))
+                            TextField("水印文字", text: Binding(get: { draft.watermark.text }, set: { value in updateWatermark { $0.text = String(value.prefix(PhotoFrameWatermark.maxTextLength)) } }))
                                 .textFieldStyle(.plain).padding(.horizontal, 12).frame(height: 42)
                                 .background(ZTransferColors.background.opacity(0.65), in: RoundedRectangle(cornerRadius: 12))
                         } else {
@@ -378,30 +383,25 @@ private struct LocalWorkbenchControls: View {
                         }
                         if draft.watermark.content == .text {
                             HStack(spacing: 8) {
-                                DetentWheel(label: "字体", options: PhotoFrameWatermarkFont.allCases, selected: draft.watermark.font, optionLabel: fontName, onCommit: { draft.watermark.font = $0 }, rowHeight: 18, wheelHeight: 50, accentColor: ZTransferColors.accentPurple)
-                                DetentWheel(label: "大小", options: Array(stride(from: 100, through: 2, by: -2)), selected: draft.watermark.sizePercent, optionLabel: { "\($0)%" }, onCommit: { draft.watermark.sizePercent = $0 }, rowHeight: 18, wheelHeight: 50, accentColor: ZTransferColors.accentPurple)
-                                DetentWheel(label: "透明度", options: Array(stride(from: 100, through: 2, by: -2)), selected: draft.watermark.opacityPercent, optionLabel: { "\($0)%" }, onCommit: { draft.watermark.opacityPercent = $0 }, rowHeight: 18, wheelHeight: 50, accentColor: ZTransferColors.accentPurple)
+                                DetentWheel(label: "字体", options: PhotoFrameWatermarkFont.allCases, selected: draft.watermark.font, optionLabel: fontName, onCommit: { value in updateWatermark { $0.font = value } }, rowHeight: 18, wheelHeight: 50, accentColor: ZTransferColors.accentPurple)
+                                DetentWheel(label: "大小", options: Array(stride(from: 100, through: 2, by: -2)), selected: draft.watermark.sizePercent, optionLabel: { "\($0)%" }, onCommit: { value in updateWatermark { $0.sizePercent = value } }, rowHeight: 18, wheelHeight: 50, accentColor: ZTransferColors.accentPurple)
+                                DetentWheel(label: "透明度", options: Array(stride(from: 100, through: 2, by: -2)), selected: draft.watermark.opacityPercent, optionLabel: { "\($0)%" }, onCommit: { value in updateWatermark { $0.opacityPercent = value } }, rowHeight: 18, wheelHeight: 50, accentColor: ZTransferColors.accentPurple)
                             }
                             HStack(spacing: 8) {
-                                DetentWheel(label: "位置", options: textWatermarkPositions, selected: textWatermarkPositions.contains(draft.watermark.position) ? draft.watermark.position : .photoBottomCenter, optionLabel: positionName, onCommit: { draft.watermark.position = $0 }, rowHeight: 18, wheelHeight: 50, accentColor: ZTransferColors.accentPurple)
-                                DetentWheel(label: "颜色", options: PhotoFrameWatermarkColor.allCases, selected: draft.watermark.color, optionLabel: colorName, onCommit: { draft.watermark.color = $0 }, rowHeight: 18, wheelHeight: 50, accentColor: ZTransferColors.accentPurple)
-                                DetentWheel(label: "可读性", options: PhotoFrameWatermarkEffect.allCases, selected: draft.watermark.effect, optionLabel: effectName, onCommit: { draft.watermark.effect = $0 }, rowHeight: 18, wheelHeight: 50, accentColor: ZTransferColors.accentPurple)
+                                DetentWheel(label: "位置", options: textWatermarkPositions, selected: textWatermarkPositions.contains(draft.watermark.position) ? draft.watermark.position : .photoBottomCenter, optionLabel: positionName, onCommit: { value in updateWatermark { $0.position = value } }, rowHeight: 18, wheelHeight: 50, accentColor: ZTransferColors.accentPurple)
+                                DetentWheel(label: "颜色", options: PhotoFrameWatermarkColor.allCases, selected: draft.watermark.color, optionLabel: colorName, onCommit: { value in updateWatermark { $0.color = value } }, rowHeight: 18, wheelHeight: 50, accentColor: ZTransferColors.accentPurple)
+                                DetentWheel(label: "可读性", options: PhotoFrameWatermarkEffect.allCases, selected: draft.watermark.effect, optionLabel: effectName, onCommit: { value in updateWatermark { $0.effect = value } }, rowHeight: 18, wheelHeight: 50, accentColor: ZTransferColors.accentPurple)
                             }
                         } else {
                             HStack(spacing: 8) {
-                                DetentWheel(label: "大小", options: Array(stride(from: 100, through: 2, by: -2)), selected: draft.watermark.sizePercent, optionLabel: { "\($0)%" }, onCommit: { draft.watermark.sizePercent = $0 }, rowHeight: 18, wheelHeight: 50, accentColor: ZTransferColors.accentPurple)
-                                DetentWheel(label: "透明度", options: Array(stride(from: 100, through: 2, by: -2)), selected: draft.watermark.opacityPercent, optionLabel: { "\($0)%" }, onCommit: { draft.watermark.opacityPercent = $0 }, rowHeight: 18, wheelHeight: 50, accentColor: ZTransferColors.accentPurple)
-                                DetentWheel(label: "位置", options: photoWatermarkPositions, selected: photoWatermarkPositions.contains(draft.watermark.position) ? draft.watermark.position : .photoBottomCenter, optionLabel: positionName, onCommit: { draft.watermark.position = $0 }, rowHeight: 18, wheelHeight: 50, accentColor: ZTransferColors.accentPurple)
+                                DetentWheel(label: "大小", options: Array(stride(from: 100, through: 2, by: -2)), selected: draft.watermark.sizePercent, optionLabel: { "\($0)%" }, onCommit: { value in updateWatermark { $0.sizePercent = value } }, rowHeight: 18, wheelHeight: 50, accentColor: ZTransferColors.accentPurple)
+                                DetentWheel(label: "透明度", options: Array(stride(from: 100, through: 2, by: -2)), selected: draft.watermark.opacityPercent, optionLabel: { "\($0)%" }, onCommit: { value in updateWatermark { $0.opacityPercent = value } }, rowHeight: 18, wheelHeight: 50, accentColor: ZTransferColors.accentPurple)
+                                DetentWheel(label: "位置", options: photoWatermarkPositions, selected: photoWatermarkPositions.contains(draft.watermark.position) ? draft.watermark.position : .photoBottomCenter, optionLabel: positionName, onCommit: { value in updateWatermark { $0.position = value } }, rowHeight: 18, wheelHeight: 50, accentColor: ZTransferColors.accentPurple)
                             }
                         }
                     }
                     .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
                 }
-            }
-            .onChange(of: draft.watermark) { value in
-                guard frameEnabled else { return }
-                guard let index = draft.favoriteFrameEffects.firstIndex(where: { $0.preset == draft.photoFramePreset }) else { return }
-                draft.favoriteFrameEffects[index].watermark = value
             }
         }
         if filterChooserPresented { filterChooserOverlay }
@@ -481,6 +481,19 @@ private struct LocalWorkbenchControls: View {
 
     private func metadataButton(_ title: String, _ selected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) { Text(title).font(.system(size: 14, weight: .semibold)).foregroundStyle(selected ? .white : ZTransferColors.primaryText).frame(maxWidth: .infinity).frame(height: 48).background(selected ? ZTransferColors.accentBlue : ZTransferColors.background.opacity(0.55), in: RoundedRectangle(cornerRadius: 12)) }.buttonStyle(.plain)
+    }
+    private func toggleFrameFavorite() {
+        guard frameEnabled else { return }
+        var value = draft
+        let preset = value.photoFramePreset
+        if let index = value.favoriteFrameEffects.firstIndex(where: { $0.preset == preset }) {
+            value.favoriteFrameEffects.remove(at: index)
+            value.favoriteFramePresets.remove(preset)
+        } else {
+            value.favoriteFrameEffects.append(.init(preset: preset, watermark: value.watermark))
+            value.favoriteFramePresets.insert(preset)
+        }
+        draft = value
     }
     private func frameName(_ value: PhotoFramePreset) -> String {
         switch value {
@@ -597,6 +610,7 @@ private struct LocalEffectPreview: View {
     let item: PhotosPickerItem
     let settings: PhotoEffectsSettings
     @State private var source: UIImage?
+    @State private var metadata: PhotoFrameMetadata?
     @State private var images: LocalPhotoPreviewImages?
     @State private var failed = false
     @GestureState private var comparing = false
@@ -618,14 +632,21 @@ private struct LocalEffectPreview: View {
             })
         .task(id: PreviewRequest(item: item, settings: settings)) {
             do {
+                // A changed wheel selection starts a new render. Clear the
+                // previous image immediately so a stale frame/filter cannot
+                // look like the setting had no effect while rendering.
+                images = nil
+                failed = false
                 let image: UIImage
                 if let source { image = source }
                 else {
-                    image = try await LocalPhotoOutput.decodePreview(item: item)
+                    let decoded = try await LocalPhotoOutput.decodePreview(item: item)
+                    image = decoded.image
+                    metadata = decoded.metadata
                     try Task.checkCancellation()
                     source = image
                 }
-                let next = try await LocalPhotoOutput.preview(image: image, settings: settings)
+                let next = try await LocalPhotoOutput.preview(image: image, settings: settings, metadata: metadata)
                 try Task.checkCancellation()
                 images = next
                 failed = false

@@ -25,23 +25,34 @@ enum Np3BitmapFilter {
         context.setBlendMode(.copy)
         context.interpolationQuality = .none
         context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
-        let bytes = data.assumingMemoryBound(to: UInt8.self)
         let engine = Np3FilterEngine(parameters: parameters, intensityPercent: intensityPercent)
-        for y in 0..<image.height {
-            try Task.checkCancellation()
-            for x in 0..<image.width {
-                let offset = y * rowBytes + x * 4
-                let alpha = UInt32(bytes[offset + 3])
-                guard alpha != 0 else { continue }
-                func straight(_ component: UInt8) -> UInt32 {
-                    min(255, (UInt32(component) * 255 + alpha / 2) / alpha)
+        // Batch generation runs two images concurrently. Four stripes keep
+        // the CPU busy without spawning twelve competing workers on phones.
+        let workerCount = min(max(ProcessInfo.processInfo.activeProcessorCount / 2, 1), 4)
+        let rowChunk = max(1, (image.height + workerCount * 3 - 1) / (workerCount * 3))
+        let chunkCount = (image.height + rowChunk - 1) / rowChunk
+        // Each worker owns disjoint rows. This keeps the exact Android pixel
+        // transform while removing the single-thread bottleneck that made a
+        // 1280px preview appear to ignore filter changes.
+        DispatchQueue.concurrentPerform(iterations: chunkCount) { chunk in
+            let bytes = data.assumingMemoryBound(to: UInt8.self)
+            let firstRow = chunk * rowChunk
+            let lastRow = min(image.height, firstRow + rowChunk)
+            for y in firstRow..<lastRow {
+                if Task.isCancelled { return }
+                for x in 0..<image.width {
+                    let offset = y * rowBytes + x * 4
+                    let alpha = UInt32(bytes[offset + 3])
+                    guard alpha != 0 else { continue }
+                    let original = alpha << 24 |
+                        min(255, (UInt32(bytes[offset]) * 255 + alpha / 2) / alpha) << 16 |
+                        min(255, (UInt32(bytes[offset + 1]) * 255 + alpha / 2) / alpha) << 8 |
+                        min(255, (UInt32(bytes[offset + 2]) * 255 + alpha / 2) / alpha)
+                    let filtered = engine.filterPixel(original)
+                    bytes[offset] = UInt8(((filtered >> 16 & 255) * alpha + 127) / 255)
+                    bytes[offset + 1] = UInt8(((filtered >> 8 & 255) * alpha + 127) / 255)
+                    bytes[offset + 2] = UInt8(((filtered & 255) * alpha + 127) / 255)
                 }
-                let original = alpha << 24 | straight(bytes[offset]) << 16 |
-                    straight(bytes[offset + 1]) << 8 | straight(bytes[offset + 2])
-                let filtered = engine.filterPixel(original)
-                bytes[offset] = UInt8(((filtered >> 16 & 255) * alpha + 127) / 255)
-                bytes[offset + 1] = UInt8(((filtered >> 8 & 255) * alpha + 127) / 255)
-                bytes[offset + 2] = UInt8(((filtered & 255) * alpha + 127) / 255)
             }
         }
         try Task.checkCancellation()

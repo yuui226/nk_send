@@ -98,6 +98,16 @@ struct DetentWheel<Option: Hashable>: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
                         .padding(.trailing, 7).padding(.bottom, 4).opacity(dragging ? 0 : 1)
                 }
+                // Short controls are buttons in Android's combinedClickable.
+                // Give them a real SwiftUI Button hit target; this prevents a
+                // sibling favorite button or parent ScrollView from consuming
+                // the tap.
+                if !canDrag {
+                    Button(action: activate) { Color.clear }
+                        .buttonStyle(.plain)
+                        .contentShape(Rectangle())
+                        .accessibilityHidden(true)
+                }
             }
             .contentShape(Rectangle()).gesture(dragGesture)
             .simultaneousGesture(tapGesture).simultaneousGesture(longPressGesture)
@@ -169,14 +179,20 @@ struct DetentWheel<Option: Hashable>: View {
         TapGesture().onEnded {
             // Android combinedClickable keeps click behavior even when the
             // same wheel also supports vertical dragging.
-            guard enabled, !readOnly else { return }
-            if suppressNextTap { suppressNextTap = false; return }
-            if let onActivated { onActivated(); return }
-            let target = (selectedIndex + 1) % options.count
-            guard target != selectedIndex else { return }
-            emitDetent()
-            withAnimation(ZTransferMotion.standard) { position = CGFloat(target) }; onCommit(options[target])
+            guard canDrag else { return }
+            activate()
         }
+    }
+
+    private func activate() {
+        guard enabled, !readOnly else { return }
+        if suppressNextTap { suppressNextTap = false; return }
+        if let onActivated { onActivated(); return }
+        let target = (selectedIndex + 1) % options.count
+        guard target != selectedIndex else { return }
+        emitDetent()
+        withAnimation(ZTransferMotion.standard) { position = CGFloat(target) }
+        onCommit(options[target])
     }
 
     private var longPressGesture: some Gesture {

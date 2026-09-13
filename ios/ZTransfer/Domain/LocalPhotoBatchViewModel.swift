@@ -93,7 +93,8 @@ enum LocalPhotoOutput {
             try Task.checkCancellation()
             return try autoreleasepool {
                 guard let image = UIImage(data: data) else { throw CocoaError(.fileReadCorruptFile) }
-                let output = try PhotoEffectsRenderer.render(image, settings: settings)
+                let metadata = PhotoExifParser.parse(data).map(PhotoFrameMetadata.init)
+                let output = try PhotoEffectsRenderer.render(image, settings: settings, metadata: metadata)
                 try Task.checkCancellation()
                 // Match Android's JPEG output; retain only compressed data while
                 // waiting for the photo-library write to settle.
@@ -116,11 +117,12 @@ enum LocalPhotoOutput {
         try Task.checkCancellation()
     }
 
-    static func decodePreview(item: PhotosPickerItem) async throws -> UIImage {
+    static func decodePreview(item: PhotosPickerItem) async throws -> LocalPhotoDecodedSource {
         guard let data = try await item.loadTransferable(type: Data.self) else {
             throw CocoaError(.fileReadCorruptFile)
         }
         try Task.checkCancellation()
+        let metadata = PhotoExifParser.parse(data).map(PhotoFrameMetadata.init)
         let renderer = Task.detached(priority: .userInitiated) {
             try Task.checkCancellation()
             return try autoreleasepool {
@@ -131,7 +133,7 @@ enum LocalPhotoOutput {
                         kCGImageSourceThumbnailMaxPixelSize: 1280,
                         kCGImageSourceShouldCacheImmediately: true,
                       ] as CFDictionary) else { throw CocoaError(.fileReadCorruptFile) }
-                return UIImage(cgImage: cgImage)
+                return LocalPhotoDecodedSource(image: UIImage(cgImage: cgImage), metadata: metadata)
             }
         }
         return try await withTaskCancellationHandler {
@@ -141,16 +143,16 @@ enum LocalPhotoOutput {
         } onCancel: { renderer.cancel() }
     }
 
-    static func preview(image: UIImage, settings: PhotoEffectsSettings) async throws -> LocalPhotoPreviewImages {
+    static func preview(image: UIImage, settings: PhotoEffectsSettings, metadata: PhotoFrameMetadata? = nil) async throws -> LocalPhotoPreviewImages {
         let renderer = Task.detached(priority: .userInitiated) {
             try Task.checkCancellation()
             return try autoreleasepool {
-                let filtered = try PhotoEffectsRenderer.render(image, settings: settings)
+                let filtered = try PhotoEffectsRenderer.render(image, settings: settings, metadata: metadata)
                 try Task.checkCancellation()
                 var comparison = settings
                 comparison.photoFilterEnabled = false
                 let unfiltered = settings.photoFilterEnabled
-                    ? try PhotoEffectsRenderer.render(image, settings: comparison) : filtered
+                    ? try PhotoEffectsRenderer.render(image, settings: comparison, metadata: metadata) : filtered
                 return LocalPhotoPreviewImages(filtered: filtered, unfiltered: unfiltered)
             }
         }
@@ -160,6 +162,11 @@ enum LocalPhotoOutput {
             return result
         } onCancel: { renderer.cancel() }
     }
+}
+
+struct LocalPhotoDecodedSource: Sendable {
+    let image: UIImage
+    let metadata: PhotoFrameMetadata?
 }
 
 struct LocalPhotoPreviewImages: Sendable {
