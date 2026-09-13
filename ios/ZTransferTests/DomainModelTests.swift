@@ -22,6 +22,14 @@ final class DomainModelTests: XCTestCase {
     }
 
     func testManualQueueAllowsRepeatedExportsOfSameCameraHandle() async {
+        let defaults = UserDefaults.standard
+        let persistenceKey = "transferQueue.items.v1"
+        let previous = defaults.data(forKey: persistenceKey)
+        defaults.removeObject(forKey: persistenceKey)
+        defer {
+            if let previous { defaults.set(previous, forKey: persistenceKey) }
+            else { defaults.removeObject(forKey: persistenceKey) }
+        }
         let queue = TransferQueue()
         let file = CameraFile(id: 9, storageID: 1, format: 0x3801, size: 10, fileName: "a.JPG", captureDate: nil, isProtected: false)
         let first = await queue.enqueue(file)
@@ -32,6 +40,14 @@ final class DomainModelTests: XCTestCase {
     }
 
     func testAutomaticQueueDeduplicatesCameraIdentity() async {
+        let defaults = UserDefaults.standard
+        let persistenceKey = "transferQueue.items.v1"
+        let previous = defaults.data(forKey: persistenceKey)
+        defaults.removeObject(forKey: persistenceKey)
+        defer {
+            if let previous { defaults.set(previous, forKey: persistenceKey) }
+            else { defaults.removeObject(forKey: persistenceKey) }
+        }
         let queue = TransferQueue()
         let file = CameraFile(id: 9, storageID: 1, format: 0x3801, size: 10, fileName: "a.JPG", captureDate: "20260913T010203", isProtected: false)
         let first = await queue.enqueueAutomatic(file)

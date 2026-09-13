@@ -461,7 +461,7 @@
 - 增加 `preserveExisting`、`detectNewHandles`、已处理 handle 集合和完整扫描标志；刷新时只删除完整 handles 快照确认缺失的对象，取消/断线保留未完成快照，避免把失败误判为空卡。
 - `PhotoListViewModel` 刷新改为保留现有行并应用 added/removed 差量；每批发布后逐项预取，结果进入 `PhotoThumbnailFillQueue` 的 pending/failed/settled 集合。
 - 缩略图缓存补齐 STA direct 的 `sta + handle + size` 键、标准键迁移、相机目录隔离、90 天清理和仅完整权威扫描后的 reconcile；后台读取增加单 permit gate，避免并发淹没 PTP 通道。
-- 验证：iOS Simulator Debug `xcodebuild ... build` 成功；`ZTRANSFER_PROTOCOL_ONLY=1 swift test --package-path ios` 通过 60 tests、0 failures。全量 Xcode 领域测试 target 仍受既有 `ios/ProtocolTests/PTPIPDiscoveryTests.swift` 无法解析 `ZTransferProtocol` 的配置阻断；未声称真机扫描、缓存命中率或取消时序已验收。
+- 验证：iOS Simulator Debug `xcodebuild ... build` 成功；`ZTRANSFER_PROTOCOL_ONLY=1 swift test --package-path ios` 通过 60 tests、0 failures。此前全量 Xcode 测试 target 被 `PTPIPDiscoveryTests.swift` 的旧模块引用阻断，已补齐 `SWIFT_PACKAGE` 条件导入并修正队列测试的共享偏好污染；2026-09-14 在 iPhone 17 Pro 模拟器执行 `xcodebuild test`，125 tests、0 failures。未据此声称真机扫描、缓存命中率或取消时序已验收。
 - 仍待补齐：效果预览页面的数据源与渲染入口尚未接入 iOS 设置页；真实相机断线恢复和扫描/缓存时序仍需回归。
 - 本轮新增 `CameraRepository.setFHDActive`：扫描在下一条元数据读取前让出通道，预览结束后继续同一快照；`PhotoPreviewView` 在 FHD/EXIF 任务期间负责成对设置和释放该状态。RAW/视频的 STA direct 预取已改为惰性处理。上述行为已通过模拟器编译，仍需真机时序验证。
 - 完整扫描进入 loaded 后，iOS 以后台补漏任务仅对缓存未命中的文件再次走同一预取入口；命中项只做磁盘索引检查，失败项进入队列 failed 集合，外部重试再重新入队，避免扫描阶段的瞬时失败造成永久缺图。
@@ -485,3 +485,9 @@
 - 照片效果编辑器切换边框预设时同步切换该预设的元数据草稿；元数据开关写入对应预设映射后再按安卓 12 字段 `|` 编码保存，避免退出编辑器后丢失设置。
 - 设置页、筛选页、队列页、连接页和共用拨轮中剩余的可见操作文案已改为 AndroidLocalization 资源键；照片列表操作的两行内容使用安卓 `tap_transfer_hold_preview` / `tap_preview_hold_transfer` 原文，语言选项保留安卓 SettingsScreen 的四个原始标签。
 - 补齐资源表中遗漏的四个边框名称键（经典签名、艺术装裱、胶片画廊、胶片边框），并按 Android 资源缺失繁体覆盖时的默认英文回退记录，避免拨轮在切换到这些预设时直接显示资源键名。
+
+### 2026-09-14 测试 target 解阻与照片队列回归
+
+- `ios/ProtocolTests/PTPIPDiscoveryTests.swift` 补齐 `SWIFT_PACKAGE`/Xcode 条件导入，Xcode 测试 target 现在直接复用 App 模块，不再引用不存在的 `ZTransferProtocol` 二进制模块。
+- `ios/ZTransferTests/DomainModelTests.swift` 的队列测试在执行前清理并在结束后恢复 `transferQueue.items.v1`，避免共享标准偏好中的历史任务污染断言；生产队列的持久化实现未改变。
+- 验证：`xcodebuild test -project ios/ZTransfer.xcodeproj -scheme ZTransfer -destination 'platform=iOS Simulator,id=CA046456-B859-45F4-9CB3-2C6E2F8E03B0' CODE_SIGNING_ALLOWED=NO`，125 tests、0 failures。

@@ -1,5 +1,9 @@
 import XCTest
+#if SWIFT_PACKAGE
 @testable import ZTransferProtocol
+#else
+@testable import ZTransfer
+#endif
 
 final class PTPIPDiscoveryTests: XCTestCase {
     func testScanUsesLocal24AndExcludesLocalAddress() {
