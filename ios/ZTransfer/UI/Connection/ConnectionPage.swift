@@ -171,12 +171,31 @@ struct ConnectionCelebrationValues: Equatable {
         let heroLinear = min(1, max(0, elapsedMilliseconds / heroDuration))
         let successLinear = min(1, max(0, (elapsedMilliseconds - successDelay) / successDuration))
         hero = CGFloat(Self.smoother(heroLinear))
-        success = CGFloat(Self.smoother(successLinear))
+        // Android's FastOutSlowInEasing is cubic-bezier(0.4, 0, 0.2, 1).
+        success = CGFloat(Self.fastOutSlowIn(successLinear))
     }
 
     private static func smoother(_ value: Double) -> Double {
         let x = min(1, max(0, value))
         return x * x * (3 - 2 * x)
+    }
+
+    private static func fastOutSlowIn(_ value: Double) -> Double {
+        let x = min(1, max(0, value))
+        // Solve the cubic's x component for t, then evaluate its y component.
+        // Binary search is stable at the endpoints and avoids UIKit timing
+        // abstractions that use a different curve on older iOS versions.
+        func component(_ t: Double, _ p1: Double, _ p2: Double) -> Double {
+            let u = 1 - t
+            return 3 * u * u * t * p1 + 3 * u * t * t * p2 + t * t * t
+        }
+        var low = 0.0
+        var high = 1.0
+        for _ in 0..<24 {
+            let mid = (low + high) / 2
+            if component(mid, 0.4, 0.2) < x { low = mid } else { high = mid }
+        }
+        return component((low + high) / 2, 0.0, 1.0)
     }
 }
 
