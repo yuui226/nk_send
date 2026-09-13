@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 enum AppLocalized {
     /// Uses the Android string resources as the source of truth. The maps are
@@ -57,6 +58,8 @@ struct RootView: View {
     @State private var transferQueue = TransferQueue()
     @AppStorage("theme_mode") private var themeMode = "SYSTEM"
     @AppStorage("app_language") private var appLanguage = "system"
+    @AppStorage("keep_screen_on") private var keepScreenOn = true
+    @Environment(\.scenePhase) private var scenePhase
     // Android keeps HomeScreen alive for the connection-success celebration
     // (500 ms delay + 760 ms effect) before entering the file list.  Keep the
     // newly-created session in this hand-off state instead of switching views
@@ -114,8 +117,10 @@ struct RootView: View {
         .onDisappear {
             connectionModel.stopUSBDiscovery()
             connectionModel.stopWiFiDiscovery()
+            UIApplication.shared.isIdleTimerDisabled = false
         }
         .onAppear {
+            UIApplication.shared.isIdleTimerDisabled = keepScreenOn
             if connectionModel.cameraSession != nil {
                 connectionCelebrationStart = Date()
                 connectionCelebrationActive = true
@@ -129,6 +134,12 @@ struct RootView: View {
                 connectionCelebrationStart = nil
                 connectionCelebrationActive = false
             }
+        }
+        .onChange(of: keepScreenOn) { enabled in
+            UIApplication.shared.isIdleTimerDisabled = enabled && scenePhase == .active
+        }
+        .onChange(of: scenePhase) { phase in
+            UIApplication.shared.isIdleTimerDisabled = keepScreenOn && phase == .active
         }
         .task(id: connectionModel.cameraSession != nil) {
             guard connectionModel.cameraSession != nil else { return }
