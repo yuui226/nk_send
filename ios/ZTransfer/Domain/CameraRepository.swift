@@ -42,6 +42,7 @@ actor CameraRepository {
     private var remoteActive = false
     private var fhdActive = false
     private var transfersBusy = false
+    private var effectPreviewActive = false
     private var activeCatalogScans = 0
     private var catalogLoading: Bool { activeCatalogScans > 0 }
     private var catalogFiles: [UInt32: CameraFile] = [:]
@@ -248,10 +249,13 @@ actor CameraRepository {
 
     func usesDirectThumbnailRead() -> Bool { directReader != nil }
     func backgroundThumbnailFillAllowed() -> Bool {
-        activeForegroundReads == 0 && !remoteActive && !fhdActive && !transfersBusy
+        activeForegroundReads == 0 && !remoteActive && !fhdActive && !transfersBusy && !effectPreviewActive
     }
 
     func setTransfersBusy(_ busy: Bool) { transfersBusy = busy }
+    /// Effects preview blocks only background thumbnail filling; metadata
+    /// enumeration itself continues, matching Android's separate gate.
+    func setEffectPreviewActive(_ active: Bool) { effectPreviewActive = active }
 
     /// Foreground FHD preview has priority over catalog metadata reads.  The
     /// scan keeps its handle snapshot and resumes at the same cursor when the

@@ -319,24 +319,29 @@ struct PhotoListView: View {
         effectPreviewGeneration &+= 1
         let generation = effectPreviewGeneration
         Task {
-            if let data = try? await session.thumbnail(file: file), let image = UIImage(data: data) {
+            await session.setEffectPreviewActive(true)
+            defer {
+                Task { @MainActor in
+                    guard generation == effectPreviewGeneration else { return }
+                    await session.setEffectPreviewActive(false)
+                }
+            }
+            if let data = try? await session.cachedThumbnail(file: file), let image = UIImage(data: data) {
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
                     guard generation == effectPreviewGeneration else { return }
                     effectPreviewSource = image
                 }
             }
-            async let loadedExif = try? session.exif(file: file)
-            async let loadedPreview = try? session.preview(handle: file.id)
-            let exif = await loadedExif
-            let previewData = await loadedPreview
+            // Android reads EXIF only after a valid FHD preview succeeds.
+            let previewData = try? await session.preview(handle: file.id)
+            guard let previewData, UIImage(data: previewData) != nil else { return }
+            let exif = try? await session.exif(file: file)
             guard !Task.isCancelled else { return }
             await MainActor.run {
                 guard generation == effectPreviewGeneration else { return }
                 effectPreviewExif = exif
-                if let previewData, let image = UIImage(data: previewData) {
-                    effectPreviewSource = image
-                }
+                effectPreviewSource = UIImage(data: previewData)
             }
         }
     }

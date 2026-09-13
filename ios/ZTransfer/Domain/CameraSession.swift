@@ -86,6 +86,19 @@ actor CameraSession {
         }
     }
 
+    /// Cache-only lookup used when the effects editor opens. Android first
+    /// publishes an already cached thumbnail and never starts a new GetThumb
+    /// just to populate the editor placeholder.
+    func cachedThumbnail(file: CameraFile) async throws -> Data? {
+        let identity: String?
+        if let deviceID { identity = deviceID }
+        else { identity = await repository.thumbnailCacheIdentity() }
+        guard let identity else { return nil }
+        let direct = await repository.usesDirectThumbnailRead()
+        return try await thumbnailStore.load(file: file, identity: identity,
+                                             directSTA: direct, allowRemote: false) { Data() }
+    }
+
     func reconcileThumbnailCache(files: [CameraFile], authoritative: Bool) async {
         guard authoritative else { return }
         let identity: String?
@@ -98,6 +111,7 @@ actor CameraSession {
 
     func setFHDActive(_ active: Bool) async { await repository.setFHDActive(active) }
     func setTransfersBusy(_ busy: Bool) async { await repository.setTransfersBusy(busy) }
+    func setEffectPreviewActive(_ active: Bool) async { await repository.setEffectPreviewActive(active) }
     func backgroundThumbnailFillAllowed() async -> Bool {
         await repository.backgroundThumbnailFillAllowed()
     }
