@@ -9,6 +9,9 @@ final class RemoteViewModel: ObservableObject {
     @Published private(set) var frameMetadata: RemoteLiveViewMetadata?
     @Published private(set) var exposureDescriptors: [RemoteExposureField: RemotePropertyDescriptor] = [:]
     @Published private(set) var movieMode = false
+    // Android RemoteScreen starts in standard live view; the HD/XGA tool opts
+    // into the enhanced frame operation for the following polls.
+    @Published private(set) var hdLiveView = false
     @Published private(set) var autoISODescriptor: RemotePropertyDescriptor?
     @Published private(set) var focusModeDescriptor: RemotePropertyDescriptor?
     @Published private(set) var recordingSeconds = 0
@@ -42,7 +45,7 @@ final class RemoteViewModel: ObservableObject {
                 state = state.applying(.deviceReady)
                 while !Task.isCancelled {
                     do {
-                        let payload = try await camera.liveViewFrame(preferEnhanced: true)
+                        let payload = try await camera.liveViewFrame(preferEnhanced: hdLiveView)
                         guard let jpegRange = RemoteFrameParser.jpegRange(in: payload) else {
                             throw RemoteViewModelError.invalidFrame
                         }
@@ -103,6 +106,10 @@ final class RemoteViewModel: ObservableObject {
                 try? await Task.sleep(nanoseconds: 600_000_000)
             }
         }
+    }
+
+    func setHDLiveView(_ enabled: Bool) {
+        hdLiveView = enabled
     }
 
     func loadExposure(movie: Bool) {

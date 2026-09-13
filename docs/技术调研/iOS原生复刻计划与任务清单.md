@@ -537,3 +537,8 @@
 
 - 安卓 `RemoteViewfinderPanel` 在取景器左上角显示当前照片/录像模式和对焦模式；iOS 现在使用 `liveViewSelector` 与 `focusMode` 的同一协议格式，仅在 `liveViewStable` 时绘制相同的黑底白字徽标，避免加载阶段显示伪状态。
 - 验证：Xcode Simulator 测试 127 项、0 failures；真实相机模式切换和徽标位置仍待设备画面核对。
+
+### 2026-09-14 远程监看清晰度选择
+
+- 安卓 `hdLiveView` 默认关闭，FPS 工具旁的 HD 按钮切换后只改变后续取帧使用的增强/标准操作；iOS 改为同样的会话态默认值和取帧参数，不再默认强制增强帧。
+- 验证：待本轮 Xcode 测试完成；真实机身对两种取帧操作的响应仍需设备核对。

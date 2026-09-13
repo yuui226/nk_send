@@ -169,6 +169,15 @@ struct RemoteView: View {
                 .padding(.top, 10)
                 HStack(spacing: 8) {
                     Button {
+                        withAnimation(ZTransferMotion.standard) {
+                            model.setHDLiveView(!model.hdLiveView)
+                        }
+                    } label: {
+                        Text("HD")
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .opacity(model.hdLiveView ? 1 : 0.6)
+                    }
+                    Button {
                         withAnimation(ZTransferMotion.standard) { showFps.toggle() }
                     } label: {
                         Text("FPS")
