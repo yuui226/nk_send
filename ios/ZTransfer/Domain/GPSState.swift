@@ -24,7 +24,12 @@ struct GPSState: Equatable, Sendable {
 enum GPSUpdateFrequency: Int, CaseIterable, Codable, Sendable {
     case thirtySeconds = 30, oneMinute = 60, twoMinutes = 120, fiveMinutes = 300
     var title: String {
-        switch self { case .thirtySeconds: return "30秒"; case .oneMinute: return "1分钟"; case .twoMinutes: return "2分钟"; case .fiveMinutes: return "5分钟" }
+        switch self {
+        case .thirtySeconds: return AppLocalized.resource("gps_frequency_30_seconds")
+        case .oneMinute: return AppLocalized.resource("gps_frequency_1_minute")
+        case .twoMinutes: return AppLocalized.resource("gps_frequency_2_minutes")
+        case .fiveMinutes: return AppLocalized.resource("gps_frequency_5_minutes")
+        }
     }
     static let defaultValue: Self = .oneMinute
 }

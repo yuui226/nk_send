@@ -7,6 +7,7 @@ import Foundation
 /// by the caller instead of silently changing the selected connection mode.
 @MainActor
 final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocationManagerDelegate {
+    private static let updateFrequencyPreferenceKey = "update_frequency_seconds"
     @Published private(set) var state = GPSState()
     @Published private(set) var frequency: GPSUpdateFrequency
     let bluetooth: NikonGPSBluetoothClient
@@ -18,7 +19,7 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        let raw = defaults.integer(forKey: "gps.updateFrequency")
+        let raw = defaults.integer(forKey: Self.updateFrequencyPreferenceKey)
         frequency = GPSUpdateFrequency(rawValue: raw) ?? .defaultValue
         bluetooth = NikonGPSBluetoothClient()
         super.init()
@@ -35,7 +36,7 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
     func setFrequency(_ value: GPSUpdateFrequency) {
         guard value != frequency else { return }
         frequency = value
-        defaults.set(value.rawValue, forKey: "gps.updateFrequency")
+        defaults.set(value.rawValue, forKey: Self.updateFrequencyPreferenceKey)
     }
 
     func setEnabled(_ enabled: Bool) {
