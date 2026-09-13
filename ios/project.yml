@@ -33,9 +33,9 @@ targets:
           - _ptp._tcp
           - _nikon._tcp
         UIAppFonts:
-          - Fonts/great_vibes_regular.ttf
-          - Fonts/bebas_neue_regular.ttf
-          - Fonts/cormorant_garamond_medium_italic.ttf
+          - great_vibes_regular.ttf
+          - bebas_neue_regular.ttf
+          - cormorant_garamond_medium_italic.ttf
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: true
           UISceneConfigurations: {}

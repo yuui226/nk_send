@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 @testable import ZTransfer
 
 final class DomainModelTests: XCTestCase {
@@ -189,5 +190,22 @@ extension DomainModelTests {
         XCTAssertEqual(result.favoriteFilterIDs, draft.favoriteFilterIDs)
         XCTAssertEqual(result.metadataByPreset, draft.metadataByPreset)
         XCTAssertEqual(result.filterIntensities, draft.filterIntensities)
+    }
+}
+
+
+extension DomainModelTests {
+    @MainActor
+    func testBundledWatermarkFontsResolveWithoutSystemFallback() throws {
+        let paths = try XCTUnwrap(Bundle.main.object(forInfoDictionaryKey: "UIAppFonts") as? [String])
+        XCTAssertEqual(paths.count, 3)
+        for path in paths {
+            let url = try XCTUnwrap(Bundle.main.resourceURL).appendingPathComponent(path)
+            XCTAssertTrue(FileManager.default.fileExists(atPath: url.path), "Missing registered font: \(path)")
+        }
+        for name in ["GreatVibes-Regular", "BebasNeue-Regular", "CormorantGaramond-MediumItalic"] {
+            let font = try XCTUnwrap(UIFont(name: name, size: 24), "Watermark would fall back to a system font: \(name)")
+            XCTAssertEqual(font.fontName, name)
+        }
     }
 }

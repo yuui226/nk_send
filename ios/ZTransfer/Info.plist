@@ -34,9 +34,9 @@
 	<string>用于读取工作台照片</string>
 	<key>UIAppFonts</key>
 	<array>
-		<string>Fonts/great_vibes_regular.ttf</string>
-		<string>Fonts/bebas_neue_regular.ttf</string>
-		<string>Fonts/cormorant_garamond_medium_italic.ttf</string>
+		<string>great_vibes_regular.ttf</string>
+		<string>bebas_neue_regular.ttf</string>
+		<string>cormorant_garamond_medium_italic.ttf</string>
 	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
