@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import QuartzCore
 
 /// Native monitor surface. Transport and frame lifecycle live in
 /// `RemoteViewModel`; this view only renders the camera frame and the controls
@@ -16,6 +17,9 @@ struct RemoteView: View {
     @State private var histogramVisible = false
     @State private var levelVisible = false
     @State private var framingGrid: IOSViewfinderGrid = .off
+    @State private var zebraVisible = false
+    @State private var zebraMask: IOSZebraMask?
+    @State private var lastZebraUpdate = 0.0
 
     init(session: CameraSession) {
         _model = StateObject(wrappedValue: RemoteViewModel(camera: session))
@@ -70,7 +74,8 @@ struct RemoteView: View {
                             .allowsHitTesting(false)
                     }
                     if framingGrid != .off {
-                        IOSFramingGridOverlay(divisions: framingGrid.divisions)
+                        IOSFramingGridOverlay(divisions: framingGrid.divisions,
+                                              aspect: (image.size.width / max(image.size.height, 1)) * CGFloat(desqueeze))
                             .allowsHitTesting(false)
                     }
                     if model.movieMode, audioLevelsVisible,
@@ -82,10 +87,16 @@ struct RemoteView: View {
                                    alignment: .bottomLeading)
                             .allowsHitTesting(false)
                     }
-                    if let focusFrame = model.frameMetadata?.selectedFocusFrame,
-                       model.frameMetadata?.focusJudgement != .none {
+                    if let metadata = model.frameMetadata,
+                       let focusFrame = metadata.selectedFocusFrame,
+                       metadata.focusJudgement != .none {
                         IOSFocusFrameOverlay(frame: focusFrame,
                                              aspect: (image.size.width / max(image.size.height, 1)) * CGFloat(desqueeze))
+                            .allowsHitTesting(false)
+                    }
+                    if zebraVisible, let zebraMask {
+                        IOSZebraOverlay(mask: zebraMask,
+                                        aspect: (image.size.width / max(image.size.height, 1)) * CGFloat(desqueeze))
                             .allowsHitTesting(false)
                     }
                 } else {
@@ -151,6 +162,14 @@ struct RemoteView: View {
                         } label: {
                             Image(systemName: audioLevelsVisible ? "waveform" : "waveform.slash")
                         }
+                    }
+                    Button {
+                        withAnimation(ZTransferMotion.standard) {
+                            zebraVisible.toggle()
+                            updateZebraMask(force: true)
+                        }
+                    } label: {
+                        Image(systemName: zebraVisible ? "rectangle.dashed.badge.record" : "rectangle.dashed")
                     }
                 }
                 .foregroundStyle(.white)
@@ -223,12 +242,25 @@ struct RemoteView: View {
         .task { model.start() }
         .task { model.loadExposure(movie: false) }
         .onDisappear { model.stop() }
+        .onChange(of: model.state.frameSequence) { _ in updateZebraMask() }
+        .onChange(of: zebraVisible) { _ in updateZebraMask(force: true) }
         .sheet(item: $selectedField) { field in
             ExposureValueList(field: field, descriptor: model.exposureDescriptors[field]) { value in
                 model.setExposure(field, value: value)
                 selectedField = nil
             }
         }
+    }
+
+    private func updateZebraMask(force: Bool = false) {
+        guard zebraVisible, let image = model.frameImage else {
+            zebraMask = nil
+            return
+        }
+        let now = CACurrentMediaTime()
+        guard force || now - lastZebraUpdate >= 0.25 else { return }
+        lastZebraUpdate = now
+        zebraMask = IOSZebraMask(image: image)
     }
 
     private func fitImageRect(in size: CGSize, aspect: CGFloat) -> CGRect {
@@ -358,22 +390,124 @@ private enum IOSViewfinderGrid: Equatable {
 
 private struct IOSFramingGridOverlay: View {
     let divisions: Int
+    let aspect: CGFloat
 
     var body: some View {
         Canvas { context, size in
             guard divisions > 1 else { return }
             let stroke = StrokeStyle(lineWidth: 0.75, lineCap: .round)
             let color = Color.white.opacity(0.42)
+            let fittedHeight = min(size.width / max(aspect, 0.01), size.height)
+            let fittedWidth = fittedHeight * aspect
+            let rect = CGRect(x: (size.width - fittedWidth) / 2,
+                              y: (size.height - fittedHeight) / 2,
+                              width: fittedWidth, height: fittedHeight)
             for index in 1..<divisions {
                 let fraction = CGFloat(index) / CGFloat(divisions)
                 var vertical = Path()
-                vertical.move(to: CGPoint(x: size.width * fraction, y: 0))
-                vertical.addLine(to: CGPoint(x: size.width * fraction, y: size.height))
+                vertical.move(to: CGPoint(x: rect.minX + rect.width * fraction, y: rect.minY))
+                vertical.addLine(to: CGPoint(x: rect.minX + rect.width * fraction, y: rect.maxY))
                 context.stroke(vertical, with: .color(color), style: stroke)
                 var horizontal = Path()
-                horizontal.move(to: CGPoint(x: 0, y: size.height * fraction))
-                horizontal.addLine(to: CGPoint(x: size.width, y: size.height * fraction))
+                horizontal.move(to: CGPoint(x: rect.minX, y: rect.minY + rect.height * fraction))
+                horizontal.addLine(to: CGPoint(x: rect.maxX, y: rect.minY + rect.height * fraction))
                 context.stroke(horizontal, with: .color(color), style: stroke)
+            }
+        }
+    }
+}
+
+/// Android computes zebra blocks from the decoded frame, throttled to 250 ms.
+/// iOS keeps the same 120×80 center-sample mask and 95 IRE threshold.
+private struct IOSZebraMask {
+    let cols: Int
+    let rows: Int
+    let cells: [Bool]
+
+    init?(image: UIImage) {
+        guard let cg = image.cgImage,
+              cg.bitsPerComponent == 8,
+              cg.bitsPerPixel >= 24,
+              let provider = cg.dataProvider,
+              let providerData = provider.data as Data? else { return nil }
+        let width = max(1, cg.width)
+        let height = max(1, cg.height)
+        let cellWidth = max(1, (width + 119) / 120)
+        let cellHeight = max(1, (height + 79) / 80)
+        let computedCols = (width + cellWidth - 1) / cellWidth
+        let computedRows = (height + cellHeight - 1) / cellHeight
+        var result = Array(repeating: false, count: computedCols * computedRows)
+        let bytesPerPixel = max(3, cg.bitsPerPixel / 8)
+        let rowStride = cg.bytesPerRow
+        let littleEndian = cg.byteOrderInfo == .order32Little
+        providerData.withUnsafeBytes { raw in
+            guard let base = raw.bindMemory(to: UInt8.self).baseAddress else { return }
+            for row in 0..<computedRows {
+                let y = min(height - 1, row * cellHeight + cellHeight / 2)
+                var column = 0
+                while column < computedCols {
+                    let x = min(width - 1, column * cellWidth + cellWidth / 2)
+                    let pixel = base.advanced(by: y * rowStride + x * bytesPerPixel)
+                    let red: Int
+                    let green: Int
+                    let blue: Int
+                    if littleEndian && bytesPerPixel >= 4 {
+                        blue = Int(pixel[0]); green = Int(pixel[1]); red = Int(pixel[2])
+                    } else {
+                        red = Int(pixel[0]); green = Int(pixel[1]); blue = Int(pixel[2])
+                    }
+                    let luma = (54 * red + 183 * green + 19 * blue) >> 8
+                    result[row * computedCols + column] = luma >= 242
+                    column += 1
+                }
+            }
+        }
+        cols = computedCols
+        rows = computedRows
+        cells = result
+    }
+}
+
+private struct IOSZebraOverlay: View {
+    let mask: IOSZebraMask
+    let aspect: CGFloat
+
+    var body: some View {
+        Canvas { context, size in
+            let fittedHeight = min(size.width / max(aspect, 0.01), size.height)
+            let fittedWidth = fittedHeight * aspect
+            let rect = CGRect(x: (size.width - fittedWidth) / 2,
+                              y: (size.height - fittedHeight) / 2,
+                              width: fittedWidth, height: fittedHeight)
+            guard rect.width > 0, rect.height > 0 else { return }
+            let cellWidth = rect.width / CGFloat(mask.cols)
+            let cellHeight = rect.height / CGFloat(mask.rows)
+            var clip = Path()
+            for row in 0..<mask.rows {
+                for column in 0..<mask.cols where mask.cells[row * mask.cols + column] {
+                    clip.addRect(CGRect(x: rect.minX + CGFloat(column) * cellWidth,
+                                        y: rect.minY + CGFloat(row) * cellHeight,
+                                        width: cellWidth, height: cellHeight))
+                }
+            }
+            var white = Path()
+            var black = Path()
+            let period: CGFloat = 5
+            var x = rect.minX - rect.height
+            while x < rect.maxX {
+                white.move(to: CGPoint(x: x, y: rect.maxY))
+                white.addLine(to: CGPoint(x: x + rect.height, y: rect.minY))
+                let half = x + period / 2
+                black.move(to: CGPoint(x: half, y: rect.maxY))
+                black.addLine(to: CGPoint(x: half + rect.height, y: rect.minY))
+                x += period
+            }
+            context.drawLayer { layer in
+                layer.clip(to: clip)
+                layer.stroke(black, with: .color(.black.opacity(0.50)),
+                             style: StrokeStyle(lineWidth: 1.4))
+                layer.stroke(white, with: .color(.white.opacity(0.85)),
+                             style: StrokeStyle(lineWidth: 1.4))
             }
         }
     }
