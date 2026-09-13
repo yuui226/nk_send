@@ -647,3 +647,4 @@
 - 安卓 `FileListScreen.SignalPill` 按 USB、STA、AP 分别选择图形；STA 在线状态使用四格专用图标，USB 使用经典三叉图标，STA 不展开 dBm 文本。iOS 原先只根据 `isUSB` 在 USB 与系统 Wi‑Fi 图标之间切换，网络会话没有保存 STA/AP 路由信息。
 - `CameraSession` 现在保存建立会话时的 `WirelessMode`，连接 ViewModel 按实际 STA/AP 传入；照片列表顶栏复用 `ClassicUSBIcon`，新增安卓同几何比例的 STA 四格图标，并禁止 STA 误展开信号详情。AP 因 iOS 没有公开等价 RSSI 数据继续使用 Wi‑Fi 图标，不注入虚构信号值。
 - 验证：iOS 模拟器 Debug 构建成功；STA/AP 真实连接后的图形、断线和重试状态仍待相机验收。
+- USB/STA 在线图标颜色同步安卓 `SignalPill` 的连接态蓝色强调色；AP 仍不伪造 RSSI 或信号格数。
