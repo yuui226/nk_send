@@ -663,6 +663,13 @@ enum PhotoEffectsRenderer {
     }
 
     private static func drawEditorial(_ cg: CGContext, image: UIImage, layout: Layout, preset: PhotoFramePreset, metadata: PhotoFrameMetadata, watermark: PhotoFrameWatermark, settings: PhotoFrameMetadataSettings) {
+        // Android composites the editorial photo watermark before each frame's
+        // typography and decoration, so labels remain legible above it.
+        let photoWatermark = editorialPhotoWatermark(watermark, preset: preset)
+        drawWatermark(cg, watermark: photoWatermark, photo: layout.photo, canvas: layout.canvas,
+                      preset: preset,
+                      metadataBand: CGRect(x: 0, y: layout.photo.maxY, width: layout.canvas.width,
+                                           height: layout.canvas.height - layout.photo.maxY))
         switch preset {
         case .galleryMat:
             drawMetadataRows(cg, area: CGRect(x: layout.canvas.width * 0.08, y: layout.photo.maxY + layout.photo.width * 0.045, width: layout.canvas.width * 0.84, height: layout.canvas.height - layout.photo.maxY - layout.photo.width * 0.05), preset: preset, rows: metadata.editorialRows, watermark: watermark, dark: true, emphasizeFirst: false)
@@ -692,8 +699,6 @@ enum PhotoEffectsRenderer {
             drawMetadataRows(cg, area: CGRect(x: 0, y: layout.photo.maxY, width: layout.canvas.width, height: layout.canvas.height - layout.photo.maxY), preset: preset, rows: [metadata.lensModel ?? "", metadata.classicSignatureDetailLine, metadata.dateTime ?? "", metadata.locationRow ?? ""].filter { !$0.isEmpty }, watermark: watermark, dark: true, emphasizeFirst: false)
         default: break
         }
-        let photoWatermark = editorialPhotoWatermark(watermark, preset: preset)
-        drawWatermark(cg, watermark: photoWatermark, photo: layout.photo, canvas: layout.canvas, preset: preset, metadataBand: CGRect(x: 0, y: layout.photo.maxY, width: layout.canvas.width, height: layout.canvas.height - layout.photo.maxY))
     }
 
     private static func drawMetadataRows(_ cg: CGContext, area: CGRect, preset: PhotoFramePreset, rows: [String], watermark: PhotoFrameWatermark, dark: Bool, insidePhoto: Bool = false, emphasizeFirst: Bool = true) {
