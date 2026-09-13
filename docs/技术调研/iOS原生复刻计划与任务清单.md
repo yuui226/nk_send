@@ -629,3 +629,9 @@
 - 安卓 `CameraViewModel` 对 USB 权限失败和断线分别直接使用 `usb_permission_required`、`usb_connection_lost` 资源；iOS 原先在错误映射中硬编码中文，切换语言后会偏离安卓。
 - iOS `ConnectionViewModel.usbErrorMessage` 现在按同名安卓资源返回权限失败和会话断开文案；超时仍保留协议错误本身的待核对分支，未把它臆造映射成新的资源。
 - 验证：源码构建待本轮完成；真实 ImageCaptureCore 权限广播和断线回调仍待设备验证，USB 任务保持未完成。
+
+### 2026-09-14 GPS 权限提示资源对账（进行中）
+
+- 安卓 GPS 入口在缺少定位/蓝牙能力时使用 `gps_permission_required` 与 `gps_bluetooth_required` 资源提示；iOS 协调器原先直接写入中文字符串，英文和繁体设置下会显示错误语言。
+- iOS `GPSCoordinator` 的定位授权拒绝、蓝牙不可用和首次启用失败分支现统一读取上述安卓资源，协议层没有对应资源的内部错误继续保留待核对。
+- 验证：源码构建待本轮完成；系统权限弹窗、蓝牙关闭和定位服务关闭路径仍待真机验证，GPS 任务保持未完成。

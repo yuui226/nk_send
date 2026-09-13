@@ -48,7 +48,11 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
         switch locationManager.authorizationStatus {
         case .notDetermined: locationManager.requestWhenInUseAuthorization()
         case .authorizedAlways, .authorizedWhenInUse: beginRunning()
-        default: state = GPSState(enabled: true, status: .error, message: "需要定位权限")
+        default: state = GPSState(
+            enabled: true,
+            status: .error,
+            message: AppLocalized.resource("gps_permission_required")
+        )
         }
     }
 
@@ -63,7 +67,9 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
     private func applyBluetoothState(_ value: NikonGPSBluetoothState) {
         guard state.enabled else { return }
         switch value {
-        case .unavailable: state.status = .error; state.message = "请打开手机蓝牙"
+        case .unavailable:
+            state.status = .error
+            state.message = AppLocalized.resource("gps_bluetooth_required")
         case .scanning: state.status = .searching; state.message = nil
         case .connecting(let name): state.status = .connecting; state.cameraName = name
         case .pairing: state.status = .pairing
@@ -80,7 +86,9 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
         guard state.enabled else { return }
         switch manager.authorizationStatus {
         case .authorizedAlways, .authorizedWhenInUse: beginRunning()
-        case .denied, .restricted: state.status = .error; state.message = "需要定位权限"
+        case .denied, .restricted:
+            state.status = .error
+            state.message = AppLocalized.resource("gps_permission_required")
         default: break
         }
     }
