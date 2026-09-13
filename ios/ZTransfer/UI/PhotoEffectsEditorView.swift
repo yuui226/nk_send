@@ -400,6 +400,20 @@ struct PhotoEffectsSettingsPreview: View {
         .task(id: renderKey) {
             guard let source else {
                 onRequest()
+                // Android gives the real thumbnail/FHD request a 2200 ms
+                // grace period before showing its deterministic demo source.
+                try? await Task.sleep(nanoseconds: 2_200_000_000)
+                guard !Task.isCancelled else { return }
+                let fallback = PhotoEffectsFallbackSource.make()
+                let fallbackSettings = settings
+                let fallbackResult = try? await Task.detached(priority: .utility) {
+                    try Task.checkCancellation()
+                    return try autoreleasepool {
+                        try PhotoEffectsRenderer.render(fallback, settings: fallbackSettings, metadata: nil)
+                    }
+                }.value
+                guard !Task.isCancelled else { return }
+                rendered = fallbackResult
                 return
             }
             showUnfiltered = false
@@ -430,6 +444,39 @@ struct PhotoEffectsSettingsPreview: View {
             }.value
             guard !Task.isCancelled else { return }
             unfiltered = comparison
+        }
+    }
+}
+
+/// Exact shape of Android's settings-page fallback source. It is only visible
+/// after the grace period and disappears automatically when a real source key
+/// arrives; it is never used for export or camera transfers.
+private enum PhotoEffectsFallbackSource {
+    static func make() -> UIImage {
+        let size = CGSize(width: 1920, height: 1280)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        return UIGraphicsImageRenderer(size: size, format: format).image { renderer in
+            let context = renderer.cgContext
+            let colors = [
+                UIColor(red: 111 / 255, green: 169 / 255, blue: 181 / 255, alpha: 1).cgColor,
+                UIColor(red: 214 / 255, green: 192 / 255, blue: 151 / 255, alpha: 1).cgColor,
+            ] as CFArray
+            context.drawLinearGradient(
+                CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0, 1])!,
+                start: .zero,
+                end: CGPoint(x: size.width, y: size.height),
+                options: [],
+            )
+            context.saveGState()
+            context.translateBy(x: size.width * 0.5, y: size.height * 0.5)
+            context.rotate(by: -.pi * 24 / 180)
+            context.setFillColor(UIColor(red: 47 / 255, green: 85 / 255, blue: 94 / 255, alpha: 1).cgColor)
+            context.fill(CGRect(x: -1040, y: -210, width: 1860, height: 170))
+            context.restoreGState()
+            context.setFillColor(UIColor(red: 244 / 255, green: 193 / 255, blue: 91 / 255, alpha: 1).cgColor)
+            context.fillEllipse(in: CGRect(x: size.width * 0.72 - 42, y: size.height * 0.24 - 42, width: 84, height: 84))
         }
     }
 }
