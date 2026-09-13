@@ -165,7 +165,14 @@ private struct GPSInlinePanel: View {
         }
         .onAppear { updateSessionEvidence() }
         .onChange(of: coordinator.state.status) { _ in updateSessionEvidence() }
-        .onChange(of: coordinator.state.latitude) { _ in updateSessionEvidence() }
+        .onChange(of: coordinator.state.latitude) { _ in
+            placeState = .idle
+            updateSessionEvidence()
+        }
+        .onChange(of: coordinator.state.longitude) { _ in
+            placeState = .idle
+            updateSessionEvidence()
+        }
         .onChange(of: coordinator.state.enabled) { enabled in
             if !enabled {
                 sessionEstablished = false
@@ -218,34 +225,36 @@ private struct GPSInlinePanel: View {
                 }
             }
             .padding(.trailing, 36)
-            Button { showHelp = true } label: {
-                Image(systemName: "lightbulb.fill")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(ZTransferColors.accentOrange)
-                    .frame(width: 30, height: 30)
-                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(ZTransferColors.secondaryText.opacity(0.14)))
-                    .scaleEffect(coordinator.connectionHelpViewed ? 1 : 1.06)
-            }
-            .buttonStyle(.plain)
-            .popover(isPresented: $showHelp, attachmentAnchor: .rect(.bounds), arrowEdge: .top) {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(AppLocalized.resource("gps_detail_description"))
-                        .zTransferText(size: 14, weight: .semibold)
-                    Text(AppLocalized.resource("gps_help_intro"))
-                        .zTransferText(size: 12, weight: .bold)
+            if !coordinator.state.enabled {
+                Button { showHelp = true } label: {
+                    Image(systemName: "lightbulb.fill")
+                        .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(ZTransferColors.accentOrange)
-                    Text(AppLocalized.resource("gps_help_battery") + "\n" + AppLocalized.resource("gps_help_multitask"))
-                        .zTransferText(size: 12)
-                    Text(AppLocalized.resource("gps_help_accuracy_note"))
-                        .zTransferText(size: 12)
-                        .foregroundStyle(ZTransferColors.secondaryText)
+                        .frame(width: 30, height: 30)
+                        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(ZTransferColors.secondaryText.opacity(0.14)))
+                        .scaleEffect(coordinator.connectionHelpViewed ? 1 : 1.06)
                 }
-                .padding(14)
-                .frame(width: 244)
-            }
-            .onChange(of: showHelp) { isPresented in
-                if isPresented { coordinator.markConnectionHelpViewed() }
+                .buttonStyle(.plain)
+                .popover(isPresented: $showHelp, attachmentAnchor: .rect(.bounds), arrowEdge: .top) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(AppLocalized.resource("gps_detail_description"))
+                            .zTransferText(size: 14, weight: .semibold)
+                        Text(AppLocalized.resource("gps_help_intro"))
+                            .zTransferText(size: 12, weight: .bold)
+                            .foregroundStyle(ZTransferColors.accentOrange)
+                        Text(AppLocalized.resource("gps_help_battery") + "\n" + AppLocalized.resource("gps_help_multitask"))
+                            .zTransferText(size: 12)
+                        Text(AppLocalized.resource("gps_help_accuracy_note"))
+                            .zTransferText(size: 12)
+                            .foregroundStyle(ZTransferColors.secondaryText)
+                    }
+                    .padding(14)
+                    .frame(width: 244)
+                }
+                .onChange(of: showHelp) { isPresented in
+                    if isPresented { coordinator.markConnectionHelpViewed() }
+                }
             }
         }
         .padding(.top, 12)
