@@ -163,7 +163,7 @@ final class PhotoEffectsStore: ObservableObject {
         // Android isolates phone-photo effects in the `local_photo_effects`
         // preference file.  UserDefaults suites provide the same isolation;
         // injected defaults are still honored for camera-transfer tests.
-        self.defaults = scope == .localPhotos
+        self.defaults = scope == .localPhotos && defaults === UserDefaults.standard
             ? (UserDefaults(suiteName: "local_photo_effects") ?? defaults)
             : defaults
         self.scope = scope
