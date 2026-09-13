@@ -134,6 +134,11 @@ final class PhotoListViewModel: ObservableObject {
 
     private func reload(generation: Int) async {
         guard generation == loadGeneration else { return }
+        // Android's fill collector is gated by hasCompletedFileScan. Cancel
+        // the existing worker for refreshes too, otherwise an old worker can
+        // issue GetThumb while this generation is enumerating handles.
+        fillTask?.cancel()
+        fillTask = nil
         await thumbnailFillQueue.beginScan()
         loadState = .loading
         isLoadingFiles = true
