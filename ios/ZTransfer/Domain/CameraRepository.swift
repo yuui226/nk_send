@@ -466,8 +466,9 @@ actor CameraRepository {
                 try trim.close()
             }
             if offset == total {
-                let destination = transferUniqueOutputURL(directory: directory, fileName: safeName)
-                try FileManager.default.moveItem(at: temporary, to: destination)
+                let destination = try finalizeDownloadedFile(
+                    temporary: temporary, directory: directory, fileName: safeName
+                )
                 progress?(1)
                 return destination
             }
@@ -492,8 +493,9 @@ actor CameraRepository {
                 progress?(min(1, Double(written) / Double(total)))
             }
             try handleForWriting.close()
-            let destination = transferUniqueOutputURL(directory: directory, fileName: safeName)
-            try FileManager.default.moveItem(at: temporary, to: destination)
+            let destination = try finalizeDownloadedFile(
+                temporary: temporary, directory: directory, fileName: safeName
+            )
             progress?(1)
             return destination
         } catch {
@@ -501,6 +503,35 @@ actor CameraRepository {
             // the next attempt discards it when it is smaller than one chunk
             // or when its known size no longer matches the camera object.
             throw error
+        }
+    }
+
+    /// Android first attempts the provider rename, then copies the completed
+    /// temporary document when rename is refused. Keep both paths behind one
+    /// helper so complete-size resume and a fresh download have identical
+    /// collision handling and never overwrite an existing original.
+    private func finalizeDownloadedFile(
+        temporary: URL,
+        directory: URL,
+        fileName: String,
+    ) throws -> URL {
+        let fileManager = FileManager.default
+        let destination = transferUniqueOutputURL(directory: directory, fileName: fileName)
+        do {
+            try fileManager.moveItem(at: temporary, to: destination)
+            return destination
+        } catch {
+            // A document provider can reject rename while still allowing a
+            // regular copy. Recompute the name in case another writer created
+            // a same-name file between the two operations.
+            let copyDestination = transferUniqueOutputURL(directory: directory, fileName: fileName)
+            do {
+                try fileManager.copyItem(at: temporary, to: copyDestination)
+                try? fileManager.removeItem(at: temporary)
+                return copyDestination
+            } catch {
+                throw error
+            }
         }
     }
 
