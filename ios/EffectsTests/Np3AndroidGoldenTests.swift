@@ -1,0 +1,95 @@
+import XCTest
+import CryptoKit
+#if SWIFT_PACKAGE
+@testable import ZTransferEffects
+#else
+@testable import ZTransfer
+#endif
+
+/// Oracle: the unchanged Android PhotoFilterRenderer.kt, BuiltInPhotoFilters.kt,
+/// CuratedNp3Filters.kt and PhotoFilterPreset.kt were compiled with Kotlin 2.2.21
+/// on JDK 17. Only Bitmap/Android resource classes were stubbed; reflection called
+/// Android's actual private compileFilter/filterPixel methods. No Swift outputs
+/// were used to create these hashes. Each hash covers 24 ARGB colors at
+/// intensities 2, 50, 80, 100 in that order, written as A/R/G/B bytes.
+/// PhotoFilterRenderer.kt SHA256: 190a4543e6345c904baccccf2d2ec9421fc2f8844fc39f661bef17bb3fee2315
+/// CuratedNp3Filters.kt SHA256: 3d2b69a9bc1ccc40ff15fbba964d647dda7ca40d4b6e4d9050fe3d37387bfa3c
+final class Np3AndroidGoldenTests: XCTestCase {
+    func testAllFiftyPresetsMatchAndroidPixelOracle() throws {
+        XCTAssertEqual(Np3FilterCatalog.presets.count, Self.expectedHashes.count)
+        for preset in Np3FilterCatalog.presets {
+            let expected = try XCTUnwrap(Self.expectedHashes[preset.id], preset.legacyID)
+            var bytes = Data()
+            for intensity in [2, 50, 80, 100] {
+                let engine = Np3FilterEngine(parameters: preset.parameters, intensityPercent: intensity)
+                for pixel in Self.samplePixels {
+                    let output = engine.filterPixel(pixel)
+                    bytes.append(contentsOf: [UInt8(output >> 24), UInt8(output >> 16 & 0xff),
+                                              UInt8(output >> 8 & 0xff), UInt8(output & 0xff)])
+                }
+            }
+            let actual = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+            XCTAssertEqual(actual, expected, "Android pixel parity: \(preset.legacyID)")
+        }
+    }
+
+    private static let samplePixels: [UInt32] = [
+        0x00000000, 0x00112233, 0x7f112233, 0xff000000, 0xffffffff, 0xff808080,
+        0xff7f8081, 0xff787880, 0xff708080, 0xffff0000, 0xff00ff00, 0xff0000ff,
+        0xffffff00, 0xff00ffff, 0xffff00ff, 0xffff8000, 0xff80ff00, 0xff0080ff,
+        0xff8040c0, 0xffd2a884, 0xff102030, 0xffabcdef, 0xff010204, 0xfffefdff,
+    ]
+
+    private static let expectedHashes: [String: String] = [
+        "1ecd940d47f9572952b54c2f1e2dcabf5ea9570eca99439bfef3caa13803dba3": "0f5a098460dd9f6b98ba896336ac6e98d51ecda54357af321a8688994410c221",
+        "3bddb358170ba310997a5793b2324370bbd79a2e90809af99dbc31d6dab7522a": "35147584612409faf4f60ca789ad6b9b2b61590e9e3cbd828cdfa475c849f70c",
+        "6474c84688e3b0d921ef2ee127efb046650c2ccec6035e8ce2eac823a4b83b7a": "68b9ff4835ec6e3e05ff9cb2d0510e1da622e9b9f4d66f6263d5de31f902a75e",
+        "00445b841a13f49d36f2a9e5ea6587c7742bde8ad16484ef3f2d82ef48b722fd": "67a3dc76f6c01750da7dfd821f3f09ed0476cd0c0d75dce688fced9556b059cc",
+        "495fc069dab31064babc96d319e09ad3d02de6d4303fb04c58127158a17921d2": "8c546aa8411d63cf4e2205251a02b86333b219cc10ff8df9a8595f1e1fdb7c6d",
+        "644e9710e38197be33257f0562f89dc3882642e36be6d2b295f82f813597a6d7": "dc9aa7b7fbe61a867695876fd02a7bc090776fa96ee5b81f47ae6ab57f39885f",
+        "62044540049c1837111d295630731828c37eaa87d2d939589884097187292a2b": "f4168e0129bb4cba4b90b909979539896cfee72d7d04cda6a54e7c9b1fe4638b",
+        "00ad1a38d1b031eb321b680f66230da175a40a0e6161a6f34a02a7e83c8c88a6": "74969c3f15c6030241271ba336fa8a05879054dbb8b8919ae15ac1af578b7158",
+        "079ca263bcef213f804aa4f49b3d3a4570828647c4d8563860f147d2128ee778": "0546d4f2f4630221db328c6295258b542f94e1c5e51f75f9befe3c5db931399c",
+        "ac3b61a07850c50ba38821937ce84867b290f3f88ac241b631dabe1d8ac2b114": "43a93b4bf68aa78aa7545562f33532230c07d719053604f1c04bc1191793619b",
+        "f367e8de6e48c3ce3ac7a12e0d286747a23adf5a476d11d7f91a3a02bdacf633": "4cda8e81fe798e09e95a44fef8f938354b2553b3429b9b1e7ce2ae63c1bb6c59",
+        "c4927d2645d780756daf181cbb189196faa1d0064a6ddd94ce29bc05f46476ae": "99be6a7f6607d9192e1ac71919eb90bc718ae3d993a1439fff6676ef2ba1f20e",
+        "af4bab0c0ffea25ea32e89ccfd29570b28c56e3cfdbd1918342f4785592fc3b1": "1fbed21ff0e4e952ada139d8de4742a917d09295fcffe4c7df575835e1af73fc",
+        "d3d207ab4b366f0c14a226fa005f99c668e704823b1c198e5273b4566f957627": "0a8befb24bd486a079630b5370576867374205dc44e3796a65e809efef9cbdcf",
+        "016fe02c15f824000594d6a219181453fbbdf276d1eed502536e6a46434a9df8": "e666580dae8a890d825437bbc38fd75899a3f254a617818fc062bc7f1989885f",
+        "d2c32ed51bebac9379200d4bb575cac7c8be7341bf26bdeccbca7c9f137b1f7b": "44f58fbb057e9116828d5a11f16d712ff49c03b9eaf84a484fa699371ee5c11c",
+        "cc88bf89b1ac0e5489cd753988bbc2a2ae3fb952d072533f96bc482a3ede2645": "bb06c2a0969daf8e7e63bf97a4c53857581f1d08ddeb974d9864b4697c1d6024",
+        "b7cfc1b1d5bc74a1ce464fe86c86a7abdb025914ff28aadb7cf3a3b6e355c22d": "d31b9f2f0ef143753c66b1217f254326cf8b84b7f5d0e1d19d8be8f3c56a2a7d",
+        "be6632886a8f33612fcb59b29652bb49c9f3d40a9bcdf0ad65309204e04a9deb": "b297cc8db606be3c763dadfdcb8a40b7a3836da4f3f7958fa7554753899075a8",
+        "695554fe4282ff574b7457ad7eca70e6ea50a87aaca387af4b8266843dd44dd0": "1e7074e407d3cde477531e55fcde5db8cf0335d596bb66b86e6de96d610f4c0c",
+        "1ca70dc3e1202048b2fc612edd073ecbf9c56de6f649d5bd3fde26c7eaec08a5": "4ce3540651479d9d51a52b47e5b8cd90f113665ed92deefc048620562f0bac11",
+        "927a6c72628727ca41e43700f0bc33968391b66a8b8939335f6a01ad83cd1c66": "f73123360528b97041a0fa6d0da15e96e83a099563f71890e95d548da6543e07",
+        "a247d4033b0c11acb864dcf03c7355d213e39e81c4030bedb71067e7ca5f14f7": "a640470d6ef3385f8e9f96020b4eb0c02726a7bbcca0200c6084b3eed9feebcb",
+        "ad0bdf98b12ddb765f93711dc05845417602ebd005bef2b6186e0b75aef65a60": "d8d8f718d55510139eaf5cc20c1031220742981df0dfd4ab0a1a7b594e809ef6",
+        "4c72e375c36d9b0f589087b761261ba6c03a42ebb507f667368f2c706675ac7e": "fd291240282d7f26b7f27fb2fb9b5934cedf0c1c10d823f0d851fe4ac9e82123",
+        "3c65e00ec2b4b541af30facc3ac79646935fb42341551d393442e3a404398f29": "47d52f85a3eee3961ba1968d0a7993c7a89a2204cf713bd872385f13464012f1",
+        "e0bda99f7778d9455be8a15f49c070b581b41cbf3e45f6a2a8d18c4ba4a46127": "536183b401e8f0139aae88d4c87b9066552ac8319f99ecbe7f091214567f87c1",
+        "668aa70a384c92346584ba9b8a0e3ab328de88bca2bad8e3c490c0bc9a5dad91": "874cf11d8faf84a137b0c29d9d594b47e018cabc3d89a4764c4a31dbfa394157",
+        "8ec888c5e6461303c261757f01f52a2ba8625530a2aa9208e6366f6369a0b0a4": "dbad573ff7a860a9793d7ed54a1921b5c65e3c00c2ce3902b79a752a108bc11c",
+        "8185217a39749c4efdb85cfa9329fe527771fea3b88d58ccaf3cfe849dcc9c1b": "1e82fa6f9d60a87122bbfe77da23227204ffdf0208b6a7a74188bf29e7a0d3dc",
+        "8d9e839715153b3da1691604133cd24de74336eb817ea6f4cad4be1718516c2d": "010bde81ba4e888f1ad506ba572834d85e967127a22c5c42a7a4141fe33e7934",
+        "4a4e50fb981a5e933bec407018f9f42070807a7ed07ecd3afce891193b377c2c": "68acd3cbb3efd9277b8847a321c24a7fad769b0ba6e9f1ca3dbd09d0c1ec514a",
+        "2d32524b88137c650aa818556159a3fdacb21d1e317d532fe76b1427d0376926": "5250d6fdda61136202801847cfb4329c4e46cfc6dd334e22fe7e77bfbe8e6ddd",
+        "8874654165387b2eb7e3b241be6ca119ca8c9b0c1f91646d5dc3c6730ee319a1": "069fcbc64cc58cc78919c51f90dc14d78fb98ee827b8ca645a8c89c254a400ff",
+        "d86b7309d531e178dfcb6fdf37045da23294f17c6f8a38ec414de049c91401d7": "5392537637428f1e348f65540b31bd05360b60d28dd925fb449e06a3fa57f077",
+        "4a9fb71aefd13f78b5c76ed36b1299b163c7fbd3f429923860f451ca4e474d52": "1bf9226d332a3658b2120131e7a8717103ecaca6c23612e3f55b451e657f5760",
+        "abfc5c299eb848856499192cef7f839821000e4abb8829b6f020e048727688a8": "d84391c2743a2bd1a474dc76dcc2b86fa6e4c67adee395a40c6aa9cd93120c2e",
+        "4e306b38eaa4ecf3231af3245e67ee2d757428a25cc0a086a0cd6785fb75a0c0": "88abfc63093179dad29b0e9a391ddc634e24716304bf9b80564bc3597609df3e",
+        "fd2c5ba404398127ab9520b4fe1a2ba0d4f9bc2f87a9be5b95745fae37a11a3e": "d9c24848748c176cefecd077b69629d447014a4c1e4f042785120776431fcf8c",
+        "82aed616e1cc841e6faaaa5061e2b2fa6ff1587e1fe133bb5d5f0e25233ae23d": "bc57d87350accf87bc22da469e0efe0e101530ea7c41e4963620cf0ff1275209",
+        "0bdf6b54bedf0a5a2d9603e05de06d4b688ef29201e91dec31b514be130dfebb": "1c267ca3e517d7db4760042bd928b85c0ad04a2339669e9c32bac6cfabf53b7d",
+        "50595b5eb80e05a9e2d5d101d0c77b68e5be7bda3392e627d27380a5f7fe8078": "edc56eb064f919e0254b660020f369e13f1a88c4a274bc1c4ac8d0f86dd1d2ac",
+        "417e4f7cc6dbe52afd7423b894adf0e1149d701f47f85c7227c0424b2080aa44": "60439950aa52227050ce087615ce69211c4928efd7342386cbecbfbbfbfde9bd",
+        "1c85b1478cd2e00f07ddce17e8f832419d2e903ac2cdbe807d431a5821b0c828": "0dc28c19c37f3b72ecfc92f36d8b766cbdfae03819b33ec26b64c4bc471aaab3",
+        "07e8d5426fd04d27680d2b2226eba9687c23ecfb2c59e0bc2592ea17eda942f9": "fca53cf23168a3f8b08f64fbadba85e3d49f248047230b8e343d180fd0108fb1",
+        "56370ca816dea661e56477b6df4a4f3d01375340c9d64e04881999145b9a7dc3": "5eda862a96ec46cb1713d40280bd5bc3ce94f1d22b3c0d32dec770d482cc0d00",
+        "8d861e5b7860d2067c83bef88f83fc35c01a084eb8d63a8110e15ed79621fc2e": "e545c68ad23a5d97d95093cd23b2dc65add6773506b301dee6738c215225534c",
+        "327960a47cc9b3a437ac977a98947683fb8ee7ce54899dc735e47a77bc96d6ac": "29c12d81488533737fd0bc70bb58895b191d869e9f576f086d494d24483553ef",
+        "6006680426e79b96114fe05a3dacc349b214f9af64f51a819c7de3ebb0deeed0": "b1be9e313cc4ab8283d9f365abefabd50383f7a951a03801704606b03b152a1f",
+        "cda442a8526dc994ab1051783744f12b5806c3932a800161befb4dfe393d5288": "1412dba481f7dc3483d453aaf5412ffcfe51a1d0bbe005db62fa6176d405e3bf",
+    ]
+}

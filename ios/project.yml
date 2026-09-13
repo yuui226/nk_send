@@ -1,0 +1,55 @@
+name: ZTransfer
+options:
+  bundleIdPrefix: com.ztransfer
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+settings:
+  base:
+    SWIFT_VERSION: 6.0
+    DEVELOPMENT_TEAM: ""
+targets:
+  ZTransfer:
+    type: application
+    platform: iOS
+    sources:
+      - path: ZTransfer
+    frameworks:
+      - ImageCaptureCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.ztransfer.ios
+        MARKETING_VERSION: "1.82"
+        CURRENT_PROJECT_VERSION: "1"
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Z传
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.photography
+        INFOPLIST_KEY_NSLocationWhenInUseUsageDescription: "用于向相机写入拍摄位置"
+        INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription: "用于连接 Nikon GPS 设备"
+        INFOPLIST_KEY_NSPhotoLibraryUsageDescription: "用于读取工作台照片"
+        INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription: "用于保存工作台生成的效果图"
+        INFOPLIST_KEY_NSLocalNetworkUsageDescription: "用于连接相机"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SWIFT_EMIT_LOC_STRINGS: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: ""
+    scheme:
+      testTargets:
+        - ZTransferTests
+  ZTransferTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: ZTransferTests
+      - path: ProtocolTests
+      - path: EffectsTests
+      - path: RemoteTests
+      - path: GPSTests
+    dependencies:
+      - target: ZTransfer
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.ztransfer.ios.tests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/ZTransfer.app/ZTransfer"
+        BUNDLE_LOADER: "$(TEST_HOST)"
