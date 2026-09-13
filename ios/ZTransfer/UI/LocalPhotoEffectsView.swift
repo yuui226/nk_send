@@ -201,7 +201,7 @@ struct LocalPhotoEffectsView: View {
             if batch.state.photos.isEmpty { showingPicker = true }
             else { batch.generate(settings: previewSettings) }
         } label: {
-            LocalPhotoBatchLabel(state: batch.state, page: previewPage)
+            LocalPhotoBatchLabel(state: batch.state)
                 .frame(maxWidth: .infinity).frame(height: 50).clipped()
         }
         .buttonStyle(WorkbenchGlassButtonStyle())
@@ -225,16 +225,11 @@ private struct WorkbenchScrollTracker: View {
 
 private struct LocalPhotoBatchLabel: View {
     let state: LocalPhotoBatchState<PhotosPickerItem>
-    let page: Int
     @State private var previousPhase: LocalPhotoBatchPhase = .ready
 
     var body: some View {
         ZStack {
             HStack(spacing: 10) {
-                if state.phase == .ready, !state.photos.isEmpty {
-                    Text("\(page + 1) / \(state.photos.count)").font(.system(size: 12)).monospacedDigit()
-                        .foregroundStyle(ZTransferColors.secondaryText)
-                }
                 if state.phase == .generating {
                     HStack(spacing: 0) {
                         Text(AppLocalized.resource("local_photo_batch_generating") + " ")
