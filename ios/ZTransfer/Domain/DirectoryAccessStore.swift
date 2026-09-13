@@ -57,6 +57,11 @@ final class DirectoryAccessStore: ObservableObject {
             relativeTo: nil,
         ) { defaults.set(refreshed, forKey: bookmarkKey) }
         directoryURL = url
+        // Android sweeps stale transfer/frame parts while restoring the saved
+        // directory. Keep the filesystem work off the main actor.
+        Task.detached(priority: .utility) {
+            _ = TransferDirectoryIndex.removeStaleTemporaryFiles(in: url)
+        }
     }
 }
 

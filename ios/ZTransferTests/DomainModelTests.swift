@@ -214,6 +214,27 @@ final class DomainModelTests: XCTestCase {
         XCTAssertNil(index.existingOriginal(for: differentSize))
     }
 
+    func testStartupCleanupRemovesOnlyAndroidTemporaryFilesInRootAndDatedFolders() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let dated = root.appendingPathComponent("ZT2026-08-17", isDirectory: true)
+        try FileManager.default.createDirectory(at: dated, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let staleRootPart = root.appendingPathComponent(".nkpart_10.20260817T142530_a.JPG")
+        let staleRootFrame = root.appendingPathComponent(".nkframe_old_a.jpg")
+        let staleDatedPart = dated.appendingPathComponent(".nkpart_20.20260817T142531_b.JPG")
+        let ordinary = root.appendingPathComponent("keep.JPG")
+        for file in [staleRootPart, staleRootFrame, staleDatedPart, ordinary] {
+            FileManager.default.createFile(atPath: file.path, contents: Data([1]))
+        }
+
+        XCTAssertEqual(TransferDirectoryIndex.removeStaleTemporaryFiles(in: root), 3)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: staleRootPart.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: staleRootFrame.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: staleDatedPart.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: ordinary.path))
+    }
+
     func testPhotoFilterAppliesTypeProtectionStorageAndDate() {
         let files = [
             CameraFile(id: 1, storageID: 1, format: 0x3801, size: 1, fileName: "a.JPG", captureDate: "20260913T010203", isProtected: true),
