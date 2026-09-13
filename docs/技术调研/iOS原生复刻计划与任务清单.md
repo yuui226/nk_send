@@ -578,6 +578,11 @@
 - 安卓 `GpsDetailOverflowLayer` 的 GPS 详情层使用顶部锚定缩放/淡入淡出，展开主时长 260ms、收起 220ms，并在溢出层中保持邻卡测量不变；iOS 已移除单纯 opacity 过渡，采用同一锚点和缩放比例。
 - 验证：Xcode Simulator 测试 127 项、0 failures；GPS 真机动画帧率和系统安全区仍需设备核对。
 
+### 2026-09-14 HD 监看会话重启顺序
+
+- 安卓切换 `hdLiveView` 会取消并等待旧监看任务、结束 LV，再写入 0xD1AC 并启动新会话；iOS 的 HD 操作现在按同一顺序串行重启，避免在旧会话仍占用时写分辨率。
+- 验证：Xcode Simulator 测试 127 项、0 failures；真实相机的结束/启动响应和失败重试仍需设备核对。
+
 ### 2026-09-14 照片列表连接类型图标
 
 - 安卓照片列表顶栏的 `SignalPill` 按当前连接类型显示 USB 或 Wi‑Fi；iOS `CameraSession` 现在保留不可变的传输类型，顶栏 USB 会话显示 USB 图标，网络会话显示 Wi‑Fi 图标。

@@ -118,7 +118,20 @@ final class RemoteViewModel: ObservableObject {
     }
 
     func setHDLiveView(_ enabled: Bool) {
+        guard hdLiveView != enabled else { return }
         hdLiveView = enabled
+        guard let previousTask = frameTask else { return }
+        // Android's HD switch starts a fresh live-view session because the
+        // 0xD1AC size property is only effective while LV is closed. Join the
+        // cancelled task before starting again so EndLiveView always precedes
+        // the next size write and StartLiveView.
+        frameTask = nil
+        previousTask.cancel()
+        Task { [weak self] in
+            await previousTask.value
+            guard let self, !Task.isCancelled else { return }
+            self.start()
+        }
     }
 
     func loadExposure(movie: Bool) {
