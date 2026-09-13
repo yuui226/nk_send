@@ -19,13 +19,19 @@ final class PhotoThumbnailDiskCache: @unchecked Sendable {
             self.lock = NSLock()
             self.index = []
             try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            index = Set((try? FileManager.default.contentsOfDirectory(
+            let files = (try? FileManager.default.contentsOfDirectory(
                 at: directory, includingPropertiesForKeys: [.fileSizeKey], options: [.skipsHiddenFiles]
-            ))?.compactMap { url in
-                guard url.pathExtension.lowercased() == "jpg",
-                      ((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) > 0 else { return nil }
-                return url.lastPathComponent
-            } ?? [])
+            )) ?? []
+            var names = Set<String>()
+            for url in files {
+                let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+                if url.pathExtension.lowercased() == "jpg", size > 0 {
+                    names.insert(url.lastPathComponent)
+                } else if url.pathExtension.lowercased() == "tmp" || size == 0 {
+                    try? FileManager.default.removeItem(at: url)
+                }
+            }
+            index = names
         }
 
         /// The OS may clear cache contents while the process remains alive.
@@ -48,6 +54,7 @@ final class PhotoThumbnailDiskCache: @unchecked Sendable {
         func find(_ name: String, legacyName: String? = nil, alternateName: String? = nil) -> URL? {
             lock.lock(); defer { lock.unlock() }
             let fm = FileManager.default
+            ensureDirectoryLocked()
             let targetURL = target(name)
             if index.contains(name), ((try? targetURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) > 0 {
                 return targetURL
@@ -67,6 +74,17 @@ final class PhotoThumbnailDiskCache: @unchecked Sendable {
                 }
             }
             return nil
+        }
+
+        private func ensureDirectoryLocked() {
+            guard !fmDirectoryExists() else { return }
+            try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            index.removeAll()
+        }
+
+        private func fmDirectoryExists() -> Bool {
+            var isDirectory: ObjCBool = false
+            return FileManager.default.fileExists(atPath: directory.path, isDirectory: &isDirectory) && isDirectory.boolValue
         }
 
         @discardableResult
@@ -159,6 +177,9 @@ final class PhotoThumbnailDiskCache: @unchecked Sendable {
                     try? fm.removeItem(at: child)
                 }
             }
+        }
+        for file in dirs where file.pathExtension.lowercased() == "tmp" {
+            if (try? fm.removeItem(at: file)) != nil { removed += 1 }
         }
         // Keep recent legacy flat files so a later camera lookup can migrate
         // them lazily, matching Android's 90-day cleanup window.
