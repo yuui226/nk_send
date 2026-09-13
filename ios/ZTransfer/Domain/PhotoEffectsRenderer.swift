@@ -439,7 +439,38 @@ enum PhotoEffectsRenderer {
         if let location = metadata.locationRow, !location.isEmpty { rows.append((location, area.width * 0.018, .regular, 3)) }
         if watermark.enabled && watermark.content == .text && !photoPlacement(watermark.position) { rows.append((watermark.displayText, area.width * textSizeFraction(watermark.sizePercent), .regular, 4)) }
         guard !rows.isEmpty else { return }
-        let fonts = rows.map { UIFont.systemFont(ofSize: max(9, $0.size), weight: $0.weight) }
+        let maxTitleWidth = area.width * (preset == .frosted ? 0.78 : 0.86)
+        var titleBrandFont = UIFont(name: "HelveticaNeue-BoldItalic", size: area.width * 0.032) ?? UIFont.italicSystemFont(ofSize: area.width * 0.032)
+        var titleModelFont = UIFont.systemFont(ofSize: area.width * 0.024, weight: .regular)
+        let titleGap = area.width * 0.016
+        let titleWidth = (brand as NSString).size(withAttributes: [.font: titleBrandFont]).width +
+            (brand.isEmpty || model.isEmpty ? 0 : titleGap) +
+            (model as NSString).size(withAttributes: [.font: titleModelFont]).width
+        if titleWidth > maxTitleWidth, titleWidth > 0 {
+            let scale = maxTitleWidth / titleWidth
+            titleBrandFont = titleBrandFont.withSize(titleBrandFont.pointSize * scale)
+            titleModelFont = titleModelFont.withSize(titleModelFont.pointSize * scale)
+        }
+        var detailFont = UIFont.systemFont(ofSize: area.width * 0.020, weight: .regular)
+        if let detailRow = detailWithDate.nilIfEmpty {
+            let width = (detailRow as NSString).size(withAttributes: [.font: detailFont]).width
+            let maxWidth = area.width * (preset == .frosted ? 0.76 : 0.82)
+            if width > maxWidth, width > 0 { detailFont = detailFont.withSize(detailFont.pointSize * maxWidth / width) }
+        }
+        var lensFont = UIFont.systemFont(ofSize: area.width * 0.0185, weight: .medium)
+        if !lens.isEmpty {
+            let width = (lens as NSString).size(withAttributes: [.font: lensFont]).width
+            let maxWidth = area.width * (preset == .frosted ? 0.76 : 0.82)
+            if width > maxWidth, width > 0 { lensFont = lensFont.withSize(lensFont.pointSize * maxWidth / width) }
+        }
+        let fonts = rows.map { row -> UIFont in
+            switch row.kind {
+            case 0: return UIFont.systemFont(ofSize: max(9, max(titleBrandFont.pointSize, titleModelFont.pointSize)), weight: .bold)
+            case 1: return lensFont
+            case 2: return detailFont
+            default: return UIFont.systemFont(ofSize: max(9, row.size), weight: row.weight)
+            }
+        }
         let inkHeights = fonts.map { $0.ascender + abs($0.descender) }
         let gap = min(area.width * 0.0125, area.height * 0.09)
         let available = area.height * 0.88
@@ -450,9 +481,6 @@ enum PhotoEffectsRenderer {
         var cursor = area.midY - total * 0.5
         let color = lightText ? UIColor(red: 0.97, green: 0.98, blue: 0.99, alpha: 1) : UIColor(red: 0.10, green: 0.12, blue: 0.15, alpha: 1)
         let muted = lightText ? UIColor(red: 0.86, green: 0.89, blue: 0.91, alpha: 1) : UIColor(red: 0.29, green: 0.31, blue: 0.33, alpha: 1)
-        let titleBrandFont = UIFont(name: "HelveticaNeue-BoldItalic", size: area.width * 0.032) ?? UIFont.italicSystemFont(ofSize: area.width * 0.032)
-        let titleModelFont = UIFont.systemFont(ofSize: area.width * 0.024, weight: .regular)
-        let titleGap = area.width * 0.016
         for (index, row) in rows.enumerated() {
             let font = fonts[index].withSize(max(9, fonts[index].pointSize * scale))
             var attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: index == 0 ? color : muted]
