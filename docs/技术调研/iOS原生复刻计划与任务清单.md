@@ -721,3 +721,9 @@
 - 对照安卓 `ConnectionMethodCard` 的 `AnimatedContent`：STA 失败提示与两行连接步骤共用固定内容槽，进入为 220ms 淡入并延迟 50ms，退出为 130ms 淡出；iOS 原先只替换静态 `Group`，状态切换时内容瞬间跳变。
 - iOS `ConnectionMethodCard` 现用固定 `ZStack` 内容槽、顶部对齐和同一方向的淡入/淡出 transition，卡片 footer 和外框不重新测量。USB/AP 的错误文案路径仍保持原有资源引用，未新增提示。
 - 验证：iOS Simulator Debug 构建成功；尚未在真实失败/恢复操作中逐帧核对，任务 15、17、18 继续保持未完成。
+
+### 2026-09-14 连接页指引气泡锚点对账（进行中）
+
+- 对照安卓 `TipsBubble`/`AnchorPopup`：指引不是带遮罩的系统弹窗，而是贴着灯泡按钮的毛玻璃气泡；AP 从按钮下方展开，STA 因内容较长向上预留空间并可滚动，点击外部关闭。
+- iOS `STATipsOverlay` 现在接收灯泡按钮全局坐标，去掉遮罩，按 AP/STA 分支读取安卓原始资源，STA 内容在剩余高度内滚动，入口仍使用同一 240ms 锚定缩放淡入和 180ms 收起时序。`ConnectionMethodCard` 通过 GeometryReader 将按钮坐标传回页面。
+- 验证：iOS Simulator Debug 构建成功，`git diff --check` 通过；尚未在模拟器逐点操作确认不同安全区下的坐标，仍需 UI 交互验收，任务 18 保持未完成。

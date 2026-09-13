@@ -14,6 +14,7 @@ struct ConnectionPage: View {
     @State private var showSTAReset = false
     @State private var showSTATips = false
     @State private var tipsWirelessMode: WirelessMode = .sta
+    @State private var tipsAnchor: CGRect = .zero
     @AppStorage("sta_connection_help_viewed") private var staHelpViewed = false
     @AppStorage("ap_connection_help_viewed") private var apHelpViewed = false
     @State private var attentionOrigin = Date()
@@ -46,7 +47,8 @@ struct ConnectionPage: View {
                         onWirelessModeChanged: model.select(wirelessMode:),
                         onConnect: { Task { await model.connectSelectedWiFi() } },
                         onResetSTAPairing: { Task { await model.refreshSTAProfiles(); showSTAReset = true } },
-                        onSTAHelpRequested: {
+                        onSTAHelpRequested: { anchor in
+                            tipsAnchor = anchor
                             tipsWirelessMode = .sta
                             staHelpViewed = true
                             showSTATips = true
@@ -57,7 +59,8 @@ struct ConnectionPage: View {
                                 UIApplication.shared.open(url)
                             }
                         },
-                        onAPHelpRequested: {
+                        onAPHelpRequested: { anchor in
+                            tipsAnchor = anchor
                             tipsWirelessMode = .ap
                             apHelpViewed = true
                             showSTATips = true
@@ -125,7 +128,7 @@ struct ConnectionPage: View {
                 .ignoresSafeArea()
             }
             if showSTATips {
-                STATipsOverlay(isPresented: $showSTATips, wirelessMode: tipsWirelessMode)
+                STATipsOverlay(isPresented: $showSTATips, wirelessMode: tipsWirelessMode, anchor: tipsAnchor)
                     .ignoresSafeArea()
             }
         }

@@ -14,12 +14,13 @@ struct ConnectionMethodCard: View {
     var onWirelessModeChanged: ((WirelessMode) -> Void)?
     var onConnect: (() -> Void)?
     var onResetSTAPairing: (() -> Void)?
-    var onSTAHelpRequested: (() -> Void)?
+    var onSTAHelpRequested: ((CGRect) -> Void)?
     var onSTAHotspotSettings: (() -> Void)?
-    var onAPHelpRequested: (() -> Void)?
+    var onAPHelpRequested: ((CGRect) -> Void)?
     var onAPHotspotSettings: (() -> Void)?
     var staHelpViewed = false
     var apHelpViewed = false
+    @State private var helpButtonFrame: CGRect = .zero
 
     private var accent: Color { mode == .usb ? ZTransferColors.accentOrange : ZTransferColors.accentBlue }
     private var isSTA: Bool { state.wirelessMode == .sta }
@@ -153,7 +154,7 @@ struct ConnectionMethodCard: View {
         if isSTA {
             VStack(spacing: 8) {
                 HStack {
-                    Button { onSTAHelpRequested?() } label: {
+                    Button { onSTAHelpRequested?(helpButtonFrame) } label: {
                         ZStack(alignment: .topTrailing) {
                             utilityIcon("lightbulb.fill", tint: ZTransferColors.accentOrange)
                             if !staHelpViewed {
@@ -166,6 +167,9 @@ struct ConnectionMethodCard: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(AppLocalized.resource("tip_sta_title"))
+                    .background(GeometryReader { proxy in
+                        Color.clear.onAppear { helpButtonFrame = proxy.frame(in: .global) }
+                    })
                     Spacer(minLength: 0)
                     Button { onResetSTAPairing?() } label: {
                       ZStack {
@@ -195,7 +199,7 @@ struct ConnectionMethodCard: View {
             }
         } else {
             HStack(spacing: 8) {
-                Button { onAPHelpRequested?() } label: {
+                Button { onAPHelpRequested?(helpButtonFrame) } label: {
                     ZStack(alignment: .topTrailing) {
                         utilityIcon("lightbulb.fill", tint: ZTransferColors.accentOrange, size: 36)
                         if !apHelpViewed {
@@ -208,6 +212,9 @@ struct ConnectionMethodCard: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(AppLocalized.resource("tip_title"))
+                .background(GeometryReader { proxy in
+                    Color.clear.onAppear { helpButtonFrame = proxy.frame(in: .global) }
+                })
                 Button { onAPHotspotSettings?() } label: {
                     Text(AppLocalized.resource("open_wifi_settings"))
                         .zTransferTypography(.labelSmall, weight: .semibold)

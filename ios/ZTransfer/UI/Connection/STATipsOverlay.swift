@@ -6,53 +6,71 @@ import SwiftUI
 struct STATipsOverlay: View {
     @Binding var isPresented: Bool
     let wirelessMode: WirelessMode
+    let anchor: CGRect
     @State private var progress: CGFloat = 0
 
     var body: some View {
-        ZStack {
-            Color.black.opacity(0.30 * progress)
-                .ignoresSafeArea()
-                .contentShape(Rectangle())
-                .onTapGesture { dismiss() }
-            VStack(alignment: .leading, spacing: 12) {
-                Text(AppLocalized.resource(wirelessMode == .ap ? "tip_title" : "tip_sta_title"))
-                    .zTransferTypography(.titleMedium, weight: .bold)
-                if wirelessMode == .ap {
-                    tipBlock(
-                        label: AppLocalized.resource("tip_ap_mode"),
-                        body: AppLocalized.resource("tip_body")
-                    )
-                    Text(AppLocalized.resource("tip_path"))
-                        .zTransferTypography(.bodySmall)
-                        .foregroundStyle(ZTransferColors.secondaryText)
-                } else {
-                    tipBlock(
-                        label: AppLocalized.resource("tip_sta_first_connection"),
-                        body: AppLocalized.resource("tip_sta_step_hotspot") + "\n" +
-                            AppLocalized.resource("tip_sta_network_alternative"),
-                        detail: AppLocalized.resource("tip_sta_hotspot_help")
-                    )
-                    tipBlock(
-                        label: AppLocalized.resource("tip_sta_quick_start"),
-                        body: AppLocalized.resource("tip_sta_steps_after_hotspot")
-                    )
-                    Text(AppLocalized.resource("tip_path"))
-                        .zTransferTypography(.bodySmall)
-                        .foregroundStyle(ZTransferColors.secondaryText)
-                }
+        GeometryReader { proxy in
+            let panelTop = resolvedPanelTop(in: proxy.size)
+            ZStack(alignment: .topLeading) {
+                // Android TipsBubble is a non-dimming AnchorPopup. The clear
+                // hit target dismisses it without changing the page colors.
+                Color.clear
+                    .ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .onTapGesture { dismiss() }
+                tipContent(maxHeight: max(120, proxy.size.height - panelTop - 20))
+                    .frame(width: min(360, max(0, proxy.size.width - 40)), alignment: .leading)
+                    .padding(18)
+                    .background(ZTransferGlassSurface(cornerRadius: 18, kind: .panel))
+                    .scaleEffect(0.94 + progress * 0.06, anchor: .topLeading)
+                    .opacity(progress)
+                    .offset(x: 20, y: panelTop)
             }
-            .foregroundStyle(ZTransferColors.primaryText)
-            .padding(18)
-            .frame(maxWidth: 360, alignment: .leading)
-            .background(ZTransferGlassSurface(cornerRadius: 18, kind: .panel))
-            .scaleEffect(0.94 + progress * 0.06, anchor: .center)
-            .opacity(progress)
-            .padding(20)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .onAppear {
+                progress = 0
+                withAnimation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.24)) { progress = 1 }
+            }
         }
-        .onAppear {
-            progress = 0
-            withAnimation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.24)) { progress = 1 }
+    }
+
+    @ViewBuilder
+    private func tipContent(maxHeight: CGFloat) -> some View {
+        let content = VStack(alignment: .leading, spacing: 12) {
+            Text(AppLocalized.resource(wirelessMode == .ap ? "tip_title" : "tip_sta_title"))
+                .zTransferTypography(.titleMedium, weight: .bold)
+            if wirelessMode == .ap {
+                tipBlock(label: AppLocalized.resource("tip_ap_mode"), body: AppLocalized.resource("tip_body"))
+                Text(AppLocalized.resource("tip_path"))
+                    .zTransferTypography(.bodySmall)
+                    .foregroundStyle(ZTransferColors.secondaryText)
+            } else {
+                tipBlock(
+                    label: AppLocalized.resource("tip_sta_first_connection"),
+                    body: AppLocalized.resource("tip_sta_step_hotspot") + "\n" + AppLocalized.resource("tip_sta_network_alternative"),
+                    detail: AppLocalized.resource("tip_sta_hotspot_help")
+                )
+                tipBlock(label: AppLocalized.resource("tip_sta_quick_start"), body: AppLocalized.resource("tip_sta_steps_after_hotspot"))
+                Text(AppLocalized.resource("tip_path"))
+                    .zTransferTypography(.bodySmall)
+                    .foregroundStyle(ZTransferColors.secondaryText)
+            }
         }
+        .foregroundStyle(ZTransferColors.primaryText)
+        if wirelessMode == .sta {
+            ScrollView(.vertical, showsIndicators: false) { content }
+                .frame(maxHeight: maxHeight)
+        } else {
+            content
+        }
+    }
+
+    private func resolvedPanelTop(in size: CGSize) -> CGFloat {
+        let anchored = anchor == .zero
+            ? (wirelessMode == .sta ? 156 : 160)
+            : (wirelessMode == .sta ? anchor.maxY - 144 : anchor.maxY + 24)
+        return min(max(20, anchored), max(20, size.height - 120))
     }
 
     @ViewBuilder
