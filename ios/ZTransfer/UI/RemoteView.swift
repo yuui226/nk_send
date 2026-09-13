@@ -22,6 +22,7 @@ struct RemoteView: View {
     @State private var zebraVisible = false
     @State private var zebraMask: IOSZebraMask?
     @State private var lastZebraUpdate = 0.0
+    @State private var recordingDotDimmed = false
 
     init(session: CameraSession) {
         _model = StateObject(wrappedValue: RemoteViewModel(camera: session))
@@ -238,7 +239,19 @@ struct RemoteView: View {
                 .frame(maxWidth: .infinity, alignment: .trailing)
                 if model.state.capture == .recording {
                     HStack(spacing: 5) {
-                        Circle().fill(.red).frame(width: 7, height: 7)
+                        Circle()
+                            .fill(.red)
+                            .opacity(recordingDotDimmed ? 0.3 : 1)
+                            .frame(width: 7, height: 7)
+                            .onAppear {
+                                recordingDotDimmed = false
+                                withAnimation(
+                                    .timingCurve(0.4, 0, 0.2, 1, duration: 0.6)
+                                        .repeatForever(autoreverses: true)
+                                ) {
+                                    recordingDotDimmed = true
+                                }
+                            }
                         Text(String(format: "%d:%02d", model.recordingSeconds / 60,
                                     model.recordingSeconds % 60))
                             .font(.system(size: 11, weight: .bold, design: .monospaced))
