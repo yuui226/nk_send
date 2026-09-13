@@ -430,7 +430,7 @@ final class ConnectionViewModel: ObservableObject {
             if state.usbAuthorization == .authorized,
                state.usbPhase == .waitingForCamera,
                (previous.usbPhase == .waitingForCamera ||
-                previous.usbPhase == .failed("未获得 USB 权限，请重新插线并允许访问") ||
+                previous.usbPhase == .failed(AppLocalized.resource("usb_permission_required")) ||
                 previous.selectedDeviceID != state.selectedDeviceID),
                usbConnectTask == nil {
                 state.usbPhase = .connecting

@@ -46,12 +46,12 @@ extension ConnectionState {
             if status == .denied || status == .restricted {
                 // Android keeps the USB card selected and exposes the same
                 // actionable permission error until the cable is reattached.
-                let message = "未获得 USB 权限，请重新插线并允许访问"
+                let message = AppLocalized.resource("usb_permission_required")
                 next.usbPhase = .failed(message)
                 next.errorMessage = message
             } else if status == .authorized,
                       (next.usbPhase == .unavailable ||
-                       next.usbPhase == .failed("未获得 USB 权限，请重新插线并允许访问")) {
+                       next.usbPhase == .failed(AppLocalized.resource("usb_permission_required"))) {
                 next.usbPhase = .waitingForCamera
                 next.errorMessage = nil
             }
