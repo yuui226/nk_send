@@ -57,6 +57,12 @@ struct RootView: View {
     @State private var transferQueue = TransferQueue()
     @AppStorage("theme_mode") private var themeMode = "SYSTEM"
     @AppStorage("app_language") private var appLanguage = "system"
+    // Android keeps HomeScreen alive for the connection-success celebration
+    // (500 ms delay + 760 ms effect) before entering the file list.  Keep the
+    // newly-created session in this hand-off state instead of switching views
+    // as soon as the transport handshake completes.
+    @State private var connectionCelebrationActive = false
+    @State private var connectionCelebrationStart: Date?
 
     private var locale: Locale {
         switch appLanguage {
@@ -69,11 +75,34 @@ struct RootView: View {
     var body: some View {
         Group {
             if let session = connectionModel.cameraSession {
-                PhotoListView(session: session, queue: transferQueue, directory: directoryStore, effectsStore: effectsStore) {
-                    Task { await connectionModel.disconnectCamera() }
+                // Android starts the file scan as soon as the camera session is
+                // ready, while HomeScreen remains visible for the 1260 ms
+                // success hand-off. Keep the list mounted (but hidden and
+                // untouchable) so its scanner/cache lifecycle starts at the
+                // same boundary instead of being delayed by the animation.
+                ZStack {
+                    PhotoListView(session: session,
+                                  queue: transferQueue,
+                                  directory: directoryStore,
+                                  effectsStore: effectsStore) {
+                        Task { await connectionModel.disconnectCamera() }
+                    }
+                    .opacity(connectionCelebrationActive ? 0 : 1)
+                    .allowsHitTesting(!connectionCelebrationActive)
+                    if connectionCelebrationActive {
+                        HomeWorkspacePagerIOS(connection: connectionModel,
+                                               effectsStore: effectsStore,
+                                               gpsCoordinator: gpsCoordinator,
+                                               directory: directoryStore,
+                                               celebrationStart: connectionCelebrationStart)
+                    }
                 }
             } else {
-                HomeWorkspacePagerIOS(connection: connectionModel, effectsStore: effectsStore, gpsCoordinator: gpsCoordinator, directory: directoryStore)
+                HomeWorkspacePagerIOS(connection: connectionModel,
+                                       effectsStore: effectsStore,
+                                       gpsCoordinator: gpsCoordinator,
+                                       directory: directoryStore,
+                                       celebrationStart: connectionCelebrationStart)
             }
         }
         .preferredColorScheme(themeMode == "DARK" ? .dark : themeMode == "LIGHT" ? .light : nil)
@@ -86,6 +115,32 @@ struct RootView: View {
             connectionModel.stopUSBDiscovery()
             connectionModel.stopWiFiDiscovery()
         }
+        .onAppear {
+            if connectionModel.cameraSession != nil {
+                connectionCelebrationStart = Date()
+                connectionCelebrationActive = true
+            }
+        }
+        .onChange(of: connectionModel.cameraSession != nil) { connected in
+            if connected {
+                connectionCelebrationStart = Date()
+                connectionCelebrationActive = true
+            } else {
+                connectionCelebrationStart = nil
+                connectionCelebrationActive = false
+            }
+        }
+        .task(id: connectionModel.cameraSession != nil) {
+            guard connectionModel.cameraSession != nil else { return }
+            do {
+                try await Task.sleep(nanoseconds: 1_260_000_000)
+                guard !Task.isCancelled, connectionModel.cameraSession != nil else { return }
+                connectionCelebrationActive = false
+                connectionCelebrationStart = nil
+            } catch {
+                // A disconnect or a replacement session cancels this hand-off.
+            }
+        }
     }
 }
 
@@ -97,12 +152,18 @@ private struct HomeWorkspacePagerIOS: View {
     let effectsStore: PhotoEffectsStore
     @ObservedObject var gpsCoordinator: GPSCoordinator
     let directory: DirectoryAccessStore
+    let celebrationStart: Date?
     @State private var page = 0
 
     var body: some View {
         GeometryReader { proxy in
             TabView(selection: $page) {
-                ConnectionPage(model: connection, effectsStore: effectsStore, gpsCoordinator: gpsCoordinator, directory: directory, onOpenWorkspace: {
+                ConnectionPage(model: connection,
+                               effectsStore: effectsStore,
+                               gpsCoordinator: gpsCoordinator,
+                               directory: directory,
+                               celebrationStart: celebrationStart,
+                               onOpenWorkspace: {
                     withAnimation(.interactiveSpring(response: 0.34, dampingFraction: 0.88)) { page = 1 }
                 })
                     .rotationEffect(.degrees(-90))

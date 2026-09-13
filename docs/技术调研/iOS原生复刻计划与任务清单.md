@@ -734,3 +734,10 @@
 - 现在扫描入口和直读准备前都经过同一 `waitForForegroundPreview()`：远程监看直接结束本轮并保留后续刷新入口，FHD 等待当前预览释放；不会让目录扫描抢占前台 PTP 通道。`PhotoListViewModel.reload()` 也先取消上一轮 `loadTask`，与安卓 `fileLoadJob?.cancel()` 一致。
 - 依据：安卓 `CameraViewModel.kt:isFileScanPaused/loadFiles`；iOS 修改位置：`CameraRepository.scanCatalog`、`PhotoListViewModel.reload`。
 - 验证：`xcodebuild test -project ios/ZTransfer.xcodeproj -scheme ZTransfer -destination 'platform=iOS Simulator,name=iPhone 17 Pro'`，140 tests、0 failures。尚未用真实监看/FHD 与相机同时操作验证抢占时序，照片列表任务仍保持未完成。
+
+### 2026-09-14 连接成功庆祝与照片列表跳转时序对账（进行中）
+
+- 安卓 `HomeScreen.kt` 在真实相机会话建立后不会立即离开连接页：先以单调时钟运行 500ms 延迟、620ms 选中卡片 hero 飞行和 760ms 成功光效，总计 1260ms；动画结束后由 `HomeWorkspacePager` 回调，`MainActivity` 仍在 Home 路由且连接未断开时才导航到照片列表。连接中断或用户离开 Home 时，迟到回调必须丢弃。
+- iOS `RootView` 现在在 `CameraSession` 建立后暂留 Home，使用同一 1260ms hand-off；取消/断线会取消任务并回到连接页。`ConnectionPage` 使用 `TimelineView` 传递 500/620/760ms 进度，`ConnectionMethodCard` 对选中卡片执行 Android 同值的缩放、位移、淡出和徽章放大，完成后才切换 `PhotoListView`。
+- 这次只改变 iOS 的入口时序和连接页动画，不改变 `ConnectionViewModel` 的协议状态、会话建立或照片扫描启动时机；扫描仍可在连接建立后立即准备，导航延迟仅作用于显示层。
+- 验证：模拟器 Debug 构建成功；新增 `ConnectionStateTests.testConnectionCelebrationUsesAndroidTiming` 校验 500/620/1260ms 边界。尚未在真实相机成功、断线中断和不同系统动画倍率下逐帧核对，任务仍保持未完成。

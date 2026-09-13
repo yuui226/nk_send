@@ -11,6 +11,13 @@ struct ConnectionMethodCard: View {
     /// failed states.
     let attentionActive: Bool
     let attentionOrigin: Date
+    /// Android's HomeScreen supplies the selected card and the shared
+    /// celebration clock.  Keeping these values at the card boundary lets
+    /// the surrounding page remain static while only the hero layers redraw.
+    let selected: Bool
+    let success: Bool
+    let selectionSceneProgress: CGFloat
+    let successEffectProgress: CGFloat
     var onWirelessModeChanged: ((WirelessMode) -> Void)?
     var onConnect: (() -> Void)?
     var onResetSTAPairing: (() -> Void)?
@@ -99,6 +106,10 @@ struct ConnectionMethodCard: View {
         .modifier(ConnectionBreathingModifier(active: attentionActive,
                                                origin: attentionOrigin,
                                                offset: mode == .usb ? 0 : 0.5))
+        .modifier(ConnectionCelebrationModifier(selected: selected,
+                                                success: success,
+                                                progress: selectionSceneProgress,
+                                                successProgress: successEffectProgress))
         .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.32), value: dimmed)
     }
 
@@ -130,6 +141,7 @@ struct ConnectionMethodCard: View {
         .frame(width: 42, height: 42)
         .background(accent.opacity(0.10), in: RoundedRectangle(cornerRadius: 13))
         .overlay(RoundedRectangle(cornerRadius: 13).strokeBorder(accent.opacity(0.35), lineWidth: 1))
+        .scaleEffect(success ? 1 + successEffectProgress * 1.12 : 1)
     }
 
     private var modeTabs: some View {
@@ -250,6 +262,24 @@ struct ConnectionMethodCard: View {
         if mode == .usb, case let .failed(message) = state.usbPhase { return message }
         if mode == .wifi, case let .failed(message) = state.wifiPhase { return message }
         return nil
+    }
+}
+
+/// Mirrors HomeScreen.kt's selected-card exit and badge success treatment.
+/// The card exits to a slight upward/transparent state while its mode badge
+/// remains visible and grows into the success effect.  This modifier is kept
+/// independent of the card layout so the footer does not remeasure each frame.
+private struct ConnectionCelebrationModifier: ViewModifier {
+    let selected: Bool
+    let success: Bool
+    let progress: CGFloat
+    let successProgress: CGFloat
+
+    func body(content: Content) -> some View {
+        content
+            .scaleEffect(selected ? 1 - progress * 0.045 : 1 - progress * 0.045)
+            .offset(y: progress * 8)
+            .opacity(selected ? 1 : 1 - progress)
     }
 }
 

@@ -9,6 +9,7 @@ struct ConnectionPage: View {
     let effectsStore: PhotoEffectsStore
     @ObservedObject var gpsCoordinator: GPSCoordinator
     let directory: DirectoryAccessStore
+    let celebrationStart: Date?
     let onOpenWorkspace: () -> Void
     @State private var showSettings = false
     @State private var showSTAReset = false
@@ -21,6 +22,16 @@ struct ConnectionPage: View {
     @State private var settingsAnchor: CGRect = .zero
 
     var body: some View {
+        TimelineView(.animation(paused: celebrationStart == nil)) { context in
+            let elapsed = celebrationStart.map {
+                max(0, context.date.timeIntervalSince($0) * 1_000)
+            } ?? 0
+            pageBody(celebration: ConnectionCelebrationValues(elapsedMilliseconds: elapsed))
+        }
+    }
+
+    @ViewBuilder
+    private func pageBody(celebration: ConnectionCelebrationValues) -> some View {
         ZStack {
             GeometryReader { proxy in
                 let layout = ConnectionLayout(size: proxy.size)
@@ -33,7 +44,11 @@ struct ConnectionPage: View {
                             height: layout.usbHeight,
                             dimmed: gpsCoordinator.state.enabled,
                             attentionActive: model.cameraSession == nil && !gpsCoordinator.state.enabled,
-                            attentionOrigin: attentionOrigin)
+                            attentionOrigin: attentionOrigin,
+                            selected: model.cameraSession?.isUSB == true,
+                            success: celebration.success > 0 && model.cameraSession?.isUSB == true,
+                            selectionSceneProgress: celebration.hero,
+                            successEffectProgress: celebration.success)
                         GPSConnectionControl(coordinator: gpsCoordinator)
                     }
                     .frame(width: layout.cardWidth)
@@ -44,6 +59,10 @@ struct ConnectionPage: View {
                         dimmed: gpsCoordinator.state.enabled,
                         attentionActive: model.cameraSession == nil && !gpsCoordinator.state.enabled,
                         attentionOrigin: attentionOrigin,
+                        selected: model.cameraSession != nil && model.cameraSession?.isUSB == false,
+                        success: celebration.success > 0 && model.cameraSession != nil && model.cameraSession?.isUSB == false,
+                        selectionSceneProgress: celebration.hero,
+                        successEffectProgress: celebration.success,
                         onWirelessModeChanged: model.select(wirelessMode:),
                         onConnect: { Task { await model.connectSelectedWiFi() } },
                         onResetSTAPairing: { Task { await model.refreshSTAProfiles(); showSTAReset = true } },
@@ -136,6 +155,28 @@ struct ConnectionPage: View {
         .onChange(of: gpsCoordinator.state.enabled) { enabled in
             if !enabled { attentionOrigin = Date() }
         }
+    }
+}
+
+/// Timing copied from HomeScreen.kt.  The first 500 ms is the selected-card
+/// hero flight; the following 760 ms is the success effect before navigation.
+struct ConnectionCelebrationValues: Equatable {
+    let hero: CGFloat
+    let success: CGFloat
+
+    init(elapsedMilliseconds: Double) {
+        let heroDuration = 620.0
+        let successDelay = 500.0
+        let successDuration = 760.0
+        let heroLinear = min(1, max(0, elapsedMilliseconds / heroDuration))
+        let successLinear = min(1, max(0, (elapsedMilliseconds - successDelay) / successDuration))
+        hero = CGFloat(Self.smoother(heroLinear))
+        success = CGFloat(Self.smoother(successLinear))
+    }
+
+    private static func smoother(_ value: Double) -> Double {
+        let x = min(1, max(0, value))
+        return x * x * (3 - 2 * x)
     }
 }
 

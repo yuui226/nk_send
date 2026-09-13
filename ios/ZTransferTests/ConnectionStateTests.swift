@@ -46,4 +46,19 @@ final class ConnectionStateTests: XCTestCase {
         XCTAssertNil(state.errorMessage)
         XCTAssertEqual(state.selectedDeviceID, device.id)
     }
+
+    func testConnectionCelebrationUsesAndroidTiming() {
+        let beforeSuccess = ConnectionCelebrationValues(elapsedMilliseconds: 499)
+        XCTAssertEqual(beforeSuccess.success, 0, accuracy: 0.0001)
+
+        let successStart = ConnectionCelebrationValues(elapsedMilliseconds: 500)
+        XCTAssertEqual(successStart.success, 0, accuracy: 0.0001)
+
+        let heroFinished = ConnectionCelebrationValues(elapsedMilliseconds: 620)
+        XCTAssertEqual(heroFinished.hero, 1, accuracy: 0.0001)
+
+        let complete = ConnectionCelebrationValues(elapsedMilliseconds: 1_260)
+        XCTAssertEqual(complete.hero, 1, accuracy: 0.0001)
+        XCTAssertEqual(complete.success, 1, accuracy: 0.0001)
+    }
 }
