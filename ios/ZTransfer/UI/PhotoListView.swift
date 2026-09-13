@@ -337,7 +337,7 @@ private struct PhotoListSignalIcon: View {
 
     var body: some View {
         if isUSB {
-            ClassicUSBIcon(tint: ZTransferColors.primaryText)
+            ClassicUSBIcon(tint: ZTransferColors.accentBlue)
                 .frame(width: 18, height: 18)
         } else if wirelessMode == .sta {
             Canvas { context, size in
@@ -349,7 +349,7 @@ private struct PhotoListSignalIcon: View {
                 for (index, height) in heights.enumerated() {
                     let x = start + CGFloat(index) * (width + gap)
                     let rect = CGRect(x: x, y: size.height - height, width: width, height: height)
-                    context.fill(Path(roundedRect: rect, cornerRadius: width * 0.35), with: .color(ZTransferColors.primaryText))
+                        context.fill(Path(roundedRect: rect, cornerRadius: width * 0.35), with: .color(ZTransferColors.accentBlue))
                 }
             }
             .frame(width: 19, height: 18)
