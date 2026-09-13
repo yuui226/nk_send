@@ -340,6 +340,7 @@
 - 彩色档案调色板改为最近邻采样并跳过 alpha 小于 128 的像素；签名构建安装启动：`dist-debug-ios/ZTransfer-ios-debug-1.82-20260913-140002.app`。
 - 标准边框信息超出安全区时加入安卓一致的 2% 抗锯齿缩放余量；签名构建安装启动：`dist-debug-ios/ZTransfer-ios-debug-1.82-20260913-140433.app`。
 - 沉浸边框调整为先绘制照片水印、再绘制底部信息文字，与安卓装饰层级一致；签名构建安装启动：`dist-debug-ios/ZTransfer-ios-debug-1.82-20260913-140700.app`。
+- 照片 elevation 按安卓 `drawPhotoElevation` 重做为四分之一尺寸透明代理上的两层阴影，使用短边比例、逐预设强度和安全的透明合成；签名构建安装启动：`dist-debug-ios/ZTransfer-ios-debug-1.82-20260913-141404.app`。
 
 **2/62**。已验收工程骨架和 Swift 6/iOS 16 配置。其余 60 项保留为待完成或进行中。
 
