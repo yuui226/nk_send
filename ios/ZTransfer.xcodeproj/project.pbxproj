@@ -24,6 +24,7 @@
 		3A016664A1796B9FA1866062 /* TransferQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CC18517971C48594EE448E6 /* TransferQueue.swift */; };
 		3C86D76849976090B4967FFB /* PhotoEffectsBatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD45F35C4B19629A11F32A1C /* PhotoEffectsBatch.swift */; };
 		44E63D0E5E2D65EDD52F8A6B /* WiFiConnectionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21F79BF7C97A481859ECB202 /* WiFiConnectionService.swift */; };
+		481FE39822F171E89584DA10 /* great_vibes_regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 3DE23631DD841D16961C9AA6 /* great_vibes_regular.ttf */; };
 		48EBBB7703B0E57F6AC878EA /* ConnectionStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61F577AFF70C53D32A99AB7B /* ConnectionStateTests.swift */; };
 		4E6912D45117355E97EA8583 /* CameraRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CEBFBB42C89586314B7CDF4 /* CameraRepository.swift */; };
 		4EC9985B073E184DC416ADE7 /* RemoteExposureTile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 125A2CF683765CC9A3041412 /* RemoteExposureTile.swift */; };
@@ -42,6 +43,7 @@
 		6FE585A7A3D1D329FA35CA75 /* PTPIPDiscoveryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C8D85042F86E7CE49C16BF8 /* PTPIPDiscoveryService.swift */; };
 		73A0B84A67659AC4209F4A8F /* RemoteExposureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59F6B50FACC860CB7B9DCBE5 /* RemoteExposureTests.swift */; };
 		73C7544A106A7E21D8421C92 /* ConnectionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 538A2FD484D2734CC691DA00 /* ConnectionState.swift */; };
+		76FA040ADFD4573DBDA00991 /* bebas_neue_regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 3EE41D0AC8C757C430C5A6B5 /* bebas_neue_regular.ttf */; };
 		7769C0BF648752E475D55711 /* RemoteFrameParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D26D7C4F1E5BCB5F08606F /* RemoteFrameParser.swift */; };
 		79DF53F7FB57B0EF6D965D7C /* RemoteStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3505DCCE29F149C76595F9C3 /* RemoteStateTests.swift */; };
 		7AF73FEFF2FAC3BA9EC8D3C7 /* PTPIPDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E20FABF2CECBED5A93AB576 /* PTPIPDiscovery.swift */; };
@@ -70,6 +72,7 @@
 		B7E26AA94FF197578A633BE6 /* AsyncDeadline.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA7454E422D1473CC4E740CD /* AsyncDeadline.swift */; };
 		B8FB7D2547F6FFA961FEB3CE /* ConnectionViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44ACCD4A54AA0F8443CA869B /* ConnectionViewModel.swift */; };
 		BADF7CD7F32B68DCF3D97C3F /* LocalPhotoEffectsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7580B5DC6E6B426AFDCD70C /* LocalPhotoEffectsView.swift */; };
+		C127B5B73435A9434E2EEF30 /* cormorant_garamond_medium_italic.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 23F79E3B04FE343289768099 /* cormorant_garamond_medium_italic.ttf */; };
 		C2B1F15D120EECDFE3C148D6 /* PhotoExif.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FFDE9BAC912EED3139672E5 /* PhotoExif.swift */; };
 		CBEB599B28F9477176061658 /* CameraTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94B13A99D0C74F65A242E106 /* CameraTransport.swift */; };
 		CCC3F71A5AF4D6584D1FC2EE /* PhotoFilter.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE7320E831B92FDF16C5A2A8 /* PhotoFilter.swift */; };
@@ -115,6 +118,7 @@
 		21AD6C6D476DF7667FF6E5E5 /* ZTransfer.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = ZTransfer.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		21F79BF7C97A481859ECB202 /* WiFiConnectionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WiFiConnectionService.swift; sourceTree = "<group>"; };
 		21FE65A239E26AF1D7198CF5 /* PhotoListViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoListViewModel.swift; sourceTree = "<group>"; };
+		23F79E3B04FE343289768099 /* cormorant_garamond_medium_italic.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = cormorant_garamond_medium_italic.ttf; sourceTree = "<group>"; };
 		2482C61B58C4A4EE95210CDA /* RemoteView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteView.swift; sourceTree = "<group>"; };
 		25DA65AB7E6B869A2B7A6F7B /* RemoteExposureParametersTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteExposureParametersTests.swift; sourceTree = "<group>"; };
 		2ABA708E06D3141226F21A83 /* PTPIPDiscoveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PTPIPDiscoveryTests.swift; sourceTree = "<group>"; };
@@ -124,6 +128,8 @@
 		3505DCCE29F149C76595F9C3 /* RemoteStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteStateTests.swift; sourceTree = "<group>"; };
 		37584615FF21622BEB453C72 /* GPSState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GPSState.swift; sourceTree = "<group>"; };
 		3CC8C5625130C6409DD261D3 /* TransferQueueViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransferQueueViewModel.swift; sourceTree = "<group>"; };
+		3DE23631DD841D16961C9AA6 /* great_vibes_regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = great_vibes_regular.ttf; sourceTree = "<group>"; };
+		3EE41D0AC8C757C430C5A6B5 /* bebas_neue_regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = bebas_neue_regular.ttf; sourceTree = "<group>"; };
 		4206A8EDAC8C835E874251CB /* RemoteDisplayOptions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteDisplayOptions.swift; sourceTree = "<group>"; };
 		44ACCD4A54AA0F8443CA869B /* ConnectionViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionViewModel.swift; sourceTree = "<group>"; };
 		4AA2639C7BC0B4B5E3D01734 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
@@ -132,6 +138,7 @@
 		538A2FD484D2734CC691DA00 /* ConnectionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionState.swift; sourceTree = "<group>"; };
 		55E5A0EF9EEE6944C08F254E /* ConnectionPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionPage.swift; sourceTree = "<group>"; };
 		59F6B50FACC860CB7B9DCBE5 /* RemoteExposureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteExposureTests.swift; sourceTree = "<group>"; };
+		5EE7E180A63F2667D786F4D4 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		615EEFA9D6159AC37C5A31C7 /* PTPSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PTPSession.swift; sourceTree = "<group>"; };
 		61DD1A7868ADB6C35411DA6F /* PhotoEffectsRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoEffectsRenderer.swift; sourceTree = "<group>"; };
 		61F577AFF70C53D32A99AB7B /* ConnectionStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionStateTests.swift; sourceTree = "<group>"; };
@@ -207,6 +214,16 @@
 				28966BF0D630B4FFE2350F88 /* ZTransferTests */,
 				EB72BEFF74DE3D43332D2792 /* Products */,
 			);
+			sourceTree = "<group>";
+		};
+		1FDAFED6652BDAF104D56E54 /* Fonts */ = {
+			isa = PBXGroup;
+			children = (
+				3EE41D0AC8C757C430C5A6B5 /* bebas_neue_regular.ttf */,
+				23F79E3B04FE343289768099 /* cormorant_garamond_medium_italic.ttf */,
+				3DE23631DD841D16961C9AA6 /* great_vibes_regular.ttf */,
+			);
+			path = Fonts;
 			sourceTree = "<group>";
 		};
 		28966BF0D630B4FFE2350F88 /* ZTransferTests */ = {
@@ -314,8 +331,10 @@
 				C03A8A7CE73218F54DD6F1BC /* App */,
 				AC9DAE0DFCDD51EC877AD7A0 /* DesignSystem */,
 				9117A54F14B42BBD022C6B40 /* Domain */,
+				B7C3A266EE6105531AAAF0D2 /* Resources */,
 				0E1C6F47BE230CF73A4C1BED /* Transport */,
 				BE6EA59081100F30C7DA348C /* UI */,
+				5EE7E180A63F2667D786F4D4 /* Info.plist */,
 			);
 			path = ZTransfer;
 			sourceTree = "<group>";
@@ -345,6 +364,14 @@
 				D2B51C2A8D807D8A9CA21F9E /* ZTransferGlassSurface.swift */,
 			);
 			path = DesignSystem;
+			sourceTree = "<group>";
+		};
+		B7C3A266EE6105531AAAF0D2 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				1FDAFED6652BDAF104D56E54 /* Fonts */,
+			);
+			path = Resources;
 			sourceTree = "<group>";
 		};
 		BE6EA59081100F30C7DA348C /* UI */ = {
@@ -430,6 +457,7 @@
 			buildConfigurationList = AFD05839CAC1512A36558E81 /* Build configuration list for PBXNativeTarget "ZTransfer" */;
 			buildPhases = (
 				C9AC39984BE607DE0D3F8F7B /* Sources */,
+				B1F81BF23A1B5B2340054C97 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -478,6 +506,19 @@
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		B1F81BF23A1B5B2340054C97 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				76FA040ADFD4573DBDA00991 /* bebas_neue_regular.ttf in Resources */,
+				C127B5B73435A9434E2EEF30 /* cormorant_garamond_medium_italic.ttf in Resources */,
+				481FE39822F171E89584DA10 /* great_vibes_regular.ttf in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		386979D509EFF616685FE79E /* Sources */ = {
@@ -590,7 +631,6 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
-				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -607,7 +647,6 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
-				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -626,7 +665,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = "";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CURRENT_PROJECT_VERSION = 1;
-				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = ZTransfer/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Z传";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.photography";
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "用于连接 Nikon GPS 设备";
@@ -654,7 +693,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = "";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CURRENT_PROJECT_VERSION = 1;
-				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = ZTransfer/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Z传";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.photography";
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "用于连接 Nikon GPS 设备";

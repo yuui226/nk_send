@@ -15,6 +15,24 @@ targets:
     platform: iOS
     sources:
       - path: ZTransfer
+    resources:
+      - path: ZTransfer/Resources
+    info:
+      path: ZTransfer/Info.plist
+      properties:
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        CFBundleDisplayName: Z传
+        LSApplicationCategoryType: public.app-category.photography
+        NSLocationWhenInUseUsageDescription: 用于向相机写入拍摄位置
+        NSBluetoothAlwaysUsageDescription: 用于连接 Nikon GPS 设备
+        NSPhotoLibraryUsageDescription: 用于读取工作台照片
+        NSPhotoLibraryAddUsageDescription: 用于保存工作台生成的效果图
+        NSLocalNetworkUsageDescription: 用于连接相机
+        UIAppFonts:
+          - Fonts/great_vibes_regular.ttf
+          - Fonts/bebas_neue_regular.ttf
+          - Fonts/cormorant_garamond_medium_italic.ttf
     frameworks:
       - ImageCaptureCore
     settings:
@@ -22,7 +40,6 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.ztransfer.ios
         MARKETING_VERSION: "1.82"
         CURRENT_PROJECT_VERSION: "1"
-        GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_CFBundleDisplayName: Z传
@@ -52,6 +69,5 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.ztransfer.ios.tests
-        GENERATE_INFOPLIST_FILE: YES
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/ZTransfer.app/ZTransfer"
         BUNDLE_LOADER: "$(TEST_HOST)"

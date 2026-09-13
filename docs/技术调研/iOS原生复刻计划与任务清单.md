@@ -352,6 +352,7 @@
 - 简白信息区主色与次级灰色改用安卓原始 RGB 值，保持照片下方文字对比度一致；签名构建安装启动：`dist-debug-ios/ZTransfer-ios-debug-1.82-20260913-151119.app`。
 - 简白信息行改用 CoreText 实际字形边界计算基线，按安卓 `getTextBounds`、6% 上下留白和可压缩行距规则垂直居中，避免 UIKit 字体行高造成标题/参数/水印偏移；签名构建安装启动：`dist-debug-ios/ZTransfer-ios-debug-1.82-20260913-151558.app`。
 - 简白边框水印改用安卓对应字体、最大宽度和自适应 RGB 颜色（含默认透明度），不再用通用系统字体替代；签名构建安装启动：`dist-debug-ios/ZTransfer-ios-debug-1.82-20260913-151926.app`。
+- 将安卓 `great_vibes_regular.ttf`、`bebas_neue_regular.ttf`、`cormorant_garamond_medium_italic.ttf` 加入 iOS 资源并注册，补回 `CFBundleShortVersionString`/构建号继承，确保字体生效且构建产物保持 1.82；签名构建安装启动：`dist-debug-ios/ZTransfer-ios-debug-1.82-20260913-152547.app`。
 
 **2/62**。已验收工程骨架和 Swift 6/iOS 16 配置。其余 60 项保留为待完成或进行中。
 
