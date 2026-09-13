@@ -471,11 +471,20 @@ enum PhotoEffectsRenderer {
             let maxWidth = area.width * (preset == .frosted ? 0.76 : 0.82)
             if width > maxWidth, width > 0 { lensFont = lensFont.withSize(lensFont.pointSize * maxWidth / width) }
         }
+        var watermarkRowFont: UIFont?
+        if watermark.enabled && watermark.content == .text && !photoPlacement(watermark.position) {
+            var font = watermarkFont(watermark.font, size: area.width * textSizeFraction(watermark.sizePercent))
+            let width = (watermark.displayText as NSString).size(withAttributes: [.font: font]).width
+            let maxWidth = area.width * 0.86
+            if width > maxWidth, width > 0 { font = font.withSize(font.pointSize * maxWidth / width) }
+            watermarkRowFont = font
+        }
         let fonts = rows.map { row -> UIFont in
             switch row.kind {
             case 0: return UIFont.systemFont(ofSize: max(9, max(titleBrandFont.pointSize, titleModelFont.pointSize)), weight: .bold)
             case 1: return lensFont
             case 2: return detailFont
+            case 4: return watermarkRowFont ?? UIFont.systemFont(ofSize: max(9, row.size), weight: row.weight)
             default: return UIFont.systemFont(ofSize: max(9, row.size), weight: row.weight)
             }
         }
@@ -1117,7 +1126,17 @@ enum PhotoEffectsRenderer {
         return (name.flatMap { UIFont(name: $0, size: size) }) ?? UIFont.systemFont(ofSize: size, weight: style == .bold ? .bold : .regular)
     }
     private static func watermarkColor(_ color: PhotoFrameWatermarkColor, _ preset: PhotoFramePreset) -> UIColor {
-        switch color { case .black: .darkText; case .white: .white; case .gold: UIColor(red: 0.80, green: 0.67, blue: 0.44, alpha: 1); case .mistBlue: UIColor(red: 0.52, green: 0.62, blue: 0.71, alpha: 1); case .roseGold: UIColor(red: 0.73, green: 0.50, blue: 0.47, alpha: 1); case .adaptive: [PhotoFramePreset.mist, .cinema, .immersive, .brandInset, .brandGallery, .filmGallery, .filmEdge].contains(preset) ? .white : .black }
+        switch color {
+        case .black: UIColor(red: 50 / 255, green: 55 / 255, blue: 60 / 255, alpha: 1)
+        case .white: UIColor(red: 244 / 255, green: 239 / 255, blue: 228 / 255, alpha: 1)
+        case .gold: UIColor(red: 204 / 255, green: 172 / 255, blue: 112 / 255, alpha: 1)
+        case .mistBlue: UIColor(red: 132 / 255, green: 157 / 255, blue: 180 / 255, alpha: 1)
+        case .roseGold: UIColor(red: 185 / 255, green: 128 / 255, blue: 121 / 255, alpha: 1)
+        case .adaptive:
+            [PhotoFramePreset.mist, .cinema, .immersive, .brandInset, .brandGallery, .filmGallery, .filmEdge].contains(preset)
+                ? UIColor(red: 250 / 255, green: 252 / 255, blue: 253 / 255, alpha: 1)
+                : UIColor(red: 24 / 255, green: 31 / 255, blue: 38 / 255, alpha: 1)
+        }
     }
 }
 
