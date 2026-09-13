@@ -408,8 +408,10 @@ struct PhotoEffectsSettingsPreview: View {
                 let fallbackSettings = settings
                 let fallbackResult = try? await Task.detached(priority: .utility) {
                     try Task.checkCancellation()
-                    return try autoreleasepool {
-                        try PhotoEffectsRenderer.render(fallback, settings: fallbackSettings, metadata: nil)
+                    return try await PhotoEffectsPreviewRenderGate.shared.withPermit {
+                        try autoreleasepool {
+                            try PhotoEffectsRenderer.render(fallback, settings: fallbackSettings, metadata: nil)
+                        }
                     }
                 }.value
                 guard !Task.isCancelled else { return }
@@ -422,8 +424,10 @@ struct PhotoEffectsSettingsPreview: View {
             let settings = settings
             let result = try? await Task.detached(priority: .userInitiated) {
                 try Task.checkCancellation()
-                return try autoreleasepool {
-                    try PhotoEffectsRenderer.render(source, settings: settings, metadata: metadata)
+                return try await PhotoEffectsPreviewRenderGate.shared.withPermit {
+                    try autoreleasepool {
+                        try PhotoEffectsRenderer.render(source, settings: settings, metadata: metadata)
+                    }
                 }
             }.value
             guard !Task.isCancelled else { return }
@@ -434,12 +438,17 @@ struct PhotoEffectsSettingsPreview: View {
             // cancel obsolete comparison work.
             try? await Task.sleep(nanoseconds: 500_000_000)
             guard !Task.isCancelled else { return }
-            var baseline = settings
-            baseline.photoFilterEnabled = false
+            let baseline: PhotoEffectsSettings = {
+                var value = settings
+                value.photoFilterEnabled = false
+                return value
+            }()
             let comparison = try? await Task.detached(priority: .utility) {
                 try Task.checkCancellation()
-                return try autoreleasepool {
-                    try PhotoEffectsRenderer.render(source, settings: baseline, metadata: metadata)
+                return try await PhotoEffectsPreviewRenderGate.shared.withPermit {
+                    try autoreleasepool {
+                        try PhotoEffectsRenderer.render(source, settings: baseline, metadata: metadata)
+                    }
                 }
             }.value
             guard !Task.isCancelled else { return }

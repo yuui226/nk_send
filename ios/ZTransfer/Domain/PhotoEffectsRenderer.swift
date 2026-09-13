@@ -1,6 +1,42 @@
 import UIKit
 import CoreText
 
+/// Android serializes full preview composition so a stale frame cannot saturate
+/// the CPU while a newer wheel selection is being prepared.  The gate is used
+/// only by interactive previews; batch export keeps its own worker policy.
+actor PhotoEffectsPreviewRenderGate {
+    static let shared = PhotoEffectsPreviewRenderGate()
+    private var available = true
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func withPermit<T: Sendable>(_ operation: @escaping @Sendable () async throws -> T) async throws -> T {
+        if available {
+            available = false
+        } else {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                waiters.append(continuation)
+            }
+            do {
+                try Task.checkCancellation()
+            } catch {
+                release()
+                throw error
+            }
+        }
+        defer { release() }
+        return try await operation()
+    }
+
+    private func release() {
+        if let waiter = waiters.first {
+            waiters.removeFirst()
+            waiter.resume()
+        } else {
+            available = true
+        }
+    }
+}
+
 /// Native renderer following PhotoFrameExporter.kt's ordered pipeline.
 /// Source -> NP3 filter -> frame backdrop/photo -> metadata/watermark.
 enum PhotoEffectsRenderer {

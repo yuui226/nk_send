@@ -667,3 +667,9 @@
 - `PhotoThumbnailDiskCache` 对齐安卓 `ThumbnailDiskCache` 的目录生命周期：相机目录初始化时清理 `.tmp`/零字节条目，查找前确保被系统回收的缓存目录已重建并清空失效索引，根目录遗留 `.tmp` 也纳入清理；不改变 90 天相机目录和旧版 JPG 的保留窗口。
 - `LocalPhotoBatchLabel` 的完成、部分完成、失败、选择图片和生成数量文本改为直接读取安卓 `local_photo_batch_*`/`local_photo_choose_short` 资源键，数量占位符与安卓格式化一致。
 - 验证：`PhotoThumbnailDiskCacheTests` 5 项通过；iOS Simulator 无签名 Debug 构建成功。完整页面、相机协议、动画和真机行为仍保持未验收，不提前标记任务完成。
+
+### 2026-09-14 效果预览并发门控对账（进行中）
+
+- 安卓效果预览通过全局 `photoEffectsPreviewRenderMutex` 串行化当前帧、对比帧和相邻滤镜预取，防止过时渲染任务与新拨轮选择并发争抢 CPU；批量生成不使用该锁。
+- iOS 新增 `PhotoEffectsPreviewRenderGate`，接入工作台及设置页交互预览的滤镜、边框、对比和兜底成片，取消等待任务会释放门控；不改变批量导出的并发范围。
+- 验证：iOS Simulator 无签名 Debug 构建成功；并发、取消和真机帧率仍需继续按安卓行为验收，任务保持未完成。
