@@ -554,10 +554,11 @@ enum PhotoEffectsRenderer {
         drawGradient(cg, rect: lower, top: UIColor(white: 0, alpha: 0), bottom: UIColor(white: 0, alpha: 0.46))
         let area = CGRect(x: layout.canvas.width * 0.07, y: layout.canvas.height * 0.66, width: layout.canvas.width * 0.86, height: layout.canvas.height * 0.29)
         let title = metadata.identity
-        let inline = watermark.enabled && watermark.content == .text && watermark.position == .auto ? watermark.displayText : nil
+        let inlineWatermark = watermark.enabled && watermark.content == .text && watermark.position == .auto ? watermark : nil
         let separate = watermark.enabled && watermark.content == .text && watermark.position != .auto && !photoPlacement(watermark.position) ? watermark : nil
         let titleFont = UIFont.systemFont(ofSize: min(layout.canvas.width * 0.030, area.width * 0.08), weight: .medium)
         let detailFont = UIFont.systemFont(ofSize: min(layout.canvas.width * 0.021, area.width * 0.058), weight: .regular)
+        let inlineFont = inlineWatermark.map { watermarkFont($0.font, size: min(layout.canvas.width, layout.canvas.height) * textSizeFraction($0.sizePercent) * 1.35) }
         let titleAttrs: [NSAttributedString.Key: Any] = [.font: titleFont, .foregroundColor: UIColor.white,
             .shadow: { let s = NSShadow(); s.shadowBlurRadius = 3; s.shadowOffset = CGSize(width: 0, height: 1); s.shadowColor = UIColor.black.withAlphaComponent(0.55); return s }()]
         let detailAttrs: [NSAttributedString.Key: Any] = [.font: detailFont, .foregroundColor: UIColor.white.withAlphaComponent(0.92)]
@@ -566,20 +567,46 @@ enum PhotoEffectsRenderer {
         if !cameraDetail.isEmpty { detailLines.append(cameraDetail) }
         if let location = metadata.locationRow, !location.isEmpty { detailLines.append(location) }
         var rows: [(String, UIFont, [NSAttributedString.Key: Any])] = []
-        if !title.isEmpty || inline != nil {
-            let titleText = [title, inline].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "  |  ")
-            rows.append((titleText, titleFont, titleAttrs))
+        if !title.isEmpty || inlineWatermark != nil {
+            rows.append((title, titleFont, titleAttrs))
         }
         rows += detailLines.map { ($0, detailFont, detailAttrs) }
         if let separate { rows.append((separate.displayText, detailFont, detailAttrs)) }
         let gap = layout.canvas.width * 0.013
-        let bounds = rows.map { ($0.0 as NSString).size(withAttributes: $0.2).height }
+        var bounds = rows.map { ($0.0 as NSString).size(withAttributes: $0.2).height }
+        if !rows.isEmpty, let inlineWatermark, let inlineFont {
+            let inlineHeight = (inlineWatermark.displayText as NSString).size(withAttributes: [.font: inlineFont]).height
+            let dividerHeight = ("|" as NSString).size(withAttributes: [.font: UIFont.systemFont(ofSize: layout.canvas.width * 0.025, weight: .light)]).height
+            bounds[0] = max(bounds[0], max(inlineHeight, dividerHeight))
+        }
         let total = bounds.reduce(0, +) + gap * CGFloat(max(0, rows.count - 1))
         var y = area.maxY - layout.canvas.height * 0.045 - total
         if !rows.isEmpty {
             for (index, row) in rows.enumerated() {
-                let width = (row.0 as NSString).size(withAttributes: row.2).width
-                row.0.draw(at: CGPoint(x: area.midX - width * 0.5, y: y), withAttributes: row.2)
+                if index == 0, let inlineWatermark, let inlineFont {
+                    let dividerFont = UIFont.systemFont(ofSize: layout.canvas.width * 0.025, weight: .light)
+                    let dividerAttrs: [NSAttributedString.Key: Any] = [.font: dividerFont, .foregroundColor: UIColor.white.withAlphaComponent(0.80)]
+                    let titleWidth = (title as NSString).size(withAttributes: row.2).width
+                    let dividerWidth = ("|" as NSString).size(withAttributes: dividerAttrs).width
+                    var inlineAttrs: [NSAttributedString.Key: Any] = [.font: inlineFont, .foregroundColor: watermarkColor(inlineWatermark.color, .immersive).withAlphaComponent(CGFloat(inlineWatermark.opacityPercent) / 100)]
+                    if inlineWatermark.effect == .shadow || inlineWatermark.effect == .auto { let shadow = NSShadow(); shadow.shadowBlurRadius = 3; shadow.shadowOffset = CGSize(width: 0, height: 1); shadow.shadowColor = UIColor.black.withAlphaComponent(0.35); inlineAttrs[.shadow] = shadow }
+                    let inlineWidth = (inlineWatermark.displayText as NSString).size(withAttributes: inlineAttrs).width
+                    let componentGap = layout.canvas.width * 0.014
+                    let hasDivider = !title.isEmpty
+                    let totalWidth = titleWidth + inlineWidth + (hasDivider ? dividerWidth + componentGap * 2 : 0)
+                    let baseline = y + max(row.1.ascender, max(dividerFont.ascender, inlineFont.ascender))
+                    var x = area.midX - totalWidth * 0.5
+                    if !title.isEmpty {
+                        title.draw(at: CGPoint(x: x, y: baseline - row.1.ascender), withAttributes: row.2)
+                        x += titleWidth + componentGap
+                        "|".draw(at: CGPoint(x: x, y: baseline - dividerFont.ascender), withAttributes: dividerAttrs)
+                        x += dividerWidth + componentGap
+                    }
+                    inlineWatermark.displayText.draw(at: CGPoint(x: x, y: baseline - inlineFont.ascender), withAttributes: inlineAttrs)
+                } else {
+                    let width = (row.0 as NSString).size(withAttributes: row.2).width
+                    row.0.draw(at: CGPoint(x: area.midX - width * 0.5, y: y), withAttributes: row.2)
+                }
                 y += bounds[index] + gap
             }
         }
