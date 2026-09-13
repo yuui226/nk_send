@@ -584,21 +584,6 @@ enum PhotoEffectsRenderer {
         }
     }
 
-    private static func drawTwoColumnRows(_ cg: CGContext, band: CGRect, left: [String], right: [String]) {
-        let leftValues = left.filter { !$0.isEmpty }, rightValues = right.filter { !$0.isEmpty }
-        let font = UIFont.systemFont(ofSize: band.width * 0.024, weight: .regular)
-        let bold = UIFont.systemFont(ofSize: band.width * 0.027, weight: .medium)
-        for (index, value) in leftValues.enumerated() {
-            let attrs: [NSAttributedString.Key: Any] = [.font: index == 0 ? bold : font, .foregroundColor: UIColor(red: 0.07, green: 0.08, blue: 0.08, alpha: 1)]
-            value.draw(at: CGPoint(x: band.width * 0.058, y: band.minY + band.height * (0.28 + CGFloat(index) * 0.22)), withAttributes: attrs)
-        }
-        for (index, value) in rightValues.prefix(3).enumerated() {
-            let attrs: [NSAttributedString.Key: Any] = [.font: index == 0 ? bold : font, .foregroundColor: UIColor(red: 0.07, green: 0.08, blue: 0.08, alpha: 1)]
-            let width = (value as NSString).size(withAttributes: attrs).width
-            value.draw(at: CGPoint(x: band.width * 0.94 - width, y: band.minY + band.height * (0.22 + CGFloat(index) * 0.23)), withAttributes: attrs)
-        }
-    }
-
     private static func drawFilmStrip(_ cg: CGContext, layout: Layout, metadata: PhotoFrameMetadata) {
         let photo = layout.photo, unit = photo.width, holeW = unit * 0.025, holeH = unit * 0.04, gap = unit * 0.025
         let outer = CGRect(x: photo.minX - unit * 0.018, y: photo.minY - unit * 0.09, width: photo.width + unit * 0.036, height: photo.height + unit * 0.18)
@@ -741,11 +726,6 @@ enum PhotoEffectsRenderer {
         default: false
         }
         return usesPhoto ? value.withPosition(mapped) : value.copy(enabled: false)
-    }
-    private static func editorialBandWatermark(_ value: PhotoFrameWatermark, preset: PhotoFramePreset) -> PhotoFrameWatermark? {
-        guard value.enabled, value.content == .text, !photoPlacement(value.position) else { return nil }
-        guard [.classicSignature, .galleryMat, .filmGallery].contains(preset) else { return nil }
-        return value.withPosition(value.position == .auto ? .center : value.position)
     }
     private static func textSizeFraction(_ value: Int) -> CGFloat {
         let p = CGFloat(min(max(value, 2), 100) + 49)
