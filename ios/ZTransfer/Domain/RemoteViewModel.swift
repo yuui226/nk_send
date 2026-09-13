@@ -39,6 +39,15 @@ final class RemoteViewModel: ObservableObject {
         frameTask = Task { [weak self] in
             guard let self else { return }
             do {
+                // Android sets 0xD1AC while live view is closed before every
+                // session (2=VGA, 3=XGA). Keep the same ordering so changing
+                // the HD choice never races StartLiveView.
+                if let descriptor = try? await camera.remoteProperty(.liveViewImageSize),
+                   descriptor.writable {
+                    var desired = descriptor
+                    desired.current = hdLiveView ? 3 : 2
+                    _ = try? await camera.setRemoteProperty(desired, value: desired.current)
+                }
                 try await camera.startLiveView()
                 guard !Task.isCancelled else { return }
                 started = true

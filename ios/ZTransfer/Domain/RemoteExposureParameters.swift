@@ -22,6 +22,7 @@ enum RemoteProperty: UInt32, CaseIterable, Sendable {
     case movieISO = 0xD1AA
     case movieExposureCompensation = 0xD1AB
     case liveViewSelector = 0xD1A6
+    case liveViewImageSize = 0xD1AC
 }
 
 enum RemoteExposureField: Hashable, Identifiable, Sendable {
@@ -137,6 +138,7 @@ enum RemoteExposureParameters {
         case .liveViewSelector: return raw == 0 ? "照片" : "录像"
         case .focusMode: return raw == 1 ? "MF" : raw == 2 ? "AF" : String(format: "0x%llx", raw)
         case .angleLevel: return String(format: "%.1f°", Double(Int64(bitPattern: raw)) / 65536)
+        case .liveViewImageSize: return String(raw)
         }
     }
 }
