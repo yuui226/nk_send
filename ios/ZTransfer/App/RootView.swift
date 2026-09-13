@@ -75,6 +75,11 @@ struct RootView: View {
         default: return .current
         }
     }
+
+    private var gpsBlockedByAPCamera: Bool {
+        guard let session = connectionModel.cameraSession else { return false }
+        return !session.isUSB && session.wirelessMode == .ap
+    }
     var body: some View {
         Group {
             if let session = connectionModel.cameraSession {
@@ -121,12 +126,14 @@ struct RootView: View {
         }
         .onAppear {
             UIApplication.shared.isIdleTimerDisabled = keepScreenOn
+            gpsCoordinator.setAPModeBlocked(gpsBlockedByAPCamera)
             if connectionModel.cameraSession != nil {
                 connectionCelebrationStart = Date()
                 connectionCelebrationActive = true
             }
         }
         .onChange(of: connectionModel.cameraSession != nil) { connected in
+            gpsCoordinator.setAPModeBlocked(gpsBlockedByAPCamera)
             if connected {
                 connectionCelebrationStart = Date()
                 connectionCelebrationActive = true
@@ -134,6 +141,12 @@ struct RootView: View {
                 connectionCelebrationStart = nil
                 connectionCelebrationActive = false
             }
+        }
+        .onChange(of: connectionModel.cameraSession?.isUSB) { _ in
+            gpsCoordinator.setAPModeBlocked(gpsBlockedByAPCamera)
+        }
+        .onChange(of: connectionModel.cameraSession?.wirelessMode) { _ in
+            gpsCoordinator.setAPModeBlocked(gpsBlockedByAPCamera)
         }
         .onChange(of: keepScreenOn) { enabled in
             UIApplication.shared.isIdleTimerDisabled = enabled && scenePhase == .active

@@ -17,6 +17,7 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
     private var writeTask: Task<Void, Never>?
     private var bluetoothObservation: AnyCancellable?
     private var awaitingPairingAction = false
+    private var apModeBlocked = false
 
     init(defaults: UserDefaults? = nil) {
         let storage = defaults ?? UserDefaults(suiteName: GPSPreferences.suiteName)!
@@ -57,6 +58,11 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
             locationManager.stopUpdatingLocation(); bluetooth.stop(); state = GPSState(); lastWrite = nil; return
         }
         state = GPSState(enabled: true, status: .starting)
+        guard !apModeBlocked else {
+            state.status = .apUnavailable
+            state.message = AppLocalized.resource("gps_ap_unavailable")
+            return
+        }
         switch locationManager.authorizationStatus {
         case .notDetermined: locationManager.requestWhenInUseAuthorization()
         case .authorizedAlways, .authorizedWhenInUse: beginRunning()
@@ -70,8 +76,33 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
 
     func retry() {
         guard state.enabled else { return }
+        guard !apModeBlocked else {
+            state.status = .apUnavailable
+            state.message = AppLocalized.resource("gps_ap_unavailable")
+            return
+        }
         awaitingPairingAction = false
         beginRunning()
+    }
+
+    /// Android's HomeScreen informs the GPS foreground service whenever an AP
+    /// camera session is connected. GPS remains enabled in preferences, but
+    /// its active BLE/location session is stopped until the AP session ends.
+    func setAPModeBlocked(_ blocked: Bool) {
+        guard apModeBlocked != blocked else { return }
+        apModeBlocked = blocked
+        if blocked {
+            writeTask?.cancel(); writeTask = nil
+            locationManager.stopUpdatingLocation()
+            bluetooth.stop()
+            guard state.enabled else { return }
+            state.status = .apUnavailable
+            state.message = AppLocalized.resource("gps_ap_unavailable")
+        } else if state.enabled {
+            state.message = nil
+            state.status = .starting
+            beginRunning()
+        }
     }
 
     /// Matches GpsViewModel.clearPairing(): remove all camera identity data and
@@ -88,6 +119,11 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
     }
 
     private func beginRunning() {
+        guard !apModeBlocked else {
+            state.status = .apUnavailable
+            state.message = AppLocalized.resource("gps_ap_unavailable")
+            return
+        }
         locationManager.startUpdatingLocation()
         state.status = .searching
         bluetooth.start()
@@ -132,7 +168,7 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
         } else if lowercased.contains("bluetooth unavailable") ||
                     lowercased.contains("scan failed") {
             state.status = .error
-            state.message = "请打开手机蓝牙"
+            state.message = AppLocalized.resource("gps_bluetooth_required")
         } else {
             state.status = .error
             state.message = message
@@ -166,7 +202,7 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
         guard state.enabled else { return }
-        state.status = .error; state.message = "无法获取定位"
+        state.status = .error; state.message = AppLocalized.resource("gps_permission_required")
     }
 
     private func scheduleWriteIfDue() {
@@ -193,7 +229,7 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
             timestamp: Date()
         ) else {
             state.status = .error
-            state.message = "GPS 写入失败"
+            state.message = AppLocalized.resource("gps_retry")
             return
         }
         bluetooth.writeGeo(payload)
