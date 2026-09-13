@@ -1,5 +1,18 @@
 import Foundation
 
+/// Android's GpsViewModel uses a dedicated `nikon_gps` SharedPreferences file.
+/// Keep the same namespace and keys on iOS so every GPS setting has one stable
+/// persistence scope instead of sharing the app-wide defaults accidentally.
+enum GPSPreferences {
+    static let suiteName = "nikon_gps"
+    static let enabled = "enabled"
+    static let deviceID = "device_id"
+    static let nonce = "nonce"
+    static let bleAddress = "ble_address"
+    static let connectionHelpViewed = "connection_help_viewed"
+    static let updateFrequencySeconds = "update_frequency_seconds"
+}
+
 /// User-facing states copied from Android's GpsStatus.  Transport details stay
 /// behind GPSCoordinator so the page only renders the same state transitions.
 enum GPSStatus: String, Codable, Sendable {

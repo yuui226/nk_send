@@ -72,7 +72,7 @@ struct GPSView: View {
             .toolbar { ToolbarItem(placement: .topBarLeading) { Button { dismiss() } label: { Image(systemName: "chevron.left") } } }
             .alert(AppLocalized.resource("gps_clear_pairing_title"), isPresented: $showingReset) {
                 Button(AppLocalized.resource("cancel"), role: .cancel) {}
-                Button(AppLocalized.resource("gps_clear_pairing"), role: .destructive) { coordinator.bluetooth.clearPairing() }
+                                Button(AppLocalized.resource("gps_clear_pairing"), role: .destructive) { coordinator.clearPairing() }
             } message: {
                 Text(AppLocalized.resource("gps_clear_pairing_message"))
             }

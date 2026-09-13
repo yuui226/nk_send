@@ -38,11 +38,22 @@ final class NikonGPSBluetoothClient: NSObject, ObservableObject {
     private var pairingTimeout: Task<Void, Never>?
     private let defaults: UserDefaults
 
-    init(controllerName: String = "ZTransfer", savedDevice: UInt32? = nil, savedNonce: UInt32? = nil, defaults: UserDefaults = .standard) {
+    init(controllerName: String = "ZTransfer", savedDevice: UInt32? = nil, savedNonce: UInt32? = nil, defaults: UserDefaults? = nil) {
         self.controllerName = controllerName
-        self.defaults = defaults
-        self.savedDevice = savedDevice ?? (defaults.object(forKey: "gps.pairing.device") as? NSNumber).map { $0.uint32Value }
-        self.savedNonce = savedNonce ?? (defaults.object(forKey: "gps.pairing.nonce") as? NSNumber).map { $0.uint32Value }
+        let storage = defaults ?? UserDefaults(suiteName: GPSPreferences.suiteName)!
+        self.defaults = storage
+        // Migrate the short-lived pre-namespace keys once. New reads/writes
+        // always use the Android-compatible nikon_gps keys.
+        if storage.object(forKey: GPSPreferences.deviceID) == nil,
+           let legacy = UserDefaults.standard.object(forKey: "gps.pairing.device") {
+            storage.set(legacy, forKey: GPSPreferences.deviceID)
+        }
+        if storage.object(forKey: GPSPreferences.nonce) == nil,
+           let legacy = UserDefaults.standard.object(forKey: "gps.pairing.nonce") {
+            storage.set(legacy, forKey: GPSPreferences.nonce)
+        }
+        self.savedDevice = savedDevice ?? (storage.object(forKey: GPSPreferences.deviceID) as? NSNumber).map { $0.uint32Value }
+        self.savedNonce = savedNonce ?? (storage.object(forKey: GPSPreferences.nonce) as? NSNumber).map { $0.uint32Value }
         central = CBCentralManager(delegate: nil, queue: .main)
         super.init()
         central.delegate = self
@@ -74,8 +85,11 @@ final class NikonGPSBluetoothClient: NSObject, ObservableObject {
     var hasSavedPairing: Bool { savedDevice != nil && savedNonce != nil }
 
     func clearPairing() {
-        defaults.removeObject(forKey: "gps.pairing.device")
-        defaults.removeObject(forKey: "gps.pairing.nonce")
+        defaults.removeObject(forKey: GPSPreferences.deviceID)
+        defaults.removeObject(forKey: GPSPreferences.nonce)
+        defaults.removeObject(forKey: GPSPreferences.bleAddress)
+        UserDefaults.standard.removeObject(forKey: "gps.pairing.device")
+        UserDefaults.standard.removeObject(forKey: "gps.pairing.nonce")
         savedDevice = nil
         savedNonce = nil
         stop()
@@ -102,8 +116,8 @@ final class NikonGPSBluetoothClient: NSObject, ObservableObject {
         guard let pairCharacteristic else { return }
         stage1 = NikonGPSPairingProtocol().newStage1(deviceOverride: savedDevice, nonceOverride: savedNonce)
         if let stage1 {
-            defaults.set(stage1.device, forKey: "gps.pairing.device")
-            defaults.set(stage1.nonce, forKey: "gps.pairing.nonce")
+            defaults.set(stage1.device, forKey: GPSPreferences.deviceID)
+            defaults.set(stage1.nonce, forKey: GPSPreferences.nonce)
         }
         stage3Sent = false; idQueued = false
         if savedDevice == nil { state = .pairing }

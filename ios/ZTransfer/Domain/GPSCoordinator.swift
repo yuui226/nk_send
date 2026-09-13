@@ -7,8 +7,8 @@ import Foundation
 /// by the caller instead of silently changing the selected connection mode.
 @MainActor
 final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocationManagerDelegate {
-    private static let updateFrequencyPreferenceKey = "update_frequency_seconds"
     @Published private(set) var state = GPSState()
+    @Published private(set) var connectionHelpViewed = false
     @Published private(set) var frequency: GPSUpdateFrequency
     let bluetooth: NikonGPSBluetoothClient
     private let locationManager = CLLocationManager()
@@ -17,18 +17,27 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
     private var writeTask: Task<Void, Never>?
     private var bluetoothObservation: AnyCancellable?
 
-    init(defaults: UserDefaults = .standard) {
-        self.defaults = defaults
-        let raw = defaults.integer(forKey: Self.updateFrequencyPreferenceKey)
+    init(defaults: UserDefaults? = nil) {
+        let storage = defaults ?? UserDefaults(suiteName: GPSPreferences.suiteName)!
+        self.defaults = storage
+        let raw = storage.integer(forKey: GPSPreferences.updateFrequencySeconds)
         frequency = GPSUpdateFrequency(rawValue: raw) ?? .defaultValue
-        bluetooth = NikonGPSBluetoothClient()
+        bluetooth = NikonGPSBluetoothClient(defaults: storage)
         super.init()
+        let enabled = storage.bool(forKey: GPSPreferences.enabled)
+        state = GPSState(enabled: enabled, status: enabled ? .starting : .off)
+        connectionHelpViewed = storage.bool(forKey: GPSPreferences.connectionHelpViewed)
         locationManager.delegate = self
         locationManager.desiredAccuracy = kCLLocationAccuracyBest
         locationManager.distanceFilter = kCLDistanceFilterNone
         bluetoothObservation = bluetooth.$state
             .receive(on: RunLoop.main)
             .sink { [weak self] value in self?.applyBluetoothState(value) }
+        if enabled {
+            // Android's foreground service restores an enabled GPS session on
+            // process restart. Defer until NSObject/CoreLocation setup is done.
+            Task { @MainActor [weak self] in self?.beginRunning() }
+        }
     }
 
     deinit { writeTask?.cancel(); locationManager.stopUpdatingLocation() }
@@ -36,10 +45,11 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
     func setFrequency(_ value: GPSUpdateFrequency) {
         guard value != frequency else { return }
         frequency = value
-        defaults.set(value.rawValue, forKey: Self.updateFrequencyPreferenceKey)
+        defaults.set(value.rawValue, forKey: GPSPreferences.updateFrequencySeconds)
     }
 
     func setEnabled(_ enabled: Bool) {
+        defaults.set(enabled, forKey: GPSPreferences.enabled)
         writeTask?.cancel(); writeTask = nil
         guard enabled else {
             locationManager.stopUpdatingLocation(); bluetooth.stop(); state = GPSState(); lastWrite = nil; return
@@ -57,6 +67,19 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
     }
 
     func retry() { guard state.enabled else { return }; beginRunning() }
+
+    /// Matches GpsViewModel.clearPairing(): remove all camera identity data and
+    /// turn the runtime off when a session is active.
+    func clearPairing() {
+        if state.enabled { setEnabled(false) }
+        bluetooth.clearPairing()
+    }
+
+    func markConnectionHelpViewed() {
+        guard !connectionHelpViewed else { return }
+        defaults.set(true, forKey: GPSPreferences.connectionHelpViewed)
+        connectionHelpViewed = true
+    }
 
     private func beginRunning() {
         locationManager.startUpdatingLocation()

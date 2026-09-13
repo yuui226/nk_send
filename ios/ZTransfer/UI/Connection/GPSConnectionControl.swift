@@ -156,7 +156,7 @@ private struct GPSInlinePanel: View {
         .overlay(RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.55), lineWidth: 1))
         .alert(AppLocalized.resource("gps_clear_pairing_title"), isPresented: $showingReset) {
             Button(AppLocalized.resource("cancel"), role: .cancel) {}
-            Button(AppLocalized.resource("gps_clear_pairing"), role: .destructive) { coordinator.bluetooth.clearPairing() }
+            Button(AppLocalized.resource("gps_clear_pairing"), role: .destructive) { coordinator.clearPairing() }
         } message: {
             Text(AppLocalized.resource("gps_clear_pairing_message"))
         }
