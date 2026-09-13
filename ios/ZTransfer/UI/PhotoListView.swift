@@ -213,40 +213,52 @@ struct PhotoListView: View {
 
     private var photoListTopControls: some View {
         HStack(spacing: 8) {
-            Button { showingSettings = true } label: {
-                DoubleZMark(tint: ZTransferColors.primaryText)
-                    .frame(width: 20 * DoubleZMark.aspectRatio, height: 20)
-                    .padding(.horizontal, 12)
-                    .frame(height: 36)
-            }
-            .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
-            .background {
-                GeometryReader { proxy in
-                    Color.clear.preference(key: PhotoListSettingsAnchorPreferenceKey.self,
-                                           value: proxy.frame(in: .global))
-                }
-            }
-
-            Button { signalExpanded.toggle() } label: {
-                HStack(spacing: 5) {
-                    Image(systemName: session?.isUSB == true ? "cable.connector" : "wifi")
-                        .font(.system(size: 17, weight: .semibold))
-                    if signalExpanded {
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 10, weight: .bold))
+            if selectedFile == nil {
+                HStack(spacing: 8) {
+                    Button { showingSettings = true } label: {
+                        DoubleZMark(tint: ZTransferColors.primaryText)
+                            .frame(width: 20 * DoubleZMark.aspectRatio, height: 20)
+                            .padding(.horizontal, 12)
+                            .frame(height: 36)
                     }
-                }
-                .padding(.horizontal, 10)
-                .frame(height: 36)
-            }
-            .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
+                    .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
+                    .background {
+                        GeometryReader { proxy in
+                            Color.clear.preference(key: PhotoListSettingsAnchorPreferenceKey.self,
+                                                   value: proxy.frame(in: .global))
+                        }
+                    }
 
-            Button { showingFilter = true } label: {
-                Image(systemName: "line.3.horizontal.decrease.circle")
-                    .font(.system(size: 18, weight: .semibold))
-                    .frame(width: 36, height: 36)
+                    Button { signalExpanded.toggle() } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: session?.isUSB == true ? "cable.connector" : "wifi")
+                                .font(.system(size: 17, weight: .semibold))
+                            if signalExpanded {
+                                Image(systemName: "chevron.down")
+                                    .font(.system(size: 10, weight: .bold))
+                            }
+                        }
+                        .padding(.horizontal, 10)
+                        .frame(height: 36)
+                    }
+                    .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
+
+                    Button { showingFilter = true } label: {
+                        Image(systemName: "line.3.horizontal.decrease.circle")
+                            .font(.system(size: 18, weight: .semibold))
+                            .frame(width: 36, height: 36)
+                    }
+                    .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
+                }
+                .transition(.asymmetric(
+                    insertion: .opacity
+                        .combined(with: .move(edge: .leading))
+                        .combined(with: .scale(scale: 0.94, anchor: .leading)),
+                    removal: .opacity
+                        .combined(with: .move(edge: .leading))
+                        .combined(with: .scale(scale: 0.96, anchor: .leading))
+                ))
             }
-            .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
 
             Spacer(minLength: 0)
 
@@ -276,6 +288,7 @@ struct PhotoListView: View {
         .padding(.horizontal, 12)
         .padding(.top, 6)
         .animation(ZTransferMotion.standard, value: queueModel.snapshot.items.count)
+        .animation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.26), value: selectedFile == nil)
         .onPreferenceChange(PhotoListSettingsAnchorPreferenceKey.self) { settingsAnchor = $0 }
     }
 
