@@ -27,7 +27,13 @@ struct PhotoPreviewView: View {
             Color.black.ignoresSafeArea()
             TabView(selection: $index) {
                 ForEach(Array(files.enumerated()), id: \.element.id) { itemIndex, file in
-                    PreviewImage(session: session, file: file, rotationDegrees: rotationDegrees)
+                    PreviewImage(
+                        session: session,
+                        file: file,
+                        rotationDegrees: rotationDegrees,
+                        zoomEnabled: !file.fileExtension.lowercased().hasSuffix(".mov") &&
+                            !file.fileExtension.lowercased().hasSuffix(".mp4"),
+                    )
                         .tag(itemIndex)
                         .padding(.horizontal, 12)
                 }
@@ -141,6 +147,7 @@ private struct PreviewImage: View {
     let session: CameraSession
     let file: CameraFile
     let rotationDegrees: Double
+    let zoomEnabled: Bool
     @State private var thumbnail: UIImage?
     @State private var image: UIImage?
     @State private var highResolutionAlpha: CGFloat = 0
@@ -160,11 +167,30 @@ private struct PreviewImage: View {
                     .opacity(thumbnail == nil ? 1 : highResolutionAlpha)
             }
             if thumbnail == nil && image == nil { ProgressView().tint(.white) }
+            if !zoomEnabled {
+                Text(AppLocalized.resource("video_no_preview"))
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 18))
+            }
         }
         .scaleEffect(scale).offset(offset).rotationEffect(.degrees(rotationDegrees))
-        .gesture(MagnificationGesture().onChanged { scale = min(max($0, 1), 4) }.onEnded { _ in withAnimation(ZTransferMotion.standard) { scale = min(max(scale, 1), 4) } })
-        .simultaneousGesture(DragGesture().onChanged { value in if scale > 1 { offset = value.translation } }.onEnded { _ in if scale <= 1 { offset = .zero } })
-        .onTapGesture(count: 2) { withAnimation(ZTransferMotion.standard) { scale = scale > 1 ? 1 : 2 } }
+        .gesture(MagnificationGesture().onChanged { value in
+            guard zoomEnabled else { return }
+            scale = min(max(value, 1), 4)
+        }.onEnded { _ in
+            guard zoomEnabled else { return }
+            withAnimation(ZTransferMotion.standard) { scale = min(max(scale, 1), 4) }
+        })
+        .simultaneousGesture(DragGesture().onChanged { value in
+            if zoomEnabled, scale > 1 { offset = value.translation }
+        }.onEnded { _ in if !zoomEnabled || scale <= 1 { offset = .zero } })
+        .onTapGesture(count: 2) {
+            guard zoomEnabled else { return }
+            withAnimation(ZTransferMotion.standard) { scale = scale > 1 ? 1 : 2 }
+        }
         .task(id: file.id) {
             thumbnail = nil
             image = nil
