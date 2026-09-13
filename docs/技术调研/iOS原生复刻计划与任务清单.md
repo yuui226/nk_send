@@ -517,6 +517,11 @@
 - `RemoteRecordingHint` 的开始/停止失败主文案改为直接读取安卓 `remote_rec_start_failed`、`remote_rec_stop_failed`，仅保留安卓同样的协议诊断附行和显示时长。
 - 验证：Xcode 测试 127 项、0 failures；未将相机录制错误回调标记为真机完成。
 
+### 2026-09-14 GPS 详情资源对账
+
+- `GPSView` 的相机名称和海拔详情改为直接读取安卓 `gps_camera_label`、`gps_altitude_value` 资源，海拔数值按安卓整数米格式化，覆盖简体、英文和繁体；不再在 Swift 中拼接平台自定义单位文案。
+- 验证：iOS Simulator Debug 构建成功；GPS 页面当前仍未完成安卓完整详情层和真实定位链路验收。
+
 ### 2026-09-14 远程监看扩展帧元数据
 
 - 按安卓 `LiveViewMetadata.kt` 增加 iOS 0x9428 帧头解析：校验头版本/长度/JPEG 边界，解析完整 AF 框表、选中框归一化坐标、对焦判断、焦点坐标网格，以及 512/1024 头型对应的双声道 15 段音频电平。
