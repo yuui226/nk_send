@@ -101,7 +101,12 @@ except (OSError, ValueError, TypeError):
 for device in devices:
     props = device.get("hardwareProperties", {})
     connection = device.get("connectionProperties", {})
-    if props.get("platform") == "iOS" and connection.get("tunnelState") == "available":
+    # CoreDevice reports "connected" for a paired wired phone on current
+    # Xcode releases; older versions used "available". Prefer devicectl for
+    # either state so launch can mount/use the matching developer services
+    # instead of falling back to idevicedebug and a manually mounted DDI.
+    if (props.get("platform") == "iOS" and
+            connection.get("tunnelState") in {"connected", "available"}):
         print(device.get("identifier", ""))
         break
 PY
