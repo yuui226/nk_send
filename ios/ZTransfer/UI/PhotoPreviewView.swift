@@ -162,10 +162,24 @@ struct PhotoPreviewView: View {
         }
         .task(id: files.indices.contains(index) ? files[index].id : 0) {
             guard files.indices.contains(index), !exifLoading else { return }
-            await session.setFHDActive(true)
-            defer { Task { await session.setFHDActive(false) } }
             histogramBars = []
             exifLoading = true
+            let file = files[index]
+            if let localURL = localOriginalURL(for: file) {
+                if let data = try? Data(contentsOf: localURL) {
+                    exif = PhotoExifParser.parse(data)
+                }
+                if let image = decodeLocalOriginalPreview(
+                    at: localURL,
+                    route: localOriginalPreviewRoute(for: file.fileExtension)
+                ) {
+                    histogramBars = luminanceHistogram(image)
+                }
+                exifLoading = false
+                return
+            }
+            await session.setFHDActive(true)
+            defer { Task { await session.setFHDActive(false) } }
             async let loadedExif = try? session.exif(file: files[index])
             async let loadedThumb = try? session.preview(handle: files[index].id)
             exif = await loadedExif
