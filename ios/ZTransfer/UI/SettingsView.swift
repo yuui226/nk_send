@@ -7,6 +7,7 @@ struct SettingsView: View {
     @State private var showingPicker = false
     @State private var feedbackHint = false
     @State private var showingEffectsEditor = false
+    @State private var showingHelp = false
     @AppStorage("organizeTransfersByDate") private var organizeByDate = false
     @AppStorage("autoTransferNewMedia") private var autoTransfer = false
     @AppStorage("deferTransferStart") private var deferStart = false
@@ -54,23 +55,40 @@ struct SettingsView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 12) {
-            Text("设置").zTransferText(size: 28, weight: .bold)
-            Button { feedbackHint = true } label: {
-                Image(systemName: "lightbulb.fill").font(.system(size: 18, weight: .semibold))
+        HStack(spacing: 8) {
+            // Keep the title in one line.  The Android title occupies a single
+            // titleLarge slot; allowing SwiftUI to compress it produces the
+            // two-character vertical title seen in the old iOS panel.
+            Text("设置")
+                .zTransferText(size: ZTransferMetrics.title, weight: .bold)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+            Button { showingHelp = true } label: {
+                Image(systemName: "lightbulb.fill")
+                    .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(ZTransferColors.accentOrange)
-            }.buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 18)).frame(width: 48, height: 48)
+                    .frame(width: 30, height: 30)
+            }
+            .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 12))
             Spacer()
-            Button("续费") { }.buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 20)).frame(width: 58, height: 40)
-            Text("高级版").zTransferTypography(.labelLarge, weight: .bold)
-                .foregroundStyle(.black).frame(width: 82, height: 40)
+            // iOS does not yet have the Android purchase backend. Keep the
+            // same compact badge footprint without exposing a dead renewal
+            // action in the settings header.
+            Text("高级版")
+                .zTransferTypography(.labelLarge, weight: .bold)
+                .foregroundStyle(.black)
+                .padding(.horizontal, 14)
+                .frame(height: 30)
                 .background(Color.yellow.opacity(0.75), in: Capsule())
             Button { onClose?() } label: {
-                Image(systemName: "xmark").font(.system(size: 25, weight: .medium))
+                Image(systemName: "xmark")
+                    .font(.system(size: 18, weight: .medium))
                     .foregroundStyle(ZTransferColors.secondaryText)
-            }.buttonStyle(.plain).frame(width: 48, height: 48)
+                    .frame(width: 30, height: 30)
+            }
+            .buttonStyle(.plain)
         }
-        .padding(.horizontal, 22).padding(.top, 16).padding(.bottom, 10)
+        .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 8)
     }
 
     private var directoryCard: some View {
@@ -82,9 +100,11 @@ struct SettingsView: View {
                     Text(directory.directoryURL?.lastPathComponent ?? "未设置").zTransferText(size: ZTransferMetrics.caption).lineLimit(1)
                 }
                 Spacer()
-                Button(directory.directoryURL == nil ? "选择目录" : "更改目录") { showingPicker = true }.buttonStyle(.bordered)
+                Button(directory.directoryURL == nil ? "选择目录" : "更改目录") { showingPicker = true }
+                    .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 12))
+                    .font(.system(size: ZTransferMetrics.caption, weight: .semibold))
             }
-            Divider().opacity(0.35)
+            SettingsDivider()
             HStack(spacing: 8) {
                 ToggleWheel(label: "按天保存", isOn: $organizeByDate, disabled: directory.directoryURL == nil)
                 ToggleWheel(label: "实时传输", isOn: $autoTransfer, disabled: directory.directoryURL == nil)
@@ -96,22 +116,22 @@ struct SettingsView: View {
     private var listCard: some View {
         SettingsCard {
             HStack(spacing: 8) {
-                DetentWheel(label: "每行数量", options: [2, 3, 4, 5], selected: columns, optionLabel: String.init, onCommit: { columns = $0 }, rowHeight: 30).frame(maxWidth: .infinity)
+                DetentWheel(label: "每行数量", options: [2, 3, 4], selected: columns, optionLabel: String.init, onCommit: { columns = $0 }, rowHeight: 18, wheelHeight: 50).frame(maxWidth: .infinity)
                 ToggleWheel(label: "连拍成组", isOn: $collapseBurst).frame(maxWidth: .infinity)
             }
-            Divider().opacity(0.35)
-            DetentWheel(label: "照片列表操作", options: [false, true], selected: tapToPreview, optionLabel: { $0 ? "点击：预览\n长按：传输" : "点击：传输\n长按：预览" }, onCommit: { tapToPreview = $0 }, rowHeight: 32)
+            SettingsDivider()
+            DetentWheel(label: "照片列表操作", options: [false, true], selected: tapToPreview, optionLabel: { $0 ? "点击：预览\n长按：传输" : "点击：传输\n长按：预览" }, onCommit: { tapToPreview = $0 }, rowHeight: 18, wheelHeight: 50, optionMaxLines: 2)
         }
     }
 
     private var appearanceCard: some View {
         SettingsCard {
             HStack(spacing: 8) {
-                DetentWheel(label: "明暗", options: ["自动", "深色", "浅色"], selected: themeMode, optionLabel: { $0 }, onCommit: { themeMode = $0 }, rowHeight: 30)
-                DetentWheel(label: "语言", options: ["自动", "English", "简体中文", "繁體中文"], selected: appLanguage, optionLabel: { $0 }, onCommit: { appLanguage = $0 }, rowHeight: 30)
-                DetentWheel(label: "按钮风格", options: ["毛玻璃", "木纹", "相机按键", "钛合金"], selected: skinPreset, optionLabel: { $0 }, onCommit: { skinPreset = $0 }, rowHeight: 30)
+                DetentWheel(label: "明暗", options: ["自动", "深色", "浅色"], selected: themeMode, optionLabel: { $0 }, onCommit: { themeMode = $0 }, rowHeight: 16, wheelHeight: 42, optionFontSize: 13).frame(maxWidth: .infinity)
+                DetentWheel(label: "语言", options: ["自动", "English", "简体中文", "繁體中文"], selected: appLanguage, optionLabel: { $0 }, onCommit: { appLanguage = $0 }, rowHeight: 16, wheelHeight: 42, optionFontSize: 13).frame(maxWidth: .infinity)
+                DetentWheel(label: "按钮风格", options: ["毛玻璃", "木纹", "相机按键", "钛合金"], selected: skinPreset, optionLabel: { $0 }, onCommit: { skinPreset = $0 }, rowHeight: 16, wheelHeight: 42, optionFontSize: 13).frame(maxWidth: .infinity)
             }
-            Divider().opacity(0.35)
+            SettingsDivider()
             HStack(spacing: 8) { ToggleWheel(label: "触感反馈", isOn: $haptics); ToggleWheel(label: "屏幕常亮", isOn: $keepScreenOn) }
         }
     }
@@ -153,15 +173,16 @@ struct SettingsView: View {
     }
 
     private var footer: some View {
-        HStack {
-            Text("Z传 v\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.82")").zTransferTypography(.labelSmall, weight: .semibold)
+        HStack(spacing: 8) {
+            Text("Z传 v\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.82")")
+                .zTransferTypography(.labelSmall, weight: .semibold)
             Spacer()
-            Button("检查更新") { }
-            Button("我要换机") { }
-            Button("反馈") { UIPasteboard.general.string = "953000922"; feedbackHint = true }
+            SettingsFooterButton("检查更新") { feedbackHint = true }
+            SettingsFooterButton("我要换机") { feedbackHint = true }
+            SettingsFooterButton("反馈") { UIPasteboard.general.string = "953000922"; feedbackHint = true }
         }
-        .font(.system(size: ZTransferMetrics.caption, weight: .semibold))
         .alert("已复制 QQ 号 953000922\n请加 QQ 反馈", isPresented: $feedbackHint) { Button("确定", role: .cancel) {} }
+        .alert("设置说明\n按天保存、实时传输和选完再传需要先设置传输目录。照片列表和外观选项会在松手后生效。", isPresented: $showingHelp) { Button("确定", role: .cancel) {} }
     }
 }
 
@@ -175,7 +196,17 @@ extension PhotoFramePreset {
 
 private struct SettingsCard<Content: View>: View {
     @ViewBuilder let content: Content
-    var body: some View { content.padding(16).background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18)).overlay(RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.55), lineWidth: 1)) }
+    var body: some View {
+        // Materialize the builder as one vertical group before applying the
+        // surface. Without this wrapper SwiftUI can propagate the background
+        // proposal to tuple children, making each divider look like a second
+        // empty rounded card in the popup.
+        VStack(spacing: 0) { content }
+            .padding(12)
+            .background(ZTransferGlassSurface(cornerRadius: 14, kind: .button))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(ZTransferColors.primaryText.opacity(0.10), lineWidth: 1))
+    }
 }
 
 private struct ToggleWheel: View {
@@ -183,9 +214,42 @@ private struct ToggleWheel: View {
     @Binding var isOn: Bool
     var disabled = false
     var body: some View {
-        Button { isOn.toggle() } label: {
-            VStack(spacing: 6) { Text(label).zTransferText(size: ZTransferMetrics.caption, weight: .semibold); Text(isOn ? "开启" : "关闭").zTransferText(size: ZTransferMetrics.body, weight: .semibold) }
-                .frame(maxWidth: .infinity).frame(height: 92).background((isOn ? ZTransferColors.accentBlue : Color.black).opacity(isOn ? 0.10 : 0.035), in: RoundedRectangle(cornerRadius: 14))
-        }.buttonStyle(.plain).disabled(disabled).opacity(disabled ? 0.45 : 1)
+        DetentWheel(
+            label: label,
+            options: [false, true],
+            selected: isOn,
+            optionLabel: { $0 ? "开启" : "关闭" },
+            onCommit: { isOn = $0 },
+            rowHeight: 18,
+            wheelHeight: 50,
+            enabled: !disabled,
+            accentColor: isOn ? ZTransferColors.accentBlue : ZTransferColors.secondaryText,
+            emphasized: isOn,
+        )
+        .frame(maxWidth: .infinity)
+    }
+}
+
+private struct SettingsDivider: View {
+    var body: some View {
+        Divider()
+            .overlay(ZTransferColors.primaryText.opacity(0.10))
+            .padding(.vertical, 8)
+    }
+}
+
+private struct SettingsFooterButton: View {
+    let title: String
+    let action: () -> Void
+    init(_ title: String, action: @escaping () -> Void) {
+        self.title = title
+        self.action = action
+    }
+    var body: some View {
+        Button(title, action: action)
+            .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 12))
+            .font(.system(size: ZTransferMetrics.caption, weight: .semibold))
+            .padding(.horizontal, 8)
+            .frame(height: 28)
     }
 }
