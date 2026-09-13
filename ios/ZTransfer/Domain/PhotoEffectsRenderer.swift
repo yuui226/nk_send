@@ -1043,14 +1043,14 @@ enum PhotoEffectsRenderer {
         return usesPhoto ? value.withPosition(mapped) : value.copy(enabled: false)
     }
     private static func textSizeFraction(_ value: Int) -> CGFloat {
-        let p = CGFloat(min(max(value, 2), 100) + 49)
+        let p = CGFloat(min(max(value, PhotoFrameWatermark.sizeRange.lowerBound), PhotoFrameWatermark.sizeRange.upperBound) + 49)
         if p <= 58 { return 0.0105 * p / 58 }
         if p <= 75 { return 0.0105 + (p - 58) / 17 * (0.0135 - 0.0105) }
         if p <= 100 { return 0.0135 + (p - 75) / 25 * (0.018 - 0.0135) }
         return 0.018 * p / 100
     }
     private static func imageSizeFraction(_ value: Int) -> CGFloat {
-        let p = CGFloat(min(max(value, 2), 100) + 49)
+        let p = CGFloat(min(max(value, PhotoFrameWatermark.sizeRange.lowerBound), PhotoFrameWatermark.sizeRange.upperBound) + 49)
         if p <= 47 { return 0.035 * p / 47 }
         if p <= 69 { return 0.035 + (p - 47) / 22 * (0.052 - 0.035) }
         if p <= 100 { return 0.052 + (p - 69) / 31 * (0.075 - 0.052) }

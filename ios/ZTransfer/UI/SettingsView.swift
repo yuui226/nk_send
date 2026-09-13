@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import PhotosUI
 
 struct SettingsView: View {
     @ObservedObject private var directory: DirectoryAccessStore
@@ -7,7 +8,12 @@ struct SettingsView: View {
     @State private var showingPicker = false
     @State private var feedbackHint = false
     @State private var settingsPage: SettingsPage = .main
-    @State private var effectsDraft: PhotoEffectsSettings
+    @Binding private var effectsDraft: PhotoEffectsSettings
+    @Binding private var filterChooser: PhotoFilterChooserState
+    @Binding private var effectsHint: PhotoEffectsHint?
+    @State private var showingWatermarkPicker = false
+    @State private var watermarkPickerItems: [PhotosPickerItem] = []
+    @FocusState private var watermarkTextFocused: Bool
     @State private var showingHelp = false
     @State private var showingEffectsHelp = false
     @State private var helpAnchor: CGRect = .zero
@@ -28,18 +34,24 @@ struct SettingsView: View {
 
     var showPhotoEffectsEntry: Bool = true
     var onClose: (() -> Void)? = nil
+    var dismissalRequested = false
 
     private enum SettingsPage {
         case main
         case effects
     }
 
-    init(showPhotoEffectsEntry: Bool = true, effectsStore: PhotoEffectsStore = PhotoEffectsStore(), directory: DirectoryAccessStore = DirectoryAccessStore(), onClose: (() -> Void)? = nil) {
+    init(showPhotoEffectsEntry: Bool, effectsStore: PhotoEffectsStore, directory: DirectoryAccessStore,
+         effectsDraft: Binding<PhotoEffectsSettings>, filterChooser: Binding<PhotoFilterChooserState>,
+         effectsHint: Binding<PhotoEffectsHint?>, dismissalRequested: Bool, onClose: (() -> Void)? = nil) {
         self.showPhotoEffectsEntry = showPhotoEffectsEntry
         self.onClose = onClose
         _effectsStore = ObservedObject(wrappedValue: effectsStore)
         _directory = ObservedObject(wrappedValue: directory)
-        _effectsDraft = State(initialValue: effectsStore.beginDraft())
+        _effectsDraft = effectsDraft
+        _filterChooser = filterChooser
+        _effectsHint = effectsHint
+        self.dismissalRequested = dismissalRequested
     }
 
     var body: some View {
@@ -58,7 +70,13 @@ struct SettingsView: View {
                     VStack(spacing: 0) {
                         effectsHeader
                         ScrollView {
-                            PhotoEffectsControls(draft: $effectsDraft)
+                            PhotoEffectsControls(draft: $effectsDraft,
+                                showingWatermarkPicker: $showingWatermarkPicker,
+                                textFieldFocused: $watermarkTextFocused,
+                                showLocationFields: true,
+                                filterChooser: $filterChooser,
+                                onWatermarkTextCommitted: { _ in commitFrameDraft() },
+                                onFavoriteImageMissing: { effectsHint = .init(resource: "photo_effect_favorite_image_missing") })
                                 .padding(.horizontal, 16)
                                 .padding(.bottom, 14)
                         }
@@ -98,6 +116,27 @@ struct SettingsView: View {
         .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous).stroke(ZTransferColors.primaryText.opacity(0.16), lineWidth: 1))
         .sheet(isPresented: $showingPicker) { DirectoryPicker { url in directory.setDirectory(url); showingPicker = false } }
+        .photosPicker(isPresented: $showingWatermarkPicker, selection: $watermarkPickerItems,
+                      maxSelectionCount: 1, matching: .images, preferredItemEncoding: .current)
+        .task(id: watermarkPickerItems) {
+            guard let item = watermarkPickerItems.last else { return }
+            guard let data = try? await item.loadTransferable(type: Data.self), !Task.isCancelled,
+                  let image = UIImage(data: data), let hash = effectsStore.importWatermarkImage(image) else {
+                if !Task.isCancelled { effectsHint = .init(resource: "photo_frame_image_import_failed"); watermarkPickerItems = [] }
+                return
+            }
+            effectsDraft.watermark.content = .image
+            effectsDraft.watermark.imageHash = hash
+            if effectsDraft.photoFrameBorderEnabled,
+               let index = effectsDraft.favoriteFrameEffects.firstIndex(where: { $0.preset == effectsDraft.photoFramePreset }) {
+                effectsDraft.favoriteFrameEffects[index].watermark = effectsDraft.watermark
+            }
+            commitFrameDraft()
+            watermarkPickerItems = []
+        }
+        .onChange(of: dismissalRequested) { closing in
+            if closing && settingsPage == .effects { commitEffectsDraft() }
+        }
         .coordinateSpace(name: "settings-panel")
         .onPreferenceChange(SettingsHelpAnchorPreferenceKey.self) { helpAnchor = $0 }
         .animation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.24), value: showingHelp)
@@ -185,17 +224,36 @@ struct SettingsView: View {
     }
 
     private func showMainSettings() {
-        effectsStore.update(effectsDraft)
+        commitEffectsDraft()
         withAnimation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.24)) {
+            showingEffectsHelp = false
             settingsPage = .main
         }
     }
 
     private func closeSettings() {
         if settingsPage == .effects {
-            effectsStore.update(effectsDraft)
+            commitEffectsDraft()
         }
         onClose?()
+    }
+
+    private func commitFrameDraft() {
+        var persisted = effectsStore.settings.persistingEditorPreferences(from: effectsDraft)
+        persisted.photoFrameEnabled = effectsDraft.photoFrameEnabled
+        persisted.photoFrameBorderEnabled = effectsDraft.photoFrameBorderEnabled
+        persisted.photoFramePreset = effectsDraft.photoFramePreset
+        persisted.metadata = effectsDraft.metadata
+        persisted.watermark = effectsDraft.watermark
+        effectsStore.update(persisted)
+    }
+
+    private func commitEffectsDraft() {
+        watermarkTextFocused = false
+        if effectsDraft.watermark.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            effectsDraft.watermark.text = PhotoFrameWatermark.defaultText
+        }
+        effectsStore.update(effectsDraft)
     }
 
     private var header: some View {

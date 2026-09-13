@@ -26,6 +26,8 @@ enum PhotoFrameWatermarkColor: String, CaseIterable, Codable, Sendable { case ad
 struct PhotoFrameWatermark: Codable, Equatable, Sendable {
     static let defaultText = "ZTransfer"
     static let maxTextLength = 24
+    static let sizeRange = 1...300
+    static let opacityRange = 1...100
     var enabled = true
     var content: PhotoFrameWatermarkContent = .text
     var text = PhotoFrameWatermark.defaultText
@@ -45,11 +47,24 @@ struct PhotoFrameWatermark: Codable, Equatable, Sendable {
     }
 }
 
-/// A frame favorite stores the complete watermark draft, matching Android's
-/// FavoriteFrameWatermarkEffect rather than only remembering the frame name.
+/// Android favorites retain presentation settings, never historical text or
+/// image identity. The legacy Codable shape is retained for existing installs.
 struct PhotoFrameFavorite: Codable, Equatable, Sendable {
     var preset: PhotoFramePreset
     var watermark: PhotoFrameWatermark
+
+    func applying(to current: PhotoFrameWatermark) -> PhotoFrameWatermark? {
+        if watermark.content == .image {
+            guard let hash = current.imageHash,
+                  hash.range(of: "^[0-9a-fA-F]{64}$", options: .regularExpression) != nil else { return nil }
+        }
+        var result = watermark
+        result.text = current.text
+        result.imageHash = current.imageHash
+        result.sizePercent = min(max(result.sizePercent, PhotoFrameWatermark.sizeRange.lowerBound), PhotoFrameWatermark.sizeRange.upperBound)
+        result.opacityPercent = min(max(result.opacityPercent, PhotoFrameWatermark.opacityRange.lowerBound), PhotoFrameWatermark.opacityRange.upperBound)
+        return result
+    }
 }
 
 struct PhotoFrameMetadataSettings: Codable, Equatable, Sendable {
@@ -117,9 +132,9 @@ struct PhotoEffectsSettings: Codable, Equatable, Sendable {
     var photoFilterEnabled = false
     var selectedFilter: PhotoFilterSelection?
     var filterIntensities: [String: Int] = [:]
-    /// Android LocalPhotoEffectsPreferences persists favorites with the effect
-    /// settings. Sets keep the same choices across workbench reopenings.
-    var favoriteFilterIDs: Set<String> = []
+    /// Android orderWithFavorites preserves the order in which favorites were
+    /// added. A Set silently changes the wheel and category chooser ordering.
+    var favoriteFilterIDs: [String] = []
     var favoriteFramePresets: Set<PhotoFramePreset> = []
     var favoriteFrameEffects: [PhotoFrameFavorite] = []
 
@@ -128,6 +143,50 @@ struct PhotoEffectsSettings: Codable, Equatable, Sendable {
     }
 
     init() {}
+
+    static func filterKey(_ id: String) -> String {
+        Np3FilterCatalog.preset(id: id)?.catalogKey ?? id
+    }
+
+    var orderedFilters: [PhotoFilterPreset] {
+        let presets = PhotoFilterCatalog.presets
+        let byKey = Dictionary(uniqueKeysWithValues: presets.map { (Self.filterKey($0.id), $0) })
+        var seen = Set<String>()
+        let favorites = favoriteFilterIDs.filter { seen.insert($0).inserted }.compactMap { byKey[$0] }
+        return favorites + presets.filter { !favoriteFilterIDs.contains(Self.filterKey($0.id)) }
+    }
+
+    mutating func selectFilter(_ id: String?) {
+        guard let id, let preset = PhotoFilterCatalog.resolve(id) else {
+            photoFilterEnabled = false
+            return
+        }
+        let key = Self.filterKey(id)
+        let intensity = filterIntensities[key] ?? Np3FilterEngine.defaultIntensityPercent
+        selectedFilter = .init(preset: preset, intensityPercent: intensity)
+        photoFilterEnabled = true
+        filterIntensities[key] = intensity
+    }
+
+    mutating func toggleFilterFavorite(_ id: String) {
+        let key = Self.filterKey(id)
+        if favoriteFilterIDs.contains(key) { favoriteFilterIDs.removeAll { $0 == key } }
+        else { favoriteFilterIDs.append(key) }
+    }
+
+    /// SettingsScreen persists these editor preferences immediately while the
+    /// selected filter/frame/watermark remain a draft until returning/closing.
+    func persistingEditorPreferences(from draft: Self) -> Self {
+        var result = self
+        result.filterIntensities = draft.filterIntensities
+        result.favoriteFilterIDs = draft.favoriteFilterIDs
+        result.favoriteFrameEffects = draft.favoriteFrameEffects
+        result.favoriteFramePresets = draft.favoriteFramePresets
+        result.metadataByPreset = draft.metadataByPreset
+        result.metadata = result.metadataByPreset[result.photoFramePreset.rawValue]
+            ?? PhotoFrameMetadataSettings.defaults(for: result.photoFramePreset)
+        return result
+    }
 
     private enum CodingKeys: String, CodingKey {
         case photoFrameEnabled, photoFrameBorderEnabled, photoFramePreset, watermark,
@@ -146,7 +205,7 @@ struct PhotoEffectsSettings: Codable, Equatable, Sendable {
         photoFilterEnabled = try c.decodeIfPresent(Bool.self, forKey: .photoFilterEnabled) ?? false
         selectedFilter = try c.decodeIfPresent(PhotoFilterSelection.self, forKey: .selectedFilter)
         filterIntensities = try c.decodeIfPresent([String: Int].self, forKey: .filterIntensities) ?? [:]
-        favoriteFilterIDs = try c.decodeIfPresent(Set<String>.self, forKey: .favoriteFilterIDs) ?? []
+        favoriteFilterIDs = try c.decodeIfPresent([String].self, forKey: .favoriteFilterIDs) ?? []
         favoriteFramePresets = try c.decodeIfPresent(Set<PhotoFramePreset>.self, forKey: .favoriteFramePresets) ?? []
         favoriteFrameEffects = try c.decodeIfPresent([PhotoFrameFavorite].self, forKey: .favoriteFrameEffects) ?? []
     }
@@ -223,14 +282,17 @@ final class PhotoEffectsStore: ObservableObject {
         var result = value
         var watermark = value.watermark
         if watermark.content == .image && watermark.imageHash == nil { watermark.content = .text }
-        watermark.sizePercent = min(max(watermark.sizePercent, 2), 100)
-        watermark.opacityPercent = min(max(watermark.opacityPercent, 2), 100)
+        watermark.sizePercent = min(max(watermark.sizePercent, PhotoFrameWatermark.sizeRange.lowerBound), PhotoFrameWatermark.sizeRange.upperBound)
+        watermark.opacityPercent = min(max(watermark.opacityPercent, PhotoFrameWatermark.opacityRange.lowerBound), PhotoFrameWatermark.opacityRange.upperBound)
         result.watermark = watermark
         result.filterIntensities = value.filterIntensities.reduce(into: [:]) { partial, item in
             let key = Np3FilterCatalog.preset(id: item.key)?.catalogKey ?? item.key
-            partial[key] = min(max(item.value, 2), 100)
+            partial[key] = Np3FilterEngine.normalizeIntensity(item.value)
         }
-        result.favoriteFilterIDs = Set(value.favoriteFilterIDs.map { Np3FilterCatalog.preset(id: $0)?.catalogKey ?? $0 })
+        var seenFilters = Set<String>()
+        let validFilterKeys = Set(Np3FilterCatalog.presets.map(\.catalogKey))
+        result.favoriteFilterIDs = value.favoriteFilterIDs.map(PhotoEffectsSettings.filterKey)
+            .filter { validFilterKeys.contains($0) && seenFilters.insert($0).inserted }
         if let selected = value.selectedFilter {
             if let preset = PhotoFilterCatalog.resolve(selected.preset.id) {
                 result.selectedFilter = .init(preset: preset, intensityPercent: selected.normalizedIntensityPercent)
@@ -241,13 +303,10 @@ final class PhotoEffectsStore: ObservableObject {
         }
         // Keep the old set field in sync for preferences written by the first
         // iOS workbench build, while the effect list remains the source of truth.
-        result.favoriteFrameEffects = result.favoriteFrameEffects
-            .reduce(into: [PhotoFramePreset: PhotoFrameFavorite]()) { partial, favorite in
-                partial[favorite.preset] = favorite
-            }
-            .map { $0.value }
+        var seenFrames = Set<PhotoFramePreset>()
+        result.favoriteFrameEffects = result.favoriteFrameEffects.filter { seenFrames.insert($0.preset).inserted }
         let knownPresets = Set(result.favoriteFrameEffects.map(\.preset))
-        for preset in result.favoriteFramePresets where !knownPresets.contains(preset) {
+        for preset in PhotoFramePreset.allCases where result.favoriteFramePresets.contains(preset) && !knownPresets.contains(preset) {
             result.favoriteFrameEffects.append(.init(preset: preset, watermark: result.watermark))
         }
         result.favoriteFramePresets.formUnion(result.favoriteFrameEffects.map(\.preset))
@@ -278,7 +337,7 @@ final class PhotoEffectsStore: ObservableObject {
                 intensityPercent: intensities[key] ?? (defaults.object(forKey: "photo_filter_intensity") as? Int ?? Np3FilterEngine.defaultIntensityPercent))
             value.filterIntensities = intensities
         }
-        value.favoriteFilterIDs = Set(decodeAndroidFavorites(defaults.string(forKey: "favorite_photo_filters_v1")))
+        value.favoriteFilterIDs = decodeAndroidFavorites(defaults.string(forKey: "favorite_photo_filters_v1"))
         let content = PhotoFrameWatermarkContent(rawValue: defaults.string(forKey: "photo_frame_watermark_content") ?? "TEXT") ?? .text
         value.watermark = PhotoFrameWatermark(
             enabled: defaults.object(forKey: "photo_frame_branding_enabled") as? Bool ?? true,
@@ -336,7 +395,7 @@ final class PhotoEffectsStore: ObservableObject {
             value.selectedFilter = PhotoFilterSelection(preset: preset, intensityPercent: intensities[key] ?? (defaults.object(forKey: "filter_intensity") as? Int ?? Np3FilterEngine.defaultIntensityPercent))
             value.filterIntensities = intensities
         }
-        value.favoriteFilterIDs = Set(decodeAndroidFavorites(defaults.string(forKey: "favorite_photo_filters_v1")))
+        value.favoriteFilterIDs = decodeAndroidFavorites(defaults.string(forKey: "favorite_photo_filters_v1"))
         value.watermark = PhotoFrameWatermark(
             enabled: defaults.object(forKey: "watermark_enabled") as? Bool ?? true,
             content: PhotoFrameWatermarkContent(rawValue: defaults.string(forKey: "watermark_content") ?? "TEXT") ?? .text,
@@ -379,16 +438,21 @@ final class PhotoEffectsStore: ObservableObject {
     private static func decodeAndroidFavorites(_ raw: String?) -> [String] {
         raw?.split(separator: ";").map { String($0).split(separator: ",").first.map(String.init) ?? "" }.filter { !$0.isEmpty } ?? []
     }
-    private static func encodeAndroidFavorites(_ ids: Set<String>) -> String { ids.sorted().joined(separator: ";") }
+    private static func encodeAndroidFavorites(_ ids: [String]) -> String { ids.joined(separator: ";") }
     private static func decodeAndroidIntensities(_ raw: String?) -> [String: Int] {
-        Dictionary(uniqueKeysWithValues: (raw ?? "").split(separator: ";").compactMap { entry in
+        var result: [String: Int] = [:]
+        let validKeys = Set(Np3FilterCatalog.presets.map(\.catalogKey))
+        for entry in (raw ?? "").split(separator: ";") {
             let f = entry.split(separator: ",", omittingEmptySubsequences: false)
-            guard f.count == 2, let n = Int(f[1]) else { return nil }
-            return (String(f[0]), n)
-        })
+            guard f.count == 2, let n = Int(f[1]) else { continue }
+            let key = String(f[0])
+            guard validKeys.contains(key), result[key] == nil else { continue }
+            result[key] = Np3FilterEngine.normalizeIntensity(n)
+        }
+        return result
     }
     private static func encodeAndroidIntensities(_ values: [String: Int]) -> String {
-        values.keys.sorted().compactMap { key in values[key].map { "\(key),\(min(max($0, 2), 100))" } }.joined(separator: ";")
+        values.keys.sorted().compactMap { key in values[key].map { "\(key),\(Np3FilterEngine.normalizeIntensity($0))" } }.joined(separator: ";")
     }
     private static func decodeAndroidFrameFavorites(_ raw: String?, watermark: PhotoFrameWatermark) -> [PhotoFrameFavorite] {
         (raw ?? "").split(separator: ";").compactMap { entry in

@@ -13,6 +13,10 @@ struct SettingsPopupOverlay: View {
     let anchor: CGRect
 
     @State private var animationProgress: CGFloat = 0
+    @State private var dismissalRequested = false
+    @State private var effectsDraft = PhotoEffectsSettings()
+    @State private var filterChooser = PhotoFilterChooserState()
+    @State private var effectsHint: PhotoEffectsHint?
 
     var body: some View {
         GeometryReader { proxy in
@@ -32,6 +36,10 @@ struct SettingsPopupOverlay: View {
                     showPhotoEffectsEntry: showPhotoEffectsEntry,
                     effectsStore: effectsStore,
                     directory: directory,
+                    effectsDraft: $effectsDraft,
+                    filterChooser: $filterChooser,
+                    effectsHint: $effectsHint,
+                    dismissalRequested: dismissalRequested,
                     onClose: { close() }
                 )
                 .frame(width: max(0, proxy.size.width - 24))
@@ -46,10 +54,14 @@ struct SettingsPopupOverlay: View {
                 .scaleEffect(0.92 + 0.08 * animationProgress, anchor: .topLeading)
                 .opacity(animationProgress)
                 .shadow(color: .black.opacity(0.16), radius: 18, y: 8)
+                if filterChooser.isPresented {
+                    PhotoFilterChooserOverlay(draft: $effectsDraft, state: $filterChooser)
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .animation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.28), value: animationProgress)
             .onAppear {
+                effectsDraft = effectsStore.beginDraft()
                 updateWindowScrimBackground()
                 animationProgress = 0
                 withAnimation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.28)) {
@@ -60,10 +72,16 @@ struct SettingsPopupOverlay: View {
         .ignoresSafeArea()
         .transition(.opacity)
         .zIndex(100)
+        .photoEffectsHint($effectsHint, duration: 1.8)
+        .onChange(of: effectsDraft) { value in
+            let persisted = effectsStore.settings.persistingEditorPreferences(from: value)
+            if persisted != effectsStore.settings { effectsStore.update(persisted) }
+        }
     }
 
     private func close() {
         guard isPresented else { return }
+        dismissalRequested = true
         withAnimation(.timingCurve(0.4, 0, 1, 1, duration: 0.22)) {
             animationProgress = 0
         }

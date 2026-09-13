@@ -93,3 +93,101 @@ final class DomainModelTests: XCTestCase {
         XCTAssertEqual(watermark.displayText.count, PhotoFrameWatermark.maxTextLength)
     }
 }
+
+extension DomainModelTests {
+    func testFilterSelectionUsesOwnRememberedIntensityAndOffKeepsSelection() {
+        let first = PhotoFilterCatalog.presets[0]
+        let next = PhotoFilterCatalog.presets[1]
+        var settings = PhotoEffectsSettings()
+        settings.selectFilter(first.id)
+        settings.filterIntensities[PhotoEffectsSettings.filterKey(first.id)] = 22
+        settings.selectedFilter = .init(preset: first, intensityPercent: 22)
+        settings.selectFilter(next.id)
+        XCTAssertEqual(settings.selectedFilter?.intensityPercent, 80)
+        settings.selectFilter(first.id)
+        XCTAssertEqual(settings.selectedFilter?.intensityPercent, 22)
+        settings.selectFilter(nil)
+        XCTAssertFalse(settings.photoFilterEnabled)
+        XCTAssertEqual(settings.selectedFilter?.preset.id, first.id)
+    }
+
+    @MainActor
+    func testEffectFavoritesKeepAdditionOrderAcrossPersistenceAndRetoggling() {
+        let suite = "effects-order-\(UUID())"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let a = PhotoFilterCatalog.presets[0], c = PhotoFilterCatalog.presets[2]
+        var settings = PhotoEffectsSettings()
+        settings.selectFilter(a.id)
+        settings.toggleFilterFavorite(c.id)
+        settings.toggleFilterFavorite(a.id)
+        settings.favoriteFrameEffects = [.init(preset: .cinema, watermark: .init()), .init(preset: .mist, watermark: .init())]
+        let store = PhotoEffectsStore(defaults: defaults)
+        store.update(settings)
+        var restored = PhotoEffectsStore(defaults: defaults).settings
+        XCTAssertEqual(Array(restored.orderedFilters.prefix(2)).map(\.id), [c.id, a.id])
+        XCTAssertEqual(restored.favoriteFrameEffects.map(\.preset), [.cinema, .mist])
+        XCTAssertEqual(restored.selectedFilter, settings.selectedFilter)
+        restored.toggleFilterFavorite(c.id)
+        restored.toggleFilterFavorite(c.id)
+        XCTAssertEqual(Array(restored.orderedFilters.prefix(2)).map(\.id), [a.id, c.id])
+    }
+
+    @MainActor
+    func testAndroidIntensityCodecKeepsFirstDuplicateAndNormalizesValues() {
+        let suite = "effects-codec-\(UUID())"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let a = Np3FilterCatalog.presets[0], b = Np3FilterCatalog.presets[1]
+        defaults.set(a.id, forKey: "photo_filter_selected_id")
+        defaults.set("\(a.catalogKey),79;missing,60;\(a.catalogKey),22;\(b.catalogKey),101;broken", forKey: "photo_filter_intensities_v1")
+        defaults.set("\(b.catalogKey),71;missing;\(a.catalogKey);\(b.catalogKey),92", forKey: "favorite_photo_filters_v1")
+        let restored = PhotoEffectsStore(defaults: defaults).settings
+        XCTAssertEqual(restored.filterIntensities, [a.catalogKey: 80, b.catalogKey: 100])
+        XCTAssertEqual(restored.favoriteFilterIDs, [b.catalogKey, a.catalogKey])
+    }
+
+    func testFrameFavoriteUsesCurrentContentAndRejectsMissingLogo() throws {
+        let historical = PhotoFrameWatermark(content: .image, text: "historical", imageHash: String(repeating: "a", count: 64), sizePercent: 242, opacityPercent: 1)
+        let favorite = PhotoFrameFavorite(preset: .minimal, watermark: historical)
+        let current = PhotoFrameWatermark(text: "current", imageHash: String(repeating: "b", count: 64))
+        let applied = try XCTUnwrap(favorite.applying(to: current))
+        XCTAssertEqual(applied.text, "current")
+        XCTAssertEqual(applied.imageHash, current.imageHash)
+        XCTAssertEqual(applied.sizePercent, 242)
+        XCTAssertEqual(applied.opacityPercent, 1)
+        XCTAssertNil(favorite.applying(to: .init()))
+    }
+
+    @MainActor
+    func testWatermarkFullAndroidRangeSurvivesSaveAndReopen() {
+        let suite = "effects-watermark-range-\(UUID())"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = PhotoEffectsStore(defaults: defaults)
+        var settings = store.settings
+        settings.watermark.sizePercent = 300
+        settings.watermark.opacityPercent = 1
+        store.update(settings)
+        let restored = PhotoEffectsStore(defaults: defaults).settings
+        XCTAssertEqual(restored.watermark.sizePercent, 300)
+        XCTAssertEqual(restored.watermark.opacityPercent, 1)
+    }
+
+    func testTransferDraftPreferencesPersistWithoutApplyingActiveEffects() {
+        let first = PhotoFilterCatalog.presets[0], next = PhotoFilterCatalog.presets[1]
+        var saved = PhotoEffectsSettings()
+        saved.selectFilter(first.id)
+        var draft = saved
+        draft.selectFilter(next.id)
+        draft.photoFramePreset = .minimal
+        draft.metadataByPreset[PhotoFramePreset.minimal.rawValue] = .init(showCoordinates: true)
+        draft.toggleFilterFavorite(next.id)
+        let result = saved.persistingEditorPreferences(from: draft)
+        XCTAssertEqual(result.selectedFilter, saved.selectedFilter)
+        XCTAssertEqual(result.photoFramePreset, .mist)
+        XCTAssertEqual(result.favoriteFilterIDs, draft.favoriteFilterIDs)
+        XCTAssertEqual(result.metadataByPreset, draft.metadataByPreset)
+        XCTAssertEqual(result.filterIntensities, draft.filterIntensities)
+    }
+}
