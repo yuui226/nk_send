@@ -219,7 +219,9 @@ struct PhotoListView: View {
         .fullScreenCover(item: $selectedFile) { file in
             if let session {
                 let files = model.sections.flatMap(\.files)
-                PhotoPreviewView(session: session, files: files, selectedFile: $selectedFile) { file in
+                PhotoPreviewView(session: session, files: files, selectedFile: $selectedFile,
+                                 directory: directoryStore.directoryURL,
+                                 organizeByDate: organizeByDate) { file in
                     if !deferTransferStart {
                         queueModel.enqueue(file, autoStart: session, directory: directoryStore.directoryURL, organizeByDate: organizeByDate)
                     } else {

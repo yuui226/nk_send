@@ -4,6 +4,8 @@ import UIKit
 struct PhotoPreviewView: View {
     let session: CameraSession
     let files: [CameraFile]
+    let directory: URL?
+    let organizeByDate: Bool
     @Binding var selectedFile: CameraFile?
     let onEnqueue: (CameraFile) -> Void
     @State private var index: Int
@@ -16,8 +18,11 @@ struct PhotoPreviewView: View {
     @AppStorage("preview_histogram_enabled") private var histogramVisible = false
     @State private var histogramBars: [CGFloat] = []
 
-    init(session: CameraSession, files: [CameraFile], selectedFile: Binding<CameraFile?>, onEnqueue: @escaping (CameraFile) -> Void = { _ in }) {
-        self.session = session; self.files = files; _selectedFile = selectedFile; self.onEnqueue = onEnqueue
+    init(session: CameraSession, files: [CameraFile], selectedFile: Binding<CameraFile?>,
+         directory: URL? = nil, organizeByDate: Bool = false,
+         onEnqueue: @escaping (CameraFile) -> Void = { _ in }) {
+        self.session = session; self.files = files; self.directory = directory
+        self.organizeByDate = organizeByDate; _selectedFile = selectedFile; self.onEnqueue = onEnqueue
         let first = selectedFile.wrappedValue ?? files.first
         _index = State(initialValue: first.flatMap { files.firstIndex(of: $0) } ?? 0)
     }
@@ -30,6 +35,7 @@ struct PhotoPreviewView: View {
                     PreviewImage(
                         session: session,
                         file: file,
+                        localOriginalURL: localOriginalURL(for: file),
                         rotationDegrees: rotationDegrees,
                         zoomEnabled: !file.fileExtension.lowercased().hasSuffix(".mov") &&
                             !file.fileExtension.lowercased().hasSuffix(".mp4"),
@@ -134,6 +140,19 @@ struct PhotoPreviewView: View {
             exifLoading = false
         }
     }
+
+    /// Android checks the exact destination folder and file size before asking
+    /// the camera for FHD. RAW and TIFF intentionally keep their camera/embedded
+    /// preview routes; videos remain thumbnail-only.
+    private func localOriginalURL(for file: CameraFile) -> URL? {
+        guard let directory,
+              [".jpg", ".jpeg", ".png", ".bmp", ".gif"].contains(file.fileExtension) else { return nil }
+        let destination = transferDestinationDirectory(
+            root: directory,
+            folderName: organizeByDate ? transferDateFolderName(file.captureDate) : nil
+        )
+        return existingTransferDestination(for: file, in: destination)
+    }
 }
 
 private func luminanceHistogram(_ image: UIImage) -> [CGFloat] {
@@ -153,6 +172,7 @@ private func luminanceHistogram(_ image: UIImage) -> [CGFloat] {
 private struct PreviewImage: View {
     let session: CameraSession
     let file: CameraFile
+    let localOriginalURL: URL?
     let rotationDegrees: Double
     let zoomEnabled: Bool
     @State private var thumbnail: UIImage?
@@ -202,11 +222,17 @@ private struct PreviewImage: View {
             thumbnail = nil
             image = nil
             highResolutionAlpha = 0
-            await session.setFHDActive(true)
-            defer { Task { await session.setFHDActive(false) } }
             // Android shows the already cached/low-cost thumbnail first, then
             // replaces it with the FHD preview. Keep both requests in flight,
             // but publish the thumbnail as soon as it is available.
+            if let localOriginalURL,
+               let localImage = UIImage(contentsOfFile: localOriginalURL.path) {
+                image = localImage
+                highResolutionAlpha = 1
+                return
+            }
+            await session.setFHDActive(true)
+            defer { Task { await session.setFHDActive(false) } }
             async let thumbnailData = try? await session.thumbnail(file: file)
             async let previewData = try? await session.preview(handle: file.id)
             if let data = await thumbnailData, let thumb = UIImage(data: data) {
