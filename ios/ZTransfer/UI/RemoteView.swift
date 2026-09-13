@@ -15,6 +15,8 @@ struct RemoteView: View {
     @AppStorage("remote_desqueeze_multiplier") private var desqueeze = 1.0
     @AppStorage("remote_audio_levels_visible") private var audioLevelsVisible = true
     @State private var histogramVisible = false
+    // Android RemoteScreen defaults the FPS overlay to visible for every session.
+    @State private var showFps = true
     @State private var levelVisible = false
     @State private var framingGrid: IOSViewfinderGrid = .off
     @State private var zebraVisible = false
@@ -99,6 +101,19 @@ struct RemoteView: View {
                                         aspect: (image.size.width / max(image.size.height, 1)) * CGFloat(desqueeze))
                             .allowsHitTesting(false)
                     }
+                    if showFps, model.state.fps > 0 {
+                        Text(String(format: "%.1f FPS", model.state.fps))
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.86))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(.black.opacity(0.42), in: RoundedRectangle(cornerRadius: 6))
+                            .frame(maxWidth: .infinity, maxHeight: .infinity,
+                                   alignment: .bottomTrailing)
+                            .padding(.trailing, 12)
+                            .padding(.bottom, 10)
+                            .allowsHitTesting(false)
+                    }
                 } else {
                     ProgressView().tint(.white).frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
@@ -129,6 +144,12 @@ struct RemoteView: View {
                 .padding(.horizontal, 14)
                 .padding(.top, 10)
                 HStack(spacing: 8) {
+                    Button {
+                        withAnimation(ZTransferMotion.standard) { showFps.toggle() }
+                    } label: {
+                        Text("FPS")
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    }
                     Button {
                         withAnimation(ZTransferMotion.standard) { histogramVisible.toggle() }
                     } label: {
