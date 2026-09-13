@@ -146,22 +146,31 @@ struct PhotoFilterSheet: View {
     }
 }
 
-private struct FilterChip: View {
-    let label: String
+struct FilterChip: View {
+    let label: String?
     let selected: Bool
+    var systemImage: String? = nil
     let action: () -> Void
     var body: some View {
         Button(action: action) {
-            Text(label).zTransferText(size: ZTransferMetrics.caption, weight: selected ? .semibold : .regular)
-                .foregroundStyle(selected ? ZTransferColors.accentBlue : ZTransferColors.primaryText)
-                .frame(maxWidth: .infinity).frame(minHeight: 38)
-                .background(selected ? ZTransferColors.accentBlue.opacity(0.13) : Color.black.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
-                .overlay(RoundedRectangle(cornerRadius: 10).stroke(selected ? ZTransferColors.accentBlue.opacity(0.32) : Color.clear, lineWidth: 1))
+            HStack(spacing: 5) {
+                if let systemImage {
+                    Image(systemName: systemImage)
+                        .font(.system(size: 13, weight: .semibold))
+                }
+                if let label {
+                    Text(label).zTransferText(size: ZTransferMetrics.caption, weight: selected ? .semibold : .regular)
+                }
+            }
+            .foregroundStyle(selected ? ZTransferColors.accentBlue : ZTransferColors.primaryText)
+            .frame(maxWidth: .infinity).frame(minHeight: 38)
+            .background(selected ? ZTransferColors.accentBlue.opacity(0.13) : Color.black.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(selected ? ZTransferColors.accentBlue.opacity(0.32) : Color.clear, lineWidth: 1))
         }.buttonStyle(.plain)
     }
 }
 
-private struct DateEndpointEditor: View {
+struct DateEndpointEditor: View {
     let label: String
     @Binding var date: Date
     let years: [Int]

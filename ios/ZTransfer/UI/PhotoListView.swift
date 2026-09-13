@@ -30,6 +30,7 @@ struct PhotoListView: View {
     @AppStorage("tap_to_preview") private var tapToPreview = false
     @State private var selectedFile: CameraFile?
     @State private var showingFilter = false
+    @State private var filterAnchor: CGRect = .zero
     @State private var showingQueue = false
     @AppStorage("defer_transfer_start") private var deferTransferStart = false
     @AppStorage("collapse_burst_photos") private var collapseBurstPhotos = true
@@ -239,19 +240,10 @@ struct PhotoListView: View {
                 }
             }
         }
-        .sheet(isPresented: $showingFilter) {
-            let files = model.availableFiles
-            let extensions = Array(Set(files.map(\.fileExtension))).sorted()
-            let slots = Array(files.flatMap { $0.storageIDs }).sorted()
-            PhotoFilterSheet(initial: model.filter,
-                             availableExtensions: extensions.isEmpty ? [".jpg", ".nef", ".mp4"] : extensions,
-                             availableStorageSlots: slots,
-                             onApply: { model.setFilter($0); showingFilter = false })
-        }
         .sheet(isPresented: $showingQueue) {
             TransferQueueView(model: queueModel, session: session, directory: directoryStore)
         }
-        .overlay {
+                .overlay {
             if showingSettings {
                 SettingsPopupOverlay(
                     isPresented: $showingSettings,
@@ -262,6 +254,21 @@ struct PhotoListView: View {
                     effectPreviewSource: effectPreviewSource,
                     effectPreviewExif: effectPreviewExif,
                     onEffectPreviewRequested: requestEffectPreview
+                )
+                .ignoresSafeArea()
+            }
+            if showingFilter {
+                let files = model.availableFiles
+                PhotoFilterPopupOverlay(
+                    isPresented: $showingFilter,
+                    anchor: filterAnchor,
+                    initial: model.filter,
+                    availableExtensions: Array(Set(files.map(\.fileExtension))).sorted().isEmpty
+                        ? [".jpg", ".nef", ".mp4"]
+                        : Array(Set(files.map(\.fileExtension))).sorted(),
+                    availableStorageSlots: Array(Set(files.flatMap { $0.storageIDs })).sorted(),
+                    suggestedDate: model.latestEffectPreviewFile?.captureDate,
+                    onChange: model.setFilter,
                 )
                 .ignoresSafeArea()
             }
@@ -308,6 +315,12 @@ struct PhotoListView: View {
                             .frame(width: 36, height: 36)
                     }
                     .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
+                    .background {
+                        GeometryReader { proxy in
+                            Color.clear.preference(key: PhotoListFilterAnchorPreferenceKey.self,
+                                                   value: proxy.frame(in: .global))
+                        }
+                    }
                 }
                 .transition(.asymmetric(
                     insertion: .modifier(
@@ -350,6 +363,7 @@ struct PhotoListView: View {
         .padding(.top, 6)
         .animation(ZTransferMotion.standard, value: queueModel.snapshot.items.count)
         .onPreferenceChange(PhotoListSettingsAnchorPreferenceKey.self) { settingsAnchor = $0 }
+        .onPreferenceChange(PhotoListFilterAnchorPreferenceKey.self) { filterAnchor = $0 }
     }
 
     /// Android requests the latest visible file on entering Settings: publish
@@ -465,6 +479,11 @@ private struct PhotoListSignalIcon: View {
 }
 
 private struct PhotoListSettingsAnchorPreferenceKey: PreferenceKey {
+    static let defaultValue: CGRect = .zero
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
+}
+
+private struct PhotoListFilterAnchorPreferenceKey: PreferenceKey {
     static let defaultValue: CGRect = .zero
     static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
 }
