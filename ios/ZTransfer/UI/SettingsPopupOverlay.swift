@@ -78,12 +78,15 @@ struct SettingsPopupOverlay: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .animation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.28), value: animationProgress)
+            // Android Motion.overlayExpand = 340ms and uses FastOutSlowIn;
+            // keep the popup shell on that exact timeline instead of the
+            // shorter generic iOS panel animation.
+            .animation(.timingCurve(0.4, 0.0, 0.2, 1.0, duration: 0.34), value: animationProgress)
             .onAppear {
                 effectsDraft = effectsStore.beginDraft()
                 updateWindowScrimBackground()
                 animationProgress = 0
-                withAnimation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.28)) {
+                withAnimation(.timingCurve(0.4, 0.0, 0.2, 1.0, duration: 0.34)) {
                     animationProgress = 1
                 }
             }
@@ -101,10 +104,11 @@ struct SettingsPopupOverlay: View {
     private func close() {
         guard isPresented else { return }
         dismissalRequested = true
-        withAnimation(.timingCurve(0.4, 0, 1, 1, duration: 0.22)) {
+        // Android Motion.overlayCollapse is a 260ms FastOutSlowIn tween.
+        withAnimation(.timingCurve(0.4, 0.0, 0.2, 1.0, duration: 0.26)) {
             animationProgress = 0
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.26) {
             clearWindowScrimBackground()
             isPresented = false
         }
