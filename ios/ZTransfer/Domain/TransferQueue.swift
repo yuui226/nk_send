@@ -189,7 +189,7 @@ actor TransferQueue {
         // Match Android's queue-start guard: a stale/deleted destination fails waiting
         // tasks with a user-facing recovery message before any camera transfer begins.
         guard let directory, FileManager.default.fileExists(atPath: directory.path) else {
-            let message = "传输目录已失效，请重新选择"
+            let message = AppLocalized.resource("error_dir_invalid")
             var changed = false
             for index in items.indices where items[index].status == .waiting {
                 items[index].status = .failed
@@ -268,10 +268,12 @@ actor TransferQueue {
     private func transferErrorMessage(_ error: Error) -> String {
         switch error {
         case CameraTransportError.disconnected:
-            return "相机连接中断，重连后重试可续传"
+            return AppLocalized.resource("error_camera_connection_lost")
         case CameraTransportError.timeout:
             // Android normalizes socket timeouts to the same reconnect/resume guidance.
-            return "相机连接中断，重连后重试可续传"
+            return AppLocalized.resource("error_camera_connection_lost")
+        case CameraRepositoryError.invalidDataset:
+            return AppLocalized.resource("error_camera_metadata_unavailable")
         default:
             return error.localizedDescription
         }

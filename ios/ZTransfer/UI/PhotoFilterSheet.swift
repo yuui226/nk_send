@@ -174,9 +174,9 @@ private struct DateEndpointEditor: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(label).zTransferText(size: ZTransferMetrics.caption, weight: .semibold)
             HStack(spacing: 8) {
-                DetentWheel(label: "年", options: years, selected: year, optionLabel: String.init, onCommit: { date = clamped(year: $0, month: month, day: day) }, rowHeight: 26)
-                DetentWheel(label: "月", options: Array(1...12), selected: month, optionLabel: { String(format: "%02d", $0) }, onCommit: { date = clamped(year: year, month: $0, day: day) }, rowHeight: 26)
-                DetentWheel(label: "日", options: days, selected: day, optionLabel: { String(format: "%02d", $0) }, onCommit: { date = clamped(year: year, month: month, day: $0) }, rowHeight: 26)
+                DetentWheel(label: AppLocalized.resource("date_year"), options: years, selected: year, optionLabel: String.init, onCommit: { date = clamped(year: $0, month: month, day: day) }, rowHeight: 26)
+                DetentWheel(label: AppLocalized.resource("date_month"), options: Array(1...12), selected: month, optionLabel: { String(format: "%02d", $0) }, onCommit: { date = clamped(year: year, month: $0, day: day) }, rowHeight: 26)
+                DetentWheel(label: AppLocalized.resource("date_day"), options: days, selected: day, optionLabel: { String(format: "%02d", $0) }, onCommit: { date = clamped(year: year, month: month, day: $0) }, rowHeight: 26)
             }
         }
     }

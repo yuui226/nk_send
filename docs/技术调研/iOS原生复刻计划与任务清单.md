@@ -491,3 +491,8 @@
 - `ios/ProtocolTests/PTPIPDiscoveryTests.swift` 补齐 `SWIFT_PACKAGE`/Xcode 条件导入，Xcode 测试 target 现在直接复用 App 模块，不再引用不存在的 `ZTransferProtocol` 二进制模块。
 - `ios/ZTransferTests/DomainModelTests.swift` 的队列测试在执行前清理并在结束后恢复 `transferQueue.items.v1`，避免共享标准偏好中的历史任务污染断言；生产队列的持久化实现未改变。
 - 验证：`xcodebuild test -project ios/ZTransfer.xcodeproj -scheme ZTransfer -destination 'platform=iOS Simulator,id=CA046456-B859-45F4-9CB3-2C6E2F8E03B0' CODE_SIGNING_ALLOWED=NO`，125 tests、0 failures。
+
+### 2026-09-14 安卓资源文案对账
+
+- `TransferQueue` 的目录失效、相机连接中断/超时、照片元数据不可读提示改为直接读取安卓资源键；日期筛选拨轮的年/月/日标签也改为安卓资源键，覆盖系统、英文和繁体语言切换。
+- 验证：iOS Simulator Debug `xcodebuild` 构建成功；未将真机连接错误分支标记为已验收。
