@@ -16,6 +16,7 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
     private var lastWrite: Date?
     private var writeTask: Task<Void, Never>?
     private var bluetoothObservation: AnyCancellable?
+    private var awaitingPairingAction = false
 
     init(defaults: UserDefaults? = nil) {
         let storage = defaults ?? UserDefaults(suiteName: GPSPreferences.suiteName)!
@@ -50,6 +51,7 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
 
     func setEnabled(_ enabled: Bool) {
         defaults.set(enabled, forKey: GPSPreferences.enabled)
+        awaitingPairingAction = false
         writeTask?.cancel(); writeTask = nil
         guard enabled else {
             locationManager.stopUpdatingLocation(); bluetooth.stop(); state = GPSState(); lastWrite = nil; return
@@ -66,7 +68,11 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
         }
     }
 
-    func retry() { guard state.enabled else { return }; beginRunning() }
+    func retry() {
+        guard state.enabled else { return }
+        awaitingPairingAction = false
+        beginRunning()
+    }
 
     /// Matches GpsViewModel.clearPairing(): remove all camera identity data and
     /// turn the runtime off when a session is active.
@@ -100,8 +106,36 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
             state.cameraName = name
             state.status = state.latitude == nil ? .connected : .ready
             if state.latitude != nil { scheduleWriteIfDue() }
-        case .disconnected: state.status = .searching
-        case .failed(let message): state.status = .error; state.message = message
+        case .disconnected:
+            if !awaitingPairingAction { state.status = .searching }
+        case .failed(let message): applyBluetoothFailure(message)
+        }
+    }
+
+    /// Mirrors NikonGpsService.handleBleError's ordered message mapping. The
+    /// BLE client may report protocol/transport English strings, but Android
+    /// converts the user-visible result into a camera-action state first.
+    private func applyBluetoothFailure(_ message: String) {
+        let lowercased = message.lowercased()
+        if lowercased.contains("pairing rejected") ||
+            lowercased.contains("identity expired") ||
+            lowercased.contains("not found") ||
+            lowercased.contains("pairing") ||
+            message.contains("配对") {
+            defaults.removeObject(forKey: GPSPreferences.deviceID)
+            defaults.removeObject(forKey: GPSPreferences.nonce)
+            defaults.removeObject(forKey: GPSPreferences.bleAddress)
+            awaitingPairingAction = true
+            bluetooth.stop()
+            state.status = .needsCamera
+            state.message = "请在相机上打开蓝牙配对"
+        } else if lowercased.contains("bluetooth unavailable") ||
+                    lowercased.contains("scan failed") {
+            state.status = .error
+            state.message = "请打开手机蓝牙"
+        } else {
+            state.status = .error
+            state.message = message
         }
     }
 
