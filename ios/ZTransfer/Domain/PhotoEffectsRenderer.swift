@@ -216,9 +216,14 @@ enum PhotoEffectsRenderer {
             cg.addPath(path)
             cg.strokePath()
         } else if preset != .plaque && preset != .immersive && preset != .filmEdge && preset != .filmGallery {
-            let stroke = preset == .minimal
-                ? UIColor(red: 0.08, green: 0.11, blue: 0.14, alpha: 0.18)
-                : UIColor(white: 1, alpha: 0.275)
+            let stroke: UIColor
+            if preset == .minimal {
+                stroke = UIColor(red: 0.08, green: 0.11, blue: 0.14, alpha: 0.18)
+            } else if preset == .brandInset || preset == .brandGallery {
+                stroke = UIColor(red: 0.06, green: 0.08, blue: 0.09, alpha: 0.18)
+            } else {
+                stroke = UIColor(white: 1, alpha: 0.275)
+            }
             cg.setStrokeColor(stroke.cgColor); cg.setLineWidth(max(1, rect.width * 0.0012)); cg.addPath(path); cg.strokePath()
         }
     }
@@ -417,49 +422,82 @@ enum PhotoEffectsRenderer {
         let photoArea = CGRect(x: photo.minX, y: photo.minY, width: photo.width, height: photo.height)
         let identity = metadata.identity
         let details = [[metadata.frameDetailLine, metadata.dateTime ?? ""].filter { !$0.isEmpty }.joined(separator: "   "), metadata.locationRow ?? ""].filter { !$0.isEmpty }
-        let rows = [identity, metadata.lensModel ?? ""] + details
-        // Brand frames use compact white typography over the lower part of the
-        // photo. The gallery variant reserves that space for the photo itself
-        // and puts the identity in its separate lower band.
-        let visibleRows = preset == .brandInset ? rows : [metadata.lensModel ?? ""] + details
-        let rowSizes: [CGFloat] = preset == .brandInset
-            ? [photo.width * 0.043, photo.width * 0.019, photo.width * 0.021, photo.width * 0.018]
-            : [photo.width * 0.019, photo.width * 0.021, photo.width * 0.018]
-        let baseArea = photoArea.insetBy(dx: photo.width * 0.08, dy: photo.height * 0.06)
-        let sizes = Array(rowSizes.prefix(visibleRows.count))
         let occupied = brandWatermarkBounds(photo: photo, watermark: photoWatermark)
-        let heights = visibleRows.enumerated().map { index, value in
-            let size = sizes[min(index, max(0, sizes.count - 1))]
-            return (value as NSString).size(withAttributes: [.font: UIFont.systemFont(ofSize: size)]).height
+        if preset == .brandInset {
+            drawBrandInsetMetadata(cg, photo: photo, brand: identity, lens: metadata.lensModel ?? "", details: details, occupied: occupied)
+        } else {
+            drawBrandGalleryDetails(cg, photo: photo, lens: metadata.lensModel ?? "", details: details, occupied: occupied)
         }
-        let blockHeight = heights.reduce(0, +) + photo.width * 0.020 * CGFloat(max(0, heights.count - 1))
-        let blockWidth = visibleRows.enumerated().map { index, value in (value as NSString).size(withAttributes: [.font: UIFont.systemFont(ofSize: sizes[min(index, max(0, sizes.count - 1))])]).width }.max() ?? 1
-        let placed = placeBrandMetadataBlock(photo: photo, preferredBottom: photo.maxY - min(photo.width, photo.height) * (preset == .brandInset ? 0.030 : 0.035), blockHeight: blockHeight, blockWidth: blockWidth, occupied: occupied, gap: min(photo.width, photo.height) * 0.040)
-        drawBrandMetadataRows(cg, area: placed ?? baseArea, rows: visibleRows, sizes: sizes)
         drawWatermark(cg, watermark: photoWatermark, photo: photo, canvas: layout.canvas, preset: preset,
                       metadataBand: CGRect(x: 0, y: photo.maxY, width: layout.canvas.width, height: layout.canvas.height - photo.maxY))
         if preset == .brandGallery {
-            let bandRows = [identity].filter { !$0.isEmpty }
-            drawMetadataRows(cg, area: CGRect(x: 0, y: photo.maxY, width: layout.canvas.width, height: layout.canvas.height - photo.maxY).insetBy(dx: layout.canvas.width * 0.07, dy: layout.canvas.height * 0.02), preset: preset, rows: bandRows, watermark: watermark, dark: true, emphasizeFirst: true)
+            drawBrandGalleryBand(cg, band: CGRect(x: 0, y: photo.maxY, width: layout.canvas.width, height: layout.canvas.height - photo.maxY), brand: identity, watermark: watermark)
         }
     }
 
-    private static func drawBrandMetadataRows(_ cg: CGContext, area: CGRect, rows: [String], sizes: [CGFloat]) {
-        let values = rows.enumerated().filter { !$0.element.isEmpty }
-        guard !values.isEmpty else { return }
-        let fonts = values.map { UIFont(name: "HelveticaNeue-CondensedBoldOblique", size: max(9, sizes[min($0.offset, sizes.count - 1)])) ?? UIFont.boldSystemFont(ofSize: max(9, sizes[min($0.offset, sizes.count - 1)])) }
-        let heights = values.enumerated().map { index, value in (value.element as NSString).size(withAttributes: [.font: fonts[index]]).height }
-        let gap = area.height * 0.020
-        let total = heights.reduce(0, +) + gap * CGFloat(max(0, heights.count - 1))
-        let scale = min(1, area.height * 0.84 / max(total, 1))
-        var y = area.midY - total * scale * 0.5
-        for index in values.indices {
-            let value = values[index].element
-            let font = fonts[index].withSize(max(9, fonts[index].pointSize * scale))
+    private static func brandDetailFont(size: CGFloat) -> UIFont {
+        UIFont(name: "HelveticaNeue-CondensedBoldOblique", size: size) ?? UIFont.italicSystemFont(ofSize: size)
+    }
+
+    private static func drawBrandInsetMetadata(_ cg: CGContext, photo: CGRect, brand: String, lens: String, details: [String], occupied: BrandBounds?) {
+        var rows: [(String, UIFont)] = []
+        if !brand.isEmpty { rows.append((brand, UIFont.systemFont(ofSize: photo.width * 0.043, weight: .black))) }
+        if !lens.isEmpty { rows.append((lens, brandDetailFont(size: photo.width * 0.019))) }
+        rows.append(contentsOf: details.filter { !$0.isEmpty }.map { ($0, brandDetailFont(size: photo.width * 0.021)) })
+        drawBrandRows(cg, photo: photo, rows: rows, occupied: occupied, preferredBottomRatio: 0.030, gapRatio: 0.020)
+    }
+
+    private static func drawBrandGalleryDetails(_ cg: CGContext, photo: CGRect, lens: String, details: [String], occupied: BrandBounds?) {
+        var rows: [(String, UIFont)] = []
+        if !lens.isEmpty { rows.append((lens, brandDetailFont(size: photo.width * 0.019))) }
+        rows.append(contentsOf: details.filter { !$0.isEmpty }.map { ($0, brandDetailFont(size: photo.width * 0.021)) })
+        drawBrandRows(cg, photo: photo, rows: rows, occupied: occupied, preferredBottomRatio: 0.035, gapRatio: 0.016)
+    }
+
+    private static func drawBrandRows(_ cg: CGContext, photo: CGRect, rows: [(String, UIFont)], occupied: BrandBounds?, preferredBottomRatio: CGFloat, gapRatio: CGFloat) {
+        guard !rows.isEmpty else { return }
+        let gap = min(photo.width, photo.height) * gapRatio
+        let heights = rows.map { ($0.0 as NSString).size(withAttributes: [.font: $0.1]).height }
+        let widths = rows.map { ($0.0 as NSString).size(withAttributes: [.font: $0.1]).width }
+        let blockHeight = heights.reduce(0, +) + gap * CGFloat(max(0, rows.count - 1))
+        let blockWidth = min(photo.width * 0.78, widths.max() ?? photo.width)
+        let area = placeBrandMetadataBlock(photo: photo, preferredBottom: photo.maxY - min(photo.width, photo.height) * preferredBottomRatio, blockHeight: blockHeight, blockWidth: blockWidth, occupied: occupied, gap: min(photo.width, photo.height) * 0.040)
+        var scale = min(1, (area?.height ?? blockHeight) / max(blockHeight, 1))
+        if blockWidth > photo.width * 0.78 { scale = min(scale, photo.width * 0.78 / blockWidth) }
+        let target = area ?? photo.insetBy(dx: photo.width * 0.08, dy: photo.height * 0.06)
+        var y = target.midY - blockHeight * scale * 0.5
+        for (index, row) in rows.enumerated() {
+            let font = row.1.withSize(max(9, row.1.pointSize * scale))
             var attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: index == 0 ? UIColor.white : UIColor.white.withAlphaComponent(0.90)]
             let shadow = NSShadow(); shadow.shadowBlurRadius = 3; shadow.shadowOffset = CGSize(width: 0, height: 1); shadow.shadowColor = UIColor.black.withAlphaComponent(0.70); attrs[.shadow] = shadow
-            let width = (value as NSString).size(withAttributes: attrs).width
-            value.draw(at: CGPoint(x: area.midX - width * 0.5, y: y), withAttributes: attrs)
+            let width = (row.0 as NSString).size(withAttributes: attrs).width
+            row.0.draw(at: CGPoint(x: target.midX - width * 0.5, y: y), withAttributes: attrs)
+            y += heights[index] * scale + gap * scale
+        }
+    }
+
+    private static func drawBrandGalleryBand(_ cg: CGContext, band: CGRect, brand: String, watermark: PhotoFrameWatermark) {
+        let bandWatermark = watermark.enabled && watermark.content == .text && !photoPlacement(watermark.position) && watermark.position != .auto ? watermark : nil
+        var rows: [(String, UIFont, UIColor)] = []
+        if let bandWatermark {
+            let color = bandWatermark.color == .adaptive ? UIColor(red: 0.06, green: 0.07, blue: 0.08, alpha: 1) : watermarkColor(bandWatermark.color, .brandGallery)
+            rows.append((bandWatermark.displayText, watermarkFont(bandWatermark.font, size: band.width * 0.019), color.withAlphaComponent(CGFloat(bandWatermark.opacityPercent) / 100)))
+        }
+        if !brand.isEmpty { rows.append((brand, UIFont.systemFont(ofSize: band.width * 0.052, weight: .black), UIColor(red: 0.06, green: 0.07, blue: 0.08, alpha: 1))) }
+        guard !rows.isEmpty else { return }
+        let top = band.minY + band.height * 0.08, bottom = band.maxY - band.height * 0.10
+        let gap = band.height * 0.12
+        let heights = rows.map { ($0.0 as NSString).size(withAttributes: [.font: $0.1]).height }
+        let total = heights.reduce(0, +) + gap * CGFloat(max(0, rows.count - 1))
+        let scale = min(1, (bottom - top) / max(total, 1))
+        var y = (top + bottom - total * scale) * 0.5
+        for (index, row) in rows.enumerated() {
+            let font = row.1.withSize(max(9, row.1.pointSize * scale))
+            var attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: row.2]
+            if bandWatermark != nil && index == 0 && bandWatermark?.effect == .shadow { let shadow = NSShadow(); shadow.shadowBlurRadius = 3; shadow.shadowOffset = CGSize(width: 0, height: 1); shadow.shadowColor = UIColor.black.withAlphaComponent(0.35); attrs[.shadow] = shadow }
+            let width = (row.0 as NSString).size(withAttributes: attrs).width
+            let x: CGFloat = index == 0 && bandWatermark?.position == .left ? band.minX + band.width * 0.07 : index == 0 && bandWatermark?.position == .right ? band.maxX - band.width * 0.07 - width : band.midX - width * 0.5
+            row.0.draw(at: CGPoint(x: x, y: y), withAttributes: attrs)
             y += heights[index] * scale + gap * scale
         }
     }
