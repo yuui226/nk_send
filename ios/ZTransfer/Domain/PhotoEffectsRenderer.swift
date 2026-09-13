@@ -1,4 +1,5 @@
 import UIKit
+import CoreText
 
 /// Native renderer following PhotoFrameExporter.kt's ordered pipeline.
 /// Source -> NP3 filter -> frame backdrop/photo -> metadata/watermark.
@@ -11,6 +12,13 @@ enum PhotoEffectsRenderer {
     private struct BrandBounds {
         var rect: CGRect
         func intersects(_ other: BrandBounds) -> Bool { rect.intersects(other.rect) }
+    }
+    /// Bounds of the visible glyph ink relative to a text baseline. Android's
+    /// exporter uses Paint.getTextBounds rather than font line metrics; using
+    /// CTLine glyph bounds keeps the iOS metadata group vertically identical.
+    private struct TextVisualBounds {
+        var top: CGFloat
+        var bottom: CGFloat
     }
 
     static func render(_ image: UIImage, settings: PhotoEffectsSettings, metadata: PhotoFrameMetadata? = nil) throws -> UIImage {
@@ -471,14 +479,45 @@ enum PhotoEffectsRenderer {
             default: return UIFont.systemFont(ofSize: max(9, row.size), weight: row.weight)
             }
         }
-        let inkHeights = fonts.map { $0.ascender + abs($0.descender) }
-        let gap = min(area.width * 0.0125, area.height * 0.09)
-        let available = area.height * 0.88
-        let inkTotal = inkHeights.reduce(0, +)
-        let scale = inkTotal <= available ? 1 : min(1, max(0.2, available / max(inkTotal, 1) * 0.98))
-        let scaledHeights = inkHeights.map { $0 * scale }
-        let total = scaledHeights.reduce(0, +) + gap * CGFloat(max(0, rows.count - 1)) * scale
-        var cursor = area.midY - total * 0.5
+        func visualBounds(_ text: String, _ font: UIFont) -> TextVisualBounds {
+            guard !text.isEmpty else { return TextVisualBounds(top: 0, bottom: 0) }
+            let line = CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: [.font: font]))
+            let bounds = CTLineGetBoundsWithOptions(line, .useGlyphPathBounds)
+            return TextVisualBounds(top: bounds.minY, bottom: bounds.maxY)
+        }
+        func merged(_ first: TextVisualBounds, _ second: TextVisualBounds) -> TextVisualBounds {
+            TextVisualBounds(top: min(first.top, second.top), bottom: max(first.bottom, second.bottom))
+        }
+        func rowBounds(using scale: CGFloat) -> [TextVisualBounds] {
+            rows.enumerated().map { index, row in
+                let font = fonts[index].withSize(max(9, fonts[index].pointSize * scale))
+                switch row.kind {
+                case 0:
+                    let brandBounds = brand.isEmpty ? nil : visualBounds(brand, titleBrandFont.withSize(max(9, titleBrandFont.pointSize * scale)))
+                    let modelBounds = model.isEmpty ? nil : visualBounds(model, titleModelFont.withSize(max(9, titleModelFont.pointSize * scale)))
+                    let titleBounds = [brandBounds, modelBounds].compactMap { $0 }
+                    return titleBounds.dropFirst().reduce(titleBounds[0], merged)
+                default:
+                    return visualBounds(row.text, font)
+                }
+            }
+        }
+        let verticalPadding = area.height * 0.06
+        let textAreaTop = area.minY + verticalPadding
+        let textAreaBottom = area.maxY - verticalPadding
+        var scale: CGFloat = 1
+        var bounds = rowBounds(using: scale)
+        let inkTotal = bounds.reduce(CGFloat.zero) { $0 + max(0, $1.bottom - $1.top) }
+        if inkTotal > textAreaBottom - textAreaTop {
+            scale = min(1, max(0.2, (textAreaBottom - textAreaTop) / max(inkTotal, 1) * 0.98))
+            bounds = rowBounds(using: scale)
+        }
+        let preferredGap = min(area.width * 0.0125, area.height * 0.09)
+        let textHeight = bounds.reduce(CGFloat.zero) { $0 + max(0, $1.bottom - $1.top) }
+        let gapCount = max(0, bounds.count - 1)
+        let gap = gapCount > 0 ? min(preferredGap, max(0, (textAreaBottom - textAreaTop - textHeight) / CGFloat(gapCount))) : 0
+        let total = textHeight + gap * CGFloat(gapCount)
+        var cursor = textAreaTop + max(0, (textAreaBottom - textAreaTop - total) * 0.5)
         let color = lightText
             ? UIColor(red: 250.0 / 255.0, green: 252.0 / 255.0, blue: 253.0 / 255.0, alpha: 1)
             : UIColor(red: 25.0 / 255.0, green: 31.0 / 255.0, blue: 38.0 / 255.0, alpha: 1)
@@ -492,7 +531,7 @@ enum PhotoEffectsRenderer {
                 attrs[.foregroundColor] = watermarkColor(watermark.color, preset).withAlphaComponent(CGFloat(watermark.opacityPercent) / 100)
                 if watermark.effect == .shadow { let s = NSShadow(); s.shadowBlurRadius = 3; s.shadowOffset = CGSize(width: 0, height: 1); s.shadowColor = UIColor.black.withAlphaComponent(0.35); attrs[.shadow] = s }
             }
-            let baseline = cursor + font.ascender
+            let baseline = cursor - bounds[index].top
             if row.kind == 0 && (!brand.isEmpty || !model.isEmpty) {
                 let brandFont = titleBrandFont.withSize(max(9, titleBrandFont.pointSize * scale))
                 let modelFont = titleModelFont.withSize(max(9, titleModelFont.pointSize * scale))
@@ -512,7 +551,7 @@ enum PhotoEffectsRenderer {
                 let x: CGFloat = row.kind == 4 && watermark.position == .left ? area.minX + area.width * 0.07 : row.kind == 4 && watermark.position == .right ? area.maxX - area.width * 0.07 - width : area.midX - width * 0.5
                 row.text.draw(at: CGPoint(x: x, y: baseline - font.ascender), withAttributes: attrs)
             }
-            cursor += scaledHeights[index] + gap * scale
+            cursor += (bounds[index].bottom - bounds[index].top) + gap
         }
     }
 
