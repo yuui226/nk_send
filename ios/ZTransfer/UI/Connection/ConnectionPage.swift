@@ -13,7 +13,9 @@ struct ConnectionPage: View {
     @State private var showSettings = false
     @State private var showSTAReset = false
     @State private var showSTATips = false
+    @State private var tipsWirelessMode: WirelessMode = .sta
     @AppStorage("sta_connection_help_viewed") private var staHelpViewed = false
+    @AppStorage("ap_connection_help_viewed") private var apHelpViewed = false
     @State private var attentionOrigin = Date()
     @State private var settingsAnchor: CGRect = .zero
 
@@ -29,6 +31,7 @@ struct ConnectionPage: View {
                             mode: .usb, state: model.state,
                             height: layout.usbHeight,
                             dimmed: gpsCoordinator.state.enabled,
+                            attentionActive: model.cameraSession == nil && !gpsCoordinator.state.enabled,
                             attentionOrigin: attentionOrigin)
                         GPSConnectionControl(coordinator: gpsCoordinator)
                     }
@@ -38,17 +41,35 @@ struct ConnectionPage: View {
                         mode: .wifi, state: model.state,
                         height: layout.wifiHeight,
                         dimmed: gpsCoordinator.state.enabled,
+                        attentionActive: model.cameraSession == nil && !gpsCoordinator.state.enabled,
                         attentionOrigin: attentionOrigin,
                         onWirelessModeChanged: model.select(wirelessMode:),
                         onConnect: { Task { await model.connectSelectedWiFi() } },
                         onResetSTAPairing: { Task { await model.refreshSTAProfiles(); showSTAReset = true } },
+                        onSTAHelpRequested: {
+                            tipsWirelessMode = .sta
+                            staHelpViewed = true
+                            showSTATips = true
+                        },
                         onSTAHotspotSettings: {
                             model.cancelWiFiConnection()
                             if let url = URL(string: UIApplication.openSettingsURLString) {
                                 UIApplication.shared.open(url)
                             }
                         },
-                        staHelpViewed: staHelpViewed)
+                        onAPHelpRequested: {
+                            tipsWirelessMode = .ap
+                            apHelpViewed = true
+                            showSTATips = true
+                        },
+                        onAPHotspotSettings: {
+                            model.cancelWiFiConnection()
+                            if let url = URL(string: UIApplication.openSettingsURLString) {
+                                UIApplication.shared.open(url)
+                            }
+                        },
+                        staHelpViewed: staHelpViewed,
+                        apHelpViewed: apHelpViewed)
                         .frame(width: layout.cardWidth)
                     }
                     .padding(.horizontal, layout.horizontalPadding)
@@ -104,7 +125,7 @@ struct ConnectionPage: View {
                 .ignoresSafeArea()
             }
             if showSTATips {
-                STATipsOverlay(isPresented: $showSTATips)
+                STATipsOverlay(isPresented: $showSTATips, wirelessMode: tipsWirelessMode)
                     .ignoresSafeArea()
             }
         }

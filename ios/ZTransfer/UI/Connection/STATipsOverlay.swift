@@ -5,6 +5,7 @@ import SwiftUI
 /// presentation and dismissal behavior.
 struct STATipsOverlay: View {
     @Binding var isPresented: Bool
+    let wirelessMode: WirelessMode
     @State private var progress: CGFloat = 0
 
     var body: some View {
@@ -14,21 +15,31 @@ struct STATipsOverlay: View {
                 .contentShape(Rectangle())
                 .onTapGesture { dismiss() }
             VStack(alignment: .leading, spacing: 12) {
-                Text(AppLocalized.resource("tip_sta_title"))
+                Text(AppLocalized.resource(wirelessMode == .ap ? "tip_title" : "tip_sta_title"))
                     .zTransferTypography(.titleMedium, weight: .bold)
-                tipBlock(
-                    label: AppLocalized.resource("tip_sta_first_connection"),
-                    body: AppLocalized.resource("tip_sta_step_hotspot") + "\n" +
-                        AppLocalized.resource("tip_sta_network_alternative"),
-                    detail: AppLocalized.resource("tip_sta_hotspot_help")
-                )
-                tipBlock(
-                    label: AppLocalized.resource("tip_sta_quick_start"),
-                    body: AppLocalized.resource("tip_sta_steps_after_hotspot")
-                )
-                Text(AppLocalized.resource("tip_path"))
-                    .zTransferTypography(.bodySmall)
-                    .foregroundStyle(ZTransferColors.secondaryText)
+                if wirelessMode == .ap {
+                    tipBlock(
+                        label: AppLocalized.resource("tip_ap_mode"),
+                        body: AppLocalized.resource("tip_body")
+                    )
+                    Text(AppLocalized.resource("tip_path"))
+                        .zTransferTypography(.bodySmall)
+                        .foregroundStyle(ZTransferColors.secondaryText)
+                } else {
+                    tipBlock(
+                        label: AppLocalized.resource("tip_sta_first_connection"),
+                        body: AppLocalized.resource("tip_sta_step_hotspot") + "\n" +
+                            AppLocalized.resource("tip_sta_network_alternative"),
+                        detail: AppLocalized.resource("tip_sta_hotspot_help")
+                    )
+                    tipBlock(
+                        label: AppLocalized.resource("tip_sta_quick_start"),
+                        body: AppLocalized.resource("tip_sta_steps_after_hotspot")
+                    )
+                    Text(AppLocalized.resource("tip_path"))
+                        .zTransferTypography(.bodySmall)
+                        .foregroundStyle(ZTransferColors.secondaryText)
+                }
             }
             .foregroundStyle(ZTransferColors.primaryText)
             .padding(18)

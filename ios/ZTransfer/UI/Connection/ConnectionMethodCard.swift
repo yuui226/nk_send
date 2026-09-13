@@ -6,23 +6,23 @@ struct ConnectionMethodCard: View {
     let state: ConnectionState
     let height: CGFloat
     let dimmed: Bool
+    /// Android supplies one page-level attention flag to both cards. It stays
+    /// active until a real connection is selected, including connecting and
+    /// failed states.
+    let attentionActive: Bool
     let attentionOrigin: Date
     var onWirelessModeChanged: ((WirelessMode) -> Void)?
     var onConnect: (() -> Void)?
     var onResetSTAPairing: (() -> Void)?
     var onSTAHelpRequested: (() -> Void)?
     var onSTAHotspotSettings: (() -> Void)?
+    var onAPHelpRequested: (() -> Void)?
+    var onAPHotspotSettings: (() -> Void)?
     var staHelpViewed = false
+    var apHelpViewed = false
 
     private var accent: Color { mode == .usb ? ZTransferColors.accentOrange : ZTransferColors.accentBlue }
     private var isSTA: Bool { state.wirelessMode == .sta }
-    private var attentionActive: Bool {
-        guard !dimmed else { return false }
-        switch state.usbPhase {
-        case .connecting, .connected, .failed: return false
-        case .unavailable, .waitingForCamera: return state.wifiPhase != .connected
-        }
-    }
     private var steps: [String] {
         if mode == .usb { return [AppLocalized.resource("usb_step_power"), AppLocalized.resource("usb_step_cable")] }
         if isSTA { return [AppLocalized.resource("sta_step_phone_hotspot"), AppLocalized.resource("sta_step_connect_camera")] }
@@ -179,12 +179,28 @@ struct ConnectionMethodCard: View {
             }
         } else {
             HStack(spacing: 8) {
-                utilityIcon("lightbulb.fill", tint: ZTransferColors.accentOrange, size: 36)
-                Text(AppLocalized.resource("open_wifi_settings"))
-                    .zTransferTypography(.labelSmall, weight: .semibold)
-                    .foregroundStyle(accent)
-                    .frame(maxWidth: .infinity).frame(height: 36)
-                    .background(ZTransferGlassSurface(cornerRadius: 12, kind: .button))
+                Button { onAPHelpRequested?() } label: {
+                    ZStack(alignment: .topTrailing) {
+                        utilityIcon("lightbulb.fill", tint: ZTransferColors.accentOrange, size: 36)
+                        if !apHelpViewed {
+                            Circle()
+                                .fill(ZTransferColors.statusError)
+                                .frame(width: 7, height: 7)
+                                .offset(x: -2, y: 2)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(AppLocalized.resource("tip_title"))
+                Button { onAPHotspotSettings?() } label: {
+                    Text(AppLocalized.resource("open_wifi_settings"))
+                        .zTransferTypography(.labelSmall, weight: .semibold)
+                        .foregroundStyle(accent)
+                        .frame(maxWidth: .infinity).frame(height: 36)
+                        .background(ZTransferGlassSurface(cornerRadius: 12, kind: .button))
+                }
+                .buttonStyle(.plain)
+                .disabled(dimmed)
             }
         }
     }

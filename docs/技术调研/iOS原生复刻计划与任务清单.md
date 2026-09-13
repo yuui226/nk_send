@@ -708,3 +708,10 @@
 
 - 安卓本地工作台预览同样预取当前滤镜后的两个目录项；iOS `LocalEffectPreview` 已接入统一 `nextPhotoFilterSelections`、独立强度和最多两项成片缓存，命中后仍延迟生成对比帧。
 - 验证：iOS Simulator 无签名 Debug 构建成功；照片选择器真实资源、取消竞态和帧率仍需继续验收，任务保持未完成。
+
+### 2026-09-14 连接页卡片状态与 AP/STA 辅助入口对账（进行中）
+
+- 对照安卓 `HomeScreen.kt` 的 `connectionAttentionActive = selectedConnection == null && !gpsState.enabled`，修正 iOS `ConnectionMethodCard` 原先仅查看 `usbPhase` 的判断。连接中、失败和等待相机期间，两张卡现在共用页面级呼吸状态；只有相机已建立会话或 GPS 开启时停止，避免 USB 连接中途两张卡突然停止呼吸。
+- 对照安卓 Wi-Fi footer：AP 模式的灯泡入口现在可打开指引、首次查看写入安卓同名 `ap_connection_help_viewed`，Wi-Fi 设置按钮实际取消当前发现并打开系统 Wi-Fi 设置；STA 灯泡入口接回指引弹窗。AP/STA 文案继续直接读取 AndroidLocalization 资源键。
+- iOS 修改位置：`ios/ZTransfer/UI/Connection/ConnectionPage.swift`、`ConnectionMethodCard.swift`、`STATipsOverlay.swift`。这是行为和回调修正，Android 代码未修改。
+- 验证：`xcodebuild -project ios/ZTransfer.xcodeproj -scheme ZTransfer -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build` 成功，`git diff --check` 通过。当前指引仍是居中浮层，尚未完成安卓 `AnchorPopup` 的按钮锚点、无遮罩定位和逐帧动画核对；AP/STA 真机网络流程也未验收，因此任务 14、16、18 继续保持未完成。
