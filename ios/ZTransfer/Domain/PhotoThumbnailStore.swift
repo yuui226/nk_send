@@ -68,6 +68,7 @@ actor PhotoThumbnailStore {
         identity: String,
         directSTA: Bool = false,
         allowRemote: Bool,
+        transform: @escaping @Sendable (Data) -> Data = { $0 },
         fetch: @escaping @Sendable () async throws -> Data
     ) async throws -> Data? {
         beginSession(identity: identity)
@@ -82,7 +83,8 @@ actor PhotoThumbnailStore {
            let url = store.find(key, legacyName: PhotoThumbnailDiskCache.legacyCacheFileName(
                fileName: file.fileName, size: file.size, captureDate: file.captureDate
            ), alternateName: directSTA ? standardKey : nil),
-           let value = try? Data(contentsOf: url), !value.isEmpty {
+           let raw = try? Data(contentsOf: url), !raw.isEmpty {
+            let value = transform(raw)
             insert(value, key: key)
             return value
         }
@@ -91,7 +93,11 @@ actor PhotoThumbnailStore {
             flight.waiters += 1
             return try await awaitFlight(WaiterToken(key: key, flight: flight))
         }
-        let task = Task<Data, Error> { try await self.remoteGate.withPermit { try await fetch() } }
+        let task = Task<Data, Error> {
+            try await self.remoteGate.withPermit {
+                transform(try await fetch())
+            }
+        }
         let flight = Flight(task: task)
         inFlight[key] = flight
         do {
@@ -111,6 +117,7 @@ actor PhotoThumbnailStore {
         file: CameraFile,
         identity: String,
         directSTA: Bool = false,
+        transform: @escaping @Sendable (Data) -> Data = { $0 },
         fetch: @escaping @Sendable () async throws -> Data
     ) async throws -> Bool {
         beginSession(identity: identity)
@@ -131,7 +138,11 @@ actor PhotoThumbnailStore {
             let value = try await awaitFlight(WaiterToken(key: key, flight: flight))
             return !value.isEmpty
         }
-        let task = Task<Data, Error> { try await self.remoteGate.withPermit { try await fetch() } }
+        let task = Task<Data, Error> {
+            try await self.remoteGate.withPermit {
+                transform(try await fetch())
+            }
+        }
         let flight = Flight(task: task)
         inFlight[key] = flight
         do {

@@ -68,9 +68,16 @@ actor CameraSession {
         else { identity = await repository.thumbnailCacheIdentity() }
         guard let identity else { return try await thumbnail(handle: file.id) }
         let direct = await repository.usesDirectThumbnailRead()
-        return try await thumbnailStore.load(file: file, identity: identity, directSTA: direct, allowRemote: true) {
-            try await self.thumbnail(handle: file.id)
-        }
+        return try await thumbnailStore.load(
+            file: file,
+            identity: identity,
+            directSTA: direct,
+            allowRemote: true,
+            transform: { data in
+                AndroidThumbnailProcessor.process(data, fileExtension: file.fileExtension)
+            },
+            fetch: { try await self.thumbnail(handle: file.id) }
+        )
     }
 
     func prefetchThumbnail(file: CameraFile) async throws -> Bool {
@@ -82,9 +89,15 @@ actor CameraSession {
         if let deviceID { identity = deviceID }
         else { identity = await repository.thumbnailCacheIdentity() }
         guard let identity else { return false }
-        return try await thumbnailStore.prefetch(file: file, identity: identity, directSTA: direct) {
-            try await self.thumbnail(handle: file.id)
-        }
+        return try await thumbnailStore.prefetch(
+            file: file,
+            identity: identity,
+            directSTA: direct,
+            transform: { data in
+                AndroidThumbnailProcessor.process(data, fileExtension: file.fileExtension)
+            },
+            fetch: { try await self.thumbnail(handle: file.id) }
+        )
     }
 
     /// Cache-only lookup used when the effects editor opens. Android first
@@ -96,8 +109,16 @@ actor CameraSession {
         else { identity = await repository.thumbnailCacheIdentity() }
         guard let identity else { return nil }
         let direct = await repository.usesDirectThumbnailRead()
-        return try await thumbnailStore.load(file: file, identity: identity,
-                                             directSTA: direct, allowRemote: false) { Data() }
+        return try await thumbnailStore.load(
+            file: file,
+            identity: identity,
+            directSTA: direct,
+            allowRemote: false,
+            transform: { data in
+                AndroidThumbnailProcessor.process(data, fileExtension: file.fileExtension)
+            },
+            fetch: { Data() }
+        )
     }
 
     func reconcileThumbnailCache(files: [CameraFile], authoritative: Bool) async {

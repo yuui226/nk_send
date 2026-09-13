@@ -90,9 +90,11 @@
 		B7E26AA94FF197578A633BE6 /* AsyncDeadline.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA7454E422D1473CC4E740CD /* AsyncDeadline.swift */; };
 		B8FB7D2547F6FFA961FEB3CE /* ConnectionViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44ACCD4A54AA0F8443CA869B /* ConnectionViewModel.swift */; };
 		BADF7CD7F32B68DCF3D97C3F /* LocalPhotoEffectsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7580B5DC6E6B426AFDCD70C /* LocalPhotoEffectsView.swift */; };
+		BD08A44BA78B8FCC84A6A283 /* AndroidThumbnailProcessorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6A4EAE118D5934657060B46 /* AndroidThumbnailProcessorTests.swift */; };
 		C127B5B73435A9434E2EEF30 /* cormorant_garamond_medium_italic.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 23F79E3B04FE343289768099 /* cormorant_garamond_medium_italic.ttf */; };
 		C2B1F15D120EECDFE3C148D6 /* PhotoExif.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FFDE9BAC912EED3139672E5 /* PhotoExif.swift */; };
 		C3B0EBF639B834E335A187A5 /* PhotoFrameTextLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = D961B6709BEFEB665F1D0932 /* PhotoFrameTextLayout.swift */; };
+		C47EE7A521C4554CB9D112FB /* AndroidThumbnailProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7014EFB81AA1037FAD74859E /* AndroidThumbnailProcessor.swift */; };
 		C713BCA63E8BAA59BEB77FAB /* STABrowsingSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15CE2B24C8F035D7C1826919 /* STABrowsingSessionTests.swift */; };
 		CB99922E4C5C868F6F4EAA41 /* PhotoFilterPopupOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 319C94935AB93C922D1BE545 /* PhotoFilterPopupOverlay.swift */; };
 		CBEB599B28F9477176061658 /* CameraTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94B13A99D0C74F65A242E106 /* CameraTransport.swift */; };
@@ -181,6 +183,7 @@
 		6A0253EE3A7C88ECD34EEACC /* PTPIPCodecTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PTPIPCodecTests.swift; sourceTree = "<group>"; };
 		6C73EF01969DAC563DA91DD0 /* PhotoEffectsEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoEffectsEditorView.swift; sourceTree = "<group>"; };
 		6CF51538A02F76ECB294979E /* RemoteState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteState.swift; sourceTree = "<group>"; };
+		7014EFB81AA1037FAD74859E /* AndroidThumbnailProcessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndroidThumbnailProcessor.swift; sourceTree = "<group>"; };
 		72757BCC923622558D27F45D /* STAConnectionCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = STAConnectionCoordinator.swift; sourceTree = "<group>"; };
 		7530BB4953CDCB614059E626 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
 		77FF345DD1F232661C243E4F /* ZTransferColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZTransferColors.swift; sourceTree = "<group>"; };
@@ -224,6 +227,7 @@
 		D2B51C2A8D807D8A9CA21F9E /* ZTransferGlassSurface.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZTransferGlassSurface.swift; sourceTree = "<group>"; };
 		D403B031ADD1B0F9C560F22D /* ClassicUSBIcon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClassicUSBIcon.swift; sourceTree = "<group>"; };
 		D40B340AC13401D86C00C2D8 /* PTPDataset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PTPDataset.swift; sourceTree = "<group>"; };
+		D6A4EAE118D5934657060B46 /* AndroidThumbnailProcessorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndroidThumbnailProcessorTests.swift; sourceTree = "<group>"; };
 		D89F88E0AAFA56543C73E8D2 /* Np3BitmapFilterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Np3BitmapFilterTests.swift; sourceTree = "<group>"; };
 		D961B6709BEFEB665F1D0932 /* PhotoFrameTextLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoFrameTextLayout.swift; sourceTree = "<group>"; };
 		DD45F35C4B19629A11F32A1C /* PhotoEffectsBatch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoEffectsBatch.swift; sourceTree = "<group>"; };
@@ -277,6 +281,7 @@
 		28966BF0D630B4FFE2350F88 /* ZTransferTests */ = {
 			isa = PBXGroup;
 			children = (
+				D6A4EAE118D5934657060B46 /* AndroidThumbnailProcessorTests.swift */,
 				61F577AFF70C53D32A99AB7B /* ConnectionStateTests.swift */,
 				9165B39E86D240D0CAB4F2F0 /* DomainModelTests.swift */,
 				E5D5E41AAFFA785D2FE92689 /* ImageCaptureErrorMappingTests.swift */,
@@ -343,6 +348,7 @@
 		9117A54F14B42BBD022C6B40 /* Domain */ = {
 			isa = PBXGroup;
 			children = (
+				7014EFB81AA1037FAD74859E /* AndroidThumbnailProcessor.swift */,
 				1623B90210C055F71FFFB2FD /* CameraConnectionService.swift */,
 				9CEBFBB42C89586314B7CDF4 /* CameraRepository.swift */,
 				4C31C90D73DDE407941D9C78 /* CameraSession.swift */,
@@ -599,6 +605,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				BD08A44BA78B8FCC84A6A283 /* AndroidThumbnailProcessorTests.swift in Sources */,
 				48EBBB7703B0E57F6AC878EA /* ConnectionStateTests.swift in Sources */,
 				3576AE9BA7B2A502352BA26B /* DomainModelTests.swift in Sources */,
 				8FB26966AAE2721DCF13FEF9 /* GPSProtocolTests.swift in Sources */,
@@ -630,6 +637,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				ABD477B9A99ED0F581232D3F /* AndroidLocalization.swift in Sources */,
+				C47EE7A521C4554CB9D112FB /* AndroidThumbnailProcessor.swift in Sources */,
 				B7E26AA94FF197578A633BE6 /* AsyncDeadline.swift in Sources */,
 				171B3B7D9317366D04867322 /* CameraConnectionService.swift in Sources */,
 				4E6912D45117355E97EA8583 /* CameraRepository.swift in Sources */,
