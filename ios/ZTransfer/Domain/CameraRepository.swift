@@ -467,8 +467,11 @@ actor CameraRepository {
             // only the sentinel values because its wildcard mapping is
             // handled by queryStorageID below.
             storageIDs = Array(Set(raw.filter { id in
-                guard id != 0 && id != .max else { return false }
-                return staAlbum != nil || (id & 0xFFFF) != 0
+                if staAlbum != nil { return id != 0 && id != .max }
+                // Keep the Android predicate literally: non-STA uses only
+                // the low-16-bit no-card marker, without an extra sentinel
+                // rule that could change a camera's reported store list.
+                return (id & 0xFFFF) != 0
             })).sorted()
             if storageIDs.isEmpty {
                 // An empty/failed storage response is not authoritative. The
