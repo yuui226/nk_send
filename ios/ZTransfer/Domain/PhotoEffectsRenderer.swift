@@ -780,11 +780,13 @@ enum PhotoEffectsRenderer {
                                        bytesPerRow: sw * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
                                        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
               let source = image.cgImage else { return }
-        context.interpolationQuality = .low
+        context.interpolationQuality = .none
         context.draw(source, in: CGRect(x: 0, y: 0, width: sw, height: sh))
         var buckets = Array(repeating: (count: 0, r: 0, g: 0, b: 0), count: 512)
         for index in 0..<(sw * sh) {
-            let offset = index * 4, r = Int(pixels[offset]), g = Int(pixels[offset + 1]), b = Int(pixels[offset + 2])
+            let offset = index * 4, alpha = Int(pixels[offset + 3])
+            guard alpha >= 128 else { continue }
+            let r = Int(pixels[offset]), g = Int(pixels[offset + 1]), b = Int(pixels[offset + 2])
             let bucket = (r >> 5) << 6 | (g >> 5) << 3 | (b >> 5)
             buckets[bucket].count += 1; buckets[bucket].r += r; buckets[bucket].g += g; buckets[bucket].b += b
         }
