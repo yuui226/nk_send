@@ -97,34 +97,35 @@ enum PhotoEffectsRenderer {
 
     private static func makeLayout(_ source: CGSize, preset: PhotoFramePreset) -> Layout {
         let w = max(source.width, 1), h = max(source.height, 1), aspect = w / h
+        let px: (CGFloat) -> CGFloat = { max(1, $0.rounded()) }
         switch preset {
         case .plaque:
-            let band = w * 0.12
+            let band = px(w * 0.12)
             return Layout(canvas: CGSize(width: w, height: h + band), photo: CGRect(x: 0, y: 0, width: w, height: h), metadataTop: h)
         case .immersive:
             return Layout(canvas: source, photo: CGRect(origin: .zero, size: source), metadataTop: h)
         case .brandInset, .brandGallery:
-            let side = w * 0.032
-            let bottom = w * (preset == .brandInset ? 0.032 : 0.16)
+            let side = px(w * 0.032)
+            let bottom = px(w * (preset == .brandInset ? 0.032 : 0.16))
             return Layout(canvas: CGSize(width: w + side * 2, height: h + side + bottom),
                           photo: CGRect(x: side, y: side, width: w, height: h), metadataTop: side + h)
         case .classicSignature, .galleryMat, .colorArchive, .filmGallery, .filmEdge:
             switch preset {
             case .classicSignature:
-                let side = w * 0.03, top = w * 0.095, bottom = w * 0.15
+                let side = px(w * 0.03), top = px(w * 0.095), bottom = px(w * 0.15)
                 return Layout(canvas: CGSize(width: w + side * 2, height: h + top + bottom), photo: CGRect(x: side, y: top, width: w, height: h), metadataTop: top + h)
             case .galleryMat:
                 let (wf, hf): (CGFloat, CGFloat) = aspect > 1.08 ? (0.80, 0.56) : aspect < 0.92 ? (0.56, 0.80) : (0.68, 0.68)
                 let side = max(w / wf, h / hf), left = (side - w) / 2, top = (side - h) * 0.45
                 return Layout(canvas: CGSize(width: side, height: side), photo: CGRect(x: left, y: top, width: w, height: h), metadataTop: top + h)
             case .colorArchive:
-                let side = w * 0.04, top = w * 0.04, bottom = w * 0.17
+                let side = px(w * 0.04), top = px(w * 0.04), bottom = px(w * 0.17)
                 return Layout(canvas: CGSize(width: w + side * 2, height: h + top + bottom), photo: CGRect(x: side, y: top, width: w, height: h), metadataTop: top + h)
             case .filmGallery:
-                let side = w * 0.085, top = w * 0.16, bar = w * 0.09, bottom = w * 0.34
+                let side = px(w * 0.085), top = px(w * 0.16), bar = px(w * 0.09), bottom = px(w * 0.34)
                 return Layout(canvas: CGSize(width: w + side * 2, height: h + top + bar * 2 + bottom), photo: CGRect(x: side, y: top + bar, width: w, height: h), metadataTop: top + bar + h + bar)
             case .filmEdge:
-                let side = w * 0.07, top = w * 0.035, bottom = w * 0.085
+                let side = px(w * 0.07), top = px(w * 0.035), bottom = px(w * 0.085)
                 return Layout(canvas: CGSize(width: w + side * 2, height: h + top + bottom), photo: CGRect(x: side, y: top, width: w, height: h), metadataTop: top + h)
             default: fatalError()
             }
