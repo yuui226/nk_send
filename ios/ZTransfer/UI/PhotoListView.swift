@@ -22,6 +22,9 @@ struct PhotoListView: View {
     @State private var showingSettings = false
     @State private var settingsAnchor: CGRect = .zero
     @State private var signalExpanded = false
+    @State private var effectPreviewSource: UIImage?
+    @State private var effectPreviewExif: PhotoExif?
+    @State private var effectPreviewGeneration = 0
 
     init(repository: CameraRepository, queue: TransferQueue = TransferQueue(), directory: DirectoryAccessStore = DirectoryAccessStore(), effectsStore: PhotoEffectsStore = PhotoEffectsStore(), onDisconnect: @escaping () -> Void) {
         _model = StateObject(wrappedValue: PhotoListViewModel(repository: repository))
@@ -204,7 +207,10 @@ struct PhotoListView: View {
                     showPhotoEffectsEntry: true,
                     effectsStore: effectsStore,
                     directory: directoryStore,
-                    anchor: settingsAnchor
+                    anchor: settingsAnchor,
+                    effectPreviewSource: effectPreviewSource,
+                    effectPreviewExif: effectPreviewExif,
+                    onEffectPreviewRequested: requestEffectPreview
                 )
                 .ignoresSafeArea()
             }
@@ -292,6 +298,37 @@ struct PhotoListView: View {
         .animation(ZTransferMotion.standard, value: queueModel.snapshot.items.count)
         .animation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.26), value: selectedFile == nil)
         .onPreferenceChange(PhotoListSettingsAnchorPreferenceKey.self) { settingsAnchor = $0 }
+    }
+
+    /// Android requests the latest visible file on entering Settings: publish
+    /// its cached thumbnail first, then upgrade the same identity to the FHD
+    /// preview and EXIF. A late response for an older file is discarded.
+    private func requestEffectPreview() {
+        guard let session, let file = model.availableFiles.first else { return }
+        let key = "\(file.id)|\(file.fileName)|\(file.size)|\(file.captureDate ?? "")"
+        effectPreviewGeneration &+= 1
+        let generation = effectPreviewGeneration
+        Task {
+            if let data = try? await session.thumbnail(file: file), let image = UIImage(data: data) {
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    guard generation == effectPreviewGeneration else { return }
+                    effectPreviewSource = image
+                }
+            }
+            async let loadedExif = try? session.exif(file: file)
+            async let loadedPreview = try? session.preview(handle: file.id)
+            let exif = await loadedExif
+            let previewData = await loadedPreview
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                guard generation == effectPreviewGeneration else { return }
+                effectPreviewExif = exif
+                if let previewData, let image = UIImage(data: previewData) {
+                    effectPreviewSource = image
+                }
+            }
+        }
     }
 
     @ViewBuilder

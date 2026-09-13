@@ -35,6 +35,9 @@ struct SettingsView: View {
     var showPhotoEffectsEntry: Bool = true
     var onClose: (() -> Void)? = nil
     var dismissalRequested = false
+    let effectPreviewSource: UIImage?
+    let effectPreviewExif: PhotoExif?
+    let onEffectPreviewRequested: () -> Void
 
     private enum SettingsPage {
         case main
@@ -43,7 +46,9 @@ struct SettingsView: View {
 
     init(showPhotoEffectsEntry: Bool, effectsStore: PhotoEffectsStore, directory: DirectoryAccessStore,
          effectsDraft: Binding<PhotoEffectsSettings>, filterChooser: Binding<PhotoFilterChooserState>,
-         effectsHint: Binding<PhotoEffectsHint?>, dismissalRequested: Bool, onClose: (() -> Void)? = nil) {
+         effectsHint: Binding<PhotoEffectsHint?>, dismissalRequested: Bool,
+         effectPreviewSource: UIImage? = nil, effectPreviewExif: PhotoExif? = nil,
+         onEffectPreviewRequested: @escaping () -> Void = {}, onClose: (() -> Void)? = nil) {
         self.showPhotoEffectsEntry = showPhotoEffectsEntry
         self.onClose = onClose
         _effectsStore = ObservedObject(wrappedValue: effectsStore)
@@ -52,6 +57,9 @@ struct SettingsView: View {
         _filterChooser = filterChooser
         _effectsHint = effectsHint
         self.dismissalRequested = dismissalRequested
+        self.effectPreviewSource = effectPreviewSource
+        self.effectPreviewExif = effectPreviewExif
+        self.onEffectPreviewRequested = onEffectPreviewRequested
     }
 
     var body: some View {
@@ -70,6 +78,11 @@ struct SettingsView: View {
                     VStack(spacing: 0) {
                         effectsHeader
                         ScrollView {
+                            PhotoEffectsSettingsPreview(source: effectPreviewSource,
+                                metadata: effectPreviewExif.map(PhotoFrameMetadata.init),
+                                settings: effectsDraft,
+                                onRequest: onEffectPreviewRequested)
+                                .padding(.horizontal, 16).padding(.top, 10)
                             PhotoEffectsControls(draft: $effectsDraft,
                                 showingWatermarkPicker: $showingWatermarkPicker,
                                 textFieldFocused: $watermarkTextFocused,

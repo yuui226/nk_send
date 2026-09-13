@@ -347,6 +347,56 @@ struct PhotoEffectsControls: View {
 
 }
 
+/// Android keeps the last rendered effect visible while a new preview is
+/// prepared. Rendering is detached from SwiftUI so wheel interaction remains
+/// responsive and a cancelled generation cannot replace a newer one.
+struct PhotoEffectsSettingsPreview: View {
+    let source: UIImage?
+    let metadata: PhotoFrameMetadata?
+    let settings: PhotoEffectsSettings
+    let onRequest: () -> Void
+    @State private var rendered: UIImage?
+
+    private var renderKey: String {
+        let data = try? JSONEncoder().encode(settings)
+        return String(data: data ?? Data(), encoding: .utf8) ?? ""
+    }
+
+    var body: some View {
+        Group {
+            if let rendered {
+                Image(uiImage: rendered)
+                    .resizable().scaledToFit()
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            } else if source != nil {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(ZTransferColors.primaryText.opacity(0.045))
+                    .overlay { ProgressView().tint(ZTransferColors.secondaryText) }
+            } else {
+                EmptyView()
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .aspectRatio(source.map { $0.size.height > $0.size.width ? CGFloat(3) / 4 : CGFloat(4) / 3 }, contentMode: .fit)
+        .task(id: renderKey) {
+            guard let source else {
+                onRequest()
+                return
+            }
+            let metadata = metadata
+            let settings = settings
+            let result = try? await Task.detached(priority: .userInitiated) {
+                try Task.checkCancellation()
+                return try autoreleasepool {
+                    try PhotoEffectsRenderer.render(source, settings: settings, metadata: metadata)
+                }
+            }.value
+            guard !Task.isCancelled else { return }
+            rendered = result
+        }
+    }
+}
+
 private struct PhotoEffectsCard<Content: View>: View {
     let accent: Color
     @ViewBuilder let content: Content

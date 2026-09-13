@@ -11,6 +11,22 @@ struct SettingsPopupOverlay: View {
     let effectsStore: PhotoEffectsStore
     let directory: DirectoryAccessStore
     let anchor: CGRect
+    let effectPreviewSource: UIImage?
+    let effectPreviewExif: PhotoExif?
+    let onEffectPreviewRequested: () -> Void
+
+    init(isPresented: Binding<Bool>, showPhotoEffectsEntry: Bool, effectsStore: PhotoEffectsStore,
+         directory: DirectoryAccessStore, anchor: CGRect, effectPreviewSource: UIImage? = nil,
+         effectPreviewExif: PhotoExif? = nil, onEffectPreviewRequested: @escaping () -> Void = {}) {
+        _isPresented = isPresented
+        self.showPhotoEffectsEntry = showPhotoEffectsEntry
+        self.effectsStore = effectsStore
+        self.directory = directory
+        self.anchor = anchor
+        self.effectPreviewSource = effectPreviewSource
+        self.effectPreviewExif = effectPreviewExif
+        self.onEffectPreviewRequested = onEffectPreviewRequested
+    }
 
     @State private var animationProgress: CGFloat = 0
     @State private var dismissalRequested = false
@@ -40,6 +56,9 @@ struct SettingsPopupOverlay: View {
                     filterChooser: $filterChooser,
                     effectsHint: $effectsHint,
                     dismissalRequested: dismissalRequested,
+                    effectPreviewSource: effectPreviewSource,
+                    effectPreviewExif: effectPreviewExif,
+                    onEffectPreviewRequested: onEffectPreviewRequested,
                     onClose: { close() }
                 )
                 .frame(width: max(0, proxy.size.width - 24))

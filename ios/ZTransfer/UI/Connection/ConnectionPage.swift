@@ -96,7 +96,10 @@ struct ConnectionPage: View {
                     showPhotoEffectsEntry: false,
                     effectsStore: effectsStore,
                     directory: directory,
-                    anchor: settingsAnchor
+                    anchor: settingsAnchor,
+                    effectPreviewSource: nil,
+                    effectPreviewExif: nil,
+                    onEffectPreviewRequested: {}
                 )
                 .ignoresSafeArea()
             }
