@@ -586,6 +586,11 @@ enum PhotoEffectsRenderer {
         }
         rows += detailLines.map { ($0, detailFont, detailAttrs) }
         if let separate { rows.append((separate.displayText, detailFont, detailAttrs)) }
+        var photoWatermark = watermark
+        if !photoPlacement(photoWatermark.position) { photoWatermark.position = .photoBottomRight }
+        if photoPlacement(watermark.position) || (watermark.content == .image && photoPlacement(watermark.position)) {
+            drawWatermark(cg, watermark: photoWatermark, photo: layout.photo, canvas: layout.canvas, preset: .immersive, metadataBand: area)
+        }
         let gap = layout.canvas.width * 0.013
         var bounds = rows.map { ($0.0 as NSString).size(withAttributes: $0.2).height }
         if !rows.isEmpty, let inlineWatermark, let inlineFont {
@@ -623,11 +628,6 @@ enum PhotoEffectsRenderer {
                 }
                 y += bounds[index] + gap
             }
-        }
-        var photoWatermark = watermark
-        if !photoPlacement(photoWatermark.position) { photoWatermark.position = .photoBottomRight }
-        if photoPlacement(watermark.position) || (watermark.content == .image && photoPlacement(watermark.position)) {
-            drawWatermark(cg, watermark: photoWatermark, photo: layout.photo, canvas: layout.canvas, preset: .immersive, metadataBand: area)
         }
     }
 
