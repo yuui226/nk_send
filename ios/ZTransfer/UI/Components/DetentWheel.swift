@@ -102,6 +102,7 @@ struct DetentWheel<Option: Hashable>: View {
             .contentShape(Rectangle()).gesture(dragGesture)
             .simultaneousGesture(tapGesture).simultaneousGesture(longPressGesture)
             .animation(.easeInOut(duration: dragging ? 0.09 : 0.18), value: dragging)
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         }
         .frame(height: wheelHeight).opacity(enabled ? 1 : 0.48)
         .accessibilityElement(children: .ignore)
@@ -183,6 +184,12 @@ struct DetentWheel<Option: Hashable>: View {
             guard enabled, !readOnly, onLongClick != nil else { return }
             suppressNextTap = true
             onLongClick?()
+            // SwiftUI does not expose combinedClickable's consumed-up event;
+            // clear the guard after the gesture sequence so a long press can
+            // never suppress a later, unrelated tap.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                suppressNextTap = false
+            }
         }
     }
 

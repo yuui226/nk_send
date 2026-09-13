@@ -210,7 +210,11 @@ final class PhotoEffectsStore: ObservableObject {
         watermark.sizePercent = min(max(watermark.sizePercent, 2), 100)
         watermark.opacityPercent = min(max(watermark.opacityPercent, 2), 100)
         result.watermark = watermark
-        result.filterIntensities = value.filterIntensities.mapValues { min(max($0, 2), 100) }
+        result.filterIntensities = value.filterIntensities.reduce(into: [:]) { partial, item in
+            let key = Np3FilterCatalog.preset(id: item.key)?.catalogKey ?? item.key
+            partial[key] = min(max(item.value, 2), 100)
+        }
+        result.favoriteFilterIDs = Set(value.favoriteFilterIDs.map { Np3FilterCatalog.preset(id: $0)?.catalogKey ?? $0 })
         if let selected = value.selectedFilter {
             if let preset = PhotoFilterCatalog.resolve(selected.preset.id) {
                 result.selectedFilter = .init(preset: preset, intensityPercent: selected.normalizedIntensityPercent)

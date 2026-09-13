@@ -190,10 +190,15 @@ private struct LocalWorkbenchControls: View {
     @State private var filterChooserCategory: LocalPhotoFilterCategory = .all
 
     private var filterOptions: [String?] {
-        let favorites = PhotoFilterCatalog.presets.filter { draft.favoriteFilterIDs.contains($0.id) }
-        let regular = PhotoFilterCatalog.presets.filter { !draft.favoriteFilterIDs.contains($0.id) }
+        let favorites = PhotoFilterCatalog.presets.filter(isFavorite)
+        let regular = PhotoFilterCatalog.presets.filter { !isFavorite($0) }
         return [nil] + (favorites + regular).map(\.id)
     }
+    private func filterKey(_ id: String) -> String {
+        Np3FilterCatalog.preset(id: id)?.catalogKey ?? id
+    }
+    private func isFavorite(_ preset: PhotoFilterPreset) -> Bool { draft.favoriteFilterIDs.contains(filterKey(preset.id)) }
+    private func isFavoriteID(_ id: String) -> Bool { draft.favoriteFilterIDs.contains(filterKey(id)) }
     private var selectedFilterID: String? { draft.photoFilterEnabled ? draft.selectedFilter?.preset.id : nil }
     private var frameEnabled: Bool { draft.photoFrameEnabled && draft.photoFrameBorderEnabled }
     private var activeMetadata: PhotoFrameMetadataSettings {
@@ -203,6 +208,13 @@ private struct LocalWorkbenchControls: View {
         let favorites = draft.favoriteFrameEffects.map(\.preset)
         let ordered = favorites + PhotoFramePreset.allCases.filter { !favorites.contains($0) }
         return [nil] + ordered
+    }
+    private var photoWatermarkPositions: [PhotoFrameWatermarkPosition] {
+        [.photoTopLeft, .photoTopCenter, .photoTopRight, .photoCenter,
+         .photoBottomLeft, .photoBottomCenter, .photoBottomRight]
+    }
+    private var textWatermarkPositions: [PhotoFrameWatermarkPosition] {
+        frameEnabled ? PhotoFrameWatermarkPosition.allCases : photoWatermarkPositions
     }
     private func updateMetadata(_ update: (inout PhotoFrameMetadataSettings) -> Void) {
         var value = activeMetadata
@@ -223,30 +235,31 @@ private struct LocalWorkbenchControls: View {
                                         draft.photoFilterEnabled = false; return
                                     }
                                     draft.photoFilterEnabled = true
-                                    let remembered = draft.filterIntensities[id] ?? draft.selectedFilter?.intensityPercent ?? 80
+                                    let remembered = draft.filterIntensities[filterKey(id)] ?? draft.selectedFilter?.intensityPercent ?? 80
                                     draft.selectedFilter = .init(preset: preset, intensityPercent: remembered)
                                 }, rowHeight: 18, wheelHeight: 50,
                                 onLongClick: { filterChooserPresented = true },
-                                favoriteOption: { id in id.map { draft.favoriteFilterIDs.contains($0) } ?? false },
+                                favoriteOption: { id in id.map(isFavoriteID) ?? false },
                                 favoriteIconColor: ZTransferColors.accentBlue)
                     .frame(maxWidth: .infinity)
                     DetentWheel(label: "滤镜强度", options: Array(stride(from: 100, through: 2, by: -2)),
                                 selected: draft.selectedFilter?.intensityPercent ?? 80,
                                 optionLabel: { "\($0)%" }, onCommit: { value in
                                     guard let selected = draft.selectedFilter else { return }
-                                    draft.filterIntensities[selected.preset.id] = value
+                                    draft.filterIntensities[filterKey(selected.preset.id)] = value
                                     draft.selectedFilter = .init(preset: selected.preset, intensityPercent: value)
                                 }, rowHeight: 18, wheelHeight: 50, enabled: draft.photoFilterEnabled)
                     .frame(maxWidth: .infinity)
                     Button {
                         if let id = selectedFilterID {
-                            if draft.favoriteFilterIDs.contains(id) { draft.favoriteFilterIDs.remove(id) }
-                            else { draft.favoriteFilterIDs.insert(id) }
+                            let key = filterKey(id)
+                            if draft.favoriteFilterIDs.contains(key) { draft.favoriteFilterIDs.remove(key) }
+                            else { draft.favoriteFilterIDs.insert(key) }
                         }
                     } label: {
-                        Image(systemName: selectedFilterID.map { draft.favoriteFilterIDs.contains($0) } == true ? "star.fill" : "star")
+                        Image(systemName: selectedFilterID.map(isFavoriteID) == true ? "star.fill" : "star")
                             .font(.system(size: 25, weight: .medium))
-                            .foregroundStyle(selectedFilterID.map { draft.favoriteFilterIDs.contains($0) } == true ? ZTransferColors.accentBlue : ZTransferColors.secondaryText)
+                            .foregroundStyle(selectedFilterID.map(isFavoriteID) == true ? ZTransferColors.accentBlue : ZTransferColors.secondaryText)
                             .frame(width: 50, height: 50)
                     }.buttonStyle(.plain)
                     .disabled(selectedFilterID == nil || !draft.photoFilterEnabled)
@@ -341,7 +354,7 @@ private struct LocalWorkbenchControls: View {
                                 optionLabel: { $0 ? "开启" : "关闭" }, onCommit: { value in
                                     draft.watermark.enabled = value
                                     draft.photoFrameEnabled = draft.photoFrameBorderEnabled || value
-                                }, rowHeight: 18, wheelHeight: 50, enabled: draft.photoFrameEnabled, accentColor: ZTransferColors.accentPurple)
+                                }, rowHeight: 18, wheelHeight: 50, enabled: true, accentColor: ZTransferColors.accentPurple)
                     DetentWheel(label: "水印设置", options: [false], selected: false,
                                 optionLabel: { _ in "水印设置" }, onCommit: { _ in }, rowHeight: 18, wheelHeight: 50,
                                 enabled: draft.watermark.enabled, accentColor: ZTransferColors.accentPurple,
@@ -370,7 +383,7 @@ private struct LocalWorkbenchControls: View {
                                 DetentWheel(label: "透明度", options: Array(stride(from: 100, through: 2, by: -2)), selected: draft.watermark.opacityPercent, optionLabel: { "\($0)%" }, onCommit: { draft.watermark.opacityPercent = $0 }, rowHeight: 18, wheelHeight: 50, accentColor: ZTransferColors.accentPurple)
                             }
                             HStack(spacing: 8) {
-                                DetentWheel(label: "位置", options: PhotoFrameWatermarkPosition.allCases, selected: draft.watermark.position, optionLabel: positionName, onCommit: { draft.watermark.position = $0 }, rowHeight: 18, wheelHeight: 50, accentColor: ZTransferColors.accentPurple)
+                                DetentWheel(label: "位置", options: textWatermarkPositions, selected: textWatermarkPositions.contains(draft.watermark.position) ? draft.watermark.position : .photoBottomCenter, optionLabel: positionName, onCommit: { draft.watermark.position = $0 }, rowHeight: 18, wheelHeight: 50, accentColor: ZTransferColors.accentPurple)
                                 DetentWheel(label: "颜色", options: PhotoFrameWatermarkColor.allCases, selected: draft.watermark.color, optionLabel: colorName, onCommit: { draft.watermark.color = $0 }, rowHeight: 18, wheelHeight: 50, accentColor: ZTransferColors.accentPurple)
                                 DetentWheel(label: "可读性", options: PhotoFrameWatermarkEffect.allCases, selected: draft.watermark.effect, optionLabel: effectName, onCommit: { draft.watermark.effect = $0 }, rowHeight: 18, wheelHeight: 50, accentColor: ZTransferColors.accentPurple)
                             }
@@ -378,7 +391,7 @@ private struct LocalWorkbenchControls: View {
                             HStack(spacing: 8) {
                                 DetentWheel(label: "大小", options: Array(stride(from: 100, through: 2, by: -2)), selected: draft.watermark.sizePercent, optionLabel: { "\($0)%" }, onCommit: { draft.watermark.sizePercent = $0 }, rowHeight: 18, wheelHeight: 50, accentColor: ZTransferColors.accentPurple)
                                 DetentWheel(label: "透明度", options: Array(stride(from: 100, through: 2, by: -2)), selected: draft.watermark.opacityPercent, optionLabel: { "\($0)%" }, onCommit: { draft.watermark.opacityPercent = $0 }, rowHeight: 18, wheelHeight: 50, accentColor: ZTransferColors.accentPurple)
-                                DetentWheel(label: "位置", options: PhotoFrameWatermarkPosition.allCases, selected: draft.watermark.position, optionLabel: positionName, onCommit: { draft.watermark.position = $0 }, rowHeight: 18, wheelHeight: 50, accentColor: ZTransferColors.accentPurple)
+                                DetentWheel(label: "位置", options: photoWatermarkPositions, selected: photoWatermarkPositions.contains(draft.watermark.position) ? draft.watermark.position : .photoBottomCenter, optionLabel: positionName, onCommit: { draft.watermark.position = $0 }, rowHeight: 18, wheelHeight: 50, accentColor: ZTransferColors.accentPurple)
                             }
                         }
                     }
@@ -386,6 +399,7 @@ private struct LocalWorkbenchControls: View {
                 }
             }
             .onChange(of: draft.watermark) { value in
+                guard frameEnabled else { return }
                 guard let index = draft.favoriteFrameEffects.firstIndex(where: { $0.preset == draft.photoFramePreset }) else { return }
                 draft.favoriteFrameEffects[index].watermark = value
             }
@@ -427,12 +441,12 @@ private struct LocalWorkbenchControls: View {
                         ForEach(filterChooserItems) { preset in
                             Button {
                                 draft.photoFilterEnabled = true
-                                let remembered = draft.filterIntensities[preset.id] ?? draft.selectedFilter?.intensityPercent ?? 80
+                                let remembered = draft.filterIntensities[filterKey(preset.id)] ?? draft.selectedFilter?.intensityPercent ?? 80
                                 draft.selectedFilter = .init(preset: preset, intensityPercent: remembered)
                                 filterChooserPresented = false
                             } label: {
                                 HStack(spacing: 8) {
-                                    if draft.favoriteFilterIDs.contains(preset.id) { Image(systemName: "star.fill").font(.system(size: 12)).foregroundStyle(ZTransferColors.accentBlue) }
+                                    if isFavorite(preset) { Image(systemName: "star.fill").font(.system(size: 12)).foregroundStyle(ZTransferColors.accentBlue) }
                                     Text(preset.name).font(.system(size: 14, weight: selectedFilterID == preset.id ? .semibold : .regular)).foregroundStyle(ZTransferColors.primaryText)
                                     Spacer(minLength: 0)
                                 }
@@ -458,11 +472,11 @@ private struct LocalWorkbenchControls: View {
         let candidates: [PhotoFilterPreset]
         switch filterChooserCategory {
         case .all: candidates = all
-        case .favorites: candidates = all.filter { draft.favoriteFilterIDs.contains($0.id) }
+        case .favorites: candidates = all.filter(isFavorite)
         default: candidates = all.filter { $0.category == filterChooserCategory }
         }
-        let favorites = candidates.filter { draft.favoriteFilterIDs.contains($0.id) }
-        return favorites + candidates.filter { !draft.favoriteFilterIDs.contains($0.id) }
+        let favorites = candidates.filter(isFavorite)
+        return favorites + candidates.filter { !isFavorite($0) }
     }
 
     private func metadataButton(_ title: String, _ selected: Bool, action: @escaping () -> Void) -> some View {
