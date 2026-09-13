@@ -1,6 +1,25 @@
 import SwiftUI
 import UIKit
 
+@preconcurrency
+private struct PhotoListTopControlsTransition: AnimatableModifier {
+    var progress: CGFloat
+    let hiddenOffset: CGFloat
+    let hiddenScale: CGFloat
+
+    nonisolated var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(progress)
+            .offset(x: hiddenOffset * (1 - progress))
+            .scaleEffect(hiddenScale + (1 - hiddenScale) * progress, anchor: .leading)
+    }
+}
+
 struct PhotoListView: View {
     @StateObject private var model: PhotoListViewModel
     @StateObject private var queueModel: TransferQueueViewModel
@@ -27,6 +46,7 @@ struct PhotoListView: View {
     @State private var effectPreviewGeneration = 0
     @State private var effectPreviewRequested = false
     @State private var effectPreviewFileKey: String?
+    @State private var topControlsVisible = true
 
     init(repository: CameraRepository, queue: TransferQueue = TransferQueue(), directory: DirectoryAccessStore = DirectoryAccessStore(), effectsStore: PhotoEffectsStore = PhotoEffectsStore(), onDisconnect: @escaping () -> Void) {
         _model = StateObject(wrappedValue: PhotoListViewModel(repository: repository))
@@ -177,6 +197,23 @@ struct PhotoListView: View {
             model.setTransferBusy(busy)
             if let session { Task { await session.setTransfersBusy(busy) } }
         }
+        .onChange(of: selectedFile) { file in
+            if file == nil {
+                // Android: fade-in 220ms after 30ms, with the slide/scale
+                // completing at 260ms.  The single SwiftUI transition keeps
+                // the three properties on one timeline and preserves the
+                // same leading anchor.
+                withAnimation(.timingCurve(0.4, 0.0, 0.2, 1.0, duration: 0.26).delay(0.03)) {
+                    topControlsVisible = true
+                }
+            } else {
+                // Android: fade-out 150ms while the slide/scale completes at
+                // 210ms.  Keep queue controls outside this state machine.
+                withAnimation(.timingCurve(0.4, 0.0, 0.2, 1.0, duration: 0.21)) {
+                    topControlsVisible = false
+                }
+            }
+        }
         .fullScreenCover(item: $selectedFile) { file in
             if let session {
                 let files = model.sections.flatMap(\.files)
@@ -233,7 +270,7 @@ struct PhotoListView: View {
 
     private var photoListTopControls: some View {
         HStack(spacing: 8) {
-            if selectedFile == nil {
+            if topControlsVisible {
                 HStack(spacing: 8) {
                     Button { showingSettings = true } label: {
                         DoubleZMark(tint: ZTransferColors.primaryText)
@@ -273,12 +310,14 @@ struct PhotoListView: View {
                     .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
                 }
                 .transition(.asymmetric(
-                    insertion: .opacity
-                        .combined(with: .move(edge: .leading))
-                        .combined(with: .scale(scale: 0.94, anchor: .leading)),
-                    removal: .opacity
-                        .combined(with: .move(edge: .leading))
-                        .combined(with: .scale(scale: 0.96, anchor: .leading))
+                    insertion: .modifier(
+                        active: PhotoListTopControlsTransition(progress: 0, hiddenOffset: -40, hiddenScale: 0.94),
+                        identity: PhotoListTopControlsTransition(progress: 1, hiddenOffset: -40, hiddenScale: 0.94)
+                    ),
+                    removal: .modifier(
+                        active: PhotoListTopControlsTransition(progress: 0, hiddenOffset: -40, hiddenScale: 0.96),
+                        identity: PhotoListTopControlsTransition(progress: 1, hiddenOffset: -40, hiddenScale: 0.96)
+                    )
                 ))
             }
 
@@ -310,7 +349,6 @@ struct PhotoListView: View {
         .padding(.horizontal, 12)
         .padding(.top, 6)
         .animation(ZTransferMotion.standard, value: queueModel.snapshot.items.count)
-        .animation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.26), value: selectedFile == nil)
         .onPreferenceChange(PhotoListSettingsAnchorPreferenceKey.self) { settingsAnchor = $0 }
     }
 
