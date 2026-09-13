@@ -12,6 +12,8 @@ struct BurstPhotoGroup: Identifiable, Equatable, Sendable {
 }
 
 enum PhotoCatalogGrouping {
+    static let unknownDay = "zzz_unknown"
+
     static func byCaptureDay(_ files: [CameraFile]) -> [PhotoDaySection] {
         var sections: [String: [CameraFile]] = [:]
         for file in files {
@@ -22,8 +24,6 @@ enum PhotoCatalogGrouping {
             if lhs == rhs { return false }
             // Android's synthetic `zzz_unknown` key sorts first in descending
             // order, so files without capture time stay at the top.
-            if lhs == "__unknown__" { return true }
-            if rhs == "__unknown__" { return false }
             return lhs > rhs
         }.map { day in
             PhotoDaySection(day: day, files: (sections[day] ?? []).sorted { $0.captureDate.orEmpty > $1.captureDate.orEmpty })
@@ -68,9 +68,11 @@ enum PhotoCatalogGrouping {
     }
 
     private static func normalizedDay(_ value: String?) -> String {
-        guard let value, value.count >= 8 else { return "__unknown__" }
-        let chars = Array(value.prefix(8))
-        return "\(chars[0])\(chars[1])\(chars[2])\(chars[3])-\(chars[4])\(chars[5])-\(chars[6])\(chars[7])"
+        guard let value, value.count >= 8 else { return PhotoCatalogGrouping.unknownDay }
+        // Android keeps the raw YYYYMMDD grouping key and formats it only at
+        // render time. Keeping that key is required for collapse/filter state
+        // and unknown-date ordering to match the source implementation.
+        return String(value.prefix(8))
     }
 }
 

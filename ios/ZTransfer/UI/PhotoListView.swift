@@ -5,6 +5,7 @@ struct PhotoListView: View {
     @StateObject private var model: PhotoListViewModel
     @StateObject private var queueModel: TransferQueueViewModel
     @ObservedObject private var directoryStore: DirectoryAccessStore
+    let effectsStore: PhotoEffectsStore
     let onDisconnect: () -> Void
     private let session: CameraSession?
     @AppStorage("tapToPreview") private var tapToPreview = false
@@ -18,18 +19,23 @@ struct PhotoListView: View {
     @State private var collapsedDays: Set<String> = []
     @State private var showTopButton = false
     @State private var showingRemote = false
+    @State private var showingSettings = false
+    @State private var settingsAnchor: CGRect = .zero
+    @State private var signalExpanded = false
 
-    init(repository: CameraRepository, queue: TransferQueue = TransferQueue(), directory: DirectoryAccessStore = DirectoryAccessStore(), onDisconnect: @escaping () -> Void) {
+    init(repository: CameraRepository, queue: TransferQueue = TransferQueue(), directory: DirectoryAccessStore = DirectoryAccessStore(), effectsStore: PhotoEffectsStore = PhotoEffectsStore(), onDisconnect: @escaping () -> Void) {
         _model = StateObject(wrappedValue: PhotoListViewModel(repository: repository))
         _queueModel = StateObject(wrappedValue: TransferQueueViewModel(queue: queue))
         _directoryStore = ObservedObject(wrappedValue: directory)
+        self.effectsStore = effectsStore
         self.onDisconnect = onDisconnect; self.session = nil
     }
 
-    init(session: CameraSession, queue: TransferQueue, directory: DirectoryAccessStore = DirectoryAccessStore(), onDisconnect: @escaping () -> Void) {
+    init(session: CameraSession, queue: TransferQueue, directory: DirectoryAccessStore = DirectoryAccessStore(), effectsStore: PhotoEffectsStore = PhotoEffectsStore(), onDisconnect: @escaping () -> Void) {
         _model = StateObject(wrappedValue: PhotoListViewModel(session: session))
         _queueModel = StateObject(wrappedValue: TransferQueueViewModel(queue: queue))
         _directoryStore = ObservedObject(wrappedValue: directory)
+        self.effectsStore = effectsStore
         self.onDisconnect = onDisconnect; self.session = session
     }
 
@@ -65,7 +71,9 @@ struct PhotoListView: View {
                                     }
                                 } label: {
                                     HStack(spacing: 6) {
-                                        Text(section.day == "__unknown__" ? "未知日期" : section.day)
+                                        Text(section.day == PhotoCatalogGrouping.unknownDay
+                                             ? String(localized: "未知日期")
+                                             : formatDateHeader(section.day))
                                             .zTransferText(size: ZTransferMetrics.body, weight: .bold)
                                         Image(systemName: "chevron.down")
                                             .font(.system(size: 13, weight: .bold))
@@ -97,7 +105,7 @@ struct PhotoListView: View {
                             }
                         }
                     }
-                    }.padding(.horizontal, ZTransferMetrics.pageHorizontal).padding(.top, 20)
+                    }.padding(.horizontal, ZTransferMetrics.pageHorizontal).padding(.top, 62)
                 }
                 .coordinateSpace(name: "photo-list-scroll")
                 .onPreferenceChange(PhotoListScrollOffsetKey.self) { value in
@@ -120,15 +128,8 @@ struct PhotoListView: View {
                     }
                 }
                 .overlay(alignment: .bottomLeading) { remoteEntryOverlay }
-            }
-        }
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) { Button(action: onDisconnect) { Image(systemName: "chevron.left") } }
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                Button { showingFilter = true } label: { Image(systemName: "line.3.horizontal.decrease.circle") }
-                if !queueModel.snapshot.items.isEmpty {
-                    Button { showingQueue = true } label: { QueuePill(snapshot: queueModel.snapshot) }
-                    .transition(.opacity.combined(with: .scale))
+                .overlay(alignment: .top) {
+                    photoListTopControls
                 }
             }
         }
@@ -156,6 +157,8 @@ struct PhotoListView: View {
                         queueModel.enqueue(file)
                     }
                 }
+                .onAppear { model.pauseForPreview() }
+                .onDisappear { model.resumeAfterPreview() }
             }
         }
         .fullScreenCover(isPresented: $showingRemote) {
@@ -164,7 +167,7 @@ struct PhotoListView: View {
         .sheet(isPresented: $showingFilter) {
             let files = model.availableFiles
             let extensions = Array(Set(files.map(\.fileExtension))).sorted()
-            let slots = Array(Set(files.map(\.storageID))).sorted()
+            let slots = Array(files.flatMap { $0.storageIDs }).sorted()
             PhotoFilterSheet(initial: model.filter,
                              availableExtensions: extensions.isEmpty ? [".jpg", ".nef", ".mp4"] : extensions,
                              availableStorageSlots: slots,
@@ -173,6 +176,86 @@ struct PhotoListView: View {
         .sheet(isPresented: $showingQueue) {
             TransferQueueView(model: queueModel, session: session, directory: directoryStore)
         }
+        .overlay {
+            if showingSettings {
+                SettingsPopupOverlay(
+                    isPresented: $showingSettings,
+                    showPhotoEffectsEntry: true,
+                    effectsStore: effectsStore,
+                    directory: directoryStore,
+                    anchor: settingsAnchor
+                )
+                .ignoresSafeArea()
+            }
+        }
+    }
+
+    private var photoListTopControls: some View {
+        HStack(spacing: 8) {
+            Button { showingSettings = true } label: {
+                DoubleZMark(tint: ZTransferColors.primaryText)
+                    .frame(width: 20 * DoubleZMark.aspectRatio, height: 20)
+                    .padding(.horizontal, 12)
+                    .frame(height: 36)
+            }
+            .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
+            .background {
+                GeometryReader { proxy in
+                    Color.clear.preference(key: PhotoListSettingsAnchorPreferenceKey.self,
+                                           value: proxy.frame(in: .global))
+                }
+            }
+
+            Button { signalExpanded.toggle() } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: signalExpanded ? "wifi" : "wifi")
+                        .font(.system(size: 17, weight: .semibold))
+                    if signalExpanded {
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 10, weight: .bold))
+                    }
+                }
+                .padding(.horizontal, 10)
+                .frame(height: 36)
+            }
+            .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
+
+            Button { showingFilter = true } label: {
+                Image(systemName: "line.3.horizontal.decrease.circle")
+                    .font(.system(size: 18, weight: .semibold))
+                    .frame(width: 36, height: 36)
+            }
+            .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
+
+            Spacer(minLength: 0)
+
+            if queueModel.snapshot.isTransferring {
+                Button { queueModel.pause() } label: {
+                    Image(systemName: "pause.fill").frame(width: 36, height: 36)
+                }
+                .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
+            } else if queueModel.snapshot.items.contains(where: { $0.status == .waiting }),
+                      let session, let directory = directoryStore.directoryURL {
+                Button { queueModel.start(session: session, directory: directory) } label: {
+                    Image(systemName: "play.fill").frame(width: 36, height: 36)
+                }
+                .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
+            }
+
+            if !queueModel.snapshot.items.isEmpty {
+                Button { showingQueue = true } label: {
+                    QueuePill(snapshot: queueModel.snapshot)
+                        .padding(.horizontal, 10)
+                        .frame(height: 36)
+                }
+                .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
+                .transition(.opacity.combined(with: .scale))
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 6)
+        .animation(ZTransferMotion.standard, value: queueModel.snapshot.items.count)
+        .onPreferenceChange(PhotoListSettingsAnchorPreferenceKey.self) { settingsAnchor = $0 }
     }
 
     @ViewBuilder
@@ -206,6 +289,18 @@ struct PhotoListView: View {
             queueModel.enqueue(file)
         }
     }
+}
+
+private struct PhotoListSettingsAnchorPreferenceKey: PreferenceKey {
+    static let defaultValue: CGRect = .zero
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
+}
+
+private func formatDateHeader(_ raw: String) -> String {
+    guard raw.count == 8,
+          raw.allSatisfy(\.isNumber) else { return raw }
+    let chars = Array(raw)
+    return "\(chars[0])\(chars[1])\(chars[2])\(chars[3])-\(chars[4])\(chars[5])-\(chars[6])\(chars[7])"
 }
 
 private struct PlaceholderThumbnail: View {
@@ -299,7 +394,11 @@ private struct CameraThumbnailView: View {
         .frame(maxWidth: .infinity).aspectRatio(1, contentMode: .fit).clipShape(RoundedRectangle(cornerRadius: 8))
         .task {
             guard image == nil else { return }
-            if let data = try? await session.thumbnail(handle: handle), let image = UIImage(data: data) { self.image = image }
+            if let file, let data = try? await session.thumbnail(file: file), let image = UIImage(data: data) {
+                self.image = image
+            } else if file == nil, let data = try? await session.thumbnail(handle: handle), let image = UIImage(data: data) {
+                self.image = image
+            }
         }
     }
 

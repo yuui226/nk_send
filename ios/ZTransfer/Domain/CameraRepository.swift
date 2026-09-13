@@ -4,6 +4,28 @@ enum CameraRepositoryError: Error, Equatable, Sendable {
     case invalidDataset
 }
 
+/// Resumable handle enumeration state. Android keeps this snapshot when a
+/// foreground preview interrupts metadata reads; only handles already
+/// accepted by the list are marked processed.
+struct PhotoScanSnapshot: Sendable {
+    let storageIDs: [UInt32]
+    let handleOrders: [(storageID: UInt32, handles: [UInt32])]
+    var processedHandles: Set<UInt32>
+    let handleQueriesSucceeded: Bool
+
+    var remainingHandles: [(storageID: UInt32, handles: [UInt32])] {
+        handleOrders.map { ($0.storageID, $0.handles.filter { !processedHandles.contains($0) }) }
+    }
+}
+
+struct PhotoScanResult: Sendable {
+    let files: [CameraFile]
+    let removedHandles: Set<UInt32>
+    let addedHandles: Set<UInt32>
+    let handleQueriesSucceeded: Bool
+    let metadataComplete: Bool
+}
+
 /// Protocol-level camera catalog. It deliberately exposes only operations already used by
 /// the Android NikonCamera path; UI state and transfer policy stay in higher layers.
 actor CameraRepository {
@@ -15,14 +37,18 @@ actor CameraRepository {
     private var prefetchedHandles: (storageID: UInt32, handles: [UInt32])?
     private var activeForegroundReads = 0
     private var remoteActive = false
+    private var fhdActive = false
     private var activeCatalogScans = 0
     private var catalogLoading: Bool { activeCatalogScans > 0 }
     private var catalogFiles: [UInt32: CameraFile] = [:]
+    private var indexedCatalogFiles: [UInt32: CameraFile] = [:]
+    private var catalogOrder: [UInt32] = []
     private var catalogStorageIDs: [UInt32] = []
     private var knownHandles = Set<UInt32>()
     private var catalogReady = false
     private var lastCatalogCheck = ContinuousClock.now
     private var catalogSyncRequested = false
+    private var scanSnapshot: PhotoScanSnapshot?
     private var pendingObjects: [UInt32: (attempts: Int, ready: ContinuousClock.Instant)] = [:]
     private var eventResolveTask: Task<Void, Never>?
     private var catalogContinuations: [UUID: AsyncStream<[CameraFile]>.Continuation] = [:]
@@ -207,6 +233,32 @@ actor CameraRepository {
         return info
     }
 
+    /// Stable per-body cache identity. A network session without an announced
+    /// serial deliberately returns nil rather than mixing thumbnails between
+    /// cameras, matching Android's camera-scoped cache invariant.
+    func thumbnailCacheIdentity() -> String? {
+        guard let info = staAlbum?.deviceInfo,
+              !info.serialNumber.isEmpty else { return nil }
+        return "\(info.manufacturer)\u{0}\(info.model)\u{0}\(info.serialNumber)"
+    }
+
+    func usesDirectThumbnailRead() -> Bool { directReader != nil }
+    func backgroundThumbnailFillAllowed() -> Bool {
+        activeForegroundReads == 0 && !remoteActive && !fhdActive
+    }
+
+    /// Foreground FHD preview has priority over catalog metadata reads.  The
+    /// scan keeps its handle snapshot and resumes at the same cursor when the
+    /// preview releases the channel.
+    func setFHDActive(_ active: Bool) { fhdActive = active }
+
+    private func waitForForegroundPreview() async throws {
+        while fhdActive {
+            try Task.checkCancellation()
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+    }
+
     func loadStorageIDs() async throws -> [UInt32] {
         if let ids = prefetchedStorageIDs { prefetchedStorageIDs = nil; return ids }
         let result = try await catalogCommand(PTPConstants.getStorageIDs)
@@ -221,6 +273,39 @@ actor CameraRepository {
         let result = try await catalogCommand(PTPConstants.getObjectHandles, [storageID, .max, 0])
         guard let handles = PTPDatasetParser.readObjectHandles(result.data) else { throw CameraRepositoryError.invalidDataset }
         return handles
+    }
+
+    private struct ObjectHandlesStatus: Sendable {
+        let handles: [UInt32]
+        let successful: Bool
+        let responseCode: UInt16?
+    }
+
+    /// Status-preserving query used by the list scan. Android treats a
+    /// non-STA response-level failure as an incomplete scan (retaining rows),
+    /// while STA retries DeviceBusy and reconnects after the third failure.
+    private func loadObjectHandlesWithStatus(storageID: UInt32) async throws -> ObjectHandlesStatus {
+        if let prefetch = prefetchedHandles, prefetch.storageID == storageID {
+            prefetchedHandles = nil
+            return ObjectHandlesStatus(handles: prefetch.handles, successful: true,
+                                       responseCode: PTPConstants.responseOK)
+        }
+        do {
+            let response = try await session.executeResponse(
+                operation: PTPConstants.getObjectHandles,
+                parameters: [storageID, .max, 0],
+                timeoutNanoseconds: 60_000_000_000
+            )
+            guard response.code == PTPConstants.responseOK,
+                  let handles = PTPDatasetParser.readObjectHandles(response.data) else {
+                return ObjectHandlesStatus(handles: [], successful: false, responseCode: response.code)
+            }
+            return ObjectHandlesStatus(handles: handles, successful: true, responseCode: response.code)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            return ObjectHandlesStatus(handles: [], successful: false, responseCode: nil)
+        }
     }
 
     func loadObjectInfo(handle: UInt32) async throws -> CameraFile {
@@ -255,6 +340,9 @@ actor CameraRepository {
     func readPrefix(handle: UInt32, length: Int64) async throws -> Data {
         activeForegroundReads += 1; defer { activeForegroundReads -= 1; scheduleObjectResolver() }
         let count = max(0, min(length, Int64(UInt32.max)))
+        if let directReader {
+            return try await directReader.exifHeader(handle: handle, length: Int(count))
+        }
         let result = try await session.execute(
             operation: PTPConstants.getPartialObjectEx,
             parameters: [handle, 0, 0, UInt32(count & 0xFFFF_FFFF), UInt32(count >> 32)]
@@ -311,43 +399,221 @@ actor CameraRepository {
         }
     }
 
-    func loadCatalog() async throws -> [CameraFile] {
+    func scanCatalog(
+        preserveExisting: Bool = false,
+        resumeSnapshot: PhotoScanSnapshot? = nil,
+        detectNewHandles: Bool = false,
+        onBatch: (@Sendable ([CameraFile]) async throws -> Void)? = nil
+    ) async throws -> PhotoScanResult {
         activeCatalogScans += 1
         defer { activeCatalogScans -= 1; scheduleObjectResolver() }
-        let raw = try await loadStorageIDs()
-        let storageIDs = staAlbum == nil ? raw : Array(Set(raw.filter { $0 != 0 && $0 != .max })).sorted()
-        let queries = staAlbum == nil && storageIDs.isEmpty ? [UInt32.max] : storageIDs
-        var groups: [(storage: UInt32, handles: [UInt32])] = []
-        var seen = Set<UInt32>()
-        for storage in queries {
-            let handles = try await loadObjectHandles(storageID: queryStorageID(storage))
-            // The newest-first scan and duplicate suppression match Android.
-            let ordered = staAlbum == nil ? handles : Array(handles.reversed())
-            groups.append((storage, ordered.filter { seen.insert($0).inserted }))
+
+        // A resume snapshot is valid only for this repository/session.  A fresh
+        // scan invalidates old rows and cache state exactly like Android.
+        let reusable = resumeSnapshot ?? (preserveExisting ? scanSnapshot : nil)
+        if !preserveExisting && reusable == nil {
+            catalogFiles.removeAll(keepingCapacity: true)
+            indexedCatalogFiles.removeAll(keepingCapacity: true)
+            catalogOrder.removeAll(keepingCapacity: true)
+            knownHandles.removeAll(keepingCapacity: true)
+            catalogStorageIDs.removeAll(keepingCapacity: true)
+            scanSnapshot = nil
         }
-        if let directReader { try await directReader.prepare(groups: groups) }
-        var files: [CameraFile] = []
-        for group in groups {
-            for handle in group.handles {
-                try Task.checkCancellation()
-                do {
-                    if let directReader { files.append(try await directReader.file(handle: handle, storage: group.storage)) }
-                    else { files.append(try await loadObjectInfo(handle: handle)) }
-                } catch is CancellationError { throw CancellationError() }
-                catch let error as PTPSessionError {
-                    if error == .invalidated || error == .timeout { throw error }
-                } catch { continue }
+        var existingFiles = preserveExisting
+            ? catalogOrder.compactMap { catalogFiles[$0] }
+            : []
+        var existingHandles = Set(existingFiles.map(\.id))
+        var addedHandles = Set<UInt32>()
+        var removedHandles = Set<UInt32>()
+
+        let storageIDs: [UInt32]
+        var groups: [(storage: UInt32, handles: [UInt32])]
+        var handleQueriesSucceeded = true
+        if let reusable {
+            storageIDs = reusable.storageIDs
+            groups = reusable.remainingHandles.map { ($0.storageID, $0.handles) }
+            handleQueriesSucceeded = reusable.handleQueriesSucceeded
+            scanSnapshot = reusable
+        } else {
+            let raw: [UInt32]
+            do {
+                raw = try await loadStorageIDs()
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                // Android's non-STA getStorageIds() maps a command/transport
+                // failure to an empty result; the no-usable-storage branch
+                // completes the scan without authorizing cache reconciliation.
+                if staAlbum != nil { throw error }
+                raw = []
+            }
+            storageIDs = staAlbum == nil ? raw : Array(Set(raw.filter { $0 != 0 && $0 != .max })).sorted()
+            if storageIDs.isEmpty {
+                removedHandles = Set(existingHandles)
+                for handle in removedHandles {
+                    catalogFiles.removeValue(forKey: handle)
+                    indexedCatalogFiles.removeValue(forKey: handle)
+                }
+                catalogOrder.removeAll { removedHandles.contains($0) }
+                existingFiles.removeAll()
+                existingHandles.removeAll()
+                knownHandles.removeAll()
+                catalogStorageIDs.removeAll()
+                scanSnapshot = nil
+                catalogReady = true
+                lastCatalogCheck = .now
+                publishCatalog()
+                return PhotoScanResult(files: [], removedHandles: removedHandles,
+                                       addedHandles: [], handleQueriesSucceeded: false,
+                                       metadataComplete: true)
+            }
+            let queries = storageIDs
+            groups = []
+            var seen = Set<UInt32>()
+            for storage in queries {
+                let query = queryStorageID(storage)
+                var attempts = 1
+                var result = try await loadObjectHandlesWithStatus(storageID: query)
+                while staAlbum != nil && !result.successful,
+                      result.responseCode == PTPConstants.deviceBusy && attempts < 3 {
+                    try await Task.sleep(nanoseconds: 750_000_000)
+                    attempts += 1
+                    result = try await loadObjectHandlesWithStatus(storageID: query)
+                }
+                guard result.successful else {
+                    handleQueriesSucceeded = false
+                    if staAlbum != nil {
+                        throw PTPSessionError.responseCode(result.responseCode ?? PTPConstants.deviceBusy)
+                    }
+                    // Android keeps the partial list for a non-STA response
+                    // failure and skips authoritative cache reconciliation.
+                    groups.append((storage, []))
+                    continue
+                }
+                // Nikon returns handles old→new; Android reverses every
+                // storage (USB, STA and aggregate queries) to read newest first.
+                let ordered = Array(result.handles.reversed())
+                groups.append((storage, ordered.filter { seen.insert($0).inserted }))
+            }
+            let currentHandles = Set(groups.flatMap(\.handles))
+            if handleQueriesSucceeded {
+                if preserveExisting { removedHandles = knownHandles.subtracting(currentHandles) }
+                if detectNewHandles { addedHandles = currentHandles.subtracting(knownHandles) }
+                for handle in removedHandles { catalogFiles.removeValue(forKey: handle) }
+                for handle in removedHandles { indexedCatalogFiles.removeValue(forKey: handle) }
+                catalogOrder.removeAll { removedHandles.contains($0) }
+                existingFiles.removeAll { removedHandles.contains($0.id) }
+                existingHandles.subtract(removedHandles)
+                knownHandles = currentHandles
+                catalogStorageIDs = storageIDs
+            }
+            scanSnapshot = PhotoScanSnapshot(
+                storageIDs: storageIDs,
+                handleOrders: groups.map { ($0.storage, $0.handles) },
+                processedHandles: Set(existingHandles),
+                handleQueriesSucceeded: handleQueriesSucceeded
+            )
+            // Preserve the Android refresh contract: metadata is requested only
+            // for handles not already published in this camera session.
+            if preserveExisting {
+                groups = groups.map { ($0.storage, $0.handles.filter { !existingHandles.contains($0) }) }
             }
         }
+        if let directReader { try await directReader.prepare(groups: groups) }
+
+        var files = existingFiles
+        var byIdentity = Dictionary(uniqueKeysWithValues: files.map { (logicalIdentity($0), $0) })
+        var indexed = indexedCatalogFiles
+        var batch: [CameraFile] = []
+        var metadataComplete = true
+        var cursors = Array(repeating: 0, count: groups.count)
+        var heads = Array<CameraFile?>(repeating: nil, count: groups.count)
+        while true {
+            try Task.checkCancellation()
+            try await waitForForegroundPreview()
+            // Fill one head per storage, then select the newest capture date.
+            // This is Android's dynamic dual-card merge; handle values never
+            // participate in ordering because Nikon embeds format bits in them.
+            for index in groups.indices where heads[index] == nil {
+                while cursors[index] < groups[index].handles.count {
+                    let handle = groups[index].handles[cursors[index]]
+                    cursors[index] += 1
+                    do {
+                        let file: CameraFile
+                        if let directReader { file = try await directReader.file(handle: handle, storage: groups[index].storage) }
+                        else { file = try await loadObjectInfo(handle: handle) }
+                        heads[index] = file
+                        break
+                    } catch is CancellationError { throw CancellationError() }
+                    catch let error as PTPSessionError {
+                        if error == .invalidated || error == .timeout { throw error }
+                        metadataComplete = false
+                    } catch { metadataComplete = false }
+                }
+            }
+            guard let selectedIndex = groups.indices
+                .filter({ heads[$0] != nil })
+                .max(by: { lhs, rhs in
+                    let left = heads[lhs]!.captureDate ?? ""
+                    let right = heads[rhs]!.captureDate ?? ""
+                    if left == right { return lhs > rhs }
+                    return left < right
+                }),
+                let file = heads[selectedIndex] else { break }
+            heads[selectedIndex] = nil
+            let key = logicalIdentity(file)
+            indexed[file.id] = file
+            if let old = byIdentity[key] {
+                let merged = old.storageIDs == old.storageIDs.union(file.storageIDs)
+                    ? old
+                    : CameraFile(id: old.id, storageID: old.storageID, format: old.format,
+                                 size: old.size, fileName: old.fileName,
+                                 captureDate: old.captureDate, isProtected: old.isProtected,
+                                 storageIDs: old.storageIDs.union(file.storageIDs))
+                if merged != old, let position = files.firstIndex(of: old) {
+                    files[position] = merged
+                    byIdentity[key] = merged
+                }
+            } else {
+                byIdentity[key] = file
+                files.append(file)
+                batch.append(file)
+            }
+            scanSnapshot?.processedHandles.insert(file.id)
+            if batch.count == 12 {
+                try await onBatch?(batch)
+                batch.removeAll(keepingCapacity: true)
+            }
+        }
+        if !batch.isEmpty { try await onBatch?(batch) }
         try Task.checkCancellation()
         catalogFiles = Dictionary(files.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        catalogStorageIDs = queries
-        knownHandles = seen
-        catalogReady = true
+        indexedCatalogFiles = indexed
+        catalogOrder = files.map(\.id)
+        knownHandles = Set(groups.flatMap(\.handles)).union(Set(existingHandles))
+        catalogStorageIDs = storageIDs
+        catalogReady = metadataComplete && handleQueriesSucceeded
         lastCatalogCheck = .now
-        return files
+        if catalogReady { scanSnapshot = nil }
+        publishCatalog()
+        return PhotoScanResult(files: files, removedHandles: removedHandles,
+                               addedHandles: addedHandles,
+                               handleQueriesSucceeded: handleQueriesSucceeded,
+                               metadataComplete: metadataComplete)
     }
 
+    private func logicalIdentity(_ file: CameraFile) -> String {
+        "\(file.fileName)|\(file.size)|\(file.captureDate ?? "")"
+    }
+
+    /// Compatibility entry point used by non-list callers.
+    func loadCatalog(onBatch: (@Sendable ([CameraFile]) async throws -> Void)? = nil) async throws -> [CameraFile] {
+        try await scanCatalog(onBatch: onBatch).files
+    }
+
+    /// Metadata stream used by the photo list. The underlying scan remains
+    /// serialized on this repository actor; each accepted 12-item batch is
+    /// yielded at the same boundary as Android's pipeline.
     private func queryStorageID(_ storage: UInt32) -> UInt32 {
         staAlbum != nil && storage & 0xFFFF == 0 ? .max : storage
     }
@@ -372,7 +638,7 @@ actor CameraRepository {
     }
     private func removeCatalogListener(_ id: UUID) { catalogContinuations.removeValue(forKey: id) }
     private func publishCatalog() {
-        let files = Array(catalogFiles.values)
+        let files = catalogOrder.compactMap { catalogFiles[$0] }
         for continuation in catalogContinuations.values { continuation.yield(files) }
     }
     func stopMonitoring() {
@@ -436,6 +702,7 @@ actor CameraRepository {
         let removed = knownHandles.subtracting(current)
         for handle in removed {
             catalogFiles.removeValue(forKey: handle); pendingObjects.removeValue(forKey: handle)
+            catalogOrder.removeAll { $0 == handle }
             await directReader?.invalidate(handle: handle)
         }
         knownHandles.subtract(removed)
@@ -474,7 +741,9 @@ actor CameraRepository {
                 } else { file = try await loadObjectInfo(handle: handle) }
                 guard backgroundReadsAllowed, !Task.isCancelled else { return }
                 if pendingObjects.removeValue(forKey: handle) != nil {
-                    knownHandles.insert(handle); catalogFiles[handle] = file; publishCatalog()
+                    knownHandles.insert(handle); catalogFiles[handle] = file
+                    catalogOrder.append(handle)
+                    publishCatalog()
                 }
             } catch {
                 guard var pending = pendingObjects[handle] else { continue }

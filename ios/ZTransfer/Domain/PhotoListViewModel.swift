@@ -13,19 +13,54 @@ final class PhotoListViewModel: ObservableObject {
     @Published private(set) var loadState: PhotoListLoadState = .idle
     @Published private(set) var sections: [PhotoDaySection] = []
     @Published private(set) var filter = PhotoFilterState()
+    /// Mirrors Android's `isLoadingFiles`/`hasCompletedFileScan` pair.  The
+    /// view may receive several published batches before the scan completes.
+    @Published private(set) var isLoadingFiles = false
+    @Published private(set) var hasCompletedFileScan = false
     private var allFiles: [CameraFile] = []
     private var transferredIDs: Set<UInt32> = []
     var availableFiles: [CameraFile] { allFiles }
-    private let loadCatalog: @Sendable () async throws -> [CameraFile]
+    private let scanCatalog: @Sendable (Bool, Bool, @escaping @Sendable ([CameraFile]) async throws -> Void) async throws -> PhotoScanResult
+    private let prefetchBatch: @Sendable ([CameraFile]) async -> Set<UInt32>
+    private let canFill: @Sendable () async -> Bool
+    private let reconcileCache: @Sendable ([CameraFile], Bool) async -> Void
+    private let thumbnailFillQueue = PhotoThumbnailFillQueue()
     private var catalogUpdatesTask: Task<Void, Never>?
     private var loadTask: Task<Void, Never>?
+    private var fillTask: Task<Void, Never>?
+    private var previewPausedScan = false
+    /// A cancelled/old scan must never publish over a newer camera session.
+    private var loadGeneration = 0
 
     init(repository: CameraRepository) {
-        self.loadCatalog = { try await repository.loadCatalog() }
+        self.scanCatalog = { preserve, detect, handler in
+            try await repository.scanCatalog(preserveExisting: preserve,
+                                              detectNewHandles: detect,
+                                              onBatch: handler)
+        }
+        self.prefetchBatch = { _ in [] }
+        self.canFill = { true }
+        self.reconcileCache = { _, _ in }
         observeCatalog(repository)
     }
     init(session: CameraSession) {
-        self.loadCatalog = { try await session.catalog() }
+        self.scanCatalog = { preserve, detect, handler in
+            try await session.scanCatalog(preserveExisting: preserve,
+                                          detectNewHandles: detect,
+                                          onBatch: handler)
+        }
+        self.prefetchBatch = { files in
+            var settled = Set<UInt32>()
+            for file in files {
+                guard !Task.isCancelled, await session.backgroundThumbnailFillAllowed() else { return settled }
+                if (try? await session.prefetchThumbnail(file: file)) == true { settled.insert(file.id) }
+            }
+            return settled
+        }
+        self.canFill = { await session.backgroundThumbnailFillAllowed() }
+        self.reconcileCache = { files, authoritative in
+            await session.reconcileThumbnailCache(files: files, authoritative: authoritative)
+        }
         catalogUpdatesTask = Task { [weak self] in
             let repository = session.repository
             for await files in await repository.catalogUpdates() {
@@ -44,55 +79,188 @@ final class PhotoListViewModel: ObservableObject {
     }
     private func applyCatalogUpdate(_ files: [CameraFile]) {
         guard loadState == .loaded else { return }
+        let oldIDs = Set(allFiles.map(\.id))
         allFiles = files
         sections = PhotoCatalogGrouping.byCaptureDay(PhotoFilter.apply(files, state: filter, transferredIDs: transferredIDs))
+        let additions = files.filter { !oldIDs.contains($0.id) }
+        if !additions.isEmpty {
+            Task { [weak self] in
+                guard let self else { return }
+                await thumbnailFillQueue.enqueueNew(additions)
+                startThumbnailFillWorker()
+            }
+        }
     }
 
-    deinit { loadTask?.cancel(); catalogUpdatesTask?.cancel() }
+    deinit { loadTask?.cancel(); fillTask?.cancel(); catalogUpdatesTask?.cancel() }
 
     func load() {
         loadTask?.cancel()
+        fillTask?.cancel()
+        loadGeneration &+= 1
+        let generation = loadGeneration
+        allFiles.removeAll(keepingCapacity: true)
+        sections.removeAll()
+        hasCompletedFileScan = false
+        isLoadingFiles = true
         loadState = .loading
         loadTask = Task { [weak self] in
-            await self?.reload()
+            await self?.reload(generation: generation)
         }
     }
 
     /// Awaitable refresh used by SwiftUI's pull-to-refresh.  A cancelled scan
     /// never replaces the current catalog, matching Android's refresh reducer.
     func reload() async {
+        loadGeneration &+= 1
+        await reload(generation: loadGeneration)
+    }
+
+    private func reload(generation: Int) async {
+        guard generation == loadGeneration else { return }
+        await thumbnailFillQueue.beginScan()
+        loadState = .loading
+        isLoadingFiles = true
+        hasCompletedFileScan = false
         do {
-            let files = try await loadCatalog()
-            guard !Task.isCancelled else { return }
-            allFiles = files
-            sections = PhotoCatalogGrouping.byCaptureDay(
-                PhotoFilter.apply(files, state: filter, transferredIDs: transferredIDs),
-            )
+            // Pull-to-refresh keeps the published snapshot while Android
+            // re-queries handles and removes only confirmed missing objects.
+            let preserveExisting = !allFiles.isEmpty
+            if !preserveExisting {
+                allFiles.removeAll(keepingCapacity: true)
+                sections.removeAll()
+            }
+            let accumulator = ScanAccumulator()
+            let result = try await scanCatalog(preserveExisting, preserveExisting) { [weak self] batch in
+                guard let self else { throw CancellationError() }
+                try await self.acceptBatch(batch, generation: generation, accumulator: accumulator)
+            }
+            guard !Task.isCancelled, generation == loadGeneration else { return }
+            // Repository returns the merged logical rows in stable display
+            // order, including dual-card membership replacements.
+            allFiles = result.files
+            if !result.removedHandles.isEmpty { await thumbnailFillQueue.remove(result.removedHandles) }
+            await thumbnailFillQueue.seed(allFiles, priorityRange: filter.dateRange)
+            await reconcileCache(allFiles, result.handleQueriesSucceeded && result.metadataComplete)
+            publishSections()
             loadState = .loaded
+            isLoadingFiles = false
+            hasCompletedFileScan = true
+            startThumbnailFillWorker()
         } catch is CancellationError {
             return
         } catch {
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, generation == loadGeneration else { return }
+            // Preserve any already published files. A failed/incomplete scan
+            // must not be treated as authoritative empty storage and must not
+            // trigger disk-cache reconciliation.
+            isLoadingFiles = false
             loadState = .failed(error.localizedDescription)
         }
     }
 
+    private func publishSections() {
+        sections = PhotoCatalogGrouping.byCaptureDay(
+            PhotoFilter.apply(allFiles, state: filter, transferredIDs: transferredIDs),
+        )
+    }
+
+    private func acceptBatch(
+        _ batch: [CameraFile],
+        generation: Int,
+        accumulator: ScanAccumulator
+    ) async throws {
+        try Task.checkCancellation()
+        guard generation == loadGeneration else { throw CancellationError() }
+        var additions: [CameraFile] = []
+        for file in batch where accumulator.publishedIDs.insert(file.id).inserted {
+            allFiles.append(file)
+            additions.append(file)
+        }
+        publishSections()
+        await thumbnailFillQueue.enqueueNew(additions)
+        // The repository awaits this callback: scanning cannot request the
+        // next metadata batch until this batch's per-file prefetch has finished,
+        // matching Android's accepted-batch/backpressure order.
+        let settled = await prefetchBatch(additions)
+        for id in settled { await thumbnailFillQueue.markSettled(id) }
+        for file in additions where !settled.contains(file.id) { await thumbnailFillQueue.markFailed(file.id) }
+        try Task.checkCancellation()
+        guard generation == loadGeneration else { throw CancellationError() }
+        await Task.yield()
+    }
+
+    private final class ScanAccumulator: @unchecked Sendable {
+        var publishedIDs = Set<UInt32>()
+    }
+
     func cancelLoading() {
+        loadGeneration &+= 1
         loadTask?.cancel()
         loadTask = nil
+        isLoadingFiles = false
+    }
+
+    /// Android pauses the metadata pipeline while an interactive FHD preview
+    /// owns the camera channel, retaining the published rows for resumption.
+    func pauseForPreview() {
+        guard isLoadingFiles else { return }
+        previewPausedScan = true
+        loadGeneration &+= 1
+        loadTask?.cancel()
+        loadTask = nil
+        isLoadingFiles = false
+    }
+
+    func resumeAfterPreview() {
+        guard previewPausedScan else { return }
+        previewPausedScan = false
+        loadTask?.cancel()
+        loadGeneration &+= 1
+        let generation = loadGeneration
+        loadState = .loading
+        isLoadingFiles = true
+        hasCompletedFileScan = false
+        loadTask = Task { [weak self] in
+            await self?.reload(generation: generation)
+        }
     }
 
     func setFilter(_ filter: PhotoFilterState) {
         self.filter = filter
-        sections = PhotoCatalogGrouping.byCaptureDay(PhotoFilter.apply(allFiles, state: filter, transferredIDs: transferredIDs))
+        publishSections()
+        Task { [weak self] in
+            guard let self else { return }
+            await thumbnailFillQueue.updatePriorityRange(allFiles, range: filter.dateRange)
+            await thumbnailFillQueue.retryFailed()
+            startThumbnailFillWorker()
+        }
     }
 
     func updateTransferredIDs(_ ids: Set<UInt32>) {
         guard ids != transferredIDs else { return }
         transferredIDs = ids
         guard loadState == .loaded else { return }
-        sections = PhotoCatalogGrouping.byCaptureDay(PhotoFilter.apply(allFiles, state: filter, transferredIDs: ids))
+        publishSections()
     }
 
     func clearFilter() { setFilter(PhotoFilterState()) }
+
+    private func startThumbnailFillWorker() {
+        fillTask?.cancel()
+        let filesByID = Dictionary(uniqueKeysWithValues: allFiles.map { ($0.id, $0) })
+        fillTask = Task { [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled, let id = await thumbnailFillQueue.poll(),
+                  let file = filesByID[id] {
+                guard await canFill() else {
+                    await thumbnailFillQueue.returnToFront(id)
+                    return
+                }
+                let settled = await prefetchBatch([file])
+                if settled.contains(id) { await thumbnailFillQueue.markSettled(id) }
+                else { await thumbnailFillQueue.markFailed(id) }
+            }
+        }
+    }
 }

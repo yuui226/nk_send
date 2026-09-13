@@ -30,7 +30,7 @@ enum PhotoFilter {
             guard !state.protectedOnly || file.isProtected else { return false }
             guard !state.burstOnly || burstIDs?.contains(file.id) == true else { return false }
             guard !state.untransferredOnly || !transferredIDs.contains(file.id) else { return false }
-            guard state.storageSlot == nil || file.storageID == state.storageSlot else { return false }
+            guard state.storageSlot == nil || file.storageIDs.contains(state.storageSlot!) else { return false }
             guard state.dateRange?.contains(file.captureDate) ?? true else { return false }
             return true
         }

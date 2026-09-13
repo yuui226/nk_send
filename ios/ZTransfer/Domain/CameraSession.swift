@@ -7,6 +7,8 @@ actor CameraSession {
     let repository: CameraRepository
     private let usbTransport: ImageCaptureUSBTransport?
     private let deviceID: String?
+    private let thumbnailStore = PhotoThumbnailStore()
+    private let exifStore = PhotoExifStore()
 
     init(repository: CameraRepository, transport: ImageCaptureUSBTransport, deviceID: String) {
         self.repository = repository; self.usbTransport = transport; self.deviceID = deviceID
@@ -20,11 +22,76 @@ actor CameraSession {
 
     func catalog() async throws -> [CameraFile] { try await repository.loadCatalog() }
 
+    func scanCatalog(onBatch: @escaping @Sendable ([CameraFile]) async throws -> Void) async throws {
+        _ = try await repository.scanCatalog(onBatch: onBatch)
+    }
+
+    func scanCatalog(
+        preserveExisting: Bool,
+        resumeSnapshot: PhotoScanSnapshot? = nil,
+        detectNewHandles: Bool = false,
+        onBatch: @escaping @Sendable ([CameraFile]) async throws -> Void
+    ) async throws -> PhotoScanResult {
+        if !preserveExisting {
+            let identity: String?
+            if let deviceID { identity = deviceID }
+            else { identity = await repository.thumbnailCacheIdentity() }
+            if let identity { await thumbnailStore.resetForScan(identity: identity) }
+            await exifStore.reset()
+        }
+        return try await repository.scanCatalog(preserveExisting: preserveExisting,
+                                          resumeSnapshot: resumeSnapshot,
+                                          detectNewHandles: detectNewHandles,
+                                          onBatch: onBatch)
+    }
+
     func thumbnail(handle: UInt32) async throws -> Data {
         if let usbTransport, let deviceID {
             return try await usbTransport.thumbnail(for: handle, deviceID: deviceID)
         }
         return try await repository.thumbnail(handle: handle)
+    }
+
+    /// Metadata-aware path used by the photo grid. It follows Android's
+    /// memory → negative → disk → shared request → camera read order.
+    func thumbnail(file: CameraFile) async throws -> Data? {
+        let identity: String?
+        if let deviceID { identity = deviceID }
+        else { identity = await repository.thumbnailCacheIdentity() }
+        guard let identity else { return try await thumbnail(handle: file.id) }
+        let direct = await repository.usesDirectThumbnailRead()
+        return try await thumbnailStore.load(file: file, identity: identity, directSTA: direct, allowRemote: true) {
+            try await self.thumbnail(handle: file.id)
+        }
+    }
+
+    func prefetchThumbnail(file: CameraFile) async throws -> Bool {
+        // Android STA direct browsing leaves RAW/video previews lazy; these
+        // formats are resolved only when visible or opened in preview.
+        let direct = await repository.usesDirectThumbnailRead()
+        if direct && [".nef", ".nrw", ".mov", ".mp4"].contains(file.fileExtension) { return true }
+        let identity: String?
+        if let deviceID { identity = deviceID }
+        else { identity = await repository.thumbnailCacheIdentity() }
+        guard let identity else { return false }
+        return try await thumbnailStore.prefetch(file: file, identity: identity, directSTA: direct) {
+            try await self.thumbnail(handle: file.id)
+        }
+    }
+
+    func reconcileThumbnailCache(files: [CameraFile], authoritative: Bool) async {
+        guard authoritative else { return }
+        let identity: String?
+        if let deviceID { identity = deviceID }
+        else { identity = await repository.thumbnailCacheIdentity() }
+        guard let identity else { return }
+        let direct = await repository.usesDirectThumbnailRead()
+        await thumbnailStore.reconcile(files: files, identity: identity, directSTA: direct)
+    }
+
+    func setFHDActive(_ active: Bool) async { await repository.setFHDActive(active) }
+    func backgroundThumbnailFillAllowed() async -> Bool {
+        await repository.backgroundThumbnailFillAllowed()
     }
 
     func preview(handle: UInt32) async throws -> Data {
@@ -47,8 +114,9 @@ actor CameraSession {
     }
 
     func exif(file: CameraFile) async throws -> PhotoExif? {
-        let prefix = try await readPrefix(file: file, length: 512 * 1024)
-        return PhotoExifParser.parse(prefix)
+        try await exifStore.load(file: file) { [self] length in
+            try await self.readPrefix(file: file, length: length)
+        }
     }
 
     func download(file: CameraFile, to directory: URL, progress: (@Sendable (Double) -> Void)? = nil) async throws -> URL {

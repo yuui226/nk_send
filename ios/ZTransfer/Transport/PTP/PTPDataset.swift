@@ -131,6 +131,34 @@ struct CameraFile: Identifiable, Equatable, Sendable, Codable {
     let fileName: String
     let captureDate: String?
     let isProtected: Bool
+    /// All physical cards containing this logical photo. `storageID` remains
+    /// the primary card for compatibility with existing transfer paths.
+    let storageIDs: Set<UInt32>
+
+    init(id: UInt32, storageID: UInt32, format: UInt16, size: UInt64,
+         fileName: String, captureDate: String?, isProtected: Bool,
+         storageIDs: Set<UInt32>? = nil) {
+        self.id = id; self.storageID = storageID; self.format = format; self.size = size
+        self.fileName = fileName; self.captureDate = captureDate; self.isProtected = isProtected
+        self.storageIDs = storageIDs?.isEmpty == false ? storageIDs! : [storageID]
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, storageID, format, size, fileName, captureDate, isProtected, storageIDs
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        let id = try values.decode(UInt32.self, forKey: .id)
+        let storageID = try values.decode(UInt32.self, forKey: .storageID)
+        self.init(id: id, storageID: storageID,
+                  format: try values.decode(UInt16.self, forKey: .format),
+                  size: try values.decode(UInt64.self, forKey: .size),
+                  fileName: try values.decode(String.self, forKey: .fileName),
+                  captureDate: try values.decodeIfPresent(String.self, forKey: .captureDate),
+                  isProtected: try values.decode(Bool.self, forKey: .isProtected),
+                  storageIDs: try values.decodeIfPresent(Set<UInt32>.self, forKey: .storageIDs))
+    }
 
     var fileExtension: String {
         guard let dot = fileName.lastIndex(of: ".") else { return "" }

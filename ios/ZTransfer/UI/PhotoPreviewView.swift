@@ -98,6 +98,8 @@ struct PhotoPreviewView: View {
         }
         .task(id: files.indices.contains(index) ? files[index].id : 0) {
             guard files.indices.contains(index), !exifLoading else { return }
+            await session.setFHDActive(true)
+            defer { Task { await session.setFHDActive(false) } }
             histogramBars = []
             exifLoading = true
             async let loadedExif = try? session.exif(file: files[index])

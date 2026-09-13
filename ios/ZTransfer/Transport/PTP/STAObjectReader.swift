@@ -134,6 +134,15 @@ actor STAObjectReader {
         return Data()
     }
 
+    /// Header-only EXIF read used by the Android direct STA path. The reader
+    /// grows its bounded prefix cache instead of issuing a fresh full-object
+    /// request for every metadata visit.
+    func exifHeader(handle: UInt32, length: Int) async throws -> Data {
+        let storage = files[handle]?.storageID ?? .max
+        _ = try await file(handle: handle, storage: storage)
+        return try await readPrefix(handle, target: length)
+    }
+
     func invalidate(handle: UInt32) {
         files.removeValue(forKey: handle); names.removeValue(forKey: handle); dates.removeValue(forKey: handle)
         prefixes.removeValue(forKey: handle); prefixOrder.removeAll { $0 == handle }

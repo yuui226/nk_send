@@ -9,7 +9,7 @@ final class DomainModelTests: XCTestCase {
             CameraFile(id: 3, storageID: 1, format: 0x3801, size: 1, fileName: "c.JPG", captureDate: "20260913T020304", isProtected: true),
         ]
         let sections = PhotoCatalogGrouping.byCaptureDay(files)
-        XCTAssertEqual(sections.map(\.day), ["__unknown__", "2026-09-13"])
+        XCTAssertEqual(sections.map(\.day), ["zzz_unknown", "20260913"])
         XCTAssertEqual(sections[1].files.map(\.id), [3, 1])
     }
 

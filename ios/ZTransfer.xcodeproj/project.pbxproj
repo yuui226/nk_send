@@ -11,6 +11,7 @@
 		04FDA089E2E70E83E18527AD /* Np3BitmapFilter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B088B7DE128919633A28EF1C /* Np3BitmapFilter.swift */; };
 		06198A7AC9FA3FCAFFDB49D7 /* RemoteMovieRecording.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FE8BFEAB58818B4214C9EA2 /* RemoteMovieRecording.swift */; };
 		075325CEBC09C41F344985F4 /* STAProfileStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FC4F7B00A76D4F318D10B0E /* STAProfileStore.swift */; };
+		07536DCEAC6F73F298D92823 /* PhotoThumbnailFillQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C2D3F7511237006742926D0 /* PhotoThumbnailFillQueue.swift */; };
 		0E1739467119ADD78EC6FFB0 /* STAResetPairingOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B84B48793ED342FBA1F6D10 /* STAResetPairingOverlay.swift */; };
 		0E6852CA1F77C714DAAF2215 /* GPSView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0D0D8FBAB87B8180493B22E /* GPSView.swift */; };
 		10BA2D27B0425D2A34F982F2 /* RemoteViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B2971CFDD3F6EBEF2ACA1A8 /* RemoteViewModel.swift */; };
@@ -26,6 +27,7 @@
 		37146E4620ABF1EF97E1867F /* STABrowsingSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78B40BD5B460FA10A033F40D /* STABrowsingSession.swift */; };
 		3987F16AD0DE800CDE55D66E /* PhotoCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7AD9D374C7D0C7B45D77B516 /* PhotoCatalog.swift */; };
 		3A016664A1796B9FA1866062 /* TransferQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CC18517971C48594EE448E6 /* TransferQueue.swift */; };
+		3B5B3D5F069C7122B459035C /* PhotoExifStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F0B7C798712246B70C8C2D0 /* PhotoExifStore.swift */; };
 		3C86D76849976090B4967FFB /* PhotoEffectsBatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD45F35C4B19629A11F32A1C /* PhotoEffectsBatch.swift */; };
 		44E63D0E5E2D65EDD52F8A6B /* WiFiConnectionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21F79BF7C97A481859ECB202 /* WiFiConnectionService.swift */; };
 		481FE39822F171E89584DA10 /* great_vibes_regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 3DE23631DD841D16961C9AA6 /* great_vibes_regular.ttf */; };
@@ -74,6 +76,8 @@
 		9F10C7DAAF507D785DEEA476 /* PTPIPDiscoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2ABA708E06D3141226F21A83 /* PTPIPDiscoveryTests.swift */; };
 		9FB6BCCF7460BB0205C907F2 /* STAProfileAndMetadataTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDD66E5D3F4314C6B66ACD88 /* STAProfileAndMetadataTests.swift */; };
 		A08A2BE34D46BA1F3B8655B9 /* PTPIPCodecTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A0253EE3A7C88ECD34EEACC /* PTPIPCodecTests.swift */; };
+		A9C301803E6F049E806AA7ED /* PhotoThumbnailDiskCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0FCBDED0111A21DB70B4D2F /* PhotoThumbnailDiskCache.swift */; };
+		AAACAA44217ABA7685E2353A /* PhotoThumbnailDiskCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1449968BB2DEF0E632E53EAE /* PhotoThumbnailDiskCacheTests.swift */; };
 		AAC92E7A80B4911C1DA5126E /* PhotoListViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21FE65A239E26AF1D7198CF5 /* PhotoListViewModel.swift */; };
 		ABD477B9A99ED0F581232D3F /* AndroidLocalization.swift in Sources */ = {isa = PBXBuildFile; fileRef = E765A10B0340558B3B98D1E1 /* AndroidLocalization.swift */; };
 		AE7CD25C554B94537BE4BE8F /* PhotoEffectsRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61DD1A7868ADB6C35411DA6F /* PhotoEffectsRenderer.swift */; };
@@ -96,6 +100,7 @@
 		D5AA7687642FFB42F491E7E0 /* PTPSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F9983A9D8E56D67C98AA6B4 /* PTPSessionTests.swift */; };
 		D5F4DFE0596F042BD0AA0510 /* RemoteProperty.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B2706E553E4F7C964F686B6 /* RemoteProperty.swift */; };
 		D67D286EED44004960A653F0 /* PTPDataset.swift in Sources */ = {isa = PBXBuildFile; fileRef = D40B340AC13401D86C00C2D8 /* PTPDataset.swift */; };
+		E154245855166665AD2D668E /* PhotoThumbnailStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA5A5EB2EE3C624D2C951974 /* PhotoThumbnailStore.swift */; };
 		E3EBD260373FF0B6C635611E /* PTPIPSocketTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19E7177E4804514D52C91294 /* PTPIPSocketTransport.swift */; };
 		E64F169475A3D51E7C7D15C7 /* LocalPhotoBatchViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9AE1B278336397EAB6029214 /* LocalPhotoBatchViewModel.swift */; };
 		E8FAC959B890B065FF02DED3 /* TransferQueueView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E17D81EDE19E9E8343BD531F /* TransferQueueView.swift */; };
@@ -121,10 +126,12 @@
 /* Begin PBXFileReference section */
 		03D3B6EEC0B03021E23E7B54 /* GPSProtocolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GPSProtocolTests.swift; sourceTree = "<group>"; };
 		0994973567FB60B02328A65F /* PhotoListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoListView.swift; sourceTree = "<group>"; };
+		0C2D3F7511237006742926D0 /* PhotoThumbnailFillQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoThumbnailFillQueue.swift; sourceTree = "<group>"; };
 		0E20FABF2CECBED5A93AB576 /* PTPIPDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PTPIPDiscovery.swift; sourceTree = "<group>"; };
 		0FE8BFEAB58818B4214C9EA2 /* RemoteMovieRecording.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteMovieRecording.swift; sourceTree = "<group>"; };
 		11F6F2458B24ED1BDFC716A4 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		125A2CF683765CC9A3041412 /* RemoteExposureTile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteExposureTile.swift; sourceTree = "<group>"; };
+		1449968BB2DEF0E632E53EAE /* PhotoThumbnailDiskCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoThumbnailDiskCacheTests.swift; sourceTree = "<group>"; };
 		15CE2B24C8F035D7C1826919 /* STABrowsingSessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = STABrowsingSessionTests.swift; sourceTree = "<group>"; };
 		1623B90210C055F71FFFB2FD /* CameraConnectionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraConnectionService.swift; sourceTree = "<group>"; };
 		19E7177E4804514D52C91294 /* PTPIPSocketTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PTPIPSocketTransport.swift; sourceTree = "<group>"; };
@@ -154,6 +161,7 @@
 		4B2971CFDD3F6EBEF2ACA1A8 /* RemoteViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteViewModel.swift; sourceTree = "<group>"; };
 		4C31C90D73DDE407941D9C78 /* CameraSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraSession.swift; sourceTree = "<group>"; };
 		4D246AB34F9D8193AD689AC0 /* STAMediaMetadata.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = STAMediaMetadata.swift; sourceTree = "<group>"; };
+		4F0B7C798712246B70C8C2D0 /* PhotoExifStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoExifStore.swift; sourceTree = "<group>"; };
 		4FC4F7B00A76D4F318D10B0E /* STAProfileStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = STAProfileStore.swift; sourceTree = "<group>"; };
 		538A2FD484D2734CC691DA00 /* ConnectionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionState.swift; sourceTree = "<group>"; };
 		55E5A0EF9EEE6944C08F254E /* ConnectionPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionPage.swift; sourceTree = "<group>"; };
@@ -191,11 +199,13 @@
 		9C82DE7EDD874E138885C18B /* PhotoPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoPreviewView.swift; sourceTree = "<group>"; };
 		9CEBFBB42C89586314B7CDF4 /* CameraRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraRepository.swift; sourceTree = "<group>"; };
 		9E44BD3A96C8965980DD7D9B /* SelectedUSBPTPTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectedUSBPTPTransport.swift; sourceTree = "<group>"; };
+		A0FCBDED0111A21DB70B4D2F /* PhotoThumbnailDiskCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoThumbnailDiskCache.swift; sourceTree = "<group>"; };
 		A685D1B40DF8FD791E95CF20 /* RemoteExposureParameters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteExposureParameters.swift; sourceTree = "<group>"; };
 		B088B7DE128919633A28EF1C /* Np3BitmapFilter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Np3BitmapFilter.swift; sourceTree = "<group>"; };
 		B0D26D7C4F1E5BCB5F08606F /* RemoteFrameParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteFrameParser.swift; sourceTree = "<group>"; };
 		B7580B5DC6E6B426AFDCD70C /* LocalPhotoEffectsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalPhotoEffectsView.swift; sourceTree = "<group>"; };
 		B8E5F0504E1E56C59E21D761 /* ZTransferDesign.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZTransferDesign.swift; sourceTree = "<group>"; };
+		BA5A5EB2EE3C624D2C951974 /* PhotoThumbnailStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoThumbnailStore.swift; sourceTree = "<group>"; };
 		BA7454E422D1473CC4E740CD /* AsyncDeadline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsyncDeadline.swift; sourceTree = "<group>"; };
 		BDD66E5D3F4314C6B66ACD88 /* STAProfileAndMetadataTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = STAProfileAndMetadataTests.swift; sourceTree = "<group>"; };
 		C03DEDD0C14571253802D484 /* SettingsPopupOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsPopupOverlay.swift; sourceTree = "<group>"; };
@@ -263,6 +273,7 @@
 			children = (
 				61F577AFF70C53D32A99AB7B /* ConnectionStateTests.swift */,
 				9165B39E86D240D0CAB4F2F0 /* DomainModelTests.swift */,
+				1449968BB2DEF0E632E53EAE /* PhotoThumbnailDiskCacheTests.swift */,
 				25DA65AB7E6B869A2B7A6F7B /* RemoteExposureParametersTests.swift */,
 			);
 			path = ZTransferTests;
@@ -343,9 +354,13 @@
 				DD45F35C4B19629A11F32A1C /* PhotoEffectsBatch.swift */,
 				61DD1A7868ADB6C35411DA6F /* PhotoEffectsRenderer.swift */,
 				8FFDE9BAC912EED3139672E5 /* PhotoExif.swift */,
+				4F0B7C798712246B70C8C2D0 /* PhotoExifStore.swift */,
 				DE7320E831B92FDF16C5A2A8 /* PhotoFilter.swift */,
 				D961B6709BEFEB665F1D0932 /* PhotoFrameTextLayout.swift */,
 				21FE65A239E26AF1D7198CF5 /* PhotoListViewModel.swift */,
+				A0FCBDED0111A21DB70B4D2F /* PhotoThumbnailDiskCache.swift */,
+				0C2D3F7511237006742926D0 /* PhotoThumbnailFillQueue.swift */,
+				BA5A5EB2EE3C624D2C951974 /* PhotoThumbnailStore.swift */,
 				7C8D85042F86E7CE49C16BF8 /* PTPIPDiscoveryService.swift */,
 				4206A8EDAC8C835E874251CB /* RemoteDisplayOptions.swift */,
 				A685D1B40DF8FD791E95CF20 /* RemoteExposureParameters.swift */,
@@ -588,6 +603,7 @@
 				D5AA7687642FFB42F491E7E0 /* PTPSessionTests.swift in Sources */,
 				501B9EDBF24732451874BB1D /* PhotoEffectsBatchTests.swift in Sources */,
 				28B3F74FF921D952492C8C1C /* PhotoFrameTextLayoutTests.swift in Sources */,
+				AAACAA44217ABA7685E2353A /* PhotoThumbnailDiskCacheTests.swift in Sources */,
 				5AC62E28F7193D5C5D250853 /* RemoteExposureParametersTests.swift in Sources */,
 				73A0B84A67659AC4209F4A8F /* RemoteExposureTests.swift in Sources */,
 				946D307C7E78C2701BC6151F /* RemoteRecordingTests.swift in Sources */,
@@ -641,12 +657,16 @@
 				993DCFA6B1D01106479A25F3 /* PhotoEffectsEditorView.swift in Sources */,
 				AE7CD25C554B94537BE4BE8F /* PhotoEffectsRenderer.swift in Sources */,
 				C2B1F15D120EECDFE3C148D6 /* PhotoExif.swift in Sources */,
+				3B5B3D5F069C7122B459035C /* PhotoExifStore.swift in Sources */,
 				CCC3F71A5AF4D6584D1FC2EE /* PhotoFilter.swift in Sources */,
 				5CB1D72BEF5ABC8FDAB563A0 /* PhotoFilterSheet.swift in Sources */,
 				C3B0EBF639B834E335A187A5 /* PhotoFrameTextLayout.swift in Sources */,
 				9D3DFDDB82CBADF50CC379C5 /* PhotoListView.swift in Sources */,
 				AAC92E7A80B4911C1DA5126E /* PhotoListViewModel.swift in Sources */,
 				FB665603737D98CF66B03FD9 /* PhotoPreviewView.swift in Sources */,
+				A9C301803E6F049E806AA7ED /* PhotoThumbnailDiskCache.swift in Sources */,
+				07536DCEAC6F73F298D92823 /* PhotoThumbnailFillQueue.swift in Sources */,
+				E154245855166665AD2D668E /* PhotoThumbnailStore.swift in Sources */,
 				86ED54F4E3D196FAF34BBC0C /* RemoteDisplayOptions.swift in Sources */,
 				7C742388BB5952231E42CDB4 /* RemoteExposureParameters.swift in Sources */,
 				4EC9985B073E184DC416ADE7 /* RemoteExposureTile.swift in Sources */,

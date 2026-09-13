@@ -69,7 +69,7 @@ struct RootView: View {
     var body: some View {
         Group {
             if let session = connectionModel.cameraSession {
-                PhotoListView(session: session, queue: transferQueue, directory: directoryStore) {
+                PhotoListView(session: session, queue: transferQueue, directory: directoryStore, effectsStore: effectsStore) {
                     Task { await connectionModel.disconnectCamera() }
                 }
             } else {

@@ -62,6 +62,21 @@
 
 ## 安卓对照资料
 
+照片列表的加载顺序、扫描代际、取消/暂停恢复、缩略图内存与磁盘缓存、后台填充队列、清理和对账规则已单独整理在
+[安卓照片列表加载与缓存策略-复刻基线](./安卓照片列表加载与缓存策略-复刻基线.md)。实现照片列表相关任务前必须先按该文档核对 `CameraViewModel.loadFiles`、`ThumbnailDiskCache` 和 `ThumbnailFillQueue`，并在任务记录中补充对应的 iOS 代码位置和验证证据。
+
+### 2026-09-13 照片列表加载基线落地（进行中）
+
+- 新增详细对照文档：`docs/技术调研/安卓照片列表加载与缓存策略-复刻基线.md`。文档记录了 `loadFiles` 的 18 步顺序、generation 与同相机快照恢复、STA `DEVICE_BUSY` 重试、12 项批次发布、双卡逻辑去重、缩略图 LRU/in-flight/负缓存、后台填充队列、相机级磁盘缓存、90 天清理、成功扫描后的 reconcile，以及 FHD/EXIF/效果预览让路规则和安卓源码位置。
+- iOS `PhotoListViewModel` 已先落地扫描状态骨架：每轮递增 generation，取消旧任务，按安卓 `FILE_THUMBNAIL_PIPELINE_BATCH_SIZE=12` 原子发布批次，批次间 `Task.yield()` 让界面渐进更新；旧任务不能覆盖新一轮，失败保留已发布文件，不把不完整扫描当成空列表。
+- 新增 `ios/ZTransfer/Domain/PhotoThumbnailDiskCache.swift`：按相机身份 SHA-256 分目录，普通/STA 句柄键、旧键迁移、原子临时写入、非空校验、90 天相机目录清理和完整扫描后 reconcile。
+- 验证：`xcodebuild -project ios/ZTransfer.xcodeproj -scheme ZTransfer -sdk iphonesimulator -configuration Debug CODE_SIGNING_ALLOWED=NO build` 成功。尚未进行真实相机扫描、缓存命中/迁移/清理测试或真机验收；任务状态保持进行中。
+- 新增 `ios/ZTransferTests/PhotoThumbnailDiskCacheTests.swift` 覆盖键稳定性、写入/读取、非空文件和成功扫描后的 reconcile；执行 Xcode 测试时被工程既有的 `ios/ProtocolTests/PTPIPDiscoveryTests.swift` 对 `ZTransferProtocol` 模块依赖阻断，未声称测试通过，待统一修复测试 target 依赖后重跑。
+- `CameraSession.thumbnail(file:)` 已接入 `PhotoThumbnailStore`，列表缩略图现在按安卓顺序查找内存、负缓存、相机磁盘并共享同文件的进行中请求，最后一个等待者取消时会取消底层请求；成功结果写回磁盘。缺少稳定机身序列号时会放弃持久化缓存，避免不同相机串缓存。STA 直读使用 `sta + handle + size` 专用键，普通键仍支持迁移；`prefetchThumbnail` 已接入扫描批次，并按安卓顺序逐项预取新加入列表的文件。仍缺真实相机验证和系统错误码映射。
+- 日期分组已纠正为安卓使用的原始 `YYYYMMDD` 键和 `zzz_unknown` 未知日期键；渲染时才格式化为 `YYYY-MM-DD`，避免折叠状态、未知日期排序和筛选键与安卓分叉。对应 `PhotoCatalog.swift`、`PhotoListView.swift` 及 `DomainModelTests`。
+- `CameraRepository.loadCatalog(onBatch:)` 与 `CameraSession.scanCatalog(onBatch:)` 已把元数据结果按 12 项边界流出；批次回调是可挂起的，`PhotoListViewModel` 在每批发布后逐项执行 `prefetchThumbnail`，因此相机扫描会等待本批预取完成再读取下一批。每批发布前检查 generation/取消，扫描完成后才置 `hasCompletedFileScan`。StorageID/句柄快照、双卡 logicalIdentity 去重和 STA 直读专用缓存键仍待下一阶段接入。
+- 流式扫描后的模拟器 Debug 构建再次成功；Xcode 测试仍受既有 `ZTransferProtocol` target 缺失阻断，未把测试结果记为通过。
+
 实现每项功能前先阅读对应安卓入口和状态来源，记录到提交说明中：
 
 - 连接与 PTP：`app/src/main/java/com/ztransfer/protocol/`、`CameraViewModel.kt`、`TransferViewModel.kt`
@@ -432,4 +447,30 @@
 - 已对齐后台行为：事件通道 PING/PONG、ObjectAdded/ObjectRemoved、GetEventEx→GetEvent 回退、2 秒事件轮询、10 秒 handles 对账、DeviceBusy 750ms×2、空闲 GetStorageIDs 保活，以及直接读取模式下的缩略图/预览/元数据/文件名日期回退。
 - 连接页 STA 的指引、帮助弹层、重置配对、热点设置和状态文案均从安卓多语言资源读取；iOS 热点设置使用系统设置入口作为平台等价动作，不新增业务文案。
 - 验证：`ZTRANSFER_PROTOCOL_ONLY=1 swift test --package-path ios`，60 tests、0 failures；全量 iOS Swift 6/iOS 16 simulator 类型检查通过，仅保留既有 `Np3BitmapFilter.swift` 非 Sendable 警告。尚未进行 STA 真机链路验收，未将总任务标记完成。
+
+### 2026-09-13 照片列表顶栏挂载修正（进行中）
+
+- 安卓 `FileListScreen` 的悬浮顶栏按源码核对为：双 Z 设置入口、信号按钮（可展开信号详情）、类型筛选入口，以及由宿主持有的传输执行按钮和队列胶囊；照片预览时整组按安卓规则退场。
+- iOS 原先把控件写在 `.toolbar` 中但页面没有 `NavigationStack`，导致真机照片列表只显示内容、所有顶栏控件都被 SwiftUI 丢弃。现改为页面内悬浮顶栏，内容顶部留白与安卓 `topInset + 54.dp` 策略对齐，设置入口连接到已有 `SettingsPopupOverlay`，筛选/队列动作沿已有模型执行。
+- 验证：`xcodebuild ... -sdk iphonesimulator ... build` 成功；Debug 真机脚本生成并安装 `dist-debug-ios/ZTransfer-ios-debug-1.82-20260913-211431.app`，镜像确认连接页重启正常。需重新连接 STA 后继续核对照片页顶栏与队列状态动画。
 - 构建脚本验证：`dist-debug-ios/build.command` 已成功签名、通过局域网 CoreDevice 安装并启动 `ZTransfer-ios-debug-1.82-20260913-210322.app`；脚本现在接受已配对但尚未建立隧道的无线设备，并在无设备时跳过安装而不再无限等待。
+
+### 2026-09-13 照片列表扫描/缓存链路继续对齐（进行中）
+
+- `CameraRepository.scanCatalog` 已拆出安卓同等的扫描结果与可恢复快照：按 StorageIDs → 每卡 ObjectHandles → 每卡反转为新到旧 → 12 条元数据批次；回调完成后才继续读取下一批。
+- 增加 `preserveExisting`、`detectNewHandles`、已处理 handle 集合和完整扫描标志；刷新时只删除完整 handles 快照确认缺失的对象，取消/断线保留未完成快照，避免把失败误判为空卡。
+- `PhotoListViewModel` 刷新改为保留现有行并应用 added/removed 差量；每批发布后逐项预取，结果进入 `PhotoThumbnailFillQueue` 的 pending/failed/settled 集合。
+- 缩略图缓存补齐 STA direct 的 `sta + handle + size` 键、标准键迁移、相机目录隔离、90 天清理和仅完整权威扫描后的 reconcile；后台读取增加单 permit gate，避免并发淹没 PTP 通道。
+- 验证：iOS Simulator Debug `xcodebuild ... build` 成功；`ZTRANSFER_PROTOCOL_ONLY=1 swift test --package-path ios` 通过 60 tests、0 failures。全量 Xcode 领域测试 target 仍受既有 `ios/ProtocolTests/PTPIPDiscoveryTests.swift` 无法解析 `ZTransferProtocol` 的配置阻断；未声称真机扫描、缓存命中率或取消时序已验收。
+- 仍待补齐：安卓可见缩略图“最后等待者取消”精确语义、FHD/远程/效果预览对扫描与后台填充的抢占恢复、STA direct 双卡成员合并与 raw/video 特殊预取、真实相机断线恢复回归。
+- 本轮新增 `CameraRepository.setFHDActive`：扫描在下一条元数据读取前让出通道，预览结束后继续同一快照；`PhotoPreviewView` 在 FHD/EXIF 任务期间负责成对设置和释放该状态。RAW/视频的 STA direct 预取已改为惰性处理。上述行为已通过模拟器编译，仍需真机时序验证。
+- 完整扫描进入 loaded 后，iOS 以后台补漏任务仅对缓存未命中的文件再次走同一预取入口；命中项只做磁盘索引检查，失败项进入队列 failed 集合，外部重试再重新入队，避免扫描阶段的瞬时失败造成永久缺图。
+- 队列在筛选日期范围变化时按范围重排并唤醒失败项；相机事件产生新文件时插入队首并启动 worker，删除事件同步移除 pending/failed/settled，和安卓的 wake/retry/remove 分支保持同样的触发点。
+- 多卡读取已改为每卡保持一个 metadata head，按 captureDate 从新到旧动态选择下一项；列表顺序由扫描顺序数组保存，不再从 Dictionary 随机值恢复，刷新和事件更新也保持原有显示顺序。
+- `CameraFile` 新增兼容的 `storageIDs` 归属集合，旧持久化数据缺少该字段时回退为单一 `storageID`；双卡同名/同大小/同拍摄时间对象合并归属，卡槽筛选和卡槽选项读取集合，避免误删逻辑照片。
+- 修正权威空卡/拔卡刷新：完整 handles 快照确认移除时同时从稳定顺序、显示行和索引表删除，失败或中断的查询仍不会清空旧列表。
+- ObjectHandles 查询现在保留响应级失败状态：STA 按安卓 750ms、最多 3 次 DeviceBusy 重试并在仍失败时交给重连；非 STA 保留已显示列表、将本轮标为不完整并跳过权威缓存对账，不把一次失败误判为新空卡。
+- StorageIDs 的非 STA 异常与安卓一致映射为空结果，进入“无可用存储”完成分支；该分支清除已确认的旧句柄但返回不可对账标志，避免把异常响应当成可授权的空相机缓存。
+- 预览抢占已接入列表生命周期：打开 FHD 预览时取消当前 metadata scan、保留已发布文件和 snapshot；预览关闭后按原有 `preserveExisting + resumeSnapshot` 继续，不重新从头枚举。
+- 新扫描会清空 iOS 内存缩略图与负缓存但保留磁盘缓存；后台填充和批次预取在远程、前台读取或 FHD 状态激活时让路，避免把扫描阶段误判为可并行填充。
+- EXIF 已按安卓 `loadExif` 接入独立会话缓存：键为 `fileName_size_captureDate`，null、非图片扩展名和确认解析失败进入负缓存；JPEG 读取 128 KiB，NEF/NRW/TIFF 读取最多 2 MiB。STA direct 通过 `STAObjectReader` 的 bounded prefix 缓存复用头部读取；光圈 APEX 回退、快门/ISO/曝光补偿/焦距/日期/GPS 的格式与安卓字段顺序对齐。传输错误和取消不会写入负缓存。
