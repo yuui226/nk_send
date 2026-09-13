@@ -46,15 +46,25 @@ enum PhotoEffectsRenderer {
             image.draw(in: CGRect(x: border, y: border, width: size.width, height: size.height))
             guard settings.watermark.enabled else { return }
             let watermarkConfig = settings.watermark.normalized(borderEnabled: settings.photoFrameEnabled && settings.photoFrameBorderEnabled)
+            if watermarkConfig.content == .image,
+               let hash = watermarkConfig.imageHash,
+               let watermarkImage = PhotoEffectsStore.watermarkImage(hash: hash) {
+                let targetHeight = min(size.width, size.height) * watermarkImageSizeFraction(watermarkConfig.sizePercent)
+                let scale = targetHeight / max(watermarkImage.size.height, 1)
+                let imageSize = CGSize(width: watermarkImage.size.width * scale, height: watermarkImage.size.height * scale)
+                let imageOrigin = watermarkImageOrigin(position: watermarkConfig.position, canvas: canvas, border: border, imageSize: imageSize)
+                watermarkImage.draw(in: CGRect(origin: imageOrigin, size: imageSize), blendMode: .normal, alpha: CGFloat(watermarkConfig.opacityPercent) / 100)
+                return
+            }
             let watermark = watermarkConfig.displayText
+            let font = watermarkFont(for: watermarkConfig.font, size: max(12, min(size.width, size.height) * CGFloat(settings.watermark.sizePercent) / 1000))
             let point = watermarkOrigin(
                 position: watermarkConfig.position,
                 canvas: canvas,
                 border: border,
                 text: watermark,
-                fontSize: max(12, min(size.width, size.height) * CGFloat(settings.watermark.sizePercent) / 1000),
+                font: font,
             )
-            let font = UIFont.systemFont(ofSize: point.fontSize, weight: watermarkConfig.font == .bold ? .bold : .regular)
             let color: UIColor = switch watermarkConfig.color {
             case .black: .black
             case .white: .white
@@ -75,6 +85,44 @@ enum PhotoEffectsRenderer {
         }
     }
 
+    private static func watermarkImageOrigin(position: PhotoFrameWatermarkPosition, canvas: CGSize, border: CGFloat, imageSize: CGSize) -> CGPoint {
+        let photo = CGRect(x: border, y: border, width: canvas.width - border * 2, height: canvas.height - border * 2)
+        let inset = min(photo.width, photo.height) * 0.04
+        if position.isPhotoPlacement {
+            let x: CGFloat = switch position {
+            case .photoTopLeft, .photoBottomLeft: photo.minX + inset
+            case .photoTopRight, .photoBottomRight: photo.maxX - inset - imageSize.width
+            default: photo.midX - imageSize.width / 2
+            }
+            let y: CGFloat = switch position {
+            case .photoTopLeft, .photoTopCenter, .photoTopRight: photo.minY + inset
+            case .photoCenter: photo.midY - imageSize.height / 2
+            default: photo.maxY - inset - imageSize.height
+            }
+            return CGPoint(x: x, y: y)
+        }
+        let x: CGFloat
+        switch position {
+        case .left, .photoTopLeft, .photoBottomLeft: x = border + 12
+        case .right, .photoTopRight, .photoBottomRight: x = canvas.width - border - imageSize.width - 12
+        default: x = (canvas.width - imageSize.width) / 2
+        }
+        let y: CGFloat
+        switch position {
+        case .photoTopLeft, .photoTopCenter, .photoTopRight: y = border + 12
+        case .photoCenter: y = (canvas.height - imageSize.height) / 2
+        default: y = canvas.height - border - imageSize.height - 12
+        }
+        return CGPoint(x: max(8, x), y: max(8, y))
+    }
+
+    private static func watermarkImageSizeFraction(_ value: Int) -> CGFloat {
+        let p = CGFloat(min(max(value, 2), 100))
+        if p <= 47 { return 0.035 * p / 47 }
+        if p <= 69 { return 0.035 + (p - 47) / 22 * (0.052 - 0.035) }
+        return 0.052 + (p - 69) / 31 * (0.075 - 0.052)
+    }
+
     private static func frameColor(for preset: PhotoFramePreset) -> UIColor {
         switch preset {
         case .cinema, .immersive, .colorArchive: UIColor(white: 0.07, alpha: 1)
@@ -84,8 +132,9 @@ enum PhotoEffectsRenderer {
         }
     }
 
-    private static func watermarkOrigin(position: PhotoFrameWatermarkPosition, canvas: CGSize, border: CGFloat, text: String, fontSize: CGFloat) -> (origin: CGPoint, fontSize: CGFloat) {
-        let width = (text as NSString).size(withAttributes: [.font: UIFont.systemFont(ofSize: fontSize)]).width
+    private static func watermarkOrigin(position: PhotoFrameWatermarkPosition, canvas: CGSize, border: CGFloat, text: String, font: UIFont) -> (origin: CGPoint, fontSize: CGFloat) {
+        let fontSize = font.pointSize
+        let width = (text as NSString).size(withAttributes: [.font: font]).width
         let imageTop = border, imageBottom = canvas.height - border
         let y: CGFloat
         switch position {
@@ -104,6 +153,18 @@ enum PhotoEffectsRenderer {
         }
         return (CGPoint(x: max(8, x), y: max(8, y - fontSize)), fontSize)
     }
+
+    private static func watermarkFont(for style: PhotoFrameWatermarkFont, size: CGFloat) -> UIFont {
+        let name: String? = switch style {
+        case .signature: "GreatVibes-Regular"
+        case .elegant: "CormorantGaramond-MediumItalic"
+        case .calligraphy: "BebasNeue-Regular"
+        case .simple: nil
+        case .bold: nil
+        }
+        if let name, let font = UIFont(name: name, size: size) { return font }
+        return UIFont.systemFont(ofSize: size, weight: style == .bold ? .bold : .regular)
+    }
 }
 
 private extension PhotoFrameWatermark {
@@ -117,6 +178,16 @@ private extension PhotoFrameWatermark {
         default: break
         }
         return value
+    }
+}
+
+private extension PhotoFrameWatermarkPosition {
+    var isPhotoPlacement: Bool {
+        switch self {
+        case .photoTopLeft, .photoTopCenter, .photoTopRight, .photoCenter,
+             .photoBottomLeft, .photoBottomCenter, .photoBottomRight: return true
+        default: return false
+        }
     }
 }
 

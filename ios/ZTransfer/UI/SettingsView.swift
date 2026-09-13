@@ -2,7 +2,6 @@ import SwiftUI
 import UIKit
 
 struct SettingsView: View {
-    @Environment(\.dismiss) private var dismiss
     @ObservedObject private var directory: DirectoryAccessStore
     @ObservedObject private var effectsStore: PhotoEffectsStore
     @State private var showingPicker = false
@@ -21,35 +20,57 @@ struct SettingsView: View {
     @AppStorage("skinPreset") private var skinPreset = "毛玻璃"
 
     var showPhotoEffectsEntry: Bool = true
+    var onClose: (() -> Void)? = nil
 
-    init(showPhotoEffectsEntry: Bool = true, effectsStore: PhotoEffectsStore = PhotoEffectsStore(), directory: DirectoryAccessStore = DirectoryAccessStore()) {
+    init(showPhotoEffectsEntry: Bool = true, effectsStore: PhotoEffectsStore = PhotoEffectsStore(), directory: DirectoryAccessStore = DirectoryAccessStore(), onClose: (() -> Void)? = nil) {
         self.showPhotoEffectsEntry = showPhotoEffectsEntry
+        self.onClose = onClose
         _effectsStore = ObservedObject(wrappedValue: effectsStore)
         _directory = ObservedObject(wrappedValue: directory)
     }
 
     var body: some View {
-        NavigationStack {
+        VStack(spacing: 0) {
+            header
             ScrollView {
-                VStack(spacing: 8) {
+                VStack(spacing: 10) {
                     directoryCard
                     listCard
-                    appearanceCard
                     if showPhotoEffectsEntry { photoEffectsCard }
+                    appearanceCard
                     footer
                 }
-                .padding(.horizontal, ZTransferMetrics.pageHorizontal)
-                .padding(.vertical, 14)
-            }
-            .background(ZTransferColors.background.ignoresSafeArea())
-            .navigationTitle("设置")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarLeading) { Button(action: { dismiss() }) { Image(systemName: "chevron.left") } } }
-            .sheet(isPresented: $showingPicker) { DirectoryPicker { url in directory.setDirectory(url); showingPicker = false } }
-            .sheet(isPresented: $showingEffectsEditor) {
-                PhotoEffectsEditorView(initial: effectsStore.settings) { effectsStore.update($0); showingEffectsEditor = false }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 14)
             }
         }
+        .background(ZTransferGlassSurface(cornerRadius: 26, kind: .connection))
+        .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous).stroke(ZTransferColors.primaryText.opacity(0.16), lineWidth: 1))
+        .sheet(isPresented: $showingPicker) { DirectoryPicker { url in directory.setDirectory(url); showingPicker = false } }
+        .sheet(isPresented: $showingEffectsEditor) {
+            PhotoEffectsEditorView(initial: effectsStore.settings) { effectsStore.update($0); showingEffectsEditor = false }
+        }
+    }
+
+    private var header: some View {
+        HStack(spacing: 12) {
+            Text("设置").zTransferText(size: 28, weight: .bold)
+            Button { feedbackHint = true } label: {
+                Image(systemName: "lightbulb.fill").font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(ZTransferColors.accentOrange)
+            }.buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 18)).frame(width: 48, height: 48)
+            Spacer()
+            Button("续费") { }.buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 20)).frame(width: 58, height: 40)
+            Text("高级版").zTransferTypography(.labelLarge, weight: .bold)
+                .foregroundStyle(.black).frame(width: 82, height: 40)
+                .background(Color.yellow.opacity(0.75), in: Capsule())
+            Button { onClose?() } label: {
+                Image(systemName: "xmark").font(.system(size: 25, weight: .medium))
+                    .foregroundStyle(ZTransferColors.secondaryText)
+            }.buttonStyle(.plain).frame(width: 48, height: 48)
+        }
+        .padding(.horizontal, 22).padding(.top, 16).padding(.bottom, 10)
     }
 
     private var directoryCard: some View {
@@ -133,8 +154,10 @@ struct SettingsView: View {
 
     private var footer: some View {
         HStack {
-            Text("Z传 v\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.82")").zTransferText(size: ZTransferMetrics.caption)
+            Text("Z传 v\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.82")").zTransferTypography(.labelSmall, weight: .semibold)
             Spacer()
+            Button("检查更新") { }
+            Button("我要换机") { }
             Button("反馈") { UIPasteboard.general.string = "953000922"; feedbackHint = true }
         }
         .font(.system(size: ZTransferMetrics.caption, weight: .semibold))

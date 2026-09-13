@@ -1,4 +1,25 @@
 import SwiftUI
+import UIKit
+
+/// Android ui/theme/Type.kt. Keep type size and line height together so the
+/// same role wraps and aligns consistently across cards, tabs and buttons.
+struct ZTransferTypography {
+    let size: CGFloat
+    let lineHeight: CGFloat
+    static let titleMedium = Self(size: 16, lineHeight: 24)
+    static let bodySmall = Self(size: 12, lineHeight: 16)
+    static let labelLarge = Self(size: 14, lineHeight: 20)
+    static let labelSmall = Self(size: 10, lineHeight: 14)
+}
+
+extension View {
+    func zTransferTypography(_ token: ZTransferTypography, weight: Font.Weight = .medium) -> some View {
+        let extraLeading = max(0, token.lineHeight - UIFont.systemFont(ofSize: token.size).lineHeight)
+        return font(.system(size: token.size, weight: weight))
+            .lineSpacing(extraLeading)
+            .padding(.vertical, extraLeading / 2)
+    }
+}
 
 enum ZTransferMetrics {
     static let pageHorizontal: CGFloat = 24

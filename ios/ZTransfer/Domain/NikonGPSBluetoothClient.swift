@@ -1,4 +1,4 @@
-import CoreBluetooth
+@preconcurrency import CoreBluetooth
 import Combine
 import Foundation
 
@@ -157,7 +157,7 @@ final class NikonGPSBluetoothClient: NSObject, ObservableObject {
 
 extension NikonGPSBluetoothClient: CBCentralManagerDelegate {
     nonisolated func centralManagerDidUpdateState(_ central: CBCentralManager) {
-        Task { @MainActor [weak self] in
+        MainActor.assumeIsolated { [weak self] in
             guard let self else { return }
             if central.state == .poweredOn { self.start() } else { self.state = .unavailable }
         }
@@ -165,7 +165,7 @@ extension NikonGPSBluetoothClient: CBCentralManagerDelegate {
 
     nonisolated func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral,
                                     advertisementData: [String: Any], rssi RSSI: NSNumber) {
-        Task { @MainActor [weak self] in
+        MainActor.assumeIsolated { [weak self] in
             guard let self else { return }
             self.central.stopScan(); self.peripheral = peripheral; self.peripheralIdentifier = peripheral.identifier
             self.state = .connecting(peripheral.name ?? "Nikon")
@@ -174,11 +174,11 @@ extension NikonGPSBluetoothClient: CBCentralManagerDelegate {
     }
 
     nonisolated func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
-        Task { @MainActor in peripheral.discoverServices([Self.serviceUUID]) }
+        MainActor.assumeIsolated { peripheral.discoverServices([Self.serviceUUID]) }
     }
 
     nonisolated func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
-        Task { @MainActor [weak self] in
+        MainActor.assumeIsolated { [weak self] in
             guard let self, self.peripheral?.identifier == peripheral.identifier else { return }
             self.clearConnectionState(); self.state = error.map { .failed($0.localizedDescription) } ?? .disconnected
         }
@@ -187,7 +187,7 @@ extension NikonGPSBluetoothClient: CBCentralManagerDelegate {
 
 extension NikonGPSBluetoothClient: CBPeripheralDelegate {
     nonisolated func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
-        Task { @MainActor [weak self] in
+        MainActor.assumeIsolated { [weak self] in
             guard let self, error == nil, let service = peripheral.services?.first(where: { $0.uuid == Self.serviceUUID }) else { self?.state = .failed("Camera GPS service unavailable"); return }
             self.state = .connecting(peripheral.name ?? "Nikon")
             peripheral.discoverCharacteristics([Self.pairUUID, Self.not1UUID, Self.idUUID, Self.geoUUID], for: service)
@@ -195,7 +195,7 @@ extension NikonGPSBluetoothClient: CBPeripheralDelegate {
     }
 
     nonisolated func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
-        Task { @MainActor [weak self] in
+        MainActor.assumeIsolated { [weak self] in
             guard let self, error == nil else { self?.state = .failed("Camera GPS service unavailable"); return }
             for characteristic in service.characteristics ?? [] {
                 switch characteristic.uuid {
@@ -218,7 +218,7 @@ extension NikonGPSBluetoothClient: CBPeripheralDelegate {
     }
 
     nonisolated func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?) {
-        Task { @MainActor [weak self] in
+        MainActor.assumeIsolated { [weak self] in
             guard let self, error == nil, characteristic.isNotifying else {
                 self?.state = .failed("Camera GPS notification unavailable")
                 return
@@ -229,14 +229,14 @@ extension NikonGPSBluetoothClient: CBPeripheralDelegate {
     }
 
     nonisolated func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
-        Task { @MainActor [weak self] in
+        MainActor.assumeIsolated { [weak self] in
             guard let self, error == nil, let value = characteristic.value else { return }
             if characteristic.uuid == Self.pairUUID { self.handlePairingValue(value, peripheral: peripheral) }
         }
     }
 
     nonisolated func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
-        Task { @MainActor [weak self] in
+        MainActor.assumeIsolated { [weak self] in
             guard let self else { return }
             self.writeInFlight = false
             if !self.writeQueue.isEmpty { self.writeQueue.removeFirst() }

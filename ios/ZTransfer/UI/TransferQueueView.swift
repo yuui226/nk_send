@@ -27,8 +27,7 @@ struct TransferQueueView: View {
             ZStack {
                 ZTransferColors.background.ignoresSafeArea()
                 if model.snapshot.items.isEmpty {
-                    DoubleZMark()
-                        .fill(ZTransferColors.secondaryText.opacity(0.45))
+                    DoubleZMark(tint: ZTransferColors.secondaryText.opacity(0.45))
                         .frame(width: 74, height: 58)
                 } else {
                     ScrollView {

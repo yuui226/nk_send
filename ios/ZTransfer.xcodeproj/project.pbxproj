@@ -13,6 +13,7 @@
 		0E6852CA1F77C714DAAF2215 /* GPSView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0D0D8FBAB87B8180493B22E /* GPSView.swift */; };
 		10BA2D27B0425D2A34F982F2 /* RemoteViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B2971CFDD3F6EBEF2ACA1A8 /* RemoteViewModel.swift */; };
 		16939A4A3006E233A957DD0E /* PTPDatasetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF061766E1A0B9F3060190ED /* PTPDatasetTests.swift */; };
+		16B7898C274ABFF0A370585B /* ZTransferGlassSurface.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2B51C2A8D807D8A9CA21F9E /* ZTransferGlassSurface.swift */; };
 		171B3B7D9317366D04867322 /* CameraConnectionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1623B90210C055F71FFFB2FD /* CameraConnectionService.swift */; };
 		20AAC3573791D9D583C064FF /* ZTransferApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECDEA795752767FBE8FFC99F /* ZTransferApp.swift */; };
 		2168F57038D1C9802791EAB7 /* Np3FilterEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCD67906893DA353A437E6A3 /* Np3FilterEngineTests.swift */; };
@@ -27,6 +28,7 @@
 		4E6912D45117355E97EA8583 /* CameraRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CEBFBB42C89586314B7CDF4 /* CameraRepository.swift */; };
 		4EC9985B073E184DC416ADE7 /* RemoteExposureTile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 125A2CF683765CC9A3041412 /* RemoteExposureTile.swift */; };
 		501B9EDBF24732451874BB1D /* PhotoEffectsBatchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3010D83FAA873246AAC42FCF /* PhotoEffectsBatchTests.swift */; };
+		52A7DDD67094B569E011911C /* ConnectionMethodCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = C94CCD158034CC3AA6E8F2F0 /* ConnectionMethodCard.swift */; };
 		53050A00F15AA49DE998807E /* RemoteView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2482C61B58C4A4EE95210CDA /* RemoteView.swift */; };
 		5847B86DF637C69FB7A9E604 /* Np3FilterEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = F372F3899BF36619208BF340 /* Np3FilterEngine.swift */; };
 		5AC62E28F7193D5C5D250853 /* RemoteExposureParametersTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25DA65AB7E6B869A2B7A6F7B /* RemoteExposureParametersTests.swift */; };
@@ -52,6 +54,7 @@
 		86ED54F4E3D196FAF34BBC0C /* RemoteDisplayOptions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4206A8EDAC8C835E874251CB /* RemoteDisplayOptions.swift */; };
 		873A6B7B39D069D290ECD832 /* DetentWheel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDDA62402A7BB9E32721C7D4 /* DetentWheel.swift */; };
 		890FF18E8A13644E81F3779B /* RemoteState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CF51538A02F76ECB294979E /* RemoteState.swift */; };
+		8D6DA87271A2A18C83AAC752 /* GPSConnectionControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A212849FDB757B232CE3700 /* GPSConnectionControl.swift */; };
 		8FB26966AAE2721DCF13FEF9 /* GPSProtocolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03D3B6EEC0B03021E23E7B54 /* GPSProtocolTests.swift */; };
 		92B56B6C3692F4CAA4989934 /* PTPSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 615EEFA9D6159AC37C5A31C7 /* PTPSession.swift */; };
 		946D307C7E78C2701BC6151F /* RemoteRecordingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF9539324F4DB53B0B922D67 /* RemoteRecordingTests.swift */; };
@@ -72,12 +75,14 @@
 		CCC3F71A5AF4D6584D1FC2EE /* PhotoFilter.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE7320E831B92FDF16C5A2A8 /* PhotoFilter.swift */; };
 		CDA839B3BA3291E7FA00F976 /* Np3FilterCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66B121CC0D58A97AD69EEF11 /* Np3FilterCatalog.swift */; };
 		D08D5FC66C3B90DDD388F961 /* SelectedUSBPTPTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E44BD3A96C8965980DD7D9B /* SelectedUSBPTPTransport.swift */; };
+		D48305D06926CD24336DAFA5 /* ConnectionPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55E5A0EF9EEE6944C08F254E /* ConnectionPage.swift */; };
 		D5AA7687642FFB42F491E7E0 /* PTPSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F9983A9D8E56D67C98AA6B4 /* PTPSessionTests.swift */; };
 		D5F4DFE0596F042BD0AA0510 /* RemoteProperty.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B2706E553E4F7C964F686B6 /* RemoteProperty.swift */; };
 		D67D286EED44004960A653F0 /* PTPDataset.swift in Sources */ = {isa = PBXBuildFile; fileRef = D40B340AC13401D86C00C2D8 /* PTPDataset.swift */; };
 		E3EBD260373FF0B6C635611E /* PTPIPSocketTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19E7177E4804514D52C91294 /* PTPIPSocketTransport.swift */; };
 		E64F169475A3D51E7C7D15C7 /* LocalPhotoBatchViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9AE1B278336397EAB6029214 /* LocalPhotoBatchViewModel.swift */; };
 		E8FAC959B890B065FF02DED3 /* TransferQueueView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E17D81EDE19E9E8343BD531F /* TransferQueueView.swift */; };
+		EA2A5E73813646829194CCFC /* SettingsPopupOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = C03DEDD0C14571253802D484 /* SettingsPopupOverlay.swift */; };
 		EAA5DF5FD98BD21E0A03F030 /* PhotoEffects.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66FA5BCCCA104E827B8A69A1 /* PhotoEffects.swift */; };
 		F4543194B75979601E536063 /* Np3BitmapFilterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D89F88E0AAFA56543C73E8D2 /* Np3BitmapFilterTests.swift */; };
 		F7DD276D50F864670EB55E91 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4AA2639C7BC0B4B5E3D01734 /* SettingsView.swift */; };
@@ -125,6 +130,7 @@
 		4B2971CFDD3F6EBEF2ACA1A8 /* RemoteViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteViewModel.swift; sourceTree = "<group>"; };
 		4C31C90D73DDE407941D9C78 /* CameraSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraSession.swift; sourceTree = "<group>"; };
 		538A2FD484D2734CC691DA00 /* ConnectionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionState.swift; sourceTree = "<group>"; };
+		55E5A0EF9EEE6944C08F254E /* ConnectionPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionPage.swift; sourceTree = "<group>"; };
 		59F6B50FACC860CB7B9DCBE5 /* RemoteExposureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteExposureTests.swift; sourceTree = "<group>"; };
 		615EEFA9D6159AC37C5A31C7 /* PTPSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PTPSession.swift; sourceTree = "<group>"; };
 		61DD1A7868ADB6C35411DA6F /* PhotoEffectsRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoEffectsRenderer.swift; sourceTree = "<group>"; };
@@ -135,6 +141,7 @@
 		6C73EF01969DAC563DA91DD0 /* PhotoEffectsEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoEffectsEditorView.swift; sourceTree = "<group>"; };
 		6CF51538A02F76ECB294979E /* RemoteState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteState.swift; sourceTree = "<group>"; };
 		77FF345DD1F232661C243E4F /* ZTransferColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZTransferColors.swift; sourceTree = "<group>"; };
+		7A212849FDB757B232CE3700 /* GPSConnectionControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GPSConnectionControl.swift; sourceTree = "<group>"; };
 		7AD9D374C7D0C7B45D77B516 /* PhotoCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoCatalog.swift; sourceTree = "<group>"; };
 		7BEAA3B6FEB394BB8C05D321 /* DirectoryAccessStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DirectoryAccessStore.swift; sourceTree = "<group>"; };
 		7C8D85042F86E7CE49C16BF8 /* PTPIPDiscoveryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PTPIPDiscoveryService.swift; sourceTree = "<group>"; };
@@ -155,12 +162,15 @@
 		B7580B5DC6E6B426AFDCD70C /* LocalPhotoEffectsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalPhotoEffectsView.swift; sourceTree = "<group>"; };
 		B8E5F0504E1E56C59E21D761 /* ZTransferDesign.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZTransferDesign.swift; sourceTree = "<group>"; };
 		BA7454E422D1473CC4E740CD /* AsyncDeadline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsyncDeadline.swift; sourceTree = "<group>"; };
+		C03DEDD0C14571253802D484 /* SettingsPopupOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsPopupOverlay.swift; sourceTree = "<group>"; };
 		C537587F3F20DEE8C60FA711 /* GPSCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GPSCoordinator.swift; sourceTree = "<group>"; };
 		C88C5ED244217DA340A1F1E5 /* PTPCodec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PTPCodec.swift; sourceTree = "<group>"; };
+		C94CCD158034CC3AA6E8F2F0 /* ConnectionMethodCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionMethodCard.swift; sourceTree = "<group>"; };
 		CB36939BEE4031E42F768A83 /* PTPCodecTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PTPCodecTests.swift; sourceTree = "<group>"; };
 		CF061766E1A0B9F3060190ED /* PTPDatasetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PTPDatasetTests.swift; sourceTree = "<group>"; };
 		D0B6DB7E3BF3A4EC8555BE3C /* PhotoFilterSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoFilterSheet.swift; sourceTree = "<group>"; };
 		D0D0D8FBAB87B8180493B22E /* GPSView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GPSView.swift; sourceTree = "<group>"; };
+		D2B51C2A8D807D8A9CA21F9E /* ZTransferGlassSurface.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZTransferGlassSurface.swift; sourceTree = "<group>"; };
 		D403B031ADD1B0F9C560F22D /* ClassicUSBIcon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClassicUSBIcon.swift; sourceTree = "<group>"; };
 		D40B340AC13401D86C00C2D8 /* PTPDataset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PTPDataset.swift; sourceTree = "<group>"; };
 		D89F88E0AAFA56543C73E8D2 /* Np3BitmapFilterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Np3BitmapFilterTests.swift; sourceTree = "<group>"; };
@@ -228,6 +238,16 @@
 				9E44BD3A96C8965980DD7D9B /* SelectedUSBPTPTransport.swift */,
 			);
 			path = USB;
+			sourceTree = "<group>";
+		};
+		3D3D1368E7A58C6452F8211F /* Connection */ = {
+			isa = PBXGroup;
+			children = (
+				C94CCD158034CC3AA6E8F2F0 /* ConnectionMethodCard.swift */,
+				55E5A0EF9EEE6944C08F254E /* ConnectionPage.swift */,
+				7A212849FDB757B232CE3700 /* GPSConnectionControl.swift */,
+			);
+			path = Connection;
 			sourceTree = "<group>";
 		};
 		4FA1CAF4109968AFCC0043BC /* Components */ = {
@@ -322,6 +342,7 @@
 				1DF8FBC08956F02D0F24ACFD /* DoubleZMark.swift */,
 				77FF345DD1F232661C243E4F /* ZTransferColors.swift */,
 				B8E5F0504E1E56C59E21D761 /* ZTransferDesign.swift */,
+				D2B51C2A8D807D8A9CA21F9E /* ZTransferGlassSurface.swift */,
 			);
 			path = DesignSystem;
 			sourceTree = "<group>";
@@ -330,6 +351,7 @@
 			isa = PBXGroup;
 			children = (
 				4FA1CAF4109968AFCC0043BC /* Components */,
+				3D3D1368E7A58C6452F8211F /* Connection */,
 				D0D0D8FBAB87B8180493B22E /* GPSView.swift */,
 				B7580B5DC6E6B426AFDCD70C /* LocalPhotoEffectsView.swift */,
 				6C73EF01969DAC563DA91DD0 /* PhotoEffectsEditorView.swift */,
@@ -337,6 +359,7 @@
 				0994973567FB60B02328A65F /* PhotoListView.swift */,
 				9C82DE7EDD874E138885C18B /* PhotoPreviewView.swift */,
 				2482C61B58C4A4EE95210CDA /* RemoteView.swift */,
+				C03DEDD0C14571253802D484 /* SettingsPopupOverlay.swift */,
 				4AA2639C7BC0B4B5E3D01734 /* SettingsView.swift */,
 				E17D81EDE19E9E8343BD531F /* TransferQueueView.swift */,
 			);
@@ -490,11 +513,14 @@
 				676480E34AEAD2A4C86B50B6 /* CameraSession.swift in Sources */,
 				CBEB599B28F9477176061658 /* CameraTransport.swift in Sources */,
 				B2BCDA3EE87598367F1136BF /* ClassicUSBIcon.swift in Sources */,
+				52A7DDD67094B569E011911C /* ConnectionMethodCard.swift in Sources */,
+				D48305D06926CD24336DAFA5 /* ConnectionPage.swift in Sources */,
 				73C7544A106A7E21D8421C92 /* ConnectionState.swift in Sources */,
 				B8FB7D2547F6FFA961FEB3CE /* ConnectionViewModel.swift in Sources */,
 				873A6B7B39D069D290ECD832 /* DetentWheel.swift in Sources */,
 				82C69505CC0D0D6BC02C6A80 /* DirectoryAccessStore.swift in Sources */,
 				2B14E3B205CBC8ED8289E7EC /* DoubleZMark.swift in Sources */,
+				8D6DA87271A2A18C83AAC752 /* GPSConnectionControl.swift in Sources */,
 				7CDDBA710E50C3C90D89338F /* GPSCoordinator.swift in Sources */,
 				9BD36C93DE99E708A9E68AF5 /* GPSProtocol.swift in Sources */,
 				823A11BECB918BA55D0BE52D /* GPSState.swift in Sources */,
@@ -535,6 +561,7 @@
 				10BA2D27B0425D2A34F982F2 /* RemoteViewModel.swift in Sources */,
 				7BE96D350B5305152D1CDB16 /* RootView.swift in Sources */,
 				D08D5FC66C3B90DDD388F961 /* SelectedUSBPTPTransport.swift in Sources */,
+				EA2A5E73813646829194CCFC /* SettingsPopupOverlay.swift in Sources */,
 				F7DD276D50F864670EB55E91 /* SettingsView.swift in Sources */,
 				5E9A339B8DCD4C1D4D876DF7 /* ThumbnailCache.swift in Sources */,
 				3A016664A1796B9FA1866062 /* TransferQueue.swift in Sources */,
@@ -544,6 +571,7 @@
 				20AAC3573791D9D583C064FF /* ZTransferApp.swift in Sources */,
 				F801A3108B643FCDE9658D68 /* ZTransferColors.swift in Sources */,
 				3155D971BF9B55A0B0AC26A1 /* ZTransferDesign.swift in Sources */,
+				16B7898C274ABFF0A370585B /* ZTransferGlassSurface.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -606,6 +634,8 @@
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "用于向相机写入拍摄位置";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "用于保存工作台生成的效果图";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "用于读取工作台照片";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -632,6 +662,8 @@
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "用于向相机写入拍摄位置";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "用于保存工作台生成的效果图";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "用于读取工作台照片";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",

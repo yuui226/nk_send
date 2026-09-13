@@ -1,0 +1,5 @@
+*.app/
+*.ipa
+*.log
+*.json
+*.xcresult/

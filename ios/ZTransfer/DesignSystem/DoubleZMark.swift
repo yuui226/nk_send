@@ -1,16 +1,41 @@
 import SwiftUI
 
-struct DoubleZMark: Shape {
-    func path(in rect: CGRect) -> Path {
-        let sx = rect.width / 108, sy = rect.height / 108
-        func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x * sx, y: y * sy) }
-        func z(_ p: inout Path, _ values: [CGFloat]) {
-            p.move(to: point(values[0], values[1])); stride(from: 2, to: values.count, by: 2).forEach { p.addLine(to: point(values[$0], values[$0 + 1])) }; p.closeSubpath()
+/// Geometry ported from Android ZMark.kt: height-relative bars, shear and
+/// overlap gap. Drawing uses the full requested size, without launcher-icon
+/// canvas padding (the previous 108-unit canvas shrank the visible mark).
+struct DoubleZMark: View {
+    static let aspectRatio: CGFloat = 0.62 + 0.30 + 0.44
+    var tint: Color = ZTransferColors.primaryText
+
+    var body: some View {
+        Canvas { context, size in
+            let h = min(size.height, size.width / Self.aspectRatio)
+            let origin = CGPoint(x: (size.width - h * Self.aspectRatio) / 2, y: (size.height - h) / 2)
+            func z(offset: CGFloat) -> Path {
+                let bar = 0.13 * h, diagonal = 0.15 * h, w = 0.62 * h
+                let points: [CGPoint] = [
+                    .init(x: 0, y: 0), .init(x: w, y: 0), .init(x: w, y: bar),
+                    .init(x: diagonal, y: h - bar), .init(x: w, y: h - bar),
+                    .init(x: w, y: h), .init(x: 0, y: h), .init(x: 0, y: h - bar),
+                    .init(x: w - diagonal, y: bar), .init(x: 0, y: bar)
+                ]
+                var path = Path()
+                for (index, p) in points.enumerated() {
+                    let point = CGPoint(x: origin.x + offset + p.x + 0.30 * (h - p.y), y: origin.y + p.y)
+                    if index == 0 { path.move(to: point) } else { path.addLine(to: point) }
+                }
+                path.closeSubpath()
+                return path
+            }
+            let left = z(offset: 0), right = z(offset: 0.44 * h)
+            context.drawLayer { layer in
+                layer.fill(left, with: .color(tint))
+                layer.blendMode = .destinationOut
+                layer.stroke(right, with: .color(.black), style: StrokeStyle(lineWidth: 0.12 * h, lineJoin: .round))
+                layer.fill(right, with: .color(.black))
+                layer.blendMode = .normal
+                layer.fill(right, with: .color(tint))
+            }
         }
-        var path = Path()
-        let left: [CGFloat] = [39.56,35, 63.12,35, 61.64,39.94, 35.34,68.06, 53.2,68.06, 51.72,73, 28.16,73, 29.64,68.06, 55.94,39.94, 38.08,39.94]
-        let right: [CGFloat] = [56.28,35, 79.84,35, 78.36,39.94, 52.06,68.06, 69.92,68.06, 68.44,73, 44.88,73, 46.36,68.06, 72.66,39.94, 54.8,39.94]
-        z(&path, left); z(&path, right)
-        return path
     }
 }

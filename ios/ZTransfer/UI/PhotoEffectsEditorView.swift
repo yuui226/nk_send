@@ -68,7 +68,7 @@ struct PhotoEffectsControls: View {
                                     intensityPercent: draft.selectedFilter?.intensityPercent ?? 80
                                 )
                             })
-                DetentWheel(label: "滤镜强度", options: Array(stride(from: 2, through: 100, by: 2)),
+                DetentWheel(label: "滤镜强度", options: Array(stride(from: 100, through: 2, by: -2)),
                             selected: draft.selectedFilter?.intensityPercent ?? 80,
                             optionLabel: { "\($0)%" }, onCommit: { value in
                                 guard let selected = draft.selectedFilter else { return }
@@ -101,7 +101,7 @@ struct PhotoEffectsControls: View {
             DetentWheel(label: "字体", options: PhotoFrameWatermarkFont.allCases, selected: draft.watermark.font,
                         optionLabel: fontName, onCommit: { draft.watermark.font = $0 }, rowHeight: 28,
                         enabled: draft.photoFrameEnabled && draft.watermark.enabled)
-            DetentWheel(label: "大小", options: Array(1...100), selected: min(max(draft.watermark.sizePercent, 1), 100),
+            DetentWheel(label: "大小", options: Array(stride(from: 100, through: 1, by: -1)), selected: min(max(draft.watermark.sizePercent, 1), 100),
                         optionLabel: { "\($0)%" }, onCommit: { draft.watermark.sizePercent = $0 }, rowHeight: 26,
                         enabled: draft.photoFrameEnabled && draft.watermark.enabled)
             DetentWheel(label: "位置", options: PhotoFrameWatermarkPosition.allCases, selected: draft.watermark.position,
@@ -110,7 +110,7 @@ struct PhotoEffectsControls: View {
             DetentWheel(label: "颜色", options: PhotoFrameWatermarkColor.allCases, selected: draft.watermark.color,
                         optionLabel: colorName, onCommit: { draft.watermark.color = $0 }, rowHeight: 28,
                         enabled: draft.photoFrameEnabled && draft.watermark.enabled)
-            DetentWheel(label: "透明度", options: Array(1...100), selected: min(max(draft.watermark.opacityPercent, 1), 100),
+            DetentWheel(label: "透明度", options: Array(stride(from: 100, through: 1, by: -1)), selected: min(max(draft.watermark.opacityPercent, 1), 100),
                         optionLabel: { "\($0)%" }, onCommit: { draft.watermark.opacityPercent = $0 }, rowHeight: 26,
                         enabled: draft.photoFrameEnabled && draft.watermark.enabled)
             DetentWheel(label: "可读性", options: PhotoFrameWatermarkEffect.allCases, selected: draft.watermark.effect,

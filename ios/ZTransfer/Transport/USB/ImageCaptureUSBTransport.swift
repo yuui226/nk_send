@@ -62,7 +62,7 @@ private final class DownloadOperationBox: @unchecked Sendable {
 /// cancellation deterministic.  The framework has no cancellation callback for
 /// reads/open requests; the late framework callback is therefore ignored after
 /// this box has resumed the caller with CancellationError.
-private final class ThrowingContinuationBox<Value>: @unchecked Sendable {
+private final class ThrowingContinuationBox<Value: Sendable>: @unchecked Sendable {
     private let lock = NSLock()
     private var continuation: CheckedContinuation<Value, Error>?
     private var cancelled = false
