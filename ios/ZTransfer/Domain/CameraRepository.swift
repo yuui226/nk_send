@@ -17,6 +17,20 @@ func transferResumeOffset(existingSize: UInt64, totalSize: UInt64, reportedSize:
     return (existingSize / transferResumeChunkSize) * transferResumeChunkSize
 }
 
+func transferUniqueOutputURL(directory: URL, fileName: String) -> URL {
+    let safeName = URL(fileURLWithPath: fileName).lastPathComponent
+    let base = directory.appendingPathComponent(safeName, isDirectory: false)
+    guard FileManager.default.fileExists(atPath: base.path) else { return base }
+    let dot = safeName.lastIndex(of: ".")
+    let stem = dot.map { String(safeName[..<$0]) } ?? safeName
+    let ext = dot.map { String(safeName[$0...]) } ?? ""
+    for n in 1...99 {
+        let candidate = directory.appendingPathComponent("\(stem) (\(n))\(ext)", isDirectory: false)
+        if !FileManager.default.fileExists(atPath: candidate.path) { return candidate }
+    }
+    return base
+}
+
 enum CameraRepositoryError: Error, Equatable, Sendable {
     case invalidDataset
     /// Remote monitor owns the channel; the list must abandon its old handle
@@ -424,7 +438,6 @@ actor CameraRepository {
                   progress: (@Sendable (Double) -> Void)? = nil) async throws -> URL {
         activeForegroundReads += 1; defer { activeForegroundReads -= 1; scheduleObjectResolver() }
         let safeName = URL(fileURLWithPath: fileName).lastPathComponent
-        let destination = directory.appendingPathComponent(safeName, isDirectory: false)
         let temporary = directory.appendingPathComponent(
             transferPartialFileName(size: size, captureDate: captureDate, fileName: safeName),
             isDirectory: false
@@ -453,7 +466,7 @@ actor CameraRepository {
                 try trim.close()
             }
             if offset == total {
-                try? FileManager.default.removeItem(at: destination)
+                let destination = transferUniqueOutputURL(directory: directory, fileName: safeName)
                 try FileManager.default.moveItem(at: temporary, to: destination)
                 progress?(1)
                 return destination
@@ -479,7 +492,7 @@ actor CameraRepository {
                 progress?(min(1, Double(written) / Double(total)))
             }
             try handleForWriting.close()
-            try? FileManager.default.removeItem(at: destination)
+            let destination = transferUniqueOutputURL(directory: directory, fileName: safeName)
             try FileManager.default.moveItem(at: temporary, to: destination)
             progress?(1)
             return destination

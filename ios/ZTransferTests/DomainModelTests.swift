@@ -184,6 +184,17 @@ final class DomainModelTests: XCTestCase {
         )
     }
 
+    func testTransferOutputNeverOverwritesAnExistingSameNameFile() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let original = directory.appendingPathComponent("DSC_0001.JPG")
+        FileManager.default.createFile(atPath: original.path, contents: Data([1]))
+        XCTAssertEqual(transferUniqueOutputURL(directory: directory, fileName: "DSC_0001.JPG").lastPathComponent, "DSC_0001 (1).JPG")
+        FileManager.default.createFile(atPath: directory.appendingPathComponent("DSC_0001 (1).JPG").path, contents: Data([1]))
+        XCTAssertEqual(transferUniqueOutputURL(directory: directory, fileName: "DSC_0001.JPG").lastPathComponent, "DSC_0001 (2).JPG")
+    }
+
     func testPhotoFilterAppliesTypeProtectionStorageAndDate() {
         let files = [
             CameraFile(id: 1, storageID: 1, format: 0x3801, size: 1, fileName: "a.JPG", captureDate: "20260913T010203", isProtected: true),
