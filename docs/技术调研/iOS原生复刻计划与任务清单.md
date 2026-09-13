@@ -342,6 +342,7 @@
 - 沉浸边框调整为先绘制照片水印、再绘制底部信息文字，与安卓装饰层级一致；签名构建安装启动：`dist-debug-ios/ZTransfer-ios-debug-1.82-20260913-140700.app`。
 - 照片 elevation 按安卓 `drawPhotoElevation` 重做为四分之一尺寸透明代理上的两层阴影，使用短边比例、逐预设强度和安全的透明合成；签名构建安装启动：`dist-debug-ios/ZTransfer-ios-debug-1.82-20260913-141404.app`。
 - 编辑类边框的照片水印绘制顺序调整为先于胶片孔、调色板和信息文字，和安卓 `drawEditorialFrameDecoration` 一致；签名构建安装启动：`dist-debug-ios/ZTransfer-ios-debug-1.82-20260913-142131.app`。
+- 雾面、影院、磨砂和胶片画廊的背景代理改为安卓同款 192px 两阶段滑动窗口盒式模糊，避免 Core Image 高斯近似造成背景质感偏差；签名构建安装启动：`dist-debug-ios/ZTransfer-ios-debug-1.82-20260913-143100.app`。
 
 **2/62**。已验收工程骨架和 Swift 6/iOS 16 配置。其余 60 项保留为待完成或进行中。
 
