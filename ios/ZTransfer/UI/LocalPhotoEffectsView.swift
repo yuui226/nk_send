@@ -258,10 +258,18 @@ private struct LocalPhotoBatchLabel: View {
 
     private var text: String {
         switch state.phase {
-        case .complete: "已保存 \(state.progress.saved) 张"
-        case .partial: "已保存 \(state.progress.saved)/\(state.progress.total) 张"
-        case .failed: "生成失败"
-        default: state.photos.isEmpty ? "选择图片" : "生成并保存（\(state.photos.count)）"
+        case .complete:
+            AppLocalized.formattedResource("local_photo_batch_saved", ["%1$d": "\(state.progress.saved)"])
+        case .partial:
+            AppLocalized.formattedResource("local_photo_batch_partial", [
+                "%1$d": "\(state.progress.saved)", "%2$d": "\(state.progress.total)"
+            ])
+        case .failed:
+            AppLocalized.resource("local_photo_batch_failed")
+        default:
+            state.photos.isEmpty
+                ? AppLocalized.resource("local_photo_choose_short")
+                : AppLocalized.formattedResource("local_photo_batch_generate", ["%1$d": "\(state.photos.count)"])
         }
     }
 }
