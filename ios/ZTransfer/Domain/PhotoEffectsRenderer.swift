@@ -337,6 +337,9 @@ enum PhotoEffectsRenderer {
         var cursor = area.midY - total * 0.5
         let color = lightText ? UIColor(red: 0.97, green: 0.98, blue: 0.99, alpha: 1) : UIColor(red: 0.10, green: 0.12, blue: 0.15, alpha: 1)
         let muted = lightText ? UIColor(red: 0.86, green: 0.89, blue: 0.91, alpha: 1) : UIColor(red: 0.29, green: 0.31, blue: 0.33, alpha: 1)
+        let titleBrandFont = UIFont(name: "HelveticaNeue-BoldItalic", size: area.width * 0.032) ?? UIFont.italicSystemFont(ofSize: area.width * 0.032)
+        let titleModelFont = UIFont.systemFont(ofSize: area.width * 0.024, weight: .regular)
+        let titleGap = area.width * 0.016
         for (index, row) in rows.enumerated() {
             let font = fonts[index].withSize(max(9, fonts[index].pointSize * scale))
             var attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: index == 0 ? color : muted]
@@ -344,10 +347,26 @@ enum PhotoEffectsRenderer {
                 attrs[.foregroundColor] = watermarkColor(watermark.color, preset).withAlphaComponent(CGFloat(watermark.opacityPercent) / 100)
                 if watermark.effect == .shadow { let s = NSShadow(); s.shadowBlurRadius = 3; s.shadowOffset = CGSize(width: 0, height: 1); s.shadowColor = UIColor.black.withAlphaComponent(0.35); attrs[.shadow] = s }
             }
-            let width = (row.text as NSString).size(withAttributes: attrs).width
             let baseline = cursor + font.ascender
-            let x: CGFloat = row.kind == 4 && watermark.position == .left ? area.minX + area.width * 0.07 : row.kind == 4 && watermark.position == .right ? area.maxX - area.width * 0.07 - width : area.midX - width * 0.5
-            row.text.draw(at: CGPoint(x: x, y: baseline - font.ascender), withAttributes: attrs)
+            if row.kind == 0 && (!brand.isEmpty || !model.isEmpty) {
+                let brandFont = titleBrandFont.withSize(max(9, titleBrandFont.pointSize * scale))
+                let modelFont = titleModelFont.withSize(max(9, titleModelFont.pointSize * scale))
+                let brandWidth = (brand as NSString).size(withAttributes: [.font: brandFont]).width
+                let modelWidth = (model as NSString).size(withAttributes: [.font: modelFont]).width
+                let totalWidth = brandWidth + (brand.isEmpty || model.isEmpty ? 0 : titleGap * scale) + modelWidth
+                var x = area.midX - totalWidth * 0.5
+                if !brand.isEmpty {
+                    brand.draw(at: CGPoint(x: x, y: baseline - brandFont.ascender), withAttributes: [.font: brandFont, .foregroundColor: color])
+                    x += brandWidth + (brand.isEmpty || model.isEmpty ? 0 : titleGap * scale)
+                }
+                if !model.isEmpty {
+                    model.draw(at: CGPoint(x: x, y: baseline - modelFont.ascender), withAttributes: [.font: modelFont, .foregroundColor: color])
+                }
+            } else {
+                let width = (row.text as NSString).size(withAttributes: attrs).width
+                let x: CGFloat = row.kind == 4 && watermark.position == .left ? area.minX + area.width * 0.07 : row.kind == 4 && watermark.position == .right ? area.maxX - area.width * 0.07 - width : area.midX - width * 0.5
+                row.text.draw(at: CGPoint(x: x, y: baseline - font.ascender), withAttributes: attrs)
+            }
             cursor += scaledHeights[index] + gap * scale
         }
     }
