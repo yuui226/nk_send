@@ -482,3 +482,4 @@
 - 缩略图填充队列补上安卓 `seededRevision` 和日期优先级状态：同一扫描代际只播种一次，筛选日期变化才重排未完成项，避免批次回调和扫描收尾重复插入或改变顺序。
 - 本轮仅完成代码级对照和模拟器构建；Android preference 编码/解码尚未用跨平台 fixture 做字节级回归，GPS/远程界面仍需按安卓页面源码和模拟器交互继续核对。
 - 手机照片效果也改用独立的 `local_photo_effects` UserDefaults suite，并使用安卓 `decoration_enabled`、`frame_preset`、`watermark_*`、`filter_*` 和 favorite 键；筛选页、队列页、GPS 页的可见文案继续从 AndroidLocalization 的资源键读取。
+- 照片效果编辑器切换边框预设时同步切换该预设的元数据草稿；元数据开关写入对应预设映射后再按安卓 12 字段 `|` 编码保存，避免退出编辑器后丢失设置。
