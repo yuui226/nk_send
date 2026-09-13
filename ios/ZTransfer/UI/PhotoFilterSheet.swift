@@ -40,15 +40,15 @@ struct PhotoFilterSheet: View {
                 if editingDate { dateEditor } else { filterForm }
             }
             .animation(ZTransferMotion.standard, value: editingDate)
-            .navigationTitle(editingDate ? "日期范围" : "筛选").navigationBarTitleDisplayMode(.inline)
+            .navigationTitle(editingDate ? AppLocalized.resource("date_range") : AppLocalized.resource("filter_title")).navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button(editingDate ? "返回" : "清除") {
+                    Button(editingDate ? AppLocalized.resource("cd_back") : AppLocalized.resource("clear_filters")) {
                         if editingDate { editingDate = false } else { onApply(PhotoFilterState()); dismiss() }
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("完成") {
+                    Button(AppLocalized.resource("done")) {
                         if editingDate { applyDate(); editingDate = false } else { apply(); dismiss() }
                     }
                 }
@@ -59,9 +59,9 @@ struct PhotoFilterSheet: View {
     private var filterForm: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                filterSectionTitle("文件类型")
+                filterSectionTitle(AppLocalized.resource("filter_section_file_type"))
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: min(5, max(1, availableExtensions.count + 1))), spacing: 8) {
-                    FilterChip(label: "全部", selected: enabledExtensions.count == availableExtensions.count) {
+                    FilterChip(label: AppLocalized.resource("filter_all"), selected: enabledExtensions.count == availableExtensions.count) {
                         enabledExtensions = Set(availableExtensions)
                     }
                     ForEach(availableExtensions, id: \.self) { ext in
@@ -71,27 +71,27 @@ struct PhotoFilterSheet: View {
                     }
                 }
                 filterDivider
-                filterSectionTitle("状态")
+                filterSectionTitle(AppLocalized.resource("filter_section_status"))
                 HStack(spacing: 8) {
-                    FilterChip(label: "保护", selected: protectedOnly) { protectedOnly.toggle() }
-                    FilterChip(label: "连拍", selected: burstOnly) { burstOnly.toggle() }
-                    FilterChip(label: "未传", selected: untransferredOnly) { untransferredOnly.toggle() }
+                    FilterChip(label: AppLocalized.resource("filter_protected"), selected: protectedOnly) { protectedOnly.toggle() }
+                    FilterChip(label: AppLocalized.resource("burst_label"), selected: burstOnly) { burstOnly.toggle() }
+                    FilterChip(label: AppLocalized.resource("filter_untransferred"), selected: untransferredOnly) { untransferredOnly.toggle() }
                 }
                 if !availableStorageSlots.isEmpty {
                     filterDivider
-                    filterSectionTitle("存储卡")
+                    filterSectionTitle(AppLocalized.resource("filter_section_storage"))
                     HStack(spacing: 8) {
                         ForEach(availableStorageSlots, id: \.self) { slot in
-                            FilterChip(label: "卡 \(slot)", selected: storageSlot == slot) {
+                            FilterChip(label: AppLocalized.formattedResource("filter_storage_slot", ["%1$d": String(slot)]), selected: storageSlot == slot) {
                                 storageSlot = storageSlot == slot ? nil : slot
                             }
                         }
                     }
                 }
                 filterDivider
-                filterSectionTitle("拍摄日期")
+                filterSectionTitle(AppLocalized.resource("filter_section_date"))
                 HStack(spacing: 8) {
-                    FilterChip(label: selectedDateRange == nil ? "日期" : dateRangeText, selected: selectedDateRange != nil) { editingDate = true }
+                    FilterChip(label: selectedDateRange == nil ? AppLocalized.resource("filter_date") : dateRangeText, selected: selectedDateRange != nil) { editingDate = true }
                     if selectedDateRange != nil { FilterChip(label: "×", selected: false) { selectedDateRange = nil }.frame(width: 38) }
                 }
             }
@@ -112,8 +112,8 @@ struct PhotoFilterSheet: View {
         let calendar = Calendar.current
         let years = Array(1990...max(1990, calendar.component(.year, from: Date()) + 1))
         return VStack(spacing: 18) {
-            DateEndpointEditor(label: "开始", date: $startDate, years: years)
-            DateEndpointEditor(label: "结束", date: $endDate, years: years)
+            DateEndpointEditor(label: AppLocalized.resource("date_start"), date: $startDate, years: years)
+            DateEndpointEditor(label: AppLocalized.resource("date_end"), date: $endDate, years: years)
             Spacer()
         }
         .padding(16)

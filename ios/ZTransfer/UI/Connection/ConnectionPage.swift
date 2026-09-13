@@ -150,7 +150,7 @@ private struct ConnectionWorkspaceButton: View {
                     .font(.system(size: 18)).frame(width: 18, height: 18)
                     .foregroundStyle(ZTransferColors.accentBlue)
                 Spacer().frame(width: 8)
-                Text("滤镜·边框·水印")
+                Text(AppLocalized.resource("photo_effects"))
                     .zTransferTypography(.labelLarge, weight: .semibold)
                     .foregroundStyle(ZTransferColors.primaryText)
                 Spacer().frame(width: 4)

@@ -55,21 +55,21 @@ struct TransferQueueView: View {
                     HStack(spacing: 12) {
                         if model.snapshot.items.contains(where: { $0.status == .failed || $0.status == .cancelled }) {
                             Button { pendingConfirmation = .retry } label: { Image(systemName: "arrow.clockwise") }
-                                .accessibilityLabel("重试失败任务")
+                                .accessibilityLabel(AppLocalized.resource("cd_retry_failed"))
                         }
                         if model.snapshot.items.contains(where: { $0.status != .transferring }) {
                             Button { pendingConfirmation = .clear } label: { Image(systemName: "trash") }
-                                .accessibilityLabel("清空队列")
+                                .accessibilityLabel(AppLocalized.resource("cd_clear_queue"))
                         }
                         if model.snapshot.isTransferring {
                             Button { model.pause() } label: { Image(systemName: "pause.fill") }
-                                .accessibilityLabel("传完当前任务后暂停")
+                                .accessibilityLabel(AppLocalized.resource("cd_pause_after_current"))
                         } else if model.snapshot.items.contains(where: { $0.status == .waiting }) {
                             Button {
                                 guard let session, let url = directory.directoryURL else { return }
                                 model.start(session: session, directory: url)
                             } label: { Image(systemName: "play.fill") }
-                                .accessibilityLabel("开始传输")
+                                .accessibilityLabel(AppLocalized.resource("cd_start_transfers"))
                         }
                     }
                 }
@@ -81,12 +81,12 @@ struct TransferQueueView: View {
             .alert(item: $pendingConfirmation) { action in
                 switch action {
                 case .clear:
-                    return Alert(title: Text("清空队列？"), message: Text("移除全部卡片；正在传输的不受影响"), primaryButton: .destructive(Text("清空")) {
+                    return Alert(title: Text(AppLocalized.resource("clear_queue_title")), message: Text(AppLocalized.resource("clear_queue_subtitle")), primaryButton: .destructive(Text(AppLocalized.resource("clear"))) {
                         model.withdrawPending()
                         Task { try? await Task.sleep(nanoseconds: 320_000_000); model.removeCleared() }
-                    }, secondaryButton: .cancel(Text("取消")))
+                    }, secondaryButton: .cancel(Text(AppLocalized.resource("cancel"))))
                 case .retry:
-                    return Alert(title: Text("重试失败任务？"), primaryButton: .default(Text("重试")) { model.retryFailed() }, secondaryButton: .cancel(Text("取消")))
+                    return Alert(title: Text(AppLocalized.resource("retry_failed_title")), primaryButton: .default(Text(AppLocalized.resource("retry"))) { model.retryFailed() }, secondaryButton: .cancel(Text(AppLocalized.resource("cancel"))))
                 }
             }
         }
@@ -134,11 +134,11 @@ private struct QueueItemView: View {
             }
             Spacer(minLength: 4)
             if item.status == .failed {
-                Button(action: onRetry) { Image(systemName: "arrow.clockwise") }.buttonStyle(.bordered).accessibilityLabel("重试")
+                Button(action: onRetry) { Image(systemName: "arrow.clockwise") }.buttonStyle(.bordered).accessibilityLabel(AppLocalized.resource("retry"))
             } else if item.status == .waiting {
-                Button(action: onCancel) { Image(systemName: "xmark") }.buttonStyle(.bordered).accessibilityLabel("取消")
+                Button(action: onCancel) { Image(systemName: "xmark") }.buttonStyle(.bordered).accessibilityLabel(AppLocalized.resource("cancel"))
             } else if item.status == .completed || item.status == .cancelled {
-                Button(action: onRemove) { Image(systemName: "trash") }.buttonStyle(.bordered).accessibilityLabel("移出队列")
+                Button(action: onRemove) { Image(systemName: "trash") }.buttonStyle(.bordered).accessibilityLabel(AppLocalized.resource("cd_remove_from_queue"))
             }
         }
         .padding(12)
@@ -149,11 +149,11 @@ private struct QueueItemView: View {
 
     private var statusText: String {
         switch item.status {
-        case .waiting: return "等待"
+        case .waiting: return AppLocalized.resource("status_waiting")
         case .transferring: return ""
-        case .completed: return "完成"
-        case .failed: return "传输失败"
-        case .cancelled: return "已取消"
+        case .completed: return AppLocalized.resource("done")
+        case .failed: return AppLocalized.resource("transfer_failed")
+        case .cancelled: return AppLocalized.resource("status_cancelled")
         }
     }
 
