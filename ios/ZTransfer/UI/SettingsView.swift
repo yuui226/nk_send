@@ -197,7 +197,7 @@ struct SettingsView: View {
 
     private var footer: some View {
         HStack(spacing: 8) {
-            VersionPlaque(text: "\(AppLocalized.text("Z传")) v\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.82")")
+            VersionPlaque(text: AppLocalized.versionText(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.82"))
             Spacer()
             SettingsFooterButton("反馈") { UIPasteboard.general.string = "953000922"; feedbackHint = true }
         }

@@ -96,6 +96,7 @@
 		F7DD276D50F864670EB55E91 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4AA2639C7BC0B4B5E3D01734 /* SettingsView.swift */; };
 		F801A3108B643FCDE9658D68 /* ZTransferColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77FF345DD1F232661C243E4F /* ZTransferColors.swift */; };
 		FB665603737D98CF66B03FD9 /* PhotoPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C82DE7EDD874E138885C18B /* PhotoPreviewView.swift */; };
+		A1DROIDLOC0000000000001 /* AndroidLocalization.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1DROIDLOC0000000000002 /* AndroidLocalization.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -201,6 +202,7 @@
 		FB4F9C50800B1AB3BC4C279E /* Np3AndroidGoldenTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Np3AndroidGoldenTests.swift; sourceTree = "<group>"; };
 		FCD67906893DA353A437E6A3 /* Np3FilterEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Np3FilterEngineTests.swift; sourceTree = "<group>"; };
 		FDDA62402A7BB9E32721C7D4 /* DetentWheel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetentWheel.swift; sourceTree = "<group>"; };
+		A1DROIDLOC0000000000002 /* AndroidLocalization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndroidLocalization.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -412,6 +414,7 @@
 			isa = PBXGroup;
 			children = (
 				11F6F2458B24ED1BDFC716A4 /* RootView.swift */,
+				A1DROIDLOC0000000000002 /* AndroidLocalization.swift */,
 				ECDEA795752767FBE8FFC99F /* ZTransferApp.swift */,
 			);
 			path = App;
@@ -621,6 +624,7 @@
 				53050A00F15AA49DE998807E /* RemoteView.swift in Sources */,
 				10BA2D27B0425D2A34F982F2 /* RemoteViewModel.swift in Sources */,
 				7BE96D350B5305152D1CDB16 /* RootView.swift in Sources */,
+				A1DROIDLOC0000000000001 /* AndroidLocalization.swift in Sources */,
 				D08D5FC66C3B90DDD388F961 /* SelectedUSBPTPTransport.swift in Sources */,
 				EA2A5E73813646829194CCFC /* SettingsPopupOverlay.swift in Sources */,
 				F7DD276D50F864670EB55E91 /* SettingsView.swift in Sources */,
