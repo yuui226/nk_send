@@ -547,3 +547,8 @@
 
 - 监看工具按钮补齐安卓对应的无障碍资源名称：XGA、FPS、直方图、水平仪、构图参考线、音频电平和斑马纹；变形倍率按钮不新增安卓没有的资源文案。
 - 验证：Xcode Simulator 测试 127 项、0 failures；未改变工具的视觉文字和业务状态。
+
+### 2026-09-14 照片预览显示偏好持久化
+
+- 安卓 `TransferViewModel` 使用 `preview_rotation_quarter_turns` 保存预览四档旋转方向，并用 `preview_histogram_enabled` 保存直方图开关；iOS 预览现在读取和写回同名键，重新进入或重启后恢复相同显示状态。
+- 验证：Xcode Simulator 测试 127 项、0 failures；未进行跨进程真实偏好迁移验收。

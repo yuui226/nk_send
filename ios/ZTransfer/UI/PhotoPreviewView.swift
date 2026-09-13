@@ -8,9 +8,12 @@ struct PhotoPreviewView: View {
     let onEnqueue: (CameraFile) -> Void
     @State private var index: Int
     @State private var rotationDegrees: Double = 0
+    @AppStorage("preview_rotation_quarter_turns") private var rotationQuarterTurns = 0
     @State private var exif: PhotoExif?
     @State private var exifLoading = false
-    @State private var histogramVisible = false
+    // Android persists this switch in the transfer preference store, so it
+    // survives leaving the preview and reopening the app.
+    @AppStorage("preview_histogram_enabled") private var histogramVisible = false
     @State private var histogramBars: [CGFloat] = []
 
     init(session: CameraSession, files: [CameraFile], selectedFile: Binding<CameraFile?>, onEnqueue: @escaping (CameraFile) -> Void = { _ in }) {
@@ -68,7 +71,12 @@ struct PhotoPreviewView: View {
                         }
                         .opacity(histogramVisible ? 1 : 0.82)
                     }
-                    Button { withAnimation(ZTransferMotion.standard) { rotationDegrees -= 90 } } label: { Image(systemName: "rotate.left").frame(width: 44, height: 44) }
+                    Button {
+                        withAnimation(ZTransferMotion.standard) {
+                            rotationQuarterTurns = (rotationQuarterTurns + 1) % 4
+                            rotationDegrees = -90 * Double(rotationQuarterTurns)
+                        }
+                    } label: { Image(systemName: "rotate.left").frame(width: 44, height: 44) }
                     Button { if files.indices.contains(index) { onEnqueue(files[index]) } } label: { Image(systemName: "plus").frame(width: 44, height: 44) }
                 }
                 .font(.system(size: 18, weight: .semibold))
@@ -88,6 +96,10 @@ struct PhotoPreviewView: View {
                 .transition(.opacity)
                 .padding(.bottom, 94)
             }
+        }
+        .onAppear {
+            rotationQuarterTurns = ((rotationQuarterTurns % 4) + 4) % 4
+            rotationDegrees = -90 * Double(rotationQuarterTurns)
         }
         .onChange(of: index) { value in
             if files.indices.contains(value) {
