@@ -356,16 +356,28 @@ struct PhotoEffectsSettingsPreview: View {
     let settings: PhotoEffectsSettings
     let onRequest: () -> Void
     @State private var rendered: UIImage?
+    @State private var unfiltered: UIImage?
+    @State private var showUnfiltered = false
 
     private var renderKey: String {
         let data = try? JSONEncoder().encode(settings)
-        return String(data: data ?? Data(), encoding: .utf8) ?? ""
+        let settingsKey = String(data: data ?? Data(), encoding: .utf8) ?? ""
+        let sourceKey: String
+        if let source {
+            sourceKey = "source:\(ObjectIdentifier(source)):\(source.size.width)x\(source.size.height)"
+        } else {
+            sourceKey = "source:none"
+        }
+        let metadataKey = metadata.map {
+            "meta:\($0.make ?? "")|\($0.model ?? "")|\($0.aperture ?? "")|\($0.shutter ?? "")|\($0.iso ?? "")|\($0.focalLength ?? "")|\($0.lensModel ?? "")|\($0.dateTime ?? "")"
+        } ?? "meta:none"
+        return settingsKey + "|" + sourceKey + "|" + metadataKey
     }
 
     var body: some View {
         Group {
-            if let rendered {
-                Image(uiImage: rendered)
+            if let displayed = showUnfiltered ? (unfiltered ?? rendered) : rendered {
+                Image(uiImage: displayed)
                     .resizable().scaledToFit()
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             } else if source != nil {
@@ -378,11 +390,20 @@ struct PhotoEffectsSettingsPreview: View {
         }
         .frame(maxWidth: .infinity)
         .aspectRatio(source.map { $0.size.height > $0.size.width ? CGFloat(3) / 4 : CGFloat(4) / 3 }, contentMode: .fit)
+        .contentShape(Rectangle())
+        .onLongPressGesture(minimumDuration: 0.5, pressing: { pressing in
+            if !pressing { showUnfiltered = false }
+        }, perform: {
+            guard unfiltered != nil else { return }
+            showUnfiltered = true
+        })
         .task(id: renderKey) {
             guard let source else {
                 onRequest()
                 return
             }
+            showUnfiltered = false
+            unfiltered = nil
             let metadata = metadata
             let settings = settings
             let result = try? await Task.detached(priority: .userInitiated) {
@@ -393,6 +414,22 @@ struct PhotoEffectsSettingsPreview: View {
             }.value
             guard !Task.isCancelled else { return }
             rendered = result
+            guard settings.photoFilterEnabled, settings.selectedFilter != nil else { return }
+            // Android's comparison frame is deliberately delayed so the
+            // filtered frame becomes visible first and rapid wheel changes
+            // cancel obsolete comparison work.
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            guard !Task.isCancelled else { return }
+            var baseline = settings
+            baseline.photoFilterEnabled = false
+            let comparison = try? await Task.detached(priority: .utility) {
+                try Task.checkCancellation()
+                return try autoreleasepool {
+                    try PhotoEffectsRenderer.render(source, settings: baseline, metadata: metadata)
+                }
+            }.value
+            guard !Task.isCancelled else { return }
+            unfiltered = comparison
         }
     }
 }
