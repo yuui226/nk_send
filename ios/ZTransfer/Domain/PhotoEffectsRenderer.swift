@@ -564,7 +564,7 @@ enum PhotoEffectsRenderer {
             .shadow: { let s = NSShadow(); s.shadowBlurRadius = 3; s.shadowOffset = CGSize(width: 0, height: 1); s.shadowColor = UIColor.black.withAlphaComponent(0.55); return s }()]
         let detailAttrs: [NSAttributedString.Key: Any] = [.font: detailFont, .foregroundColor: UIColor.white.withAlphaComponent(0.92)]
         var detailLines = [String](); if let lens = metadata.lensModel, !lens.isEmpty { detailLines.append(lens) }
-        let cameraDetail = [metadata.frameDetailLine, metadata.dateTime ?? ""].filter { !$0.isEmpty }.joined(separator: "  ")
+        let cameraDetail = [metadata.immersiveDetailLine, metadata.dateTime ?? ""].filter { !$0.isEmpty }.joined(separator: "  ")
         if !cameraDetail.isEmpty { detailLines.append(cameraDetail) }
         if let location = metadata.locationRow, !location.isEmpty { detailLines.append(location) }
         var rows: [(String, UIFont, [NSAttributedString.Key: Any])] = []
@@ -805,7 +805,15 @@ enum PhotoEffectsRenderer {
 
     private static func drawWatermark(_ cg: CGContext, watermark: PhotoFrameWatermark, photo: CGRect, canvas: CGSize, preset: PhotoFramePreset, metadataBand: CGRect) {
         guard watermark.enabled else { return }
-        if photoPlacement(watermark.position) { cg.saveGState(); cg.addPath(UIBezierPath(roundedRect: photo, cornerRadius: photo.width * 0.014).cgPath); cg.clip() }
+        if photoPlacement(watermark.position) {
+            let radius: CGFloat = switch preset {
+            case .colorArchive: photo.width * 0.012
+            case .brandInset, .brandGallery: photo.width * 0.014
+            case .mist, .cinema, .minimal, .frosted: max(1, metadataBand.height * 0.26)
+            default: 0
+            }
+            cg.saveGState(); cg.addPath(UIBezierPath(roundedRect: photo, cornerRadius: radius).cgPath); cg.clip()
+        }
         defer { if photoPlacement(watermark.position) { cg.restoreGState() } }
         var effective = watermark
         let isPhoto = photoPlacement(effective.position)
@@ -949,6 +957,14 @@ private extension PhotoFrameMetadata {
          iso.map { $0.uppercased().hasPrefix("ISO") ? $0 : "ISO\($0)" }]
             .compactMap { $0 }
             .joined(separator: "   ")
+    }
+    var immersiveDetailLine: String {
+        [focalLength,
+         aperture.map { $0.lowercased().hasPrefix("f/") ? $0 : "f/\($0)" },
+         shutter.map { $0.lowercased().hasSuffix("s") ? $0 : "\($0)s" },
+         iso]
+            .compactMap { $0 }
+            .joined(separator: "  ")
     }
     var editorialRows: [String] { [identity, lensModel ?? "", frameDetailLine, dateTime ?? "", locationRow ?? ""].filter { !$0.isEmpty } }
     var normalizedMake: String {
