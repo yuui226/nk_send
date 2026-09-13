@@ -196,8 +196,8 @@ enum PhotoEffectsRenderer {
             }
             if preset == .frosted {
                 drawGradient(cg, rect: rect,
-                             top: UIColor(red: 0.98, green: 0.99, blue: 1.0, alpha: 0.36),
-                             bottom: UIColor(red: 0.90, green: 0.94, blue: 0.96, alpha: 0.52))
+                             top: UIColor(red: 250.0 / 255.0, green: 253.0 / 255.0, blue: 255.0 / 255.0, alpha: 92.0 / 255.0),
+                             bottom: UIColor(red: 231.0 / 255.0, green: 239.0 / 255.0, blue: 245.0 / 255.0, alpha: 132.0 / 255.0))
             }
             if preset == .filmGallery {
                 cg.setFillColor(UIColor(red: 18.0 / 255.0, green: 12.0 / 255.0, blue: 10.0 / 255.0, alpha: 66.0 / 255.0).cgColor); cg.fill(rect)
@@ -209,7 +209,7 @@ enum PhotoEffectsRenderer {
         case .immersive:
             break
         case .filmEdge:
-            cg.setFillColor(UIColor(red: 0.027, green: 0.027, blue: 0.031, alpha: 1).cgColor); cg.fill(rect)
+            cg.setFillColor(UIColor(red: 8.0 / 255.0, green: 8.0 / 255.0, blue: 9.0 / 255.0, alpha: 1).cgColor); cg.fill(rect)
         }
     }
 
