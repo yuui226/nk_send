@@ -41,13 +41,17 @@ struct GPSView: View {
                                         onCommit: coordinator.setFrequency,
                                         rowHeight: 30)
                             if let name = coordinator.state.cameraName {
-                                detailRow(AppLocalized.text("相机"), name)
+                                detailRow(AppLocalized.resource("gps_camera_label"), name)
                             }
                             if let latitude = coordinator.state.latitude, let longitude = coordinator.state.longitude {
                                 detailRow(AppLocalized.text("位置"), String(format: "%.5f, %.5f", latitude, longitude))
                             }
                             if let altitude = coordinator.state.altitudeMeters {
-                                detailRow(AppLocalized.text("海拔"), String(format: "%.0f m", altitude))
+                                detailRow(
+                                    AppLocalized.resource("gps_altitude_value")
+                                        .replacingOccurrences(of: "%1$d", with: "\(Int(altitude.rounded()))"),
+                                    "",
+                                )
                             }
                             if coordinator.state.status == .error {
                                 Button(AppLocalized.resource("gps_retry")) { coordinator.retry() }
