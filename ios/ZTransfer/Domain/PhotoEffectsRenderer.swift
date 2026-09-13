@@ -241,9 +241,7 @@ enum PhotoEffectsRenderer {
             cg.strokePath()
         } else if preset != .plaque && preset != .immersive && preset != .filmEdge && preset != .filmGallery {
             let stroke: UIColor
-            if preset == .minimal {
-                stroke = UIColor(red: 0.08, green: 0.11, blue: 0.14, alpha: 0.18)
-            } else if preset == .brandInset || preset == .brandGallery {
+            if preset == .brandInset || preset == .brandGallery {
                 stroke = UIColor(red: 0.06, green: 0.08, blue: 0.09, alpha: 0.18)
             } else {
                 stroke = UIColor(white: 1, alpha: 0.275)
@@ -269,21 +267,16 @@ enum PhotoEffectsRenderer {
         let proxyFormat = UIGraphicsImageRendererFormat()
         proxyFormat.scale = 1
         proxyFormat.opaque = false
-        // CoreGraphics' shadow radius spreads farther than Android's
-        // setShadowLayer at the same numeric value. Keep the Android alpha,
-        // offset and proxy scale, but calibrate only the blur footprint so a
-        // standard frame's metadata area is not covered by a gray shadow band.
-        let blurCalibration: CGFloat = 0.55
         let proxy = UIGraphicsImageRenderer(size: proxySize, format: proxyFormat).image { renderer in
             let context = renderer.cgContext
             let proxyRect = CGRect(x: rect.minX * proxyScale, y: rect.minY * proxyScale, width: rect.width * proxyScale, height: rect.height * proxyScale)
             let proxyRadius = radius * proxyScale
             let proxyPath = UIBezierPath(roundedRect: proxyRect, cornerRadius: proxyRadius).cgPath
             context.setFillColor(UIColor(white: 0, alpha: 18.0 / 255.0).cgColor)
-            context.setShadow(offset: CGSize(width: 0, height: shortEdge * 0.003 * proxyScale), blur: shortEdge * 0.020 * proxyScale * blurCalibration, color: UIColor(red: 8.0 / 255.0, green: 15.0 / 255.0, blue: 21.0 / 255.0, alpha: 48.0 / 255.0 * strength).cgColor)
+            context.setShadow(offset: CGSize(width: 0, height: shortEdge * 0.003 * proxyScale), blur: shortEdge * 0.020 * proxyScale, color: UIColor(red: 8.0 / 255.0, green: 15.0 / 255.0, blue: 21.0 / 255.0, alpha: 48.0 / 255.0 * strength).cgColor)
             context.addPath(proxyPath); context.fillPath(); context.setShadow(offset: .zero, blur: 0, color: nil)
             context.setFillColor(UIColor(white: 0, alpha: 20.0 / 255.0).cgColor)
-            context.setShadow(offset: CGSize(width: 0, height: shortEdge * 0.009 * proxyScale), blur: shortEdge * 0.009 * proxyScale * blurCalibration, color: UIColor(red: 5.0 / 255.0, green: 11.0 / 255.0, blue: 16.0 / 255.0, alpha: 64.0 / 255.0 * strength).cgColor)
+            context.setShadow(offset: CGSize(width: 0, height: shortEdge * 0.009 * proxyScale), blur: shortEdge * 0.009 * proxyScale, color: UIColor(red: 5.0 / 255.0, green: 11.0 / 255.0, blue: 16.0 / 255.0, alpha: 64.0 / 255.0 * strength).cgColor)
             context.addPath(proxyPath); context.fillPath()
         }
         guard let proxyCG = proxy.cgImage else { return }
