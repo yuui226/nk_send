@@ -54,6 +54,13 @@ struct PhotoPreviewView: View {
                         Text(files[index].fileName)
                             .font(.system(size: 16, weight: .semibold, design: .rounded))
                             .lineLimit(1)
+                            // Android PreviewInfoText scales the filename to
+                            // its measured width and clips only as a last
+                            // resort; SwiftUI's default ellipsis changes the
+                            // visible text, so prefer the same shrink-first
+                            // behavior here.
+                            .minimumScaleFactor(0.5)
+                            .allowsTightening(true)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .id(files[index].id)
                             .transition(.opacity.combined(with: .move(edge: .top)))
