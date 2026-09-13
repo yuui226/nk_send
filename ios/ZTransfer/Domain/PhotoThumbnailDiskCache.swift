@@ -28,6 +28,21 @@ final class PhotoThumbnailDiskCache: @unchecked Sendable {
             } ?? [])
         }
 
+        /// The OS may clear cache contents while the process remains alive.
+        /// Android resets an existing CameraCache index when its directory is
+        /// recreated; do the same before serving the next lookup.
+        fileprivate func resetIndexAfterDirectoryRecreated() {
+            lock.lock(); defer { lock.unlock() }
+            try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            index = Set((try? FileManager.default.contentsOfDirectory(
+                at: directory, includingPropertiesForKeys: [.fileSizeKey], options: [.skipsHiddenFiles]
+            ))?.compactMap { url in
+                guard url.pathExtension.lowercased() == "jpg",
+                      ((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) > 0 else { return nil }
+                return url.lastPathComponent
+            } ?? [])
+        }
+
         func target(_ name: String) -> URL { directory.appendingPathComponent(name, isDirectory: false) }
 
         func find(_ name: String, legacyName: String? = nil, alternateName: String? = nil) -> URL? {
@@ -112,11 +127,15 @@ final class PhotoThumbnailDiskCache: @unchecked Sendable {
     func openCamera(identity: String, now: Date = Date()) -> CameraStore {
         lock.lock(); defer { lock.unlock() }
         let directory = root.appendingPathComponent("camera_\(Self.sha256(identity))", isDirectory: true)
+        let directoryAlreadyExisted = FileManager.default.fileExists(atPath: directory.path)
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let marker = directory.appendingPathComponent(".last_connected")
         try? Data(String(now.timeIntervalSince1970).utf8).write(to: marker, options: .atomic)
         try? FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: directory.path)
-        if let existing = stores[directory.lastPathComponent] { return existing }
+        if let existing = stores[directory.lastPathComponent] {
+            if !directoryAlreadyExisted { existing.resetIndexAfterDirectoryRecreated() }
+            return existing
+        }
         let store = CameraStore(root: root, directory: directory)
         stores[directory.lastPathComponent] = store
         return store
@@ -141,10 +160,11 @@ final class PhotoThumbnailDiskCache: @unchecked Sendable {
                 }
             }
         }
-        // Remove legacy flat cache files after the camera-scoped migration.
+        // Keep recent legacy flat files so a later camera lookup can migrate
+        // them lazily, matching Android's 90-day cleanup window.
         for file in dirs where file.pathExtension.lowercased() == "jpg" {
-            try? fm.removeItem(at: file)
-            removed += 1
+            let mtime = (try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate?.timeIntervalSince1970) ?? 0
+            if mtime < cutoff, (try? fm.removeItem(at: file)) != nil { removed += 1 }
         }
         return removed
     }
