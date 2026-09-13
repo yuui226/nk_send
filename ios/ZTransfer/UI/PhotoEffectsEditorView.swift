@@ -504,7 +504,7 @@ struct PhotoEffectsSettingsPreview: View {
 
 /// Android's `nextPhotoFilterSelections`: preserve the catalog's favorite-first
 /// order and warm only the two entries after the current selection.
-private func nextPhotoFilterSelections(for settings: PhotoEffectsSettings) -> [PhotoFilterSelection] {
+func nextPhotoFilterSelections(for settings: PhotoEffectsSettings) -> [PhotoFilterSelection] {
     guard settings.photoFilterEnabled, let selected = settings.selectedFilter else { return [] }
     let ordered = settings.orderedFilters
     guard let index = ordered.firstIndex(where: { $0.id == selected.preset.id }),
