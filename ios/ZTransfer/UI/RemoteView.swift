@@ -102,16 +102,16 @@ struct RemoteView: View {
                             .allowsHitTesting(false)
                     }
                     if showFps, model.state.fps > 0 {
-                        Text(String(format: "%.1f FPS", model.state.fps))
-                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.86))
+                        Text(String(format: "%.1f fps", model.state.fps))
+                            .font(.system(size: 10, weight: .regular, design: .monospaced))
+                            .foregroundStyle(.white)
                             .padding(.horizontal, 6)
-                            .padding(.vertical, 3)
-                            .background(.black.opacity(0.42), in: RoundedRectangle(cornerRadius: 6))
+                            .padding(.vertical, 2)
+                            .background(.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
                             .frame(maxWidth: .infinity, maxHeight: .infinity,
                                    alignment: .bottomTrailing)
-                            .padding(.trailing, 12)
-                            .padding(.bottom, 10)
+                            .padding(.trailing, 8)
+                            .padding(.bottom, 8)
                             .allowsHitTesting(false)
                     }
                 } else {
