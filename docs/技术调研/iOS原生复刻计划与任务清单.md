@@ -340,7 +340,9 @@
   - 已修：连接页 GPS 入口恢复安卓语义：主胶囊恒定显示“GPS”并只控制展开/收起；展开面板承载手机/相机准备说明、首次配对路径、已配对标记、频率拨轮、状态启停按钮、长按关闭、清除配对和诊断复制。
   - 已修：`GPSCoordinator` 由根页面持有，离开 GPS 页面不会意外停止已启用的定位/BLE 会话；页面按 Android `GpsStatus` 展示状态。
   - 已修：连接页展开面板底部控件按安卓 `0.82/0.86/1.18` 权重重排；GPS 已启用并建立会话后，左侧显示上次写入时间，中间切换为按频率计算的倒计时拨轮，未启用时保留频率拨轮和清除配对入口。
-  - 待完成：连接帮助气泡、AP 冲突状态、诊断信息和状态动画逐项对照。
+  - 已修：连接步骤不再与已建立会话的详情内容同时显示；按安卓 `gpsSessionPresentationEstablished` / `shouldShowGpsConnectionSteps` 的状态集合切换准备说明与坐标/海拔内容。坐标卡沿用安卓五位小数和 N/S/E/W 格式，点击后复制坐标并启动地点查询；帮助灯泡读取安卓 GPS 帮助文案并记录 `connection_help_viewed`。
+  - 已修：连接页详情层展开/收起使用安卓 260/220ms、25/20ms 延迟及顶部锚点缩放淡入淡出；邻侧 Wi‑Fi 卡片仍不参与重测量。iOS 的系统 popover 仅作为承载方式，内容和触发条件沿用安卓气泡。
+  - 待完成：AP 冲突状态、地点查询缓存/超时、诊断复制内容和状态动画仍需逐项对照；GPS 真机权限、BLE 和画面验收未完成。
 
 ### J. 验证、性能与发布
 
@@ -641,6 +643,12 @@
 - 安卓 GPS 入口在缺少定位/蓝牙能力时使用 `gps_permission_required` 与 `gps_bluetooth_required` 资源提示；iOS 协调器原先直接写入中文字符串，英文和繁体设置下会显示错误语言。
 - iOS `GPSCoordinator` 的定位授权拒绝、蓝牙不可用和首次启用失败分支现统一读取上述安卓资源，协议层没有对应资源的内部错误继续保留待核对。
 - 验证：源码构建待本轮完成；系统权限弹窗、蓝牙关闭和定位服务关闭路径仍待真机验证，GPS 任务保持未完成。
+
+### 2026-09-14 GPS 连接页详情状态对账（进行中）
+
+- 对照安卓 `GpsDetailPrimaryContent`、`GpsConnectionGuide`、`GpsCoordinateValueSurface` 和 `GpsPlaceLookupBubble`，iOS 连接页 GPS 展开面板现在按“未建立会话 → 连接步骤 / 已有定位 → 坐标与海拔”的状态切换，不再无条件显示准备步骤。
+- 坐标显示使用五位小数、绝对值加方向字母；点击任一坐标复制完整坐标并通过 `CLGeocoder` 显示地点查询的加载、成功或失败状态。所有可见文案继续读取安卓 GPS 资源键。
+- 验证：`xcodebuild -project ios/ZTransfer.xcodeproj -scheme ZTransfer -sdk iphonesimulator -configuration Debug CODE_SIGNING_ALLOWED=NO build` 成功；未进行真实定位、地点查询、BLE 或真机动画验收，任务仍保持未完成。
 
 ### 2026-09-14 USB 权限状态 reducer 文案对账（进行中）
 

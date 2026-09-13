@@ -1,4 +1,6 @@
 import SwiftUI
+import CoreLocation
+import UIKit
 
 struct GPSConnectionControl: View {
     @ObservedObject var coordinator: GPSCoordinator
@@ -8,7 +10,12 @@ struct GPSConnectionControl: View {
             TimelineView(.animation) { context in
                 let phase = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 2.8) / 2.8
                 let pulse = coordinator.state.enabled ? 0.05 + 0.05 * CGFloat((sin(phase * 2 * .pi) + 1) / 2) : 0
-                Button { withAnimation(ZTransferMotion.standard) { expanded.toggle() } } label: {
+                Button {
+                    let animation: Animation = expanded
+                        ? .easeInOut(duration: 0.22).delay(0.02)
+                        : .easeInOut(duration: 0.26).delay(0.025)
+                    withAnimation(animation) { expanded.toggle() }
+                } label: {
                     Text(AppLocalized.resource("gps_auto_write")).zTransferTypography(.titleMedium, weight: .bold)
                         .foregroundStyle(ZTransferColors.primaryText)
                         .frame(maxWidth: .infinity).frame(height: 50)
@@ -31,22 +38,22 @@ struct GPSConnectionControl: View {
                     // keeps the two connection cards at their measured width.
                     .frame(width: 250)
                     .padding(.top, 60)
-                    .transition(
-                        .asymmetric(
-                            insertion: .opacity
-                                .combined(with: .scale(scale: 0.965, anchor: .topLeading))
-                                .combined(with: .move(edge: .top)),
-                            removal: .opacity
-                                .combined(with: .scale(scale: 0.975, anchor: .topLeading))
-                                .combined(with: .move(edge: .top)),
-                        )
-                    )
+                    .transition(.asymmetric(
+                        insertion: .opacity
+                            .combined(with: .scale(scale: 0.965, anchor: .topLeading))
+                            .combined(with: .move(edge: .top)),
+                        removal: .opacity
+                            .combined(with: .scale(scale: 0.975, anchor: .topLeading))
+                            .combined(with: .move(edge: .top))
+                    ))
             }
         }
         // Android GpsDetailOverflowLayer uses 260ms enter/220ms exit motion;
         // keep the panel mounted in the overlay so the neighbouring card is
         // never remeasured during either direction.
-        .animation(.easeInOut(duration: expanded ? 0.26 : 0.22), value: expanded)
+        .animation(expanded
+            ? .easeInOut(duration: 0.26).delay(0.025)
+            : .easeInOut(duration: 0.22).delay(0.02), value: expanded)
     }
 }
 
@@ -73,6 +80,16 @@ private struct GPSInlinePanel: View {
     @ObservedObject var coordinator: GPSCoordinator
     @State private var showingReset = false
     @State private var holdCompleted = false
+    @State private var sessionEstablished = false
+    @State private var showHelp = false
+    @State private var placeState = GPSPlaceState.idle
+
+    private enum GPSPlaceState: Equatable {
+        case idle
+        case loading
+        case success(String)
+        case error
+    }
 
     private var statusLabel: String {
         switch coordinator.state.status {
@@ -88,27 +105,33 @@ private struct GPSInlinePanel: View {
         }
     }
 
+    private var hasCoordinates: Bool {
+        coordinator.state.latitude != nil && coordinator.state.longitude != nil
+    }
+
+    private var showConnectionSteps: Bool {
+        guard !sessionEstablished else { return false }
+        switch coordinator.state.status {
+        case .off, .starting, .searching, .needsCamera, .connecting, .pairing, .cameraConfirm, .error:
+            return true
+        default:
+            return false
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            VStack(alignment: .leading, spacing: 10) {
-                gpsPreparationRow(icon: "iphone", title: AppLocalized.resource("gps_phone_label"), detail: AppLocalized.resource("gps_phone_ready"))
-                gpsPreparationRow(icon: "camera.fill", title: AppLocalized.resource("gps_camera_label"), detail: AppLocalized.resource("gps_camera_ready"), status: coordinator.bluetooth.hasSavedPairing ? AppLocalized.resource("gps_paired_badge") : nil)
-            }
-            if !coordinator.bluetooth.hasSavedPairing {
-                HStack(spacing: 6) {
-                    Text(AppLocalized.resource("gps_first_pairing_label"))
-                        .zTransferText(size: 12, weight: .bold)
-                        .foregroundStyle(ZTransferColors.accentBlue)
-                    Text(AppLocalized.resource("gps_first_pairing_path"))
-                        .zTransferText(size: 11)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
+            Group {
+                if showConnectionSteps {
+                    connectionGuide
+                } else if hasCoordinates {
+                    locationContent
+                } else {
+                    Color.clear.frame(height: 0)
                 }
-                .padding(.horizontal, 11).padding(.vertical, 9)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(ZTransferColors.accentBlue.opacity(0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(ZTransferColors.accentBlue.opacity(0.22)))
             }
+            .id(showConnectionSteps ? "guide" : (hasCoordinates ? "location" : "empty"))
+            .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .topLeading)))
             TimelineView(.periodic(from: .now, by: 1)) { context in
                 GeometryReader { geometry in
                     // Android uses weights 0.82 / 0.86 / 1.18 with two 8dp
@@ -140,6 +163,165 @@ private struct GPSInlinePanel: View {
         } message: {
             Text(AppLocalized.resource("gps_clear_pairing_message"))
         }
+        .onAppear { updateSessionEvidence() }
+        .onChange(of: coordinator.state.status) { _ in updateSessionEvidence() }
+        .onChange(of: coordinator.state.latitude) { _ in updateSessionEvidence() }
+        .onChange(of: coordinator.state.enabled) { enabled in
+            if !enabled {
+                sessionEstablished = false
+                placeState = .idle
+                showHelp = false
+            } else {
+                updateSessionEvidence()
+            }
+        }
+        .animation(.easeInOut(duration: 0.24), value: showConnectionSteps)
+        .animation(.easeInOut(duration: 0.24), value: hasCoordinates)
+    }
+
+    private func updateSessionEvidence() {
+        guard coordinator.state.enabled else {
+            sessionEstablished = false
+            return
+        }
+        if hasCoordinates {
+            sessionEstablished = true
+            return
+        }
+        switch coordinator.state.status {
+        case .pairingSuccess, .connected, .writing, .waitingFix, .ready:
+            sessionEstablished = true
+        default:
+            break
+        }
+    }
+
+    private var connectionGuide: some View {
+        ZStack(alignment: .topTrailing) {
+            VStack(alignment: .leading, spacing: 10) {
+                gpsPreparationRow(icon: "iphone", title: AppLocalized.resource("gps_phone_label"), detail: AppLocalized.resource("gps_phone_ready"))
+                gpsPreparationRow(icon: "camera.fill", title: AppLocalized.resource("gps_camera_label"), detail: AppLocalized.resource("gps_camera_ready"), status: coordinator.bluetooth.hasSavedPairing ? AppLocalized.resource("gps_paired_badge") : nil)
+                if !coordinator.bluetooth.hasSavedPairing {
+                    HStack(spacing: 6) {
+                        Text(AppLocalized.resource("gps_first_pairing_label"))
+                            .zTransferText(size: 12, weight: .bold)
+                            .foregroundStyle(ZTransferColors.accentBlue)
+                        Text(AppLocalized.resource("gps_first_pairing_path"))
+                            .zTransferText(size: 11)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.horizontal, 11).padding(.vertical, 9)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(ZTransferColors.accentBlue.opacity(0.065), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(ZTransferColors.accentBlue.opacity(0.20)))
+                }
+            }
+            .padding(.trailing, 36)
+            Button { showHelp = true } label: {
+                Image(systemName: "lightbulb.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(ZTransferColors.accentOrange)
+                    .frame(width: 30, height: 30)
+                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(ZTransferColors.secondaryText.opacity(0.14)))
+                    .scaleEffect(coordinator.connectionHelpViewed ? 1 : 1.06)
+            }
+            .buttonStyle(.plain)
+            .popover(isPresented: $showHelp, attachmentAnchor: .rect(.bounds), arrowEdge: .top) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(AppLocalized.resource("gps_detail_description"))
+                        .zTransferText(size: 14, weight: .semibold)
+                    Text(AppLocalized.resource("gps_help_intro"))
+                        .zTransferText(size: 12, weight: .bold)
+                        .foregroundStyle(ZTransferColors.accentOrange)
+                    Text(AppLocalized.resource("gps_help_battery") + "\n" + AppLocalized.resource("gps_help_multitask"))
+                        .zTransferText(size: 12)
+                    Text(AppLocalized.resource("gps_help_accuracy_note"))
+                        .zTransferText(size: 12)
+                        .foregroundStyle(ZTransferColors.secondaryText)
+                }
+                .padding(14)
+                .frame(width: 244)
+            }
+            .onChange(of: showHelp) { isPresented in
+                if isPresented { coordinator.markConnectionHelpViewed() }
+            }
+        }
+        .padding(.top, 12)
+    }
+
+    private var locationContent: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                coordinateSurface(text: formatCoordinate(coordinator.state.latitude, latitude: true), tint: ZTransferColors.accentBlue)
+                    .onTapGesture { copyAndLookup() }
+                coordinateSurface(text: formatCoordinate(coordinator.state.longitude, latitude: false), tint: ZTransferColors.accentOrange)
+                    .onTapGesture { copyAndLookup() }
+            }
+            Text(AppLocalized.formattedResource("gps_altitude_value", ["%1$d": "\(Int((coordinator.state.altitudeMeters ?? 0).rounded()))"]))
+                .zTransferText(size: 15, weight: .semibold)
+                .frame(maxWidth: .infinity, minHeight: 42)
+                .background(ZTransferColors.accentBlue.opacity(0.065), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(ZTransferColors.accentBlue.opacity(0.20)))
+            if case .loading = placeState {
+                placeBubble(AppLocalized.resource("gps_place_loading"), loading: true)
+            } else if case .success(let name) = placeState {
+                placeBubble(name, loading: false)
+            } else if case .error = placeState {
+                placeBubble(AppLocalized.resource("gps_place_unavailable"), loading: false)
+            }
+        }
+        .padding(.top, 8)
+    }
+
+    private func coordinateSurface(text: String, tint: Color) -> some View {
+        Text(text)
+            .zTransferText(size: 15, weight: .semibold)
+            .frame(maxWidth: .infinity, minHeight: 42)
+            .background(tint.opacity(0.065), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(tint.opacity(0.20)))
+            .lineLimit(1)
+            .minimumScaleFactor(0.72)
+    }
+
+    @ViewBuilder
+    private func placeBubble(_ text: String, loading: Bool) -> some View {
+        HStack(spacing: 8) {
+            if loading { ProgressView().tint(ZTransferColors.accentBlue) }
+            Text(text).zTransferText(size: 12, weight: .medium)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 11)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(ZTransferColors.secondaryText.opacity(0.16)))
+        .transition(.opacity.combined(with: .move(edge: .bottom)))
+    }
+
+    private func copyAndLookup() {
+        guard let latitude = coordinator.state.latitude, let longitude = coordinator.state.longitude else { return }
+        UIPasteboard.general.string = "\(formatCoordinate(latitude, latitude: true)), \(formatCoordinate(longitude, latitude: false))"
+        placeState = .loading
+        let geocoder = CLGeocoder()
+        geocoder.reverseGeocodeLocation(CLLocation(latitude: latitude, longitude: longitude)) { placemarks, error in
+            Task { @MainActor in
+                if let name = placemarks?.first?.name ?? placemarks?.first?.locality ?? placemarks?.first?.administrativeArea,
+                   !name.isEmpty {
+                    withAnimation(.easeInOut(duration: 0.17)) { placeState = .success(name) }
+                } else if error != nil {
+                    withAnimation(.easeInOut(duration: 0.17)) { placeState = .error }
+                } else {
+                    withAnimation(.easeInOut(duration: 0.17)) { placeState = .error }
+                }
+            }
+        }
+    }
+
+    private func formatCoordinate(_ value: Double?, latitude: Bool) -> String {
+        guard let value else { return "--" }
+        let hemisphere: String
+        if latitude { hemisphere = value < 0 ? "S" : "N" } else { hemisphere = value < 0 ? "W" : "E" }
+        return String(format: "%.5f°%@", abs(value), hemisphere)
     }
 
     @ViewBuilder
