@@ -636,7 +636,7 @@ enum PhotoEffectsRenderer {
         case .classicSignature:
             if !metadata.identity.isEmpty {
                 let headerArea = CGRect(x: 0, y: 0, width: layout.canvas.width, height: layout.photo.minY)
-                var font = UIFont(name: "HelveticaNeue-CondensedBoldOblique", size: layout.canvas.width * 0.034) ?? UIFont.boldSystemFont(ofSize: layout.canvas.width * 0.034)
+                var font = UIFont(name: "HelveticaNeue-BlackItalic", size: layout.canvas.width * 0.034) ?? UIFont.italicSystemFont(ofSize: layout.canvas.width * 0.034)
                 let maxWidth = layout.canvas.width * 0.54
                 let measured = (metadata.identity as NSString).size(withAttributes: [.font: font]).width
                 if measured > maxWidth { font = font.withSize(font.pointSize * maxWidth / measured) }
@@ -644,7 +644,7 @@ enum PhotoEffectsRenderer {
                 let size = (metadata.identity as NSString).size(withAttributes: attrs)
                 metadata.identity.draw(at: CGPoint(x: headerArea.midX - size.width * 0.5, y: headerArea.midY - size.height * 0.5), withAttributes: attrs)
             }
-            drawMetadataRows(cg, area: CGRect(x: 0, y: layout.photo.maxY, width: layout.canvas.width, height: layout.canvas.height - layout.photo.maxY), preset: preset, rows: [metadata.lensModel ?? "", metadata.frameDetailLine, metadata.dateTime ?? "", metadata.locationRow ?? ""].filter { !$0.isEmpty }, watermark: watermark, dark: true, emphasizeFirst: false)
+            drawMetadataRows(cg, area: CGRect(x: 0, y: layout.photo.maxY, width: layout.canvas.width, height: layout.canvas.height - layout.photo.maxY), preset: preset, rows: [metadata.lensModel ?? "", metadata.classicSignatureDetailLine, metadata.dateTime ?? "", metadata.locationRow ?? ""].filter { !$0.isEmpty }, watermark: watermark, dark: true, emphasizeFirst: false)
         default: break
         }
         let photoWatermark = editorialPhotoWatermark(watermark, preset: preset)
@@ -924,7 +924,22 @@ private extension PhotoFrameMetadata {
         return [coordinate, altitudeText].compactMap { $0 }.joined(separator: "  ").nilIfEmpty
     }
     var identity: String { [normalizedMake, normalizedModel].filter { !$0.isEmpty }.joined(separator: " ") }
-    var frameDetailLine: String { [focalLength, aperture, shutter, iso].compactMap { $0 }.joined(separator: "   ") }
+    var frameDetailLine: String {
+        [focalLength,
+         aperture?.replacingOccurrences(of: "f/", with: "F", options: .caseInsensitive),
+         shutter.map { $0.lowercased().hasSuffix("s") ? $0 : "\($0)s" },
+         iso.map { $0.uppercased().hasPrefix("ISO") ? $0 : "ISO\($0)" }]
+            .compactMap { $0 }
+            .joined(separator: "   ")
+    }
+    var classicSignatureDetailLine: String {
+        [focalLength.map { $0.uppercased().hasPrefix("FL") ? $0 : "FL \($0)" },
+         aperture.map { "Aperture \($0)" },
+         shutter.map { "Shutter \($0.replacingOccurrences(of: "s", with: "", options: .caseInsensitive))" },
+         iso.map { $0.uppercased().hasPrefix("ISO") ? $0 : "ISO\($0)" }]
+            .compactMap { $0 }
+            .joined(separator: "   ")
+    }
     var editorialRows: [String] { [identity, lensModel ?? "", frameDetailLine, dateTime ?? "", locationRow ?? ""].filter { !$0.isEmpty } }
     var normalizedMake: String {
         let value = make?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""

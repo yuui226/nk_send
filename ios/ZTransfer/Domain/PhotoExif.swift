@@ -59,10 +59,10 @@ enum PhotoExifParser {
         let gps = properties[kCGImagePropertyGPSDictionary] as? NSDictionary
         let make = tiff?[kCGImagePropertyTIFFMake] as? String
         let model = tiff?[kCGImagePropertyTIFFModel] as? String
-        let aperture = (exif?[kCGImagePropertyExifFNumber] as? NSNumber).map { String(format: "f/%.1f", $0.doubleValue) }
+        let aperture = (exif?[kCGImagePropertyExifFNumber] as? NSNumber).map(formatAperture)
         let exposure = (exif?[kCGImagePropertyExifExposureTime] as? NSNumber)?.doubleValue
         let shutter = exposure.flatMap(formatShutter)
-        let iso = ((exif?[kCGImagePropertyExifISOSpeedRatings] as? [NSNumber])?.first)?.stringValue
+        let iso = ((exif?[kCGImagePropertyExifISOSpeedRatings] as? [NSNumber])?.first).map { "ISO\($0.intValue)" }
         let focal = (exif?[kCGImagePropertyExifFocalLength] as? NSNumber).map { String(format: "%.0fmm", $0.doubleValue) }
         let dateTime = (exif?[kCGImagePropertyExifDateTimeOriginal] as? String) ?? (tiff?[kCGImagePropertyTIFFDateTime] as? String)
         let lens = exif?[kCGImagePropertyExifLensModel] as? String
@@ -74,9 +74,21 @@ enum PhotoExifParser {
         return PhotoExif(make: make, model: model, aperture: aperture, shutterSpeed: shutter, iso: iso, focalLength: focal, dateTime: dateTime, lensModel: lens, exposureCompensation: compensation, latitude: latitude, longitude: longitude, altitude: altitude)
     }
 
+    private static func formatAperture(_ value: NSNumber) -> String {
+        let number = value.doubleValue
+        return abs(number.rounded() - number) < 0.05
+            ? String(format: "f/%.0f", number)
+            : String(format: "f/%.1f", number)
+    }
+
     private static func formatShutter(_ seconds: Double) -> String? {
         guard seconds.isFinite, seconds > 0 else { return nil }
-        if seconds >= 1 { return String(format: "%.1fs", seconds) }
+        if seconds >= 1 {
+            return abs(seconds.rounded() - seconds) < 0.05
+                ? String(format: "%.0fs", seconds)
+                : String(format: "%.1fs", seconds)
+        }
+        if seconds >= 0.4 { return String(format: "%.1fs", seconds) }
         let denominator = max(1, Int((1 / seconds).rounded()))
         return "1/\(denominator)"
     }
