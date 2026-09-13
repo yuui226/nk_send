@@ -502,6 +502,10 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
         }
     }
 
+    #if DEBUG
+    static func mapForTesting(_ error: Error) -> CameraTransportError { map(error) }
+    #endif
+
     private static func pngData(_ image: CGImage) -> Data? {
         let data = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(data, "public.png" as CFString, 1, nil) else { return nil }

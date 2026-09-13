@@ -29,6 +29,7 @@
 		3A016664A1796B9FA1866062 /* TransferQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CC18517971C48594EE448E6 /* TransferQueue.swift */; };
 		3B5B3D5F069C7122B459035C /* PhotoExifStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F0B7C798712246B70C8C2D0 /* PhotoExifStore.swift */; };
 		3C86D76849976090B4967FFB /* PhotoEffectsBatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD45F35C4B19629A11F32A1C /* PhotoEffectsBatch.swift */; };
+		3E8C1CA06EBC3AB08DB250B3 /* ImageCaptureErrorMappingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5D5E41AAFFA785D2FE92689 /* ImageCaptureErrorMappingTests.swift */; };
 		44E63D0E5E2D65EDD52F8A6B /* WiFiConnectionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21F79BF7C97A481859ECB202 /* WiFiConnectionService.swift */; };
 		481FE39822F171E89584DA10 /* great_vibes_regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 3DE23631DD841D16961C9AA6 /* great_vibes_regular.ttf */; };
 		48EBBB7703B0E57F6AC878EA /* ConnectionStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61F577AFF70C53D32A99AB7B /* ConnectionStateTests.swift */; };
@@ -229,6 +230,7 @@
 		DE7320E831B92FDF16C5A2A8 /* PhotoFilter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoFilter.swift; sourceTree = "<group>"; };
 		DF9539324F4DB53B0B922D67 /* RemoteRecordingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteRecordingTests.swift; sourceTree = "<group>"; };
 		E17D81EDE19E9E8343BD531F /* TransferQueueView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransferQueueView.swift; sourceTree = "<group>"; };
+		E5D5E41AAFFA785D2FE92689 /* ImageCaptureErrorMappingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageCaptureErrorMappingTests.swift; sourceTree = "<group>"; };
 		E765A10B0340558B3B98D1E1 /* AndroidLocalization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndroidLocalization.swift; sourceTree = "<group>"; };
 		ECDEA795752767FBE8FFC99F /* ZTransferApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZTransferApp.swift; sourceTree = "<group>"; };
 		EDE7552A6B315888DE6033D1 /* zh-Hant */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hant"; path = "zh-Hant.lproj/Localizable.strings"; sourceTree = "<group>"; };
@@ -277,6 +279,7 @@
 			children = (
 				61F577AFF70C53D32A99AB7B /* ConnectionStateTests.swift */,
 				9165B39E86D240D0CAB4F2F0 /* DomainModelTests.swift */,
+				E5D5E41AAFFA785D2FE92689 /* ImageCaptureErrorMappingTests.swift */,
 				1449968BB2DEF0E632E53EAE /* PhotoThumbnailDiskCacheTests.swift */,
 				341299C34669842D43A516C0 /* PhotoThumbnailStoreTests.swift */,
 				25DA65AB7E6B869A2B7A6F7B /* RemoteExposureParametersTests.swift */,
@@ -599,6 +602,7 @@
 				48EBBB7703B0E57F6AC878EA /* ConnectionStateTests.swift in Sources */,
 				3576AE9BA7B2A502352BA26B /* DomainModelTests.swift in Sources */,
 				8FB26966AAE2721DCF13FEF9 /* GPSProtocolTests.swift in Sources */,
+				3E8C1CA06EBC3AB08DB250B3 /* ImageCaptureErrorMappingTests.swift in Sources */,
 				6E67243D68222B05469B1AAE /* Np3AndroidGoldenTests.swift in Sources */,
 				F4543194B75979601E536063 /* Np3BitmapFilterTests.swift in Sources */,
 				2168F57038D1C9802791EAB7 /* Np3FilterEngineTests.swift in Sources */,
