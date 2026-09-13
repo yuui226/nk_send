@@ -217,11 +217,15 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
                         return
                     }
                     if let error {
+                        let mapped = Self.map(error)
                         self.removeOpening(camera, for: id)
                         if self.isKnownCamera(camera) {
+                            // The connection view maps the typed error to the
+                            // Android resource key; this event remains only a
+                            // lifecycle notification for an already-open UI.
                             self.emit(.failed(id: id, message: error.localizedDescription))
                         }
-                        _ = box.finish(.failure(error))
+                        _ = box.finish(.failure(mapped))
                     } else if box.finish(.success(())) {
                         if self.markOpened(camera, for: id, generation: generation) {
                             self.emit(.sessionOpened(id: id))
