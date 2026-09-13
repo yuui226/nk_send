@@ -136,6 +136,30 @@ final class DomainModelTests: XCTestCase {
         XCTAssertEqual(existingTransferDestination(for: unknownSize, in: directory)?.lastPathComponent, "same.JPG")
     }
 
+    func testTransferDateFolderMatchesAndroidAndFallsBackForInvalidDate() {
+        let fallback = Calendar(identifier: .gregorian).date(from: DateComponents(year: 2026, month: 3, day: 21))!
+        XCTAssertEqual(transferDateFolderName("20260817T142530", fallback: fallback), "ZT2026-08-17")
+        XCTAssertEqual(transferDateFolderName("20260231T120000", fallback: fallback), "ZT2026-03-21")
+        XCTAssertEqual(transferDateFolderName(nil, fallback: fallback), "ZT2026-03-21")
+    }
+
+    func testTransferDestinationDirectoryKeepsRootAndDatedFoldersSeparate() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let dated = transferDestinationDirectory(root: root, folderName: "ZT2026-08-17")
+        XCTAssertEqual(dated.lastPathComponent, "ZT2026-08-17")
+        XCTAssertEqual(transferDestinationDirectory(root: root, folderName: nil), root)
+    }
+
+    func testQueueItemPersistsDestinationFolderSnapshot() throws {
+        let file = CameraFile(id: 3, storageID: 1, format: 0x3801, size: 10,
+                              fileName: "same.JPG", captureDate: "20260817T142530", isProtected: false)
+        let item = TransferQueueItem(id: UUID(), file: file, destinationFolderName: "ZT2026-08-17")
+        let data = try JSONEncoder().encode(item)
+        let decoded = try JSONDecoder().decode(TransferQueueItem.self, from: data)
+        XCTAssertEqual(decoded.destinationFolderName, "ZT2026-08-17")
+    }
+
     func testPhotoFilterAppliesTypeProtectionStorageAndDate() {
         let files = [
             CameraFile(id: 1, storageID: 1, format: 0x3801, size: 1, fileName: "a.JPG", captureDate: "20260913T010203", isProtected: true),

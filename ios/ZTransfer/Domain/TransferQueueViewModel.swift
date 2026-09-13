@@ -21,25 +21,25 @@ final class TransferQueueViewModel: ObservableObject {
 
     deinit { observation?.cancel() }
 
-    func enqueue(_ file: CameraFile) { Task { _ = await queue.enqueue(file) } }
+    func enqueue(_ file: CameraFile, organizeByDate: Bool = false) { Task { _ = await queue.enqueue(file, organizeByDate: organizeByDate) } }
     /// Android's automatic-new-media entry point deduplicates by logical
     /// identity before adding and starts the worker only when the user has not
     /// deferred transfer start.
-    func enqueueAutomatic(_ files: [CameraFile], session: CameraSession?, directory: URL?, autoStart: Bool) {
+    func enqueueAutomatic(_ files: [CameraFile], session: CameraSession?, directory: URL?, autoStart: Bool, organizeByDate: Bool = false) {
         guard !files.isEmpty else { return }
         Task {
             var accepted = false
             for file in files {
-                if await queue.enqueueAutomatic(file) != nil { accepted = true }
+                if await queue.enqueueAutomatic(file, organizeByDate: organizeByDate) != nil { accepted = true }
             }
             if accepted, autoStart, let session, let directory {
                 await queue.start(session: session, directory: directory)
             }
         }
     }
-    func enqueue(_ file: CameraFile, autoStart session: CameraSession?, directory: URL?) {
+    func enqueue(_ file: CameraFile, autoStart session: CameraSession?, directory: URL?, organizeByDate: Bool = false) {
         Task {
-            _ = await queue.enqueue(file)
+            _ = await queue.enqueue(file, organizeByDate: organizeByDate)
             if let session, let directory { await queue.start(session: session, directory: directory) }
         }
     }

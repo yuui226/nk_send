@@ -33,6 +33,7 @@ struct PhotoListView: View {
     @State private var filterAnchor: CGRect = .zero
     @State private var showingQueue = false
     @AppStorage("defer_transfer_start") private var deferTransferStart = false
+    @AppStorage("organize_transfers_by_date") private var organizeByDate = false
     @AppStorage("collapse_burst_photos") private var collapseBurstPhotos = true
     @AppStorage("thumbnail_columns") private var thumbnailColumns = 3
     @State private var expandedBurstIDs: Set<String> = []
@@ -172,7 +173,7 @@ struct PhotoListView: View {
                       let directory = directoryStore.directoryURL else { return }
                 let deferStart = UserDefaults.standard.bool(forKey: "defer_transfer_start")
                 queueModel.enqueueAutomatic(files, session: session, directory: directory,
-                                            autoStart: !deferStart)
+                                            autoStart: !deferStart, organizeByDate: organizeByDate)
             }
             model.load()
         }
@@ -220,9 +221,9 @@ struct PhotoListView: View {
                 let files = model.sections.flatMap(\.files)
                 PhotoPreviewView(session: session, files: files, selectedFile: $selectedFile) { file in
                     if !deferTransferStart {
-                        queueModel.enqueue(file, autoStart: session, directory: directoryStore.directoryURL)
+                        queueModel.enqueue(file, autoStart: session, directory: directoryStore.directoryURL, organizeByDate: organizeByDate)
                     } else {
-                        queueModel.enqueue(file)
+                        queueModel.enqueue(file, organizeByDate: organizeByDate)
                     }
                 }
                 .onAppear { model.pauseForPreview() }
@@ -437,9 +438,9 @@ struct PhotoListView: View {
         if tapToPreview {
             selectedFile = file
         } else if !deferTransferStart {
-            queueModel.enqueue(file, autoStart: session, directory: directoryStore.directoryURL)
+            queueModel.enqueue(file, autoStart: session, directory: directoryStore.directoryURL, organizeByDate: organizeByDate)
         } else {
-            queueModel.enqueue(file)
+            queueModel.enqueue(file, organizeByDate: organizeByDate)
         }
     }
 }

@@ -4,6 +4,27 @@ func exportedOriginalBaseName(_ name: String) -> String {
     name.replacingOccurrences(of: " \\(\\d+\\)(?=\\.[^.]*$|$)", with: "", options: .regularExpression)
 }
 
+/// Android's PTP capture date is `yyyyMMdd'T'HHmmss`; malformed or missing
+/// dates fall back to the day the task is queued.
+func transferDateFolderName(_ captureDate: String?, fallback: Date = Date()) -> String {
+    let calendar = Calendar(identifier: .gregorian)
+    let fallbackParts = calendar.dateComponents([.year, .month, .day], from: fallback)
+    var year = fallbackParts.year ?? 1970
+    var month = fallbackParts.month ?? 1
+    var day = fallbackParts.day ?? 1
+    if let raw = captureDate?.prefix(8), raw.count == 8,
+       let y = Int(raw.prefix(4)), let m = Int(raw.dropFirst(4).prefix(2)),
+       let d = Int(raw.suffix(2)),
+       (1...12).contains(m), (1...31).contains(d), y >= 1,
+       let parsed = calendar.date(from: DateComponents(year: y, month: m, day: d)),
+       calendar.component(.year, from: parsed) == y,
+       calendar.component(.month, from: parsed) == m,
+       calendar.component(.day, from: parsed) == d {
+        year = y; month = m; day = d
+    }
+    return String(format: "ZT%04d-%02d-%02d", year, month, day)
+}
+
 enum TransferStatus: String, Codable, Sendable { case waiting, transferring, completed, failed, cancelled }
 
 struct TransferQueueItem: Identifiable, Equatable, Sendable, Codable {
@@ -15,6 +36,36 @@ struct TransferQueueItem: Identifiable, Equatable, Sendable, Codable {
     var error: String?
     var skipped = false
     var outputURL: URL?
+    /// Android locks the destination folder when the task is created. Keeping
+    /// it on the item prevents a later settings change from moving a queued
+    /// task between the root and a dated folder.
+    var destinationFolderName: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case id, file, status, progress, bytesPerSecond, error, skipped, outputURL, destinationFolderName
+    }
+
+    init(id: UUID, file: CameraFile, status: TransferStatus = .waiting,
+         progress: Double = 0, bytesPerSecond: Int64 = 0, error: String? = nil,
+         skipped: Bool = false, outputURL: URL? = nil,
+         destinationFolderName: String? = nil) {
+        self.id = id; self.file = file; self.status = status; self.progress = progress
+        self.bytesPerSecond = bytesPerSecond; self.error = error; self.skipped = skipped
+        self.outputURL = outputURL; self.destinationFolderName = destinationFolderName
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(UUID.self, forKey: .id)
+        file = try values.decode(CameraFile.self, forKey: .file)
+        status = try values.decodeIfPresent(TransferStatus.self, forKey: .status) ?? .waiting
+        progress = try values.decodeIfPresent(Double.self, forKey: .progress) ?? 0
+        bytesPerSecond = try values.decodeIfPresent(Int64.self, forKey: .bytesPerSecond) ?? 0
+        error = try values.decodeIfPresent(String.self, forKey: .error)
+        skipped = try values.decodeIfPresent(Bool.self, forKey: .skipped) ?? false
+        outputURL = try values.decodeIfPresent(URL.self, forKey: .outputURL)
+        destinationFolderName = try values.decodeIfPresent(String.self, forKey: .destinationFolderName)
+    }
 }
 
 struct TransferQueueSnapshot: Equatable, Sendable {
@@ -37,6 +88,14 @@ func existingTransferDestination(for file: CameraFile, in directory: URL) -> URL
         guard file.size == UInt64(UInt32.max) else { return values?.fileSize.map { UInt64($0) } == Optional(file.size) }
         return true
     }
+}
+
+/// Resolves the exact Android destination: root when the option is off, or a
+/// `ZTyyyy-MM-dd` child when it is on. Existing files are only considered in
+/// that selected directory, never in an unrelated dated folder.
+func transferDestinationDirectory(root: URL, folderName: String?) -> URL {
+    guard let folderName, !folderName.isEmpty else { return root }
+    return root.appendingPathComponent(folderName, isDirectory: true)
 }
 
 /// Serial transfer queue. Android permits repeated manual exports of one camera
@@ -84,16 +143,19 @@ actor TransferQueue {
     }
 
     @discardableResult
-    func enqueue(_ file: CameraFile) -> UUID? {
-        let item = TransferQueueItem(id: UUID(), file: file)
+    func enqueue(_ file: CameraFile, organizeByDate: Bool = false) -> UUID? {
+        let item = TransferQueueItem(
+            id: UUID(), file: file,
+            destinationFolderName: organizeByDate ? transferDateFolderName(file.captureDate) : nil
+        )
         items.append(item); publish(); return item.id
     }
 
     @discardableResult
-    func enqueueAutomatic(_ file: CameraFile) -> UUID? {
+    func enqueueAutomatic(_ file: CameraFile, organizeByDate: Bool = false) -> UUID? {
         let identity = automaticIdentity(for: file)
         guard !items.contains(where: { automaticIdentity(for: $0.file) == identity }) else { return nil }
-        return enqueue(file)
+        return enqueue(file, organizeByDate: organizeByDate)
     }
 
     func start(session: CameraSession, directory: URL) {
@@ -205,7 +267,13 @@ actor TransferQueue {
             items[index].status = .transferring; items[index].error = nil; publish()
             progressSamples[itemID] = (Date(), 0)
             do {
-                if let destination = existingTransferDestination(for: items[index].file, in: directory) {
+                let destinationDirectory = transferDestinationDirectory(
+                    root: directory, folderName: items[index].destinationFolderName
+                )
+                if items[index].destinationFolderName != nil {
+                    try FileManager.default.createDirectory(at: destinationDirectory, withIntermediateDirectories: true)
+                }
+                if let destination = existingTransferDestination(for: items[index].file, in: destinationDirectory) {
                     if let index = items.firstIndex(where: { $0.id == itemID }) {
                         items[index].status = .completed
                         items[index].progress = 1
@@ -216,7 +284,7 @@ actor TransferQueue {
                     }
                     continue
                 }
-                let output = try await session.download(file: items[index].file, to: directory) { [weak self] progress in
+                let output = try await session.download(file: items[index].file, to: destinationDirectory) { [weak self] progress in
                     Task { await self?.updateProgress(id: itemID, value: progress) }
                 }
                 if let index = items.firstIndex(where: { $0.id == itemID }) {
