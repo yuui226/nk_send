@@ -29,6 +29,7 @@ final class PhotoListViewModel: ObservableObject {
     private var loadTask: Task<Void, Never>?
     private var fillTask: Task<Void, Never>?
     private var previewPausedScan = false
+    private var transferBusy = false
     /// A cancelled/old scan must never publish over a newer camera session.
     private var loadGeneration = 0
 
@@ -182,7 +183,7 @@ final class PhotoListViewModel: ObservableObject {
         // The repository awaits this callback: scanning cannot request the
         // next metadata batch until this batch's per-file prefetch has finished,
         // matching Android's accepted-batch/backpressure order.
-        let settled = await prefetchBatch(additions)
+        let settled = transferBusy ? Set<UInt32>() : await prefetchBatch(additions)
         for id in settled { await thumbnailFillQueue.markSettled(id) }
         for file in additions where !settled.contains(file.id) { await thumbnailFillQueue.markFailed(file.id) }
         try Task.checkCancellation()
@@ -237,6 +238,18 @@ final class PhotoListViewModel: ObservableObject {
         }
     }
 
+    /// TransferViewModel exposes the same foreground gate Android feeds into
+    /// CameraViewModel. A running transfer owns the PTP channel, so the list
+    /// fill worker must stop and wake only after the transfer becomes idle.
+    func setTransferBusy(_ busy: Bool) {
+        guard transferBusy != busy else { return }
+        transferBusy = busy
+        if !busy { startThumbnailFillWorker() }
+    }
+
+    /// Reawaken background filling after a remote/FHD full-screen owner closes.
+    func wakeThumbnailFill() { startThumbnailFillWorker() }
+
     func updateTransferredIDs(_ ids: Set<UInt32>) {
         guard ids != transferredIDs else { return }
         transferredIDs = ids
@@ -253,7 +266,7 @@ final class PhotoListViewModel: ObservableObject {
             guard let self else { return }
             while !Task.isCancelled, let id = await thumbnailFillQueue.poll(),
                   let file = filesByID[id] {
-                guard await canFill() else {
+                guard !self.transferBusy, await canFill() else {
                     await thumbnailFillQueue.returnToFront(id)
                     return
                 }

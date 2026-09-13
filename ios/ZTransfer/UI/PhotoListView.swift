@@ -147,6 +147,9 @@ struct PhotoListView: View {
         .onChange(of: queueModel.snapshot.items) { items in
             model.updateTransferredIDs(Set(items.filter { $0.status == .completed }.map { $0.file.id }))
         }
+        .onChange(of: queueModel.snapshot.isTransferring) { busy in
+            model.setTransferBusy(busy)
+        }
         .fullScreenCover(item: $selectedFile) { file in
             if let session {
                 let files = model.sections.flatMap(\.files)
@@ -158,11 +161,14 @@ struct PhotoListView: View {
                     }
                 }
                 .onAppear { model.pauseForPreview() }
-                .onDisappear { model.resumeAfterPreview() }
+                .onDisappear {
+                    model.resumeAfterPreview()
+                    model.wakeThumbnailFill()
+                }
             }
         }
         .fullScreenCover(isPresented: $showingRemote) {
-            if let session { RemoteView(session: session) }
+            if let session { RemoteView(session: session).onDisappear { model.wakeThumbnailFill() } }
         }
         .sheet(isPresented: $showingFilter) {
             let files = model.availableFiles

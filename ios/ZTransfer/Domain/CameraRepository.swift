@@ -253,7 +253,10 @@ actor CameraRepository {
     func setFHDActive(_ active: Bool) { fhdActive = active }
 
     private func waitForForegroundPreview() async throws {
-        while fhdActive {
+        // Android's isFileScanPaused() covers both interactive FHD and the
+        // remote/live-view command owner. Never queue metadata behind either
+        // foreground session; resume at the same cursor after it releases.
+        while fhdActive || remoteActive {
             try Task.checkCancellation()
             try await Task.sleep(nanoseconds: 20_000_000)
         }

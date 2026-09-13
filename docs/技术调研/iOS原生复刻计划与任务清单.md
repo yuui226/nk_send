@@ -462,7 +462,7 @@
 - `PhotoListViewModel` 刷新改为保留现有行并应用 added/removed 差量；每批发布后逐项预取，结果进入 `PhotoThumbnailFillQueue` 的 pending/failed/settled 集合。
 - 缩略图缓存补齐 STA direct 的 `sta + handle + size` 键、标准键迁移、相机目录隔离、90 天清理和仅完整权威扫描后的 reconcile；后台读取增加单 permit gate，避免并发淹没 PTP 通道。
 - 验证：iOS Simulator Debug `xcodebuild ... build` 成功；`ZTRANSFER_PROTOCOL_ONLY=1 swift test --package-path ios` 通过 60 tests、0 failures。全量 Xcode 领域测试 target 仍受既有 `ios/ProtocolTests/PTPIPDiscoveryTests.swift` 无法解析 `ZTransferProtocol` 的配置阻断；未声称真机扫描、缓存命中率或取消时序已验收。
-- 仍待补齐：安卓可见缩略图“最后等待者取消”精确语义、FHD/远程/效果预览对扫描与后台填充的抢占恢复、STA direct 双卡成员合并与 raw/video 特殊预取、真实相机断线恢复回归。
+- 仍待补齐：效果预览页面的数据源与渲染入口尚未接入 iOS 设置页；真实相机断线恢复和扫描/缓存时序仍需回归。
 - 本轮新增 `CameraRepository.setFHDActive`：扫描在下一条元数据读取前让出通道，预览结束后继续同一快照；`PhotoPreviewView` 在 FHD/EXIF 任务期间负责成对设置和释放该状态。RAW/视频的 STA direct 预取已改为惰性处理。上述行为已通过模拟器编译，仍需真机时序验证。
 - 完整扫描进入 loaded 后，iOS 以后台补漏任务仅对缓存未命中的文件再次走同一预取入口；命中项只做磁盘索引检查，失败项进入队列 failed 集合，外部重试再重新入队，避免扫描阶段的瞬时失败造成永久缺图。
 - 队列在筛选日期范围变化时按范围重排并唤醒失败项；相机事件产生新文件时插入队首并启动 worker，删除事件同步移除 pending/failed/settled，和安卓的 wake/retry/remove 分支保持同样的触发点。
@@ -474,3 +474,4 @@
 - 预览抢占已接入列表生命周期：打开 FHD 预览时取消当前 metadata scan、保留已发布文件和 snapshot；预览关闭后按原有 `preserveExisting + resumeSnapshot` 继续，不重新从头枚举。
 - 新扫描会清空 iOS 内存缩略图与负缓存但保留磁盘缓存；后台填充和批次预取在远程、前台读取或 FHD 状态激活时让路，避免把扫描阶段误判为可并行填充。
 - EXIF 已按安卓 `loadExif` 接入独立会话缓存：键为 `fileName_size_captureDate`，null、非图片扩展名和确认解析失败进入负缓存；JPEG 读取 128 KiB，NEF/NRW/TIFF 读取最多 2 MiB。STA direct 通过 `STAObjectReader` 的 bounded prefix 缓存复用头部读取；光圈 APEX 回退、快门/ISO/曝光补偿/焦距/日期/GPS 的格式与安卓字段顺序对齐。传输错误和取消不会写入负缓存。
+- 照片列表在传输队列进入 `isTransferring` 时暂停批次预取和后台填充，传输结束、远程监看退出或预览退出时重新唤醒队列；对应 Android 的 `transfersBusyFlow`/远程状态组合门控。
