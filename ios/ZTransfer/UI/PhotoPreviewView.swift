@@ -181,7 +181,9 @@ struct PhotoPreviewView: View {
             await session.setFHDActive(true)
             defer { Task { await session.setFHDActive(false) } }
             async let loadedExif = try? session.exif(file: files[index])
-            async let loadedThumb = try? session.preview(handle: files[index].id)
+            async let loadedThumb = files[index].fileExtension == ".mov" || files[index].fileExtension == ".mp4"
+                ? nil
+                : (try? session.preview(handle: files[index].id))
             exif = await loadedExif
             if let data = await loadedThumb, let image = UIImage(data: data) { histogramBars = luminanceHistogram(image) }
             exifLoading = false
@@ -233,7 +235,9 @@ private struct PreviewImage: View {
             if let thumbnail {
                 Image(uiImage: thumbnail)
                     .resizable().scaledToFit()
-                    .opacity(image == nil ? 1 : 1 - highResolutionAlpha)
+                    .opacity(zoomEnabled
+                             ? (image == nil ? 1 : 1 - highResolutionAlpha)
+                             : 0.56)
             }
             if let image {
                 Image(uiImage: image)
@@ -279,6 +283,12 @@ private struct PreviewImage: View {
                ) {
                 image = localImage
                 highResolutionAlpha = 1
+                return
+            }
+            if !zoomEnabled {
+                if let data = try? await session.thumbnail(file: file), let thumb = UIImage(data: data) {
+                    thumbnail = thumb
+                }
                 return
             }
             await session.setFHDActive(true)
