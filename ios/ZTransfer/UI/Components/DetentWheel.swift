@@ -99,7 +99,11 @@ struct DetentWheel<Option: Hashable>: View {
                         .padding(.trailing, 7).padding(.bottom, 4).opacity(dragging ? 0 : 1)
                 }
             }
-            .contentShape(Rectangle()).gesture(dragGesture)
+            .contentShape(Rectangle())
+            // The workbench is itself a vertical ScrollView. Give a wheel's
+            // drag first refusal so its detent tracks the finger instead of
+            // waiting for the parent scroll view to yield.
+            .highPriorityGesture(dragGesture)
             // A one-detent control is an Android combinedClickable action, not
             // a wheel. Use a high-priority gesture so the surrounding workbench
             // ScrollView cannot consume the tap before onActivated runs.
