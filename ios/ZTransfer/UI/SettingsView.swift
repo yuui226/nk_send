@@ -18,6 +18,7 @@ struct SettingsView: View {
     @State private var showingEffectsHelp = false
     @State private var helpAnchor: CGRect = .zero
     @State private var helpAttentionScale: CGFloat = 1
+    @State private var settingsTransitionDirection: CGFloat = 1
     @AppStorage("organize_transfers_by_date") private var organizeByDate = false
     @AppStorage("auto_transfer_new_media") private var autoTransfer = false
     @AppStorage("defer_transfer_start") private var deferStart = false
@@ -71,8 +72,10 @@ struct SettingsView: View {
                         ScrollView { mainSettingsContent }
                     }
                     .transition(.asymmetric(
-                        insertion: .move(edge: .leading).combined(with: .opacity),
-                        removal: .move(edge: .leading).combined(with: .opacity)
+                        insertion: .offset(x: settingsTransitionDirection * 24)
+                            .combined(with: .opacity),
+                        removal: .offset(x: -settingsTransitionDirection * 24)
+                            .combined(with: .opacity)
                     ))
                 } else {
                     VStack(spacing: 0) {
@@ -95,8 +98,10 @@ struct SettingsView: View {
                         }
                     }
                     .transition(.asymmetric(
-                        insertion: .move(edge: .trailing).combined(with: .opacity),
-                        removal: .move(edge: .trailing).combined(with: .opacity)
+                        insertion: .offset(x: settingsTransitionDirection * 24)
+                            .combined(with: .opacity),
+                        removal: .offset(x: -settingsTransitionDirection * 24)
+                            .combined(with: .opacity)
                     ))
                 }
             }
@@ -230,6 +235,7 @@ struct SettingsView: View {
 
     private func showEffectsSettings() {
         effectsDraft = effectsStore.beginDraft()
+        settingsTransitionDirection = 1
         withAnimation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.24)) {
             showingHelp = false
             settingsPage = .effects
@@ -238,6 +244,7 @@ struct SettingsView: View {
 
     private func showMainSettings() {
         commitEffectsDraft()
+        settingsTransitionDirection = -1
         withAnimation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.24)) {
             showingEffectsHelp = false
             settingsPage = .main
