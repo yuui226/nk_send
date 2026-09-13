@@ -741,3 +741,9 @@
 - iOS `RootView` 现在在 `CameraSession` 建立后暂留 Home，使用同一 1260ms hand-off；取消/断线会取消任务并回到连接页。`ConnectionPage` 使用 `TimelineView` 传递 500/620/760ms 进度，`ConnectionMethodCard` 对选中卡片执行 Android 同值的缩放、位移、淡出和徽章放大，完成后才切换 `PhotoListView`。
 - 这次只改变 iOS 的入口时序和连接页动画，不改变 `ConnectionViewModel` 的协议状态、会话建立或照片扫描启动时机；扫描仍可在连接建立后立即准备，导航延迟仅作用于显示层。
 - 验证：模拟器 Debug 构建成功；新增 `ConnectionStateTests.testConnectionCelebrationUsesAndroidTiming` 校验 500/620/1260ms 边界。尚未在真实相机成功、断线中断和不同系统动画倍率下逐帧核对，任务仍保持未完成。
+
+### 2026-09-14 双卡句柄合并对账（进行中）
+
+- 安卓 `CameraViewModel.loadFiles` 保留每个 StorageID 返回的完整句柄序列，双卡时由后续元数据合并阶段按“文件名 + 大小 + 拍摄时间”逻辑身份合并，并把同一照片的多个 `storageIds` 汇总到一行。
+- iOS `CameraRepository.scanCatalog` 原先在每个存储卡反转句柄后使用全局 `seen` 去重，会在元数据合并前丢掉第二张卡的同一句柄，导致卡槽归属和筛选信息不完整。现已移除该去重，保留各卡原始序列；`currentHandles` 仍使用集合做快照差量，显示行仍由既有 `logicalIdentity` 合并。
+- 验证：模拟器 141 项测试、0 失败；当前没有相机双卡样本，仍需用安卓日志或真实双卡机验证句柄/元数据顺序与最终筛选归属。

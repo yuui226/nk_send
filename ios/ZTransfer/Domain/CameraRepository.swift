@@ -536,7 +536,6 @@ actor CameraRepository {
             }
             let queries = storageIDs
             groups = []
-            var seen = Set<UInt32>()
             for storage in queries {
                 let query = queryStorageID(storage)
                 var attempts = 1
@@ -559,8 +558,12 @@ actor CameraRepository {
                 }
                 // Nikon returns handles old→new; Android reverses every
                 // storage (USB, STA and aggregate queries) to read newest first.
+                // Keep duplicate handles across cards. Android's merged
+                // metadata stream reads both memberships and combines them by
+                // logical identity; a global handle set here would discard
+                // the second card before that merge can happen.
                 let ordered = Array(result.handles.reversed())
-                groups.append((storage, ordered.filter { seen.insert($0).inserted }))
+                groups.append((storage, ordered))
             }
             let currentHandles = Set(groups.flatMap(\.handles))
             if handleQueriesSucceeded {
