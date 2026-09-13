@@ -18,8 +18,8 @@ enum PhotoEffectsRenderer {
             output = try applyFilter(output, selection: filter)
         }
         if settings.photoFrameEnabled {
-            if !settings.photoFrameBorderEnabled && settings.watermark.enabled {
-                output = drawWatermarkOnly(output, watermark: settings.watermark)
+            if !settings.photoFrameBorderEnabled {
+                if settings.watermark.enabled { output = drawWatermarkOnly(output, watermark: settings.watermark) }
                 try Task.checkCancellation()
                 return output
             }
@@ -54,9 +54,10 @@ enum PhotoEffectsRenderer {
             } else {
                 image.draw(in: layout.photo)
             }
+            let visibleMetadata = metadata?.resolved(for: settings.metadata) ?? .empty
             drawPresetDecoration(cg, image: image, layout: layout,
                                  preset: settings.photoFramePreset,
-                                 metadata: metadata,
+                                 metadata: visibleMetadata,
                                  watermark: settings.watermark,
                                  metadataSettings: settings.metadata)
         }
@@ -113,15 +114,25 @@ enum PhotoEffectsRenderer {
             default: fatalError()
             }
         default:
-            let canvas: CGSize
-            if aspect > 1.9 { canvas = CGSize(width: 1, height: 0.5625) }
-            else if aspect > 1.1 { canvas = CGSize(width: 1, height: 0.75) }
-            else if aspect >= 0.9 { canvas = CGSize(width: 1, height: 1) }
-            else if aspect >= 0.72 { canvas = CGSize(width: 0.75, height: 1) }
-            else if aspect >= 0.56 { canvas = CGSize(width: 2.0 / 3.0, height: 1) }
-            else { canvas = CGSize(width: 0.5625, height: 1) }
-            let longEdge = max(w, h)
-            let canvasSize = CGSize(width: canvas.width * longEdge, height: canvas.height * longEdge)
+            return standardLayout(source)
+        }
+    }
+
+    /// Android's original-quality path grows the canvas until the photo
+    /// rectangle can keep every source pixel. This is also used for preview;
+    /// the picker has already downsampled that source to 1280px.
+    private static func standardLayout(_ source: CGSize) -> Layout {
+        let w = max(source.width, 1), h = max(source.height, 1), aspect = w / h
+        let canvasRatio: CGSize
+        if aspect > 1.9 { canvasRatio = CGSize(width: 1, height: 0.5625) }
+        else if aspect > 1.1 { canvasRatio = CGSize(width: 1, height: 0.75) }
+        else if aspect >= 0.9 { canvasRatio = CGSize(width: 1, height: 1) }
+        else if aspect >= 0.72 { canvasRatio = CGSize(width: 0.75, height: 1) }
+        else if aspect >= 0.56 { canvasRatio = CGSize(width: 2.0 / 3.0, height: 1) }
+        else { canvasRatio = CGSize(width: 0.5625, height: 1) }
+        var longEdge = max(w, h)
+        for _ in 0..<8 {
+            let canvasSize = CGSize(width: canvasRatio.width * longEdge, height: canvasRatio.height * longEdge)
             let portrait = canvasSize.height > canvasSize.width, square = abs(canvasSize.height - canvasSize.width) < 0.5
             let side = canvasSize.width * 0.052
             let top = canvasSize.height * (portrait ? 0.030 : square ? 0.040 : 0.050)
@@ -129,11 +140,16 @@ enum PhotoEffectsRenderer {
             let availableWidth = canvasSize.width - side * 2
             let availableHeight = metadataTop - top - canvasSize.height * 0.012
             let scale = min(availableWidth / w, availableHeight / h)
-            let photoSize = CGSize(width: w * scale, height: h * scale)
-            let left = (canvasSize.width - photoSize.width) / 2
-            let centerY = top + availableHeight / 2
-            return Layout(canvas: canvasSize, photo: CGRect(x: left, y: centerY - photoSize.height / 2, width: photoSize.width, height: photoSize.height), metadataTop: metadataTop)
+            if scale >= 0.999 {
+                let left = (canvasSize.width - w) / 2
+                let desiredTop = top + availableHeight / 2 - h / 2
+                let maxTop = min(canvasSize.height - h, metadataTop - h)
+                let photoTop = min(max(desiredTop, 0), maxTop)
+                return Layout(canvas: canvasSize, photo: CGRect(x: left, y: photoTop, width: w, height: h), metadataTop: metadataTop)
+            }
+            longEdge = ceil(longEdge / max(scale, 0.01))
         }
+        return Layout(canvas: CGSize(width: canvasRatio.width * longEdge, height: canvasRatio.height * longEdge), photo: CGRect(x: 0, y: 0, width: w, height: h), metadataTop: h)
     }
 
     // MARK: Backdrops and photo layer
@@ -148,7 +164,11 @@ enum PhotoEffectsRenderer {
             bg.draw(in: rect)
             if preset == .mist { cg.setFillColor(UIColor(red: 0.93, green: 0.95, blue: 0.97, alpha: 0.24).cgColor); cg.fill(rect) }
             if preset == .cinema { cg.setFillColor(UIColor(red: 0.01, green: 0.035, blue: 0.06, alpha: 0.59).cgColor); cg.fill(rect) }
-            if preset == .frosted { drawGradient(cg, rect: rect, top: UIColor(white: 0.98, alpha: 0.36), bottom: UIColor(red: 0.90, green: 0.94, blue: 0.96, alpha: 0.54)) }
+            if preset == .frosted {
+                drawGradient(cg, rect: rect,
+                             top: UIColor(red: 0.98, green: 0.99, blue: 1.0, alpha: 0.36),
+                             bottom: UIColor(red: 0.90, green: 0.94, blue: 0.96, alpha: 0.52))
+            }
             if preset == .filmGallery { cg.setFillColor(UIColor(red: 0.07, green: 0.05, blue: 0.04, alpha: 0.26).cgColor); cg.fill(rect) }
         case .plaque, .brandInset, .brandGallery, .classicSignature, .galleryMat, .colorArchive:
             cg.setFillColor(UIColor(red: 0.992, green: 0.992, blue: 0.988, alpha: 1).cgColor); cg.fill(rect)
@@ -160,7 +180,12 @@ enum PhotoEffectsRenderer {
     }
 
     private static func drawPhoto(_ cg: CGContext, image: UIImage, rect: CGRect, preset: PhotoFramePreset) {
-        let radius = rect.width * (preset == .colorArchive ? 0.012 : preset == .brandInset || preset == .brandGallery ? 0.014 : 0.018)
+        let radius: CGFloat = switch preset {
+        case .colorArchive: rect.width * 0.012
+        case .brandInset, .brandGallery: rect.width * 0.014
+        case .mist, .cinema, .minimal, .frosted: rect.width * 0.035
+        default: rect.width * 0.018
+        }
         let path = UIBezierPath(roundedRect: rect, cornerRadius: radius).cgPath
         if ![.plaque, .immersive, .filmEdge].contains(preset) {
             cg.saveGState()
@@ -170,9 +195,13 @@ enum PhotoEffectsRenderer {
         }
         cg.saveGState(); cg.addPath(path); cg.clip(); image.draw(in: rect); cg.restoreGState()
         if preset != .plaque && preset != .immersive && preset != .filmEdge {
-            cg.setStrokeColor(UIColor(white: 1, alpha: 0.28).cgColor); cg.setLineWidth(max(1, rect.width * 0.0012)); cg.addPath(path); cg.strokePath()
+            let stroke = preset == .minimal
+                ? UIColor(red: 0.08, green: 0.11, blue: 0.14, alpha: 0.18)
+                : UIColor(white: 1, alpha: 0.275)
+            cg.setStrokeColor(stroke.cgColor); cg.setLineWidth(max(1, rect.width * 0.0012)); cg.addPath(path); cg.strokePath()
         }
     }
+
 
     private static func blurredBackground(_ image: UIImage, size: CGSize) -> UIImage {
         guard let source = image.cgImage, size.width > 0, size.height > 0 else { return image }
@@ -213,13 +242,42 @@ enum PhotoEffectsRenderer {
         }
     }
 
+    private static func frostedMetadataPanelBounds(_ layout: Layout) -> CGRect {
+        let bandHeight = layout.canvas.height - layout.photo.maxY
+        let horizontalInset = layout.canvas.width * 0.072
+        let verticalInset = bandHeight * 0.08
+        return CGRect(x: horizontalInset, y: layout.photo.maxY + verticalInset,
+                      width: layout.canvas.width - horizontalInset * 2,
+                      height: bandHeight - verticalInset * 2)
+    }
+
+    private static func drawFrostedMetadataPanel(_ cg: CGContext, panel: CGRect, canvas: CGSize) {
+        let radius = min(panel.height * 0.31, panel.width * 0.5)
+        let path = UIBezierPath(roundedRect: panel, cornerRadius: radius).cgPath
+        cg.saveGState()
+        cg.setShadow(offset: CGSize(width: 0, height: canvas.height * 0.004),
+                     blur: canvas.width * 0.009,
+                     color: UIColor(red: 0.08, green: 0.14, blue: 0.18, alpha: 0.20).cgColor)
+        cg.setFillColor(UIColor(red: 0.98, green: 0.99, blue: 1.0, alpha: 0.59).cgColor)
+        cg.addPath(path); cg.fillPath(); cg.restoreGState()
+        cg.setStrokeColor(UIColor(white: 1, alpha: 0.70).cgColor)
+        cg.setLineWidth(max(1, canvas.width * 0.0011))
+        cg.addPath(path); cg.strokePath()
+    }
+
     private static func drawStandardMetadata(_ cg: CGContext, layout: Layout, preset: PhotoFramePreset, metadata: PhotoFrameMetadata, watermark: PhotoFrameWatermark, settings: PhotoFrameMetadataSettings) {
-        let area = CGRect(x: 0, y: layout.photo.maxY, width: layout.canvas.width, height: layout.canvas.height - layout.photo.maxY)
+        let area = preset == .frosted ? frostedMetadataPanelBounds(layout) :
+            CGRect(x: 0, y: layout.photo.maxY, width: layout.canvas.width, height: layout.canvas.height - layout.photo.maxY)
+        if preset == .frosted { drawFrostedMetadataPanel(cg, panel: area, canvas: layout.canvas) }
         drawAndroidMetadata(cg, area: area, preset: preset, metadata: metadata, watermark: watermark, settings: settings,
                             lightText: preset == .mist || preset == .cinema)
         var photoWatermark = watermark
         if !photoPlacement(photoWatermark.position) && photoWatermark.content == .image { photoWatermark.position = .photoBottomCenter }
-        drawWatermark(cg, watermark: photoWatermark, photo: layout.photo, canvas: layout.canvas, preset: preset, metadataBand: area)
+        // Text watermarks on a frame side are already one of the metadata rows;
+        // only photo-anchored text and image logos need a second draw pass.
+        if photoPlacement(photoWatermark.position) || photoWatermark.content == .image {
+            drawWatermark(cg, watermark: photoWatermark, photo: layout.photo, canvas: layout.canvas, preset: preset, metadataBand: area)
+        }
     }
 
     private static func drawAndroidMetadata(_ cg: CGContext, area: CGRect, preset: PhotoFramePreset, metadata: PhotoFrameMetadata, watermark: PhotoFrameWatermark, settings: PhotoFrameMetadataSettings, lightText: Bool) {
@@ -229,15 +287,17 @@ enum PhotoEffectsRenderer {
         var detail = ""
         if settings.showFocalLength { detail = metadata.focalLength ?? "" }
         if settings.showExposure {
-            let exposure = [metadata.aperture, metadata.shutter, metadata.iso, metadata.exposureCompensation].compactMap { $0 }.joined(separator: "   ")
+            let exposure = [metadata.aperture, metadata.shutter, metadata.iso].compactMap { $0 }.joined(separator: "   ")
             if !exposure.isEmpty { detail = detail.isEmpty ? exposure : detail + "   " + exposure }
         }
         var rows: [(String, CGFloat, UIFont.Weight)] = []
         let title = [brand, model].filter { !$0.isEmpty }.joined(separator: " ")
         if !title.isEmpty { rows.append((title, area.width * 0.032, .bold)) }
         if !lens.isEmpty { rows.append((lens, area.width * 0.0185, .medium)) }
-        if !detail.isEmpty { rows.append((detail, area.width * 0.020, .regular)) }
-        if settings.showDate, let date = metadata.dateTime, !date.isEmpty { rows.append((date, area.width * 0.020, .regular)) }
+        let detailWithDate = [detail, settings.showDate ? (metadata.dateTime ?? "") : ""]
+            .filter { !$0.isEmpty }.joined(separator: "   ")
+        if !detailWithDate.isEmpty { rows.append((detailWithDate, area.width * 0.020, .regular)) }
+        if let location = metadata.locationRow, !location.isEmpty { rows.append((location, area.width * 0.018, .regular)) }
         if watermark.enabled && watermark.content == .text && !photoPlacement(watermark.position) { rows.append((watermark.displayText, area.width * textSizeFraction(watermark.sizePercent), .regular)) }
         guard !rows.isEmpty else { return }
         let gap = min(area.width * 0.0125, area.height * 0.09)
@@ -265,9 +325,26 @@ enum PhotoEffectsRenderer {
         let leftPrimary = metadata.normalizedMake.isEmpty ? (metadata.normalizedModel.isEmpty ? (metadata.lensModel ?? "") : metadata.normalizedModel) : metadata.normalizedMake.uppercased()
         let leftSecondary = [metadata.normalizedModel, metadata.lensModel ?? ""].filter { !$0.isEmpty && $0 != leftPrimary }.joined(separator: " · ")
         let left = [leftPrimary, leftSecondary].filter { !$0.isEmpty }
-        let right = [metadata.frameDetailLine, metadata.dateTime].compactMap { $0 }.filter { !$0.isEmpty } + metadata.rows(settings).filter { !$0.isEmpty && !$0.contains(metadata.identity) }
+        let right = [[metadata.frameDetailLine, metadata.dateTime ?? ""].filter { !$0.isEmpty }.joined(separator: "   "), metadata.locationRow ?? ""].filter { !$0.isEmpty }
         drawTwoColumnRows(cg, band: band, left: left, right: right)
-        drawWatermark(cg, watermark: watermark, photo: layout.photo, canvas: layout.canvas, preset: .plaque, metadataBand: CGRect(x: 0, y: layout.metadataTop, width: layout.canvas.width, height: layout.canvas.height - layout.metadataTop))
+        if !left.isEmpty && !right.isEmpty {
+            cg.setStrokeColor(UIColor(red: 0.87, green: 0.88, blue: 0.87, alpha: 1).cgColor)
+            cg.setLineWidth(max(1, band.width * 0.001))
+            let inset = band.height * 0.075
+            cg.move(to: CGPoint(x: band.width * 0.575, y: band.minY + inset))
+            cg.addLine(to: CGPoint(x: band.width * 0.575, y: band.maxY - inset)); cg.strokePath()
+        }
+        if photoPlacement(watermark.position) || watermark.content == .image {
+            var photoWatermark = watermark
+            if !photoPlacement(photoWatermark.position) { photoWatermark.position = .photoBottomCenter }
+            drawWatermark(cg, watermark: photoWatermark, photo: layout.photo, canvas: layout.canvas, preset: .plaque, metadataBand: band)
+        } else if watermark.enabled, watermark.content == .text {
+            let font = watermarkFont(watermark.font, size: min(layout.canvas.width, layout.canvas.height) * textSizeFraction(watermark.sizePercent))
+            let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: watermarkColor(watermark.color, .plaque).withAlphaComponent(CGFloat(watermark.opacityPercent) / 100)]
+            let width = (watermark.displayText as NSString).size(withAttributes: attrs).width
+            let x: CGFloat = watermark.position == .left ? band.minX + band.width * 0.07 : watermark.position == .right ? band.maxX - band.width * 0.07 - width : band.midX - width * 0.5
+            watermark.displayText.draw(at: CGPoint(x: x, y: band.midY - font.lineHeight * 0.5), withAttributes: attrs)
+        }
     }
 
     private static func drawBrand(_ cg: CGContext, layout: Layout, preset: PhotoFramePreset, metadata: PhotoFrameMetadata, watermark: PhotoFrameWatermark, settings: PhotoFrameMetadataSettings) {
@@ -281,21 +358,42 @@ enum PhotoEffectsRenderer {
             photoWatermark.enabled = false
         }
         let photoArea = CGRect(x: photo.minX, y: photo.minY, width: photo.width, height: photo.height)
-        let rows = metadata.rows(settings)
+        let identity = metadata.identity
+        let details = [[metadata.frameDetailLine, metadata.dateTime ?? ""].filter { !$0.isEmpty }.joined(separator: "   "), metadata.locationRow ?? ""].filter { !$0.isEmpty }
+        let rows = [identity, metadata.lensModel ?? ""] + details
         // Brand frames use compact white typography over the lower part of the
         // photo. The gallery variant reserves that space for the photo itself
         // and puts the identity in its separate lower band.
-        let visibleRows = preset == .brandInset ? rows : Array(rows.dropFirst())
-        drawMetadataRows(cg, area: photoArea.insetBy(dx: photo.width * 0.08, dy: photo.height * 0.06), preset: preset,
-                         rows: visibleRows, watermark: photoWatermark, dark: false, insidePhoto: true)
+        let visibleRows = preset == .brandInset ? rows : [metadata.lensModel ?? ""] + details
+        let rowSizes: [CGFloat] = preset == .brandInset
+            ? [photo.width * 0.043, photo.width * 0.019, photo.width * 0.021, photo.width * 0.018]
+            : [photo.width * 0.019, photo.width * 0.021, photo.width * 0.018]
+        drawBrandMetadataRows(cg, area: photoArea.insetBy(dx: photo.width * 0.08, dy: photo.height * 0.06), rows: visibleRows, sizes: Array(rowSizes.prefix(visibleRows.count)))
         drawWatermark(cg, watermark: photoWatermark, photo: photo, canvas: layout.canvas, preset: preset,
                       metadataBand: CGRect(x: 0, y: photo.maxY, width: layout.canvas.width, height: layout.canvas.height - photo.maxY))
         if preset == .brandGallery {
-            var bandRows = [metadata.identity].filter { !$0.isEmpty }
-            if watermark.enabled && watermark.content == .text && !photoPlacement(watermark.position), watermark.position != .auto {
-                bandRows.insert(watermark.displayText, at: 0)
-            }
-            drawMetadataRows(cg, area: CGRect(x: 0, y: photo.maxY, width: layout.canvas.width, height: layout.canvas.height - photo.maxY).insetBy(dx: layout.canvas.width * 0.07, dy: layout.canvas.height * 0.02), preset: preset, rows: bandRows, watermark: watermark, dark: true)
+            let bandRows = [identity].filter { !$0.isEmpty }
+            drawMetadataRows(cg, area: CGRect(x: 0, y: photo.maxY, width: layout.canvas.width, height: layout.canvas.height - photo.maxY).insetBy(dx: layout.canvas.width * 0.07, dy: layout.canvas.height * 0.02), preset: preset, rows: bandRows, watermark: watermark, dark: true, emphasizeFirst: true)
+        }
+    }
+
+    private static func drawBrandMetadataRows(_ cg: CGContext, area: CGRect, rows: [String], sizes: [CGFloat]) {
+        let values = rows.enumerated().filter { !$0.element.isEmpty }
+        guard !values.isEmpty else { return }
+        let fonts = values.map { UIFont(name: "HelveticaNeue-CondensedBoldOblique", size: max(9, sizes[min($0.offset, sizes.count - 1)])) ?? UIFont.boldSystemFont(ofSize: max(9, sizes[min($0.offset, sizes.count - 1)])) }
+        let heights = values.enumerated().map { index, value in (value.element as NSString).size(withAttributes: [.font: fonts[index]]).height }
+        let gap = area.height * 0.020
+        let total = heights.reduce(0, +) + gap * CGFloat(max(0, heights.count - 1))
+        let scale = min(1, area.height * 0.84 / max(total, 1))
+        var y = area.midY - total * scale * 0.5
+        for index in values.indices {
+            let value = values[index].element
+            let font = fonts[index].withSize(max(9, fonts[index].pointSize * scale))
+            var attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: index == 0 ? UIColor.white : UIColor.white.withAlphaComponent(0.90)]
+            let shadow = NSShadow(); shadow.shadowBlurRadius = 3; shadow.shadowOffset = CGSize(width: 0, height: 1); shadow.shadowColor = UIColor.black.withAlphaComponent(0.70); attrs[.shadow] = shadow
+            let width = (value as NSString).size(withAttributes: attrs).width
+            value.draw(at: CGPoint(x: area.midX - width * 0.5, y: y), withAttributes: attrs)
+            y += heights[index] * scale + gap * scale
         }
     }
 
@@ -304,51 +402,85 @@ enum PhotoEffectsRenderer {
         drawGradient(cg, rect: lower, top: UIColor(white: 0, alpha: 0), bottom: UIColor(white: 0, alpha: 0.46))
         let area = CGRect(x: layout.canvas.width * 0.07, y: layout.canvas.height * 0.66, width: layout.canvas.width * 0.86, height: layout.canvas.height * 0.29)
         let title = metadata.identity
+        let inline = watermark.enabled && watermark.content == .text && watermark.position == .auto ? watermark.displayText : nil
+        let separate = watermark.enabled && watermark.content == .text && watermark.position != .auto && !photoPlacement(watermark.position) ? watermark : nil
         let titleFont = UIFont.systemFont(ofSize: min(layout.canvas.width * 0.030, area.width * 0.08), weight: .medium)
         let detailFont = UIFont.systemFont(ofSize: min(layout.canvas.width * 0.021, area.width * 0.058), weight: .regular)
-        let attrs: [NSAttributedString.Key: Any] = [.font: titleFont, .foregroundColor: UIColor.white, .shadow: { let s = NSShadow(); s.shadowBlurRadius = 3; s.shadowOffset = CGSize(width: 0, height: 1); s.shadowColor = UIColor.black.withAlphaComponent(0.55); return s }()]
+        let titleAttrs: [NSAttributedString.Key: Any] = [.font: titleFont, .foregroundColor: UIColor.white,
+            .shadow: { let s = NSShadow(); s.shadowBlurRadius = 3; s.shadowOffset = CGSize(width: 0, height: 1); s.shadowColor = UIColor.black.withAlphaComponent(0.55); return s }()]
         let detailAttrs: [NSAttributedString.Key: Any] = [.font: detailFont, .foregroundColor: UIColor.white.withAlphaComponent(0.92)]
-        var lines = [String](); if let lens = metadata.lensModel, !lens.isEmpty { lines.append(lens) }; if !metadata.frameDetailLine.isEmpty { lines.append(metadata.frameDetailLine) }; if let date = metadata.dateTime, !date.isEmpty { lines.append(date) }
-        let rowCount = (title.isEmpty ? 0 : 1) + lines.count
-        let gap = area.height * 0.055, totalHeight = CGFloat(rowCount) * titleFont.lineHeight + CGFloat(max(0, rowCount - 1)) * gap
-        var y = area.midY - totalHeight * 0.5
-        if !title.isEmpty { title.draw(at: CGPoint(x: area.midX - (title as NSString).size(withAttributes: attrs).width * 0.5, y: y), withAttributes: attrs); y += titleFont.lineHeight + gap }
-        for line in lines { let width = (line as NSString).size(withAttributes: detailAttrs).width; line.draw(at: CGPoint(x: area.midX - width * 0.5, y: y), withAttributes: detailAttrs); y += detailFont.lineHeight + gap }
+        var detailLines = [String](); if let lens = metadata.lensModel, !lens.isEmpty { detailLines.append(lens) }
+        let cameraDetail = [metadata.frameDetailLine, metadata.dateTime ?? ""].filter { !$0.isEmpty }.joined(separator: "  ")
+        if !cameraDetail.isEmpty { detailLines.append(cameraDetail) }
+        if let location = metadata.locationRow, !location.isEmpty { detailLines.append(location) }
+        var rows: [(String, UIFont, [NSAttributedString.Key: Any])] = []
+        if !title.isEmpty || inline != nil {
+            let titleText = [title, inline].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "  |  ")
+            rows.append((titleText, titleFont, titleAttrs))
+        }
+        rows += detailLines.map { ($0, detailFont, detailAttrs) }
+        if let separate { rows.append((separate.displayText, detailFont, detailAttrs)) }
+        let gap = layout.canvas.width * 0.013
+        let bounds = rows.map { ($0.0 as NSString).size(withAttributes: $0.2).height }
+        let total = bounds.reduce(0, +) + gap * CGFloat(max(0, rows.count - 1))
+        var y = area.maxY - layout.canvas.height * 0.045 - total
+        if !rows.isEmpty {
+            for (index, row) in rows.enumerated() {
+                let width = (row.0 as NSString).size(withAttributes: row.2).width
+                row.0.draw(at: CGPoint(x: area.midX - width * 0.5, y: y), withAttributes: row.2)
+                y += bounds[index] + gap
+            }
+        }
         var photoWatermark = watermark
         if !photoPlacement(photoWatermark.position) { photoWatermark.position = .photoBottomRight }
-        drawWatermark(cg, watermark: photoWatermark, photo: layout.photo, canvas: layout.canvas, preset: .immersive, metadataBand: area)
+        if photoPlacement(watermark.position) || (watermark.content == .image && photoPlacement(watermark.position)) {
+            drawWatermark(cg, watermark: photoWatermark, photo: layout.photo, canvas: layout.canvas, preset: .immersive, metadataBand: area)
+        }
     }
 
     private static func drawEditorial(_ cg: CGContext, image: UIImage, layout: Layout, preset: PhotoFramePreset, metadata: PhotoFrameMetadata, watermark: PhotoFrameWatermark, settings: PhotoFrameMetadataSettings) {
         switch preset {
         case .galleryMat:
             cg.setFillColor(UIColor.black.cgColor); cg.fill(CGRect(x: layout.photo.minX - layout.photo.width * 0.045, y: layout.photo.minY - layout.photo.height * 0.045, width: layout.photo.width * 1.09, height: layout.photo.height * 1.09))
-            drawMetadataRows(cg, area: CGRect(x: layout.canvas.width * 0.08, y: layout.photo.maxY + layout.photo.width * 0.045, width: layout.canvas.width * 0.84, height: layout.canvas.height - layout.photo.maxY - layout.photo.width * 0.05), preset: preset, rows: metadata.editorialRows, watermark: watermark, dark: true)
+            drawMetadataRows(cg, area: CGRect(x: layout.canvas.width * 0.08, y: layout.photo.maxY + layout.photo.width * 0.045, width: layout.canvas.width * 0.84, height: layout.canvas.height - layout.photo.maxY - layout.photo.width * 0.05), preset: preset, rows: metadata.editorialRows, watermark: watermark, dark: true, emphasizeFirst: false)
         case .colorArchive:
             drawPalette(cg, image: image, layout: layout)
-            drawMetadataRows(cg, area: CGRect(x: layout.canvas.width * 0.08, y: layout.photo.maxY, width: layout.canvas.width * 0.84, height: layout.canvas.height - layout.photo.maxY), preset: preset, rows: metadata.editorialRows, watermark: watermark, dark: true)
+            drawColorArchiveInformation(cg, layout: layout, metadata: metadata)
         case .filmGallery:
             drawFilmStrip(cg, layout: layout, metadata: metadata)
-            drawMetadataRows(cg, area: CGRect(x: layout.canvas.width * 0.08, y: layout.photo.maxY + layout.photo.width * 0.12, width: layout.canvas.width * 0.84, height: layout.canvas.height - layout.photo.maxY - layout.photo.width * 0.12), preset: preset, rows: metadata.editorialRows.filter { $0 != metadata.identity }, watermark: watermark, dark: false)
+            drawMetadataRows(cg, area: CGRect(x: layout.canvas.width * 0.08, y: layout.photo.maxY + layout.photo.width * 0.12, width: layout.canvas.width * 0.84, height: layout.canvas.height - layout.photo.maxY - layout.photo.width * 0.12), preset: preset, rows: [metadata.lensModel ?? "", metadata.frameDetailLine, metadata.locationRow ?? ""].filter { !$0.isEmpty }, watermark: watermark, dark: false, emphasizeFirst: false)
         case .filmEdge:
             drawSideLabel(cg, text: "PORTRA 400", x: layout.photo.minX * 0.48, y: layout.photo.midY, angle: -.pi / 2, color: UIColor(red: 0.87, green: 0.65, blue: 0.47, alpha: 1), size: layout.photo.width * 0.028)
             drawSideLabel(cg, text: "▶  20", x: layout.photo.maxX + (layout.canvas.width - layout.photo.maxX) * 0.52, y: layout.photo.minY + layout.photo.height * 0.22, angle: .pi / 2, color: UIColor(red: 0.87, green: 0.65, blue: 0.47, alpha: 1), size: layout.photo.width * 0.028)
-            drawMetadataRows(cg, area: CGRect(x: layout.photo.minX, y: layout.photo.maxY, width: layout.photo.width, height: layout.canvas.height - layout.photo.maxY), preset: preset, rows: metadata.rows(settings), watermark: watermark, dark: false)
+            let identity = metadata.identity
+            let cameraLine = [identity, metadata.lensModel ?? "", metadata.frameDetailLine, metadata.dateTime ?? ""].filter { !$0.isEmpty }.joined(separator: "   ")
+            drawMetadataRows(cg, area: CGRect(x: layout.photo.minX, y: layout.photo.maxY, width: layout.photo.width, height: layout.canvas.height - layout.photo.maxY), preset: preset, rows: [cameraLine, metadata.locationRow ?? ""].filter { !$0.isEmpty }, watermark: watermark, dark: false, emphasizeFirst: false)
         case .classicSignature:
-            drawMetadataRows(cg, area: CGRect(x: 0, y: 0, width: layout.canvas.width, height: layout.photo.minY), preset: preset, rows: [metadata.identity].filter { !$0.isEmpty }, watermark: watermark, dark: true)
-            drawMetadataRows(cg, area: CGRect(x: 0, y: layout.photo.maxY, width: layout.canvas.width, height: layout.canvas.height - layout.photo.maxY), preset: preset, rows: metadata.rows(settings), watermark: watermark, dark: true)
+            if !metadata.identity.isEmpty {
+                let headerArea = CGRect(x: 0, y: 0, width: layout.canvas.width, height: layout.photo.minY)
+                var font = UIFont(name: "HelveticaNeue-CondensedBoldOblique", size: layout.canvas.width * 0.034) ?? UIFont.boldSystemFont(ofSize: layout.canvas.width * 0.034)
+                let maxWidth = layout.canvas.width * 0.54
+                let measured = (metadata.identity as NSString).size(withAttributes: [.font: font]).width
+                if measured > maxWidth { font = font.withSize(font.pointSize * maxWidth / measured) }
+                let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: UIColor(red: 0.04, green: 0.043, blue: 0.047, alpha: 1)]
+                let size = (metadata.identity as NSString).size(withAttributes: attrs)
+                metadata.identity.draw(at: CGPoint(x: headerArea.midX - size.width * 0.5, y: headerArea.midY - size.height * 0.5), withAttributes: attrs)
+            }
+            drawMetadataRows(cg, area: CGRect(x: 0, y: layout.photo.maxY, width: layout.canvas.width, height: layout.canvas.height - layout.photo.maxY), preset: preset, rows: [metadata.lensModel ?? "", metadata.frameDetailLine, metadata.dateTime ?? "", metadata.locationRow ?? ""].filter { !$0.isEmpty }, watermark: watermark, dark: true, emphasizeFirst: false)
         default: break
         }
         let photoWatermark = editorialPhotoWatermark(watermark, preset: preset)
         drawWatermark(cg, watermark: photoWatermark, photo: layout.photo, canvas: layout.canvas, preset: preset, metadataBand: CGRect(x: 0, y: layout.photo.maxY, width: layout.canvas.width, height: layout.canvas.height - layout.photo.maxY))
-        if let bandWatermark = editorialBandWatermark(watermark, preset: preset) {
-            drawWatermark(cg, watermark: bandWatermark, photo: layout.photo, canvas: layout.canvas, preset: preset, metadataBand: CGRect(x: 0, y: layout.photo.maxY, width: layout.canvas.width, height: layout.canvas.height - layout.photo.maxY))
-        }
     }
 
-    private static func drawMetadataRows(_ cg: CGContext, area: CGRect, preset: PhotoFramePreset, rows: [String], watermark: PhotoFrameWatermark, dark: Bool, insidePhoto: Bool = false) {
+    private static func drawMetadataRows(_ cg: CGContext, area: CGRect, preset: PhotoFramePreset, rows: [String], watermark: PhotoFrameWatermark, dark: Bool, insidePhoto: Bool = false, emphasizeFirst: Bool = true) {
         guard area.height > 1 else { return }
-        let values = rows.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        var values = rows.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        let supportsBandWatermark = preset == .galleryMat || preset == .filmGallery ||
+            (preset == .classicSignature && watermark.position != .auto) ||
+            (preset == .brandGallery && watermark.position != .auto)
+        let drawsWatermark = !insidePhoto && supportsBandWatermark && watermark.enabled && watermark.content == .text && !photoPlacement(watermark.position)
+        if drawsWatermark { values.append(watermark.displayText) }
         guard !values.isEmpty else { return }
         let color = dark ? UIColor(red: 0.10, green: 0.12, blue: 0.15, alpha: 1) : UIColor(red: 0.97, green: 0.98, blue: 0.99, alpha: 1)
         let muted = dark ? UIColor(red: 0.29, green: 0.31, blue: 0.33, alpha: 1) : UIColor(red: 0.86, green: 0.89, blue: 0.91, alpha: 1)
@@ -357,12 +489,52 @@ enum PhotoEffectsRenderer {
         let total = rowHeight * CGFloat(values.count) + gap * CGFloat(max(values.count - 1, 0))
         var y = area.midY - total / 2
         for (index, value) in values.enumerated() {
-            let font = UIFont.systemFont(ofSize: max(9, rowHeight * (index == 0 ? 0.82 : 0.62)), weight: index == 0 ? .semibold : .regular)
-            let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: index == 0 ? color : muted]
+            let prominent = emphasizeFirst && index == 0
+            let font = UIFont.systemFont(ofSize: max(9, rowHeight * (prominent ? 0.82 : 0.62)), weight: prominent ? .semibold : .regular)
+            var attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: index == 0 ? color : muted]
+            if drawsWatermark && index == values.count - 1 {
+                attrs[.foregroundColor] = watermarkColor(watermark.color, preset).withAlphaComponent(CGFloat(watermark.opacityPercent) / 100)
+                if watermark.effect == .shadow { let shadow = NSShadow(); shadow.shadowBlurRadius = 3; shadow.shadowOffset = CGSize(width: 0, height: 1); shadow.shadowColor = UIColor.black.withAlphaComponent(0.35); attrs[.shadow] = shadow }
+            }
             let line = (value as NSString).size(withAttributes: attrs)
-            let x = area.midX - min(line.width, area.width * 0.9) / 2
+            let x: CGFloat
+            if drawsWatermark && index == values.count - 1 && watermark.position == .left {
+                x = area.minX
+            } else if drawsWatermark && index == values.count - 1 && watermark.position == .right {
+                x = area.maxX - min(line.width, area.width * 0.9)
+            } else {
+                x = area.midX - min(line.width, area.width * 0.9) / 2
+            }
             value.draw(at: CGPoint(x: x, y: y + rowHeight * 0.18), withAttributes: attrs)
             y += rowHeight + gap
+        }
+    }
+
+    private static func drawColorArchiveInformation(_ cg: CGContext, layout: Layout, metadata: PhotoFrameMetadata) {
+        let photo = layout.photo
+        let bandHeight = layout.canvas.height - photo.maxY
+        let paletteWidth = photo.width * 0.23
+        let textArea = CGRect(x: photo.minX,
+                              y: photo.maxY + bandHeight * 0.12,
+                              width: max(1, photo.width - paletteWidth - photo.width * 0.063),
+                              height: bandHeight * 0.76)
+        var rows: [(String, UIFont, UIColor, UIFont.Weight)] = []
+        if !metadata.identity.isEmpty { rows.append((metadata.identity.uppercased(), UIFont.systemFont(ofSize: photo.width * 0.027, weight: .bold), .black, .bold)) }
+        if let lens = metadata.lensModel, !lens.isEmpty { rows.append((lens, UIFont.systemFont(ofSize: photo.width * 0.0195), .black, .regular)) }
+        if !metadata.frameDetailLine.isEmpty { rows.append((metadata.frameDetailLine, UIFont.systemFont(ofSize: photo.width * 0.022, weight: .bold), .black, .bold)) }
+        if let date = metadata.dateTime, !date.isEmpty { rows.append((date, UIFont.systemFont(ofSize: photo.width * 0.0185), .black, .regular)) }
+        if let location = metadata.locationRow, !location.isEmpty { rows.append((location, UIFont.systemFont(ofSize: photo.width * 0.0185), .black, .regular)) }
+        guard !rows.isEmpty else { return }
+        let gap = bandHeight * 0.055
+        let heights = rows.map { ($0.0 as NSString).size(withAttributes: [.font: $0.1]).height }
+        let total = heights.reduce(0, +) + gap * CGFloat(max(0, rows.count - 1))
+        let scale = min(1, textArea.height / max(total, 1))
+        var y = textArea.midY - total * scale * 0.5
+        for (index, row) in rows.enumerated() {
+            let font = row.1.withSize(max(9, row.1.pointSize * scale))
+            let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: row.2]
+            row.0.draw(at: CGPoint(x: textArea.minX, y: y), withAttributes: attrs)
+            y += heights[index] * scale + gap * scale
         }
     }
 
@@ -397,15 +569,16 @@ enum PhotoEffectsRenderer {
         let filmText = UIColor(red: 0.72, green: 0.52, blue: 0.39, alpha: 1)
         let labelFont = UIFont.boldSystemFont(ofSize: unit * 0.021)
         let labelAttrs: [NSAttributedString.Key: Any] = [.font: labelFont, .foregroundColor: filmText]
-        "2".draw(at: CGPoint(x: outer.minX + unit * 0.018, y: outer.minY + unit * 0.006), withAttributes: labelAttrs)
+        let topBaseline = outer.minY + unit * 0.028
+        "2".draw(at: CGPoint(x: outer.minX + unit * 0.018, y: topBaseline - labelFont.ascender), withAttributes: labelAttrs)
         let identity = metadata.identity
         if !identity.isEmpty {
-            identity.draw(at: CGPoint(x: outer.minX + unit * 0.15, y: outer.minY + unit * 0.006), withAttributes: labelAttrs)
+            identity.draw(at: CGPoint(x: outer.minX + unit * 0.15, y: topBaseline - labelFont.ascender), withAttributes: labelAttrs)
         }
         if let date = metadata.dateTime, !date.isEmpty {
             let attrs: [NSAttributedString.Key: Any] = [.font: labelFont, .foregroundColor: filmText]
             let width = (date as NSString).size(withAttributes: attrs).width
-            date.draw(at: CGPoint(x: outer.midX + unit * 0.085 - width * 0.5, y: outer.maxY - unit * 0.028), withAttributes: attrs)
+            date.draw(at: CGPoint(x: outer.midX + unit * 0.085 - width * 0.5, y: outer.maxY - unit * 0.014 - labelFont.ascender), withAttributes: attrs)
         }
         let triangle = UIBezierPath(); let tx = outer.maxX - unit * 0.14, ty = outer.minY + unit * 0.020
         triangle.move(to: CGPoint(x: tx, y: ty - unit * 0.010)); triangle.addLine(to: CGPoint(x: tx + unit * 0.022, y: ty)); triangle.addLine(to: CGPoint(x: tx, y: ty + unit * 0.010)); triangle.close()
@@ -430,11 +603,20 @@ enum PhotoEffectsRenderer {
             let bucket = (r >> 5) << 6 | (g >> 5) << 3 | (b >> 5)
             buckets[bucket].count += 1; buckets[bucket].r += r; buckets[bucket].g += g; buckets[bucket].b += b
         }
-        var colors = buckets.filter { $0.count > 0 }.sorted { $0.count > $1.count }.prefix(4).map {
-            UIColor(red: CGFloat($0.r / $0.count) / 255, green: CGFloat($0.g / $0.count) / 255, blue: CGFloat($0.b / $0.count) / 255, alpha: 1)
+        let candidates = buckets.filter { $0.count > 0 }.sorted { $0.count > $1.count }.map { (r: $0.r / $0.count, g: $0.g / $0.count, b: $0.b / $0.count) }
+        var selected: [(r: Int, g: Int, b: Int)] = []
+        for candidate in candidates where selected.count < 4 {
+            if selected.allSatisfy({ let dr = $0.r - candidate.r, dg = $0.g - candidate.g, db = $0.b - candidate.b; return dr * dr + dg * dg + db * db >= 42 * 42 }) { selected.append(candidate) }
         }
-        colors.append(contentsOf: [UIColor(red: 0.12, green: 0.18, blue: 0.24, alpha: 1), UIColor(red: 0.76, green: 0.39, blue: 0.18, alpha: 1), UIColor(red: 0.18, green: 0.45, blue: 0.32, alpha: 1), UIColor(red: 0.79, green: 0.68, blue: 0.38, alpha: 1)])
-        colors = Array(colors.prefix(4))
+        for candidate in candidates where selected.count < 4 && !selected.contains(where: { $0.r == candidate.r && $0.g == candidate.g && $0.b == candidate.b }) { selected.append(candidate) }
+        selected.append(contentsOf: [(r: 31, g: 46, b: 61), (r: 194, g: 100, b: 46), (r: 46, g: 115, b: 82), (r: 202, g: 173, b: 97)])
+        let sorted = selected.prefix(4).sorted { lhs, rhs in
+            let l = lhs.r * 299 + lhs.g * 587 + lhs.b * 114
+            let r = rhs.r * 299 + rhs.g * 587 + rhs.b * 114
+            return l < r
+        }
+        let ordered = sorted.count == 4 ? [sorted[0], sorted[1], sorted[3], sorted[2]] : Array(sorted)
+        let colors = ordered.map { UIColor(red: CGFloat($0.r) / 255, green: CGFloat($0.g) / 255, blue: CGFloat($0.b) / 255, alpha: 1) }
         let bandHeight = layout.canvas.height - layout.photo.maxY
         let totalWidth = layout.photo.width * 0.23, size = layout.photo.width * 0.038
         let startX = layout.photo.maxX - layout.photo.width * 0.018 - totalWidth
@@ -461,8 +643,11 @@ enum PhotoEffectsRenderer {
         let inset = min(photo.width, photo.height) * 0.04
         if effective.content == .image, let hash = effective.imageHash, let image = PhotoEffectsStore.watermarkImage(hash: hash) {
             let height = min(photo.width, photo.height) * imageSizeFraction(effective.sizePercent)
-            let width = height * image.size.width / max(image.size.height, 1)
-            let rect = watermarkRect(position: effective.position, photo: photo, size: CGSize(width: width, height: height), inset: inset)
+            var width = height * image.size.width / max(image.size.height, 1)
+            var targetHeight = height
+            let maxWidth = max(1, photo.width - inset * 2)
+            if width > maxWidth { let scale = maxWidth / width; width *= scale; targetHeight *= scale }
+            let rect = watermarkRect(position: effective.position, photo: photo, size: CGSize(width: width, height: targetHeight), inset: inset)
             image.draw(in: rect, blendMode: .normal, alpha: CGFloat(effective.opacityPercent) / 100)
             return
         }
@@ -542,9 +727,48 @@ enum PhotoEffectsRenderer {
 
 private extension PhotoFrameMetadata {
     static let empty = PhotoFrameMetadata(make: nil, model: nil, lensModel: nil, focalLength: nil, aperture: nil, shutter: nil, iso: nil, exposureCompensation: nil, dateTime: nil)
+    /// Android resolves metadata visibility and date/time formatting before any
+    /// frame branch draws. Keep the same single filtered snapshot on iOS so
+    /// every border receives identical values and never invents rows.
+    func resolved(for settings: PhotoFrameMetadataSettings) -> PhotoFrameMetadata {
+        let modelValue = PhotoFrameMetadata(make: make, model: model, lensModel: lensModel,
+                                            focalLength: focalLength, aperture: aperture,
+                                            shutter: shutter, iso: iso,
+                                            exposureCompensation: exposureCompensation,
+                                            dateTime: dateTime).normalizedModel
+        return PhotoFrameMetadata(
+            make: settings.showBrand ? make : nil,
+            model: settings.showModel ? modelValue : nil,
+            lensModel: settings.showLensModel ? lensModel : nil,
+            focalLength: settings.showFocalLength ? focalLength : nil,
+            aperture: settings.showExposure ? aperture : nil,
+            shutter: settings.showExposure ? shutter : nil,
+            iso: settings.showExposure ? iso : nil,
+            exposureCompensation: settings.showExposure ? exposureCompensation : nil,
+            dateTime: formatDateTime(dateTime, settings: settings),
+            latitude: settings.showCoordinates ? latitude : nil,
+            longitude: settings.showCoordinates ? longitude : nil,
+            altitude: settings.showAltitude ? altitude : nil
+        )
+    }
+    var locationRow: String? {
+        let coordinate: String? = {
+            guard let latitude, let longitude,
+                  latitude.isFinite, longitude.isFinite,
+                  latitude != 0, longitude != 0,
+                  (-90...90).contains(latitude), (-180...180).contains(longitude) else { return nil }
+            func degree(_ value: Double, positive: Character, negative: Character) -> String {
+                let hemisphere = value < 0 ? negative : positive
+                return String(format: "%.4f°%@", abs(value), String(hemisphere))
+            }
+            return "\(degree(latitude, positive: "N", negative: "S")), \(degree(longitude, positive: "E", negative: "W"))"
+        }()
+        let altitudeText = altitude.flatMap { $0.isFinite && $0 != 0 ? String(format: "%.0fm", $0) : nil }
+        return [coordinate, altitudeText].compactMap { $0 }.joined(separator: "  ").nilIfEmpty
+    }
     var identity: String { [normalizedMake, normalizedModel].filter { !$0.isEmpty }.joined(separator: " ") }
-    var frameDetailLine: String { [focalLength, aperture, shutter, iso, exposureCompensation].compactMap { $0 }.joined(separator: "   ") }
-    var editorialRows: [String] { [identity, lensModel ?? "", frameDetailLine, dateTime ?? ""].filter { !$0.isEmpty } }
+    var frameDetailLine: String { [focalLength, aperture, shutter, iso].compactMap { $0 }.joined(separator: "   ") }
+    var editorialRows: [String] { [identity, lensModel ?? "", frameDetailLine, dateTime ?? "", locationRow ?? ""].filter { !$0.isEmpty } }
     var normalizedMake: String {
         let value = make?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let brands: [(String, String)] = [("nikon", "Nikon"), ("canon", "Canon"), ("sony", "SONY"), ("fujifilm", "FUJIFILM"), ("hasselblad", "Hasselblad"), ("leica", "Leica"), ("panasonic", "Panasonic"), ("olympus", "OM SYSTEM"), ("om digital", "OM SYSTEM"), ("pentax", "PENTAX"), ("ricoh", "RICOH"), ("apple", "Apple"), ("samsung", "SAMSUNG"), ("google", "Google"), ("xiaomi", "XIAOMI"), ("redmi", "XIAOMI"), ("huawei", "HUAWEI"), ("honor", "HONOR"), ("oneplus", "ONEPLUS"), ("oppo", "OPPO"), ("vivo", "VIVO"), ("realme", "REALME"), ("motorola", "MOTOROLA")]
@@ -564,11 +788,45 @@ private extension PhotoFrameMetadata {
         if settings.showBrand, !normalizedMake.isEmpty { values.append(normalizedMake) }
         if settings.showModel, !normalizedModel.isEmpty { values.append(normalizedModel) }
         if settings.showLensModel, let lensModel, !lensModel.isEmpty { values.append(lensModel) }
-        let detail = [settings.showFocalLength ? focalLength : nil, settings.showExposure ? [aperture, shutter, iso, exposureCompensation].compactMap { $0 }.joined(separator: "  ") : nil].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "   ")
+        let detail = [settings.showFocalLength ? focalLength : nil, settings.showExposure ? [aperture, shutter, iso].compactMap { $0 }.joined(separator: "  ") : nil].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "   ")
         if !detail.isEmpty { values.append(detail) }
         if settings.showDate, let dateTime, !dateTime.isEmpty { values.append(dateTime) }
+        if let locationRow, !locationRow.isEmpty { values.append(locationRow) }
         return values
     }
+
+    private func formatDateTime(_ value: String?, settings: PhotoFrameMetadataSettings) -> String? {
+        guard let value, !value.isEmpty, settings.showDate || settings.showTime else { return nil }
+        let parts = value.split(separator: " ", maxSplits: 1).map(String.init)
+        let date = parts.first?.replacingOccurrences(of: ":", with: "-")
+        let time = parts.count > 1 ? parts[1] : nil
+        var output: [String] = []
+        if settings.showDate, let date {
+            output.append(applyDatePattern(date, pattern: settings.datePattern))
+        }
+        if settings.showTime, let time { output.append(applyTimePattern(time, pattern: settings.timePattern)) }
+        return output.filter { !$0.isEmpty }.joined(separator: " ").nilIfEmpty
+    }
+    private func applyDatePattern(_ value: String, pattern: String) -> String {
+        let digits = value.split(separator: "-")
+        guard digits.count >= 3 else { return value }
+        let map: [String: String] = ["yyyy": String(digits[0]), "MM": String(digits[1]), "dd": String(digits[2])]
+        var result = pattern
+        for (token, replacement) in map { result = result.replacingOccurrences(of: token, with: replacement) }
+        return result
+    }
+    private func applyTimePattern(_ value: String, pattern: String) -> String {
+        let digits = value.split(separator: ":")
+        guard digits.count >= 2 else { return value }
+        let map: [String: String] = ["HH": String(digits[0]), "mm": String(digits[1]), "ss": digits.count > 2 ? String(digits[2]) : "00"]
+        var result = pattern
+        for (token, replacement) in map { result = result.replacingOccurrences(of: token, with: replacement) }
+        return result
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
 }
 
 private extension PhotoFrameWatermark {

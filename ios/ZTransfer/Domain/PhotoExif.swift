@@ -11,6 +11,9 @@ struct PhotoExif: Equatable, Sendable {
     let dateTime: String?
     let lensModel: String?
     let exposureCompensation: String?
+    let latitude: Double?
+    let longitude: Double?
+    let altitude: Double?
 }
 
 /// Metadata presentation values consumed by the frame renderer. The strings
@@ -25,13 +28,17 @@ struct PhotoFrameMetadata: Equatable, Sendable {
     let iso: String?
     let exposureCompensation: String?
     let dateTime: String?
+    let latitude: Double?
+    let longitude: Double?
+    let altitude: Double?
 
     init(make: String?, model: String?, lensModel: String?, focalLength: String?,
          aperture: String?, shutter: String?, iso: String?, exposureCompensation: String?,
-         dateTime: String?) {
+         dateTime: String?, latitude: Double? = nil, longitude: Double? = nil, altitude: Double? = nil) {
         self.make = make; self.model = model; self.lensModel = lensModel
         self.focalLength = focalLength; self.aperture = aperture; self.shutter = shutter
         self.iso = iso; self.exposureCompensation = exposureCompensation; self.dateTime = dateTime
+        self.latitude = latitude; self.longitude = longitude; self.altitude = altitude
     }
 
     init(_ exif: PhotoExif) {
@@ -39,6 +46,7 @@ struct PhotoFrameMetadata: Equatable, Sendable {
         focalLength = exif.focalLength; aperture = exif.aperture
         shutter = exif.shutterSpeed; iso = exif.iso
         exposureCompensation = exif.exposureCompensation; dateTime = exif.dateTime
+        latitude = exif.latitude; longitude = exif.longitude; altitude = exif.altitude
     }
 }
 
@@ -48,6 +56,7 @@ enum PhotoExifParser {
               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as NSDictionary? else { return nil }
         let exif = properties[kCGImagePropertyExifDictionary] as? NSDictionary
         let tiff = properties[kCGImagePropertyTIFFDictionary] as? NSDictionary
+        let gps = properties[kCGImagePropertyGPSDictionary] as? NSDictionary
         let make = tiff?[kCGImagePropertyTIFFMake] as? String
         let model = tiff?[kCGImagePropertyTIFFModel] as? String
         let aperture = (exif?[kCGImagePropertyExifFNumber] as? NSNumber).map { String(format: "f/%.1f", $0.doubleValue) }
@@ -58,7 +67,11 @@ enum PhotoExifParser {
         let dateTime = (exif?[kCGImagePropertyExifDateTimeOriginal] as? String) ?? (tiff?[kCGImagePropertyTIFFDateTime] as? String)
         let lens = exif?[kCGImagePropertyExifLensModel] as? String
         let compensation = (exif?[kCGImagePropertyExifExposureBiasValue] as? NSNumber).flatMap(formatEV)
-        return PhotoExif(make: make, model: model, aperture: aperture, shutterSpeed: shutter, iso: iso, focalLength: focal, dateTime: dateTime, lensModel: lens, exposureCompensation: compensation)
+        let latitude = signedCoordinate(gps?[kCGImagePropertyGPSLatitude] as? NSNumber, reference: gps?[kCGImagePropertyGPSLatitudeRef] as? String, maximum: 90)
+        let longitude = signedCoordinate(gps?[kCGImagePropertyGPSLongitude] as? NSNumber, reference: gps?[kCGImagePropertyGPSLongitudeRef] as? String, maximum: 180)
+        let altitudeValue = (gps?[kCGImagePropertyGPSAltitude] as? NSNumber)?.doubleValue
+        let altitude = altitudeValue.map { (gps?[kCGImagePropertyGPSAltitudeRef] as? NSNumber)?.intValue == 1 ? -abs($0) : $0 }
+        return PhotoExif(make: make, model: model, aperture: aperture, shutterSpeed: shutter, iso: iso, focalLength: focal, dateTime: dateTime, lensModel: lens, exposureCompensation: compensation, latitude: latitude, longitude: longitude, altitude: altitude)
     }
 
     private static func formatShutter(_ seconds: Double) -> String? {
@@ -72,5 +85,10 @@ enum PhotoExifParser {
         let ev = value.doubleValue
         guard ev.isFinite, abs(ev) >= 0.05 else { return nil }
         return String(format: "%+.1f EV", ev)
+    }
+    private static func signedCoordinate(_ value: NSNumber?, reference: String?, maximum: Double) -> Double? {
+        guard let raw = value?.doubleValue, raw.isFinite, raw >= 0, raw <= maximum else { return nil }
+        let sign = (reference?.uppercased() == "S" || reference?.uppercased() == "W") ? -1.0 : 1.0
+        return raw == 0 ? nil : raw * sign
     }
 }
