@@ -156,7 +156,10 @@ actor CameraSession {
     }
 
     func download(file: CameraFile, to directory: URL, progress: (@Sendable (Double) -> Void)? = nil) async throws -> URL {
-        return try await repository.download(handle: file.id, size: file.size, fileName: file.fileName, to: directory, progress: progress)
+        return try await repository.download(handle: file.id, size: file.size,
+                                             fileName: file.fileName,
+                                             captureDate: file.captureDate,
+                                             to: directory, progress: progress)
     }
 
     // Remote monitor operations share the same serialized PTP session as the

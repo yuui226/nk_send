@@ -1,5 +1,22 @@
 import Foundation
 
+let transferResumeChunkSize: UInt64 = 4 * 1024 * 1024
+
+func transferPartialFileName(size: UInt64, captureDate: String?, fileName: String) -> String {
+    let token = "\(size).\(captureDate ?? "0")"
+        .replacingOccurrences(of: "[^A-Za-z0-9.]", with: "", options: .regularExpression)
+    let safeName = URL(fileURLWithPath: fileName).lastPathComponent
+    return ".nkpart_\(token)_\(safeName)"
+}
+
+func transferResumeOffset(existingSize: UInt64, totalSize: UInt64, reportedSize: UInt64) -> UInt64? {
+    let known = reportedSize > 0 && reportedSize != UInt64(UInt32.max)
+    guard existingSize >= transferResumeChunkSize else { return nil }
+    if known && existingSize == totalSize { return totalSize }
+    guard !known || existingSize < totalSize else { return nil }
+    return (existingSize / transferResumeChunkSize) * transferResumeChunkSize
+}
+
 enum CameraRepositoryError: Error, Equatable, Sendable {
     case invalidDataset
     /// Remote monitor owns the channel; the list must abandon its old handle
@@ -399,17 +416,19 @@ actor CameraRepository {
         return result.data
     }
 
-    /// PTP/IP and USB share the same serialized operation path. A temporary
-    /// file is written first, then atomically moved into the destination so a
-    /// cancellation or disconnect never leaves a valid-looking partial file.
-    func download(handle: UInt32, size: UInt64, fileName: String, to directory: URL,
+    /// PTP/IP and USB share the same serialized operation path. Android keeps
+    /// an identity-tagged partial file so a retry can resume on a 4 MiB block
+    /// boundary; the completed file is still moved atomically into place.
+    func download(handle: UInt32, size: UInt64, fileName: String,
+                  captureDate: String? = nil, to directory: URL,
                   progress: (@Sendable (Double) -> Void)? = nil) async throws -> URL {
         activeForegroundReads += 1; defer { activeForegroundReads -= 1; scheduleObjectResolver() }
         let safeName = URL(fileURLWithPath: fileName).lastPathComponent
         let destination = directory.appendingPathComponent(safeName, isDirectory: false)
-        let temporary = destination.appendingPathExtension("ztransfer-partial")
-        try? FileManager.default.removeItem(at: temporary)
-        FileManager.default.createFile(atPath: temporary.path, contents: nil)
+        let temporary = directory.appendingPathComponent(
+            transferPartialFileName(size: size, captureDate: captureDate, fileName: safeName),
+            isDirectory: false
+        )
         do {
             let total: UInt64
             if size == UInt64(UInt32.max) || size == 0 {
@@ -420,22 +439,44 @@ actor CameraRepository {
                 total = size
             }
             guard total > 0 else { throw CameraRepositoryError.invalidDataset }
-            let chunk: UInt64 = 4 * 1024 * 1024
-            var offset: UInt64 = 0
+            let existingSize = (try? temporary.resourceValues(forKeys: [.fileSizeKey]).fileSize)
+                .map { UInt64(max(0, $0)) } ?? 0
+            let offset = transferResumeOffset(
+                existingSize: existingSize, totalSize: total, reportedSize: size
+            ) ?? 0
+            if offset == 0 {
+                try? FileManager.default.removeItem(at: temporary)
+            }
+            if offset > 0 && offset < existingSize {
+                let trim = try FileHandle(forWritingTo: temporary)
+                try trim.truncate(atOffset: offset)
+                try trim.close()
+            }
+            if offset == total {
+                try? FileManager.default.removeItem(at: destination)
+                try FileManager.default.moveItem(at: temporary, to: destination)
+                progress?(1)
+                return destination
+            }
+            if !FileManager.default.fileExists(atPath: temporary.path) {
+                FileManager.default.createFile(atPath: temporary.path, contents: nil)
+            }
             let handleForWriting = try FileHandle(forWritingTo: temporary)
+            try handleForWriting.seek(toOffset: offset)
             defer { try? handleForWriting.close() }
-            while offset < total {
+            var written = offset
+            while written < total {
                 try Task.checkCancellation()
-                let request = min(chunk, total - offset)
+                let request = min(transferResumeChunkSize, total - written)
                 let result = try await session.execute(
                     operation: PTPConstants.getPartialObjectEx,
-                    parameters: [handle, UInt32(truncatingIfNeeded: offset), UInt32(offset >> 32), UInt32(request), UInt32(request >> 32)],
+                    parameters: [handle, UInt32(truncatingIfNeeded: written), UInt32(written >> 32), UInt32(request), UInt32(request >> 32)],
                     timeoutNanoseconds: staAlbum == nil ? 45_000_000_000 : 60_000_000_000
                 )
                 try handleForWriting.write(contentsOf: result.data)
-                offset += UInt64(result.data.count)
+                written += UInt64(result.data.count)
                 guard !result.data.isEmpty else { throw CameraRepositoryError.invalidDataset }
-                progress?(min(1, Double(offset) / Double(total)))
+                progress?(min(1, Double(written) / Double(total)))
             }
             try handleForWriting.close()
             try? FileManager.default.removeItem(at: destination)
@@ -443,7 +484,9 @@ actor CameraRepository {
             progress?(1)
             return destination
         } catch {
-            try? FileManager.default.removeItem(at: temporary)
+            // Keep the identity-tagged partial for Android-compatible retry;
+            // the next attempt discards it when it is smaller than one chunk
+            // or when its known size no longer matches the camera object.
             throw error
         }
     }

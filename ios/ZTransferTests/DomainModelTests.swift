@@ -168,6 +168,22 @@ final class DomainModelTests: XCTestCase {
         XCTAssertEqual(localOriginalPreviewRoute(for: ".mp4"), .cameraFHD)
     }
 
+    func testTransferPartialIdentityAndResumeBoundaryMatchAndroid() {
+        XCTAssertEqual(
+            transferPartialFileName(size: 42, captureDate: "20260817T142530", fileName: "A_B.JPG"),
+            ".nkpart_42.20260817T142530_A_B.JPG"
+        )
+        XCTAssertNil(transferResumeOffset(existingSize: 1024, totalSize: 20_000_000, reportedSize: 20_000_000))
+        XCTAssertEqual(
+            transferResumeOffset(existingSize: 4 * 1024 * 1024 + 7, totalSize: 20_000_000, reportedSize: 20_000_000),
+            4 * 1024 * 1024
+        )
+        XCTAssertEqual(
+            transferResumeOffset(existingSize: 8 * 1024 * 1024, totalSize: 8 * 1024 * 1024, reportedSize: 8 * 1024 * 1024),
+            8 * 1024 * 1024
+        )
+    }
+
     func testPhotoFilterAppliesTypeProtectionStorageAndDate() {
         let files = [
             CameraFile(id: 1, storageID: 1, format: 0x3801, size: 1, fileName: "a.JPG", captureDate: "20260913T010203", isProtected: true),
