@@ -567,3 +567,8 @@
 
 - 安卓录制徽标红点使用 600ms、0.3 到 1.0 的往返 FastOutSlowIn 动画；iOS 录制计时条的红点现在使用同一时长、透明度范围和曲线循环，不影响录制状态机。
 - 验证：Xcode Simulator 测试 127 项、0 failures；真实录制链路和帧率仍需相机核对。
+
+### 2026-09-14 照片列表连接类型图标
+
+- 安卓照片列表顶栏的 `SignalPill` 按当前连接类型显示 USB 或 Wi‑Fi；iOS `CameraSession` 现在保留不可变的传输类型，顶栏 USB 会话显示 USB 图标，网络会话显示 Wi‑Fi 图标。
+- 验证：Xcode Simulator 测试 127 项、0 failures；未连接真实 USB 相机核对图标资源和 RSSI 展开状态。

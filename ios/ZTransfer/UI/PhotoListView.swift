@@ -229,7 +229,7 @@ struct PhotoListView: View {
 
             Button { signalExpanded.toggle() } label: {
                 HStack(spacing: 5) {
-                    Image(systemName: signalExpanded ? "wifi" : "wifi")
+                    Image(systemName: session?.isUSB == true ? "cable.connector" : "wifi")
                         .font(.system(size: 17, weight: .semibold))
                     if signalExpanded {
                         Image(systemName: "chevron.down")
