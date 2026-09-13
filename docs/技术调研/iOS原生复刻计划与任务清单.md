@@ -715,3 +715,9 @@
 - 对照安卓 Wi-Fi footer：AP 模式的灯泡入口现在可打开指引、首次查看写入安卓同名 `ap_connection_help_viewed`，Wi-Fi 设置按钮实际取消当前发现并打开系统 Wi-Fi 设置；STA 灯泡入口接回指引弹窗。AP/STA 文案继续直接读取 AndroidLocalization 资源键。
 - iOS 修改位置：`ios/ZTransfer/UI/Connection/ConnectionPage.swift`、`ConnectionMethodCard.swift`、`STATipsOverlay.swift`。这是行为和回调修正，Android 代码未修改。
 - 验证：`xcodebuild -project ios/ZTransfer.xcodeproj -scheme ZTransfer -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build` 成功，`git diff --check` 通过。当前指引仍是居中浮层，尚未完成安卓 `AnchorPopup` 的按钮锚点、无遮罩定位和逐帧动画核对；AP/STA 真机网络流程也未验收，因此任务 14、16、18 继续保持未完成。
+
+### 2026-09-14 连接页 STA 失败槽动画对账（进行中）
+
+- 对照安卓 `ConnectionMethodCard` 的 `AnimatedContent`：STA 失败提示与两行连接步骤共用固定内容槽，进入为 220ms 淡入并延迟 50ms，退出为 130ms 淡出；iOS 原先只替换静态 `Group`，状态切换时内容瞬间跳变。
+- iOS `ConnectionMethodCard` 现用固定 `ZStack` 内容槽、顶部对齐和同一方向的淡入/淡出 transition，卡片 footer 和外框不重新测量。USB/AP 的错误文案路径仍保持原有资源引用，未新增提示。
+- 验证：iOS Simulator Debug 构建成功；尚未在真实失败/恢复操作中逐帧核对，任务 15、17、18 继续保持未完成。

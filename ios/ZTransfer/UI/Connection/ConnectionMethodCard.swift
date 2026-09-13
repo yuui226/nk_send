@@ -47,20 +47,36 @@ struct ConnectionMethodCard: View {
             if mode == .wifi && isSTA {
                 // Android reserves this slot. Failure replaces the steps inside
                 // it, leaving both footer rows and the card outline stationary.
-                Group {
+                ZStack(alignment: .topLeading) {
                     if case let .failed(message) = state.wifiPhase {
-                        ConnectionFeedback(title: AppLocalized.resource("sta_camera_not_found_short"), message: message)
+                        ConnectionFeedback(
+                            title: AppLocalized.resource("sta_camera_not_found_short"),
+                            message: message
+                        )
+                        .transition(.asymmetric(
+                            insertion: .opacity.animation(.timingCurve(0.0, 0.0, 0.2, 1.0, duration: 0.22).delay(0.05)),
+                            removal: .opacity.animation(.timingCurve(0.4, 0.0, 1.0, 1.0, duration: 0.13))
+                        ))
                     } else {
                         instructions
+                            .transition(.asymmetric(
+                                insertion: .opacity.animation(.timingCurve(0.0, 0.0, 0.2, 1.0, duration: 0.22).delay(0.05)),
+                                removal: .opacity.animation(.timingCurve(0.4, 0.0, 1.0, 1.0, duration: 0.13))
+                            ))
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .clipped()
+                .animation(.timingCurve(0.4, 0.0, 0.2, 1.0, duration: 0.22), value: state.wifiPhase)
             } else {
                 instructions
                 if let failure {
                     ConnectionFeedback(title: AppLocalized.resource("connection_failed_short"), message: failure)
                         .padding(.top, 12)
+                        .transition(.asymmetric(
+                            insertion: .opacity.animation(.timingCurve(0.0, 0.0, 0.2, 1.0, duration: 0.22).delay(0.035)),
+                            removal: .opacity.animation(.timingCurve(0.4, 0.0, 1.0, 1.0, duration: 0.15))
+                        ))
                 }
                 Spacer(minLength: 0)
             }
