@@ -238,7 +238,7 @@ private struct ToggleWheel: View {
             label: label,
             options: [false, true],
             selected: isOn,
-            optionLabel: { $0 ? "开启" : "关闭" },
+            optionLabel: { AppLocalized.settingState($0) },
             onCommit: { isOn = $0 },
             rowHeight: 18,
             wheelHeight: 50,

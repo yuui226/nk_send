@@ -123,10 +123,15 @@ final class ConnectionViewModel: ObservableObject {
         usbEventsTask = nil
         usbConnectTask?.cancel()
         usbConnectTask = nil
-        // stop() can race an OpenSession callback.  Ask the service to run its
-        // non-cancellable close path before the transport drops its references.
-        Task { [weak self] in await self?.connectionService.disconnect() }
-        usbTransport.stop()
+        // stop() can race an OpenSession callback.  Close the service first and
+        // only then stop ImageCaptureCore, so it still owns the camera reference
+        // while the non-cancellable close request is in flight.  Android keeps
+        // the same ordering when its USB monitor is torn down.
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.connectionService.disconnect()
+            self.usbTransport.stop()
+        }
     }
 
     func disconnectCamera() async {

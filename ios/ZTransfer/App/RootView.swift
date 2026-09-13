@@ -21,8 +21,25 @@ enum AppLocalized {
         }
     }
 
+    static func resource(_ name: String) -> String {
+        let tag = UserDefaults.standard.string(forKey: "appLanguage") ?? "system"
+        let language: String
+        if tag == "en" || (tag == "system" && Locale.current.language.languageCode?.identifier == "en") {
+            language = "en"
+        } else if tag == "zh-Hant" || (tag == "system" && Locale.current.language.script?.identifier == "Hant") {
+            language = "hant"
+        } else {
+            language = "zh"
+        }
+        return AndroidLocalization.byResource[name]?[language] ?? name
+    }
+
     static func versionText(_ version: String) -> String {
-        text("Z传 v%1$s").replacingOccurrences(of: "%1$s", with: version)
+        resource("version_label").replacingOccurrences(of: "%1$s", with: version)
+    }
+
+    static func settingState(_ enabled: Bool) -> String {
+        resource(enabled ? "setting_on" : "setting_off")
     }
 }
 
