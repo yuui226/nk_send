@@ -345,7 +345,7 @@ enum PhotoEffectsRenderer {
         let gap = min(area.width * 0.0125, area.height * 0.09)
         let available = area.height * 0.88
         let inkTotal = inkHeights.reduce(0, +)
-        let scale = min(1, max(0.2, available / max(inkTotal, 1)))
+        let scale = inkTotal <= available ? 1 : min(1, max(0.2, available / max(inkTotal, 1) * 0.98))
         let scaledHeights = inkHeights.map { $0 * scale }
         let total = scaledHeights.reduce(0, +) + gap * CGFloat(max(0, rows.count - 1)) * scale
         var cursor = area.midY - total * 0.5
