@@ -10,13 +10,20 @@ struct SettingsPopupOverlay: View {
     let directory: DirectoryAccessStore
     let anchor: CGRect
 
-    @State private var visible = false
+    @State private var animationProgress: CGFloat = 0
 
     var body: some View {
         GeometryReader { proxy in
             ZStack(alignment: .topLeading) {
-                Color.black.opacity(visible ? 0.30 : 0)
-                    .ignoresSafeArea()
+                Color.black.opacity(0.30 * animationProgress)
+                    // GeometryReader is hosted inside the safe-area content
+                    // region. Expand and offset the scrim explicitly so the
+                    // status bar and home-indicator regions are dimmed too.
+                    .frame(
+                        width: proxy.size.width,
+                        height: proxy.size.height + proxy.safeAreaInsets.top + proxy.safeAreaInsets.bottom,
+                    )
+                    .offset(y: -proxy.safeAreaInsets.top)
                     .contentShape(Rectangle())
                     .onTapGesture { close() }
 
@@ -26,27 +33,39 @@ struct SettingsPopupOverlay: View {
                     directory: directory,
                     onClose: { close() }
                 )
-                .frame(width: max(0, proxy.size.width - 24),
-                       height: max(0, proxy.size.height - 104))
+                .frame(width: max(0, proxy.size.width - 24))
+                // AnchorPopup measures its content intrinsically and only
+                // clamps when the available window is smaller. Keep the same
+                // behavior here: the main page stays compact, while the
+                // longer effects page can still scroll on a small phone.
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxHeight: max(0, min(proxy.size.height - 150, proxy.size.height * 0.82)), alignment: .top)
                 .padding(.horizontal, 12)
                 .padding(.top, anchor == .zero ? 74 : anchor.maxY + 8)
-                .scaleEffect(visible ? 1 : 0.94, anchor: .topLeading)
-                .opacity(visible ? 1 : 0)
+                .scaleEffect(0.92 + 0.08 * animationProgress, anchor: .topLeading)
+                .opacity(animationProgress)
                 .shadow(color: .black.opacity(0.16), radius: 18, y: 8)
             }
-            .animation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.24), value: visible)
-            .onAppear { visible = true }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .animation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.28), value: animationProgress)
+            .onAppear {
+                animationProgress = 0
+                withAnimation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.28)) {
+                    animationProgress = 1
+                }
+            }
         }
+        .ignoresSafeArea()
         .transition(.opacity)
         .zIndex(100)
     }
 
     private func close() {
         guard isPresented else { return }
-        withAnimation(.timingCurve(0.4, 0, 1, 1, duration: 0.20)) {
-            visible = false
+        withAnimation(.timingCurve(0.4, 0, 1, 1, duration: 0.22)) {
+            animationProgress = 0
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
             isPresented = false
         }
     }

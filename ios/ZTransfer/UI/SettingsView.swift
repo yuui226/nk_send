@@ -100,9 +100,14 @@ struct SettingsView: View {
                     Text(directory.directoryURL?.lastPathComponent ?? "未设置").zTransferText(size: ZTransferMetrics.caption).lineLimit(1)
                 }
                 Spacer()
-                Button(directory.directoryURL == nil ? "选择目录" : "更改目录") { showingPicker = true }
-                    .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 12))
-                    .font(.system(size: ZTransferMetrics.caption, weight: .semibold))
+                Button { showingPicker = true } label: {
+                    Text(directory.directoryURL == nil ? "选择目录" : "更改目录")
+                        .zTransferText(size: ZTransferMetrics.caption, weight: .semibold)
+                        .lineLimit(1)
+                        .padding(.horizontal, 12)
+                        .frame(height: 30)
+                }
+                .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 12))
             }
             SettingsDivider()
             HStack(spacing: 8) {
@@ -174,11 +179,8 @@ struct SettingsView: View {
 
     private var footer: some View {
         HStack(spacing: 8) {
-            Text("Z传 v\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.82")")
-                .zTransferTypography(.labelSmall, weight: .semibold)
+            VersionPlaque(text: "Z传 v\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.82")")
             Spacer()
-            SettingsFooterButton("检查更新") { feedbackHint = true }
-            SettingsFooterButton("我要换机") { feedbackHint = true }
             SettingsFooterButton("反馈") { UIPasteboard.general.string = "953000922"; feedbackHint = true }
         }
         .alert("已复制 QQ 号 953000922\n请加 QQ 反馈", isPresented: $feedbackHint) { Button("确定", role: .cancel) {} }
@@ -246,10 +248,32 @@ private struct SettingsFooterButton: View {
         self.action = action
     }
     var body: some View {
-        Button(title, action: action)
-            .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 12))
-            .font(.system(size: ZTransferMetrics.caption, weight: .semibold))
-            .padding(.horizontal, 8)
-            .frame(height: 28)
+        Button(action: action) {
+            Text(title)
+                .zTransferText(size: ZTransferMetrics.caption, weight: .semibold)
+                .padding(.horizontal, 10)
+                .frame(height: 28)
+                .background(ZTransferGlassSurface(cornerRadius: 12, kind: .button))
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(ZTransferColors.primaryText.opacity(0.10), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct VersionPlaque: View {
+    let text: String
+    var body: some View {
+        HStack(spacing: 5) {
+            Circle().fill(ZTransferColors.secondaryText.opacity(0.42)).frame(width: 3, height: 3)
+            Text(text).zTransferTypography(.labelSmall, weight: .medium)
+                .foregroundStyle(ZTransferColors.secondaryText.opacity(0.82))
+                .lineLimit(1)
+            Circle().fill(ZTransferColors.secondaryText.opacity(0.42)).frame(width: 3, height: 3)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(ZTransferColors.primaryText.opacity(0.035), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).stroke(ZTransferColors.primaryText.opacity(0.10), lineWidth: 1))
     }
 }
