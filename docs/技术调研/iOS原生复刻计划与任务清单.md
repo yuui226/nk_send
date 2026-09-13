@@ -611,3 +611,9 @@
 - 安卓 `GpsUpdateFrequency` 的枚举值为 30/60/120/300 秒，持久化键为 `update_frequency_seconds`，显示文案由 `gps_frequency_*` 多语言资源提供。iOS 原先使用自定义 `gps.updateFrequency` 键，并在模型中硬编码中文标题，导致语言和安卓持久化定义分叉。
 - iOS `GPSUpdateFrequency.title` 现在按安卓资源名读取三语文案；`GPSCoordinator` 改用安卓原始 `update_frequency_seconds` 键读写相同秒数枚举，保持默认 60 秒和运行中更新规则不变。
 - 验证：iOS 模拟器 Debug 构建和 127 项测试通过；GPS 真机权限、蓝牙状态和频率写入仍待设备验证，GPS 任务保持未完成。
+
+### 2026-09-14 设置效果页顶栏与帮助入口对账（进行中）
+
+- 安卓 `SettingsScreen` 在照片效果二级页显示返回按钮、标题和帮助灯泡；关闭设置的入口只存在主设置页，帮助内容由同一 `AnchorPopup` 内的 `PhotoEffectsInfoBubble` 锚定显示。
+- iOS 效果详情页现移除额外关闭按钮，补齐安卓资源驱动的帮助灯泡、`photo_effects_help_viewed` 未读状态和四项说明气泡；点击返回提交草稿并回到主设置页，点击外部收起帮助气泡，不改变设置弹窗层级。
+- 验证：iOS 模拟器 Debug 构建成功；帮助气泡锚点、材质和真机安全区仍待画面核对，任务保持未完成。

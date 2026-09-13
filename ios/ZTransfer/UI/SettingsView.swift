@@ -9,6 +9,7 @@ struct SettingsView: View {
     @State private var settingsPage: SettingsPage = .main
     @State private var effectsDraft: PhotoEffectsSettings
     @State private var showingHelp = false
+    @State private var showingEffectsHelp = false
     @State private var helpAnchor: CGRect = .zero
     @State private var helpAttentionScale: CGFloat = 1
     @AppStorage("organize_transfers_by_date") private var organizeByDate = false
@@ -23,6 +24,7 @@ struct SettingsView: View {
     @AppStorage("app_language") private var appLanguage = "system"
     @AppStorage("skin_preset") private var skinPreset = "FROSTED_GLASS"
     @AppStorage("main_settings_help_viewed") private var mainSettingsHelpViewed = false
+    @AppStorage("photo_effects_help_viewed") private var photoEffectsHelpViewed = false
 
     var showPhotoEffectsEntry: Bool = true
     var onClose: (() -> Void)? = nil
@@ -68,12 +70,22 @@ struct SettingsView: View {
                 }
             }
 
-            if showingHelp {
+            if showingHelp && settingsPage == .main {
                 Color.clear
                     .contentShape(Rectangle())
                     .onTapGesture { dismissHelp() }
                     .zIndex(1)
                 SettingsHelpBubble()
+                    .offset(x: max(12, helpAnchor.minX - 10), y: helpAnchor.maxY + 8)
+                    .transition(.scale(scale: 0.94, anchor: .topLeading).combined(with: .opacity))
+                    .zIndex(2)
+            }
+            if showingEffectsHelp && settingsPage == .effects {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture { dismissEffectsHelp() }
+                    .zIndex(1)
+                PhotoEffectsHelpBubble()
                     .offset(x: max(12, helpAnchor.minX - 10), y: helpAnchor.maxY + 8)
                     .transition(.scale(scale: 0.94, anchor: .topLeading).combined(with: .opacity))
                     .zIndex(2)
@@ -89,6 +101,7 @@ struct SettingsView: View {
         .coordinateSpace(name: "settings-panel")
         .onPreferenceChange(SettingsHelpAnchorPreferenceKey.self) { helpAnchor = $0 }
         .animation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.24), value: showingHelp)
+        .animation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.24), value: showingEffectsHelp)
         .animation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.24), value: settingsPage)
         .onAppear {
             // Migrate the early preview value ("自动") to the same BCP-47
@@ -132,13 +145,31 @@ struct SettingsView: View {
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
             Spacer()
-            Button(action: closeSettings) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundStyle(ZTransferColors.secondaryText)
-                    .frame(width: 30, height: 30)
+            Button {
+                photoEffectsHelpViewed = true
+                showingEffectsHelp.toggle()
+            } label: {
+                ZStack(alignment: .topTrailing) {
+                    Image(systemName: "lightbulb.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(ZTransferColors.accentOrange)
+                    if !photoEffectsHelpViewed {
+                        Circle()
+                            .fill(Color(red: 1, green: 0.30, blue: 0.24))
+                            .frame(width: 7, height: 7)
+                    }
+                }
+                .frame(width: 30, height: 30)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 12))
+            .background {
+                GeometryReader { proxy in
+                    Color.clear.preference(
+                        key: SettingsHelpAnchorPreferenceKey.self,
+                        value: proxy.frame(in: .named("settings-panel"))
+                    )
+                }
+            }
         }
         .padding(.horizontal, 16)
         .padding(.top, 12)
@@ -348,6 +379,12 @@ struct SettingsView: View {
             showingHelp = false
         }
     }
+
+    private func dismissEffectsHelp() {
+        withAnimation(.timingCurve(0.4, 0, 1, 1, duration: 0.18)) {
+            showingEffectsHelp = false
+        }
+    }
 }
 
 private struct SettingsHelpAnchorPreferenceKey: PreferenceKey {
@@ -381,6 +418,32 @@ private struct SettingsHelpBubble: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
+        }
+        .foregroundStyle(ZTransferColors.primaryText)
+        .padding(16)
+        .frame(width: 300, alignment: .leading)
+        .background(ZTransferGlassSurface(cornerRadius: 18, kind: .panel))
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
+            .stroke(ZTransferColors.primaryText.opacity(0.12), lineWidth: 1))
+        .shadow(color: .black.opacity(0.16), radius: 14, y: 7)
+    }
+}
+
+/// Android PhotoEffectsInfoBubble equivalent. The strings and ordering are
+/// sourced from the same Android resource keys used by the detail page.
+private struct PhotoEffectsHelpBubble: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Text(AppLocalized.resource("photo_effects_info_title"))
+                .zTransferTypography(.titleMedium, weight: .bold)
+            Text(AppLocalized.resource("photo_effects_info_description"))
+                .zTransferTypography(.bodySmall)
+            Text(AppLocalized.resource("photo_effects_gesture_hint"))
+                .zTransferTypography(.bodySmall)
+                .fontWeight(.semibold)
+            Text(AppLocalized.resource("photo_effects_wheel_hint"))
+                .zTransferTypography(.bodySmall)
+                .fontWeight(.semibold)
         }
         .foregroundStyle(ZTransferColors.primaryText)
         .padding(16)
