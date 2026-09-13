@@ -115,12 +115,18 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
     /// cleanup issue requestCloseSession just like Android closes NikonCamera
     /// after a stale OpenSession result.
     private var openingCameras: [String: ICCameraDevice] = [:]
+    private var openingGenerations: [String: UInt64] = [:]
+    private var replacementTokens: [String: UUID] = [:]
     private var continuation: AsyncStream<USBTransportEvent>.Continuation?
     private var stream: AsyncStream<USBTransportEvent>?
     private var thumbnailWaiters: [String: [UUID: CheckedContinuation<Data, Error>]] = [:]
     private let thumbnailLock = NSLock()
     private let thumbnailCache = ThumbnailCache()
     private let lock = NSLock()
+    /// Guards late ImageCaptureCore callbacks after stop/restart.  A stopped
+    /// browser must never repopulate openedCameras for the next attach.
+    private var lifecycleGeneration: UInt64 = 0
+    private var stopped = true
 
     override init() {
         super.init()
@@ -145,14 +151,26 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
     }
 
     func start() {
+        lock.lock()
+        lifecycleGeneration &+= 1
+        let generation = lifecycleGeneration
+        stopped = false
+        lock.unlock()
         emit(.authorization(status(from: browser.contentsAuthorizationStatus)))
         if browser.contentsAuthorizationStatus == .notDetermined {
-            browser.requestContentsAuthorization { [weak self] status in self?.emit(.authorization(self?.status(from: status) ?? .notDetermined)) }
+            browser.requestContentsAuthorization { [weak self] status in
+                guard let self, self.isCurrentGeneration(generation) else { return }
+                self.emit(.authorization(self.status(from: status)))
+            }
         }
         browser.start()
     }
 
     func stop() {
+        lock.lock()
+        stopped = true
+        lifecycleGeneration &+= 1
+        lock.unlock()
         browser.stop()
         // Stopping the browser does not close an ImageCaptureCore session.
         // Issue close requests before releasing our strong references so a
@@ -171,6 +189,8 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
         cameraIDsByObject.removeAll()
         openedCameras.removeAll()
         openingCameras.removeAll()
+        openingGenerations.removeAll()
+        replacementTokens.removeAll()
         lock.unlock()
         finishThumbnailWaiters(with: CameraTransportError.disconnected)
         // Finish outside the lock: AsyncStream invokes onTermination synchronously
@@ -185,23 +205,39 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
 
     func openSession(for id: String) async throws {
         guard let camera = camera(for: id) else { throw CameraTransportError.disconnected }
-        markOpening(camera, for: id)
+        let generation = currentGeneration()
+        markOpening(camera, for: id, generation: generation)
         let box = ThrowingContinuationBox<Void>()
         try await withTaskCancellationHandler(operation: {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                 box.install(continuation)
                 camera.requestOpenSession(options: nil) { [weak self] error in
+                    guard let self, self.isCurrentGeneration(generation) else {
+                        _ = box.finish(.failure(CameraTransportError.disconnected))
+                        return
+                    }
                     if let error {
-                        self?.removeOpening(camera, for: id)
-                        self?.emit(.failed(id: id, message: error.localizedDescription))
+                        self.removeOpening(camera, for: id)
+                        if self.isKnownCamera(camera) {
+                            self.emit(.failed(id: id, message: error.localizedDescription))
+                        }
                         _ = box.finish(.failure(error))
                     } else if box.finish(.success(())) {
-                        self?.markOpened(camera, for: id)
-                        self?.emit(.sessionOpened(id: id))
+                        if self.markOpened(camera, for: id, generation: generation) {
+                            self.emit(.sessionOpened(id: id))
+                        } else {
+                            // The browser was stopped while OpenSession was in
+                            // flight. Close the late success immediately and
+                            // keep it out of the next lifecycle generation.
+                            self.removeOpening(camera, for: id)
+                            camera.requestCloseSession(options: nil) { [weak self] _ in
+                                self?.removeSession(camera, for: id)
+                            }
+                        }
                     } else {
                         // Open completed after its caller was cancelled. The
                         // late success must be closed before another attempt.
-                        self?.removeOpening(camera, for: id)
+                        self.removeOpening(camera, for: id)
                         camera.requestCloseSession(options: nil) { [weak self] _ in
                             self?.removeSession(camera, for: id)
                         }
@@ -345,31 +381,85 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
         return openedCameras[id] ?? openingCameras[id] ?? cameras[id]
     }
 
-    private func markOpening(_ camera: ICCameraDevice, for id: String) {
-        lock.lock(); openingCameras[id] = camera; lock.unlock()
+    /// Returns true only while the opened ImageCaptureCore session belongs to
+    /// the camera object currently published by discovery.  UUIDs can survive
+    /// an unplug/replug, so comparing the identifier alone would let a stale
+    /// repository leak into the replacement camera's connection attempt.
+    func hasCurrentOpenedSession(for id: String) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard let camera = cameras[id], let opened = openedCameras[id] else { return false }
+        return camera === opened
+    }
+
+    private func markOpening(_ camera: ICCameraDevice, for id: String, generation: UInt64) {
+        lock.lock()
+        openingCameras[id] = camera
+        openingGenerations[id] = generation
+        lock.unlock()
     }
 
     private func removeOpening(_ camera: ICCameraDevice, for id: String) {
         lock.lock(); defer { lock.unlock() }
-        if openingCameras[id] === camera { openingCameras.removeValue(forKey: id) }
+        if openingCameras[id] === camera {
+            openingCameras.removeValue(forKey: id)
+            openingGenerations.removeValue(forKey: id)
+        }
     }
 
-    private func markOpened(_ camera: ICCameraDevice, for id: String) {
+    @discardableResult
+    private func markOpened(_ camera: ICCameraDevice, for id: String, generation: UInt64) -> Bool {
         lock.lock(); defer { lock.unlock() }
+        guard !stopped, lifecycleGeneration == generation,
+              cameras[id] === camera,
+              openingCameras[id] === camera,
+              openingGenerations[id] == generation else {
+            if openingCameras[id] === camera { openingCameras.removeValue(forKey: id) }
+            if openingGenerations[id] == generation { openingGenerations.removeValue(forKey: id) }
+            return false
+        }
         if openingCameras[id] === camera { openingCameras.removeValue(forKey: id) }
+        openingGenerations.removeValue(forKey: id)
         openedCameras[id] = camera
+        return true
     }
 
     private func removeSession(_ camera: ICCameraDevice, for id: String) {
         lock.lock(); defer { lock.unlock() }
         if openedCameras[id] === camera { openedCameras.removeValue(forKey: id) }
-        if openingCameras[id] === camera { openingCameras.removeValue(forKey: id) }
+        if openingCameras[id] === camera {
+            openingCameras.removeValue(forKey: id)
+            openingGenerations.removeValue(forKey: id)
+        }
+    }
+
+    private func currentGeneration() -> UInt64 {
+        lock.lock(); defer { lock.unlock() }
+        return lifecycleGeneration
+    }
+
+    private func isCurrentGeneration(_ generation: UInt64) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return !stopped && lifecycleGeneration == generation
+    }
+
+    private func publishReplacement(
+        _ camera: ICCameraDevice,
+        id: String,
+        descriptor: USBDeviceDescriptor,
+        token: UUID,
+    ) {
+        lock.lock()
+        let shouldPublish = replacementTokens[id] == token && cameras[id] === camera && !stopped
+        if shouldPublish { replacementTokens.removeValue(forKey: id) }
+        lock.unlock()
+        guard shouldPublish else { return }
+        emit(.deviceAdded(descriptor))
     }
 
     private func isKnownCamera(_ camera: ICCameraDevice) -> Bool {
         let id = stableID(for: camera)
         lock.lock(); defer { lock.unlock() }
-        return cameras[id] === camera
+        return !stopped && cameras[id] === camera
     }
 
     private func finishThumbnailWaiters(for deviceID: String? = nil, with error: Error) {
@@ -457,12 +547,27 @@ extension ImageCaptureUSBTransport: ICDeviceBrowserDelegate {
         camera.delegate = self
         if let replaced, replaced !== camera {
             // A replug can arrive as add-before-remove with the same UUID.
-            // Invalidate the old session before exposing the replacement.
-            replaced.requestCloseSession(options: nil) { [weak self] _ in
-                self?.removeSession(replaced, for: descriptor.id)
-            }
+            // Publish removal first, then wait for the old ImageCaptureCore
+            // session to close before exposing the replacement. This prevents
+            // CameraConnectionService from returning the old repository to the
+            // new device's connect attempt.
             finishThumbnailWaiters(for: descriptor.id, with: CameraTransportError.disconnected)
             emit(.deviceRemoved(id: descriptor.id))
+            let token = UUID()
+            lock.lock()
+            replacementTokens[descriptor.id] = token
+            lock.unlock()
+            replaced.requestCloseSession(options: nil) { [weak self] _ in
+                self?.removeSession(replaced, for: descriptor.id)
+                self?.publishReplacement(camera, id: descriptor.id, descriptor: descriptor, token: token)
+            }
+            // Some drivers omit the close callback after a physical unplug.
+            // Publish the replacement after a bounded grace period instead of
+            // leaving discovery permanently blocked.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+                self?.publishReplacement(camera, id: descriptor.id, descriptor: descriptor, token: token)
+            }
+            return
         }
         emit(.deviceAdded(descriptor))
     }
@@ -471,9 +576,12 @@ extension ImageCaptureUSBTransport: ICDeviceBrowserDelegate {
         guard let camera = device as? ICCameraDevice else { return }
         let id = stableID(for: camera)
         lock.lock()
-        cameras.removeValue(forKey: id)
+        let isCurrent = cameras[id] === camera
+        if isCurrent { cameras.removeValue(forKey: id) }
         cameraIDsByObject.removeValue(forKey: ObjectIdentifier(camera))
+        if isCurrent { replacementTokens.removeValue(forKey: id) }
         lock.unlock()
+        guard isCurrent else { return }
         finishThumbnailWaiters(for: id, with: CameraTransportError.disconnected)
         emit(.deviceRemoved(id: id))
     }
@@ -489,6 +597,7 @@ extension ImageCaptureUSBTransport: ICDeviceDelegate {
     }
     func device(_ device: ICDevice, didReceiveStatusInformation status: [ICDeviceStatus : Any]) {}
     func device(_ device: ICDevice, didEncounterError error: Error?) {
+        if let camera = device as? ICCameraDevice, !isKnownCamera(camera) { return }
         emit(.failed(id: deviceID(for: device), message: error?.localizedDescription ?? ""))
     }
     func device(_ device: ICDevice, didEjectWithError error: Error?) {}
@@ -496,6 +605,7 @@ extension ImageCaptureUSBTransport: ICDeviceDelegate {
 
 extension ImageCaptureUSBTransport: ICCameraDeviceDelegate {
     func cameraDevice(_ camera: ICCameraDevice, didReceiveThumbnail thumbnail: CGImage?, for item: ICCameraItem, error: Error?) {
+        guard isKnownCamera(camera) else { return }
         let handle = item.ptpObjectHandle
         let deviceID = stableID(for: camera)
         let waiterKey = "\(deviceID)\u{0}\(handle)"

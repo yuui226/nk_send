@@ -39,6 +39,11 @@ enum ZTransferMotion {
     static let standard = Animation.easeInOut(duration: 0.24)
     static let emphasized = Animation.spring(response: 0.38, dampingFraction: 0.86)
     static let popup = Animation.spring(response: 0.34, dampingFraction: 0.9)
+    // Android AnimatedVisibility uses fadeIn/fadeOut with expandVertically/
+    // shrinkVertically. SwiftUI's layout engine performs the height change
+    // when the conditional child is inserted; keeping the transition to
+    // opacity avoids scaling text and prevents the characteristic end jump.
+    static let inlineExpansion = Animation.timingCurve(0.4, 0, 0.2, 1, duration: 0.24)
 
     /// Android ButtonStateTextMotion: incoming 220 ms, outgoing 190 ms,
     /// independent fade timing and FastOutSlowIn cubic control points.

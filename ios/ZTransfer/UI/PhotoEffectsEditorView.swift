@@ -22,11 +22,11 @@ struct PhotoEffectsEditorView: View {
                 .padding(.vertical, 12)
             }
             .background(ZTransferColors.background.ignoresSafeArea())
-            .navigationTitle("滤镜·边框·水印")
+            .navigationTitle(AppLocalized.resource("photo_effects"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
-                ToolbarItem(placement: .topBarTrailing) { Button("完成") { onSave(draft); dismiss() } }
+                ToolbarItem(placement: .topBarLeading) { Button(AppLocalized.resource("cancel")) { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) { Button(AppLocalized.resource("done")) { onSave(draft); dismiss() } }
             }
         }
     }
@@ -48,15 +48,16 @@ struct PhotoEffectsControls: View {
     }
 
     private var filterCard: some View {
-        EditorCard(title: "照片滤镜") {
-            EffectToggle(label: "开启", isOn: binding(\.photoFilterEnabled))
+        EditorCard(title: AppLocalized.resource("photo_filter")) {
+            EffectToggle(label: AppLocalized.resource("photo_frame_on"), isOn: binding(\.photoFilterEnabled))
             if draft.photoFilterEnabled {
                 let ids: [String?] = [nil] + PhotoFilterCatalog.presets.map(\.id)
-                DetentWheel(label: "照片滤镜", options: ids,
+                DetentWheel(label: AppLocalized.resource("photo_filter"), options: ids,
                             selected: draft.selectedFilter?.preset.id,
                             optionLabel: { id in
-                                guard let id else { return "无滤镜" }
-                                return PhotoFilterCatalog.presets.first { $0.id == id }?.name ?? "无滤镜"
+                                guard let id else { return AppLocalized.resource("photo_filter_off_option") }
+                                guard let preset = Np3FilterCatalog.preset(id: id) else { return AppLocalized.resource("photo_filter_off_option") }
+                                return AppLocalized.resource("photo_filter_builtin_\(preset.legacyID)")
                             }, onCommit: { id in
                                 guard let id, let preset = PhotoFilterCatalog.presets.first(where: { $0.id == id }) else {
                                     draft.selectedFilter = nil
@@ -68,7 +69,7 @@ struct PhotoEffectsControls: View {
                                     intensityPercent: draft.selectedFilter?.intensityPercent ?? 80
                                 )
                             })
-                DetentWheel(label: "滤镜强度", options: Array(stride(from: 100, through: 2, by: -2)),
+                DetentWheel(label: AppLocalized.resource("photo_filter_intensity"), options: Array(stride(from: 100, through: 2, by: -2)),
                             selected: draft.selectedFilter?.intensityPercent ?? 80,
                             optionLabel: { "\($0)%" }, onCommit: { value in
                                 guard let selected = draft.selectedFilter else { return }
@@ -79,11 +80,11 @@ struct PhotoEffectsControls: View {
     }
 
     private var frameCard: some View {
-        EditorCard(title: "边框和水印") {
-            EffectToggle(label: "开启", isOn: binding(\.photoFrameEnabled))
-            EffectToggle(label: "边框", isOn: binding(\.photoFrameBorderEnabled), enabled: draft.photoFrameEnabled)
+        EditorCard(title: AppLocalized.resource("photo_frame_and_watermark_short")) {
+            EffectToggle(label: AppLocalized.resource("photo_frame_on"), isOn: binding(\.photoFrameEnabled))
+            EffectToggle(label: AppLocalized.resource("photo_frame_style_short"), isOn: binding(\.photoFrameBorderEnabled), enabled: draft.photoFrameEnabled)
             if draft.photoFrameEnabled {
-                DetentWheel(label: "边框", options: PhotoFramePreset.allCases,
+                DetentWheel(label: AppLocalized.resource("photo_frame_style_short"), options: PhotoFramePreset.allCases,
                             selected: draft.photoFramePreset,
                             optionLabel: { frameName($0) }, onCommit: { draft.photoFramePreset = $0 }, rowHeight: 28)
             }
@@ -91,46 +92,46 @@ struct PhotoEffectsControls: View {
     }
 
     private var watermarkCard: some View {
-        EditorCard(title: "水印") {
-            EffectToggle(label: "开启", isOn: binding(\.watermark.enabled), enabled: draft.photoFrameEnabled)
-            TextField("水印文字", text: Binding(get: { draft.watermark.text }, set: { draft.watermark.text = String($0.prefix(PhotoFrameWatermark.maxTextLength)) }))
+        EditorCard(title: AppLocalized.resource("photo_frame_watermark_short")) {
+            EffectToggle(label: AppLocalized.resource("photo_frame_on"), isOn: binding(\.watermark.enabled), enabled: draft.photoFrameEnabled)
+            TextField("", text: Binding(get: { draft.watermark.text }, set: { draft.watermark.text = String($0.prefix(PhotoFrameWatermark.maxTextLength)) }))
                 .textFieldStyle(.plain)
                 .padding(.horizontal, 12).frame(height: 42)
                 .background(ZTransferColors.background.opacity(0.65), in: RoundedRectangle(cornerRadius: 12))
                 .disabled(!draft.photoFrameEnabled || !draft.watermark.enabled)
-            DetentWheel(label: "字体", options: PhotoFrameWatermarkFont.allCases, selected: draft.watermark.font,
+            DetentWheel(label: AppLocalized.resource("photo_frame_watermark_font"), options: PhotoFrameWatermarkFont.allCases, selected: draft.watermark.font,
                         optionLabel: fontName, onCommit: { draft.watermark.font = $0 }, rowHeight: 28,
                         enabled: draft.photoFrameEnabled && draft.watermark.enabled)
-            DetentWheel(label: "大小", options: Array(stride(from: 100, through: 1, by: -1)), selected: min(max(draft.watermark.sizePercent, 1), 100),
+            DetentWheel(label: AppLocalized.resource("photo_frame_watermark_size"), options: Array(stride(from: 100, through: 1, by: -1)), selected: min(max(draft.watermark.sizePercent, 1), 100),
                         optionLabel: { "\($0)%" }, onCommit: { draft.watermark.sizePercent = $0 }, rowHeight: 26,
                         enabled: draft.photoFrameEnabled && draft.watermark.enabled)
-            DetentWheel(label: "位置", options: PhotoFrameWatermarkPosition.allCases, selected: draft.watermark.position,
+            DetentWheel(label: AppLocalized.resource("photo_frame_watermark_position"), options: PhotoFrameWatermarkPosition.allCases, selected: draft.watermark.position,
                         optionLabel: positionName, onCommit: { draft.watermark.position = $0 }, rowHeight: 28,
                         enabled: draft.photoFrameEnabled && draft.watermark.enabled)
-            DetentWheel(label: "颜色", options: PhotoFrameWatermarkColor.allCases, selected: draft.watermark.color,
+            DetentWheel(label: AppLocalized.resource("photo_frame_watermark_color"), options: PhotoFrameWatermarkColor.allCases, selected: draft.watermark.color,
                         optionLabel: colorName, onCommit: { draft.watermark.color = $0 }, rowHeight: 28,
                         enabled: draft.photoFrameEnabled && draft.watermark.enabled)
-            DetentWheel(label: "透明度", options: Array(stride(from: 100, through: 1, by: -1)), selected: min(max(draft.watermark.opacityPercent, 1), 100),
+            DetentWheel(label: AppLocalized.resource("photo_frame_watermark_opacity"), options: Array(stride(from: 100, through: 1, by: -1)), selected: min(max(draft.watermark.opacityPercent, 1), 100),
                         optionLabel: { "\($0)%" }, onCommit: { draft.watermark.opacityPercent = $0 }, rowHeight: 26,
                         enabled: draft.photoFrameEnabled && draft.watermark.enabled)
-            DetentWheel(label: "可读性", options: PhotoFrameWatermarkEffect.allCases, selected: draft.watermark.effect,
+            DetentWheel(label: AppLocalized.resource("photo_frame_watermark_effect"), options: PhotoFrameWatermarkEffect.allCases, selected: draft.watermark.effect,
                         optionLabel: effectName, onCommit: { draft.watermark.effect = $0 }, rowHeight: 28,
                         enabled: draft.photoFrameEnabled && draft.watermark.enabled)
         }
     }
 
     private var metadataCard: some View {
-        EditorCard(title: "曝光信息") {
-            EffectToggle(label: "日期格式", isOn: binding(\.metadata.showDate))
-            EffectToggle(label: "时间格式", isOn: binding(\.metadata.showTime))
-            EffectToggle(label: "焦距", isOn: binding(\.metadata.showFocalLength))
-            EffectToggle(label: "曝光参数", isOn: binding(\.metadata.showExposure))
-            EffectToggle(label: "品牌", isOn: binding(\.metadata.showBrand))
-            EffectToggle(label: "型号", isOn: binding(\.metadata.showModel))
-            EffectToggle(label: "镜头型号", isOn: binding(\.metadata.showLensModel))
+        EditorCard(title: AppLocalized.resource("photo_frame_metadata_button")) {
+            EffectToggle(label: AppLocalized.resource("photo_frame_metadata_date_format"), isOn: binding(\.metadata.showDate))
+            EffectToggle(label: AppLocalized.resource("photo_frame_metadata_time_format"), isOn: binding(\.metadata.showTime))
+            EffectToggle(label: AppLocalized.resource("photo_frame_metadata_focal_length"), isOn: binding(\.metadata.showFocalLength))
+            EffectToggle(label: AppLocalized.resource("photo_frame_metadata_exposure"), isOn: binding(\.metadata.showExposure))
+            EffectToggle(label: AppLocalized.resource("photo_frame_metadata_brand"), isOn: binding(\.metadata.showBrand))
+            EffectToggle(label: AppLocalized.resource("photo_frame_metadata_model"), isOn: binding(\.metadata.showModel))
+            EffectToggle(label: AppLocalized.resource("photo_frame_metadata_lens_model"), isOn: binding(\.metadata.showLensModel))
             if showLocationFields {
-                EffectToggle(label: "经纬度", isOn: binding(\.metadata.showCoordinates))
-                EffectToggle(label: "海拔", isOn: binding(\.metadata.showAltitude))
+                EffectToggle(label: AppLocalized.resource("photo_frame_metadata_coordinates"), isOn: binding(\.metadata.showCoordinates))
+                EffectToggle(label: AppLocalized.resource("photo_frame_metadata_altitude"), isOn: binding(\.metadata.showAltitude))
             }
         }
     }
@@ -140,26 +141,26 @@ struct PhotoEffectsControls: View {
     }
     private func frameName(_ value: PhotoFramePreset) -> String {
         switch value {
-        case .mist: return "雾白"; case .cinema: return "暗夜"; case .minimal: return "简白"; case .frosted: return "毛玻璃"
-        case .plaque: return "铭牌"; case .immersive: return "沉浸"; case .brandInset: return "品牌内嵌"; case .brandGallery: return "品牌留白"
-        case .classicSignature: return "经典签名"; case .galleryMat: return "艺术装裱"; case .colorArchive: return "色彩档案"; case .filmGallery: return "胶片画廊"; case .filmEdge: return "胶片边框"
+        case .mist: return AppLocalized.resource("photo_frame_mist"); case .cinema: return AppLocalized.resource("photo_frame_cinema"); case .minimal: return AppLocalized.resource("photo_frame_minimal"); case .frosted: return AppLocalized.resource("photo_frame_frosted")
+        case .plaque: return AppLocalized.resource("photo_frame_plaque"); case .immersive: return AppLocalized.resource("photo_frame_immersive"); case .brandInset: return AppLocalized.resource("photo_frame_brand_inset"); case .brandGallery: return AppLocalized.resource("photo_frame_brand_gallery")
+        case .classicSignature: return AppLocalized.resource("photo_frame_classic_signature"); case .galleryMat: return AppLocalized.resource("photo_frame_gallery_mat"); case .colorArchive: return AppLocalized.resource("photo_frame_color_archive"); case .filmGallery: return AppLocalized.resource("photo_frame_film_gallery"); case .filmEdge: return AppLocalized.resource("photo_frame_film_edge")
         }
     }
     private func fontName(_ value: PhotoFrameWatermarkFont) -> String {
-        switch value { case .signature: return "流畅签名"; case .elegant: return "编辑衬线"; case .calligraphy: return "窄体铭牌"; case .simple: return "简约"; case .bold: return "醒目" }
+        switch value { case .signature: return AppLocalized.resource("photo_frame_font_signature"); case .elegant: return AppLocalized.resource("photo_frame_font_elegant"); case .calligraphy: return AppLocalized.resource("photo_frame_font_calligraphy"); case .simple: return AppLocalized.resource("photo_frame_font_simple"); case .bold: return AppLocalized.resource("photo_frame_font_bold") }
     }
     private func positionName(_ value: PhotoFrameWatermarkPosition) -> String {
         switch value {
-        case .auto: return "边框·随样式"; case .left: return "边框·左侧"; case .center: return "边框·居中"; case .right: return "边框·右侧"
-        case .photoTopLeft: return "图内·左上"; case .photoTopCenter: return "图内·中上"; case .photoTopRight: return "图内·右上"; case .photoCenter: return "图内·中央"
-        case .photoBottomLeft: return "图内·左下"; case .photoBottomCenter: return "图内·中下"; case .photoBottomRight: return "图内·右下"
+        case .auto: return AppLocalized.resource("photo_frame_position_auto"); case .left: return AppLocalized.resource("photo_frame_position_left"); case .center: return AppLocalized.resource("photo_frame_position_center"); case .right: return AppLocalized.resource("photo_frame_position_right")
+        case .photoTopLeft: return AppLocalized.resource("photo_frame_position_photo_top_left"); case .photoTopCenter: return AppLocalized.resource("photo_frame_position_photo_top_center"); case .photoTopRight: return AppLocalized.resource("photo_frame_position_photo_top_right"); case .photoCenter: return AppLocalized.resource("photo_frame_position_photo_center")
+        case .photoBottomLeft: return AppLocalized.resource("photo_frame_position_photo_bottom_left"); case .photoBottomCenter: return AppLocalized.resource("photo_frame_position_photo_bottom_center"); case .photoBottomRight: return AppLocalized.resource("photo_frame_position_photo_bottom_right")
         }
     }
     private func colorName(_ value: PhotoFrameWatermarkColor) -> String {
-        switch value { case .adaptive: return "自适应"; case .white: return "暖白"; case .black: return "石墨"; case .gold: return "香槟金"; case .mistBlue: return "雾霾蓝"; case .roseGold: return "玫瑰棕" }
+        switch value { case .adaptive: return AppLocalized.resource("photo_frame_color_adaptive"); case .white: return AppLocalized.resource("photo_frame_color_white"); case .black: return AppLocalized.resource("photo_frame_color_black"); case .gold: return AppLocalized.resource("photo_frame_color_gold"); case .mistBlue: return AppLocalized.resource("photo_frame_color_mist_blue"); case .roseGold: return AppLocalized.resource("photo_frame_color_rose_gold") }
     }
     private func effectName(_ value: PhotoFrameWatermarkEffect) -> String {
-        switch value { case .auto: return "智能"; case .none: return "默认"; case .shadow: return "阴影"; case .outline: return "描边" }
+        switch value { case .auto: return AppLocalized.resource("photo_frame_effect_auto"); case .none: return AppLocalized.resource("photo_frame_effect_none"); case .shadow: return AppLocalized.resource("photo_frame_effect_shadow"); case .outline: return AppLocalized.resource("photo_frame_effect_outline") }
     }
 }
 
@@ -187,7 +188,7 @@ private struct EffectToggle: View {
             HStack {
                 Text(label).zTransferText(size: ZTransferMetrics.body)
                 Spacer()
-                Text(isOn ? "开启" : "关闭").zTransferText(size: ZTransferMetrics.caption, weight: .semibold)
+                Text(AppLocalized.settingState(isOn)).zTransferText(size: ZTransferMetrics.caption, weight: .semibold)
                 Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
                     .foregroundStyle(isOn ? ZTransferColors.accentBlue : ZTransferColors.secondaryText)
             }

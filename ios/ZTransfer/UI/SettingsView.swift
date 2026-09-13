@@ -12,7 +12,7 @@ struct SettingsView: View {
     @AppStorage("autoTransferNewMedia") private var autoTransfer = false
     @AppStorage("deferTransferStart") private var deferStart = false
     @AppStorage("thumbnailColumns") private var columns = 3
-    @AppStorage("collapseBurstPhotos") private var collapseBurst = false
+    @AppStorage("collapseBurstPhotos") private var collapseBurst = true
     @AppStorage("tapToPreview") private var tapToPreview = false
     @AppStorage("hapticsEnabled") private var haptics = true
     @AppStorage("keepScreenOn") private var keepScreenOn = true
@@ -70,7 +70,7 @@ struct SettingsView: View {
             // Keep the title in one line.  The Android title occupies a single
             // titleLarge slot; allowing SwiftUI to compress it produces the
             // two-character vertical title seen in the old iOS panel.
-            Text("设置")
+            Text(AppLocalized.resource("settings"))
                 .zTransferText(size: ZTransferMetrics.title, weight: .bold)
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
@@ -85,7 +85,7 @@ struct SettingsView: View {
             // iOS does not yet have the Android purchase backend. Keep the
             // same compact badge footprint without exposing a dead renewal
             // action in the settings header.
-            Text("高级版")
+            Text(AppLocalized.resource("pro_label"))
                 .zTransferTypography(.labelLarge, weight: .bold)
                 .foregroundStyle(.black)
                 .padding(.horizontal, 14)
@@ -107,12 +107,12 @@ struct SettingsView: View {
             HStack(spacing: 10) {
                 Image(systemName: "location.fill").foregroundStyle(directory.directoryURL == nil ? ZTransferColors.accentOrange : .green)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("传输目录").zTransferText(size: ZTransferMetrics.caption, weight: .semibold)
-                    Text(directory.directoryURL?.lastPathComponent ?? "未设置").zTransferText(size: ZTransferMetrics.caption).lineLimit(1)
+                    Text(AppLocalized.resource("transfer_directory")).zTransferText(size: ZTransferMetrics.caption, weight: .semibold)
+                    Text(directory.directoryURL?.lastPathComponent ?? AppLocalized.resource("dir_not_set")).zTransferText(size: ZTransferMetrics.caption).lineLimit(1)
                 }
                 Spacer()
                 Button { showingPicker = true } label: {
-                    Text(directory.directoryURL == nil ? "选择目录" : "更改目录")
+                    Text(directory.directoryURL == nil ? AppLocalized.resource("choose_directory") : AppLocalized.resource("change_directory"))
                         .zTransferText(size: ZTransferMetrics.caption, weight: .semibold)
                         .lineLimit(1)
                         .padding(.horizontal, 12)
@@ -122,9 +122,9 @@ struct SettingsView: View {
             }
             SettingsDivider()
             HStack(spacing: 8) {
-                ToggleWheel(label: "按天保存", isOn: $organizeByDate, disabled: directory.directoryURL == nil)
-                ToggleWheel(label: "实时传输", isOn: $autoTransfer, disabled: directory.directoryURL == nil)
-                ToggleWheel(label: "选完再传", isOn: $deferStart, disabled: directory.directoryURL == nil)
+                ToggleWheel(label: AppLocalized.resource("organize_transfers_by_date"), isOn: $organizeByDate, disabled: directory.directoryURL == nil)
+                ToggleWheel(label: AppLocalized.resource("auto_transfer_new_media"), isOn: $autoTransfer, disabled: directory.directoryURL == nil)
+                ToggleWheel(label: AppLocalized.resource("defer_transfer_start"), isOn: $deferStart, disabled: directory.directoryURL == nil)
             }
         }
     }
@@ -132,19 +132,19 @@ struct SettingsView: View {
     private var listCard: some View {
         SettingsCard {
             HStack(spacing: 8) {
-                DetentWheel(label: "每行数量", options: [2, 3, 4], selected: columns, optionLabel: String.init, onCommit: { columns = $0 }, rowHeight: 18, wheelHeight: 50).frame(maxWidth: .infinity)
-                ToggleWheel(label: "连拍成组", isOn: $collapseBurst).frame(maxWidth: .infinity)
+                DetentWheel(label: AppLocalized.resource("columns"), options: [2, 3, 4], selected: columns, optionLabel: String.init, onCommit: { columns = $0 }, rowHeight: 18, wheelHeight: 50).frame(maxWidth: .infinity)
+                ToggleWheel(label: AppLocalized.resource("collapse_burst_photos"), isOn: $collapseBurst).frame(maxWidth: .infinity)
             }
             SettingsDivider()
-                DetentWheel(label: "照片列表操作", options: [false, true], selected: tapToPreview, optionLabel: { $0 ? "点击：预览\n长按：传输" : "点击：传输\n长按：预览" }, onCommit: { tapToPreview = $0 }, rowHeight: 32, wheelHeight: 56, optionMaxLines: 2, optionFontSize: 13)
+                DetentWheel(label: AppLocalized.resource("photo_interaction"), options: [false, true], selected: tapToPreview, optionLabel: { $0 ? "点击：预览\n长按：传输" : "点击：传输\n长按：预览" }, onCommit: { tapToPreview = $0 }, rowHeight: 32, wheelHeight: 56, optionMaxLines: 2, optionFontSize: 13)
         }
     }
 
     private var appearanceCard: some View {
         SettingsCard {
             HStack(spacing: 8) {
-                DetentWheel(label: "明暗", options: ["自动", "深色", "浅色"], selected: themeMode, optionLabel: { $0 }, onCommit: { themeMode = $0 }, rowHeight: 16, wheelHeight: 42, optionFontSize: 13).frame(maxWidth: .infinity)
-                DetentWheel(label: "语言", options: ["system", "en", "zh-Hans", "zh-Hant"], selected: appLanguage, optionLabel: { language in
+                DetentWheel(label: AppLocalized.resource("light_dark_mode"), options: ["自动", "深色", "浅色"], selected: themeMode, optionLabel: { $0 }, onCommit: { themeMode = $0 }, rowHeight: 16, wheelHeight: 42, optionFontSize: 13).frame(maxWidth: .infinity)
+                DetentWheel(label: AppLocalized.resource("language"), options: ["system", "en", "zh-Hans", "zh-Hant"], selected: appLanguage, optionLabel: { language in
                     switch language {
                     case "en": return "English"
                     case "zh-Hans": return "简体中文"
@@ -152,10 +152,10 @@ struct SettingsView: View {
                     default: return "自动"
                     }
                 }, onCommit: { appLanguage = $0; onClose?() }, rowHeight: 16, wheelHeight: 42, optionFontSize: 13).frame(maxWidth: .infinity)
-                DetentWheel(label: "按钮风格", options: ["毛玻璃", "木纹", "相机按键", "钛合金"], selected: skinPreset, optionLabel: { $0 }, onCommit: { skinPreset = $0 }, rowHeight: 16, wheelHeight: 42, optionFontSize: 13).frame(maxWidth: .infinity)
+                DetentWheel(label: AppLocalized.resource("button_style"), options: ["毛玻璃", "木纹", "相机按键", "钛合金"], selected: skinPreset, optionLabel: { $0 }, onCommit: { skinPreset = $0 }, rowHeight: 16, wheelHeight: 42, optionFontSize: 13).frame(maxWidth: .infinity)
             }
             SettingsDivider()
-            HStack(spacing: 8) { ToggleWheel(label: "触感反馈", isOn: $haptics); ToggleWheel(label: "屏幕常亮", isOn: $keepScreenOn) }
+            HStack(spacing: 8) { ToggleWheel(label: AppLocalized.resource("haptic_feedback"), isOn: $haptics); ToggleWheel(label: AppLocalized.resource("keep_screen_on"), isOn: $keepScreenOn) }
         }
     }
 
@@ -164,31 +164,32 @@ struct SettingsView: View {
         let settings = effectsStore.settings
         let filterSummary: String = {
             guard settings.photoFilterEnabled, let selection = settings.selectedFilter else {
-                return "无滤镜"
+                return AppLocalized.resource("photo_filter_off_option")
             }
-            return "\(selection.preset.name)\n强度 \(selection.intensityPercent)%"
+            let name = Np3FilterCatalog.preset(id: selection.preset.id).map { AppLocalized.resource("photo_filter_builtin_\($0.legacyID)") } ?? selection.preset.name
+            return "\(name)\n\(AppLocalized.formattedResource("photo_filter_intensity_summary", ["%1$d": "\(selection.intensityPercent)"]))"
         }()
         let frameSummary = settings.photoFrameEnabled && settings.photoFrameBorderEnabled
-            ? settings.photoFramePreset.displayName : "关闭"
+            ? settings.photoFramePreset.displayName : AppLocalized.resource("photo_frame_off")
         let watermarkSummary: String = {
-            guard settings.photoFrameEnabled, settings.watermark.enabled else { return "无水印" }
+            guard settings.photoFrameEnabled, settings.watermark.enabled else { return AppLocalized.resource("photo_frame_no_watermark") }
             switch settings.watermark.content {
             case .text: return settings.watermark.displayText
-            case .image: return "Logo"
+            case .image: return AppLocalized.resource("photo_frame_image_watermark")
             }
         }()
         Button { showingEffectsEditor = true } label: {
             SettingsCard {
-                HStack { Text("滤镜·边框·水印").zTransferText(size: ZTransferMetrics.body, weight: .semibold); Spacer(); Image(systemName: "chevron.right").foregroundStyle(ZTransferColors.secondaryText) }
+                HStack { Text(AppLocalized.resource("photo_effects")).zTransferText(size: ZTransferMetrics.body, weight: .semibold); Spacer(); Image(systemName: "chevron.right").foregroundStyle(ZTransferColors.secondaryText) }
                 Divider().opacity(0.35)
                 HStack(spacing: 8) {
-                    Text("照片滤镜").zTransferText(size: ZTransferMetrics.caption, weight: .semibold)
+                    Text(AppLocalized.resource("photo_filter")).zTransferText(size: ZTransferMetrics.caption, weight: .semibold)
                     Text(filterSummary).zTransferText(size: ZTransferMetrics.caption).multilineTextAlignment(.leading)
                     Spacer()
                     VStack(alignment: .trailing, spacing: 2) {
-                        Text("边框和水印").zTransferText(size: ZTransferMetrics.caption, weight: .semibold)
-                        Text("边框：\(frameSummary)").zTransferText(size: ZTransferMetrics.caption)
-                        Text("水印：\(watermarkSummary)").zTransferText(size: ZTransferMetrics.caption)
+                        Text(AppLocalized.resource("photo_frame_and_watermark_short")).zTransferText(size: ZTransferMetrics.caption, weight: .semibold)
+                        Text(AppLocalized.formattedResource("photo_frame_summary_line", ["%1$s": frameSummary])).zTransferText(size: ZTransferMetrics.caption)
+                        Text(AppLocalized.formattedResource("photo_watermark_summary_line", ["%1$s": watermarkSummary])).zTransferText(size: ZTransferMetrics.caption)
                     }
                 }
             }
@@ -199,17 +200,23 @@ struct SettingsView: View {
         HStack(spacing: 8) {
             VersionPlaque(text: AppLocalized.versionText(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.82"))
             Spacer()
-            SettingsFooterButton("反馈") { UIPasteboard.general.string = "953000922"; feedbackHint = true }
+            SettingsFooterButton(AppLocalized.resource("feedback")) { UIPasteboard.general.string = "953000922"; feedbackHint = true }
         }
-        .alert("已复制 QQ 号 953000922\n请加 QQ 反馈", isPresented: $feedbackHint) { Button("确定", role: .cancel) {} }
-        .alert("设置说明\n按天保存、实时传输和选完再传需要先设置传输目录。照片列表和外观选项会在松手后生效。", isPresented: $showingHelp) { Button("确定", role: .cancel) {} }
+        .alert(AppLocalized.formattedResource("feedback_qq_copied", ["%1$s": "953000922"]), isPresented: $feedbackHint) { Button(AppLocalized.resource("cd_close"), role: .cancel) {} }
+        .alert(AppLocalized.resource("settings_help_title"), isPresented: $showingHelp) {
+            Button(AppLocalized.resource("cd_close"), role: .cancel) {}
+        } message: {
+            Text(["organize_transfers_by_date_summary", "auto_transfer_new_media_summary", "defer_transfer_start_summary"]
+                .map { AppLocalized.resource($0) }
+                .joined(separator: "\n"))
+        }
     }
 }
 
 extension PhotoFramePreset {
     var displayName: String {
         switch self {
-        case .mist: return "雾白"; case .cinema: return "暗夜"; case .minimal: return "简白"; case .frosted: return "毛玻璃"; case .plaque: return "铭牌"; case .immersive: return "沉浸"; case .brandInset: return "品牌内嵌"; case .brandGallery: return "品牌留白"; case .classicSignature: return "经典签名"; case .galleryMat: return "艺术装裱"; case .colorArchive: return "色彩档案"; case .filmGallery: return "胶片画廊"; case .filmEdge: return "胶片边框"
+        case .mist: return AppLocalized.resource("photo_frame_mist"); case .cinema: return AppLocalized.resource("photo_frame_cinema"); case .minimal: return AppLocalized.resource("photo_frame_minimal"); case .frosted: return AppLocalized.resource("photo_frame_frosted"); case .plaque: return AppLocalized.resource("photo_frame_plaque"); case .immersive: return AppLocalized.resource("photo_frame_immersive"); case .brandInset: return AppLocalized.resource("photo_frame_brand_inset"); case .brandGallery: return AppLocalized.resource("photo_frame_brand_gallery"); case .classicSignature: return AppLocalized.resource("photo_frame_classic_signature"); case .galleryMat: return AppLocalized.resource("photo_frame_gallery_mat"); case .colorArchive: return AppLocalized.resource("photo_frame_color_archive"); case .filmGallery: return AppLocalized.resource("photo_frame_film_gallery"); case .filmEdge: return AppLocalized.resource("photo_frame_film_edge")
         }
     }
 }

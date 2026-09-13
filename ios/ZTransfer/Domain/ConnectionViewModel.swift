@@ -37,6 +37,9 @@ final class ConnectionViewModel: ObservableObject {
 
     func startUSBDiscovery() {
         guard usbEventsTask == nil else { return }
+        // Pair every start with a new generation so an earlier asynchronous
+        // stop cannot tear down the listener that is being started now.
+        connectionGeneration &+= 1
         let events = usbTransport.events()
         usbEventsTask = Task { [weak self] in
             for await event in events {
@@ -119,6 +122,7 @@ final class ConnectionViewModel: ObservableObject {
 
     func stopUSBDiscovery() {
         connectionGeneration &+= 1
+        let stopGeneration = connectionGeneration
         usbEventsTask?.cancel()
         usbEventsTask = nil
         usbConnectTask?.cancel()
@@ -130,6 +134,7 @@ final class ConnectionViewModel: ObservableObject {
         Task { @MainActor [weak self] in
             guard let self else { return }
             await self.connectionService.disconnect()
+            guard self.connectionGeneration == stopGeneration else { return }
             self.usbTransport.stop()
         }
     }

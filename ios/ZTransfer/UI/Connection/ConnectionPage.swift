@@ -20,7 +20,7 @@ struct ConnectionPage: View {
                 ZStack(alignment: .topLeading) {
                     ZTransferColors.background.ignoresSafeArea()
                     HStack(alignment: .top, spacing: ConnectionLayout.cardSpacing) {
-                    VStack(spacing: ConnectionLayout.gpsSpacing) {
+                    VStack(alignment: .leading, spacing: ConnectionLayout.gpsSpacing) {
                         ConnectionMethodCard(
                             mode: .usb, state: model.state,
                             height: layout.usbHeight,

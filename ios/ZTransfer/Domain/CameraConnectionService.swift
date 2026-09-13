@@ -22,7 +22,16 @@ actor CameraConnectionService {
             guard activeDeviceID == deviceID, let repository else {
                 throw CameraConnectionServiceError.noDevice
             }
-            return repository
+            // A camera UUID may remain stable across a physical replug.  Do
+            // not reuse the old repository unless ImageCaptureCore confirms
+            // that its opened object is still the object currently published
+            // by discovery.
+            if transport.hasCurrentOpenedSession(for: deviceID) {
+                return repository
+            }
+            await closeWithDeadline(deviceID: deviceID)
+            self.activeDeviceID = nil
+            self.repository = nil
         }
         if let connectTask {
             // There is one physical PTP channel. A second caller joins the same

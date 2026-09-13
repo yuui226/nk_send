@@ -41,6 +41,12 @@ enum AppLocalized {
     static func settingState(_ enabled: Bool) -> String {
         resource(enabled ? "setting_on" : "setting_off")
     }
+
+    static func formattedResource(_ name: String, _ replacements: [String: String]) -> String {
+        replacements.reduce(resource(name)) { result, pair in
+            result.replacingOccurrences(of: pair.key, with: pair.value)
+        }
+    }
 }
 
 struct RootView: View {

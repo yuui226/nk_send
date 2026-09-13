@@ -12,7 +12,7 @@ struct PhotoListView: View {
     @State private var showingFilter = false
     @State private var showingQueue = false
     @AppStorage("deferTransferStart") private var deferTransferStart = false
-    @AppStorage("collapseBurstPhotos") private var collapseBurstPhotos = false
+    @AppStorage("collapseBurstPhotos") private var collapseBurstPhotos = true
     @AppStorage("thumbnailColumns") private var thumbnailColumns = 3
     @State private var expandedBurstIDs: Set<String> = []
     @State private var collapsedDays: Set<String> = []
