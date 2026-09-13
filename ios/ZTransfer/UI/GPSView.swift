@@ -49,8 +49,7 @@ struct GPSView: View {
                             if let altitude = coordinator.state.altitudeMeters {
                                 detailRow(
                                     AppLocalized.resource("gps_altitude_value")
-                                        .replacingOccurrences(of: "%1$d", with: "\(Int(altitude.rounded()))"),
-                                    "",
+                                        .replacingOccurrences(of: "%1$d", with: "\(Int(altitude.rounded()))")
                                 )
                             }
                             if coordinator.state.status == .error {
@@ -96,8 +95,14 @@ struct GPSView: View {
         }
     }
 
-    private func detailRow(_ label: String, _ value: String) -> some View {
-        HStack { Text(label).zTransferText(size: ZTransferMetrics.caption); Spacer(); Text(value).zTransferText(size: ZTransferMetrics.caption, weight: .semibold) }
+    private func detailRow(_ label: String, _ value: String? = nil) -> some View {
+        HStack {
+            Text(label).zTransferText(size: ZTransferMetrics.caption)
+            if let value {
+                Spacer()
+                Text(value).zTransferText(size: ZTransferMetrics.caption, weight: .semibold)
+            }
+        }
     }
 }
 
