@@ -709,7 +709,7 @@ enum PhotoEffectsRenderer {
         var rows: [(String, UIFont, UIColor, UIFont.Weight)] = []
         if !metadata.identity.isEmpty { rows.append((metadata.identity.uppercased(), UIFont.systemFont(ofSize: photo.width * 0.027, weight: .bold), .black, .bold)) }
         if let lens = metadata.lensModel, !lens.isEmpty { rows.append((lens, UIFont.systemFont(ofSize: photo.width * 0.0195), .black, .regular)) }
-        if !metadata.frameDetailLine.isEmpty { rows.append((metadata.frameDetailLine, UIFont.systemFont(ofSize: photo.width * 0.022, weight: .bold), .black, .bold)) }
+        if !metadata.colorArchiveDetailLine.isEmpty { rows.append((metadata.colorArchiveDetailLine, UIFont.systemFont(ofSize: photo.width * 0.022, weight: .bold), .black, .bold)) }
         if let date = metadata.dateTime, !date.isEmpty { rows.append((date, UIFont.systemFont(ofSize: photo.width * 0.0185), .black, .regular)) }
         if let location = metadata.locationRow, !location.isEmpty { rows.append((location, UIFont.systemFont(ofSize: photo.width * 0.0185), .black, .regular)) }
         guard !rows.isEmpty else { return }
@@ -978,6 +978,14 @@ private extension PhotoFrameMetadata {
          iso.map { $0.uppercased().hasPrefix("ISO") ? $0 : "ISO\($0)" }]
             .compactMap { $0 }
             .joined(separator: "   ")
+    }
+    var colorArchiveDetailLine: String {
+        [focalLength,
+         aperture.map { $0.lowercased().hasPrefix("f/") ? $0.lowercased() : "f/\($0)" },
+         iso.map { $0.replacingOccurrences(of: " ", with: "").uppercased().hasPrefix("ISO") ? $0.replacingOccurrences(of: " ", with: "").uppercased() : "ISO\($0.replacingOccurrences(of: " ", with: ""))" },
+         shutter.map { $0.lowercased().hasSuffix("s") ? $0 : "\($0)s" }]
+            .compactMap { $0 }
+            .joined(separator: "  ")
     }
     var immersiveDetailLine: String {
         [focalLength,
