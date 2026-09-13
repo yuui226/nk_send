@@ -282,6 +282,7 @@ private struct LocalEffectPreview: View {
     @State private var images: LocalPhotoPreviewImages?
     @State private var filteredSource: UIImage?
     @State private var filteredSourceKey: PhotoFilterSelection?
+    @State private var prefetched: [String: LocalPhotoPreviewImages] = [:]
     @State private var lastPreviewSettings: PhotoEffectsSettings?
     @State private var failed = false
     @GestureState private var comparing = false
@@ -334,6 +335,10 @@ private struct LocalEffectPreview: View {
                     source = image
                 }
                 let filterKey = settings.photoFilterEnabled ? settings.selectedFilter : nil
+                let settingsKey = String(
+                    data: (try? JSONEncoder().encode(settings)) ?? Data(),
+                    encoding: .utf8,
+                ) ?? ""
                 let preparedSource: UIImage?
                 if let filterKey {
                     if filteredSourceKey == filterKey, let filteredSource {
@@ -350,8 +355,13 @@ private struct LocalEffectPreview: View {
                     filteredSourceKey = nil
                     preparedSource = nil
                 }
-                let next = try await LocalPhotoOutput.preview(image: image, settings: settings,
-                                                               metadata: metadata, filteredSource: preparedSource)
+                let next: LocalPhotoPreviewImages
+                if let cached = prefetched.removeValue(forKey: settingsKey) {
+                    next = cached
+                } else {
+                    next = try await LocalPhotoOutput.preview(image: image, settings: settings,
+                                                              metadata: metadata, filteredSource: preparedSource)
+                }
                 try Task.checkCancellation()
                 images = next
                 failed = false
@@ -366,6 +376,34 @@ private struct LocalEffectPreview: View {
                     )
                     try Task.checkCancellation()
                     images = LocalPhotoPreviewImages(filtered: next.filtered, unfiltered: comparison)
+                }
+                if settings.photoFilterEnabled {
+                    for selection in nextPhotoFilterSelections(for: settings) {
+                        guard !Task.isCancelled else { return }
+                        let nextSettings: PhotoEffectsSettings = {
+                            var value = settings
+                            value.photoFilterEnabled = true
+                            value.selectedFilter = selection
+                            return value
+                        }()
+                        let key = String(
+                            data: (try? JSONEncoder().encode(nextSettings)) ?? Data(),
+                            encoding: .utf8,
+                        ) ?? ""
+                        guard prefetched[key] == nil else { continue }
+                        let nextFiltered = try await LocalPhotoOutput.filteredSource(
+                            image: image, selection: selection,
+                        )
+                        let preview = try await LocalPhotoOutput.preview(
+                            image: image, settings: nextSettings, metadata: metadata,
+                            filteredSource: nextFiltered,
+                        )
+                        guard !Task.isCancelled else { return }
+                        prefetched[key] = preview
+                        if prefetched.count > 2, let oldest = prefetched.keys.first {
+                            prefetched.removeValue(forKey: oldest)
+                        }
+                    }
                 }
             } catch is CancellationError {} catch { failed = true }
         }
