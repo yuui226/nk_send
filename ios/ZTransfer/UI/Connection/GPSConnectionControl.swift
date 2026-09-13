@@ -31,10 +31,22 @@ struct GPSConnectionControl: View {
                     // keeps the two connection cards at their measured width.
                     .frame(width: 250)
                     .padding(.top, 60)
-                    .transition(.opacity)
+                    .transition(
+                        .asymmetric(
+                            insertion: .opacity
+                                .combined(with: .scale(scale: 0.965, anchor: .topLeading))
+                                .combined(with: .move(edge: .top)),
+                            removal: .opacity
+                                .combined(with: .scale(scale: 0.975, anchor: .topLeading))
+                                .combined(with: .move(edge: .top)),
+                        )
+                    )
             }
         }
-        .animation(ZTransferMotion.inlineExpansion, value: expanded)
+        // Android GpsDetailOverflowLayer uses 260ms enter/220ms exit motion;
+        // keep the panel mounted in the overlay so the neighbouring card is
+        // never remeasured during either direction.
+        .animation(.easeInOut(duration: expanded ? 0.26 : 0.22), value: expanded)
     }
 }
 
