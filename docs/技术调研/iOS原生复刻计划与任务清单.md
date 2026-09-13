@@ -496,3 +496,8 @@
 
 - `TransferQueue` 的目录失效、相机连接中断/超时、照片元数据不可读提示改为直接读取安卓资源键；日期筛选拨轮的年/月/日标签也改为安卓资源键，覆盖系统、英文和繁体语言切换。
 - 验证：iOS Simulator Debug `xcodebuild` 构建成功；未将真机连接错误分支标记为已验收。
+
+### 2026-09-14 文案资源引用收敛
+
+- `RemoteViewModel` 的监看连接失败提示改为安卓 `connection_failed_short` 资源键；传输队列错误和日期拨轮标签同样改为 `AppLocalized.resource`，不再在 iOS 代码中维护同义文本。
+- 验证：iOS Simulator Debug `xcodebuild` 构建成功；真实远程监看异常路径仍待相机验收。

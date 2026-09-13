@@ -339,7 +339,7 @@ final class RemoteViewModel: ObservableObject {
 
     private static func message(for error: Error) -> String {
         if let error = error as? LocalizedError, let description = error.errorDescription { return description }
-        return "监看连接失败"
+        return AppLocalized.resource("connection_failed_short")
     }
 }
 
