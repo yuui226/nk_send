@@ -57,9 +57,6 @@ actor CameraSession {
     }
 
     func thumbnail(handle: UInt32) async throws -> Data {
-        if let usbTransport, let deviceID {
-            return try await usbTransport.thumbnail(for: handle, deviceID: deviceID)
-        }
         return try await repository.thumbnail(handle: handle)
     }
 
@@ -121,21 +118,13 @@ actor CameraSession {
     }
 
     func preview(handle: UInt32) async throws -> Data {
-        if let usbTransport, let deviceID {
-            // ImageCaptureCore exposes the same camera-generated preview as its
-            // best available thumbnail; the PTP fallback remains for Wi-Fi.
-            return try await usbTransport.thumbnail(for: handle, deviceID: deviceID)
-        }
+        // USB and Wi-Fi use the same Nikon PTP operation order. ImageCaptureCore
+        // only owns discovery/session callbacks; it must not replace Android's
+        // FHD → LargeThumb → standard-thumbnail preview fallback.
         return try await repository.preview(handle: handle)
     }
 
     func readPrefix(file: CameraFile, length: Int64) async throws -> Data {
-        if let usbTransport, let deviceID {
-            guard let cameraFile = usbTransport.cameraFiles(for: deviceID).first(where: { $0.ptpObjectHandle == file.id }) else {
-                throw CameraTransportError.protocolError("Camera file not found")
-            }
-            return try await usbTransport.read(file: cameraFile, offset: 0, length: min(length, cameraFile.fileSize))
-        }
         return try await repository.readPrefix(handle: file.id, length: length)
     }
 
@@ -146,12 +135,6 @@ actor CameraSession {
     }
 
     func download(file: CameraFile, to directory: URL, progress: (@Sendable (Double) -> Void)? = nil) async throws -> URL {
-        if let usbTransport, let deviceID {
-            guard let cameraFile = usbTransport.cameraFiles(for: deviceID).first(where: { $0.ptpObjectHandle == file.id }) else {
-                throw CameraTransportError.protocolError("Camera file not found")
-            }
-            return try await usbTransport.download(file: cameraFile, to: directory, saveAs: file.fileName, progress: progress)
-        }
         return try await repository.download(handle: file.id, size: file.size, fileName: file.fileName, to: directory, progress: progress)
     }
 

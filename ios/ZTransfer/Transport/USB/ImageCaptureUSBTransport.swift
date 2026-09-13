@@ -483,9 +483,23 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
 
     private static func map(_ error: Error) -> CameraTransportError {
         let nsError = error as NSError
-        if nsError.code == NSURLErrorTimedOut { return .timeout }
-        if nsError.code == NSUserCancelledError { return .disconnected }
-        return .protocolError(nsError.localizedDescription)
+        // ImageCaptureCore's C error constants are not imported by Swift on
+        // every SDK; keep the values from ImageCaptureConstants.h here so the
+        // Android error categories remain stable across SDK versions.
+        let code = nsError.code
+        switch nsError.code {
+        case NSURLErrorTimedOut, -9923: // ICReturnCommunicationTimedOut
+            return .timeout
+        case NSUserCancelledError, -20098, // ICReturnThumbnailCanceled
+             -9937, // ICReturnDownloadCanceled
+             -21350, -21349, -21348, // connection driver/closed/ejected
+             -9901, -9902: // legacy device not found/not open
+            return .disconnected
+        case -21343, -21249: // not authorized to open/send PTP
+            return .permissionDenied
+        default:
+            return .protocolError("ImageCaptureCore (\(code)): \(nsError.localizedDescription)")
+        }
     }
 
     private static func pngData(_ image: CGImage) -> Data? {
