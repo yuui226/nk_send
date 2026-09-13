@@ -10,6 +10,10 @@ enum PhotoEffectsRenderer {
         var photo: CGRect
         var metadataTop: CGFloat
     }
+    private struct BrandBounds {
+        var rect: CGRect
+        func intersects(_ other: BrandBounds) -> Bool { rect.intersects(other.rect) }
+    }
 
     static func render(_ image: UIImage, settings: PhotoEffectsSettings, metadata: PhotoFrameMetadata? = nil) throws -> UIImage {
         try Task.checkCancellation()
@@ -195,6 +199,7 @@ enum PhotoEffectsRenderer {
         case .colorArchive: rect.width * 0.012
         case .brandInset, .brandGallery: rect.width * 0.014
         case .mist, .cinema, .minimal, .frosted: max(1, metadataBandHeight * 0.26)
+        case .plaque, .immersive, .classicSignature, .galleryMat, .filmGallery, .filmEdge: 0
         default: rect.width * 0.018
         }
         let path = UIBezierPath(roundedRect: rect, cornerRadius: radius).cgPath
@@ -205,7 +210,12 @@ enum PhotoEffectsRenderer {
             cg.restoreGState()
         }
         cg.saveGState(); cg.addPath(path); cg.clip(); image.draw(in: rect); cg.restoreGState()
-        if preset != .plaque && preset != .immersive && preset != .filmEdge && preset != .classicSignature && preset != .filmGallery {
+        if preset == .classicSignature {
+            cg.setStrokeColor(UIColor(white: 0, alpha: 0.14).cgColor)
+            cg.setLineWidth(max(1, rect.width * 0.0008))
+            cg.addPath(path)
+            cg.strokePath()
+        } else if preset != .plaque && preset != .immersive && preset != .filmEdge && preset != .filmGallery {
             let stroke = preset == .minimal
                 ? UIColor(red: 0.08, green: 0.11, blue: 0.14, alpha: 0.18)
                 : UIColor(white: 1, alpha: 0.275)
@@ -415,7 +425,17 @@ enum PhotoEffectsRenderer {
         let rowSizes: [CGFloat] = preset == .brandInset
             ? [photo.width * 0.043, photo.width * 0.019, photo.width * 0.021, photo.width * 0.018]
             : [photo.width * 0.019, photo.width * 0.021, photo.width * 0.018]
-        drawBrandMetadataRows(cg, area: photoArea.insetBy(dx: photo.width * 0.08, dy: photo.height * 0.06), rows: visibleRows, sizes: Array(rowSizes.prefix(visibleRows.count)))
+        let baseArea = photoArea.insetBy(dx: photo.width * 0.08, dy: photo.height * 0.06)
+        let sizes = Array(rowSizes.prefix(visibleRows.count))
+        let occupied = brandWatermarkBounds(photo: photo, watermark: photoWatermark)
+        let heights = visibleRows.enumerated().map { index, value in
+            let size = sizes[min(index, max(0, sizes.count - 1))]
+            return (value as NSString).size(withAttributes: [.font: UIFont.systemFont(ofSize: size)]).height
+        }
+        let blockHeight = heights.reduce(0, +) + photo.width * 0.020 * CGFloat(max(0, heights.count - 1))
+        let blockWidth = visibleRows.enumerated().map { index, value in (value as NSString).size(withAttributes: [.font: UIFont.systemFont(ofSize: sizes[min(index, max(0, sizes.count - 1))])]).width }.max() ?? 1
+        let placed = placeBrandMetadataBlock(photo: photo, preferredBottom: photo.maxY - min(photo.width, photo.height) * (preset == .brandInset ? 0.030 : 0.035), blockHeight: blockHeight, blockWidth: blockWidth, occupied: occupied, gap: min(photo.width, photo.height) * 0.040)
+        drawBrandMetadataRows(cg, area: placed ?? baseArea, rows: visibleRows, sizes: sizes)
         drawWatermark(cg, watermark: photoWatermark, photo: photo, canvas: layout.canvas, preset: preset,
                       metadataBand: CGRect(x: 0, y: photo.maxY, width: layout.canvas.width, height: layout.canvas.height - photo.maxY))
         if preset == .brandGallery {
@@ -442,6 +462,34 @@ enum PhotoEffectsRenderer {
             value.draw(at: CGPoint(x: area.midX - width * 0.5, y: y), withAttributes: attrs)
             y += heights[index] * scale + gap * scale
         }
+    }
+
+    private static func brandWatermarkBounds(photo: CGRect, watermark: PhotoFrameWatermark) -> BrandBounds? {
+        guard watermark.enabled, photoPlacement(watermark.position), watermark.content == .text else { return nil }
+        let font = watermarkFont(watermark.font, size: min(photo.width, photo.height) * textSizeFraction(watermark.sizePercent))
+        let measured = (watermark.displayText as NSString).size(withAttributes: [.font: font])
+        let inset = min(photo.width, photo.height) * 0.04
+        return BrandBounds(rect: watermarkRect(position: watermark.position, photo: photo, size: measured, inset: inset))
+    }
+
+    private static func placeBrandMetadataBlock(photo: CGRect, preferredBottom: CGFloat, blockHeight: CGFloat, blockWidth: CGFloat, occupied: BrandBounds?, gap: CGFloat) -> CGRect? {
+        guard blockHeight > 0 else { return nil }
+        let width = min(blockWidth, photo.width)
+        let left = photo.midX - width * 0.5
+        func block(endingAt bottom: CGFloat) -> CGRect {
+            let clamped = min(max(bottom, photo.minY + blockHeight), photo.maxY)
+            return CGRect(x: left, y: clamped - blockHeight, width: width, height: blockHeight)
+        }
+        let preferred = block(endingAt: preferredBottom)
+        guard let occupied else { return preferred }
+        if !preferred.intersects(occupied.rect) { return preferred }
+        let above = block(endingAt: occupied.rect.minY - gap)
+        if above.minY >= photo.minY && !above.intersects(occupied.rect) { return above }
+        let below = CGRect(x: left, y: occupied.rect.maxY + gap, width: width, height: blockHeight)
+        if below.maxY <= photo.maxY && !below.intersects(occupied.rect) { return below }
+        let roomAbove = max(0, occupied.rect.minY - gap - photo.minY)
+        let roomBelow = max(0, photo.maxY - occupied.rect.maxY - gap)
+        return roomAbove >= roomBelow ? block(endingAt: max(photo.minY + blockHeight, occupied.rect.minY - gap)) : block(endingAt: min(photo.maxY, occupied.rect.maxY + gap + blockHeight))
     }
 
     private static func drawImmersive(_ cg: CGContext, layout: Layout, metadata: PhotoFrameMetadata, watermark: PhotoFrameWatermark) {
