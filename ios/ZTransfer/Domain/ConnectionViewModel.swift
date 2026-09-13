@@ -489,11 +489,11 @@ final class ConnectionViewModel: ObservableObject {
         case CameraConnectionServiceError.timeout, CameraTransportError.timeout, PTPSessionError.timeout:
             return "连接超时，请检查相机电源和 USB 数据线"
         case CameraTransportError.permissionDenied:
-            return "未获得 USB 权限，请重新插线并允许访问"
+            return AppLocalized.resource("usb_permission_required")
         case CameraTransportError.disconnected:
-            return "有线连接已断开"
+            return AppLocalized.resource("usb_connection_lost")
         case PTPSessionError.invalidated:
-            return "有线连接已断开"
+            return AppLocalized.resource("usb_connection_lost")
         default:
             return error.localizedDescription
         }
