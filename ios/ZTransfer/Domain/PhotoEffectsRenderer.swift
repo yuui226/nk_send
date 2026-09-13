@@ -65,7 +65,8 @@ enum PhotoEffectsRenderer {
             }
             if settings.photoFrameBorderEnabled {
                 drawPhoto(cg, image: image, rect: layout.photo, preset: settings.photoFramePreset,
-                          metadataBandHeight: layout.canvas.height - layout.metadataTop)
+                          metadataBandHeight: layout.canvas.height - layout.metadataTop,
+                          canvasSize: layout.canvas)
             } else {
                 image.draw(in: layout.photo)
             }
@@ -208,7 +209,7 @@ enum PhotoEffectsRenderer {
         }
     }
 
-    private static func drawPhoto(_ cg: CGContext, image: UIImage, rect: CGRect, preset: PhotoFramePreset, metadataBandHeight: CGFloat) {
+    private static func drawPhoto(_ cg: CGContext, image: UIImage, rect: CGRect, preset: PhotoFramePreset, metadataBandHeight: CGFloat, canvasSize: CGSize) {
         let radius: CGFloat = switch preset {
         case .colorArchive: rect.width * 0.012
         case .brandInset, .brandGallery: rect.width * 0.014
@@ -218,10 +219,7 @@ enum PhotoEffectsRenderer {
         }
         let path = UIBezierPath(roundedRect: rect, cornerRadius: radius).cgPath
         if ![.plaque, .immersive, .filmEdge, .classicSignature, .filmGallery].contains(preset) {
-            cg.saveGState()
-            cg.setShadow(offset: CGSize(width: 0, height: rect.width * 0.009), blur: rect.width * 0.018, color: UIColor.black.withAlphaComponent(0.20).cgColor)
-            cg.setFillColor(UIColor.white.cgColor); cg.addPath(path); cg.fillPath()
-            cg.restoreGState()
+            drawPhotoElevation(cg, rect: rect, radius: radius, preset: preset, canvasSize: canvasSize)
         }
         cg.saveGState(); cg.addPath(path); cg.clip(); image.draw(in: rect); cg.restoreGState()
         if preset == .classicSignature {
@@ -240,6 +238,39 @@ enum PhotoEffectsRenderer {
             }
             cg.setStrokeColor(stroke.cgColor); cg.setLineWidth(max(1, rect.width * 0.0012)); cg.addPath(path); cg.strokePath()
         }
+    }
+
+    /// Android renders elevation on a quarter-size transparent proxy using two shadow layers.
+    /// Keeping the proxy small avoids a full-resolution software blur while preserving the same
+    /// soft edge and per-preset shadow strength.
+    private static func drawPhotoElevation(_ cg: CGContext, rect: CGRect, radius: CGFloat, preset: PhotoFramePreset, canvasSize: CGSize) {
+        let strength: CGFloat = switch preset {
+        case .cinema: 1.15
+        case .minimal, .brandInset, .brandGallery, .colorArchive: 0.78
+        case .mist, .frosted: 1.0
+        default: 0
+        }
+        guard strength > 0, canvasSize.width > 0, canvasSize.height > 0 else { return }
+        let proxyScale: CGFloat = 0.25
+        let shortEdge = min(canvasSize.width, canvasSize.height)
+        let proxySize = CGSize(width: max(1, (canvasSize.width * proxyScale).rounded()), height: max(1, (canvasSize.height * proxyScale).rounded()))
+        let proxyFormat = UIGraphicsImageRendererFormat()
+        proxyFormat.scale = 1
+        proxyFormat.opaque = false
+        let proxy = UIGraphicsImageRenderer(size: proxySize, format: proxyFormat).image { renderer in
+            let context = renderer.cgContext
+            let proxyRect = CGRect(x: rect.minX * proxyScale, y: rect.minY * proxyScale, width: rect.width * proxyScale, height: rect.height * proxyScale)
+            let proxyRadius = radius * proxyScale
+            let proxyPath = UIBezierPath(roundedRect: proxyRect, cornerRadius: proxyRadius).cgPath
+            context.setFillColor(UIColor(white: 0, alpha: 18.0 / 255.0).cgColor)
+            context.setShadow(offset: CGSize(width: 0, height: shortEdge * 0.003 * proxyScale), blur: shortEdge * 0.020 * proxyScale, color: UIColor(red: 8.0 / 255.0, green: 15.0 / 255.0, blue: 21.0 / 255.0, alpha: 48.0 / 255.0 * strength).cgColor)
+            context.addPath(proxyPath); context.fillPath(); context.setShadow(offset: .zero, blur: 0, color: nil)
+            context.setFillColor(UIColor(white: 0, alpha: 20.0 / 255.0).cgColor)
+            context.setShadow(offset: CGSize(width: 0, height: shortEdge * 0.009 * proxyScale), blur: shortEdge * 0.009 * proxyScale, color: UIColor(red: 5.0 / 255.0, green: 11.0 / 255.0, blue: 16.0 / 255.0, alpha: 64.0 / 255.0 * strength).cgColor)
+            context.addPath(proxyPath); context.fillPath()
+        }
+        guard let proxyCG = proxy.cgImage else { return }
+        cg.draw(proxyCG, in: CGRect(origin: .zero, size: canvasSize), byTiling: false)
     }
 
 
