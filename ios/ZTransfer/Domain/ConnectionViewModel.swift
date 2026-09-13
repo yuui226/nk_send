@@ -242,7 +242,7 @@ final class ConnectionViewModel: ObservableObject {
                     return
                 }
                 self.cameraRepository = repository
-                self.cameraSession = CameraSession(repository: repository)
+                self.cameraSession = CameraSession(repository: repository, wirelessMode: mode)
                 self.state.wifiPhase = .connected
                 self.state.staProgressIP = nil
                 self.wifiConnectTask = nil

@@ -229,11 +229,13 @@ struct PhotoListView: View {
                         }
                     }
 
-                    Button { signalExpanded.toggle() } label: {
+                    Button {
+                        if session?.wirelessMode != .sta { signalExpanded.toggle() }
+                    } label: {
                         HStack(spacing: 5) {
-                            Image(systemName: session?.isUSB == true ? "cable.connector" : "wifi")
-                                .font(.system(size: 17, weight: .semibold))
-                            if signalExpanded {
+                            PhotoListSignalIcon(isUSB: session?.isUSB == true,
+                                                wirelessMode: session?.wirelessMode)
+                            if signalExpanded && session?.wirelessMode != .sta {
                                 Image(systemName: "chevron.down")
                                     .font(.system(size: 10, weight: .bold))
                             }
@@ -321,6 +323,40 @@ struct PhotoListView: View {
             queueModel.enqueue(file, autoStart: session, directory: directoryStore.directoryURL)
         } else {
             queueModel.enqueue(file)
+        }
+    }
+}
+
+/// The Android SignalPill has a dedicated USB mark and a four-bar STA mark.
+/// AP has no public RSSI API on iOS, so it retains the existing Wi-Fi glyph
+/// until a platform-equivalent signal value is available; no synthetic level
+/// is introduced.
+private struct PhotoListSignalIcon: View {
+    let isUSB: Bool
+    let wirelessMode: WirelessMode?
+
+    var body: some View {
+        if isUSB {
+            ClassicUSBIcon(tint: ZTransferColors.primaryText)
+                .frame(width: 18, height: 18)
+        } else if wirelessMode == .sta {
+            Canvas { context, size in
+                let width = size.width * 0.16
+                let gap = size.width * 0.10
+                let heights: [CGFloat] = [0.30, 0.48, 0.66, 0.84].map { size.height * $0 }
+                let total = width * 4 + gap * 3
+                let start = (size.width - total) / 2
+                for (index, height) in heights.enumerated() {
+                    let x = start + CGFloat(index) * (width + gap)
+                    let rect = CGRect(x: x, y: size.height - height, width: width, height: height)
+                    context.fill(Path(roundedRect: rect, cornerRadius: width * 0.35), with: .color(ZTransferColors.primaryText))
+                }
+            }
+            .frame(width: 19, height: 18)
+            .accessibilityLabel(AppLocalized.resource("sta_signal_connected"))
+        } else {
+            Image(systemName: ZTransferIcon.wifi)
+                .font(.system(size: 17, weight: .semibold))
         }
     }
 }

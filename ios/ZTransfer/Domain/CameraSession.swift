@@ -10,17 +10,21 @@ actor CameraSession {
     /// The connection pill uses the transport kind just like Android's
     /// SignalPill (USB icon for wired sessions, Wi‑Fi icon otherwise).
     nonisolated let isUSB: Bool
+    /// Keep the selected wireless route with the session so the photo-list
+    /// signal pill can render Android's STA-specific state instead of
+    /// collapsing every PTP/IP connection into a generic Wi‑Fi glyph.
+    nonisolated let wirelessMode: WirelessMode?
     private let thumbnailStore = PhotoThumbnailStore()
     private let exifStore = PhotoExifStore()
 
     init(repository: CameraRepository, transport: ImageCaptureUSBTransport, deviceID: String) {
-        self.repository = repository; self.usbTransport = transport; self.deviceID = deviceID; self.isUSB = true
+        self.repository = repository; self.usbTransport = transport; self.deviceID = deviceID; self.isUSB = true; self.wirelessMode = nil
     }
 
     /// Creates a network-backed session. The repository's PTPSession is the
     /// serialized command channel for thumbnails, reads and downloads.
-    init(repository: CameraRepository) {
-        self.repository = repository; self.usbTransport = nil; self.deviceID = nil; self.isUSB = false
+    init(repository: CameraRepository, wirelessMode: WirelessMode = .ap) {
+        self.repository = repository; self.usbTransport = nil; self.deviceID = nil; self.isUSB = false; self.wirelessMode = wirelessMode
     }
 
     func catalog() async throws -> [CameraFile] { try await repository.loadCatalog() }

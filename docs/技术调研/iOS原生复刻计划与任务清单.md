@@ -641,3 +641,9 @@
 - 安卓 USB 权限拒绝后的卡片错误状态和重新插线恢复判断使用同一份资源文案。iOS 原先仅在 `ConnectionViewModel.usbErrorMessage` 使用 `usb_permission_required`，而 `ConnectionState.applying` 及设备新增分支仍用硬编码简体中文，语言切换或状态恢复时会产生分叉。
 - 现将 reducer 和设备新增判断统一改为安卓资源键 `usb_permission_required`；状态枚举、事件顺序和重试条件未改变。
 - 验证：待本轮 Swift 测试完成；需在系统语言切换及 ImageCaptureCore 权限回调下继续验收。
+
+### 2026-09-14 照片列表信号胶囊连接类型对账（进行中）
+
+- 安卓 `FileListScreen.SignalPill` 按 USB、STA、AP 分别选择图形；STA 在线状态使用四格专用图标，USB 使用经典三叉图标，STA 不展开 dBm 文本。iOS 原先只根据 `isUSB` 在 USB 与系统 Wi‑Fi 图标之间切换，网络会话没有保存 STA/AP 路由信息。
+- `CameraSession` 现在保存建立会话时的 `WirelessMode`，连接 ViewModel 按实际 STA/AP 传入；照片列表顶栏复用 `ClassicUSBIcon`，新增安卓同几何比例的 STA 四格图标，并禁止 STA 误展开信号详情。AP 因 iOS 没有公开等价 RSSI 数据继续使用 Wi‑Fi 图标，不注入虚构信号值。
+- 验证：iOS 模拟器 Debug 构建成功；STA/AP 真实连接后的图形、断线和重试状态仍待相机验收。
