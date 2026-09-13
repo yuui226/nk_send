@@ -168,7 +168,12 @@ struct PhotoListView: View {
             }
         }
         .fullScreenCover(isPresented: $showingRemote) {
-            if let session { RemoteView(session: session).onDisappear { model.wakeThumbnailFill() } }
+            if let session {
+                RemoteView(session: session).onDisappear {
+                    model.resumeAfterRemote()
+                    model.wakeThumbnailFill()
+                }
+            }
         }
         .sheet(isPresented: $showingFilter) {
             let files = model.availableFiles

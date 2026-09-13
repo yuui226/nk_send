@@ -2,6 +2,9 @@ import Foundation
 
 enum CameraRepositoryError: Error, Equatable, Sendable {
     case invalidDataset
+    /// Remote monitor owns the channel; the list must abandon its old handle
+    /// snapshot and enumerate again after monitor dismissal.
+    case foregroundPreempted
 }
 
 /// Resumable handle enumeration state. Android keeps this snapshot when a
@@ -253,10 +256,16 @@ actor CameraRepository {
     func setFHDActive(_ active: Bool) { fhdActive = active }
 
     private func waitForForegroundPreview() async throws {
-        // Android's isFileScanPaused() covers both interactive FHD and the
-        // remote/live-view command owner. Never queue metadata behind either
-        // foreground session; resume at the same cursor after it releases.
-        while fhdActive || remoteActive {
+        // Android cancels a list scan when remote monitor takes ownership. The
+        // monitor may capture new media, so its next list load must enumerate
+        // fresh handles instead of resuming the old snapshot.
+        if remoteActive {
+            scanSnapshot = nil
+            throw CameraRepositoryError.foregroundPreempted
+        }
+        // Interactive FHD is a short same-session pause and resumes at the
+        // existing cursor after the preview releases the channel.
+        while fhdActive {
             try Task.checkCancellation()
             try await Task.sleep(nanoseconds: 20_000_000)
         }

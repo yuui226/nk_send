@@ -150,6 +150,13 @@ final class PhotoListViewModel: ObservableObject {
             startThumbnailFillWorker()
         } catch is CancellationError {
             return
+        } catch CameraRepositoryError.foregroundPreempted {
+            // Remote monitor owns the command channel. Keep the rows already
+            // shown and let the monitor dismissal trigger a fresh handle scan.
+            guard generation == loadGeneration else { return }
+            isLoadingFiles = false
+            loadState = allFiles.isEmpty ? .idle : .loaded
+            hasCompletedFileScan = false
         } catch {
             guard !Task.isCancelled, generation == loadGeneration else { return }
             // Preserve any already published files. A failed/incomplete scan
@@ -249,6 +256,20 @@ final class PhotoListViewModel: ObservableObject {
 
     /// Reawaken background filling after a remote/FHD full-screen owner closes.
     func wakeThumbnailFill() { startThumbnailFillWorker() }
+
+    /// Remote monitor can capture new media, therefore its return path starts
+    /// a fresh handle enumeration rather than resuming the old scan snapshot.
+    func resumeAfterRemote() {
+        loadTask?.cancel()
+        loadGeneration &+= 1
+        let generation = loadGeneration
+        loadState = .loading
+        isLoadingFiles = true
+        hasCompletedFileScan = false
+        loadTask = Task { [weak self] in
+            await self?.reload(generation: generation)
+        }
+    }
 
     func updateTransferredIDs(_ ids: Set<UInt32>) {
         guard ids != transferredIDs else { return }
