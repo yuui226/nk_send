@@ -83,11 +83,13 @@ struct RemoteRecordingHint: Equatable, Sendable {
 
     static func startFailed(_ result: RemoteMovieStartResult?) -> Self {
         let detail = result.map { "\n" + $0.diagnosticSummary } ?? ""
-        return Self(message: "无法开始录像" + detail, durationNanoseconds: 12_000_000_000)
+        return Self(message: AppLocalized.resource("remote_rec_start_failed") + detail,
+                    durationNanoseconds: 12_000_000_000)
     }
 
     static func stopFailed(responseCode: UInt16 = 0xFFFF) -> Self {
-        Self(message: String(format: "无法停止录像，请检查相机后重试\nstop=0x%04X", responseCode),
+        Self(message: AppLocalized.resource("remote_rec_stop_failed") +
+                 String(format: "\nstop=0x%04X", responseCode),
              durationNanoseconds: 6_000_000_000)
     }
 }
