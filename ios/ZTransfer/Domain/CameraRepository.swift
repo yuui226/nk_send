@@ -478,21 +478,24 @@ actor CameraRepository {
                 // Android path removes only handles from an established
                 // baseline; a first scan keeps any rows already published by
                 // an earlier partial result.
-                removedHandles = knownHandles.isEmpty ? [] : knownHandles.intersection(existingHandles)
+                let hasKnownBaseline = !knownHandles.isEmpty
+                removedHandles = hasKnownBaseline ? knownHandles.intersection(existingHandles) : []
                 for handle in removedHandles {
                     catalogFiles.removeValue(forKey: handle)
                     indexedCatalogFiles.removeValue(forKey: handle)
                 }
                 catalogOrder.removeAll { removedHandles.contains($0) }
-                existingFiles.removeAll()
-                existingHandles.removeAll()
+                if hasKnownBaseline {
+                    existingFiles.removeAll { removedHandles.contains($0.id) }
+                    existingHandles.subtract(removedHandles)
+                }
                 knownHandles.removeAll()
                 catalogStorageIDs.removeAll()
                 scanSnapshot = nil
                 catalogReady = true
                 lastCatalogCheck = .now
                 publishCatalog()
-                return PhotoScanResult(files: [], removedHandles: removedHandles,
+                return PhotoScanResult(files: existingFiles, removedHandles: removedHandles,
                                        addedHandles: [], handleQueriesSucceeded: false,
                                        metadataComplete: true)
             }
