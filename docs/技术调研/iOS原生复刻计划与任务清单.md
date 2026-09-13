@@ -344,6 +344,7 @@
 - 编辑类边框的照片水印绘制顺序调整为先于胶片孔、调色板和信息文字，和安卓 `drawEditorialFrameDecoration` 一致；签名构建安装启动：`dist-debug-ios/ZTransfer-ios-debug-1.82-20260913-142131.app`。
 - 雾面、影院、磨砂和胶片画廊的背景代理改为安卓同款 192px 两阶段滑动窗口盒式模糊，避免 Core Image 高斯近似造成背景质感偏差；签名构建安装启动：`dist-debug-ios/ZTransfer-ios-debug-1.82-20260913-143100.app`。
 - 修复单选项拨轮（包括“边框信息”）在 iOS 16 下透明点击层可能塌缩的问题，点击区域现在明确铺满控件；签名构建安装启动：`dist-debug-ios/ZTransfer-ios-debug-1.82-20260913-144429.app`。
+- 单选项拨轮改用高优先级点击手势，避免透明按钮与工作台滚动手势竞争，确保“边框信息”点击触发展开；签名构建安装启动：`dist-debug-ios/ZTransfer-ios-debug-1.82-20260913-144704.app`。
 
 **2/62**。已验收工程骨架和 Swift 6/iOS 16 配置。其余 60 项保留为待完成或进行中。
 
