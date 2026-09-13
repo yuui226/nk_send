@@ -8,25 +8,40 @@ struct GPSConnectionControl: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             TimelineView(.animation) { context in
-                let phase = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 2.8) / 2.8
-                let pulse = coordinator.state.enabled ? 0.05 + 0.05 * CGFloat((sin(phase * 2 * .pi) + 1) / 2) : 0
-                Button {
-                    let animation: Animation = expanded
-                        ? .easeInOut(duration: 0.22).delay(0.02)
-                        : .easeInOut(duration: 0.26).delay(0.025)
-                    withAnimation(animation) { expanded.toggle() }
-                } label: {
-                    Text(AppLocalized.resource("gps_auto_write")).zTransferTypography(.titleMedium, weight: .bold)
-                        .foregroundStyle(ZTransferColors.primaryText)
-                        .frame(maxWidth: .infinity).frame(height: 50)
-                        .background((coordinator.state.enabled ? ZTransferColors.accentBlue : ZTransferColors.background).opacity(coordinator.state.enabled ? 0.12 + pulse : 0.55), in: RoundedRectangle(cornerRadius: 20))
-                        .overlay(RoundedRectangle(cornerRadius: 20).stroke((coordinator.state.enabled ? ZTransferColors.accentBlue : Color.white).opacity(0.55), lineWidth: 1))
-                }
-                .buttonStyle(.plain)
-                .simultaneousGesture(
-                    LongPressGesture(minimumDuration: 0.8).onEnded { _ in
+                let active = coordinator.state.enabled
+                let period = active ? 2.4 : 2.8
+                let phase = context.date.timeIntervalSinceReferenceDate
+                    .truncatingRemainder(dividingBy: period) / period
+                let ambientAlpha = active
+                    ? 0.075 + 0.085 * CGFloat((sin(phase * 2 * .pi) + 1) / 2)
+                    : 0.050 + 0.095 * CGFloat((sin(phase * 2 * .pi) + 1) / 2)
+                // Android uses ReleaseCommitWheel for this boolean control. Using
+                // the shared wheel preserves tap-to-toggle, long-press diagnostics,
+                // detent feedback and the same disabled/active material treatment.
+                DetentWheel(
+                    label: "",
+                    options: [false, true],
+                    selected: expanded,
+                    optionLabel: { _ in AppLocalized.resource("gps_auto_write") },
+                    onCommit: { next in
+                        let animation: Animation = next
+                            ? .easeInOut(duration: 0.26).delay(0.025)
+                            : .easeInOut(duration: 0.22).delay(0.02)
+                        withAnimation(animation) { expanded = next }
+                    },
+                    wheelHeight: 50,
+                    cornerRadius: 20,
+                    optionFontSize: 18,
+                    optionFontWeight: .bold,
+                    accentColor: active ? ZTransferColors.accentBlue : ZTransferColors.secondaryText,
+                    emphasized: expanded || active,
+                    showEmphasisBorder: false,
+                    showDragHint: false,
+                    onLongClick: {
                         UIPasteboard.general.string = gpsDiagnosticsSnapshot(coordinator)
-                    }
+                    },
+                    ambientEffectColor: active ? ZTransferColors.accentBlue : ZTransferColors.background,
+                    ambientEffectAlpha: ambientAlpha,
                 )
             }
         }
