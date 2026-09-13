@@ -661,3 +661,9 @@
 - 本轮模拟器日志明确报告三款内置字体找不到 `Fonts/*.ttf`，实际 Xcode 资源复制结果是 App 根目录中的 `.ttf`。这会让渲染器的 `UIFont(name:)` 返回空并回退系统字体，不能据此前的“字体文件存在”记录认定字体效果正确。
 - `ios/ZTransfer/Info.plist` 与 `ios/project.yml` 的 `UIAppFonts` 同步改成产物中的真实根目录文件名；没有修改安卓字体文件。
 - 新增宿主 App 加载测试，检查注册路径对应文件存在，并验证 `GreatVibes-Regular`、`BebasNeue-Regular`、`CormorantGaramond-MediumItalic` 三个实际字体名都能通过 `UIFont(name:)` 读取。该定向测试通过，日志 `/tmp/ztransfer-watermark-font-test.log`；真机效果截图与完整排版仍待验收。
+
+### 2026-09-14 照片列表缓存回收与批处理文案对账（进行中）
+
+- `PhotoThumbnailDiskCache` 对齐安卓 `ThumbnailDiskCache` 的目录生命周期：相机目录初始化时清理 `.tmp`/零字节条目，查找前确保被系统回收的缓存目录已重建并清空失效索引，根目录遗留 `.tmp` 也纳入清理；不改变 90 天相机目录和旧版 JPG 的保留窗口。
+- `LocalPhotoBatchLabel` 的完成、部分完成、失败、选择图片和生成数量文本改为直接读取安卓 `local_photo_batch_*`/`local_photo_choose_short` 资源键，数量占位符与安卓格式化一致。
+- 验证：`PhotoThumbnailDiskCacheTests` 5 项通过；iOS Simulator 无签名 Debug 构建成功。完整页面、相机协议、动画和真机行为仍保持未验收，不提前标记任务完成。
