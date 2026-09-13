@@ -1,10 +1,8 @@
 import UIKit
-import CoreImage
 
 /// Native renderer following PhotoFrameExporter.kt's ordered pipeline.
 /// Source -> NP3 filter -> frame backdrop/photo -> metadata/watermark.
 enum PhotoEffectsRenderer {
-    private static let ciContext = CIContext(options: [.useSoftwareRenderer: false])
     private struct Layout {
         var canvas: CGSize
         var photo: CGRect
@@ -286,17 +284,78 @@ enum PhotoEffectsRenderer {
         let proxySize = size.width >= size.height
             ? CGSize(width: longEdge, height: max(96, (longEdge * size.height / size.width).rounded()))
             : CGSize(width: max(96, (longEdge * size.width / size.height).rounded()), height: longEdge)
-        let proxy = UIGraphicsImageRenderer(size: proxySize).image { renderer in
+        var pixels = Array(repeating: UInt8(255), count: Int(proxySize.width * proxySize.height) * 4)
+        let proxyFormat = UIGraphicsImageRendererFormat()
+        proxyFormat.scale = 1
+        proxyFormat.opaque = true
+        let proxy = UIGraphicsImageRenderer(size: proxySize, format: proxyFormat).image { renderer in
             let scale = max(proxySize.width / CGFloat(source.width), proxySize.height / CGFloat(source.height))
             let drawSize = CGSize(width: CGFloat(source.width) * scale, height: CGFloat(source.height) * scale)
             let rect = CGRect(x: (proxySize.width - drawSize.width) / 2, y: (proxySize.height - drawSize.height) / 2, width: drawSize.width, height: drawSize.height)
             renderer.cgContext.interpolationQuality = .high
             renderer.cgContext.draw(source, in: rect)
         }
-        guard let input = CIImage(image: proxy), let filter = CIFilter(name: "CIGaussianBlur") else { return image }
-        filter.setValue(input, forKey: kCIInputImageKey); filter.setValue(8, forKey: kCIInputRadiusKey)
-        guard let output = filter.outputImage, let cg = ciContext.createCGImage(output, from: input.extent) else { return proxy }
-        return UIImage(cgImage: cg)
+        guard let proxyCG = proxy.cgImage,
+              let context = CGContext(data: &pixels, width: Int(proxySize.width), height: Int(proxySize.height),
+                                       bitsPerComponent: 8, bytesPerRow: Int(proxySize.width) * 4,
+                                       space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                       bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return proxy }
+        context.interpolationQuality = .high
+        context.draw(proxyCG, in: CGRect(origin: .zero, size: proxySize))
+        androidBoxBlur(&pixels, width: Int(proxySize.width), height: Int(proxySize.height), radius: 8, passes: 2)
+        guard let blurredContext = CGContext(data: &pixels, width: Int(proxySize.width), height: Int(proxySize.height),
+                                              bitsPerComponent: 8, bytesPerRow: Int(proxySize.width) * 4,
+                                              space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                              bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
+              let blurredCG = blurredContext.makeImage() else { return proxy }
+        return UIImage(cgImage: blurredCG)
+    }
+
+    /// Two-pass sliding-window box blur used by Android's 192px backdrop proxy.
+    private static func androidBoxBlur(_ pixels: inout [UInt8], width: Int, height: Int, radius: Int, passes: Int) {
+        guard width > 0, height > 0, pixels.count >= width * height * 4 else { return }
+        var source = pixels
+        var target = source
+        let diameter = radius * 2 + 1
+        for _ in 0..<passes {
+            for y in 0..<height {
+                var sums = [Int](repeating: 0, count: 4)
+                for offset in -radius...radius {
+                    let x = min(max(offset, 0), width - 1)
+                    let base = (y * width + x) * 4
+                    for channel in 0..<4 { sums[channel] += Int(source[base + channel]) }
+                }
+                for x in 0..<width {
+                    let base = (y * width + x) * 4
+                    for channel in 0..<4 { target[base + channel] = UInt8(sums[channel] / diameter) }
+                    let leavingX = min(max(x - radius, 0), width - 1)
+                    let enteringX = min(max(x + radius + 1, 0), width - 1)
+                    let leaving = (y * width + leavingX) * 4
+                    let entering = (y * width + enteringX) * 4
+                    for channel in 0..<4 { sums[channel] += Int(source[entering + channel]) - Int(source[leaving + channel]) }
+                }
+            }
+            source = target
+            for x in 0..<width {
+                var sums = [Int](repeating: 0, count: 4)
+                for offset in -radius...radius {
+                    let y = min(max(offset, 0), height - 1)
+                    let base = (y * width + x) * 4
+                    for channel in 0..<4 { sums[channel] += Int(source[base + channel]) }
+                }
+                for y in 0..<height {
+                    let base = (y * width + x) * 4
+                    for channel in 0..<4 { target[base + channel] = UInt8(sums[channel] / diameter) }
+                    let leavingY = min(max(y - radius, 0), height - 1)
+                    let enteringY = min(max(y + radius + 1, 0), height - 1)
+                    let leaving = (leavingY * width + x) * 4
+                    let entering = (enteringY * width + x) * 4
+                    for channel in 0..<4 { sums[channel] += Int(source[entering + channel]) - Int(source[leaving + channel]) }
+                }
+            }
+            source = target
+        }
+        pixels = source
     }
 
     private static func drawGradient(_ cg: CGContext, rect: CGRect, top: UIColor, bottom: UIColor) {
@@ -784,7 +843,7 @@ enum PhotoEffectsRenderer {
     private static func drawFilmStrip(_ cg: CGContext, layout: Layout, metadata: PhotoFrameMetadata) {
         let photo = layout.photo, unit = photo.width, holeW = unit * 0.025, holeH = unit * 0.04, gap = unit * 0.025
         let outer = CGRect(x: photo.minX - unit * 0.018, y: photo.minY - unit * 0.09, width: photo.width + unit * 0.036, height: photo.height + unit * 0.18)
-        cg.setFillColor(UIColor(red: 0.22, green: 0.22, blue: 0.24, alpha: 1).cgColor)
+        cg.setFillColor(UIColor(red: 55.0 / 255.0, green: 55.0 / 255.0, blue: 61.0 / 255.0, alpha: 1).cgColor)
         let count = max(3, Int((outer.width - gap) / (holeW + gap)))
         let occupied = CGFloat(count) * holeW + CGFloat(count - 1) * gap, start = outer.midX - occupied / 2
         for i in 0..<count {
@@ -793,7 +852,7 @@ enum PhotoEffectsRenderer {
             cg.addPath(UIBezierPath(roundedRect: CGRect(x: x, y: photo.maxY + unit * 0.008, width: holeW, height: holeH), cornerRadius: holeW * 0.34).cgPath)
         }
         cg.fillPath()
-        let filmText = UIColor(red: 0.72, green: 0.52, blue: 0.39, alpha: 1)
+        let filmText = UIColor(red: 184.0 / 255.0, green: 132.0 / 255.0, blue: 99.0 / 255.0, alpha: 1)
         let labelFont = UIFont.boldSystemFont(ofSize: unit * 0.021)
         let labelAttrs: [NSAttributedString.Key: Any] = [.font: labelFont, .foregroundColor: filmText]
         let topBaseline = outer.minY + unit * 0.028
