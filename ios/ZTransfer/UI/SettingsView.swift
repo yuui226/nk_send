@@ -8,6 +8,7 @@ struct SettingsView: View {
     @State private var feedbackHint = false
     @State private var showingEffectsEditor = false
     @State private var showingHelp = false
+    @State private var helpAnchor: CGRect = .zero
     @AppStorage("organize_transfers_by_date") private var organizeByDate = false
     @AppStorage("auto_transfer_new_media") private var autoTransfer = false
     @AppStorage("defer_transfer_start") private var deferStart = false
@@ -31,18 +32,31 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            ScrollView {
-                VStack(spacing: 10) {
-                    directoryCard
-                    listCard
-                    if showPhotoEffectsEntry { photoEffectsCard }
-                    appearanceCard
-                    footer
+        ZStack(alignment: .topLeading) {
+            VStack(spacing: 0) {
+                header
+                ScrollView {
+                    VStack(spacing: 10) {
+                        directoryCard
+                        listCard
+                        if showPhotoEffectsEntry { photoEffectsCard }
+                        appearanceCard
+                        footer
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 14)
                 }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 14)
+            }
+
+            if showingHelp {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture { dismissHelp() }
+                    .zIndex(1)
+                SettingsHelpBubble()
+                    .offset(x: max(12, helpAnchor.minX - 10), y: helpAnchor.maxY + 8)
+                    .transition(.scale(scale: 0.94, anchor: .topLeading).combined(with: .opacity))
+                    .zIndex(2)
             }
         }
         // Android AnchorPopup uses glassSurfaceHeavy (0.92/0.95 alpha). A
@@ -55,6 +69,9 @@ struct SettingsView: View {
         .sheet(isPresented: $showingEffectsEditor) {
             PhotoEffectsEditorView(initial: effectsStore.settings) { effectsStore.update($0); showingEffectsEditor = false }
         }
+        .coordinateSpace(name: "settings-panel")
+        .onPreferenceChange(SettingsHelpAnchorPreferenceKey.self) { helpAnchor = $0 }
+        .animation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.24), value: showingHelp)
         .onAppear {
             // Migrate the early preview value ("自动") to the same BCP-47
             // tags used by Android so the selection actually changes the app
@@ -74,13 +91,23 @@ struct SettingsView: View {
                 .zTransferText(size: ZTransferMetrics.title, weight: .bold)
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
-            Button { showingHelp = true } label: {
+            Button {
+                showingHelp.toggle()
+            } label: {
                 Image(systemName: "lightbulb.fill")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(ZTransferColors.accentOrange)
                     .frame(width: 30, height: 30)
             }
             .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 12))
+            .background {
+                GeometryReader { proxy in
+                    Color.clear.preference(
+                        key: SettingsHelpAnchorPreferenceKey.self,
+                        value: proxy.frame(in: .named("settings-panel"))
+                    )
+                }
+            }
             Spacer()
             // iOS does not yet have the Android purchase backend. Keep the
             // same compact badge footprint without exposing a dead renewal
@@ -216,13 +243,54 @@ struct SettingsView: View {
             SettingsFooterButton(AppLocalized.resource("feedback")) { UIPasteboard.general.string = "953000922"; feedbackHint = true }
         }
         .alert(AppLocalized.formattedResource("feedback_qq_copied", ["%1$s": "953000922"]), isPresented: $feedbackHint) { Button(AppLocalized.resource("cd_close"), role: .cancel) {} }
-        .alert(AppLocalized.resource("settings_help_title"), isPresented: $showingHelp) {
-            Button(AppLocalized.resource("cd_close"), role: .cancel) {}
-        } message: {
-            Text(["organize_transfers_by_date_summary", "auto_transfer_new_media_summary", "defer_transfer_start_summary"]
-                .map { AppLocalized.resource($0) }
-                .joined(separator: "\n"))
+    }
+
+    private func dismissHelp() {
+        withAnimation(.timingCurve(0.4, 0, 1, 1, duration: 0.18)) {
+            showingHelp = false
         }
+    }
+}
+
+private struct SettingsHelpAnchorPreferenceKey: PreferenceKey {
+    static let defaultValue: CGRect = .zero
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
+}
+
+/// Android MainSettingsInfoBubble equivalent. The four label/summary pairs
+/// and their order are copied from SettingsScreen; no iOS-only help text is
+/// introduced here.
+private struct SettingsHelpBubble: View {
+    private let items = [
+        ("organize_transfers_by_date", "organize_transfers_by_date_summary"),
+        ("auto_transfer_new_media", "auto_transfer_new_media_summary"),
+        ("defer_transfer_start", "defer_transfer_start_summary"),
+        ("collapse_burst_photos", "collapse_burst_photos_summary"),
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(AppLocalized.resource("settings_help_title"))
+                .zTransferTypography(.titleMedium, weight: .bold)
+            ForEach(items, id: \.0) { label, summary in
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(AppLocalized.resource(label))
+                        .zTransferTypography(.labelMedium, weight: .bold)
+                        .foregroundStyle(ZTransferColors.accentOrange)
+                    Text(AppLocalized.resource(summary))
+                        .zTransferTypography(.bodySmall)
+                        .foregroundStyle(ZTransferColors.primaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .foregroundStyle(ZTransferColors.primaryText)
+        .padding(16)
+        .frame(width: 300, alignment: .leading)
+        .background(ZTransferGlassSurface(cornerRadius: 18, kind: .panel))
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
+            .stroke(ZTransferColors.primaryText.opacity(0.12), lineWidth: 1))
+        .shadow(color: .black.opacity(0.16), radius: 14, y: 7)
     }
 }
 

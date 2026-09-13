@@ -587,3 +587,9 @@
 
 - 安卓照片列表顶栏的 `SignalPill` 按当前连接类型显示 USB 或 Wi‑Fi；iOS `CameraSession` 现在保留不可变的传输类型，顶栏 USB 会话显示 USB 图标，网络会话显示 Wi‑Fi 图标。
 - 验证：Xcode Simulator 测试 127 项、0 failures；未连接真实 USB 相机核对图标资源和 RSSI 展开状态。
+
+### 2026-09-14 设置帮助浮层对账（进行中）
+
+- 安卓 `SettingsScreen` 的灯泡入口使用 `MainSettingsInfoBubble` 通过 `AnchorPopup` 锚定在灯泡按钮下方，内容按“按拍摄日期分文件夹保存 / 连接期间新增媒体自动加入 / 延迟传输 / 连拍合集”四组标签与说明排列；它不是系统警告框，也不改变设置页状态。
+- iOS `SettingsView` 已移除原先的系统 `alert`，改为面板内锚定浮层：按钮可切换显示，浮层点击外部收起，使用相同四组安卓资源文案、顺序、标题、顶部锚点和 240ms 淡入缩放过渡。设置页其它控件不因帮助浮层重建。
+- 验证：iOS 模拟器 Debug 构建成功；`xcodebuild test` 执行 127 tests、0 failures。尚未在真机逐帧核对浮层坐标与系统安全区，任务保持未完成。
