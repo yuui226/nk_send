@@ -98,24 +98,15 @@ struct DetentWheel<Option: Hashable>: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
                         .padding(.trailing, 7).padding(.bottom, 4).opacity(dragging ? 0 : 1)
                 }
-                // Short controls are buttons in Android's combinedClickable.
-                // Give them a real SwiftUI Button hit target; this prevents a
-                // sibling favorite button or parent ScrollView from consuming
-                // the tap.
-                if !canDrag {
-                    Button(action: activate) {
-                        // A clear label without an explicit frame can collapse
-                        // to zero on iOS 16, leaving the one-detent control
-                        // visually present but untappable.
-                        Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
-                    }
-                        .buttonStyle(.plain)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .contentShape(Rectangle())
-                        .accessibilityHidden(true)
-                }
             }
             .contentShape(Rectangle()).gesture(dragGesture)
+            // A one-detent control is an Android combinedClickable action, not
+            // a wheel. Use a high-priority gesture so the surrounding workbench
+            // ScrollView cannot consume the tap before onActivated runs.
+            .highPriorityGesture(TapGesture().onEnded {
+                guard !canDrag else { return }
+                activate()
+            })
             .simultaneousGesture(tapGesture).simultaneousGesture(longPressGesture)
             .animation(.easeInOut(duration: dragging ? 0.09 : 0.18), value: dragging)
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
