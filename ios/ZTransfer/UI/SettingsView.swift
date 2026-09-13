@@ -136,7 +136,7 @@ struct SettingsView: View {
                 ToggleWheel(label: AppLocalized.resource("collapse_burst_photos"), isOn: $collapseBurst).frame(maxWidth: .infinity)
             }
             SettingsDivider()
-                DetentWheel(label: AppLocalized.resource("photo_interaction"), options: [false, true], selected: tapToPreview, optionLabel: { $0 ? "点击：预览\n长按：传输" : "点击：传输\n长按：预览" }, onCommit: { tapToPreview = $0 }, rowHeight: 32, wheelHeight: 56, optionMaxLines: 2, optionFontSize: 13)
+                DetentWheel(label: AppLocalized.resource("photo_interaction"), options: [false, true], selected: tapToPreview, optionLabel: { $0 ? AppLocalized.resource("tap_preview_hold_transfer") : AppLocalized.resource("tap_transfer_hold_preview") }, onCommit: { tapToPreview = $0 }, rowHeight: 32, wheelHeight: 56, optionMaxLines: 2, optionFontSize: 13)
         }
     }
 
@@ -153,9 +153,9 @@ struct SettingsView: View {
                 DetentWheel(label: AppLocalized.resource("language"), options: ["system", "en", "zh-Hans", "zh-Hant"], selected: appLanguage, optionLabel: { language in
                     switch language {
                     case "en": return "English"
-                    case "zh-Hans": return "简体中文"
-                    case "zh-Hant": return "繁體中文"
-                    default: return "自动"
+                    case "zh-Hans": return AppLocalized.text("简体中文")
+                    case "zh-Hant": return AppLocalized.text("繁體中文")
+                    default: return AppLocalized.resource("language_system")
                     }
                 }, onCommit: { appLanguage = $0; onClose?() }, rowHeight: 16, wheelHeight: 42, optionFontSize: 13).frame(maxWidth: .infinity)
                 DetentWheel(label: AppLocalized.resource("button_style"), options: ["FROSTED_GLASS", "WOOD", "CAMERA_CONTROLS", "TITANIUM"], selected: skinPreset, optionLabel: {
