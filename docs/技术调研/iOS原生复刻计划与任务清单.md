@@ -77,7 +77,7 @@
 - `CameraSession.thumbnail(file:)` 已接入 `PhotoThumbnailStore`，列表缩略图现在按安卓顺序查找内存、负缓存、相机磁盘并共享同文件的进行中请求，最后一个等待者取消时会取消底层请求；成功结果写回磁盘。缺少稳定机身序列号时会放弃持久化缓存，避免不同相机串缓存。STA 直读使用 `sta + handle + size` 专用键，普通键仍支持迁移；`prefetchThumbnail` 已接入扫描批次，并按安卓顺序逐项预取新加入列表的文件。仍缺真实相机验证和系统错误码映射。
 - 日期分组已纠正为安卓使用的原始 `YYYYMMDD` 键和 `zzz_unknown` 未知日期键；渲染时才格式化为 `YYYY-MM-DD`，避免折叠状态、未知日期排序和筛选键与安卓分叉。对应 `PhotoCatalog.swift`、`PhotoListView.swift` 及 `DomainModelTests`。
 - `CameraRepository.loadCatalog(onBatch:)` 与 `CameraSession.scanCatalog(onBatch:)` 已把元数据结果按 12 项边界流出；批次回调是可挂起的，`PhotoListViewModel` 在每批发布后逐项执行 `prefetchThumbnail`，因此相机扫描会等待本批预取完成再读取下一批。每批发布前检查 generation/取消，扫描完成后才置 `hasCompletedFileScan`。StorageID/句柄快照、双卡 logicalIdentity 去重和 STA 直读专用缓存键仍待下一阶段接入。
-- 流式扫描后的模拟器 Debug 构建再次成功；`xcodebuild ... CODE_SIGNING_ALLOWED=NO test` 已通过 139 项测试，包含双卡缺失日期/同时间稳定顺序和缩略图补漏顺序定向测试。带签名测试仍受测试 target 缺少 Info.plist 的工程配置阻断；未进行真实相机扫描或真机验收。
+- 流式扫描后的模拟器 Debug 构建再次成功；`xcodebuild -project ios/ZTransfer.xcodeproj -scheme ZTransfer -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test` 已通过 139 项测试，包含双卡缺失日期/同时间稳定顺序和缩略图补漏顺序定向测试。测试 target 已开启自动生成 `Info.plist`，不再依赖关闭签名旁路；未进行真实相机扫描或真机验收。
 
 实现每项功能前先阅读对应安卓入口和状态来源，记录到提交说明中：
 
