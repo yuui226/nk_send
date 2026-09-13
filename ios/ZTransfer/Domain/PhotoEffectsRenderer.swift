@@ -662,13 +662,22 @@ enum PhotoEffectsRenderer {
         guard !values.isEmpty else { return }
         let color = dark ? UIColor(red: 0.10, green: 0.12, blue: 0.15, alpha: 1) : UIColor(red: 0.97, green: 0.98, blue: 0.99, alpha: 1)
         let muted = dark ? UIColor(red: 0.29, green: 0.31, blue: 0.33, alpha: 1) : UIColor(red: 0.86, green: 0.89, blue: 0.91, alpha: 1)
-        let gap = min(area.width * 0.0125, area.height * 0.09)
-        let rowHeight = min(area.height * 0.82 / CGFloat(values.count), area.width * 0.032)
-        let total = rowHeight * CGFloat(values.count) + gap * CGFloat(max(values.count - 1, 0))
-        var y = area.midY - total / 2
-        for (index, value) in values.enumerated() {
+        let fonts: [UIFont] = values.enumerated().map { index, _ in
             let prominent = emphasizeFirst && index == 0
-            let font = UIFont.systemFont(ofSize: max(9, rowHeight * (prominent ? 0.82 : 0.62)), weight: prominent ? .semibold : .regular)
+            if prominent { return UIFont(name: "Georgia-BoldItalic", size: area.width * 0.052) ?? UIFont.italicSystemFont(ofSize: area.width * 0.052) }
+            return UIFont.systemFont(ofSize: area.width * 0.024, weight: .regular)
+        }
+        var heights = values.enumerated().map { index, value in
+            (value as NSString).size(withAttributes: [.font: fonts[index]]).height
+        }
+        let gap = area.height * 0.055
+        let available = max(0, area.height - gap * CGFloat(max(values.count - 1, 0)))
+        let inkTotal = heights.reduce(0, +)
+        let scale = min(1, available / max(inkTotal, 1))
+        if scale < 1 { heights = heights.map { $0 * scale } }
+        var y = area.midY - (heights.reduce(0, +) + gap * CGFloat(max(values.count - 1, 0)) * scale) * 0.5
+        for (index, value) in values.enumerated() {
+            let font = fonts[index].withSize(max(9, fonts[index].pointSize * scale))
             var attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: index == 0 ? color : muted]
             if drawsWatermark && index == values.count - 1 {
                 attrs[.foregroundColor] = watermarkColor(watermark.color, preset).withAlphaComponent(CGFloat(watermark.opacityPercent) / 100)
@@ -679,12 +688,12 @@ enum PhotoEffectsRenderer {
             if drawsWatermark && index == values.count - 1 && watermark.position == .left {
                 x = area.minX
             } else if drawsWatermark && index == values.count - 1 && watermark.position == .right {
-                x = area.maxX - min(line.width, area.width * 0.9)
+                x = area.maxX - line.width
             } else {
-                x = area.midX - min(line.width, area.width * 0.9) / 2
+                x = area.midX - line.width / 2
             }
-            value.draw(at: CGPoint(x: x, y: y + rowHeight * 0.18), withAttributes: attrs)
-            y += rowHeight + gap
+            value.draw(at: CGPoint(x: x, y: y), withAttributes: attrs)
+            y += heights[index] + gap * scale
         }
     }
 
