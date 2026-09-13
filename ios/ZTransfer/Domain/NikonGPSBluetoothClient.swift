@@ -37,6 +37,7 @@ final class NikonGPSBluetoothClient: NSObject, ObservableObject {
     private var writeInFlight = false
     private var notificationsReady = Set<CBUUID>()
     private var pairingTimeout: Task<Void, Never>?
+    private var directReconnectTask: Task<Void, Never>?
     private let defaults: UserDefaults
 
     init(controllerName: String = "ZTransfer", savedDevice: UInt32? = nil, savedNonce: UInt32? = nil, defaults: UserDefaults? = nil) {
@@ -72,6 +73,8 @@ final class NikonGPSBluetoothClient: NSObject, ObservableObject {
     }
 
     func start() {
+        directReconnectTask?.cancel()
+        directReconnectTask = nil
         guard central.state == .poweredOn else {
             state = central.state == .unauthorized || central.state == .unsupported ? .unavailable : .failed("Bluetooth unavailable")
             return
@@ -88,17 +91,31 @@ final class NikonGPSBluetoothClient: NSObject, ObservableObject {
             state = .connecting(remembered.name ?? "Nikon")
             remembered.delegate = self
             central.connect(remembered)
+            let rememberedID = remembered.identifier
+            directReconnectTask = Task { [weak self, weak remembered] in
+                try? await Task.sleep(nanoseconds: 7_000_000_000)
+                guard let self, let remembered, !Task.isCancelled,
+                      self.peripheral?.identifier == rememberedID,
+                      self.state == .connecting(remembered.name ?? "Nikon") else { return }
+                self.central.cancelPeripheralConnection(remembered)
+                self.clearConnectionState()
+                self.beginScan()
+            }
         } else {
             beginScan()
         }
     }
 
     private func beginScan() {
+        directReconnectTask?.cancel()
+        directReconnectTask = nil
         state = .scanning
         central.scanForPeripherals(withServices: [Self.serviceUUID], options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
     }
 
     func stop() {
+        directReconnectTask?.cancel()
+        directReconnectTask = nil
         pairingTimeout?.cancel(); pairingTimeout = nil
         central.stopScan()
         if let peripheral { central.cancelPeripheralConnection(peripheral) }
@@ -219,13 +236,20 @@ extension NikonGPSBluetoothClient: CBCentralManagerDelegate {
     }
 
     nonisolated func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
-        MainActor.assumeIsolated { peripheral.discoverServices([Self.serviceUUID]) }
+        MainActor.assumeIsolated {
+            self.directReconnectTask?.cancel()
+            self.directReconnectTask = nil
+            peripheral.discoverServices([Self.serviceUUID])
+        }
     }
 
     nonisolated func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         MainActor.assumeIsolated { [weak self] in
             guard let self, self.peripheral?.identifier == peripheral.identifier else { return }
+            let wasDirectReconnect = self.savedPeripheralIdentifier == peripheral.identifier &&
+                self.state == .connecting(peripheral.name ?? "Nikon")
             self.clearConnectionState(); self.state = error.map { .failed($0.localizedDescription) } ?? .disconnected
+            if wasDirectReconnect, error != nil { self.beginScan() }
         }
     }
 }
