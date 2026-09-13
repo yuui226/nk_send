@@ -358,8 +358,17 @@ struct PhotoEffectsSettingsPreview: View {
     @State private var rendered: UIImage?
     @State private var unfiltered: UIImage?
     @State private var showUnfiltered = false
+    @State private var prefetched: [String: UIImage] = [:]
 
     private var renderKey: String {
+        Self.makeRenderKey(settings: settings, source: source, metadata: metadata)
+    }
+
+    private static func makeRenderKey(
+        settings: PhotoEffectsSettings,
+        source: UIImage?,
+        metadata: PhotoFrameMetadata?,
+    ) -> String {
         let data = try? JSONEncoder().encode(settings)
         let settingsKey = String(data: data ?? Data(), encoding: .utf8) ?? ""
         let sourceKey: String
@@ -422,14 +431,19 @@ struct PhotoEffectsSettingsPreview: View {
             unfiltered = nil
             let metadata = metadata
             let settings = settings
-            let result = try? await Task.detached(priority: .userInitiated) {
-                try Task.checkCancellation()
-                return try await PhotoEffectsPreviewRenderGate.shared.withPermit {
-                    try autoreleasepool {
-                        try PhotoEffectsRenderer.render(source, settings: settings, metadata: metadata)
+            let result: UIImage?
+            if let cached = prefetched.removeValue(forKey: renderKey) {
+                result = cached
+            } else {
+                result = try? await Task.detached(priority: .userInitiated) {
+                    try Task.checkCancellation()
+                    return try await PhotoEffectsPreviewRenderGate.shared.withPermit {
+                        try autoreleasepool {
+                            try PhotoEffectsRenderer.render(source, settings: settings, metadata: metadata)
+                        }
                     }
-                }
-            }.value
+                }.value
+            }
             guard !Task.isCancelled else { return }
             rendered = result
             guard settings.photoFilterEnabled, settings.selectedFilter != nil else { return }
@@ -453,7 +467,54 @@ struct PhotoEffectsSettingsPreview: View {
             }.value
             guard !Task.isCancelled else { return }
             unfiltered = comparison
+
+            // Android warms the next two filters only after the current frame is
+            // visible. Keep the complete result keyed by the same source,
+            // metadata and decoration settings so a wheel step can promote it
+            // without another full composition.
+            for selection in nextPhotoFilterSelections(for: settings) {
+                guard !Task.isCancelled else { return }
+                let next: PhotoEffectsSettings = {
+                    var value = settings
+                    value.photoFilterEnabled = true
+                    value.selectedFilter = selection
+                    return value
+                }()
+                let key = Self.makeRenderKey(settings: next, source: source, metadata: metadata)
+                guard prefetched[key] == nil else { continue }
+                let nextResult = try? await Task.detached(priority: .utility) {
+                    try Task.checkCancellation()
+                    return try await PhotoEffectsPreviewRenderGate.shared.withPermit {
+                        try autoreleasepool {
+                            try PhotoEffectsRenderer.render(source, settings: next, metadata: metadata)
+                        }
+                    }
+                }.value
+                guard !Task.isCancelled else { return }
+                if let nextResult {
+                    prefetched[key] = nextResult
+                    if prefetched.count > 2, let oldest = prefetched.keys.first {
+                        prefetched.removeValue(forKey: oldest)
+                    }
+                }
+            }
         }
+    }
+}
+
+/// Android's `nextPhotoFilterSelections`: preserve the catalog's favorite-first
+/// order and warm only the two entries after the current selection.
+private func nextPhotoFilterSelections(for settings: PhotoEffectsSettings) -> [PhotoFilterSelection] {
+    guard settings.photoFilterEnabled, let selected = settings.selectedFilter else { return [] }
+    let ordered = settings.orderedFilters
+    guard let index = ordered.firstIndex(where: { $0.id == selected.preset.id }),
+          index < ordered.index(before: ordered.endIndex) else { return [] }
+    return ordered.dropFirst(index + 1).prefix(2).map { preset in
+        let key = PhotoEffectsSettings.filterKey(preset.id)
+        return PhotoFilterSelection(
+            preset: preset,
+            intensityPercent: settings.filterIntensities[key] ?? 80,
+        )
     }
 }
 
