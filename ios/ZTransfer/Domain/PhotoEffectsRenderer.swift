@@ -178,14 +178,27 @@ enum PhotoEffectsRenderer {
         case .mist, .cinema, .frosted, .filmGallery:
             let bg = blurredBackground(image, size: layout.canvas)
             bg.draw(in: rect)
-            if preset == .mist { cg.setFillColor(UIColor(red: 0.93, green: 0.95, blue: 0.97, alpha: 0.24).cgColor); cg.fill(rect) }
-            if preset == .cinema { cg.setFillColor(UIColor(red: 0.01, green: 0.035, blue: 0.06, alpha: 0.59).cgColor); cg.fill(rect) }
+            if preset == .mist {
+                cg.setFillColor(UIColor(red: 0.93, green: 0.95, blue: 0.97, alpha: 62.0 / 255.0).cgColor); cg.fill(rect)
+                drawGradient(cg, rect: CGRect(x: 0, y: rect.height * 0.58, width: rect.width, height: rect.height * 0.42),
+                             top: UIColor(red: 3.0 / 255.0, green: 10.0 / 255.0, blue: 15.0 / 255.0, alpha: 0),
+                             bottom: UIColor(red: 3.0 / 255.0, green: 10.0 / 255.0, blue: 15.0 / 255.0, alpha: 178.0 / 255.0))
+            }
+            if preset == .cinema {
+                cg.setFillColor(UIColor(red: 3.0 / 255.0, green: 9.0 / 255.0, blue: 15.0 / 255.0, alpha: 150.0 / 255.0).cgColor); cg.fill(rect)
+                drawGradient(cg, rect: CGRect(x: 0, y: rect.height * 0.60, width: rect.width, height: rect.height * 0.40),
+                             top: UIColor(white: 0, alpha: 0), bottom: UIColor(white: 0, alpha: 110.0 / 255.0))
+            }
             if preset == .frosted {
                 drawGradient(cg, rect: rect,
                              top: UIColor(red: 0.98, green: 0.99, blue: 1.0, alpha: 0.36),
                              bottom: UIColor(red: 0.90, green: 0.94, blue: 0.96, alpha: 0.52))
             }
-            if preset == .filmGallery { cg.setFillColor(UIColor(red: 0.07, green: 0.05, blue: 0.04, alpha: 0.26).cgColor); cg.fill(rect) }
+            if preset == .filmGallery {
+                cg.setFillColor(UIColor(red: 18.0 / 255.0, green: 12.0 / 255.0, blue: 10.0 / 255.0, alpha: 66.0 / 255.0).cgColor); cg.fill(rect)
+                drawGradient(cg, rect: CGRect(x: 0, y: rect.height * 0.48, width: rect.width, height: rect.height * 0.52),
+                             top: UIColor(white: 0, alpha: 0), bottom: UIColor(red: 15.0 / 255.0, green: 10.0 / 255.0, blue: 8.0 / 255.0, alpha: 92.0 / 255.0))
+            }
         case .plaque, .brandInset, .brandGallery, .classicSignature, .galleryMat, .colorArchive:
             cg.setFillColor(UIColor(red: 0.992, green: 0.992, blue: 0.988, alpha: 1).cgColor); cg.fill(rect)
         case .immersive:
