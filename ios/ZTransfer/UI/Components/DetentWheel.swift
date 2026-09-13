@@ -75,7 +75,7 @@ struct DetentWheel<Option: Hashable>: View {
     var body: some View {
         GeometryReader { proxy in
             let center = proxy.size.height / 2
-            ZStack {
+            let surface = ZStack {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .fill(Color.white.opacity(emphasized ? 0.86 : 0.74))
                     .overlay(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
@@ -99,19 +99,24 @@ struct DetentWheel<Option: Hashable>: View {
                         .padding(.trailing, 7).padding(.bottom, 4).opacity(dragging ? 0 : 1)
                 }
             }
+            // Only a real, vertically draggable wheel gets first refusal in
+            // the surrounding ScrollView. Short option lists are Android
+            // click controls; leaving their surface gesture-free lets a
+            // press-and-drag continue into the page pager instead of being
+            // trapped by a high-priority tap recognizer.
+            Group {
+                if canDrag {
+                    surface.highPriorityGesture(dragGesture)
+                } else {
+                    surface
+                }
+            }
             .contentShape(Rectangle())
-            // The workbench is itself a vertical ScrollView. Give a wheel's
-            // drag first refusal so its detent tracks the finger instead of
-            // waiting for the parent scroll view to yield.
-            .highPriorityGesture(dragGesture)
-            // A one-detent control is an Android combinedClickable action, not
-            // a wheel. Use a high-priority gesture so the surrounding workbench
-            // ScrollView cannot consume the tap before onActivated runs.
-            .highPriorityGesture(TapGesture().onEnded {
-                guard !canDrag else { return }
-                activate()
-            })
-            .simultaneousGesture(tapGesture).simultaneousGesture(longPressGesture)
+            // A normal tap keeps the control clickable without installing a
+            // second high-priority recognizer that can delay the enclosing
+            // page's vertical drag.
+            .onTapGesture { activate() }
+            .simultaneousGesture(longPressGesture)
             .animation(.easeInOut(duration: dragging ? 0.09 : 0.18), value: dragging)
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         }
@@ -176,15 +181,6 @@ struct DetentWheel<Option: Hashable>: View {
             }
     }
 
-    private var tapGesture: some Gesture {
-        TapGesture().onEnded {
-            // Android combinedClickable keeps click behavior even when the
-            // same wheel also supports vertical dragging.
-            guard canDrag else { return }
-            activate()
-        }
-    }
-
     private func activate() {
         guard enabled, !readOnly else { return }
         if suppressNextTap { suppressNextTap = false; return }
@@ -197,7 +193,10 @@ struct DetentWheel<Option: Hashable>: View {
     }
 
     private var longPressGesture: some Gesture {
-        LongPressGesture(minimumDuration: 0.45).onEnded { _ in
+        // Controls without a long-click action still need to expose their
+        // surface to the parent pager. An effectively disabled recognizer is
+        // preferable to a no-op long press that can hold the touch arena.
+        LongPressGesture(minimumDuration: onLongClick == nil ? .infinity : 0.45).onEnded { _ in
             guard enabled, !readOnly, onLongClick != nil else { return }
             suppressNextTap = true
             onLongClick?()

@@ -13,13 +13,6 @@ enum PhotoEffectsRenderer {
         var rect: CGRect
         func intersects(_ other: BrandBounds) -> Bool { rect.intersects(other.rect) }
     }
-    /// Bounds of the visible glyph ink relative to a text baseline. Android's
-    /// exporter uses Paint.getTextBounds rather than font line metrics; using
-    /// CTLine glyph bounds keeps the iOS metadata group vertically identical.
-    private struct TextVisualBounds {
-        var top: CGFloat
-        var bottom: CGFloat
-    }
 
     static func render(_ image: UIImage, settings: PhotoEffectsSettings, metadata: PhotoFrameMetadata? = nil) throws -> UIImage {
         try Task.checkCancellation()
@@ -69,8 +62,8 @@ enum PhotoEffectsRenderer {
                 if settings.photoFramePreset == .galleryMat {
                     // Android lifts the black mat as its own Minimal-style
                     // surface before drawing the source photo above it.
-                    drawPhotoElevation(cg, rect: outer, radius: 0,
-                                       preset: .minimal, canvasSize: layout.canvas)
+                    drawStandardPhotoElevation(cg, rect: outer, radius: 0,
+                                                preset: .minimal, canvasSize: layout.canvas)
                 }
                 cg.setFillColor(UIColor(red: 0.025, green: 0.027, blue: 0.031, alpha: 1).cgColor)
                 cg.fill(outer)
@@ -230,8 +223,8 @@ enum PhotoEffectsRenderer {
         default: rect.width * 0.018
         }
         let path = UIBezierPath(roundedRect: rect, cornerRadius: radius).cgPath
-        if preset == .minimal {
-            drawMinimalPhotoElevation(cg, rect: rect, radius: radius, canvasSize: canvasSize)
+        if [.mist, .cinema, .minimal, .frosted, .brandInset, .brandGallery, .colorArchive].contains(preset) {
+            drawStandardPhotoElevation(cg, rect: rect, radius: radius, preset: preset, canvasSize: canvasSize)
         } else if ![.plaque, .immersive, .filmEdge, .classicSignature, .filmGallery].contains(preset) {
             drawPhotoElevation(cg, rect: rect, radius: radius, preset: preset, canvasSize: canvasSize)
         }
@@ -252,20 +245,19 @@ enum PhotoEffectsRenderer {
         }
     }
 
-    /// 简白的照片边缘按安卓成图重做：只保留贴边的接触阴影，
-    /// 不使用会在缩放后形成灰色圆角块的代理阴影图。
-    private static func drawMinimalPhotoElevation(_ cg: CGContext, rect: CGRect, radius: CGFloat, canvasSize: CGSize) {
+    /// 安卓标准四种照片边框都只有贴边的接触阴影。CoreGraphics 的大半径代理
+    /// 阴影在 iOS 预览缩放后会变成照片下方的灰色圆角块，因此这些预设直接在
+    /// 主画布绘制窄阴影；毛玻璃的信息面板仍由其独立路径绘制。
+    private static func drawStandardPhotoElevation(_ cg: CGContext, rect: CGRect, radius: CGFloat, preset: PhotoFramePreset, canvasSize: CGSize) {
         guard rect.width > 0, rect.height > 0 else { return }
         let path = UIBezierPath(roundedRect: rect, cornerRadius: radius).cgPath
+        let opacity: CGFloat = preset == .cinema ? 0.20 : 0.16
         cg.saveGState()
-        // The reference has a narrow, low-opacity edge shadow directly below the
-        // photo. Rendering it at canvas resolution keeps the footprint stable at
-        // both preview and export sizes.
         cg.setFillColor(UIColor(white: 0, alpha: 0.01).cgColor)
         cg.setShadow(offset: CGSize(width: 0, height: max(1, canvasSize.height * 0.0012)),
                      blur: max(1, min(canvasSize.width, canvasSize.height) * 0.0028),
                      color: UIColor(red: 8.0 / 255.0, green: 15.0 / 255.0, blue: 21.0 / 255.0,
-                                    alpha: 0.16).cgColor)
+                                    alpha: opacity).cgColor)
         cg.addPath(path)
         cg.fillPath()
         cg.restoreGState()
@@ -432,7 +424,7 @@ enum PhotoEffectsRenderer {
             drawFrostedMetadataPanel(cg, panel: area, canvas: layout.canvas,
                                      metadataBandHeight: layout.canvas.height - layout.metadataTop)
         }
-        drawAndroidMetadata(cg, area: area, preset: preset, metadata: metadata, watermark: watermark, settings: settings,
+        drawAndroidMetadata(cg, area: area, canvasWidth: layout.canvas.width, preset: preset, metadata: metadata, watermark: watermark, settings: settings,
                             lightText: preset == .mist || preset == .cinema)
         var photoWatermark = watermark
         if !photoPlacement(photoWatermark.position) && photoWatermark.content == .image { photoWatermark.position = .photoBottomCenter }
@@ -443,140 +435,81 @@ enum PhotoEffectsRenderer {
         }
     }
 
-    private static func drawAndroidMetadata(_ cg: CGContext, area: CGRect, preset: PhotoFramePreset, metadata: PhotoFrameMetadata, watermark: PhotoFrameWatermark, settings: PhotoFrameMetadataSettings, lightText: Bool) {
-        let brand = settings.showBrand ? metadata.normalizedMake : ""
-        let model = settings.showModel ? metadata.normalizedModel : ""
-        let lens = settings.showLensModel ? (metadata.lensModel ?? "") : ""
-        var detail = ""
-        if settings.showFocalLength { detail = metadata.focalLength ?? "" }
-        if settings.showExposure {
-            let exposure = [metadata.aperture, metadata.shutter, metadata.iso].compactMap { $0 }.joined(separator: "   ")
-            if !exposure.isEmpty { detail = detail.isEmpty ? exposure : detail + "   " + exposure }
+    private static func metadataText(_ text: String, font: UIFont, color: UIColor) -> NSAttributedString {
+        NSAttributedString(string: text, attributes: [
+            NSAttributedString.Key(kCTFontAttributeName as String): CTFontCreateWithName(font.fontName as CFString, font.pointSize, nil),
+            NSAttributedString.Key(kCTForegroundColorAttributeName as String): color.cgColor,
+        ])
+    }
+
+    private static func metadataRow(_ text: String, font: UIFont, color: UIColor) -> PhotoFrameTextRow {
+        PhotoFrameTextRow(metadataText(text, font: font, color: color))
+    }
+
+    private static func drawMetadataRow(_ row: PhotoFrameTextRow, in cg: CGContext, x: CGFloat,
+                                        baseline: CGFloat, scale: CGFloat, shadowOpacity: CGFloat = 0) {
+        cg.saveGState()
+        if shadowOpacity > 0 {
+            cg.setShadow(offset: CGSize(width: 0, height: scale), blur: 3 * scale,
+                         color: UIColor.black.withAlphaComponent(shadowOpacity).cgColor)
         }
-        var rows: [(text: String, size: CGFloat, weight: UIFont.Weight, kind: Int)] = []
-        let title = [brand, model].filter { !$0.isEmpty }.joined(separator: " ")
-        if !title.isEmpty { rows.append((title, area.width * 0.032, .bold, 0)) }
-        if !lens.isEmpty { rows.append((lens, area.width * 0.0185, .medium, 1)) }
-        let detailWithDate = [detail, settings.showDate ? (metadata.dateTime ?? "") : ""]
-            .filter { !$0.isEmpty }.joined(separator: "   ")
-        if !detailWithDate.isEmpty { rows.append((detailWithDate, area.width * 0.020, .regular, 2)) }
-        if let location = metadata.locationRow, !location.isEmpty { rows.append((location, area.width * 0.018, .regular, 3)) }
-        if watermark.enabled && watermark.content == .text && !photoPlacement(watermark.position) { rows.append((watermark.displayText, area.width * textSizeFraction(watermark.sizePercent), .regular, 4)) }
-        guard !rows.isEmpty else { return }
-        let maxTitleWidth = area.width * (preset == .frosted ? 0.78 : 0.86)
-        var titleBrandFont = UIFont(name: "HelveticaNeue-BoldItalic", size: area.width * 0.032) ?? UIFont.italicSystemFont(ofSize: area.width * 0.032)
-        var titleModelFont = UIFont.systemFont(ofSize: area.width * 0.024, weight: .regular)
-        let titleGap = area.width * 0.016
-        let titleWidth = (brand as NSString).size(withAttributes: [.font: titleBrandFont]).width +
-            (brand.isEmpty || model.isEmpty ? 0 : titleGap) +
-            (model as NSString).size(withAttributes: [.font: titleModelFont]).width
-        if titleWidth > maxTitleWidth, titleWidth > 0 {
-            let scale = maxTitleWidth / titleWidth
-            titleBrandFont = titleBrandFont.withSize(titleBrandFont.pointSize * scale)
-            titleModelFont = titleModelFont.withSize(titleModelFont.pointSize * scale)
-        }
-        var detailFont = UIFont.systemFont(ofSize: area.width * 0.020, weight: .regular)
-        if let detailRow = detailWithDate.nilIfEmpty {
-            let width = (detailRow as NSString).size(withAttributes: [.font: detailFont]).width
-            let maxWidth = area.width * (preset == .frosted ? 0.76 : 0.82)
-            if width > maxWidth, width > 0 { detailFont = detailFont.withSize(detailFont.pointSize * maxWidth / width) }
-        }
-        var lensFont = UIFont.systemFont(ofSize: area.width * 0.0185, weight: .medium)
-        if !lens.isEmpty {
-            let width = (lens as NSString).size(withAttributes: [.font: lensFont]).width
-            let maxWidth = area.width * (preset == .frosted ? 0.76 : 0.82)
-            if width > maxWidth, width > 0 { lensFont = lensFont.withSize(lensFont.pointSize * maxWidth / width) }
-        }
-        var watermarkRowFont: UIFont?
-        if watermark.enabled && watermark.content == .text && !photoPlacement(watermark.position) {
-            var font = watermarkFont(watermark.font, size: area.width * textSizeFraction(watermark.sizePercent))
-            let width = (watermark.displayText as NSString).size(withAttributes: [.font: font]).width
-            let maxWidth = area.width * 0.86
-            if width > maxWidth, width > 0 { font = font.withSize(font.pointSize * maxWidth / width) }
-            watermarkRowFont = font
-        }
-        let fonts = rows.map { row -> UIFont in
-            switch row.kind {
-            case 0: return UIFont.systemFont(ofSize: max(9, max(titleBrandFont.pointSize, titleModelFont.pointSize)), weight: .bold)
-            case 1: return lensFont
-            case 2: return detailFont
-            case 4: return watermarkRowFont ?? UIFont.systemFont(ofSize: max(9, row.size), weight: row.weight)
-            default: return UIFont.systemFont(ofSize: max(9, row.size), weight: row.weight)
-            }
-        }
-        func visualBounds(_ text: String, _ font: UIFont) -> TextVisualBounds {
-            guard !text.isEmpty else { return TextVisualBounds(top: 0, bottom: 0) }
-            let line = CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: [.font: font]))
-            let bounds = CTLineGetBoundsWithOptions(line, .useGlyphPathBounds)
-            return TextVisualBounds(top: bounds.minY, bottom: bounds.maxY)
-        }
-        func merged(_ first: TextVisualBounds, _ second: TextVisualBounds) -> TextVisualBounds {
-            TextVisualBounds(top: min(first.top, second.top), bottom: max(first.bottom, second.bottom))
-        }
-        func rowBounds(using scale: CGFloat) -> [TextVisualBounds] {
-            rows.enumerated().map { index, row in
-                let font = fonts[index].withSize(max(9, fonts[index].pointSize * scale))
-                switch row.kind {
-                case 0:
-                    let brandBounds = brand.isEmpty ? nil : visualBounds(brand, titleBrandFont.withSize(max(9, titleBrandFont.pointSize * scale)))
-                    let modelBounds = model.isEmpty ? nil : visualBounds(model, titleModelFont.withSize(max(9, titleModelFont.pointSize * scale)))
-                    let titleBounds = [brandBounds, modelBounds].compactMap { $0 }
-                    return titleBounds.dropFirst().reduce(titleBounds[0], merged)
-                default:
-                    return visualBounds(row.text, font)
-                }
-            }
-        }
-        let verticalPadding = area.height * 0.06
-        let textAreaTop = area.minY + verticalPadding
-        let textAreaBottom = area.maxY - verticalPadding
-        var scale: CGFloat = 1
-        var bounds = rowBounds(using: scale)
-        let inkTotal = bounds.reduce(CGFloat.zero) { $0 + max(0, $1.bottom - $1.top) }
-        if inkTotal > textAreaBottom - textAreaTop {
-            scale = min(1, max(0.2, (textAreaBottom - textAreaTop) / max(inkTotal, 1) * 0.98))
-            bounds = rowBounds(using: scale)
-        }
-        let preferredGap = min(area.width * 0.0125, area.height * 0.09)
-        let textHeight = bounds.reduce(CGFloat.zero) { $0 + max(0, $1.bottom - $1.top) }
-        let gapCount = max(0, bounds.count - 1)
-        let gap = gapCount > 0 ? min(preferredGap, max(0, (textAreaBottom - textAreaTop - textHeight) / CGFloat(gapCount))) : 0
-        let total = textHeight + gap * CGFloat(gapCount)
-        var cursor = textAreaTop + max(0, (textAreaBottom - textAreaTop - total) * 0.5)
+        row.draw(in: cg, x: x, baseline: baseline, scale: scale)
+        cg.restoreGState()
+    }
+
+    private static func drawAndroidMetadata(_ cg: CGContext, area: CGRect, canvasWidth: CGFloat,
+                                             preset: PhotoFramePreset, metadata: PhotoFrameMetadata,
+                                             watermark: PhotoFrameWatermark, settings: PhotoFrameMetadataSettings,
+                                             lightText: Bool) {
         let color = lightText
-            ? UIColor(red: 250.0 / 255.0, green: 252.0 / 255.0, blue: 253.0 / 255.0, alpha: 1)
+            ? UIColor(red: 248.0 / 255.0, green: 250.0 / 255.0, blue: 252.0 / 255.0, alpha: 1)
             : UIColor(red: 25.0 / 255.0, green: 31.0 / 255.0, blue: 38.0 / 255.0, alpha: 1)
         let muted = lightText
             ? UIColor(red: 220.0 / 255.0, green: 227.0 / 255.0, blue: 233.0 / 255.0, alpha: 1)
             : UIColor(red: 70.0 / 255.0, green: 79.0 / 255.0, blue: 88.0 / 255.0, alpha: 1)
+        let brand = metadata.normalizedMake
+        let model = metadata.normalizedModel
+        let lens = (metadata.lensModel ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let detail = [metadata.frameDetailLine, metadata.dateTime ?? ""].filter { !$0.isEmpty }.joined(separator: "   ")
+        var rows: [PhotoFrameTextRow] = []
+        let titleRuns = [
+            metadataText(brand, font: UIFont(name: "HelveticaNeue-BoldItalic", size: canvasWidth * 0.032)
+                         ?? UIFont.italicSystemFont(ofSize: canvasWidth * 0.032), color: color),
+            metadataText(model, font: UIFont.systemFont(ofSize: canvasWidth * 0.024), color: color),
+        ]
+        if !brand.isEmpty || !model.isEmpty {
+            rows.append(PhotoFrameTextRow(titleRuns, gap: canvasWidth * 0.016)
+                .fitting(width: canvasWidth * (preset == .frosted ? 0.78 : 0.86)))
+        }
+        let detailWidth = canvasWidth * (preset == .frosted ? 0.76 : 0.82)
+        if !lens.isEmpty {
+            rows.append(metadataRow(lens, font: .systemFont(ofSize: canvasWidth * 0.0185, weight: .medium), color: muted)
+                .fitting(width: detailWidth))
+        }
+        let details = [detail, metadata.locationRow ?? ""].filter { !$0.isEmpty }
+        let detailRows = details.map { metadataRow($0, font: .systemFont(ofSize: canvasWidth * 0.020), color: muted) }
+        let widestDetail = detailRows.map(\.width).max() ?? 0
+        let detailScale = widestDetail > detailWidth ? detailWidth / widestDetail : 1
+        rows += detailRows.map { $0.fitting(width: $0.width * detailScale) }
+        let watermarkIndex = watermark.enabled && watermark.content == .text && !photoPlacement(watermark.position)
+            ? rows.count : nil
+        if watermarkIndex != nil {
+            rows.append(metadataRow(watermark.displayText,
+                                    font: watermarkFont(watermark.font, size: canvasWidth * textSizeFraction(watermark.sizePercent)),
+                                    color: watermarkColor(watermark.color, preset).withAlphaComponent(CGFloat(watermark.opacityPercent) / 100))
+                .fitting(width: area.width * 0.86))
+        }
+        let placement = PhotoFrameTextLayout(area: area, bounds: rows.map(\.bounds),
+                                             preferredGap: min(canvasWidth * 0.0125, area.height * 0.09),
+                                             verticalInset: area.height * PhotoFrameTextLayout.standardPaddingRatio)
         for (index, row) in rows.enumerated() {
-            let font = fonts[index].withSize(max(9, fonts[index].pointSize * scale))
-            var attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: index == 0 ? color : muted]
-            if row.kind == 4 {
-                attrs[.foregroundColor] = watermarkColor(watermark.color, preset).withAlphaComponent(CGFloat(watermark.opacityPercent) / 100)
-                if watermark.effect == .shadow { let s = NSShadow(); s.shadowBlurRadius = 3; s.shadowOffset = CGSize(width: 0, height: 1); s.shadowColor = UIColor.black.withAlphaComponent(0.35); attrs[.shadow] = s }
-            }
-            let baseline = cursor - bounds[index].top
-            if row.kind == 0 && (!brand.isEmpty || !model.isEmpty) {
-                let brandFont = titleBrandFont.withSize(max(9, titleBrandFont.pointSize * scale))
-                let modelFont = titleModelFont.withSize(max(9, titleModelFont.pointSize * scale))
-                let brandWidth = (brand as NSString).size(withAttributes: [.font: brandFont]).width
-                let modelWidth = (model as NSString).size(withAttributes: [.font: modelFont]).width
-                let totalWidth = brandWidth + (brand.isEmpty || model.isEmpty ? 0 : titleGap * scale) + modelWidth
-                var x = area.midX - totalWidth * 0.5
-                if !brand.isEmpty {
-                    brand.draw(at: CGPoint(x: x, y: baseline - brandFont.ascender), withAttributes: [.font: brandFont, .foregroundColor: color])
-                    x += brandWidth + (brand.isEmpty || model.isEmpty ? 0 : titleGap * scale)
-                }
-                if !model.isEmpty {
-                    model.draw(at: CGPoint(x: x, y: baseline - modelFont.ascender), withAttributes: [.font: modelFont, .foregroundColor: color])
-                }
-            } else {
-                let width = (row.text as NSString).size(withAttributes: attrs).width
-                let x: CGFloat = row.kind == 4 && watermark.position == .left ? area.minX + area.width * 0.07 : row.kind == 4 && watermark.position == .right ? area.maxX - area.width * 0.07 - width : area.midX - width * 0.5
-                row.text.draw(at: CGPoint(x: x, y: baseline - font.ascender), withAttributes: attrs)
-            }
-            cursor += (bounds[index].bottom - bounds[index].top) + gap
+            let width = row.width * placement.scale
+            let isWatermark = index == watermarkIndex
+            let x = isWatermark && watermark.position == .left ? area.minX + area.width * 0.07
+                : isWatermark && watermark.position == .right ? area.maxX - area.width * 0.07 - width
+                : area.midX - width * 0.5
+            drawMetadataRow(row, in: cg, x: x, baseline: placement.baselines[index], scale: placement.scale,
+                            shadowOpacity: isWatermark && watermark.effect == .shadow ? 0.35 : 0)
         }
     }
 
@@ -603,40 +536,53 @@ enum PhotoEffectsRenderer {
     }
 
     private static func drawPlaqueInformation(_ cg: CGContext, band: CGRect, leftPrimary: String?, leftSecondary: String?, right: [String], watermark: PhotoFrameWatermark?) {
-        let primaryFont = UIFont.systemFont(ofSize: band.width * 0.027, weight: .medium)
-        let secondaryFont = UIFont.systemFont(ofSize: band.width * 0.0165)
-        let rightFont = UIFont.systemFont(ofSize: band.width * 0.0245)
-        let mutedFont = UIFont.systemFont(ofSize: band.width * 0.018)
-        let slots: [(String?, UIFont, UIColor, String?, UIFont, UIColor)] = [
-            (leftPrimary, primaryFont, UIColor(white: 0.07, alpha: 1), right.first, rightFont, UIColor(white: 0.07, alpha: 1)),
-            (leftSecondary, secondaryFont, UIColor(white: 0.40, alpha: 1), right.dropFirst().first, mutedFont, UIColor(white: 0.40, alpha: 1)),
-            (nil, mutedFont, UIColor.clear, right.dropFirst(2).first, mutedFont, UIColor(white: 0.40, alpha: 1)),
-        ]
-        let watermarkSlot = watermark.map { ($0.displayText, watermarkFont($0.font, size: band.width * textSizeFraction($0.sizePercent)), watermarkColor($0.color, .plaque).withAlphaComponent(CGFloat($0.opacityPercent) / 100)) }
-        let slotHeights = slots.map { slot in max(slot.0.map { ($0 as NSString).size(withAttributes: [.font: slot.1]).height } ?? 0, slot.3.map { ($0 as NSString).size(withAttributes: [.font: slot.4]).height } ?? 0) }
-        let allHeights = slotHeights + (watermarkSlot.map { [($0.0 as NSString).size(withAttributes: [.font: $0.1]).height] } ?? [])
-        guard allHeights.contains(where: { $0 > 0 }) else { return }
-        let gap = min(band.width * 0.0115, band.height * 0.095)
-        let total = allHeights.reduce(0, +) + gap * CGFloat(max(0, allHeights.count - 1))
-        let scale = min(1, band.height / max(total, 1))
-        var y = band.midY - total * scale * 0.5
+        let leftX = band.minX + band.width * 0.058
+        let rightX = band.minX + band.width * (leftPrimary != nil ? 0.60 : 0.058)
+        let leftWidth = band.width * (right.isEmpty ? 0.884 : 0.46)
+        let rightWidth = band.width * (leftPrimary != nil ? 0.35 : 0.884)
+        func text(_ value: String?, size: CGFloat, primary: Bool, left: Bool) -> PhotoFrameTextRow? {
+            guard let value, !value.isEmpty else { return nil }
+            return metadataRow(value, font: .systemFont(ofSize: band.width * size, weight: primary && left ? .medium : .regular),
+                               color: primary ? UIColor(white: 0.07, alpha: 1) : UIColor(white: 0.40, alpha: 1))
+                .fitting(width: left ? leftWidth : rightWidth)
+        }
+        // Only visible slots consume a baseline or a gap. Both columns in a
+        // slot share a baseline even when their fonts have different heights.
+        let slots: [(left: PhotoFrameTextRow?, right: PhotoFrameTextRow?)] = [
+            (text(leftPrimary, size: 0.027, primary: true, left: true), text(right.first, size: 0.0245, primary: true, left: false)),
+            (text(leftSecondary, size: 0.0165, primary: false, left: true), text(right.dropFirst().first, size: 0.018, primary: false, left: false)),
+            (nil, text(right.dropFirst(2).first, size: 0.018, primary: false, left: false)),
+        ].filter { $0.0 != nil || $0.1 != nil }
+        var bounds = slots.map { slot in [slot.left, slot.right].compactMap { $0?.bounds }.reduce(CGRect.null) { $0.union($1) } }
+        let watermarkRow = watermark.map {
+            metadataRow($0.displayText, font: watermarkFont($0.font, size: band.width * textSizeFraction($0.sizePercent)),
+                        color: watermarkColor($0.color, .plaque).withAlphaComponent(CGFloat($0.opacityPercent) / 100))
+                .fitting(width: band.width * 0.884)
+        }
+        if let watermarkRow { bounds.append(watermarkRow.bounds) }
+        let placement = PhotoFrameTextLayout(area: band, bounds: bounds,
+                                             preferredGap: min(band.width * 0.0115, band.height * 0.095),
+                                             verticalInset: band.height * PhotoFrameTextLayout.standardPaddingRatio)
         for (index, slot) in slots.enumerated() {
-            if let text = slot.0 { let font = slot.1.withSize(max(9, slot.1.pointSize * scale)); text.draw(at: CGPoint(x: band.width * 0.058, y: y), withAttributes: [.font: font, .foregroundColor: slot.2]) }
-            if let text = slot.3 { let font = slot.4.withSize(max(9, slot.4.pointSize * scale)); let width = (text as NSString).size(withAttributes: [.font: font]).width; text.draw(at: CGPoint(x: band.width * 0.94 - width, y: y), withAttributes: [.font: font, .foregroundColor: slot.5]) }
-            y += slotHeights[index] * scale + gap * scale
+            slot.left?.draw(in: cg, x: leftX, baseline: placement.baselines[index], scale: placement.scale)
+            slot.right?.draw(in: cg, x: rightX, baseline: placement.baselines[index], scale: placement.scale)
         }
-        if let watermark, let slot = watermarkSlot {
-            let font = slot.1.withSize(max(9, slot.1.pointSize * scale)); var attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: slot.2]
-            if watermark.effect == .shadow { let shadow = NSShadow(); shadow.shadowBlurRadius = 3; shadow.shadowOffset = CGSize(width: 0, height: 1); shadow.shadowColor = UIColor.black.withAlphaComponent(0.35); attrs[.shadow] = shadow }
-            let width = (slot.0 as NSString).size(withAttributes: attrs).width
-            let x = watermark.position == .left ? band.minX + band.width * 0.07 : watermark.position == .right ? band.maxX - band.width * 0.07 - width : band.midX - width * 0.5
-            slot.0.draw(at: CGPoint(x: x, y: y), withAttributes: attrs)
+        if let watermark, let watermarkRow, let baseline = placement.baselines.last {
+            let width = watermarkRow.width * placement.scale
+            let x = watermark.position == .left ? band.minX + band.width * 0.07
+                : watermark.position == .right ? band.maxX - band.width * 0.07 - width : band.midX - width * 0.5
+            drawMetadataRow(watermarkRow, in: cg, x: x, baseline: baseline, scale: placement.scale,
+                            shadowOpacity: watermark.effect == .shadow ? 0.35 : 0)
         }
-        if leftPrimary != nil && !right.isEmpty {
+        if leftPrimary != nil, !right.isEmpty, !slots.isEmpty {
+            let infoTop = slots.indices.map { placement.baselines[$0] + bounds[$0].minY * placement.scale }.min()!
+            let infoBottom = slots.indices.map { placement.baselines[$0] + bounds[$0].maxY * placement.scale }.max()!
+            let inset = band.height * 0.075
             cg.setStrokeColor(UIColor(red: 0.87, green: 0.88, blue: 0.87, alpha: 1).cgColor)
             cg.setLineWidth(max(1, band.width * 0.001))
-            let inset = band.height * 0.075
-            cg.move(to: CGPoint(x: band.width * 0.575, y: band.minY + inset)); cg.addLine(to: CGPoint(x: band.width * 0.575, y: band.maxY - inset)); cg.strokePath()
+            cg.move(to: CGPoint(x: band.minX + band.width * 0.575, y: max(band.minY + inset, infoTop - inset)))
+            cg.addLine(to: CGPoint(x: band.minX + band.width * 0.575, y: min(band.maxY - inset, infoBottom + inset)))
+            cg.strokePath()
         }
     }
 
@@ -650,7 +596,6 @@ enum PhotoEffectsRenderer {
         if preset == .brandGallery && watermark.content == .text && !photoPlacement(watermark.position) && watermark.position != .auto {
             photoWatermark.enabled = false
         }
-        let photoArea = CGRect(x: photo.minX, y: photo.minY, width: photo.width, height: photo.height)
         let identity = metadata.identity
         let details = [[metadata.frameDetailLine, metadata.dateTime ?? ""].filter { !$0.isEmpty }.joined(separator: "   "), metadata.locationRow ?? ""].filter { !$0.isEmpty }
         let occupied = brandWatermarkBounds(photo: photo, watermark: photoWatermark)
@@ -688,22 +633,20 @@ enum PhotoEffectsRenderer {
     private static func drawBrandRows(_ cg: CGContext, photo: CGRect, rows: [(String, UIFont)], occupied: BrandBounds?, preferredBottomRatio: CGFloat, gapRatio: CGFloat) {
         guard !rows.isEmpty else { return }
         let gap = min(photo.width, photo.height) * gapRatio
-        let heights = rows.map { ($0.0 as NSString).size(withAttributes: [.font: $0.1]).height }
-        let widths = rows.map { ($0.0 as NSString).size(withAttributes: [.font: $0.1]).width }
-        let blockHeight = heights.reduce(0, +) + gap * CGFloat(max(0, rows.count - 1))
-        let blockWidth = min(photo.width * 0.78, widths.max() ?? photo.width)
-        let area = placeBrandMetadataBlock(photo: photo, preferredBottom: photo.maxY - min(photo.width, photo.height) * preferredBottomRatio, blockHeight: blockHeight, blockWidth: blockWidth, occupied: occupied, gap: min(photo.width, photo.height) * 0.040)
-        var scale = min(1, (area?.height ?? blockHeight) / max(blockHeight, 1))
-        if blockWidth > photo.width * 0.78 { scale = min(scale, photo.width * 0.78 / blockWidth) }
+        let textRows = rows.enumerated().map { index, row in
+            metadataRow(row.0, font: row.1, color: index == 0 ? .white : UIColor.white.withAlphaComponent(0.90))
+                .fitting(width: photo.width * 0.78)
+        }
+        let blockHeight = textRows.reduce(CGFloat.zero) { $0 + $1.bounds.height } + gap * CGFloat(max(0, textRows.count - 1))
+        let blockWidth = textRows.map(\.width).max() ?? photo.width
+        let area = placeBrandMetadataBlock(photo: photo, preferredBottom: photo.maxY - min(photo.width, photo.height) * preferredBottomRatio,
+                                          blockHeight: blockHeight, blockWidth: blockWidth, occupied: occupied,
+                                          gap: min(photo.width, photo.height) * 0.040)
         let target = area ?? photo.insetBy(dx: photo.width * 0.08, dy: photo.height * 0.06)
-        var y = target.midY - blockHeight * scale * 0.5
-        for (index, row) in rows.enumerated() {
-            let font = row.1.withSize(max(9, row.1.pointSize * scale))
-            var attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: index == 0 ? UIColor.white : UIColor.white.withAlphaComponent(0.90)]
-            let shadow = NSShadow(); shadow.shadowBlurRadius = 3; shadow.shadowOffset = CGSize(width: 0, height: 1); shadow.shadowColor = UIColor.black.withAlphaComponent(0.70); attrs[.shadow] = shadow
-            let width = (row.0 as NSString).size(withAttributes: attrs).width
-            row.0.draw(at: CGPoint(x: target.midX - width * 0.5, y: y), withAttributes: attrs)
-            y += heights[index] * scale + gap * scale
+        let placement = PhotoFrameTextLayout(area: target, bounds: textRows.map(\.bounds), preferredGap: gap)
+        for (index, row) in textRows.enumerated() {
+            drawMetadataRow(row, in: cg, x: target.midX - row.width * placement.scale * 0.5,
+                            baseline: placement.baselines[index], scale: placement.scale, shadowOpacity: 0.70)
         }
     }
 
@@ -716,20 +659,16 @@ enum PhotoEffectsRenderer {
         }
         if !brand.isEmpty { rows.append((brand, UIFont.systemFont(ofSize: band.width * 0.052, weight: .black), UIColor(red: 0.06, green: 0.07, blue: 0.08, alpha: 1))) }
         guard !rows.isEmpty else { return }
-        let top = band.minY + band.height * 0.08, bottom = band.maxY - band.height * 0.10
-        let gap = band.height * 0.12
-        let heights = rows.map { ($0.0 as NSString).size(withAttributes: [.font: $0.1]).height }
-        let total = heights.reduce(0, +) + gap * CGFloat(max(0, rows.count - 1))
-        let scale = min(1, (bottom - top) / max(total, 1))
-        var y = (top + bottom - total * scale) * 0.5
-        for (index, row) in rows.enumerated() {
-            let font = row.1.withSize(max(9, row.1.pointSize * scale))
-            var attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: row.2]
-            if bandWatermark != nil && index == 0 && bandWatermark?.effect == .shadow { let shadow = NSShadow(); shadow.shadowBlurRadius = 3; shadow.shadowOffset = CGSize(width: 0, height: 1); shadow.shadowColor = UIColor.black.withAlphaComponent(0.35); attrs[.shadow] = shadow }
-            let width = (row.0 as NSString).size(withAttributes: attrs).width
-            let x: CGFloat = index == 0 && bandWatermark?.position == .left ? band.minX + band.width * 0.07 : index == 0 && bandWatermark?.position == .right ? band.maxX - band.width * 0.07 - width : band.midX - width * 0.5
-            row.0.draw(at: CGPoint(x: x, y: y), withAttributes: attrs)
-            y += heights[index] * scale + gap * scale
+        let area = CGRect(x: band.minX, y: band.minY + band.height * 0.08, width: band.width, height: band.height * 0.82)
+        let textRows = rows.map { metadataRow($0.0, font: $0.1, color: $0.2).fitting(width: band.width * 0.86) }
+        let placement = PhotoFrameTextLayout(area: area, bounds: textRows.map(\.bounds), preferredGap: band.height * 0.12)
+        for (index, row) in textRows.enumerated() {
+            let width = row.width * placement.scale
+            let isWatermark = index == 0 && bandWatermark != nil
+            let x = isWatermark && bandWatermark?.position == .left ? band.minX + band.width * 0.07
+                : isWatermark && bandWatermark?.position == .right ? band.maxX - band.width * 0.07 - width : band.midX - width * 0.5
+            drawMetadataRow(row, in: cg, x: x, baseline: placement.baselines[index], scale: placement.scale,
+                            shadowOpacity: isWatermark && bandWatermark?.effect == .shadow ? 0.35 : 0)
         }
     }
 
@@ -762,77 +701,61 @@ enum PhotoEffectsRenderer {
     }
 
     private static func drawImmersive(_ cg: CGContext, layout: Layout, metadata: PhotoFrameMetadata, watermark: PhotoFrameWatermark) {
-        let lower = CGRect(x: 0, y: layout.canvas.height * 0.52, width: layout.canvas.width, height: layout.canvas.height * 0.48)
-        drawGradient(cg, rect: lower, top: UIColor(white: 0, alpha: 0), bottom: UIColor(white: 0, alpha: 0.46))
-        let area = CGRect(x: layout.canvas.width * 0.07, y: layout.canvas.height * 0.66, width: layout.canvas.width * 0.86, height: layout.canvas.height * 0.29)
+        let photo = layout.photo
+        let shortEdge = min(photo.width, photo.height)
+        let maxWidth = photo.width * 0.86
         let title = metadata.identity
         let inlineWatermark = watermark.enabled && watermark.content == .text && watermark.position == .auto ? watermark : nil
         let separate = watermark.enabled && watermark.content == .text && watermark.position != .auto && !photoPlacement(watermark.position) ? watermark : nil
-        let shortEdge = min(layout.canvas.width, layout.canvas.height)
-        let titleFont = UIFont.systemFont(ofSize: min(shortEdge * 0.030, area.width * 0.08), weight: .medium)
-        let detailFont = UIFont.systemFont(ofSize: min(shortEdge * 0.0235, area.width * 0.058), weight: .regular)
-        let lensFont = UIFont.systemFont(ofSize: min(shortEdge * 0.0205, area.width * 0.058), weight: .medium)
-        let inlineFont = inlineWatermark.map { watermarkFont($0.font, size: shortEdge * textSizeFraction($0.sizePercent) * 1.35) }
-        let titleAttrs: [NSAttributedString.Key: Any] = [.font: titleFont, .foregroundColor: UIColor.white,
-            .shadow: { let s = NSShadow(); s.shadowBlurRadius = 3; s.shadowOffset = CGSize(width: 0, height: 1); s.shadowColor = UIColor.black.withAlphaComponent(0.55); return s }()]
-        let detailAttrs: [NSAttributedString.Key: Any] = [.font: detailFont, .foregroundColor: UIColor.white.withAlphaComponent(0.92)]
-        let lensAttrs: [NSAttributedString.Key: Any] = [.font: lensFont, .foregroundColor: UIColor.white.withAlphaComponent(0.92)]
-        var detailLines = [String](); if let lens = metadata.lensModel, !lens.isEmpty { detailLines.append(lens) }
-        let cameraDetail = [metadata.immersiveDetailLine, metadata.dateTime ?? ""].filter { !$0.isEmpty }.joined(separator: "  ")
-        if !cameraDetail.isEmpty { detailLines.append(cameraDetail) }
-        if let location = metadata.locationRow, !location.isEmpty { detailLines.append(location) }
-        var rows: [(String, UIFont, [NSAttributedString.Key: Any])] = []
-        if !title.isEmpty || inlineWatermark != nil {
-            rows.append((title, titleFont, titleAttrs))
+        var titleRuns: [NSAttributedString] = []
+        if !title.isEmpty {
+            titleRuns.append(metadataText(title, font: .systemFont(ofSize: shortEdge * 0.030, weight: .medium), color: .white))
         }
-        rows += detailLines.enumerated().map { index, value in
-            index == 0 && metadata.lensModel?.isEmpty == false
-                ? (value, lensFont, lensAttrs)
-                : (value, detailFont, detailAttrs)
-        }
-        if let separate { rows.append((separate.displayText, detailFont, detailAttrs)) }
-        var photoWatermark = watermark
-        if !photoPlacement(photoWatermark.position) { photoWatermark.position = .photoBottomRight }
-        if photoPlacement(watermark.position) || (watermark.content == .image && photoPlacement(watermark.position)) {
-            drawWatermark(cg, watermark: photoWatermark, photo: layout.photo, canvas: layout.canvas, preset: .immersive, metadataBand: area)
-        }
-        let gap = layout.canvas.width * 0.013
-        var bounds = rows.map { ($0.0 as NSString).size(withAttributes: $0.2).height }
-        if !rows.isEmpty, let inlineWatermark, let inlineFont {
-            let inlineHeight = (inlineWatermark.displayText as NSString).size(withAttributes: [.font: inlineFont]).height
-            let dividerHeight = ("|" as NSString).size(withAttributes: [.font: UIFont.systemFont(ofSize: layout.canvas.width * 0.025, weight: .light)]).height
-            bounds[0] = max(bounds[0], max(inlineHeight, dividerHeight))
-        }
-        let total = bounds.reduce(0, +) + gap * CGFloat(max(0, rows.count - 1))
-        var y = area.maxY - layout.canvas.height * 0.045 - total
-        if !rows.isEmpty {
-            for (index, row) in rows.enumerated() {
-                if index == 0, let inlineWatermark, let inlineFont {
-                    let dividerFont = UIFont.systemFont(ofSize: layout.canvas.width * 0.025, weight: .light)
-                    let dividerAttrs: [NSAttributedString.Key: Any] = [.font: dividerFont, .foregroundColor: UIColor.white.withAlphaComponent(0.80)]
-                    let titleWidth = (title as NSString).size(withAttributes: row.2).width
-                    let dividerWidth = ("|" as NSString).size(withAttributes: dividerAttrs).width
-                    var inlineAttrs: [NSAttributedString.Key: Any] = [.font: inlineFont, .foregroundColor: watermarkColor(inlineWatermark.color, .immersive).withAlphaComponent(CGFloat(inlineWatermark.opacityPercent) / 100)]
-                    if inlineWatermark.effect == .shadow || inlineWatermark.effect == .auto { let shadow = NSShadow(); shadow.shadowBlurRadius = 3; shadow.shadowOffset = CGSize(width: 0, height: 1); shadow.shadowColor = UIColor.black.withAlphaComponent(0.35); inlineAttrs[.shadow] = shadow }
-                    let inlineWidth = (inlineWatermark.displayText as NSString).size(withAttributes: inlineAttrs).width
-                    let componentGap = layout.canvas.width * 0.014
-                    let hasDivider = !title.isEmpty
-                    let totalWidth = titleWidth + inlineWidth + (hasDivider ? dividerWidth + componentGap * 2 : 0)
-                    let baseline = y + max(row.1.ascender, max(dividerFont.ascender, inlineFont.ascender))
-                    var x = area.midX - totalWidth * 0.5
-                    if !title.isEmpty {
-                        title.draw(at: CGPoint(x: x, y: baseline - row.1.ascender), withAttributes: row.2)
-                        x += titleWidth + componentGap
-                        "|".draw(at: CGPoint(x: x, y: baseline - dividerFont.ascender), withAttributes: dividerAttrs)
-                        x += dividerWidth + componentGap
-                    }
-                    inlineWatermark.displayText.draw(at: CGPoint(x: x, y: baseline - inlineFont.ascender), withAttributes: inlineAttrs)
-                } else {
-                    let width = (row.0 as NSString).size(withAttributes: row.2).width
-                    row.0.draw(at: CGPoint(x: area.midX - width * 0.5, y: y), withAttributes: row.2)
-                }
-                y += bounds[index] + gap
+        if let inlineWatermark {
+            if !title.isEmpty {
+                titleRuns.append(metadataText("|", font: .systemFont(ofSize: shortEdge * 0.025, weight: .light), color: .white.withAlphaComponent(0.80)))
             }
+            titleRuns.append(metadataText(inlineWatermark.displayText,
+                                          font: watermarkFont(inlineWatermark.font, size: shortEdge * textSizeFraction(inlineWatermark.sizePercent) * 1.35),
+                                          color: watermarkColor(inlineWatermark.color, .immersive).withAlphaComponent(CGFloat(inlineWatermark.opacityPercent) / 100)))
+        }
+        var rows: [PhotoFrameTextRow] = []
+        if !titleRuns.isEmpty { rows.append(PhotoFrameTextRow(titleRuns, gap: shortEdge * 0.014).fitting(width: maxWidth)) }
+        if let lens = metadata.lensModel, !lens.isEmpty {
+            rows.append(metadataRow(lens, font: .systemFont(ofSize: shortEdge * 0.0205, weight: .medium), color: .white.withAlphaComponent(0.92)).fitting(width: maxWidth))
+        }
+        let detail = [metadata.immersiveDetailLine, metadata.dateTime ?? ""].filter { !$0.isEmpty }.joined(separator: "  ")
+        rows += [detail, metadata.locationRow ?? ""].filter { !$0.isEmpty }.map {
+            metadataRow($0, font: .systemFont(ofSize: shortEdge * 0.0235), color: .white.withAlphaComponent(0.92)).fitting(width: maxWidth)
+        }
+        if let separate {
+            rows.append(metadataRow(separate.displayText,
+                                    font: watermarkFont(separate.font, size: shortEdge * textSizeFraction(separate.sizePercent)),
+                                    color: watermarkColor(separate.color, .immersive).withAlphaComponent(CGFloat(separate.opacityPercent) / 100))
+                .fitting(width: maxWidth))
+        }
+        let gap = shortEdge * 0.013
+        let blockHeight = rows.reduce(CGFloat.zero) { $0 + $1.bounds.height } + gap * CGFloat(max(0, rows.count - 1))
+        // Android anchors the visible ink above this bottom safety margin, not
+        // a percentage of an unrelated font-line-height container.
+        let bottom = photo.maxY - max(shortEdge * 0.045, photo.height * 0.025)
+        let available = max(0, bottom - photo.minY - shortEdge * 0.045)
+        let area = CGRect(x: photo.minX + photo.width * 0.07, y: bottom - min(blockHeight, available),
+                          width: maxWidth, height: min(blockHeight, available))
+        let veilTop = max(area.minY - shortEdge * 0.10, photo.minY + photo.height * 0.58)
+        drawGradient(cg, rect: CGRect(x: photo.minX, y: veilTop, width: photo.width, height: photo.maxY - veilTop),
+                     top: UIColor(white: 0, alpha: 0), bottom: UIColor(white: 0, alpha: 0.46))
+        if photoPlacement(watermark.position) {
+            drawWatermark(cg, watermark: watermark, photo: photo, canvas: layout.canvas, preset: .immersive, metadataBand: area)
+        }
+        let placement = PhotoFrameTextLayout(area: area, bounds: rows.map(\.bounds), preferredGap: gap)
+        for (index, row) in rows.enumerated() {
+            let width = row.width * placement.scale
+            let isSeparate = separate != nil && index == rows.count - 1
+            let x = isSeparate && separate?.position == .left ? area.minX
+                : isSeparate && separate?.position == .right ? area.maxX - width : area.midX - width * 0.5
+            drawMetadataRow(row, in: cg, x: x, baseline: placement.baselines[index], scale: placement.scale,
+                            shadowOpacity: isSeparate ? (separate?.effect == .shadow ? 0.35 : 0) : 0.55)
         }
     }
 
@@ -862,13 +785,14 @@ enum PhotoEffectsRenderer {
         case .classicSignature:
             if !metadata.identity.isEmpty {
                 let headerArea = CGRect(x: 0, y: 0, width: layout.canvas.width, height: layout.photo.minY)
-                var font = UIFont(name: "HelveticaNeue-BlackItalic", size: layout.canvas.width * 0.034) ?? UIFont.italicSystemFont(ofSize: layout.canvas.width * 0.034)
-                let maxWidth = layout.canvas.width * 0.54
-                let measured = (metadata.identity as NSString).size(withAttributes: [.font: font]).width
-                if measured > maxWidth { font = font.withSize(font.pointSize * maxWidth / measured) }
-                let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: UIColor(red: 0.04, green: 0.043, blue: 0.047, alpha: 1)]
-                let size = (metadata.identity as NSString).size(withAttributes: attrs)
-                metadata.identity.draw(at: CGPoint(x: headerArea.midX - size.width * 0.5, y: headerArea.midY - size.height * 0.5), withAttributes: attrs)
+                let font = UIFont(name: "HelveticaNeue-BlackItalic", size: layout.canvas.width * 0.034)
+                    ?? UIFont.italicSystemFont(ofSize: layout.canvas.width * 0.034)
+                let row = metadataRow(metadata.identity, font: font, color: UIColor(red: 0.04, green: 0.043, blue: 0.047, alpha: 1))
+                    .fitting(width: layout.canvas.width * 0.54)
+                let placement = PhotoFrameTextLayout(area: headerArea, bounds: [row.bounds], preferredGap: 0,
+                                                     verticalInset: headerArea.height * PhotoFrameTextLayout.standardPaddingRatio)
+                row.draw(in: cg, x: headerArea.midX - row.width * placement.scale * 0.5,
+                         baseline: placement.baselines[0], scale: placement.scale)
             }
             drawMetadataRows(cg, area: CGRect(x: 0, y: layout.photo.maxY, width: layout.canvas.width, height: layout.canvas.height - layout.photo.maxY), preset: preset, rows: [metadata.lensModel ?? "", metadata.classicSignatureDetailLine, metadata.dateTime ?? "", metadata.locationRow ?? ""].filter { !$0.isEmpty }, watermark: watermark, dark: true, emphasizeFirst: false)
         default: break
@@ -877,47 +801,34 @@ enum PhotoEffectsRenderer {
 
     private static func drawMetadataRows(_ cg: CGContext, area: CGRect, preset: PhotoFramePreset, rows: [String], watermark: PhotoFrameWatermark, dark: Bool, insidePhoto: Bool = false, emphasizeFirst: Bool = true) {
         guard area.height > 1 else { return }
-        var values = rows.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        let values = rows.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         let supportsBandWatermark = preset == .galleryMat || preset == .filmGallery ||
             (preset == .classicSignature && watermark.position != .auto) ||
             (preset == .brandGallery && watermark.position != .auto)
         let drawsWatermark = !insidePhoto && supportsBandWatermark && watermark.enabled && watermark.content == .text && !photoPlacement(watermark.position)
-        if drawsWatermark { values.append(watermark.displayText) }
-        guard !values.isEmpty else { return }
         let color = dark ? UIColor(red: 0.10, green: 0.12, blue: 0.15, alpha: 1) : UIColor(red: 0.97, green: 0.98, blue: 0.99, alpha: 1)
         let muted = dark ? UIColor(red: 0.29, green: 0.31, blue: 0.33, alpha: 1) : UIColor(red: 0.86, green: 0.89, blue: 0.91, alpha: 1)
-        let fonts: [UIFont] = values.enumerated().map { index, _ in
+        var textRows = values.enumerated().map { index, value in
             let prominent = emphasizeFirst && index == 0
-            if prominent { return UIFont(name: "Georgia-BoldItalic", size: area.width * 0.052) ?? UIFont.italicSystemFont(ofSize: area.width * 0.052) }
-            return UIFont.systemFont(ofSize: area.width * 0.024, weight: .regular)
+            let font = prominent ? (UIFont(name: "Georgia-BoldItalic", size: area.width * 0.052) ?? UIFont.italicSystemFont(ofSize: area.width * 0.052))
+                : UIFont.systemFont(ofSize: area.width * 0.024)
+            return metadataRow(value, font: font, color: index == 0 ? color : muted).fitting(width: area.width * 0.90)
         }
-        var heights = values.enumerated().map { index, value in
-            (value as NSString).size(withAttributes: [.font: fonts[index]]).height
+        if drawsWatermark {
+            textRows.append(metadataRow(watermark.displayText,
+                                        font: watermarkFont(watermark.font, size: area.width * textSizeFraction(watermark.sizePercent)),
+                                        color: watermarkColor(watermark.color, preset).withAlphaComponent(CGFloat(watermark.opacityPercent) / 100))
+                .fitting(width: area.width * 0.48))
         }
-        let gap = area.height * 0.055
-        let available = max(0, area.height - gap * CGFloat(max(values.count - 1, 0)))
-        let inkTotal = heights.reduce(0, +)
-        let scale = min(1, available / max(inkTotal, 1))
-        if scale < 1 { heights = heights.map { $0 * scale } }
-        var y = area.midY - (heights.reduce(0, +) + gap * CGFloat(max(values.count - 1, 0)) * scale) * 0.5
-        for (index, value) in values.enumerated() {
-            let font = fonts[index].withSize(max(9, fonts[index].pointSize * scale))
-            var attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: index == 0 ? color : muted]
-            if drawsWatermark && index == values.count - 1 {
-                attrs[.foregroundColor] = watermarkColor(watermark.color, preset).withAlphaComponent(CGFloat(watermark.opacityPercent) / 100)
-                if watermark.effect == .shadow { let shadow = NSShadow(); shadow.shadowBlurRadius = 3; shadow.shadowOffset = CGSize(width: 0, height: 1); shadow.shadowColor = UIColor.black.withAlphaComponent(0.35); attrs[.shadow] = shadow }
-            }
-            let line = (value as NSString).size(withAttributes: attrs)
-            let x: CGFloat
-            if drawsWatermark && index == values.count - 1 && watermark.position == .left {
-                x = area.minX
-            } else if drawsWatermark && index == values.count - 1 && watermark.position == .right {
-                x = area.maxX - line.width
-            } else {
-                x = area.midX - line.width / 2
-            }
-            value.draw(at: CGPoint(x: x, y: y), withAttributes: attrs)
-            y += heights[index] + gap * scale
+        let placement = PhotoFrameTextLayout(area: area, bounds: textRows.map(\.bounds), preferredGap: area.height * 0.055,
+                                             verticalInset: area.height * PhotoFrameTextLayout.standardPaddingRatio)
+        for (index, row) in textRows.enumerated() {
+            let isWatermark = drawsWatermark && index == textRows.count - 1
+            let width = row.width * placement.scale
+            let x = isWatermark && watermark.position == .left ? area.minX
+                : isWatermark && watermark.position == .right ? area.maxX - width : area.midX - width * 0.5
+            drawMetadataRow(row, in: cg, x: x, baseline: placement.baselines[index], scale: placement.scale,
+                            shadowOpacity: isWatermark && watermark.effect == .shadow ? 0.35 : 0)
         }
     }
 
@@ -936,16 +847,10 @@ enum PhotoEffectsRenderer {
         if let date = metadata.dateTime, !date.isEmpty { rows.append((date, UIFont.systemFont(ofSize: photo.width * 0.0185), .black, .regular)) }
         if let location = metadata.locationRow, !location.isEmpty { rows.append((location, UIFont.systemFont(ofSize: photo.width * 0.0185), .black, .regular)) }
         guard !rows.isEmpty else { return }
-        let gap = bandHeight * 0.055
-        let heights = rows.map { ($0.0 as NSString).size(withAttributes: [.font: $0.1]).height }
-        let total = heights.reduce(0, +) + gap * CGFloat(max(0, rows.count - 1))
-        let scale = min(1, textArea.height / max(total, 1))
-        var y = textArea.midY - total * scale * 0.5
-        for (index, row) in rows.enumerated() {
-            let font = row.1.withSize(max(9, row.1.pointSize * scale))
-            let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: row.2]
-            row.0.draw(at: CGPoint(x: textArea.minX, y: y), withAttributes: attrs)
-            y += heights[index] * scale + gap * scale
+        let textRows = rows.map { metadataRow($0.0, font: $0.1, color: $0.2).fitting(width: textArea.width) }
+        let placement = PhotoFrameTextLayout(area: textArea, bounds: textRows.map(\.bounds), preferredGap: bandHeight * 0.055)
+        for (index, row) in textRows.enumerated() {
+            row.draw(in: cg, x: textArea.minX, baseline: placement.baselines[index], scale: placement.scale)
         }
     }
 
@@ -1033,21 +938,14 @@ enum PhotoEffectsRenderer {
         let color = UIColor(red: 0.88, green: 0.67, blue: 0.49, alpha: 1)
         let baseSize = area.width * 0.016
         let font = UIFont(name: "HelveticaNeue-Condensed", size: baseSize) ?? UIFont.systemFont(ofSize: baseSize)
-        let gap = area.height * 0.10
-        let heights = rows.map { ($0 as NSString).size(withAttributes: [.font: font]).height }
-        let total = heights.reduce(0, +) + gap * CGFloat(max(0, rows.count - 1))
-        let scale = min(1, area.height / max(total, 1))
-        var y = area.midY - total * scale * 0.5
-        for (index, row) in rows.enumerated() {
-            let rowFont = font.withSize(max(9, font.pointSize * scale))
-            let attrs: [NSAttributedString.Key: Any] = [.font: rowFont, .foregroundColor: color]
-            let width = (row as NSString).size(withAttributes: attrs).width
-            row.draw(at: CGPoint(x: area.midX - width * 0.5, y: y), withAttributes: attrs)
-            y += heights[index] * scale + gap * scale
+        let textRows = rows.filter { !$0.isEmpty }.map { metadataRow($0, font: font, color: color).fitting(width: area.width * 0.94) }
+        let placement = PhotoFrameTextLayout(area: area, bounds: textRows.map(\.bounds), preferredGap: area.height * 0.10,
+                                             verticalInset: area.height * PhotoFrameTextLayout.standardPaddingRatio)
+        for (index, row) in textRows.enumerated() {
+            row.draw(in: cg, x: area.midX - row.width * placement.scale * 0.5,
+                     baseline: placement.baselines[index], scale: placement.scale)
         }
     }
-
-    // MARK: Watermark placement and sizing
 
     private static func drawWatermark(_ cg: CGContext, watermark: PhotoFrameWatermark, photo: CGRect, canvas: CGSize, preset: PhotoFramePreset, metadataBand: CGRect) {
         guard watermark.enabled else { return }
@@ -1088,10 +986,31 @@ enum PhotoEffectsRenderer {
             let x: CGFloat = switch effective.position { case .left: metadataBand.minX + metadataBand.width * 0.07; case .right: metadataBand.maxX - metadataBand.width * 0.07 - measured.width; default: metadataBand.midX - measured.width / 2 }
             rect = CGRect(x: max(metadataBand.minX, x), y: metadataBand.maxY - measured.height - metadataBand.height * 0.12, width: measured.width, height: measured.height)
         }
-        var drawAttrs = attrs
-        if effective.effect == .shadow || effective.effect == .auto { let shadow = NSShadow(); shadow.shadowBlurRadius = 3; shadow.shadowOffset = CGSize(width: 0, height: 1); shadow.shadowColor = UIColor.black.withAlphaComponent(0.35); drawAttrs[.shadow] = shadow }
-        if effective.effect == .outline { drawAttrs[.strokeWidth] = -1.5; drawAttrs[.strokeColor] = UIColor.white.withAlphaComponent(0.65) }
-        text.draw(at: rect.origin, withAttributes: drawAttrs)
+        if effective.effect == .outline {
+            // Match Android's two-pass Paint.Style.STROKE + fill rendering.
+            // A fixed -1.5pt attributed stroke became visibly uneven as the
+            // watermark size changed, and the hard-coded white outline was
+            // wrong for light watermarks. Scale the stroke from the actual
+            // font size and choose the contrasting ink from the fill color.
+            let fillColor = watermarkColor(effective.color, preset)
+                .withAlphaComponent(CGFloat(effective.opacityPercent) / 100)
+            let outline = contrastingWatermarkColor(for: fillColor)
+            var outlineAttrs = attrs
+            outlineAttrs[.strokeWidth] = font.pointSize * 0.075
+            outlineAttrs[.strokeColor] = outline
+            text.draw(at: rect.origin, withAttributes: outlineAttrs)
+            text.draw(at: rect.origin, withAttributes: attrs)
+        } else {
+            var drawAttrs = attrs
+            if effective.effect == .shadow || effective.effect == .auto {
+                let shadow = NSShadow()
+                shadow.shadowBlurRadius = 3
+                shadow.shadowOffset = CGSize(width: 0, height: 1)
+                shadow.shadowColor = UIColor.black.withAlphaComponent(0.35)
+                drawAttrs[.shadow] = shadow
+            }
+            text.draw(at: rect.origin, withAttributes: drawAttrs)
+        }
     }
 
     private static func watermarkRect(position: PhotoFrameWatermarkPosition, photo: CGRect, size: CGSize, inset: CGFloat) -> CGRect {
@@ -1153,6 +1072,20 @@ enum PhotoEffectsRenderer {
                 ? UIColor(red: 250 / 255, green: 252 / 255, blue: 253 / 255, alpha: 1)
                 : UIColor(red: 24 / 255, green: 31 / 255, blue: 38 / 255, alpha: 1)
         }
+    }
+
+    private static func contrastingWatermarkColor(for color: UIColor) -> UIColor {
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 1
+        guard color.getRed(&red, green: &green, blue: &blue, alpha: &alpha) else {
+            return UIColor(white: 0.05, alpha: alpha)
+        }
+        let brightness = (red * 299 + green * 587 + blue * 114) / 1000
+        return brightness >= 0.588
+            ? UIColor(red: 12 / 255, green: 15 / 255, blue: 18 / 255, alpha: alpha)
+            : UIColor(red: 248 / 255, green: 249 / 255, blue: 250 / 255, alpha: alpha)
     }
 }
 

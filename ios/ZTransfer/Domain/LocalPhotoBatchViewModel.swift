@@ -143,17 +143,63 @@ enum LocalPhotoOutput {
         } onCancel: { renderer.cancel() }
     }
 
-    static func preview(image: UIImage, settings: PhotoEffectsSettings, metadata: PhotoFrameMetadata? = nil) async throws -> LocalPhotoPreviewImages {
+    static func filteredSource(image: UIImage, selection: PhotoFilterSelection?) async throws -> UIImage {
+        guard let selection else { return image }
         let renderer = Task.detached(priority: .userInitiated) {
             try Task.checkCancellation()
             return try autoreleasepool {
-                let filtered = try PhotoEffectsRenderer.render(image, settings: settings, metadata: metadata)
+                var filterOnly = PhotoEffectsSettings()
+                filterOnly.photoFilterEnabled = true
+                filterOnly.selectedFilter = selection
+                let output = try PhotoEffectsRenderer.render(image, settings: filterOnly)
                 try Task.checkCancellation()
+                return output
+            }
+        }
+        return try await withTaskCancellationHandler {
+            let result = try await renderer.value
+            try Task.checkCancellation()
+            return result
+        } onCancel: { renderer.cancel() }
+    }
+
+    static func preview(image: UIImage, settings: PhotoEffectsSettings, metadata: PhotoFrameMetadata? = nil,
+                        filteredSource: UIImage? = nil) async throws -> LocalPhotoPreviewImages {
+        let renderer = Task.detached(priority: .userInitiated) {
+            try Task.checkCancellation()
+            return try autoreleasepool {
+                // Android keeps the expensive filter result separate from the
+                // frame/watermark preview. Reuse that intermediate whenever a
+                // wheel changes only decoration settings.
+                var decorationOnly = settings
+                decorationOnly.photoFilterEnabled = false
+                let filteredInput = filteredSource ?? image
+                let filtered = try PhotoEffectsRenderer.render(filteredInput, settings: decorationOnly, metadata: metadata)
+                try Task.checkCancellation()
+                // The comparison frame is deliberately deferred by the view
+                // until the filtered frame is visible, matching Android's
+                // delayed long-press baseline and avoiding a blank preview
+                // while the second full composition is running.
+                return LocalPhotoPreviewImages(filtered: filtered, unfiltered: filtered)
+            }
+        }
+        return try await withTaskCancellationHandler {
+            let result = try await renderer.value
+            try Task.checkCancellation()
+            return result
+        } onCancel: { renderer.cancel() }
+    }
+
+    static func unfilteredPreview(image: UIImage, settings: PhotoEffectsSettings,
+                                  metadata: PhotoFrameMetadata? = nil) async throws -> UIImage {
+        let renderer = Task.detached(priority: .userInitiated) {
+            try Task.checkCancellation()
+            return try autoreleasepool {
                 var comparison = settings
                 comparison.photoFilterEnabled = false
-                let unfiltered = settings.photoFilterEnabled
-                    ? try PhotoEffectsRenderer.render(image, settings: comparison, metadata: metadata) : filtered
-                return LocalPhotoPreviewImages(filtered: filtered, unfiltered: unfiltered)
+                let output = try PhotoEffectsRenderer.render(image, settings: comparison, metadata: metadata)
+                try Task.checkCancellation()
+                return output
             }
         }
         return try await withTaskCancellationHandler {

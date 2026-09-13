@@ -14,6 +14,7 @@ struct LocalPhotoEffectsView: View {
     @State private var showingHelp = false
     @State private var showingWatermarkPicker = false
     @State private var scrollOffset: CGFloat = 0
+    @FocusState private var watermarkTextFocused: Bool
 
     var body: some View {
         ScrollView {
@@ -24,6 +25,7 @@ struct LocalPhotoEffectsView: View {
                 batchFailureView
                 LocalWorkbenchControls(draft: effectsBinding,
                                        showingWatermarkPicker: $showingWatermarkPicker,
+                                       textFieldFocused: $watermarkTextFocused,
                                        showLocationFields: false)
                 .padding(.top, 10).padding(.bottom, 18)
             }
@@ -37,10 +39,17 @@ struct LocalPhotoEffectsView: View {
         // Keeping this simultaneous avoids stealing vertical scrolling inside
         // the editor once the user has moved down the page.
         .simultaneousGesture(DragGesture(minimumDistance: 18).onEnded { value in
-            // Wheel drags are vertical too; only the top navigation/preview
-            // band may hand a downward gesture to the page pager. This keeps
-            // changing a detent from accidentally navigating back.
-            guard scrollOffset >= -2, value.startLocation.y < 360,
+            // Wheel drags are vertical too, but short option controls no
+            // longer install a competing drag recognizer. Let a downward
+            // gesture from any part of the top-scrolled workbench reach the
+            // page pager; long option wheels still take precedence themselves.
+            // A horizontal drag belongs to the photo pager. Explicitly
+            // checking the dominant axis is important here because this
+            // gesture is attached to the enclosing vertical ScrollView and
+            // otherwise competes with TabView's page recognizer.
+            guard abs(value.translation.height) > abs(value.translation.width),
+                  !watermarkTextFocused,
+                  scrollOffset >= -2,
                   value.translation.height > 70 else { return }
             onNavigateUp()
         })
@@ -157,6 +166,10 @@ struct LocalPhotoEffectsView: View {
                     }
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
+                // Keep the whole 4:3 preview as the pager's hit region. The
+                // child preview also has a long-press comparison gesture, so
+                // the pager must be allowed to win ordinary horizontal drags.
+                .contentShape(Rectangle())
                 .id(batch.state.photos)
             }
         }
@@ -183,6 +196,7 @@ struct LocalPhotoEffectsView: View {
 private struct LocalWorkbenchControls: View {
     @Binding var draft: PhotoEffectsSettings
     @Binding var showingWatermarkPicker: Bool
+    @FocusState.Binding var textFieldFocused: Bool
     var showLocationFields = false
     @State private var metadataExpanded = false
     @State private var watermarkExpanded = false
@@ -368,19 +382,54 @@ private struct LocalWorkbenchControls: View {
                 }
                 if watermarkExpanded && draft.watermark.enabled {
                     VStack(spacing: 8) {
-                        DetentWheel(label: "水印类型", options: PhotoFrameWatermarkContent.allCases, selected: draft.watermark.content,
-                                    optionLabel: { $0 == .text ? "文字" : "图片" }, onCommit: { value in
-                                        if value == .image && draft.watermark.imageHash == nil { showingWatermarkPicker = true }
-                                        else { updateWatermark { $0.content = value } }
-                                    }, rowHeight: 18, wheelHeight: 50, accentColor: ZTransferColors.accentPurple)
-                        if draft.watermark.content == .text {
-                            TextField("水印文字", text: Binding(get: { draft.watermark.text }, set: { value in updateWatermark { $0.text = String(value.prefix(PhotoFrameWatermark.maxTextLength)) } }))
-                                .textFieldStyle(.plain).padding(.horizontal, 12).frame(height: 42)
-                                .background(ZTransferColors.background.opacity(0.65), in: RoundedRectangle(cornerRadius: 12))
-                        } else {
-                            Button("更换 Logo") { showingWatermarkPicker = true }
-                                .buttonStyle(WorkbenchGlassButtonStyle()).frame(maxWidth: .infinity).frame(height: 42)
+                        // Android keeps the content wheel and its editor on
+                        // one row: one third for the type and two thirds for
+                        // the text field / logo button. Keeping that geometry
+                        // here prevents the editor from becoming a separate,
+                        // oversized row on iOS.
+                        GeometryReader { proxy in
+                            let typeWidth = (proxy.size.width - 8) / 3
+                            HStack(spacing: 8) {
+                                DetentWheel(label: "水印类型", options: PhotoFrameWatermarkContent.allCases,
+                                            selected: draft.watermark.content,
+                                            optionLabel: { $0 == .text ? "文字" : "Logo" },
+                                            onCommit: { value in
+                                                if value == .image && draft.watermark.imageHash == nil {
+                                                    showingWatermarkPicker = true
+                                                } else {
+                                                    updateWatermark { $0.content = value }
+                                                }
+                                            }, rowHeight: 18, wheelHeight: 50,
+                                            accentColor: ZTransferColors.accentPurple)
+                                .frame(width: typeWidth)
+                                if draft.watermark.content == .text {
+                                    TextField("水印文字", text: Binding(
+                                        get: { draft.watermark.text },
+                                        set: { value in updateWatermark { $0.text = String(value.prefix(PhotoFrameWatermark.maxTextLength)) } }
+                                    ))
+                                    .textFieldStyle(.plain)
+                                    .multilineTextAlignment(.center)
+                                    .focused($textFieldFocused)
+                                    .padding(.horizontal, 14)
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 50)
+                                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 13))
+                                    .overlay(RoundedRectangle(cornerRadius: 13).stroke(ZTransferColors.secondaryText.opacity(0.15)))
+                                } else {
+                                    Button { showingWatermarkPicker = true } label: {
+                                        HStack(spacing: 6) {
+                                            Image(systemName: "photo").font(.system(size: 16, weight: .medium))
+                                            Text("更换 Logo").font(.system(size: 14, weight: .medium))
+                                        }
+                                        .foregroundStyle(ZTransferColors.primaryText)
+                                        .frame(maxWidth: .infinity)
+                                        .frame(height: 50)
+                                    }
+                                    .buttonStyle(WorkbenchGlassButtonStyle())
+                                }
+                            }
                         }
+                        .frame(height: 50)
                         if draft.watermark.content == .text {
                             HStack(spacing: 8) {
                                 DetentWheel(label: "字体", options: PhotoFrameWatermarkFont.allCases, selected: draft.watermark.font, optionLabel: fontName, onCommit: { value in updateWatermark { $0.font = value } }, rowHeight: 18, wheelHeight: 50, accentColor: ZTransferColors.accentPurple)
@@ -400,6 +449,10 @@ private struct LocalWorkbenchControls: View {
                             }
                         }
                     }
+                    .padding(8)
+                    .background(ZTransferColors.accentPurple.opacity(0.055), in: RoundedRectangle(cornerRadius: 12))
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(ZTransferColors.accentPurple.opacity(0.18)))
+                    .padding(.top, 2)
                     .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
                 }
             }
@@ -612,6 +665,9 @@ private struct LocalEffectPreview: View {
     @State private var source: UIImage?
     @State private var metadata: PhotoFrameMetadata?
     @State private var images: LocalPhotoPreviewImages?
+    @State private var filteredSource: UIImage?
+    @State private var filteredSourceKey: PhotoFilterSelection?
+    @State private var lastPreviewSettings: PhotoEffectsSettings?
     @State private var failed = false
     @GestureState private var comparing = false
 
@@ -626,12 +682,28 @@ private struct LocalEffectPreview: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity).contentShape(Rectangle())
         .simultaneousGesture(LongPressGesture(minimumDuration: 0.5)
-            .sequenced(before: DragGesture(minimumDistance: 0))
+            // A zero-distance drag starts competing with the horizontal
+            // pager on every touch. Require a small movement after the long
+            // press; the first sequence state still keeps comparison active
+            // while the finger is held in place.
+            .sequenced(before: DragGesture(minimumDistance: 12))
             .updating($comparing) { value, state, _ in
-                if case .second(true, _) = value { state = true }
+                switch value {
+                case .first(true), .second(true, _): state = true
+                default: break
+                }
             })
         .task(id: PreviewRequest(item: item, settings: settings)) {
             do {
+                if let previous = lastPreviewSettings,
+                   previous.watermark.text != settings.watermark.text,
+                   previous.watermark.withoutText() == settings.watermark.withoutText() {
+                    // Match Android's 140 ms text-only preview debounce. A
+                    // fast typing sequence cancels this task before any
+                    // expensive filter/frame render starts.
+                    try await Task.sleep(for: .milliseconds(140))
+                }
+                lastPreviewSettings = settings
                 // A changed wheel selection starts a new render. Clear the
                 // previous image immediately so a stale frame/filter cannot
                 // look like the setting had no effect while rendering.
@@ -646,12 +718,50 @@ private struct LocalEffectPreview: View {
                     try Task.checkCancellation()
                     source = image
                 }
-                let next = try await LocalPhotoOutput.preview(image: image, settings: settings, metadata: metadata)
+                let filterKey = settings.photoFilterEnabled ? settings.selectedFilter : nil
+                let preparedSource: UIImage?
+                if let filterKey {
+                    if filteredSourceKey == filterKey, let filteredSource {
+                        preparedSource = filteredSource
+                    } else {
+                        let rendered = try await LocalPhotoOutput.filteredSource(image: image, selection: filterKey)
+                        try Task.checkCancellation()
+                        filteredSource = rendered
+                        filteredSourceKey = filterKey
+                        preparedSource = rendered
+                    }
+                } else {
+                    filteredSource = nil
+                    filteredSourceKey = nil
+                    preparedSource = nil
+                }
+                let next = try await LocalPhotoOutput.preview(image: image, settings: settings,
+                                                               metadata: metadata, filteredSource: preparedSource)
                 try Task.checkCancellation()
                 images = next
                 failed = false
+                if settings.photoFilterEnabled {
+                    // Android renders the selected effect first and only
+                    // prepares the long-press comparison after a short idle
+                    // window. Do the same so the first frame is interactive
+                    // without waiting for a second full composition.
+                    try await Task.sleep(for: .milliseconds(140))
+                    let comparison = try await LocalPhotoOutput.unfilteredPreview(
+                        image: image, settings: settings, metadata: metadata,
+                    )
+                    try Task.checkCancellation()
+                    images = LocalPhotoPreviewImages(filtered: next.filtered, unfiltered: comparison)
+                }
             } catch is CancellationError {} catch { failed = true }
         }
+    }
+}
+
+private extension PhotoFrameWatermark {
+    func withoutText() -> Self {
+        var copy = self
+        copy.text = ""
+        return copy
     }
 }
 
