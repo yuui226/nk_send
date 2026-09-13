@@ -209,9 +209,22 @@ final class PhotoListViewModel: ObservableObject {
         // The repository awaits this callback: scanning cannot request the
         // next metadata batch until this batch's per-file prefetch has finished,
         // matching Android's accepted-batch/backpressure order.
-        let settled = transferBusy ? Set<UInt32>() : await prefetchBatch(additions)
+        // Android abandons this batch's background prefetch when a foreground
+        // owner has the camera channel. The items stay pending for the normal
+        // fill worker; they are not failures and must not require an unrelated
+        // filter change to be retried.
+        let channelAllowed = await canFill()
+        let fillAllowed = !transferBusy && channelAllowed
+        let settled = fillAllowed ? await prefetchBatch(additions) : Set<UInt32>()
         for id in settled { await thumbnailFillQueue.markSettled(id) }
-        for file in additions where !settled.contains(file.id) { await thumbnailFillQueue.markFailed(file.id) }
+        // The gate may change while a single batch is being prefetched. As in
+        // Android's early return, leave the remaining items pending when that
+        // happens; only a genuine per-file failure becomes `failed`.
+        let channelStillAllowed = await canFill()
+        let fillStillAllowed = fillAllowed && !transferBusy && channelStillAllowed
+        if fillStillAllowed {
+            for file in additions where !settled.contains(file.id) { await thumbnailFillQueue.markFailed(file.id) }
+        }
         try Task.checkCancellation()
         guard generation == loadGeneration else { throw CancellationError() }
         await Task.yield()

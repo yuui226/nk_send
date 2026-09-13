@@ -548,6 +548,11 @@ actor CameraRepository {
         var byIdentity = Dictionary(uniqueKeysWithValues: files.map { (logicalIdentity($0), $0) })
         var indexed = indexedCatalogFiles
         var batch: [CameraFile] = []
+        // STA direct metadata intentionally publishes the first frame as a
+        // 1-item batch, then a 3-item warm-up batch, before settling at 12.
+        // This is the same first-content latency strategy as
+        // `streamStaDirectFileInfo`; ordinary ObjectInfo scans stay at 12.
+        var directPublishedCount = 0
         var metadataComplete = true
         var cursors = Array(repeating: 0, count: groups.count)
         var heads = Array<CameraFile?>(repeating: nil, count: groups.count)
@@ -603,8 +608,11 @@ actor CameraRepository {
                 batch.append(file)
             }
             scanSnapshot?.processedHandles.insert(file.id)
-            if batch.count == 12 {
+            let batchLimit: Int = directReader == nil ? 12 :
+                (directPublishedCount == 0 ? 1 : directPublishedCount < 4 ? 3 : 12)
+            if batch.count >= batchLimit {
                 try await onBatch?(batch)
+                directPublishedCount += batch.count
                 batch.removeAll(keepingCapacity: true)
             }
         }
