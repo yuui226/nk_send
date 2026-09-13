@@ -103,8 +103,14 @@ struct DetentWheel<Option: Hashable>: View {
                 // sibling favorite button or parent ScrollView from consuming
                 // the tap.
                 if !canDrag {
-                    Button(action: activate) { Color.clear }
+                    Button(action: activate) {
+                        // A clear label without an explicit frame can collapse
+                        // to zero on iOS 16, leaving the one-detent control
+                        // visually present but untappable.
+                        Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
                         .buttonStyle(.plain)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .contentShape(Rectangle())
                         .accessibilityHidden(true)
                 }
