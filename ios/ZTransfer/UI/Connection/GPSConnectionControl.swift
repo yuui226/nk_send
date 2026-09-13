@@ -9,7 +9,7 @@ struct GPSConnectionControl: View {
                 let phase = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 2.8) / 2.8
                 let pulse = coordinator.state.enabled ? 0.05 + 0.05 * CGFloat((sin(phase * 2 * .pi) + 1) / 2) : 0
                 Button { withAnimation(ZTransferMotion.standard) { expanded.toggle() } } label: {
-                    Text("GPS").zTransferTypography(.titleMedium, weight: .bold)
+                    Text(AppLocalized.resource("gps_auto_write")).zTransferTypography(.titleMedium, weight: .bold)
                         .foregroundStyle(ZTransferColors.primaryText)
                         .frame(maxWidth: .infinity).frame(height: 50)
                         .background((coordinator.state.enabled ? ZTransferColors.accentBlue : ZTransferColors.background).opacity(coordinator.state.enabled ? 0.12 + pulse : 0.55), in: RoundedRectangle(cornerRadius: 20))

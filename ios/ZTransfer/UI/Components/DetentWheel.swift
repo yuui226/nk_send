@@ -104,7 +104,9 @@ struct DetentWheel<Option: Hashable>: View {
                         .opacity(dragging ? 0 : 1)
                 }
                 if canDrag && showDragHint {
-                    Text("↕︎").font(.system(size: 10)).foregroundStyle(ZTransferColors.secondaryText.opacity(0.38))
+                    Image(systemName: "arrow.up.arrow.down")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(ZTransferColors.secondaryText.opacity(0.38))
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
                         .padding(.trailing, 7).padding(.bottom, 4).opacity(dragging ? 0 : 1)
                 }
@@ -134,7 +136,7 @@ struct DetentWheel<Option: Hashable>: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(AppLocalized.text(label.isEmpty ? "拨轮" : label)))
         .accessibilityValue(Text(AppLocalized.text(optionLabel(options[selectedIndex])) + (favoriteOption(options[selectedIndex]) ? "，已收藏" : "")))
-        .accessibilityHint(Text(readOnly ? "只读" : (canDrag ? "上下拖动调整，点击切换" : "点击切换")))
+        .accessibilityHint(Text(readOnly ? AppLocalized.text("只读") : AppLocalized.resource("photo_effects_wheel_hint")))
         .accessibilityAddTraits(.isButton)
         .onChange(of: selected) { value in sync(value: value) }
         .onChange(of: options) { _ in sync(value: selected) }

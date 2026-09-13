@@ -160,12 +160,19 @@ final class PhotoEffectsStore: ObservableObject {
     private let scope: Scope
 
     init(defaults: UserDefaults = .standard, scope: Scope = .cameraTransfer) {
-        self.defaults = defaults
+        // Android isolates phone-photo effects in the `local_photo_effects`
+        // preference file.  UserDefaults suites provide the same isolation;
+        // injected defaults are still honored for camera-transfer tests.
+        self.defaults = scope == .localPhotos
+            ? (UserDefaults(suiteName: "local_photo_effects") ?? defaults)
+            : defaults
         self.scope = scope
         key = scope == .cameraTransfer ? "photoEffectsSettings.v1" : "localPhotoEffectsSettings.v1"
-        if scope == .cameraTransfer, let value = Self.restoreAndroidTransferSettings(defaults: defaults) {
+        if scope == .cameraTransfer, let value = Self.restoreAndroidTransferSettings(defaults: self.defaults) {
             settings = Self.normalized(value)
-        } else if let data = defaults.data(forKey: key), let value = try? JSONDecoder().decode(PhotoEffectsSettings.self, from: data) {
+        } else if scope == .localPhotos, let value = Self.restoreAndroidLocalSettings(defaults: self.defaults) {
+            settings = Self.normalized(value)
+        } else if let data = self.defaults.data(forKey: key), let value = try? JSONDecoder().decode(PhotoEffectsSettings.self, from: data) {
             settings = Self.normalized(value)
         } else {
             settings = PhotoEffectsSettings()
@@ -178,10 +185,12 @@ final class PhotoEffectsStore: ObservableObject {
     func update(_ value: PhotoEffectsSettings) {
         settings = Self.normalized(value)
         if scope == .cameraTransfer {
-            Self.persistAndroidTransferSettings(settings, defaults: defaults)
+            Self.persistAndroidTransferSettings(settings, defaults: self.defaults)
+        } else {
+            Self.persistAndroidLocalSettings(settings, defaults: self.defaults)
         }
         guard let data = try? JSONEncoder().encode(settings) else { return }
-        defaults.set(data, forKey: key)
+        self.defaults.set(data, forKey: key)
     }
 
     func beginDraft() -> PhotoEffectsSettings { settings }
@@ -309,6 +318,61 @@ final class PhotoEffectsStore: ObservableObject {
         defaults.set(value.watermark.opacityPercent, forKey: "photo_frame_watermark_opacity")
         defaults.set(value.watermark.effect.rawValue, forKey: "photo_frame_watermark_effect")
         defaults.set(encodeAndroidMetadata(value.metadataByPreset), forKey: "photo_frame_metadata_settings_v1")
+        defaults.set(encodeAndroidFrameFavorites(value.favoriteFrameEffects), forKey: "favorite_frame_effects_v1")
+    }
+
+    private static func restoreAndroidLocalSettings(defaults: UserDefaults) -> PhotoEffectsSettings? {
+        guard defaults.object(forKey: "settings_version") != nil || defaults.object(forKey: "frame_preset") != nil else { return nil }
+        var value = PhotoEffectsSettings()
+        value.photoFrameEnabled = defaults.object(forKey: "decoration_enabled") as? Bool ?? false
+        value.photoFrameBorderEnabled = defaults.object(forKey: "border_enabled") as? Bool ?? true
+        value.photoFramePreset = PhotoFramePreset(rawValue: defaults.string(forKey: "frame_preset") ?? "MIST") ?? .mist
+        value.metadataByPreset = decodeAndroidMetadata(defaults.string(forKey: "frame_metadata_settings_v1"))
+        value.metadata = value.metadataByPreset[value.photoFramePreset.rawValue] ?? PhotoFrameMetadataSettings.defaults(for: value.photoFramePreset)
+        value.photoFilterEnabled = defaults.object(forKey: "filter_enabled") as? Bool ?? false
+        if let id = defaults.string(forKey: "filter_id"), let preset = PhotoFilterCatalog.resolve(id) {
+            let key = Np3FilterCatalog.preset(id: id)?.catalogKey ?? id
+            let intensities = decodeAndroidIntensities(defaults.string(forKey: "filter_intensities_v1"))
+            value.selectedFilter = PhotoFilterSelection(preset: preset, intensityPercent: intensities[key] ?? (defaults.object(forKey: "filter_intensity") as? Int ?? Np3FilterEngine.defaultIntensityPercent))
+            value.filterIntensities = intensities
+        }
+        value.favoriteFilterIDs = Set(decodeAndroidFavorites(defaults.string(forKey: "favorite_photo_filters_v1")))
+        value.watermark = PhotoFrameWatermark(
+            enabled: defaults.object(forKey: "watermark_enabled") as? Bool ?? true,
+            content: PhotoFrameWatermarkContent(rawValue: defaults.string(forKey: "watermark_content") ?? "TEXT") ?? .text,
+            text: defaults.string(forKey: "watermark_text") ?? PhotoFrameWatermark.defaultText,
+            imageHash: defaults.string(forKey: "watermark_image_hash"),
+            font: PhotoFrameWatermarkFont(rawValue: defaults.string(forKey: "watermark_font") ?? "CALLIGRAPHY") ?? .calligraphy,
+            sizePercent: defaults.object(forKey: "watermark_size") as? Int ?? 80,
+            position: PhotoFrameWatermarkPosition(rawValue: defaults.string(forKey: "watermark_position") ?? "AUTO") ?? .auto,
+            color: PhotoFrameWatermarkColor(rawValue: defaults.string(forKey: "watermark_color") ?? "ADAPTIVE") ?? .adaptive,
+            opacityPercent: defaults.object(forKey: "watermark_opacity") as? Int ?? 72,
+            effect: PhotoFrameWatermarkEffect(rawValue: defaults.string(forKey: "watermark_effect") ?? "AUTO") ?? .auto)
+        value.favoriteFrameEffects = decodeAndroidFrameFavorites(defaults.string(forKey: "favorite_frame_effects_v1"), watermark: value.watermark)
+        value.favoriteFramePresets = Set(value.favoriteFrameEffects.map(\.preset))
+        return value
+    }
+
+    private static func persistAndroidLocalSettings(_ value: PhotoEffectsSettings, defaults: UserDefaults) {
+        defaults.set(3, forKey: "settings_version")
+        defaults.set(value.photoFrameEnabled, forKey: "decoration_enabled")
+        defaults.set(value.photoFrameBorderEnabled, forKey: "border_enabled")
+        defaults.set(value.photoFramePreset.rawValue, forKey: "frame_preset")
+        defaults.set(encodeAndroidMetadata(value.metadataByPreset), forKey: "frame_metadata_settings_v1")
+        defaults.set(value.watermark.enabled, forKey: "watermark_enabled")
+        defaults.set(value.watermark.content.rawValue, forKey: "watermark_content")
+        defaults.set(value.watermark.text, forKey: "watermark_text")
+        if let hash = value.watermark.imageHash { defaults.set(hash, forKey: "watermark_image_hash") } else { defaults.removeObject(forKey: "watermark_image_hash") }
+        defaults.set(value.watermark.font.rawValue, forKey: "watermark_font")
+        defaults.set(value.watermark.sizePercent, forKey: "watermark_size")
+        defaults.set(value.watermark.position.rawValue, forKey: "watermark_position")
+        defaults.set(value.watermark.color.rawValue, forKey: "watermark_color")
+        defaults.set(value.watermark.opacityPercent, forKey: "watermark_opacity")
+        defaults.set(value.watermark.effect.rawValue, forKey: "watermark_effect")
+        if let selected = value.selectedFilter { defaults.set(selected.preset.id, forKey: "filter_id") } else { defaults.removeObject(forKey: "filter_id") }
+        defaults.set(value.photoFilterEnabled && value.selectedFilter != nil, forKey: "filter_enabled")
+        defaults.set(encodeAndroidIntensities(value.filterIntensities), forKey: "filter_intensities_v1")
+        defaults.set(encodeAndroidFavorites(value.favoriteFilterIDs), forKey: "favorite_photo_filters_v1")
         defaults.set(encodeAndroidFrameFavorites(value.favoriteFrameEffects), forKey: "favorite_frame_effects_v1")
     }
 
