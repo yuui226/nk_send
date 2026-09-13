@@ -3,6 +3,18 @@ import UIKit
 @testable import ZTransfer
 
 final class DomainModelTests: XCTestCase {
+    @MainActor
+    func testEffectPreviewCandidateSkipsVideoAndUsesNewestCaptureDateThenHandle() {
+        let files = [
+            CameraFile(id: 9, storageID: 1, format: 0x300E, size: 1,
+                       fileName: "new.MP4", captureDate: "20990101T000000", isProtected: false),
+            CameraFile(id: 2, storageID: 1, format: 0x3801, size: 1,
+                       fileName: "older.JPG", captureDate: "20260101T000000", isProtected: false),
+            CameraFile(id: 7, storageID: 1, format: 0x3801, size: 1,
+                       fileName: "newer.JPG", captureDate: "20260914T000000", isProtected: false),
+        ]
+        XCTAssertEqual(PhotoListViewModel.latestEffectPreviewFile(in: files)?.id, 7)
+    }
     func testCatalogGroupingKeepsFirstSeenDayOrderAndUnknownBucket() {
         let files = [
             CameraFile(id: 1, storageID: 1, format: 0x3801, size: 1, fileName: "a.JPG", captureDate: "20260913T010203", isProtected: false),

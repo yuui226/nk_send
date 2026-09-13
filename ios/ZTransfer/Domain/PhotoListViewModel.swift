@@ -34,6 +34,23 @@ final class PhotoListViewModel: ObservableObject {
     /// A cancelled/old scan must never publish over a newer camera session.
     private var loadGeneration = 0
 
+    /// Matches Android's latestEffectPreviewFile: videos are never used as an
+    /// effect demo, and ties are resolved by the camera handle.
+    static func latestEffectPreviewFile(in files: [CameraFile]) -> CameraFile? {
+        files
+            .filter { $0.fileExtension != ".mov" && $0.fileExtension != ".mp4" }
+            .max { lhs, rhs in
+                let leftDate = lhs.captureDate ?? ""
+                let rightDate = rhs.captureDate ?? ""
+                if leftDate != rightDate { return leftDate < rightDate }
+                return lhs.id < rhs.id
+            }
+    }
+
+    var latestEffectPreviewFile: CameraFile? {
+        Self.latestEffectPreviewFile(in: allFiles)
+    }
+
     init(repository: CameraRepository) {
         self.scanCatalog = { preserve, detect, handler in
             try await repository.scanCatalog(preserveExisting: preserve,

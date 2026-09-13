@@ -25,6 +25,8 @@ struct PhotoListView: View {
     @State private var effectPreviewSource: UIImage?
     @State private var effectPreviewExif: PhotoExif?
     @State private var effectPreviewGeneration = 0
+    @State private var effectPreviewRequested = false
+    @State private var effectPreviewFileKey: String?
 
     init(repository: CameraRepository, queue: TransferQueue = TransferQueue(), directory: DirectoryAccessStore = DirectoryAccessStore(), effectsStore: PhotoEffectsStore = PhotoEffectsStore(), onDisconnect: @escaping () -> Void) {
         _model = StateObject(wrappedValue: PhotoListViewModel(repository: repository))
@@ -155,6 +157,11 @@ struct PhotoListView: View {
         .onChange(of: model.sections) { sections in
             let valid = Set(sections.map(\.day))
             collapsedDays = collapsedDays.intersection(valid)
+        }
+        .onChange(of: model.availableFiles.count) { _ in
+            // Android retains this demand when Settings opens before the
+            // first metadata batch and retries when a candidate appears.
+            if effectPreviewRequested { requestEffectPreview() }
         }
         .onChange(of: queueModel.snapshot.items) { items in
             model.updateTransferredIDs(Set(items.filter { $0.status == .completed }.map { $0.file.id }))
@@ -304,8 +311,11 @@ struct PhotoListView: View {
     /// its cached thumbnail first, then upgrade the same identity to the FHD
     /// preview and EXIF. A late response for an older file is discarded.
     private func requestEffectPreview() {
-        guard let session, let file = model.availableFiles.first else { return }
+        effectPreviewRequested = true
+        guard let session, let file = model.latestEffectPreviewFile else { return }
         let key = "\(file.id)|\(file.fileName)|\(file.size)|\(file.captureDate ?? "")"
+        guard effectPreviewFileKey != key || (effectPreviewSource == nil && effectPreviewExif == nil) else { return }
+        effectPreviewFileKey = key
         effectPreviewGeneration &+= 1
         let generation = effectPreviewGeneration
         Task {
