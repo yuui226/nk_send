@@ -91,6 +91,10 @@ struct PhotoPreviewView: View {
     // survives leaving the preview and reopening the app.
     @AppStorage("preview_histogram_enabled") private var histogramVisible = false
     @State private var histogramBars: [CGFloat] = []
+    // The preview page publishes the bitmap it is already displaying. Keep
+    // that reference so enabling the histogram never starts another camera
+    // read or decodes the same image a second time.
+    @State private var displayedImages: [UInt32: UIImage] = [:]
     @State private var queueDragOffset: CGFloat = 0
     @State private var queueFlightTask: Task<Void, Never>?
     @State private var queueFlightActive = false
@@ -158,7 +162,12 @@ struct PhotoPreviewView: View {
                                          localOriginalURL: localOriginalURLs[file.id],
                                          rotationDegrees: rotationDegrees,
                                          zoomEnabled: !file.fileExtension.lowercased().hasSuffix(".mov") &&
-                                            !file.fileExtension.lowercased().hasSuffix(".mp4"))
+                                            !file.fileExtension.lowercased().hasSuffix(".mp4"),
+                                         onDisplayImage: { image in
+                                             displayedImages[file.id] = image
+                                             guard histogramVisible, currentPhoto?.id == file.id else { return }
+                                             histogramBars = image.map(luminanceHistogram) ?? []
+                                         })
                         case .burst(let group):
                             BurstCollectionPreview(session: session, group: group) {
                                 expandBurst(group)
@@ -341,6 +350,11 @@ struct PhotoPreviewView: View {
                 exifLoading = false
             }
         }
+        .onChange(of: histogramVisible) { visible in
+            guard visible, let file = currentPhoto,
+                  let image = displayedImages[file.id] else { return }
+            histogramBars = luminanceHistogram(image)
+        }
         .task(id: previewEntries.indices.contains(index) ? previewEntries[index].id : "none") {
             guard let file = currentPhoto, !exifLoading else { return }
             histogramBars = []
@@ -349,23 +363,13 @@ struct PhotoPreviewView: View {
                 if let data = try? Data(contentsOf: localURL) {
                     exif = PhotoExifParser.parse(data)
                 }
-                if let image = decodeLocalOriginalPreview(
-                    at: localURL,
-                    route: localOriginalPreviewRoute(for: file.fileExtension)
-                ) {
-                    histogramBars = luminanceHistogram(image)
-                }
                 exifLoading = false
                 return
             }
-            await session.setFHDActive(true)
-            defer { Task { await session.setFHDActive(false) } }
-            async let loadedExif = try? session.exif(file: file)
-            async let loadedThumb = file.fileExtension == ".mov" || file.fileExtension == ".mp4"
-                ? nil
-                : (try? session.preview(handle: file.id))
-            exif = await loadedExif
-            if let data = await loadedThumb, let image = UIImage(data: data) { histogramBars = luminanceHistogram(image) }
+            // PreviewImage owns the single thumbnail/FHD pipeline. EXIF is
+            // independent; requesting another preview here would duplicate
+            // the camera read and race the Android-ordered loader.
+            exif = try? await session.exif(file: file)
             exifLoading = false
         }
     }
@@ -568,6 +572,7 @@ private struct PreviewImage: View {
     let localOriginalURL: URL?
     let rotationDegrees: Double
     let zoomEnabled: Bool
+    let onDisplayImage: (UIImage?) -> Void
     @State private var thumbnail: UIImage?
     @State private var image: UIImage?
     @State private var highResolutionAlpha: CGFloat = 0
@@ -633,6 +638,7 @@ private struct PreviewImage: View {
             if let data = try? await session.cachedThumbnail(file: file),
                let thumb = UIImage(data: data) {
                 thumbnail = thumb
+                onDisplayImage(thumb)
             }
             try? await Task.sleep(nanoseconds: 340_000_000)
             guard !Task.isCancelled else { return }
@@ -643,6 +649,7 @@ private struct PreviewImage: View {
                ) {
                 image = localImage
                 highResolutionAlpha = 1
+                onDisplayImage(localImage)
                 return
             }
             if !zoomEnabled {
@@ -650,6 +657,7 @@ private struct PreviewImage: View {
                    let data = try? await session.thumbnail(file: file),
                    let thumb = UIImage(data: data) {
                     thumbnail = thumb
+                    onDisplayImage(thumb)
                 }
                 return
             }
@@ -659,9 +667,11 @@ private struct PreviewImage: View {
             async let previewData = try? await session.preview(handle: file.id)
             if let data = await thumbnailData, let thumb = UIImage(data: data) {
                 thumbnail = thumb
+                onDisplayImage(thumb)
             }
             if let data = await previewData, let highResolution = UIImage(data: data) {
                 image = highResolution
+                onDisplayImage(highResolution)
                 if thumbnail == nil {
                     highResolutionAlpha = 1
                 } else {
