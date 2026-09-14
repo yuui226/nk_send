@@ -69,16 +69,18 @@ actor PhotoThumbnailFillQueue {
         }
     }
 
-    func poll() -> UInt32? {
+    func poll() -> (id: UInt32, revision: Int)? {
         let id: UInt32?
         if !priority.isEmpty { id = removeFirst(&priority) }
         else if !regular.isEmpty { id = removeFirst(&regular) }
         else { id = nil }
         if let id { pending.remove(id) }
-        return id
+        guard let id else { return nil }
+        return (id, revision)
     }
 
-    func returnToFront(_ id: UInt32) {
+    func returnToFront(_ id: UInt32, expectedRevision: Int) {
+        guard revision == expectedRevision else { return }
         guard !settled.contains(id), !failed.contains(id) else { return }
         priority.removeAll { $0 == id }; regular.removeAll { $0 == id }
         pending.insert(id)

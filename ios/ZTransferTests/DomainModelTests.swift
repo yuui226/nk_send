@@ -63,8 +63,9 @@ final class DomainModelTests: XCTestCase {
         await queue.seed([first, second])
         let firstPolled = await queue.poll()
         let secondPolled = await queue.poll()
-        XCTAssertEqual(firstPolled, first.id)
-        XCTAssertEqual(secondPolled, second.id)
+        XCTAssertEqual(firstPolled?.id, first.id)
+        XCTAssertEqual(secondPolled?.id, second.id)
+        XCTAssertEqual(firstPolled?.revision, secondPolled?.revision)
     }
 
     func testThumbnailFillQueueWakeReleasesAnEmptyWorker() async {
@@ -77,6 +78,22 @@ final class DomainModelTests: XCTestCase {
         await queue.wake()
         let released = await waiter.value
         XCTAssertTrue(released)
+    }
+
+    func testThumbnailFillQueueDoesNotRequeueAcrossScanRevision() async {
+        let queue = PhotoThumbnailFillQueue()
+        let first = CameraFile(id: 11, storageID: 1, format: 0x3801, size: 1,
+                               fileName: "first.JPG", captureDate: "20260914T020000", isProtected: false)
+        let second = CameraFile(id: 12, storageID: 1, format: 0x3801, size: 1,
+                                fileName: "second.JPG", captureDate: "20260914T010000", isProtected: false)
+        await queue.beginScan()
+        await queue.seed([first])
+        let stale = await queue.poll()
+        await queue.beginScan()
+        await queue.seed([second])
+        if let stale { await queue.returnToFront(stale.id, expectedRevision: stale.revision) }
+        let next = await queue.poll()
+        XCTAssertEqual(next?.id, second.id)
     }
 
     func testBurstGroupingMatchesConsecutiveNameAndOneSecondRule() {

@@ -363,10 +363,11 @@ final class PhotoListViewModel: ObservableObject {
             guard let self else { return }
             defer { self.fillWorkerActive = false }
             while !Task.isCancelled {
-                guard let id = await thumbnailFillQueue.poll() else {
+                guard let polled = await thumbnailFillQueue.poll() else {
                     await thumbnailFillQueue.waitForWake()
                     continue
                 }
+                let id = polled.id
                 // Android's queue resolves the current file when a task is
                 // consumed. Do not capture a one-time catalog snapshot here:
                 // ObjectAdded can enqueue a file after the worker starts.
@@ -374,7 +375,7 @@ final class PhotoListViewModel: ObservableObject {
                     continue
                 }
                 guard !self.transferBusy, await canFill() else {
-                    await thumbnailFillQueue.returnToFront(id)
+                    await thumbnailFillQueue.returnToFront(id, expectedRevision: polled.revision)
                     return
                 }
                 let settled = await prefetchBatch([file])
