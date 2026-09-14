@@ -23,12 +23,20 @@ enum WiFiConnectionPhase: Equatable, Sendable {
     case unavailable, idle, discovering, pairing, connecting, connected, failed(String)
 }
 
+/// Android keeps the AP card's short title/body separate from the transport
+/// exception. Preserve that classification so the iOS card never exposes a
+/// raw socket error where Android shows its localized feedback pair.
+enum WiFiFailureKind: String, Equatable, Sendable {
+    case notFound, refused, failed
+}
+
 struct ConnectionState: Equatable, Sendable {
     var selectedMode: CameraConnectionMode = .usb
     var wirelessMode: WirelessMode = .sta
     var usbPhase: USBConnectionPhase = .waitingForCamera
     var staProgressIP: String?
     var wifiPhase: WiFiConnectionPhase = .idle
+    var wifiFailureKind: WiFiFailureKind?
     var usbAuthorization: USBAuthorizationState = .notDetermined
     var discoveredDevices: [USBDeviceDescriptor] = []
     var selectedDeviceID: String?

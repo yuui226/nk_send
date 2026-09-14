@@ -61,4 +61,21 @@ final class ConnectionStateTests: XCTestCase {
         XCTAssertEqual(complete.hero, 1, accuracy: 0.0001)
         XCTAssertEqual(complete.success, 1, accuracy: 0.0001)
     }
+
+    func testAPFailureClassificationMatchesAndroid() async {
+        let refusal = await MainActor.run {
+            ConnectionViewModel.wifiFailureKind(for: STAConnectionError.cameraRefused)
+        }
+        XCTAssertEqual(refusal, .refused)
+
+        let timeout = await MainActor.run {
+            ConnectionViewModel.wifiFailureKind(for: PTPSessionError.timeout)
+        }
+        XCTAssertEqual(timeout, .notFound)
+
+        let protocolFailure = await MainActor.run {
+            ConnectionViewModel.wifiFailureKind(for: PTPIPCodecError.malformedLength)
+        }
+        XCTAssertEqual(protocolFailure, .failed)
+    }
 }

@@ -79,7 +79,7 @@ struct ConnectionMethodCard: View {
             } else {
                 instructions
                 if let failure {
-                    ConnectionFeedback(title: AppLocalized.resource("connection_failed_short"), message: failure)
+                    ConnectionFeedback(title: feedbackTitle(for: failure), message: feedbackMessage(for: failure))
                         .padding(.top, 12)
                         .transition(.asymmetric(
                             insertion: .opacity.animation(.timingCurve(0.0, 0.0, 0.2, 1.0, duration: 0.22).delay(0.035)),
@@ -262,6 +262,24 @@ struct ConnectionMethodCard: View {
         if mode == .usb, case let .failed(message) = state.usbPhase { return message }
         if mode == .wifi, case let .failed(message) = state.wifiPhase { return message }
         return nil
+    }
+
+    private func feedbackTitle(for failure: String) -> String {
+        guard mode == .wifi, !isSTA else { return AppLocalized.resource("connection_failed_short") }
+        switch state.wifiFailureKind {
+        case .notFound: return AppLocalized.resource("wifi_camera_not_found")
+        case .refused: return AppLocalized.resource("wifi_camera_refused")
+        case .failed, .none: return AppLocalized.resource("wifi_camera_connection_failed")
+        }
+    }
+
+    private func feedbackMessage(for failure: String) -> String {
+        guard mode == .wifi, !isSTA else { return failure }
+        switch state.wifiFailureKind {
+        case .notFound: return AppLocalized.resource("wifi_connect_camera")
+        case .refused: return AppLocalized.resource("wifi_check_camera_connection")
+        case .failed, .none: return AppLocalized.resource("wifi_restart_camera")
+        }
     }
 }
 

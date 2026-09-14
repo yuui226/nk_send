@@ -164,6 +164,7 @@ final class ConnectionViewModel: ObservableObject {
         state.usbPhase = .waitingForCamera
         state.selectedDeviceID = nil
         state.wifiPhase = .idle
+        state.wifiFailureKind = nil
         // Returning from the photo list keeps Android's AP watcher alive;
         // restart it after the explicit session teardown when Wi‑Fi is still
         // on the camera candidate network.
@@ -188,6 +189,7 @@ final class ConnectionViewModel: ObservableObject {
         cancelledConnection?.cancel(); wifiConnectTask = nil
         wifiRetryTask?.cancel(); wifiRetryTask = nil
         state.wifiPhase = .idle
+        state.wifiFailureKind = nil
         state.staProgressIP = nil
         let service = wifiService
         let previousCleanup = wifiCleanupTask
@@ -220,6 +222,7 @@ final class ConnectionViewModel: ObservableObject {
         wifiGeneration &+= 1
         let generation = wifiGeneration
         state.wifiPhase = mode == .sta ? .discovering : .connecting
+        state.wifiFailureKind = nil
         state.staProgressIP = nil
         let pendingCleanup = wifiCleanupTask
         wifiConnectTask = Task { [weak self] in
@@ -257,6 +260,7 @@ final class ConnectionViewModel: ObservableObject {
                 self.wifiConnectTask = nil
                 if Task.isCancelled || error is CancellationError { self.state.wifiPhase = .idle; return }
                 self.state.wifiPhase = .failed(self.wifiErrorMessage(error))
+                if mode == .ap { self.state.wifiFailureKind = Self.wifiFailureKind(for: error) }
                 self.state.staProgressIP = nil
                 await self.refreshSTAProfiles()
                 if mode == .sta {
@@ -320,6 +324,30 @@ final class ConnectionViewModel: ObservableObject {
         case STAConnectionError.pairingResultFailed(let response):
             return "Nikon pairing result failed: 0x" + String(response, radix: 16)
         default: return cause.localizedDescription
+        }
+    }
+
+    /// Mirrors CameraViewModel.classifyWifiConnectionFailure exactly for AP:
+    /// refusal is only the camera's explicit PTP/IP init-fail; socket reachability
+    /// failures are presented as "camera not found"; all other protocol errors
+    /// use the generic connection-failed copy.
+    static func wifiFailureKind(for error: Error) -> WiFiFailureKind {
+        let cause = (error as? STAConnectionFailure)?.cause ?? error
+        switch cause {
+        case STAConnectionError.cameraRefused:
+            return .refused
+        case PTPSessionError.timeout:
+            return .notFound
+        case NWError.posix(let code)
+            where code == .ECONNREFUSED || code == .ENETUNREACH ||
+                  code == .EHOSTUNREACH || code == .ETIMEDOUT:
+            return .notFound
+        case let url as URLError
+            where url.code == .timedOut || url.code == .cannotConnectToHost ||
+                  url.code == .networkConnectionLost:
+            return .notFound
+        default:
+            return .failed
         }
     }
 
@@ -408,6 +436,7 @@ final class ConnectionViewModel: ObservableObject {
         guard cameraSession == nil else { return }
         cancelWiFiConnection()
         state.wirelessMode = wirelessMode
+        state.wifiFailureKind = nil
         wirelessPreferences.set(wirelessMode == .sta ? "STA" : "AP", forKey: "wireless_mode")
         if wirelessMode == .ap { startAPWatcherIfNeeded() } else {
             wifiWatcherTask?.cancel()
