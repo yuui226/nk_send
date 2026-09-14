@@ -137,12 +137,14 @@ actor TransferQueue {
             // requeues that item on the next session instead of persisting a
             // permanent in-flight state.
             items = stored.map { item in
-                guard item.status == .transferring else { return item }
+                guard item.status == .transferring || item.isGeneratingFrame else { return item }
                 var recovered = item
                 recovered.status = .waiting
                 recovered.progress = 0
                 recovered.bytesPerSecond = 0
                 recovered.error = nil
+                recovered.isGeneratingFrame = false
+                recovered.frameError = nil
                 return recovered
             }
         }

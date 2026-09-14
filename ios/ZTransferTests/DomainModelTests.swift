@@ -181,6 +181,25 @@ final class DomainModelTests: XCTestCase {
         XCTAssertTrue(decoded.effects?.hasEffect == true)
     }
 
+    func testPersistedFrameGenerationIsRequeuedForRecovery() async throws {
+        let defaults = UserDefaults.standard
+        let key = "transferQueue.items.v1"
+        let previous = defaults.data(forKey: key)
+        defer {
+            if let previous { defaults.set(previous, forKey: key) }
+            else { defaults.removeObject(forKey: key) }
+        }
+        let file = CameraFile(id: 45, storageID: 1, format: 0x3801, size: 10,
+                              fileName: "resume-frame.JPG", captureDate: nil, isProtected: false)
+        let item = TransferQueueItem(id: UUID(), file: file, status: .completed,
+                                     isGeneratingFrame: true)
+        defaults.set(try JSONEncoder().encode([item]), forKey: key)
+        let queue = TransferQueue()
+        let snapshot = await queue.snapshots().first(where: { !$0.items.isEmpty })
+        XCTAssertEqual(snapshot?.items.first?.status, .waiting)
+        XCTAssertFalse(snapshot?.items.first?.isGeneratingFrame ?? true)
+    }
+
     func testAutomaticQueueDeduplicatesCameraIdentity() async {
         let defaults = UserDefaults.standard
         let persistenceKey = "transferQueue.items.v1"
