@@ -35,7 +35,14 @@ struct RemoteView: View {
                 if let image = model.frameImage {
                     Image(uiImage: image)
                         .resizable()
-                        .scaledToFit()
+                        // Android lays out the viewfinder with the desqueezed
+                        // aspect ratio first, then applies the horizontal
+                        // correction to the rendered pixels. Keeping that
+                        // order here makes the image rect and all overlays
+                        // use the same geometry.
+                        .aspectRatio((image.size.width / max(image.size.height, 1)) * CGFloat(desqueeze),
+                                     contentMode: .fit)
+                        .scaleEffect(x: CGFloat(desqueeze), y: 1, anchor: .center)
                         .scaleEffect(zoom)
                         .gesture(
                             MagnificationGesture()
@@ -53,8 +60,7 @@ struct RemoteView: View {
                                             coordinateSize: image.size)
                             }
                         )
-                        .frame(width: proxy.size.width, height: proxy.size.height)
-                        .aspectRatio((image.size.width / max(image.size.height, 1)) * CGFloat(desqueeze), contentMode: .fit)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                     if let point = model.state.focus.point,
                        model.state.focus.phase != .idle {
                         RemoteFocusReticle(phase: model.state.focus.phase,
