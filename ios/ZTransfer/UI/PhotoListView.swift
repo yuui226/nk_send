@@ -1007,7 +1007,16 @@ private struct BurstThumbnailView: View {
         ZStack(alignment: .bottomTrailing) {
             CameraThumbnailView(session: session, handle: group.files[0].id, file: group.files[0],
                                 transferred: transferred, queueStatus: queueStatus)
-            Text("\(group.files.count)").font(.system(size: 12, weight: .bold, design: .rounded)).foregroundStyle(.white).padding(.horizontal, 6).padding(.vertical, 3).background(.black.opacity(0.62), in: Capsule()).padding(6)
+            HStack(spacing: 4) {
+                Image(systemName: "square.stack.3d.up.fill")
+                    .font(.system(size: 10, weight: .semibold))
+                Text(String(format: AppLocalized.resource("burst_collection_count"), group.files.count))
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 6).padding(.vertical, 4)
+            .background(ZTransferColors.statusConnected.opacity(0.9), in: Capsule())
+            .padding(6)
         }
     }
 }
