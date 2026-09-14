@@ -203,6 +203,13 @@ actor TransferQueue {
         worker = Task { [weak self] in await self?.run() }
     }
 
+    /// Refreshes the transport used by later retries without changing the
+    /// deferred-start decision or interrupting an active transfer.
+    func attach(session: CameraSession, directory: URL?) {
+        self.session = session
+        if let directory { self.directory = directory }
+    }
+
     /// Android only records this request while a transfer worker is active.
     /// An idle queue must remain startable; setting the flag before the first
     /// task would incorrectly suppress the next explicit start.

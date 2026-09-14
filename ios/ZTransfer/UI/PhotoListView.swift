@@ -180,6 +180,9 @@ struct PhotoListView: View {
             }
         }
         .task {
+            if let session {
+                queueModel.attach(session: session, directory: directoryStore.directoryURL)
+            }
             model.setNewMediaHandler { files in
                 guard UserDefaults.standard.bool(forKey: "auto_transfer_new_media"), let session,
                       let directory = directoryStore.directoryURL else { return }
