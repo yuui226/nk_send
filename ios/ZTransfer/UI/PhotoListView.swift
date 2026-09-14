@@ -326,6 +326,21 @@ struct PhotoListView: View {
                         queueModel.enqueue(file, organizeByDate: organizeByDate, effects: effectsStore.settings)
                     }
                     return true
+                } onEnqueueBurst: { burstFiles in
+                    guard directoryStore.directoryURL != nil else {
+                        selectedFile = nil
+                        showingSettings = true
+                        return false
+                    }
+                    if !deferTransferStart, let directory = directoryStore.directoryURL {
+                        queueModel.enqueue(burstFiles, autoStart: session, directory: directory,
+                                           organizeByDate: organizeByDate, effects: effectsStore.settings)
+                    } else {
+                        for file in burstFiles {
+                            queueModel.enqueue(file, organizeByDate: organizeByDate, effects: effectsStore.settings)
+                        }
+                    }
+                    return true
                 }
                 .onAppear { model.pauseForPreview() }
                 .onDisappear {
@@ -824,7 +839,8 @@ private struct QueuePill: View {
     var body: some View {
         HStack(spacing: 5) {
             if showDoneLabel {
-                Text("Done").font(.system(size: ZTransferMetrics.caption, weight: .semibold))
+                Text(AppLocalized.resource("done"))
+                    .zTransferText(size: ZTransferMetrics.caption, weight: .semibold)
                     .transition(.opacity.combined(with: .scale(scale: 0.82)))
             } else {
                 Image(systemName: snapshot.isTransferring ? "arrow.down.circle.fill" : "checklist")

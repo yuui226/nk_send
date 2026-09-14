@@ -22,6 +22,16 @@ final class TransferQueueViewModel: ObservableObject {
     deinit { observation?.cancel() }
 
     func enqueue(_ file: CameraFile, organizeByDate: Bool = false, effects: PhotoEffectsSettings? = nil) { Task { _ = await queue.enqueue(file, organizeByDate: organizeByDate, effects: effects) } }
+    /// Batch entry point used by Android's collapsed burst preview. Tasks are
+    /// appended in source order and the worker is started once, so a burst
+    /// cannot interleave with another enqueue between members.
+    func enqueue(_ files: [CameraFile], autoStart session: CameraSession?, directory: URL?, organizeByDate: Bool = false, effects: PhotoEffectsSettings? = nil) {
+        guard !files.isEmpty else { return }
+        Task {
+            for file in files { _ = await queue.enqueue(file, organizeByDate: organizeByDate, effects: effects) }
+            if let session, let directory { await queue.start(session: session, directory: directory) }
+        }
+    }
     /// Android's automatic-new-media entry point deduplicates by logical
     /// identity before adding and starts the worker only when the user has not
     /// deferred transfer start.

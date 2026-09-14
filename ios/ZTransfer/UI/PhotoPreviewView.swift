@@ -37,12 +37,14 @@ private func decodeLocalOriginalPreview(at url: URL, route: LocalOriginalPreview
 struct PhotoPreviewView: View {
     let session: CameraSession
     let files: [CameraFile]
+    let burstGroups: [BurstPhotoGroup]
     let directory: URL?
     let organizeByDate: Bool
     @Binding var selectedFile: CameraFile?
     /// Returns false when the Android preflight (directory/connection gate)
     /// rejects the task. The queue flight must not play without a real task.
     let onEnqueue: (CameraFile) -> Bool
+    let onEnqueueBurst: ([CameraFile]) -> Bool
     @State private var index: Int
     @State private var rotationDegrees: Double = 0
     @AppStorage("preview_rotation_quarter_turns") private var rotationQuarterTurns = 0
@@ -58,9 +60,12 @@ struct PhotoPreviewView: View {
 
     init(session: CameraSession, files: [CameraFile], selectedFile: Binding<CameraFile?>,
          directory: URL? = nil, organizeByDate: Bool = false,
-         onEnqueue: @escaping (CameraFile) -> Bool = { _ in false }) {
+         onEnqueue: @escaping (CameraFile) -> Bool = { _ in false },
+         onEnqueueBurst: @escaping ([CameraFile]) -> Bool = { _ in false }) {
         self.session = session; self.files = files; self.directory = directory
-        self.organizeByDate = organizeByDate; _selectedFile = selectedFile; self.onEnqueue = onEnqueue
+        self.burstGroups = PhotoCatalogGrouping.bursts(in: files)
+        self.organizeByDate = organizeByDate; _selectedFile = selectedFile
+        self.onEnqueue = onEnqueue; self.onEnqueueBurst = onEnqueueBurst
         let first = selectedFile.wrappedValue ?? files.first
         _index = State(initialValue: first.flatMap { files.firstIndex(of: $0) } ?? 0)
     }
@@ -160,7 +165,10 @@ struct PhotoPreviewView: View {
                             rotationDegrees = -90 * Double(rotationQuarterTurns)
                         }
                     } label: { Image(systemName: "rotate.left").frame(width: 44, height: 44) }
-                    Button { if files.indices.contains(index) { _ = onEnqueue(files[index]) } } label: { Image(systemName: "plus").frame(width: 44, height: 44) }
+                    Button {
+                        guard files.indices.contains(index) else { return }
+                        startQueueFlight(for: files[index])
+                    } label: { Image(systemName: "plus").frame(width: 44, height: 44) }
                 }
                 .font(.system(size: 18, weight: .semibold))
                 .background(.black.opacity(0.28), in: Capsule())
@@ -239,7 +247,8 @@ struct PhotoPreviewView: View {
     }
 
     private func startQueueFlight(for file: CameraFile) {
-        guard onEnqueue(file) else { return }
+        let burst = burstGroups.first(where: { $0.files.first?.id == file.id })
+        guard burst == nil ? onEnqueue(file) : onEnqueueBurst(burst!.files) else { return }
         queueFlightActive = true
         withAnimation(.timingCurve(0.4, 0.0, 0.2, 1.0, duration: 0.56)) {
             queueDragOffset = -max(240, UIScreen.main.bounds.height * 0.42)
