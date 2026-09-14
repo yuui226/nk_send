@@ -394,7 +394,9 @@ actor TransferQueue {
     private var pauseAfterCurrentFileRequested: Bool { pauseAfterCurrent }
 
     private static func supportsRenderedOutput(_ ext: String) -> Bool {
-        [".jpg", ".jpeg", ".png", ".heic", ".heif", ".tif", ".tiff"].contains(ext.lowercased())
+        // Android's PhotoFrameExporter deliberately limits transfer effects
+        // to JPG/JPEG/PNG; RAW, TIFF, HEIC and video remain original-only.
+        [".jpg", ".jpeg", ".png"].contains(ext.lowercased())
     }
 
     private func generateFrame(for id: UUID, source: URL, settings: PhotoEffectsSettings, in directory: URL) async {
