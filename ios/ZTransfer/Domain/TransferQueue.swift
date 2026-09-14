@@ -350,7 +350,25 @@ actor TransferQueue {
             }
         }
         while !Task.isCancelled, !pauseAfterCurrentFileRequested {
-            guard let index = items.firstIndex(where: { $0.status == .waiting }), let session else { break }
+            guard let index = items.firstIndex(where: { $0.status == .waiting }) else { break }
+            // Android asks the provider for a live camera immediately before
+            // claiming each task. If the session disappeared between files,
+            // every remaining waiting task is settled as "camera not
+            // connected" and the worker ends; leaving them waiting would make
+            // the queue look idle without the Android error state and would
+            // also allow a stale worker to be mistaken for a resumable one.
+            guard let session else {
+                let message = AppLocalized.resource("camera_not_connected")
+                var changed = false
+                for waitingIndex in items.indices where items[waitingIndex].status == .waiting {
+                    items[waitingIndex].status = .failed
+                    items[waitingIndex].error = message
+                    items[waitingIndex].bytesPerSecond = 0
+                    changed = true
+                }
+                if changed { publish() }
+                break
+            }
             let itemID = items[index].id
             let originalSize = items[index].file.size
             items[index].status = .transferring; items[index].error = nil; publish()
