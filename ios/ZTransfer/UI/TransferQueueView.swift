@@ -78,7 +78,7 @@ struct TransferQueueView: View {
     }
 
     private var queueBottomControls: some View {
-        HStack(spacing: 12) {
+        VStack(alignment: .trailing, spacing: 12) {
             if model.snapshot.items.contains(where: { $0.status == .failed || $0.status == .cancelled }) {
                 Button { withAnimation(ZTransferMotion.standard) { pendingConfirmation = .retry } } label: {
                     Image(systemName: "arrow.clockwise").frame(width: 48, height: 48)
