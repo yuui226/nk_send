@@ -333,7 +333,7 @@ private struct QueueItemView: View {
 /// Android's transfer cards use a low-amplitude liquid fill instead of a
 /// static progress bar. The phase is driven by TimelineView so progress
 /// updates do not create a second task per card.
-private struct LiquidTransferProgressFill: View {
+struct LiquidTransferProgressFill: View {
     let progress: Double
     let seed: String
 
@@ -357,7 +357,7 @@ private struct LiquidTransferProgressFill: View {
     private var seedPhase: CGFloat { CGFloat(abs(seed.hashValue % 360)) / 360 }
 }
 
-private struct LiquidTransferShape: Shape {
+struct LiquidTransferShape: Shape {
     var progress: Double
     var phase: CGFloat
 

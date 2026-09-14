@@ -846,36 +846,44 @@ private struct QueuePill: View {
     private var hasActive: Bool { remainingCount > 0 || generationCount > 0 || heldCount > 0 }
 
     var body: some View {
-        HStack(spacing: 5) {
-            if showDoneLabel {
-                // Android keeps this transient badge literal across locales.
-                Text("Done")
-                    .zTransferText(size: ZTransferMetrics.caption, weight: .semibold)
-                    .transition(.opacity.combined(with: .scale(scale: 0.82)))
-            } else {
-                Image(systemName: snapshot.isTransferring ? "arrow.down.circle.fill" : "checklist")
-                    .scaleEffect(hasActive ? 1 : 0.9)
-                if displayRemainingCount > 0 {
-                    Text("\(displayRemainingCount)")
-                        .monospacedDigit()
-                        .id(displayRemainingCount)
-                        .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .move(edge: .top).combined(with: .opacity)))
-                } else if generationCount > 0 {
-                    Text(AppLocalized.resource("queue_pill_generating"))
+        ZStack(alignment: .leading) {
+            if let activeItem, snapshot.isTransferring {
+                LiquidTransferProgressFill(progress: activeItem.progress, seed: activeItem.id.uuidString)
+                    .clipShape(Capsule())
+                    .transition(.opacity)
+            }
+            HStack(spacing: 5) {
+                if showDoneLabel {
+                    // Android keeps this transient badge literal across locales.
+                    Text("Done")
                         .zTransferText(size: ZTransferMetrics.caption, weight: .semibold)
-                        .foregroundStyle(ZTransferColors.accentPurple)
-                    Text("\(generationCount)")
-                        .monospacedDigit()
-                        .id("generation-\(generationCount)")
-                        .foregroundStyle(ZTransferColors.accentPurple)
-                }
-                if let activeItem, activeItem.bytesPerSecond > 0 {
-                    Text(speedText(activeItem.bytesPerSecond))
-                        .monospacedDigit()
-                        .transition(.opacity.combined(with: .move(edge: .leading)))
+                        .transition(.opacity.combined(with: .scale(scale: 0.82)))
+                } else {
+                    Image(systemName: snapshot.isTransferring ? "arrow.down.circle.fill" : "checklist")
+                        .scaleEffect(hasActive ? 1 : 0.9)
+                    if displayRemainingCount > 0 {
+                        Text("\(displayRemainingCount)")
+                            .monospacedDigit()
+                            .id(displayRemainingCount)
+                            .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .move(edge: .top).combined(with: .opacity)))
+                    } else if generationCount > 0 {
+                        Text(AppLocalized.resource("queue_pill_generating"))
+                            .zTransferText(size: ZTransferMetrics.caption, weight: .semibold)
+                            .foregroundStyle(ZTransferColors.accentPurple)
+                        Text("\(generationCount)")
+                            .monospacedDigit()
+                            .id("generation-\(generationCount)")
+                            .foregroundStyle(ZTransferColors.accentPurple)
+                    }
+                    if let activeItem, activeItem.bytesPerSecond > 0 {
+                        Text(speedText(activeItem.bytesPerSecond))
+                            .monospacedDigit()
+                            .transition(.opacity.combined(with: .move(edge: .leading)))
+                    }
                 }
             }
         }
+        .clipShape(Capsule())
         .animation(ZTransferMotion.standard, value: displayRemainingCount)
         .animation(ZTransferMotion.standard, value: generationCount)
         .animation(ZTransferMotion.standard, value: showDoneLabel)
