@@ -613,7 +613,19 @@ actor TransferQueue {
         case CameraRepositoryError.invalidDataset:
             return AppLocalized.resource("error_camera_metadata_unavailable")
         default:
-            return error.localizedDescription
+            // Android's friendlyError normalizes transport failures even when
+            // ImageCaptureCore/PTP wraps them in an NSError with only a text
+            // description. Preserve that user-facing classification here.
+            let message = error.localizedDescription
+            let lower = message.lowercased()
+            if ["connection abort", "connection reset", "broken pipe", "network is unreachable",
+                "timed out", "timeout", "socket", "econn", "etimedout"].contains(where: { lower.contains($0) }) {
+                return AppLocalized.resource("error_camera_connection_lost")
+            }
+            if error is CocoaError, (error as NSError).code == CocoaError.fileNoSuchFile.rawValue {
+                return AppLocalized.resource("error_dir_invalid")
+            }
+            return message
         }
     }
 }
