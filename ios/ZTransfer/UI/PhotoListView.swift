@@ -267,13 +267,14 @@ struct PhotoListView: View {
                     guard directoryStore.directoryURL != nil else {
                         selectedFile = nil
                         showingSettings = true
-                        return
+                        return false
                     }
                     if !deferTransferStart {
                         queueModel.enqueue(file, autoStart: session, directory: directoryStore.directoryURL, organizeByDate: organizeByDate, effects: effectsStore.settings)
                     } else {
                         queueModel.enqueue(file, organizeByDate: organizeByDate, effects: effectsStore.settings)
                     }
+                    return true
                 }
                 .onAppear { model.pauseForPreview() }
                 .onDisappear {
