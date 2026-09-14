@@ -164,7 +164,14 @@ actor TransferQueue {
         worker = Task { [weak self] in await self?.run() }
     }
 
-    func pauseAfterCurrentFile() { pauseAfterCurrent = true; publish() }
+    /// Android only records this request while a transfer worker is active.
+    /// An idle queue must remain startable; setting the flag before the first
+    /// task would incorrectly suppress the next explicit start.
+    func pauseAfterCurrentFile() {
+        guard isTransferring else { return }
+        pauseAfterCurrent = true
+        publish()
+    }
     func resume() {
         pauseAfterCurrent = false
         if worker == nil, let session, let directory { start(session: session, directory: directory) }

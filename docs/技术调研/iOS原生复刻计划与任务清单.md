@@ -19,6 +19,7 @@
 7. **验证记录如实填写。** 编译成功或接口存在不代表功能完成；未执行的测试不写通过。发现过去的完成状态不准确时立即更正，保留问题和后续工作记录。
 8. **动画参数与时序也是复刻内容。** 时长、延迟、曲线/弹簧参数、位移、缩放、透明度、交错顺序和手势联动逐项依据安卓实现；连续触发、中断、取消、恢复和退出清理一并核对。不能用系统默认效果替代，优化性能也不能擅改行为。
 9. **复用不改变状态归属。** 复用组件、模型类型、渲染器和公共逻辑；安卓独立的配置、草稿、持久化作用域及任务生命周期继续独立。工作台与相机传输的照片效果配置分别保存，不能因使用相同控件而合并。不为 iOS 复用改动安卓结构。
+10. **按场景完成闭环。** 每次只选定一个用户场景，沿入口、加载、交互、正常/异常/取消/重试/恢复、持久化、动画和验证完整对照安卓；照片列表与传输作为一条连续链路一起完成，未闭环前不交叉处理 GPS、监看或其他无关页面。
 
 第一条实际连接链路选择 USB 有线连接。先把“插入相机—授权—建立 PTP 会话—读取文件—预览—下载”跑通，再扩展 Wi‑Fi STA、AP 和 BLE/GPS。USB 能力必须以真实 iPhone、转接设备和 Nikon 机身验证结果为准，不能只按模拟器结果判断。
 
@@ -521,6 +522,12 @@
 - 对照 `ThumbnailFillQueue.beginScan()`：安卓重新枚举时只清空 priority/regular/pending/failed 队列，保留当前 `range`；扫描期间到达的 `ObjectAdded` 会继续按当前日期范围进入优先队列。iOS `PhotoThumbnailFillQueue.beginScan()` 原先额外把 `priorityRange` 置空，导致新对象在 `seed()` 前被错误放入普通队列。
 - 已修：iOS `beginScan()` 保留 `priorityRange`，仅重置当前扫描代际的工作项；新增 `testThumbnailFillQueuePreservesDatePriorityAcrossBeginScan`，验证新扫描期间范围内对象优先于范围外对象。
 - 验证：`xcodebuild -project ios/ZTransfer.xcodeproj -scheme ZTransfer -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test`，162 tests、0 failures。真实相机 ObjectAdded 时序仍留在照片列表任务的真机回归范围内。
+
+### 2026-09-14 照片传输暂停边界对账
+
+- 对照 `TransferViewModel.requestPauseAfterCurrent()`：安卓只有 `isTransferring` 为真时才设置 `pauseAfterCurrent`，空闲队列调用该动作不会阻止后续显式启动。
+- 已修：`ios/ZTransfer/Domain/TransferQueue.swift` 的 `pauseAfterCurrentFile()` 增加相同的活动队列门控；新增 `testTransferQueueIgnoresPauseRequestWhileIdle`，验证空闲状态不会残留暂停标记。
+- 验证：同一轮 Xcode Simulator 测试共 163 项、0 failures。传输中的断线续传和真实目录提供者回调仍属于任务 28/32 的后续闭环。
 
 ### 2026-09-14 安卓资源文案对账
 

@@ -156,6 +156,13 @@ final class DomainModelTests: XCTestCase {
         XCTAssertEqual(snapshot?.items.count, 2)
     }
 
+    func testTransferQueueIgnoresPauseRequestWhileIdle() async {
+        let queue = TransferQueue(defaults: UserDefaults(suiteName: "TransferQueueIdlePauseTests")!)
+        await queue.pauseAfterCurrentFile()
+        let paused = await queue.pauseAfterCurrent
+        XCTAssertFalse(paused)
+    }
+
     func testAutomaticQueueDeduplicatesCameraIdentity() async {
         let defaults = UserDefaults.standard
         let persistenceKey = "transferQueue.items.v1"
