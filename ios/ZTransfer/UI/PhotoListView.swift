@@ -861,16 +861,16 @@ struct QueuePill: View {
     let heldCount: Int
     @State private var showDoneLabel = false
     @State private var sawActiveBatch = false
+    @State private var previousAllDone: Bool?
+    @State private var countingVisible = false
     @State private var doneTask: Task<Void, Never>?
-    private var remainingCount: Int {
+    private var downloadRemaining: Int {
         snapshot.items.reduce(into: 0) { count, item in
-            if item.status == .waiting || item.status == .transferring || item.isGeneratingFrame {
+            if item.status == .waiting || item.status == .transferring {
                 count += 1
             }
         }
     }
-
-    private var displayRemainingCount: Int { max(0, remainingCount - heldCount) }
 
     private var generationCount: Int {
         snapshot.items.reduce(into: 0) { count, item in
@@ -882,7 +882,15 @@ struct QueuePill: View {
         snapshot.items.first(where: { $0.status == .transferring })
     }
 
-    private var hasActive: Bool { remainingCount > 0 || generationCount > 0 || heldCount > 0 }
+    private var displayRemainingCount: Int { max(0, downloadRemaining - heldCount) }
+    private var hasActive: Bool { downloadRemaining > 0 || generationCount > 0 || heldCount > 0 }
+    private var allDone: Bool { downloadRemaining == 0 && generationCount == 0 }
+    private var paused: Bool { !snapshot.isTransferring && downloadRemaining > 0 }
+    private var hasCancelled: Bool { snapshot.items.contains { $0.status == .cancelled } }
+    private var collapsedToIcon: Bool {
+        let allRemainingInFlight = downloadRemaining > 0 && heldCount >= downloadRemaining
+        return allRemainingInFlight || (!paused && !countingVisible && !allDone) || (allDone && !showDoneLabel)
+    }
 
     var body: some View {
         ZStack(alignment: .leading) {
@@ -897,27 +905,33 @@ struct QueuePill: View {
                     Text("Done")
                         .zTransferText(size: ZTransferMetrics.caption, weight: .semibold)
                         .transition(.opacity.combined(with: .scale(scale: 0.82)))
-                } else {
-                    Image(systemName: snapshot.isTransferring ? "arrow.down.circle.fill" : "checklist")
+                } else if collapsedToIcon {
+                    Image(systemName: "checklist")
                         .scaleEffect(hasActive ? 1 : 0.9)
-                    if displayRemainingCount > 0 {
+                } else if paused {
+                    Text("\(displayRemainingCount)")
+                        .monospacedDigit()
+                        .id("paused-\(displayRemainingCount)")
+                        .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .move(edge: .top).combined(with: .opacity)))
+                } else if downloadRemaining == 0, generationCount > 0 {
+                    Text(AppLocalized.resource("queue_pill_generating"))
+                        .zTransferText(size: ZTransferMetrics.caption, weight: .semibold)
+                        .foregroundStyle(ZTransferColors.accentBlue)
+                    Text("\(generationCount)")
+                        .monospacedDigit()
+                        .foregroundStyle(ZTransferColors.accentBlue)
+                } else {
+                    HStack(spacing: 8) {
+                        if let activeItem, activeItem.bytesPerSecond > 0 {
+                            Text(speedText(activeItem.bytesPerSecond))
+                                .monospacedDigit()
+                                .foregroundStyle(ZTransferColors.accentBlue)
+                                .transition(.opacity.combined(with: .move(edge: .leading)))
+                        }
                         Text("\(displayRemainingCount)")
                             .monospacedDigit()
                             .id(displayRemainingCount)
                             .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .move(edge: .top).combined(with: .opacity)))
-                    } else if generationCount > 0 {
-                        Text(AppLocalized.resource("queue_pill_generating"))
-                            .zTransferText(size: ZTransferMetrics.caption, weight: .semibold)
-                            .foregroundStyle(ZTransferColors.accentPurple)
-                        Text("\(generationCount)")
-                            .monospacedDigit()
-                            .id("generation-\(generationCount)")
-                            .foregroundStyle(ZTransferColors.accentPurple)
-                    }
-                    if let activeItem, activeItem.bytesPerSecond > 0 {
-                        Text(speedText(activeItem.bytesPerSecond))
-                            .monospacedDigit()
-                            .transition(.opacity.combined(with: .move(edge: .leading)))
                     }
                 }
             }
@@ -931,17 +945,39 @@ struct QueuePill: View {
                 sawActiveBatch = true
                 doneTask?.cancel()
                 showDoneLabel = false
-            } else if sawActiveBatch {
-                sawActiveBatch = false
-                showDoneLabel = true
-                doneTask?.cancel()
-                doneTask = Task { @MainActor in
-                    try? await Task.sleep(nanoseconds: 1_800_000_000)
-                    guard !Task.isCancelled else { return }
-                    withAnimation(ZTransferMotion.standard) { showDoneLabel = false }
-                }
             }
         }
+        .task(id: "\(hasActive)-\(paused)-\(displayRemainingCount)") {
+            if paused || hasActive {
+                countingVisible = true
+            } else if displayRemainingCount > 0 {
+                try? await Task.sleep(nanoseconds: 350_000_000)
+                guard !Task.isCancelled else { return }
+                countingVisible = true
+            } else {
+                countingVisible = false
+            }
+        }
+        .onChange(of: allDone) { done in
+            guard let previousAllDone else {
+                self.previousAllDone = done
+                return
+            }
+            if done && !previousAllDone {
+                if !hasCancelled {
+                    withAnimation(ZTransferMotion.standard) { showDoneLabel = true }
+                    doneTask?.cancel()
+                    doneTask = Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 1_800_000_000)
+                        guard !Task.isCancelled else { return }
+                        withAnimation(ZTransferMotion.standard) { showDoneLabel = false }
+                    }
+                }
+                sawActiveBatch = false
+            }
+            self.previousAllDone = done
+        }
+        .onAppear { previousAllDone = allDone }
         .onDisappear { doneTask?.cancel() }
     }
 
