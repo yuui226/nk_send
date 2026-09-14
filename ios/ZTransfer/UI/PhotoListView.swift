@@ -636,7 +636,9 @@ struct PhotoListView: View {
             queueFlights[index].progress = 1
         }
         Task { @MainActor in
-            if let session, let data = try? await session.thumbnail(file: file), let image = UIImage(data: data),
+            // Android's flight uses the synchronous in-memory thumbnail cache;
+            // it never adds a camera request just to decorate a 560ms flight.
+            if let session, let data = try? await session.cachedThumbnail(file: file), let image = UIImage(data: data),
                let index = queueFlights.firstIndex(where: { $0.id == id }) {
                 queueFlights[index].image = image
             }
@@ -664,12 +666,26 @@ private struct PhotoListQueueFlightView: View {
         GeometryReader { _ in
             let p = min(max(flight.progress, 0), 1)
             let start = CGPoint(x: flight.from.midX - viewport.minX, y: flight.from.midY - viewport.minY)
-            let end = CGPoint(x: target.midX - viewport.minX, y: target.midY - viewport.minY)
-            let control = CGPoint(
-                x: start.x + (end.x - start.x) * 0.42,
-                y: min(start.y, end.y) - max(56, abs(end.x - start.x) * 0.18)
+            // Android lands on the capsule's right edge, 28dp inward, and
+            // computes the control point from an adaptive lift plus a short
+            // inward bow for near-vertical paths.
+            let endOnCapsule = CGPoint(
+                x: target.maxX - 28 - viewport.minX,
+                y: target.midY - viewport.minY
             )
-            let position = quadraticBezier(start: start, control: control, end: end, t: p)
+            let dx = abs(endOnCapsule.x - start.x)
+            let lift = min(90, 36 + 0.35 * dx)
+            let minApex = 12.0
+            let controlY = max(
+                min(start.y, endOnCapsule.y) - lift,
+                (4 * minApex - start.y - endOnCapsule.y) / 2
+            )
+            let bow = 52 * (1 - min(dx / 160, 1))
+            let control = CGPoint(
+                x: (start.x + endOnCapsule.x) / 2 - bow,
+                y: controlY
+            )
+            let position = quadraticBezier(start: start, control: control, end: endOnCapsule, t: p)
             let width = max(10, flight.from.width * (1 - p * 0.56))
             let height = max(10, flight.from.height * (1 - p * 0.56))
             Group {
