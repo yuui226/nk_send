@@ -377,8 +377,6 @@ struct PhotoPreviewView: View {
             queueFlightImages = cachedImages
             if let image = cachedImages.first {
                 queueFlightImage = image
-            } else if let data = try? await session.thumbnail(file: file), let image = UIImage(data: data) {
-                queueFlightImage = image
             }
             try? await Task.sleep(nanoseconds: 560_000_000)
             guard !Task.isCancelled else { return }
