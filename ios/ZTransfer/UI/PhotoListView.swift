@@ -73,6 +73,17 @@ struct PhotoListView: View {
     var body: some View {
         ZStack {
             ZTransferColors.background.ignoresSafeArea()
+            if showingQueue {
+                TransferQueueView(model: queueModel, session: session, directory: directoryStore) {
+                    withAnimation(.timingCurve(0.4, 0.0, 0.2, 1.0, duration: 0.22)) {
+                        showingQueue = false
+                    }
+                }
+                .transition(.asymmetric(
+                    insertion: .move(edge: .trailing).combined(with: .opacity),
+                    removal: .move(edge: .trailing).combined(with: .opacity)
+                ))
+            } else {
             ScrollViewReader { reader in
                 ScrollView {
                     Color.clear.frame(height: 1).id("photo-list-top")
@@ -166,6 +177,7 @@ struct PhotoListView: View {
                     }
                 }
             }
+            }
         }
         .task {
             model.setNewMediaHandler { files in
@@ -249,9 +261,6 @@ struct PhotoListView: View {
                     model.wakeThumbnailFill()
                 }
             }
-        }
-        .sheet(isPresented: $showingQueue) {
-            TransferQueueView(model: queueModel, session: session, directory: directoryStore)
         }
                 .overlay {
             if showingSettings {
@@ -360,7 +369,11 @@ struct PhotoListView: View {
             }
 
             if !queueModel.snapshot.items.isEmpty {
-                Button { showingQueue = true } label: {
+                Button {
+                    withAnimation(.timingCurve(0.4, 0.0, 0.2, 1.0, duration: 0.22)) {
+                        showingQueue = true
+                    }
+                } label: {
                     QueuePill(snapshot: queueModel.snapshot)
                         .padding(.horizontal, 10)
                         .frame(height: 36)

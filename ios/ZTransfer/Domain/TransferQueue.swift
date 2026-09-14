@@ -35,6 +35,9 @@ struct TransferQueueItem: Identifiable, Equatable, Sendable, Codable {
     var status: TransferStatus = .waiting
     var progress: Double = 0
     var bytesPerSecond: Int64 = 0
+    /// Android records the active file transfer duration on completion.
+    /// A skipped existing file has no transfer duration.
+    var elapsedMs: Int64?
     var error: String?
     var skipped = false
     var outputURL: URL?
@@ -53,17 +56,17 @@ struct TransferQueueItem: Identifiable, Equatable, Sendable, Codable {
 
     private enum CodingKeys: String, CodingKey {
         case id, file, status, progress, bytesPerSecond, error, skipped, outputURL, destinationFolderName,
-             effects, isGeneratingFrame, frameGenerationStartedAt, frameGenerationElapsedMs, frameURL, frameError
+             elapsedMs, effects, isGeneratingFrame, frameGenerationStartedAt, frameGenerationElapsedMs, frameURL, frameError
     }
 
     init(id: UUID, file: CameraFile, status: TransferStatus = .waiting,
-         progress: Double = 0, bytesPerSecond: Int64 = 0, error: String? = nil,
+         progress: Double = 0, bytesPerSecond: Int64 = 0, elapsedMs: Int64? = nil, error: String? = nil,
          skipped: Bool = false, outputURL: URL? = nil,
          destinationFolderName: String? = nil, effects: PhotoEffectsSettings? = nil,
          isGeneratingFrame: Bool = false, frameGenerationStartedAt: Date? = nil,
          frameGenerationElapsedMs: Int64? = nil, frameURL: URL? = nil, frameError: String? = nil) {
         self.id = id; self.file = file; self.status = status; self.progress = progress
-        self.bytesPerSecond = bytesPerSecond; self.error = error; self.skipped = skipped
+        self.bytesPerSecond = bytesPerSecond; self.elapsedMs = elapsedMs; self.error = error; self.skipped = skipped
         self.outputURL = outputURL; self.destinationFolderName = destinationFolderName
         self.effects = effects; self.isGeneratingFrame = isGeneratingFrame
         self.frameGenerationStartedAt = frameGenerationStartedAt
@@ -78,6 +81,7 @@ struct TransferQueueItem: Identifiable, Equatable, Sendable, Codable {
         status = try values.decodeIfPresent(TransferStatus.self, forKey: .status) ?? .waiting
         progress = try values.decodeIfPresent(Double.self, forKey: .progress) ?? 0
         bytesPerSecond = try values.decodeIfPresent(Int64.self, forKey: .bytesPerSecond) ?? 0
+        elapsedMs = try values.decodeIfPresent(Int64.self, forKey: .elapsedMs)
         error = try values.decodeIfPresent(String.self, forKey: .error)
         skipped = try values.decodeIfPresent(Bool.self, forKey: .skipped) ?? false
         outputURL = try values.decodeIfPresent(URL.self, forKey: .outputURL)
@@ -149,6 +153,7 @@ actor TransferQueue {
                 recovered.status = .waiting
                 recovered.progress = 0
                 recovered.bytesPerSecond = 0
+                recovered.elapsedMs = nil
                 recovered.error = nil
                 recovered.isGeneratingFrame = false
                 recovered.frameGenerationStartedAt = nil
@@ -326,6 +331,8 @@ actor TransferQueue {
             let itemID = items[index].id
             let originalSize = items[index].file.size
             items[index].status = .transferring; items[index].error = nil; publish()
+            let transferStartedAt = Date()
+            items[index].elapsedMs = nil
             progressSamples[itemID] = (Date(), 0)
             do {
                 let destinationDirectory = transferDestinationDirectory(
@@ -363,7 +370,11 @@ actor TransferQueue {
                     Task { await self?.updateProgress(id: itemID, value: progress) }
                 }
                 if let index = items.firstIndex(where: { $0.id == itemID }) {
-                    items[index].status = .completed; items[index].progress = 1; items[index].outputURL = output; publish()
+                    items[index].status = .completed
+                    items[index].progress = 1
+                    items[index].elapsedMs = Int64(max(0, Date().timeIntervalSince(transferStartedAt) * 1000).rounded())
+                    items[index].outputURL = output
+                    publish()
                 }
                 directoryIndexes[destinationDirectory, default: TransferDirectoryIndex.scan(directory: destinationDirectory)]
                     .addOriginal(output, size: originalSize)

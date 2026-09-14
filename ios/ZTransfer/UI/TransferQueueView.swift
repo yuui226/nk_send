@@ -8,7 +8,7 @@ struct TransferQueueView: View {
     @ObservedObject var model: TransferQueueViewModel
     @ObservedObject var directory: DirectoryAccessStore
     let session: CameraSession?
-    @Environment(\.dismiss) private var dismiss
+    let onNavigateBack: () -> Void
     @State private var pendingConfirmation: QueueConfirmation?
 
     private enum QueueConfirmation: Identifiable {
@@ -16,69 +16,43 @@ struct TransferQueueView: View {
         var id: Self { self }
     }
 
-    init(model: TransferQueueViewModel, session: CameraSession?, directory: DirectoryAccessStore) {
+    init(model: TransferQueueViewModel, session: CameraSession?, directory: DirectoryAccessStore,
+         onNavigateBack: @escaping () -> Void) {
         self.model = model
         self.session = session
         self.directory = directory
+        self.onNavigateBack = onNavigateBack
     }
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                ZTransferColors.background.ignoresSafeArea()
-                if model.snapshot.items.isEmpty {
-                    DoubleZMark(tint: ZTransferColors.secondaryText.opacity(0.45))
-                        .frame(width: 74, height: 58)
-                } else {
-                    ScrollView {
-                        LazyVStack(spacing: 10) {
-                            // Android keeps the newest queue task at the top of the list.
-                            // Preserve the same ordering when the SwiftUI snapshot is rendered.
-                            ForEach(model.snapshot.items.reversed()) { item in
-                                QueueItemView(item: item, session: session,
-                                              onRetry: { model.retry(id: item.id) },
-                                              onRemove: { model.remove(id: item.id) },
-                                              onCancel: { model.cancel(id: item.id) })
-                            }
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.top, 12)
-                        .padding(.bottom, 92)
-                    }
-                }
-            }
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button { dismiss() } label: { Image(systemName: "chevron.left") }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    HStack(spacing: 12) {
-                        if model.snapshot.items.contains(where: { $0.status == .failed || $0.status == .cancelled }) {
-                            Button { pendingConfirmation = .retry } label: { Image(systemName: "arrow.clockwise") }
-                                .accessibilityLabel(AppLocalized.resource("cd_retry_failed"))
-                        }
-                        if model.snapshot.items.contains(where: { $0.status != .transferring && !$0.isGeneratingFrame }) {
-                            Button { pendingConfirmation = .clear } label: { Image(systemName: "trash") }
-                                .accessibilityLabel(AppLocalized.resource("cd_clear_queue"))
-                        }
-                        if model.snapshot.isTransferring {
-                            Button { model.pause() } label: { Image(systemName: "pause.fill") }
-                                .accessibilityLabel(AppLocalized.resource("cd_pause_after_current"))
-                        } else if model.snapshot.items.contains(where: { $0.status == .waiting }) {
-                            Button {
-                                guard let session, let url = directory.directoryURL else { return }
-                                model.start(session: session, directory: url)
-                            } label: { Image(systemName: "play.fill") }
-                                .accessibilityLabel(AppLocalized.resource("cd_start_transfers"))
+        ZStack {
+            ZTransferColors.background.ignoresSafeArea()
+            if model.snapshot.items.isEmpty {
+                DoubleZMark(tint: ZTransferColors.secondaryText.opacity(0.45))
+                    .frame(width: 74, height: 58)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 10) {
+                        ForEach(model.snapshot.items.reversed()) { item in
+                            QueueItemView(item: item, session: session,
+                                          onRetry: { model.retry(id: item.id) },
+                                          onRemove: { model.remove(id: item.id) },
+                                          onCancel: { model.cancel(id: item.id) })
                         }
                     }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 62)
+                    .padding(.bottom, 112)
                 }
             }
-            .task {
-                guard let session, let url = directory.directoryURL else { return }
-                model.start(session: session, directory: url)
-            }
-            .alert(item: $pendingConfirmation) { action in
+            queueTopControls
+            queueBottomControls
+        }
+        .task {
+            guard let session, let url = directory.directoryURL else { return }
+            model.start(session: session, directory: url)
+        }
+        .alert(item: $pendingConfirmation) { action in
                 switch action {
                 case .clear:
                     return Alert(title: Text(AppLocalized.resource("clear_queue_title")), message: Text(AppLocalized.resource("clear_queue_subtitle")), primaryButton: .destructive(Text(AppLocalized.resource("clear"))) {
@@ -88,8 +62,62 @@ struct TransferQueueView: View {
                 case .retry:
                     return Alert(title: Text(AppLocalized.resource("retry_failed_title")), primaryButton: .default(Text(AppLocalized.resource("retry"))) { model.retryFailed() }, secondaryButton: .cancel(Text(AppLocalized.resource("cancel"))))
                 }
+        }
+    }
+
+    private var queueTopControls: some View {
+        HStack(spacing: 8) {
+            Button(action: onNavigateBack) {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 16, weight: .bold))
+                    .frame(width: 36, height: 36)
+            }
+            .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
+            Spacer()
+            if model.snapshot.isTransferring {
+                Button { model.pause() } label: {
+                    Image(systemName: "pause.fill").frame(width: 36, height: 36)
+                }
+                .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
+                .accessibilityLabel(AppLocalized.resource("cd_pause_after_current"))
+            } else if model.snapshot.items.contains(where: { $0.status == .waiting }),
+                      let session, let url = directory.directoryURL {
+                Button { model.start(session: session, directory: url) } label: {
+                    Image(systemName: "play.fill").frame(width: 36, height: 36)
+                }
+                .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
+                .accessibilityLabel(AppLocalized.resource("cd_start_transfers"))
+            }
+            if session != nil {
+                Image(systemName: "wifi")
+                    .frame(width: 36, height: 36)
+                    .foregroundStyle(ZTransferColors.statusConnected)
             }
         }
+        .padding(.horizontal, 12)
+        .padding(.top, 6)
+    }
+
+    private var queueBottomControls: some View {
+        HStack(spacing: 12) {
+            if model.snapshot.items.contains(where: { $0.status == .failed || $0.status == .cancelled }) {
+                Button { pendingConfirmation = .retry } label: {
+                    Image(systemName: "arrow.clockwise").frame(width: 48, height: 48)
+                }
+                .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 24))
+                .accessibilityLabel(AppLocalized.resource("cd_retry_failed"))
+            }
+            if model.snapshot.items.contains(where: { $0.status != .transferring && !$0.isGeneratingFrame }) {
+                Button { pendingConfirmation = .clear } label: {
+                    Image(systemName: "trash").frame(width: 48, height: 48)
+                }
+                .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 24))
+                .accessibilityLabel(AppLocalized.resource("cd_clear_queue"))
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+        .padding(.trailing, 20)
+        .padding(.bottom, 24)
     }
 }
 
@@ -101,6 +129,7 @@ private struct QueueItemView: View {
     let onCancel: () -> Void
 
     private var stateColor: Color {
+        if item.isGeneratingFrame { return ZTransferColors.accentPurple }
         switch item.status {
         case .waiting: return ZTransferColors.accentYellow
         case .transferring: return ZTransferColors.accentBlue
@@ -124,9 +153,9 @@ private struct QueueItemView: View {
                         if item.status == .transferring, item.bytesPerSecond > 0 {
                             TransferInfoPill(text: speedText, color: ZTransferColors.statusConnected)
                         }
-                    }
-                    if item.status == .transferring {
-                        Text("\(Int(item.progress * 100))%").zTransferText(size: ZTransferMetrics.caption)
+                        if let elapsed = item.elapsedMs {
+                            TransferInfoPill(text: formatDuration(elapsed), color: ZTransferColors.accentBlue)
+                        }
                     }
                 }
                 if let error = item.error, !error.isEmpty {
@@ -243,6 +272,10 @@ private struct QueueThumbnail: View {
     let handle: UInt32
     let item: TransferQueueItem
     @State private var image: UIImage?
+    private var visualState: String {
+        if item.isGeneratingFrame { return "generating" }
+        return item.status.rawValue
+    }
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
@@ -257,8 +290,12 @@ private struct QueueThumbnail: View {
                     Image(systemName: statusIcon)
                         .font(.system(size: 11, weight: .bold))
                         .foregroundStyle(.white)
+                        .id(visualState)
+                        .transition(.opacity.combined(with: .scale(scale: 0.62)))
                 }
                 .overlay(Circle().stroke(ZTransferColors.background, lineWidth: 2))
+                .animation(.easeInOut(duration: 0.18), value: visualState)
+                .transition(.scale(scale: 0.62).combined(with: .opacity))
         }
         .frame(width: 56, height: 56)
         .clipShape(RoundedRectangle(cornerRadius: 8))
