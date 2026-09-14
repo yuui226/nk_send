@@ -163,7 +163,7 @@ struct PhotoPreviewView: View {
                 if let exif { PreviewExifBar(exif: exif).padding(.bottom, 78) }
             }
             .foregroundStyle(.white)
-            if files.indices.contains(index) {
+            if files.indices.contains(index), !isCollapsedBurst(at: index) {
                 VStack {
                     HStack {
                         Text(files[index].fileName)
@@ -211,18 +211,20 @@ struct PhotoPreviewView: View {
                 Spacer()
                 HStack(spacing: 12) {
                     Spacer()
-                    if files.indices.contains(index), !files[index].fileExtension.lowercased().contains(".mov"), !files[index].fileExtension.lowercased().contains(".mp4") {
+                    if files.indices.contains(index), !isCollapsedBurst(at: index), !files[index].fileExtension.lowercased().contains(".mov"), !files[index].fileExtension.lowercased().contains(".mp4") {
                         Button { withAnimation(ZTransferMotion.standard) { histogramVisible.toggle() } } label: {
                             Image(systemName: "chart.bar.fill").frame(width: 44, height: 44)
                         }
                         .opacity(histogramVisible ? 1 : 0.82)
                     }
-                    Button {
-                        withAnimation(ZTransferMotion.standard) {
-                            rotationQuarterTurns = (rotationQuarterTurns + 1) % 4
-                            rotationDegrees = -90 * Double(rotationQuarterTurns)
-                        }
-                    } label: { Image(systemName: "rotate.left").frame(width: 44, height: 44) }
+                    if !isCollapsedBurst(at: index) {
+                        Button {
+                            withAnimation(ZTransferMotion.standard) {
+                                rotationQuarterTurns = (rotationQuarterTurns + 1) % 4
+                                rotationDegrees = -90 * Double(rotationQuarterTurns)
+                            }
+                        } label: { Image(systemName: "rotate.left").frame(width: 44, height: 44) }
+                    }
                     Button {
                         guard files.indices.contains(index) else { return }
                         startQueueFlight(for: files[index])
