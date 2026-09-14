@@ -529,7 +529,20 @@ actor TransferQueue {
     private func existingFrameURL(source: URL, settings: PhotoEffectsSettings, in directory: URL) -> URL? {
         let framesDirectory = directory.appendingPathComponent("ZTFrames", isDirectory: true)
         let preferred = frameURL(source: source, settings: settings, framesDirectory: framesDirectory)
-        return FileManager.default.fileExists(atPath: preferred.path) ? preferred : nil
+        guard let entries = try? FileManager.default.contentsOfDirectory(
+            at: framesDirectory,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else { return nil }
+        let stem = preferred.deletingPathExtension().lastPathComponent
+        let ext = preferred.pathExtension
+        let pattern = #"^\#(NSRegularExpression.escapedPattern(for: stem))(?: \(\d+\)|_\d+)?\.\#(NSRegularExpression.escapedPattern(for: ext))$"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return nil }
+        return entries.first { candidate in
+            guard (try? candidate.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { return false }
+            let range = NSRange(candidate.lastPathComponent.startIndex..., in: candidate.lastPathComponent)
+            return regex.firstMatch(in: candidate.lastPathComponent, options: [], range: range) != nil
+        }
     }
 
     private func frameURL(source: URL, settings: PhotoEffectsSettings, framesDirectory: URL) -> URL {
