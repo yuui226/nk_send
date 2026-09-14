@@ -88,7 +88,9 @@ struct PhotoListView: View {
     }
 
     private var columns: [GridItem] {
-        Array(repeating: GridItem(.flexible(minimum: 0), spacing: 8), count: min(max(thumbnailColumns, 2), 5))
+        // Android clamps the persisted preference to one through four columns;
+        // the grid uses the same 6dp inter-cell spacing on both axes.
+        Array(repeating: GridItem(.flexible(minimum: 0), spacing: 6), count: min(max(thumbnailColumns, 1), 4))
     }
 
     var body: some View {
@@ -160,7 +162,7 @@ struct PhotoListView: View {
                                     .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14))
                                 }
                                 .buttonStyle(.plain)
-                                if !collapsedDays.contains(section.day) { LazyVGrid(columns: columns, spacing: 8) {
+                                if !collapsedDays.contains(section.day) { LazyVGrid(columns: columns, spacing: 6) {
                                         ForEach(photoGridEntries(section.files, collapse: collapseBurstPhotos, expandedIDs: expandedBurstIDs)) { entry in
                                         let file = entry.firstFile
                                         VStack(alignment: .leading, spacing: 0) {
