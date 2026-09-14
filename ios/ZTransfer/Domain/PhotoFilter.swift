@@ -17,6 +17,11 @@ struct PhotoFilterState: Equatable, Sendable, Codable {
     var untransferredOnly = false
     var storageSlot: UInt32?
     var dateRange: PhotoDateRange?
+
+    var isActive: Bool {
+        extensions != nil || protectedOnly || burstOnly || untransferredOnly ||
+            storageSlot != nil || dateRange != nil
+    }
 }
 
 enum PhotoFilter {

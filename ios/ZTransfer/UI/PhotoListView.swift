@@ -100,8 +100,15 @@ struct PhotoListView: View {
                     case let .failed(message):
                         Text(message).zTransferText(size: ZTransferMetrics.body).padding()
                     case .loaded:
-                        ForEach(model.sections) { section in
-                            VStack(alignment: .leading, spacing: 8) {
+                        if model.sections.isEmpty {
+                            PhotoListEmptyState(filterActive: model.filter.isActive,
+                                                usb: session?.isUSB == true,
+                                                onClearFilter: model.clearFilter)
+                                .frame(maxWidth: .infinity)
+                                .padding(.top, 150)
+                        } else {
+                            ForEach(model.sections) { section in
+                                VStack(alignment: .leading, spacing: 8) {
                                 Button {
                                     withAnimation(ZTransferMotion.standard) {
                                         if collapsedDays.contains(section.day) { collapsedDays.remove(section.day) }
@@ -140,6 +147,7 @@ struct PhotoListView: View {
                                         .onLongPressGesture { if !tapToPreview { selectedFile = file } }
                                     }
                                 } }
+                                }
                             }
                         }
                     }
@@ -562,6 +570,32 @@ private struct PlaceholderThumbnail: View {
         RoundedRectangle(cornerRadius: 8)
             .fill(Color.black.opacity(0.08))
             .aspectRatio(1, contentMode: .fit)
+    }
+}
+
+private struct PhotoListEmptyState: View {
+    let filterActive: Bool
+    let usb: Bool
+    let onClearFilter: () -> Void
+
+    var body: some View {
+        VStack(spacing: 14) {
+            Image(systemName: filterActive ? "line.3.horizontal.decrease.circle" : "folder")
+                .font(.system(size: 48, weight: .regular))
+                .foregroundStyle(ZTransferColors.secondaryText.opacity(0.55))
+            Text(AppLocalized.resource(filterActive ? "no_photos_match_filter" : "no_photos_on_camera"))
+                .zTransferText(size: ZTransferMetrics.body)
+                .foregroundStyle(ZTransferColors.secondaryText)
+            if !filterActive && usb {
+                Text(AppLocalized.resource("usb_turn_on_camera_hint"))
+                    .zTransferText(size: ZTransferMetrics.caption)
+                    .foregroundStyle(ZTransferColors.secondaryText)
+            }
+            if filterActive {
+                Button(AppLocalized.resource("clear_filters"), action: onClearFilter)
+                    .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 18))
+            }
+        }
     }
 }
 
