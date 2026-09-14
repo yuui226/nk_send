@@ -11,7 +11,7 @@ struct TransferQueueView: View {
     let onNavigateBack: () -> Void
     @State private var pendingConfirmation: QueueConfirmation?
 
-    private enum QueueConfirmation: Identifiable {
+    fileprivate enum QueueConfirmation: Identifiable {
         case clear, retry
         var id: Self { self }
     }
@@ -52,17 +52,7 @@ struct TransferQueueView: View {
             guard let session, let url = directory.directoryURL else { return }
             model.start(session: session, directory: url)
         }
-        .alert(item: $pendingConfirmation) { action in
-                switch action {
-                case .clear:
-                    return Alert(title: Text(AppLocalized.resource("clear_queue_title")), message: Text(AppLocalized.resource("clear_queue_subtitle")), primaryButton: .destructive(Text(AppLocalized.resource("clear"))) {
-                        model.withdrawPending()
-                        Task { try? await Task.sleep(nanoseconds: 320_000_000); model.removeCleared() }
-                    }, secondaryButton: .cancel(Text(AppLocalized.resource("cancel"))))
-                case .retry:
-                    return Alert(title: Text(AppLocalized.resource("retry_failed_title")), primaryButton: .default(Text(AppLocalized.resource("retry"))) { model.retryFailed() }, secondaryButton: .cancel(Text(AppLocalized.resource("cancel"))))
-                }
-        }
+        .overlay { queueConfirmationOverlay }
     }
 
     private var queueTopControls: some View {
@@ -101,14 +91,14 @@ struct TransferQueueView: View {
     private var queueBottomControls: some View {
         HStack(spacing: 12) {
             if model.snapshot.items.contains(where: { $0.status == .failed || $0.status == .cancelled }) {
-                Button { pendingConfirmation = .retry } label: {
+                Button { withAnimation(ZTransferMotion.standard) { pendingConfirmation = .retry } } label: {
                     Image(systemName: "arrow.clockwise").frame(width: 48, height: 48)
                 }
                 .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 24))
                 .accessibilityLabel(AppLocalized.resource("cd_retry_failed"))
             }
             if model.snapshot.items.contains(where: { $0.status != .transferring && !$0.isGeneratingFrame }) {
-                Button { pendingConfirmation = .clear } label: {
+                Button { withAnimation(ZTransferMotion.standard) { pendingConfirmation = .clear } } label: {
                     Image(systemName: "trash").frame(width: 48, height: 48)
                 }
                 .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 24))
@@ -118,6 +108,93 @@ struct TransferQueueView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
         .padding(.trailing, 20)
         .padding(.bottom, 24)
+    }
+
+    @ViewBuilder
+    private var queueConfirmationOverlay: some View {
+        if let pendingConfirmation {
+            ZStack {
+                Color.black.opacity(0.28)
+                    .ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .onTapGesture { self.pendingConfirmation = nil }
+                VStack {
+                    Spacer()
+                    QueueConfirmationCard(action: pendingConfirmation,
+                                          onConfirm: {
+                        switch pendingConfirmation {
+                        case .clear:
+                            model.withdrawPending()
+                            Task {
+                                try? await Task.sleep(nanoseconds: 320_000_000)
+                                model.removeCleared()
+                            }
+                        case .retry:
+                            model.retryFailed()
+                        }
+                        self.pendingConfirmation = nil
+                    }, onDismiss: { self.pendingConfirmation = nil })
+                    .padding(.trailing, 20)
+                    .padding(.bottom, 92)
+                }
+            }
+            .transition(.opacity)
+        }
+    }
+}
+
+private struct QueueConfirmationCard: View {
+    let action: TransferQueueView.QueueConfirmation
+    let onConfirm: () -> Void
+    let onDismiss: () -> Void
+
+    private var title: String {
+        switch action {
+        case .clear: return AppLocalized.resource("clear_queue_title")
+        case .retry: return AppLocalized.resource("retry_failed_title")
+        }
+    }
+    private var subtitle: String? {
+        switch action {
+        case .clear: return AppLocalized.resource("clear_queue_subtitle")
+        case .retry: return nil
+        }
+    }
+    private var confirmLabel: String {
+        switch action {
+        case .clear: return AppLocalized.resource("clear")
+        case .retry: return AppLocalized.resource("retry")
+        }
+    }
+    private var tint: Color {
+        switch action {
+        case .clear: return ZTransferColors.statusError
+        case .retry: return ZTransferColors.accentBlue
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title).zTransferText(size: ZTransferMetrics.body, weight: .bold)
+            if let subtitle {
+                Text(subtitle).zTransferText(size: ZTransferMetrics.caption)
+                    .foregroundStyle(ZTransferColors.secondaryText)
+            }
+            HStack(spacing: 8) {
+                Spacer()
+                Button(AppLocalized.resource("cancel"), action: onDismiss)
+                    .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 10))
+                Button(confirmLabel, action: onConfirm)
+                    .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 10))
+                    .foregroundStyle(tint)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: 260, alignment: .leading)
+        .background(.thickMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(tint.opacity(0.4), lineWidth: 1))
+        .shadow(color: .black.opacity(0.18), radius: 8, y: 4)
+        .transition(.scale(scale: 0.86, anchor: .bottomTrailing).combined(with: .opacity))
     }
 }
 
