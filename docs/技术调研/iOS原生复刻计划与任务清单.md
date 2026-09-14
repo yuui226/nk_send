@@ -65,6 +65,11 @@
 
 ## 安卓对照资料
 
+### 队列执行补充依据（2026-09-14）
+
+本轮按同一“照片列表 → 传输”场景核对 `TransferViewModel.kt` 的 `PendingTransferQueue`、`processQueue`、`retrySingleTask/retryFailed`、`launchPhotoFrameExport`，以及 `TransferScreen.kt` 的退场排除集、280ms 收合/320ms 清理。iOS 对应 `TransferQueue.swift`、`TransferQueueViewModel.swift`、`TransferQueueView.swift`、`PhotoListView.swift`；原片索引另对照 `TransferViewModel.recordExistingExport/ExportedOriginalIndex` 和 `ExistingFileNameIndexTest`，接入 `TransferDirectoryIndex.swift`、`PhotoListViewModel.swift`，不再用队列完成项覆盖本地已传记录。逐场景结果与未闭环项统一记录在 [总进度表的队列执行场景核对](./iOS原生复刻进度表.md#队列执行场景核对2026-09-14)。执行测试独立于真机回归，当前未将任务 28/30/31/32 整项勾选。
+
+
 照片列表的加载顺序、扫描代际、取消/暂停恢复、缩略图内存与磁盘缓存、后台填充队列、清理和对账规则已单独整理在
 [安卓照片列表加载与缓存策略-复刻基线](./安卓照片列表加载与缓存策略-复刻基线.md)。实现照片列表相关任务前必须先按该文档核对 `CameraViewModel.loadFiles`、`ThumbnailDiskCache` 和 `ThumbnailFillQueue`，并在任务记录中补充对应的 iOS 代码位置和验证证据。
 
@@ -508,7 +513,7 @@
 ### 2026-09-14 测试 target 解阻与照片队列回归
 
 - `ios/ProtocolTests/PTPIPDiscoveryTests.swift` 补齐 `SWIFT_PACKAGE`/Xcode 条件导入，Xcode 测试 target 现在直接复用 App 模块，不再引用不存在的 `ZTransferProtocol` 二进制模块。
-- `ios/ZTransferTests/DomainModelTests.swift` 的队列测试在执行前清理并在结束后恢复 `transferQueue.items.v1`，避免共享标准偏好中的历史任务污染断言；生产队列的持久化实现未改变。
+- **2026-09-14 已纠正本条旧记录**：安卓任务列表仅在内存中；iOS 的 `transferQueue.items.v1` 读写和任务重启恢复已删除。测试现在使用独立偏好域，并验证旧 iOS 队列不会跨启动恢复，不再维护与安卓不同的测试预期。
 - 验证：`xcodebuild test -project ios/ZTransfer.xcodeproj -scheme ZTransfer -destination 'platform=iOS Simulator,id=CA046456-B859-45F4-9CB3-2C6E2F8E03B0' CODE_SIGNING_ALLOWED=NO`，125 tests、0 failures。
 
 ### 2026-09-14 安卓后台缩略图唤醒语义对账
@@ -802,7 +807,7 @@
 
 ### 2026-09-14 传输生命周期取消恢复对账（进行中）
 
-- 安卓活动下载没有用户取消入口；协程因页面/进程生命周期结束时，半成品保留并由后续队列恢复。iOS 原先把活动项改成 `cancelled`，导致持久化后无法续传；现改为 `waiting`、清零临时进度并保留 `.nkpart_`，下一次有效会话继续按 4 MiB 边界恢复。
+- **2026-09-14 已纠正本条旧记录**：安卓活动下载没有用户取消入口，但也不持久化或自动恢复任务。iOS 当前进程内会话取消不会循环重试；`.nkpart_` 的同进程重试及新进程启动清理按独立目录规则处理，不能据此新增跨进程任务恢复。
 - 等待项的“撤回”仍保持 `cancelled`，因此用户清空队列的可观察行为没有改变。
 - 验证：模拟器 164 项测试、0 失败；仍待真实断线/进程生命周期和大文件回调验证，任务 28 保持未完成。
 
@@ -810,7 +815,7 @@
 
 - 安卓派生图名称的配置摘要是稳定的；iOS 现对效果设置使用排序键 JSON 后再计算摘要，包含滤镜强度字典时跨重启、重试和语言切换仍得到同一查重路径。
 - 指纹字段进一步收窄为真正影响渲染的边框、元数据、水印和滤镜；收藏顺序、收藏集合等编辑偏好不会再导致相同像素重复导出。
-- 派生生成中进程退出时，iOS 现在把任务恢复为 `waiting`；下一次队列启动会命中已保存原片并重新检查/生成 `ZTFrames`，不会留下永久“已完成但无成片”的状态。
+- **2026-09-14 已纠正本条旧记录**：这项重启恢复是安卓没有的额外逻辑，已删除。新进程从空任务队列开始；用户重新入队时照常依据本地原片和派生输出索引处理。
 - 派生源扩展名收窄为安卓同样的 JPG/JPEG/PNG；RAW、TIFF、HEIC 和视频只传输原片，不额外生成效果图。
 - 验证：模拟器 164 项测试、0 失败；安卓精确文件名规则和目录提供者并发查重仍待补齐，任务 28 保持未完成。
 

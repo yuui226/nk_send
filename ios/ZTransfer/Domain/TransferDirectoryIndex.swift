@@ -71,6 +71,45 @@ struct TransferDirectoryIndex: Sendable {
     }
 }
 
+/// Android ExportedOriginalIndex: local-file identity is independent of queue
+/// cards and camera handles. Removing a card must not make its original "new".
+struct ExportedOriginalIndex: Sendable {
+    private var destinations: [String: [String: [UInt64: URL]]] = [:]
+
+    @discardableResult
+    mutating func add(_ url: URL, size: UInt64, folderName: String?) -> Bool {
+        let folder = folderName?.lowercased() ?? ""
+        let name = exportedOriginalBaseName(url.lastPathComponent).lowercased()
+        guard destinations[folder]?[name]?[size] != url else { return false }
+        destinations[folder, default: [:]][name, default: [:]][size] = url
+        return true
+    }
+
+    mutating func merge(_ index: TransferDirectoryIndex, folderName: String?) {
+        for entries in index.files.values {
+            for entry in entries { add(entry.url, size: entry.size, folderName: folderName) }
+        }
+    }
+
+    @discardableResult
+    mutating func record(_ items: [TransferQueueItem], root: URL) -> Bool {
+        var changed = false
+        for item in items {
+            guard let output = item.outputURL,
+                  output.deletingLastPathComponent() == transferDestinationDirectory(root: root, folderName: item.destinationFolderName)
+            else { continue }
+            if add(output, size: item.file.size, folderName: item.destinationFolderName) { changed = true }
+        }
+        return changed
+    }
+
+    func original(for file: CameraFile, folderName: String?) -> URL? {
+        let name = exportedOriginalBaseName(file.fileName).lowercased()
+        guard let sizes = destinations[folderName?.lowercased() ?? ""]?[name] else { return nil }
+        return file.size == UInt64(UInt32.max) ? sizes.values.first : sizes[file.size]
+    }
+}
+
 func transferDatedFolderName(_ name: String) -> Bool {
     name.range(of: #"^ZT\d{4}-\d{2}-\d{2}$"#, options: .regularExpression) != nil
 }

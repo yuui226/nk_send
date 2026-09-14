@@ -284,17 +284,19 @@ struct PhotoListView: View {
             model.refreshTransferredIDs(directory: directoryStore.directoryURL, organizeByDate: organizeByDate)
         }
         .onChange(of: directoryStore.directoryURL) { directory in
+            queueModel.attach(session: session, directory: directory)
             model.refreshTransferredIDs(directory: directory, organizeByDate: organizeByDate)
         }
         .onChange(of: organizeByDate) { _ in
             model.refreshTransferredIDs(directory: directoryStore.directoryURL, organizeByDate: organizeByDate)
         }
         .onChange(of: queueModel.snapshot.items) { items in
-            model.updateTransferredIDs(Set(items.filter { $0.status == .completed }.map { $0.file.id }))
-            // Android clears the persisted transfer directory as soon as the
-            // queue proves its handle stale. Keep the scene's directory store
-            // in the same state so a retry opens the existing chooser flow.
-            if items.contains(where: { $0.status == .failed && $0.error == AppLocalized.resource("error_dir_invalid") }) {
+            model.recordTransferredOriginals(items)
+        }
+        .onChange(of: queueModel.snapshot.invalidatedDirectory) { invalidated in
+            // Handle the actual invalidation once. A historical failed card
+            // must never clear a different directory the user just selected.
+            if let invalidated, invalidated == directoryStore.directoryURL {
                 directoryStore.clear()
             }
         }

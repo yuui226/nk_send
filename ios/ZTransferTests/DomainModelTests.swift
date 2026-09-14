@@ -169,15 +169,7 @@ final class DomainModelTests: XCTestCase {
     }
 
     func testManualQueueAllowsRepeatedExportsOfSameCameraHandle() async {
-        let defaults = UserDefaults.standard
-        let persistenceKey = "transferQueue.items.v1"
-        let previous = defaults.data(forKey: persistenceKey)
-        defaults.removeObject(forKey: persistenceKey)
-        defer {
-            if let previous { defaults.set(previous, forKey: persistenceKey) }
-            else { defaults.removeObject(forKey: persistenceKey) }
-        }
-        let queue = TransferQueue()
+        let queue = TransferQueue(defaults: UserDefaults(suiteName: "TransferQueueTests.\(UUID())")!)
         let file = CameraFile(id: 9, storageID: 1, format: 0x3801, size: 10, fileName: "a.JPG", captureDate: nil, isProtected: false)
         let first = await queue.enqueue(file)
         let second = await queue.enqueue(file)
@@ -193,7 +185,7 @@ final class DomainModelTests: XCTestCase {
         XCTAssertFalse(paused)
     }
 
-    func testTransferQueueItemPersistsEffectSnapshotForQueuedExport() throws {
+    func testTransferQueueItemKeepsIndependentEffectSnapshotForQueuedExport() {
         let file = CameraFile(id: 44, storageID: 1, format: 0x3801, size: 10,
                               fileName: "snapshot.JPG", captureDate: "20260914T010203", isProtected: false)
         var effects = PhotoEffectsSettings()
@@ -205,41 +197,33 @@ final class DomainModelTests: XCTestCase {
             preset: PhotoFilterPreset(id: "NP3_FILM", name: "Film"), intensityPercent: 63
         )
         let item = TransferQueueItem(id: UUID(), file: file, effects: effects)
-        let data = try JSONEncoder().encode(item)
-        let decoded = try JSONDecoder().decode(TransferQueueItem.self, from: data)
-        XCTAssertEqual(decoded.effects, effects)
-        XCTAssertTrue(decoded.effects?.hasEffect == true)
+        let snapshot = effects
+        effects.photoFramePreset = .mist
+        effects.watermark.text = "Changed"
+        XCTAssertEqual(item.effects, snapshot)
+        XCTAssertTrue(item.effects?.hasEffect == true)
     }
 
-    func testPersistedFrameGenerationIsRequeuedForRecovery() async throws {
-        let defaults = UserDefaults.standard
-        let key = "transferQueue.items.v1"
-        let previous = defaults.data(forKey: key)
-        defer {
-            if let previous { defaults.set(previous, forKey: key) }
-            else { defaults.removeObject(forKey: key) }
-        }
-        let file = CameraFile(id: 45, storageID: 1, format: 0x3801, size: 10,
-                              fileName: "resume-frame.JPG", captureDate: nil, isProtected: false)
-        let item = TransferQueueItem(id: UUID(), file: file, status: .completed,
-                                     isGeneratingFrame: true)
-        defaults.set(try JSONEncoder().encode([item]), forKey: key)
-        let queue = TransferQueue()
-        let snapshot = await queue.snapshots().first(where: { !$0.items.isEmpty })
-        XCTAssertEqual(snapshot?.items.first?.status, .waiting)
-        XCTAssertFalse(snapshot?.items.first?.isGeneratingFrame ?? true)
+    func testQueueDoesNotRestoreLegacyIOSOnlyTaskHistory() async {
+        let suite = "TransferQueueLegacyTests.\(UUID().uuidString)"
+        UserDefaults(suiteName: suite)!.set(Data("[{\"status\":\"transferring\"}]".utf8), forKey: "transferQueue.items.v1")
+        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        let queue = TransferQueue(defaults: UserDefaults(suiteName: suite)!)
+        let state = await queue.snapshot()
+        XCTAssertTrue(state.items.isEmpty)
+        XCTAssertFalse(state.isTransferring)
+        XCTAssertFalse(state.pauseAfterCurrent)
+        XCTAssertNil(UserDefaults(suiteName: suite)?.data(forKey: "transferQueue.items.v1"))
+        _ = await queue.enqueue(CameraFile(id: 45, storageID: 1, format: 0x3801, size: 10,
+                                          fileName: "queued.JPG", captureDate: nil, isProtected: false))
+        let reopened = TransferQueue(defaults: UserDefaults(suiteName: suite)!)
+        let fresh = await reopened.snapshot()
+        XCTAssertTrue(fresh.items.isEmpty)
+        XCTAssertNil(UserDefaults(suiteName: suite)?.data(forKey: "transferQueue.items.v1"))
     }
 
     func testAutomaticQueueDeduplicatesCameraIdentity() async {
-        let defaults = UserDefaults.standard
-        let persistenceKey = "transferQueue.items.v1"
-        let previous = defaults.data(forKey: persistenceKey)
-        defaults.removeObject(forKey: persistenceKey)
-        defer {
-            if let previous { defaults.set(previous, forKey: persistenceKey) }
-            else { defaults.removeObject(forKey: persistenceKey) }
-        }
-        let queue = TransferQueue()
+        let queue = TransferQueue(defaults: UserDefaults(suiteName: "TransferQueueTests.\(UUID())")!)
         let file = CameraFile(id: 9, storageID: 1, format: 0x3801, size: 10, fileName: "a.JPG", captureDate: "20260913T010203", isProtected: false)
         let first = await queue.enqueueAutomatic(file)
         let second = await queue.enqueueAutomatic(file)
@@ -305,13 +289,15 @@ final class DomainModelTests: XCTestCase {
         XCTAssertEqual(transferDestinationDirectory(root: root, folderName: nil), root)
     }
 
-    func testQueueItemPersistsDestinationFolderSnapshot() throws {
+    func testQueueLocksDestinationFolderWhenEnqueued() async {
+        let queue = TransferQueue(defaults: UserDefaults(suiteName: "TransferDestinationTests.\(UUID())")!)
         let file = CameraFile(id: 3, storageID: 1, format: 0x3801, size: 10,
                               fileName: "same.JPG", captureDate: "20260817T142530", isProtected: false)
-        let item = TransferQueueItem(id: UUID(), file: file, destinationFolderName: "ZT2026-08-17")
-        let data = try JSONEncoder().encode(item)
-        let decoded = try JSONDecoder().decode(TransferQueueItem.self, from: data)
-        XCTAssertEqual(decoded.destinationFolderName, "ZT2026-08-17")
+        await queue.enqueue(file, organizeByDate: true)
+        await queue.enqueue(file, organizeByDate: false)
+        let snapshot = await queue.snapshot()
+        XCTAssertEqual(snapshot.items[0].destinationFolderName, "ZT2026-08-17")
+        XCTAssertNil(snapshot.items[1].destinationFolderName)
     }
 
     func testLocalOriginalPreviewRoutesMatchAndroidFileTypes() {
@@ -525,5 +511,386 @@ extension DomainModelTests {
             let font = try XCTUnwrap(UIFont(name: name, size: 24), "Watermark would fall back to a system font: \(name)")
             XCTAssertEqual(font.fontName, name)
         }
+    }
+}
+
+/// Android TransferStateTest + processQueue/withdraw/retry scenarios. These use
+/// controlled camera/render operations so task-boundary races are repeatable.
+@MainActor
+final class TransferQueueScenarioTests: XCTestCase {
+    private func file(_ id: UInt32) -> CameraFile {
+        CameraFile(id: id, storageID: 1, format: 0x3801, size: 10,
+                   fileName: "DSC_\(id).JPG", captureDate: "20260914T120000", isProtected: false)
+    }
+
+    private func fixture(renderer: TransferQueue.FrameRenderer? = nil) throws -> (TransferQueue, URL) {
+        let suite = "TransferQueueScenarioTests.\(UUID().uuidString)"
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(suite, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        addTeardownBlock {
+            UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        if let renderer {
+            return (TransferQueue(defaults: UserDefaults(suiteName: suite)!, renderFrame: renderer), directory)
+        }
+        return (TransferQueue(defaults: UserDefaults(suiteName: suite)!), directory)
+    }
+
+    private func snapshot(_ queue: TransferQueue) async -> TransferQueueSnapshot {
+        await queue.snapshot()
+    }
+
+    private func wait(_ queue: TransferQueue, until predicate: (TransferQueueSnapshot) -> Bool) async throws -> TransferQueueSnapshot {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while ContinuousClock.now < deadline {
+            let value = await snapshot(queue)
+            if predicate(value) { return value }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTFail("Queue did not reach the expected state")
+        throw CocoaError(.coderInvalidValue)
+    }
+
+    func testBatchDeduplicatesHandlesButSeparateClicksCreateNewAttempts() async throws {
+        let (queue, _) = try fixture()
+        let first = await queue.enqueue([file(1), file(1), file(2)])
+        let second = await queue.enqueue([file(1), file(2)])
+        XCTAssertEqual(first.count, 2)
+        XCTAssertEqual(second.count, 2)
+        XCTAssertTrue(Set(first).isDisjoint(with: second))
+        let state = await snapshot(queue)
+        XCTAssertEqual(state.items.map(\.file.id), [1, 2, 1, 2])
+    }
+
+    func testOfflineLocalHitAndMissingOriginalNeverPublishFalseDownloadState() async throws {
+        let (queue, directory) = try fixture()
+        try Data(repeating: 1, count: 10).write(to: directory.appendingPathComponent(file(1).fileName))
+        await queue.enqueue([file(1), file(2)])
+        let stream = await queue.snapshots()
+        await queue.start(session: nil, directory: directory)
+        var finished: TransferQueueSnapshot?
+        for await value in stream {
+            XCTAssertFalse(value.items.contains { $0.status == .transferring })
+            if value.items.allSatisfy({ $0.status == .completed || $0.status == .failed }) && !value.isTransferring {
+                finished = value
+                break
+            }
+        }
+        XCTAssertEqual(finished?.items[0].status, .completed)
+        XCTAssertEqual(finished?.items[0].skipped, true)
+        XCTAssertNil(finished?.items[0].elapsedMs)
+        XCTAssertEqual(finished?.items[1].error, AppLocalized.resource("camera_not_connected"))
+    }
+
+    func testRetryKeepsCardPositionButExecutesAfterAlreadyPendingTasks() async throws {
+        let (queue, directory) = try fixture()
+        let camera = ControlledTransferCamera()
+        let old = await queue.enqueue(file(9))!
+        await queue.cancel(id: old)
+        await queue.enqueue([file(1), file(2)])
+        await queue.start(session: camera, directory: directory)
+        _ = try await wait(queue) { $0.items[1].status == .transferring }
+        let attempt = await queue.retry(id: old)
+        XCTAssertNotNil(attempt)
+        XCTAssertNotEqual(attempt, old)
+        await camera.finish(1)
+        _ = try await wait(queue) { $0.items[2].status == .transferring }
+        await camera.finish(2)
+        _ = try await wait(queue) { $0.items[0].status == .transferring }
+        await camera.finish(9)
+        let final = try await wait(queue) { !$0.isTransferring }
+        let requests = await camera.requests
+        XCTAssertEqual(requests, [1, 2, 9])
+        XCTAssertEqual(final.items.map(\.file.id), [9, 1, 2])
+        XCTAssertTrue(final.items.allSatisfy { $0.status == .completed })
+    }
+
+    func testPauseWaitsForCurrentFileAndRetryCannotReleaseIt() async throws {
+        let (queue, directory) = try fixture()
+        let camera = ControlledTransferCamera()
+        let ids = await queue.enqueue([file(1), file(2), file(3)])
+        await queue.cancel(id: ids[2])
+        await queue.start(session: camera, directory: directory)
+        _ = try await wait(queue) { $0.items[0].status == .transferring }
+        await queue.pauseAfterCurrentFile()
+        // An overlapping explicit start is ignored while the worker is active.
+        await queue.startPendingTransfers(session: camera, directory: directory)
+        await camera.finish(1)
+        let paused = try await wait(queue) { !$0.isTransferring }
+        XCTAssertTrue(paused.pauseAfterCurrent)
+        XCTAssertEqual(paused.items[0].status, .completed)
+        let replacement = await queue.retry(id: ids[2])
+        XCTAssertNotNil(replacement)
+        let afterRetry = await snapshot(queue)
+        XCTAssertFalse(afterRetry.isTransferring)
+        XCTAssertTrue(afterRetry.pauseAfterCurrent)
+        let replacementCamera = ControlledTransferCamera()
+        await queue.attach(session: replacementCamera, directory: directory)
+        await queue.resume()
+        _ = try await wait(queue) { $0.items[1].status == .transferring }
+        await replacementCamera.finish(2)
+        _ = try await wait(queue) { $0.items[2].status == .transferring }
+        await replacementCamera.finish(3)
+        let final = try await wait(queue) { !$0.isTransferring }
+        XCTAssertFalse(final.pauseAfterCurrent)
+        let oldRequests = await camera.requests
+        let newRequests = await replacementCamera.requests
+        XCTAssertEqual(oldRequests, [1])
+        XCTAssertEqual(newRequests, [2, 3])
+    }
+
+    func testWithdrawAndRetryAllExcludeCardsAlreadyLeaving() async throws {
+        let (queue, directory) = try fixture()
+        let camera = ControlledTransferCamera()
+        let ids = await queue.enqueue([file(1), file(2), file(3)])
+        await queue.start(session: camera, directory: directory)
+        _ = try await wait(queue) { $0.items[0].status == .transferring }
+        await queue.withdrawPending()
+        await queue.retryFailed(excluding: [ids[1]])
+        await queue.removeCleared()
+        let during = await snapshot(queue)
+        XCTAssertEqual(during.items.map(\.file.id), [1, 3])
+        await camera.finish(1)
+        _ = try await wait(queue) { $0.items.last?.status == .transferring }
+        await camera.finish(3)
+        _ = try await wait(queue) { !$0.isTransferring }
+        let requests = await camera.requests
+        XCTAssertEqual(requests, [1, 3])
+    }
+
+    func testDetachDoesNotReuseOldCameraAndReconnectRetryUsesNewOne() async throws {
+        let (queue, directory) = try fixture()
+        let camera = ControlledTransferCamera()
+        let ids = await queue.enqueue([file(1), file(2)])
+        await queue.start(session: camera, directory: directory)
+        _ = try await wait(queue) { $0.items[0].status == .transferring }
+        await queue.detach()
+        await camera.finish(1)
+        let disconnected = try await wait(queue) { !$0.isTransferring }
+        XCTAssertEqual(disconnected.items[0].status, .completed)
+        XCTAssertEqual(disconnected.items[1].status, .failed)
+        XCTAssertEqual(disconnected.items[1].error, AppLocalized.resource("camera_not_connected"))
+        let replacement = ControlledTransferCamera()
+        await queue.attach(session: replacement, directory: directory)
+        await queue.retry(id: ids[1])
+        _ = try await wait(queue) { $0.items[1].status == .transferring }
+        await replacement.finish(2)
+        _ = try await wait(queue) { !$0.isTransferring }
+        let oldRequests = await camera.requests
+        let newRequests = await replacement.requests
+        XCTAssertEqual(oldRequests, [1])
+        XCTAssertEqual(newRequests, [2])
+    }
+
+    func testFramesUseTwoWorkersAndClearProtectsActiveAndWaitingRenders() async throws {
+        let renderer = ControlledFrameRenderer()
+        let (queue, directory) = try fixture { source, _, target in
+            try await renderer.render(source: source, directory: target)
+        }
+        var effects = PhotoEffectsSettings()
+        effects.photoFrameEnabled = true
+        let files = [file(1), file(2), file(3)]
+        for file in files { try Data(repeating: 1, count: 10).write(to: directory.appendingPathComponent(file.fileName)) }
+        let ids = await queue.enqueue(files, effects: effects)
+        await queue.start(session: nil, directory: directory)
+        let generating = try await wait(queue) { !$0.isTransferring && $0.items.allSatisfy(\.isGeneratingFrame) }
+        XCTAssertTrue(generating.items.allSatisfy { !$0.skipped })
+        let removed = await queue.remove(id: ids[0])
+        XCTAssertFalse(removed)
+        await queue.clearFinished()
+        await queue.removeCleared()
+        let protected = await snapshot(queue)
+        XCTAssertEqual(protected.items.count, 3)
+        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while await renderer.peak < 2, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        await renderer.releaseAll()
+        let final = try await wait(queue) { $0.items.allSatisfy { !$0.isGeneratingFrame } }
+        let peak = await renderer.peak
+        XCTAssertEqual(peak, 2)
+        XCTAssertTrue(final.items.allSatisfy { $0.status == .completed && $0.frameURL != nil })
+        await queue.removeCleared()
+        let cleared = await snapshot(queue)
+        XCTAssertTrue(cleared.items.isEmpty)
+    }
+
+    func testExistingOriginalFrameFailureCanRetryOfflineWithLockedEffects() async throws {
+        let renderer = FailOnceFrameRenderer()
+        let (queue, directory) = try fixture { source, settings, target in
+            try await renderer.render(source: source, settings: settings, directory: target)
+        }
+        let source = directory.appendingPathComponent(file(1).fileName)
+        try Data(repeating: 1, count: 10).write(to: source)
+        var effects = PhotoEffectsSettings()
+        effects.photoFrameEnabled = true
+        effects.photoFramePreset = .minimal
+        let id = await queue.enqueue(file(1), effects: effects)!
+        await queue.start(session: nil, directory: directory)
+        let failed = try await wait(queue) { !$0.isTransferring && $0.items[0].status == .failed && !$0.items[0].isGeneratingFrame }
+        XCTAssertEqual(failed.items[0].outputURL, source)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: source.path))
+        let replacement = await queue.retry(id: id)
+        XCTAssertNotEqual(replacement, id)
+        let final = try await wait(queue) { !$0.isTransferring && $0.items[0].status == .completed && !$0.items[0].isGeneratingFrame }
+        XCTAssertEqual(final.items[0].effects, effects)
+        XCTAssertNotNil(final.items[0].frameURL)
+        XCTAssertNil(final.items[0].error)
+        let selections = await renderer.selections
+        XCTAssertEqual(selections, [effects, effects])
+    }
+
+    func testNewDownloadRemainsCompletedWhenOnlyItsFrameFails() async throws {
+        let (queue, directory) = try fixture { _, _, _ in throw CocoaError(.fileWriteUnknown) }
+        var effects = PhotoEffectsSettings()
+        effects.photoFrameEnabled = true
+        await queue.enqueue(file(1), effects: effects)
+        let camera = ControlledTransferCamera()
+        await queue.start(session: camera, directory: directory)
+        _ = try await wait(queue) { $0.items[0].status == .transferring }
+        await camera.finish(1)
+        let final = try await wait(queue) { !$0.isTransferring && !$0.items[0].isGeneratingFrame }
+        XCTAssertEqual(final.items[0].status, .completed)
+        XCTAssertNil(final.items[0].error)
+        XCTAssertNotNil(final.items[0].frameError)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: directory.appendingPathComponent(file(1).fileName).path))
+    }
+
+    func testInvalidDestinationClearsQueueDirectoryAndDoesNotRestartOnRetry() async throws {
+        let (queue, directory) = try fixture()
+        let id = await queue.enqueue(file(1))!
+        try FileManager.default.removeItem(at: directory)
+        await queue.start(session: nil, directory: directory)
+        let invalid = try await wait(queue) { !$0.isTransferring }
+        XCTAssertEqual(invalid.items[0].error, AppLocalized.resource("error_dir_invalid"))
+        let retry = await queue.retry(id: id)
+        XCTAssertNil(retry)
+    }
+
+    func testReselectedDirectoryCanRetryWithoutHistoricalErrorInvalidatingIt() async throws {
+        let (queue, directory) = try fixture()
+        let id = await queue.enqueue(file(1))!
+        let missing = directory.appendingPathComponent("missing", isDirectory: true)
+        await queue.start(session: nil, directory: missing)
+        let invalid = try await wait(queue) { !$0.isTransferring }
+        XCTAssertEqual(invalid.invalidatedDirectory, missing)
+        try Data(repeating: 1, count: 10).write(to: directory.appendingPathComponent(file(1).fileName))
+        await queue.attach(session: nil, directory: directory)
+        let selected = await snapshot(queue)
+        XCTAssertNil(selected.invalidatedDirectory)
+        XCTAssertNotNil(selected.items[0].error)
+        let attempt = await queue.retry(id: id)
+        XCTAssertNotNil(attempt)
+        let completed = try await wait(queue) { !$0.isTransferring && $0.items[0].status == .completed }
+        XCTAssertNil(completed.invalidatedDirectory)
+        XCTAssertEqual(completed.items[0].outputURL?.deletingLastPathComponent(), directory)
+    }
+}
+
+private actor ControlledTransferCamera: TransferDownloading {
+    private(set) var requests: [UInt32] = []
+    private var waiting: [UInt32: CheckedContinuation<Void, Never>] = [:]
+    private var finished: Set<UInt32> = []
+
+    func download(file: CameraFile, to directory: URL, progress: (@Sendable (Double) -> Void)?) async throws -> URL {
+        requests.append(file.id)
+        if finished.remove(file.id) == nil {
+            await withCheckedContinuation { waiting[file.id] = $0 }
+        }
+        progress?(1)
+        let result = directory.appendingPathComponent(file.fileName)
+        try Data(repeating: 1, count: Int(file.size)).write(to: result)
+        return result
+    }
+
+    func finish(_ id: UInt32) {
+        if let continuation = waiting.removeValue(forKey: id) { continuation.resume() }
+        else { finished.insert(id) }
+    }
+}
+
+private actor ControlledFrameRenderer {
+    private var waiting: [CheckedContinuation<Void, Never>] = []
+    private var released = false
+    private var active = 0
+    private(set) var peak = 0
+
+    func render(source: URL, directory: URL) async throws -> URL {
+        active += 1
+        peak = max(peak, active)
+        defer { active -= 1 }
+        if !released { await withCheckedContinuation { waiting.append($0) } }
+        let result = directory.appendingPathComponent(source.lastPathComponent + ".frame.jpg")
+        try Data([1]).write(to: result)
+        return result
+    }
+
+    func releaseAll() {
+        released = true
+        let pending = waiting
+        waiting.removeAll()
+        pending.forEach { $0.resume() }
+    }
+}
+
+private actor FailOnceFrameRenderer {
+    private(set) var selections: [PhotoEffectsSettings] = []
+    func render(source: URL, settings: PhotoEffectsSettings, directory: URL) throws -> URL {
+        selections.append(settings)
+        if selections.count == 1 { throw CocoaError(.fileWriteUnknown) }
+        let result = directory.appendingPathComponent(source.lastPathComponent + ".frame.jpg")
+        try Data([1]).write(to: result)
+        return result
+    }
+}
+
+extension DomainModelTests {
+    func testExportedOriginalIndexMatchesCopyNameSizeAndDestination() {
+        let file = CameraFile(id: 1, storageID: 1, format: 0x3801, size: 100,
+                              fileName: "DSC_0001.JPG", captureDate: "20260817T120000", isProtected: false)
+        let copy = URL(fileURLWithPath: "/exports/ZT2026-08-17/dsc_0001 (2).jpg")
+        var index = ExportedOriginalIndex()
+        XCTAssertTrue(index.add(copy, size: 100, folderName: "ZT2026-08-17"))
+        XCTAssertFalse(index.add(copy, size: 100, folderName: "ZT2026-08-17"))
+        XCTAssertEqual(index.original(for: file, folderName: "ZT2026-08-17"), copy)
+        XCTAssertNil(index.original(for: file, folderName: nil))
+        XCTAssertNil(index.original(for: file, folderName: "ZT2026-08-18"))
+        let wrongSize = CameraFile(id: 1, storageID: 1, format: 0x3801, size: 99,
+                                   fileName: file.fileName, captureDate: file.captureDate, isProtected: false)
+        XCTAssertNil(index.original(for: wrongSize, folderName: "ZT2026-08-17"))
+        let unknown = CameraFile(id: 1, storageID: 1, format: 0x3801, size: UInt64(UInt32.max),
+                                fileName: file.fileName, captureDate: file.captureDate, isProtected: false)
+        XCTAssertEqual(index.original(for: unknown, folderName: "ZT2026-08-17"), copy)
+    }
+
+    func testExportedOriginalSurvivesFrameFailureAndQueueClearing() {
+        let root = URL(fileURLWithPath: "/exports", isDirectory: true)
+        let file = CameraFile(id: 1, storageID: 1, format: 0x3801, size: 100,
+                              fileName: "DSC_0001.JPG", captureDate: nil, isProtected: false)
+        let output = root.appendingPathComponent(file.fileName)
+        let failedFrame = TransferQueueItem(id: UUID(), file: file, status: .failed, outputURL: output)
+        var index = ExportedOriginalIndex()
+        XCTAssertTrue(index.record([failedFrame], root: root))
+        XCTAssertFalse(index.record([], root: root))
+        XCTAssertEqual(index.original(for: file, folderName: nil), output)
+        XCTAssertFalse(index.record([failedFrame], root: root))
+    }
+
+    func testLateOldDirectoryOutputDoesNotPolluteNewExportIndex() {
+        let oldRoot = URL(fileURLWithPath: "/old", isDirectory: true)
+        let newRoot = URL(fileURLWithPath: "/new", isDirectory: true)
+        let file = CameraFile(id: 1, storageID: 1, format: 0x3801, size: 100,
+                              fileName: "DSC_0001.JPG", captureDate: nil, isProtected: false)
+        let oldTask = TransferQueueItem(id: UUID(), file: file, status: .completed,
+                                        outputURL: oldRoot.appendingPathComponent(file.fileName))
+        var index = ExportedOriginalIndex()
+        XCTAssertFalse(index.record([oldTask], root: newRoot))
+        XCTAssertNil(index.original(for: file, folderName: nil))
+        let changedHandle = CameraFile(id: 9, storageID: 1, format: 0x3801, size: 100,
+                                       fileName: file.fileName, captureDate: nil, isProtected: false)
+        let output = newRoot.appendingPathComponent(file.fileName)
+        index.add(output, size: 100, folderName: nil)
+        XCTAssertEqual(index.original(for: changedHandle, folderName: nil), output)
     }
 }

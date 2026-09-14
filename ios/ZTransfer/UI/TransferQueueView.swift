@@ -11,6 +11,7 @@ struct TransferQueueView: View {
     let onNavigateBack: () -> Void
     @State private var pendingConfirmation: QueueConfirmation?
     @State private var removingItemIDs: Set<UUID> = []
+    @State private var clearAllInProgress = false
 
     fileprivate enum QueueConfirmation: Identifiable {
         case clear, retry
@@ -69,7 +70,7 @@ struct TransferQueueView: View {
         if withdraw { model.cancel(id: id) }
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 280_000_000)
-            model.remove(id: id)
+            if !(await model.remove(id: id)) { removingItemIDs.remove(id) }
         }
     }
 
@@ -123,7 +124,7 @@ struct TransferQueueView: View {
 
     private var queueBottomControls: some View {
         VStack(alignment: .trailing, spacing: 12) {
-            if model.snapshot.items.contains(where: { $0.status == .failed || $0.status == .cancelled }) {
+            if !clearAllInProgress && !model.snapshot.isTransferring && actionItems.contains(where: { $0.status == .failed || $0.status == .cancelled }) {
                 Button { withAnimation(ZTransferMotion.standard) { pendingConfirmation = .retry } } label: {
                     Image(systemName: "arrow.clockwise").frame(width: 48, height: 48)
                 }
@@ -132,7 +133,7 @@ struct TransferQueueView: View {
                 .opacity(session == nil && retryNeedsCamera ? 0.45 : 1)
                 .accessibilityLabel(AppLocalized.resource("cd_retry_failed"))
             }
-            if model.snapshot.items.contains(where: { $0.status != .transferring && !$0.isGeneratingFrame }) {
+            if !clearAllInProgress && actionItems.contains(where: { $0.status != .transferring && !$0.isGeneratingFrame }) {
                 Button { withAnimation(ZTransferMotion.standard) { pendingConfirmation = .clear } } label: {
                     QueueBroomMark(color: ZTransferColors.primaryText)
                         .frame(width: 22, height: 22)
@@ -147,8 +148,12 @@ struct TransferQueueView: View {
         .padding(.bottom, 24)
     }
 
+    private var actionItems: [TransferQueueItem] {
+        model.snapshot.items.filter { !removingItemIDs.contains($0.id) }
+    }
+
     private var retryNeedsCamera: Bool {
-        model.snapshot.items.contains {
+        actionItems.contains {
             ($0.status == .failed || $0.status == .cancelled) && $0.outputURL == nil
         }
     }
@@ -169,13 +174,18 @@ struct TransferQueueView: View {
                                               onConfirm: {
                             switch pendingConfirmation {
                             case .clear:
+                                clearAllInProgress = true
                                 model.withdrawPending()
-                                Task {
+                                for item in model.snapshot.items where item.status != .transferring && !item.isGeneratingFrame {
+                                    beginRemoval(item.id, withdraw: false)
+                                }
+                                Task { @MainActor in
                                     try? await Task.sleep(nanoseconds: 320_000_000)
-                                    model.removeCleared()
+                                    await model.removeCleared()
+                                    clearAllInProgress = false
                                 }
                             case .retry:
-                                model.retryFailed()
+                                model.retryFailed(excluding: removingItemIDs)
                             }
                             self.pendingConfirmation = nil
                         }, onDismiss: { self.pendingConfirmation = nil })

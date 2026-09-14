@@ -35,6 +35,10 @@ final class PhotoListViewModel: ObservableObject {
     private var transferBusy = false
     private var newMediaHandler: (([CameraFile]) -> Void)?
     private var transferIndexGeneration = 0
+    private var transferIndexDirectory: URL?
+    private var transferIndexOrganizeByDate = false
+    private var diskOriginals = ExportedOriginalIndex()
+    private var queueOriginals = ExportedOriginalIndex()
     /// A cancelled/old scan must never publish over a newer camera session.
     private var loadGeneration = 0
 
@@ -108,7 +112,7 @@ final class PhotoListViewModel: ObservableObject {
         guard loadState == .loaded else { return }
         let oldIDs = Set(allFiles.map(\.id))
         allFiles = files
-        sections = PhotoCatalogGrouping.byCaptureDay(PhotoFilter.apply(files, state: filter, transferredIDs: transferredIDs))
+        publishSections()
         let additions = files.filter { !oldIDs.contains($0.id) }
         if !additions.isEmpty {
             newMediaHandler?(additions.filter(Self.isAutoTransferMedia))
@@ -228,6 +232,9 @@ final class PhotoListViewModel: ObservableObject {
     }
 
     private func publishSections() {
+        // A refreshed catalog may reuse a handle for another file. Resolve
+        // current file identity against the indexes, never a stale handle set.
+        transferredIDs = indexedTransferredIDs
         sections = PhotoCatalogGrouping.byCaptureDay(
             PhotoFilter.apply(allFiles, state: filter, transferredIDs: transferredIDs),
         )
@@ -346,11 +353,31 @@ final class PhotoListViewModel: ObservableObject {
         }
     }
 
-    func updateTransferredIDs(_ ids: Set<UInt32>) {
+    private func updateTransferredIDs(_ ids: Set<UInt32>) {
         guard ids != transferredIDs else { return }
         transferredIDs = ids
         guard loadState == .loaded else { return }
         publishSections()
+    }
+
+    /// recordExistingExport is an index insertion, never a replacement with
+    /// the queue's currently completed IDs. Keep originals after clear, retry
+    /// and derived-image failure, and reject late results from an old folder.
+    func recordTransferredOriginals(_ items: [TransferQueueItem]) {
+        guard let root = transferIndexDirectory else { return }
+        if queueOriginals.record(items, root: root) { publishTransferredOriginals() }
+    }
+
+    private func publishTransferredOriginals() {
+        updateTransferredIDs(indexedTransferredIDs)
+    }
+
+    private var indexedTransferredIDs: Set<UInt32> {
+        Set(allFiles.compactMap { file -> UInt32? in
+            let folder = transferIndexOrganizeByDate ? transferDateFolderName(file.captureDate) : nil
+            return diskOriginals.original(for: file, folderName: folder) != nil ||
+                queueOriginals.original(for: file, folderName: folder) != nil ? file.id : nil
+        })
     }
 
     /// Android refreshes the exported-original index independently of the
@@ -359,29 +386,33 @@ final class PhotoListViewModel: ObservableObject {
     func refreshTransferredIDs(directory: URL?, organizeByDate: Bool) {
         transferIndexGeneration &+= 1
         let generation = transferIndexGeneration
+        if transferIndexDirectory != directory {
+            diskOriginals = ExportedOriginalIndex()
+            queueOriginals = ExportedOriginalIndex()
+        }
+        transferIndexDirectory = directory
+        transferIndexOrganizeByDate = organizeByDate
+        publishTransferredOriginals()
         guard let directory else {
-            updateTransferredIDs([])
             return
         }
-        let files = allFiles
         let indexTask = Task.detached(priority: .utility) {
-            guard FileManager.default.fileExists(atPath: directory.path) else { return Set<UInt32>() }
-            var indexes: [String: TransferDirectoryIndex] = ["": TransferDirectoryIndex.scan(directory: directory)]
+            var result = ExportedOriginalIndex()
+            guard FileManager.default.fileExists(atPath: directory.path) else { return result }
+            result.merge(TransferDirectoryIndex.scan(directory: directory), folderName: nil)
             if let children = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isDirectoryKey]) {
                 for child in children where transferDatedFolderName(child.lastPathComponent) {
                     guard (try? child.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { continue }
-                    indexes[child.lastPathComponent] = TransferDirectoryIndex.scan(directory: child)
+                    result.merge(TransferDirectoryIndex.scan(directory: child), folderName: child.lastPathComponent)
                 }
             }
-            return Set(files.compactMap { file in
-                let folder = organizeByDate ? transferDateFolderName(file.captureDate) : ""
-                return indexes[folder]?.existingOriginal(for: file) == nil ? nil : file.id
-            })
+            return result
         }
         Task { [weak self] in
-            let ids = await indexTask.value
+            let index = await indexTask.value
             guard let self, generation == self.transferIndexGeneration else { return }
-            self.updateTransferredIDs(ids)
+            self.diskOriginals = index
+            self.publishTransferredOriginals()
         }
     }
 
