@@ -63,6 +63,7 @@ struct PhotoPreviewView: View {
     @State private var queueFlightActive = false
     @State private var queueFlightProgress: CGFloat = 0
     @State private var queueFlightImage: UIImage?
+    @State private var queueFlightImages: [UIImage] = []
     @State private var queueFlightCount = 0
     @State private var expandedBurstIDs: Set<String> = []
 
@@ -152,6 +153,7 @@ struct PhotoPreviewView: View {
                     PhotoPreviewQueueFlightView(
                         progress: queueFlightProgress,
                         image: queueFlightImage,
+                        images: queueFlightImages,
                         from: CGPoint(x: proxy.size.width / 2, y: proxy.size.height * 0.46),
                         target: CGPoint(
                             x: (queueTarget?.midX ?? (proxy.size.width - 74)) - proxy.frame(in: .global).minX,
@@ -276,6 +278,7 @@ struct PhotoPreviewView: View {
             queueFlightCount = 0
             queueFlightProgress = 0
             queueFlightImage = nil
+            queueFlightImages = []
         }
         .onChange(of: index) { value in
             if previewEntries.indices.contains(value) {
@@ -356,13 +359,25 @@ struct PhotoPreviewView: View {
         queueFlightActive = true
         queueFlightProgress = 0
         queueFlightImage = nil
+        queueFlightImages = []
         withAnimation(.timingCurve(0.4, 0.0, 0.2, 1.0, duration: 0.56)) {
             queueDragOffset = -max(240, UIScreen.main.bounds.height * 0.42)
             queueFlightProgress = 1
         }
         queueFlightTask?.cancel()
         queueFlightTask = Task { @MainActor in
-            if let data = try? await session.thumbnail(file: file), let image = UIImage(data: data) {
+            let burstFiles = burst?.files.prefix(3).map { $0 } ?? [file]
+            var cachedImages: [UIImage] = []
+            for candidate in burstFiles {
+                if let data = try? await session.cachedThumbnail(file: candidate),
+                   let image = UIImage(data: data) {
+                    cachedImages.append(image)
+                }
+            }
+            queueFlightImages = cachedImages
+            if let image = cachedImages.first {
+                queueFlightImage = image
+            } else if let data = try? await session.thumbnail(file: file), let image = UIImage(data: data) {
                 queueFlightImage = image
             }
             try? await Task.sleep(nanoseconds: 560_000_000)
@@ -395,6 +410,7 @@ private func luminanceHistogram(_ image: UIImage) -> [CGFloat] {
 private struct PhotoPreviewQueueFlightView: View {
     let progress: CGFloat
     let image: UIImage?
+    let images: [UIImage]
     let from: CGPoint
     let target: CGPoint
     let size: CGSize
@@ -412,7 +428,7 @@ private struct PhotoPreviewQueueFlightView: View {
         ZStack {
             ForEach(Array(0..<min(max(stackCount, 1), 3)), id: \.self) { layer in
                 Group {
-                    if let image {
+                    if let image = images.indices.contains(layer) ? images[layer] : image {
                         Image(uiImage: image).resizable().scaledToFill()
                     } else {
                         RoundedRectangle(cornerRadius: 18).fill(.white.opacity(0.26))
