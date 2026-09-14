@@ -49,6 +49,7 @@ struct PhotoPreviewView: View {
     let onQueueFlightStarted: (Int) -> Void
     let onQueueFlightFinished: (Int) -> Void
     @State private var index: Int
+    @State private var previewEntries: [PhotoPreviewEntry]
     @State private var rotationDegrees: Double = 0
     @AppStorage("preview_rotation_quarter_turns") private var rotationQuarterTurns = 0
     @State private var exif: PhotoExif?
@@ -79,32 +80,37 @@ struct PhotoPreviewView: View {
         self.onEnqueue = onEnqueue; self.onEnqueueBurst = onEnqueueBurst
         self.onQueueFlightStarted = onQueueFlightStarted
         self.onQueueFlightFinished = onQueueFlightFinished
+        let entries = collapsedPhotoPreviewEntries(files: files)
         let first = selectedFile.wrappedValue ?? files.first
-        _index = State(initialValue: first.flatMap { files.firstIndex(of: $0) } ?? 0)
+        let initialIndex = first.flatMap { selected in
+            entries.firstIndex { entry in
+                switch entry {
+                case .photo(let file, _): return file.id == selected.id
+                case .burst(let group): return group.files.first?.id == selected.id
+                }
+            }
+        } ?? 0
+        _previewEntries = State(initialValue: entries)
+        _index = State(initialValue: initialIndex)
     }
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
             TabView(selection: $index) {
-                ForEach(Array(files.enumerated()), id: \.element.id) { itemIndex, file in
+                ForEach(Array(previewEntries.enumerated()), id: \.element.id) { itemIndex, entry in
                     Group {
-                        if let group = burstGroups.first(where: { $0.files.first?.id == file.id }),
-                           !expandedBurstIDs.contains(group.id) {
+                        switch entry {
+                        case .photo(let file, _):
+                            PreviewImage(session: session, file: file,
+                                         localOriginalURL: localOriginalURL(for: file),
+                                         rotationDegrees: rotationDegrees,
+                                         zoomEnabled: !file.fileExtension.lowercased().hasSuffix(".mov") &&
+                                            !file.fileExtension.lowercased().hasSuffix(".mp4"))
+                        case .burst(let group):
                             BurstCollectionPreview(session: session, group: group) {
-                                withAnimation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.28)) {
-                                    _ = expandedBurstIDs.insert(group.id)
-                                }
+                                expandBurst(group)
                             }
-                        } else {
-                            PreviewImage(
-                                session: session,
-                                file: file,
-                                localOriginalURL: localOriginalURL(for: file),
-                                rotationDegrees: rotationDegrees,
-                                zoomEnabled: !file.fileExtension.lowercased().hasSuffix(".mov") &&
-                                    !file.fileExtension.lowercased().hasSuffix(".mp4"),
-                            )
                         }
                     }
                         .tag(itemIndex)
@@ -127,7 +133,7 @@ struct PhotoPreviewView: View {
                     }
                     .onEnded { value in
                         guard !queueFlightActive,
-                              files.indices.contains(index) else { return }
+                              previewEntries.indices.contains(index) else { return }
                         let translation = value.translation
                         guard translation.height < 0,
                               -translation.height >= 96,
@@ -135,10 +141,13 @@ struct PhotoPreviewView: View {
                             withAnimation(ZTransferMotion.standard) { queueDragOffset = 0 }
                             return
                         }
-                        startQueueFlight(for: files[index])
+                        switch previewEntries[index] {
+                        case .photo(let file, _): startQueueFlight(for: file)
+                        case .burst(let group): startQueueFlight(for: group.files[0])
+                        }
                     }
             )
-            if queueFlightActive, files.indices.contains(index) {
+            if queueFlightActive, previewEntries.indices.contains(index) {
                 GeometryReader { proxy in
                     PhotoPreviewQueueFlightView(
                         progress: queueFlightProgress,
@@ -164,10 +173,10 @@ struct PhotoPreviewView: View {
                 if let exif { PreviewExifBar(exif: exif).padding(.bottom, 78) }
             }
             .foregroundStyle(.white)
-            if files.indices.contains(index), !isCollapsedBurst(at: index) {
+            if previewEntries.indices.contains(index), let file = previewEntries[index].file {
                 VStack {
                     HStack {
-                        Text(files[index].fileName)
+                        Text(file.fileName)
                             .font(.system(size: 16, weight: .semibold, design: .rounded))
                             .lineLimit(1)
                             // Android PreviewInfoText scales the filename to
@@ -178,7 +187,7 @@ struct PhotoPreviewView: View {
                             .minimumScaleFactor(0.5)
                             .allowsTightening(true)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .id(files[index].id)
+                            .id(file.id)
                             .transition(.opacity.combined(with: .move(edge: .top)))
                         Spacer(minLength: 44)
                     }
@@ -190,13 +199,17 @@ struct PhotoPreviewView: View {
                 .foregroundStyle(.white.opacity(0.88))
                 .transition(.opacity)
             }
-            if files.indices.contains(index),
-               let group = burstGroups.first(where: { $0.files.dropFirst().contains(where: { $0.id == files[index].id }) }),
-               expandedBurstIDs.contains(group.id) {
+            if previewEntries.indices.contains(index),
+               let burstID = previewEntries[index].burstID,
+               let group = burstGroups.first(where: { $0.id == burstID }) {
                 Button {
                     withAnimation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.28)) {
+                        previewEntries = collapsePhotoPreviewBurst(previewEntries, burstID: group.id)
                         _ = expandedBurstIDs.remove(group.id)
-                        if let first = files.firstIndex(where: { $0.id == group.files[0].id }) { index = first }
+                        index = previewEntries.firstIndex { entry in
+                            if case .burst(let value) = entry { return value.id == group.id }
+                            return false
+                        } ?? index
                     }
                 } label: {
                     Image(systemName: "chevron.left").frame(width: 44, height: 44)
@@ -212,13 +225,13 @@ struct PhotoPreviewView: View {
                 Spacer()
                 HStack(spacing: 12) {
                     Spacer()
-                    if files.indices.contains(index), !isCollapsedBurst(at: index), !files[index].fileExtension.lowercased().contains(".mov"), !files[index].fileExtension.lowercased().contains(".mp4") {
+                    if let file = currentPhoto, !file.fileExtension.lowercased().contains(".mov"), !file.fileExtension.lowercased().contains(".mp4") {
                         Button { withAnimation(ZTransferMotion.standard) { histogramVisible.toggle() } } label: {
                             Image(systemName: "chart.bar.fill").frame(width: 44, height: 44)
                         }
                         .opacity(histogramVisible ? 1 : 0.82)
                     }
-                    if !isCollapsedBurst(at: index) {
+                    if currentPhoto != nil {
                         Button {
                             withAnimation(ZTransferMotion.standard) {
                                 rotationQuarterTurns = (rotationQuarterTurns + 1) % 4
@@ -227,8 +240,11 @@ struct PhotoPreviewView: View {
                         } label: { Image(systemName: "rotate.left").frame(width: 44, height: 44) }
                     }
                     Button {
-                        guard files.indices.contains(index) else { return }
-                        startQueueFlight(for: files[index])
+                        guard previewEntries.indices.contains(index) else { return }
+                        switch previewEntries[index] {
+                        case .photo(let file, _): startQueueFlight(for: file)
+                        case .burst(let group): startQueueFlight(for: group.files[0])
+                        }
                     } label: { Image(systemName: "plus").frame(width: 44, height: 44) }
                 }
                 .font(.system(size: 18, weight: .semibold))
@@ -262,17 +278,19 @@ struct PhotoPreviewView: View {
             queueFlightImage = nil
         }
         .onChange(of: index) { value in
-            if files.indices.contains(value) {
-                selectedFile = files[value]
+            if previewEntries.indices.contains(value) {
+                selectedFile = previewEntries[value].file ?? {
+                    if case .burst(let group) = previewEntries[value] { return group.files.first }
+                    return nil
+                }()
                 exif = nil
                 exifLoading = false
             }
         }
-        .task(id: files.indices.contains(index) ? files[index].id : 0) {
-            guard files.indices.contains(index), !isCollapsedBurst(at: index), !exifLoading else { return }
+        .task(id: previewEntries.indices.contains(index) ? previewEntries[index].id : "none") {
+            guard let file = currentPhoto, !exifLoading else { return }
             histogramBars = []
             exifLoading = true
-            let file = files[index]
             if let localURL = localOriginalURL(for: file) {
                 if let data = try? Data(contentsOf: localURL) {
                     exif = PhotoExifParser.parse(data)
@@ -288,20 +306,32 @@ struct PhotoPreviewView: View {
             }
             await session.setFHDActive(true)
             defer { Task { await session.setFHDActive(false) } }
-            async let loadedExif = try? session.exif(file: files[index])
-            async let loadedThumb = files[index].fileExtension == ".mov" || files[index].fileExtension == ".mp4"
+            async let loadedExif = try? session.exif(file: file)
+            async let loadedThumb = file.fileExtension == ".mov" || file.fileExtension == ".mp4"
                 ? nil
-                : (try? session.preview(handle: files[index].id))
+                : (try? session.preview(handle: file.id))
             exif = await loadedExif
             if let data = await loadedThumb, let image = UIImage(data: data) { histogramBars = luminanceHistogram(image) }
             exifLoading = false
         }
     }
 
-    private func isCollapsedBurst(at index: Int) -> Bool {
-        guard files.indices.contains(index),
-              let group = burstGroups.first(where: { $0.files.first?.id == files[index].id }) else { return false }
-        return !expandedBurstIDs.contains(group.id)
+    private var currentPhoto: CameraFile? {
+        guard previewEntries.indices.contains(index) else { return nil }
+        return previewEntries[index].file
+    }
+
+    private func expandBurst(_ group: BurstPhotoGroup) {
+        guard let collectionIndex = previewEntries.firstIndex(where: { entry in
+            if case .burst(let value) = entry { return value.id == group.id }
+            return false
+        }) else { return }
+        withAnimation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.28)) {
+            previewEntries = expandPhotoPreviewBurst(previewEntries, at: collectionIndex)
+            expandedBurstIDs.insert(group.id)
+            index = collectionIndex + 1
+            selectedFile = group.files.first
+        }
     }
 
     /// Android checks the exact destination folder and file size before asking
