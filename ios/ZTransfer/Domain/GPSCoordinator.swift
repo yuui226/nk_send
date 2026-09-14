@@ -8,6 +8,7 @@ import Foundation
 @MainActor
 final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocationManagerDelegate {
     @Published private(set) var state = GPSState()
+    @Published private(set) var placeLookupState = GPSPlaceLookupState.idle
     @Published private(set) var connectionHelpViewed = false
     @Published private(set) var frequency: GPSUpdateFrequency
     let bluetooth: NikonGPSBluetoothClient
@@ -22,7 +23,6 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
     private var placeCacheOrder: [String] = []
     private var placeRequestID = 0
     private var placeGeocoder: CLGeocoder?
-    private var placeTimeoutTask: Task<Void, Never>?
 
     init(defaults: UserDefaults? = nil) {
         let storage = defaults ?? UserDefaults(suiteName: GPSPreferences.suiteName)!
@@ -49,7 +49,6 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
 
     deinit {
         writeTask?.cancel()
-        placeTimeoutTask?.cancel()
         placeGeocoder?.cancelGeocode()
         locationManager.stopUpdatingLocation()
     }
@@ -58,9 +57,11 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
         guard value != frequency else { return }
         frequency = value
         defaults.set(value.rawValue, forKey: GPSPreferences.updateFrequencySeconds)
+        GPSDiagnostics.record("update frequency=\(value.rawValue)s")
     }
 
     func setEnabled(_ enabled: Bool) {
+        GPSDiagnostics.record("set enabled=\(enabled)")
         defaults.set(enabled, forKey: GPSPreferences.enabled)
         awaitingPairingAction = false
         writeTask?.cancel(); writeTask = nil
@@ -86,6 +87,7 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
 
     func retry() {
         guard state.enabled else { return }
+        GPSDiagnostics.record("retry status=\(state.status.rawValue)")
         guard !apModeBlocked else {
             state.status = .apUnavailable
             state.message = AppLocalized.resource("gps_ap_unavailable")
@@ -100,6 +102,7 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
     /// its active BLE/location session is stopped until the AP session ends.
     func setAPModeBlocked(_ blocked: Bool) {
         guard apModeBlocked != blocked else { return }
+        GPSDiagnostics.record("AP mode blocked=\(blocked)")
         apModeBlocked = blocked
         if blocked {
             writeTask?.cancel(); writeTask = nil
@@ -118,6 +121,7 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
     /// Matches GpsViewModel.clearPairing(): remove all camera identity data and
     /// turn the runtime off when a session is active.
     func clearPairing() {
+        GPSDiagnostics.record("clear pairing")
         if state.enabled { setEnabled(false) }
         bluetooth.clearPairing()
     }
@@ -131,30 +135,34 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
     /// Android's GpsViewModel resolves one-shot place names through an
     /// eight-entry LRU cache keyed by a roughly 100 m coordinate cell and the
     /// active locale. A new request cancels the old one so a late geocoder
-    /// callback can never replace the result for a newer coordinate.
-    func lookupPlaceName(
-        latitude: Double,
-        longitude: Double,
-        completion: @escaping @MainActor (String?) -> Void,
-    ) {
+    /// callback can never replace the result for a newer coordinate. Android
+    /// leaves the platform geocoder's completion timing unchanged, so this
+    /// adapter deliberately does not add an iOS-only timeout.
+    func lookupPlaceName(latitude: Double, longitude: Double) {
         placeRequestID += 1
         let requestID = placeRequestID
-        placeTimeoutTask?.cancel()
         placeGeocoder?.cancelGeocode()
         placeGeocoder = nil
         guard latitude.isFinite, latitude >= -90, latitude <= 90,
               longitude.isFinite, longitude >= -180, longitude <= 180 else {
-            completion(nil)
+            placeLookupState = GPSPlaceLookupState(
+                latitude: latitude, longitude: longitude, status: .error, placeName: nil,
+            )
             return
         }
 
         let key = placeCacheKey(latitude: latitude, longitude: longitude)
         if let cached = placeCache[key] {
             touchPlaceCache(key)
-            completion(cached)
+            placeLookupState = GPSPlaceLookupState(
+                latitude: latitude, longitude: longitude, status: .success, placeName: cached,
+            )
             return
         }
 
+        placeLookupState = GPSPlaceLookupState(
+            latitude: latitude, longitude: longitude, status: .loading, placeName: nil,
+        )
         let geocoder = CLGeocoder()
         placeGeocoder = geocoder
         geocoder.reverseGeocodeLocation(
@@ -163,28 +171,29 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
             Task { @MainActor [weak self] in
                 guard let self, self.placeRequestID == requestID else { return }
                 let name = placemarks?.first.flatMap(Self.bestPlaceName)
-                guard self.finishPlaceLookup(requestID: requestID, key: key, name: name) else { return }
-                completion(name)
+                self.finishPlaceLookup(
+                    requestID: requestID, key: key,
+                    latitude: latitude, longitude: longitude, name: name,
+                )
             }
-        }
-        placeTimeoutTask = Task { @MainActor [weak self] in
-            do { try await Task.sleep(nanoseconds: 8_000_000_000) } catch { return }
-            guard let self, self.placeRequestID == requestID else { return }
-            guard self.finishPlaceLookup(requestID: requestID, key: key, name: nil) else { return }
-            completion(nil)
         }
     }
 
     func cancelPlaceLookup() {
         placeRequestID += 1
-        placeTimeoutTask?.cancel(); placeTimeoutTask = nil
         placeGeocoder?.cancelGeocode(); placeGeocoder = nil
+        placeLookupState = .idle
     }
 
     @discardableResult
-    private func finishPlaceLookup(requestID: Int, key: String, name: String?) -> Bool {
-        guard placeRequestID == requestID else { return false }
-        placeTimeoutTask?.cancel(); placeTimeoutTask = nil
+    private func finishPlaceLookup(
+        requestID: Int,
+        key: String,
+        latitude: Double,
+        longitude: Double,
+        name: String?,
+    ) {
+        guard placeRequestID == requestID else { return }
         placeGeocoder = nil
         if let name, !name.isEmpty {
             placeCache[key] = name
@@ -194,15 +203,26 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
                 placeCache.removeValue(forKey: evicted)
             }
         }
-        // Invalidate any late callback from this request, including one that
-        // arrives after the timeout has already completed it.
+        placeLookupState = GPSPlaceLookupState(
+            latitude: latitude,
+            longitude: longitude,
+            status: name == nil ? .error : .success,
+            placeName: name,
+        )
+        // Invalidate any late callback from this request after the result has
+        // been committed, matching the Android request-id guard.
         placeRequestID += 1
-        return true
     }
 
     private func placeCacheKey(latitude: Double, longitude: Double) -> String {
-        let locale = Locale.current.identifier
-        return "\(locale)|\(String(format: "%.3f,%.3f", latitude, longitude))"
+        let locale = Locale.current.identifier.replacingOccurrences(of: "_", with: "-")
+        let coordinate = String(
+            format: "%.3f,%.3f",
+            locale: Locale(identifier: "en_US_POSIX"),
+            latitude,
+            longitude,
+        )
+        return "\(locale)|\(coordinate)"
     }
 
     private func touchPlaceCache(_ key: String) {
@@ -234,11 +254,13 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
         }
         locationManager.startUpdatingLocation()
         state.status = .searching
+        GPSDiagnostics.record("GPS session started")
         bluetooth.start()
     }
 
     private func applyBluetoothState(_ value: NikonGPSBluetoothState) {
         guard state.enabled else { return }
+        GPSDiagnostics.record("BLE state=\(String(describing: value))")
         switch value {
         case .unavailable:
             state.status = .error
@@ -260,6 +282,7 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
     /// BLE client may report protocol/transport English strings, but Android
     /// converts the user-visible result into a camera-action state first.
     private func applyBluetoothFailure(_ message: String) {
+        GPSDiagnostics.record("error=\(message)")
         let lowercased = message.lowercased()
         if lowercased.contains("pairing rejected") ||
             lowercased.contains("identity expired") ||
@@ -300,6 +323,7 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
         state.longitude = location.coordinate.longitude
         state.altitudeMeters = location.verticalAccuracy >= 0 ? location.altitude : nil
         state.accuracyMeters = location.horizontalAccuracy
+        GPSDiagnostics.record("location fix accuracy=\(location.horizontalAccuracy)")
         if case .ready = bluetooth.state {
             state.status = .connected
             scheduleWriteIfDue()
@@ -342,5 +366,6 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
         }
         bluetooth.writeGeo(payload)
         lastWrite = Date(); state.lastSentAt = lastWrite; state.status = .ready
+        GPSDiagnostics.record("GEO write success=true")
     }
 }

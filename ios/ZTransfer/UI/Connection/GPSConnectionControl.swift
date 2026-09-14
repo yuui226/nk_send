@@ -38,7 +38,7 @@ struct GPSConnectionControl: View {
                     showEmphasisBorder: false,
                     showDragHint: false,
                     onLongClick: {
-                        UIPasteboard.general.string = gpsDiagnosticsSnapshot(coordinator)
+                        UIPasteboard.general.string = gpsDiagnosticsSnapshot()
                     },
                     ambientEffectColor: active ? ZTransferColors.accentBlue : ZTransferColors.background,
                     ambientEffectAlpha: ambientAlpha,
@@ -73,22 +73,8 @@ struct GPSConnectionControl: View {
 }
 
 @MainActor
-private func gpsDiagnosticsSnapshot(_ coordinator: GPSCoordinator) -> String {
-    let state = coordinator.state
-    let latitude = state.latitude.map { String($0) } ?? "-"
-    let longitude = state.longitude.map { String($0) } ?? "-"
-    let altitude = state.altitudeMeters.map { String($0) } ?? "-"
-    let accuracy = state.accuracyMeters.map { String($0) } ?? "-"
-    return [
-        "status=\(state.status.rawValue)",
-        "enabled=\(state.enabled)",
-        "camera=\(state.cameraName ?? "-")",
-        "latitude=\(latitude)",
-        "longitude=\(longitude)",
-        "altitude=\(altitude)",
-        "accuracy=\(accuracy)",
-        "message=\(state.message ?? "-")",
-    ].joined(separator: "\n")
+private func gpsDiagnosticsSnapshot() -> String {
+    GPSDiagnostics.snapshot()
 }
 
 private struct GPSInlinePanel: View {
@@ -97,15 +83,10 @@ private struct GPSInlinePanel: View {
     @State private var holdCompleted = false
     @State private var sessionEstablished = false
     @State private var showHelp = false
-    @State private var placeState = GPSPlaceState.idle
-
-    private enum GPSPlaceState: Equatable {
-        case idle
-        case loading
-        case success(String)
-        case error
-    }
-
+    @State private var placeBubbleCoordinates: (latitude: Double, longitude: Double)?
+    @State private var placeBubbleRequestID = 0
+    @State private var previousStatusRank = 0
+    @State private var statusTransitionDirection = 1
     private var statusLabel: String {
         switch coordinator.state.status {
         case .off: return AppLocalized.resource("gps_enable")
@@ -179,22 +160,30 @@ private struct GPSInlinePanel: View {
             Text(AppLocalized.resource("gps_clear_pairing_message"))
         }
         .onAppear { updateSessionEvidence() }
+        .onAppear { previousStatusRank = statusRank }
         .onChange(of: coordinator.state.status) { _ in updateSessionEvidence() }
+        .onChange(of: statusRank) { newRank in
+            statusTransitionDirection = newRank >= previousStatusRank ? 1 : -1
+            previousStatusRank = newRank
+        }
         .onChange(of: coordinator.state.latitude) { _ in
-            placeState = .idle
+            placeBubbleCoordinates = nil
+            placeBubbleRequestID &+= 1
             coordinator.cancelPlaceLookup()
             updateSessionEvidence()
         }
         .onChange(of: coordinator.state.longitude) { _ in
-            placeState = .idle
+            placeBubbleCoordinates = nil
+            placeBubbleRequestID &+= 1
             coordinator.cancelPlaceLookup()
             updateSessionEvidence()
         }
         .onChange(of: coordinator.state.enabled) { enabled in
             if !enabled {
                 sessionEstablished = false
-                placeState = .idle
                 showHelp = false
+                placeBubbleCoordinates = nil
+                placeBubbleRequestID &+= 1
                 coordinator.cancelPlaceLookup()
             } else {
                 updateSessionEvidence()
@@ -202,6 +191,29 @@ private struct GPSInlinePanel: View {
         }
         .animation(.easeInOut(duration: 0.24), value: showConnectionSteps)
         .animation(.easeInOut(duration: 0.24), value: hasCoordinates)
+        .animation(.easeInOut(duration: 0.17), value: coordinator.placeLookupState)
+        .task(id: placeBubbleTaskKey) {
+            guard let requested = placeBubbleCoordinates else { return }
+            if coordinator.placeLookupState.status == .success,
+               let name = coordinator.placeLookupState.placeName {
+                let coordinates = "\(formatCoordinate(requested.latitude, latitude: true)), \(formatCoordinate(requested.longitude, latitude: false))"
+                UIPasteboard.general.string = "\(name)\n\(coordinates)"
+            }
+            let delay: UInt64
+            switch coordinator.placeLookupState.status {
+            case .success: delay = 2_200_000_000
+            case .error: delay = 1_800_000_000
+            case .idle, .loading: delay = 8_000_000_000
+            }
+            try? await Task.sleep(nanoseconds: delay)
+            guard !Task.isCancelled else { return }
+            placeBubbleCoordinates = nil
+        }
+    }
+
+    private var placeBubbleTaskKey: String {
+        let name = coordinator.placeLookupState.placeName ?? ""
+        return "\(placeBubbleRequestID)-\(coordinator.placeLookupState.status.rawValue)-\(name)"
     }
 
     private func updateSessionEvidence() {
@@ -291,11 +303,12 @@ private struct GPSInlinePanel: View {
                 .frame(maxWidth: .infinity, minHeight: 42)
                 .background(ZTransferColors.accentBlue.opacity(0.065), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(ZTransferColors.accentBlue.opacity(0.20)))
-            if case .loading = placeState {
+            if placeBubbleCoordinates != nil && coordinator.placeLookupState.status == .loading {
                 placeBubble(AppLocalized.resource("gps_place_loading"), loading: true)
-            } else if case .success(let name) = placeState {
+            } else if placeBubbleCoordinates != nil && coordinator.placeLookupState.status == .success,
+                      let name = coordinator.placeLookupState.placeName {
                 placeBubble(name, loading: false)
-            } else if case .error = placeState {
+            } else if placeBubbleCoordinates != nil && coordinator.placeLookupState.status == .error {
                 placeBubble(AppLocalized.resource("gps_place_unavailable"), loading: false)
             }
         }
@@ -328,14 +341,9 @@ private struct GPSInlinePanel: View {
     private func copyAndLookup() {
         guard let latitude = coordinator.state.latitude, let longitude = coordinator.state.longitude else { return }
         UIPasteboard.general.string = "\(formatCoordinate(latitude, latitude: true)), \(formatCoordinate(longitude, latitude: false))"
-        placeState = .loading
-        coordinator.lookupPlaceName(latitude: latitude, longitude: longitude) { name in
-            if let name {
-                withAnimation(.easeInOut(duration: 0.17)) { placeState = .success(name) }
-            } else {
-                withAnimation(.easeInOut(duration: 0.17)) { placeState = .error }
-            }
-        }
+        placeBubbleCoordinates = (latitude, longitude)
+        placeBubbleRequestID &+= 1
+        coordinator.lookupPlaceName(latitude: latitude, longitude: longitude)
     }
 
     private func formatCoordinate(_ value: Double?, latitude: Bool) -> String {
@@ -424,14 +432,27 @@ private struct GPSInlinePanel: View {
     }
 
     private func statusControl(width: CGFloat) -> some View {
-        Button(statusLabel) {
+        Button {
             if holdCompleted { holdCompleted = false; return }
             if !coordinator.state.enabled { coordinator.setEnabled(true) }
             else if coordinator.state.status == .error { coordinator.retry() }
             else if !requiresHoldToDisable && coordinator.state.status != .apUnavailable { coordinator.setEnabled(false) }
+        } label: {
+            ZStack {
+                Text(statusLabel)
+                    .id(statusLabel)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(ZTransferColors.primaryText)
+                    .lineLimit(1)
+                    .transition(.asymmetric(
+                        insertion: .move(edge: statusTransitionDirection > 0 ? .bottom : .top)
+                            .combined(with: .opacity),
+                        removal: .move(edge: statusTransitionDirection > 0 ? .top : .bottom)
+                            .combined(with: .opacity)
+                    ))
+            }
+            .frame(maxWidth: .infinity)
         }
-        .font(.system(size: 14, weight: .semibold))
-        .foregroundStyle(ZTransferColors.primaryText)
         .frame(maxWidth: .infinity).frame(height: 42)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(ZTransferColors.secondaryText.opacity(0.15)))
@@ -440,6 +461,21 @@ private struct GPSInlinePanel: View {
                 holdCompleted = true
                 coordinator.setEnabled(false)
             }
+        }
+        .animation(.easeInOut(duration: 0.22), value: statusLabel)
+    }
+
+    private var statusRank: Int {
+        switch coordinator.state.status {
+        case .off: return 0
+        case .starting, .searching: return 1
+        case .connecting: return 2
+        case .pairing: return 3
+        case .cameraConfirm: return 4
+        case .pairingSuccess, .connected, .writing, .waitingFix, .ready: return 5
+        case .needsCamera: return 6
+        case .apUnavailable: return 7
+        case .error: return 8
         }
     }
 }

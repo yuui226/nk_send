@@ -1,5 +1,23 @@
 import Foundation
 
+/// Android's GpsDiagnostics ring buffer used by the long-press troubleshooting
+/// action. It is intentionally in-memory and capped at the same 80 entries.
+enum GPSDiagnostics {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var entries: [String] = []
+
+    static func record(_ message: String) {
+        lock.lock(); defer { lock.unlock() }
+        if entries.count >= 80 { entries.removeFirst() }
+        entries.append("\(ISO8601DateFormatter().string(from: Date())) \(message)")
+    }
+
+    static func snapshot() -> String {
+        lock.lock(); defer { lock.unlock() }
+        return entries.isEmpty ? "GPS: no events" : entries.joined(separator: "\n")
+    }
+}
+
 /// Android's GpsViewModel uses a dedicated `nikon_gps` SharedPreferences file.
 /// Keep the same namespace and keys on iOS so every GPS setting has one stable
 /// persistence scope instead of sharing the app-wide defaults accidentally.
@@ -32,6 +50,22 @@ struct GPSState: Equatable, Sendable {
     var accuracyMeters: Double?
     var lastSentAt: Date?
     var message: String?
+}
+
+/// One-shot coordinate lookup state copied from Android's GpsPlaceLookupState.
+/// The coordinates stay attached to the result so a late geocoder callback
+/// cannot be mistaken for the current location.
+enum GPSPlaceLookupStatus: String, Sendable {
+    case idle, loading, success, error
+}
+
+struct GPSPlaceLookupState: Equatable, Sendable {
+    var latitude: Double?
+    var longitude: Double?
+    var status: GPSPlaceLookupStatus
+    var placeName: String?
+
+    static let idle = Self(latitude: nil, longitude: nil, status: .idle, placeName: nil)
 }
 
 enum GPSUpdateFrequency: Int, CaseIterable, Codable, Sendable {

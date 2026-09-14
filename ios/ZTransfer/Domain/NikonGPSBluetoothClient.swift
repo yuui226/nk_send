@@ -73,9 +73,11 @@ final class NikonGPSBluetoothClient: NSObject, ObservableObject {
     }
 
     func start() {
+        GPSDiagnostics.record("BLE start savedIdentity=\(savedDevice != nil && savedNonce != nil)")
         directReconnectTask?.cancel()
         directReconnectTask = nil
         guard central.state == .poweredOn else {
+            GPSDiagnostics.record("Bluetooth adapter unavailable")
             state = central.state == .unauthorized || central.state == .unsupported ? .unavailable : .failed("Bluetooth unavailable")
             return
         }
@@ -110,10 +112,12 @@ final class NikonGPSBluetoothClient: NSObject, ObservableObject {
         directReconnectTask?.cancel()
         directReconnectTask = nil
         state = .scanning
+        GPSDiagnostics.record("BLE scan started")
         central.scanForPeripherals(withServices: [Self.serviceUUID], options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
     }
 
     func stop() {
+        GPSDiagnostics.record("BLE stopped")
         directReconnectTask?.cancel()
         directReconnectTask = nil
         pairingTimeout?.cancel(); pairingTimeout = nil
@@ -131,6 +135,7 @@ final class NikonGPSBluetoothClient: NSObject, ObservableObject {
     var hasSavedPairing: Bool { savedDevice != nil && savedNonce != nil }
 
     func clearPairing() {
+        GPSDiagnostics.record("cached pairing identity cleared")
         defaults.removeObject(forKey: GPSPreferences.deviceID)
         defaults.removeObject(forKey: GPSPreferences.nonce)
         defaults.removeObject(forKey: GPSPreferences.bleAddress)
@@ -166,6 +171,7 @@ final class NikonGPSBluetoothClient: NSObject, ObservableObject {
             defaults.set(stage1.nonce, forKey: GPSPreferences.nonce)
         }
         stage3Sent = false; idQueued = false
+        GPSDiagnostics.record("BLE pairing handshake")
         if savedDevice == nil { state = .pairing }
         pairingTimeout?.cancel()
         pairingTimeout = Task { [weak self] in
@@ -177,13 +183,17 @@ final class NikonGPSBluetoothClient: NSObject, ObservableObject {
     }
 
     private func handlePairingValue(_ value: Data, peripheral: CBPeripheral) {
-        if value == Data([0x01, 0x00]) { queueControllerID(peripheral); return }
+        if value == Data([0x01, 0x00]) {
+            GPSDiagnostics.record("pairing stage4 received")
+            queueControllerID(peripheral); return
+        }
         guard let packet = NikonGPSPairingPacket.decode(value), let first = stage1 else { return }
         if packet.stage == 2 && !stage3Sent {
             guard let response = NikonGPSPairingProtocol().stage3(for: first, stage2: packet), let pairCharacteristic else {
                 state = .failed("Camera pairing rejected"); return
             }
             pairingTimeout?.cancel(); stage3Sent = true
+            GPSDiagnostics.record("pairing stage3 sent")
             enqueueWrite(peripheral: peripheral, characteristic: pairCharacteristic, data: response.encode())
             pairingTimeout = Task { [weak self] in
                 try? await Task.sleep(nanoseconds: 7_000_000_000)
@@ -203,6 +213,7 @@ final class NikonGPSBluetoothClient: NSObject, ObservableObject {
     private func queueControllerID(_ peripheral: CBPeripheral) {
         guard !idQueued, let idCharacteristic else { return }
         idQueued = true; pairingTimeout?.cancel()
+        GPSDiagnostics.record("ID queued")
         var data = Data(controllerName.prefix(32).utf8)
         data.append(contentsOf: repeatElement(0, count: max(0, 32 - data.count)))
         enqueueWrite(peripheral: peripheral, characteristic: idCharacteristic, data: data)
