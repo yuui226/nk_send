@@ -195,6 +195,12 @@ struct PhotoListView: View {
         }
         .onChange(of: queueModel.snapshot.items) { items in
             model.updateTransferredIDs(Set(items.filter { $0.status == .completed }.map { $0.file.id }))
+            // Android clears the persisted transfer directory as soon as the
+            // queue proves its handle stale. Keep the scene's directory store
+            // in the same state so a retry opens the existing chooser flow.
+            if items.contains(where: { $0.status == .failed && $0.error == AppLocalized.resource("error_dir_invalid") }) {
+                directoryStore.clear()
+            }
         }
         .onChange(of: queueModel.snapshot.isTransferring) { busy in
             model.setTransferBusy(busy)
