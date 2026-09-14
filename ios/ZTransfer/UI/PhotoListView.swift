@@ -775,9 +775,14 @@ private struct PhotoListEmptyState: View {
 
     var body: some View {
         VStack(spacing: 14) {
-            Image(systemName: filterActive ? "line.3.horizontal.decrease.circle" : "folder")
-                .font(.system(size: 48, weight: .regular))
-                .foregroundStyle(ZTransferColors.secondaryText.opacity(0.55))
+            TimelineView(.animation) { context in
+                let phase = context.date.timeIntervalSinceReferenceDate
+                    .truncatingRemainder(dividingBy: 1.6) / 1.6
+                let alpha = 0.35 + 0.25 * ((sin(phase * 2 * .pi) + 1) / 2)
+                Image(systemName: filterActive ? "line.3.horizontal.decrease.circle" : "folder")
+                    .font(.system(size: 48, weight: .regular))
+                    .foregroundStyle(ZTransferColors.secondaryText.opacity(alpha))
+            }
             Text(AppLocalized.resource(filterActive ? "no_photos_match_filter" : "no_photos_on_camera"))
                 .zTransferText(size: ZTransferMetrics.body)
                 .foregroundStyle(ZTransferColors.secondaryText)
