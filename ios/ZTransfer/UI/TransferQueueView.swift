@@ -78,13 +78,17 @@ struct TransferQueueView: View {
                 }
                 .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
                 .accessibilityLabel(AppLocalized.resource("cd_pause_after_current"))
-            } else if model.snapshot.items.contains(where: { $0.status == .waiting }),
-                      let session, let directoryURL = directory.directoryURL {
-                Button { model.start(session: session, directory: directoryURL) } label: {
+            } else if model.snapshot.items.contains(where: { $0.status == .waiting }) {
+                Button {
+                    guard let session, let directoryURL = directory.directoryURL else { return }
+                    model.start(session: session, directory: directoryURL)
+                } label: {
                     Image(systemName: "play.fill")
                         .frame(width: 36, height: 36)
                 }
                 .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
+                .disabled(session == nil || directory.directoryURL == nil)
+                .opacity(session == nil || directory.directoryURL == nil ? 0.45 : 1)
                 .accessibilityLabel(AppLocalized.resource("cd_start_transfers"))
             }
             if !model.snapshot.items.isEmpty {

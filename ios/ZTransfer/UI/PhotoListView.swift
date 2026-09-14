@@ -488,12 +488,16 @@ struct PhotoListView: View {
                 }
                 .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
                 .accessibilityLabel(AppLocalized.resource("cd_pause_after_current"))
-            } else if queueModel.snapshot.items.contains(where: { $0.status == .waiting }),
-                      let session, let directory = directoryStore.directoryURL {
-                Button { queueModel.start(session: session, directory: directory) } label: {
+            } else if queueModel.snapshot.items.contains(where: { $0.status == .waiting }) {
+                Button {
+                    guard let session, let directory = directoryStore.directoryURL else { return }
+                    queueModel.start(session: session, directory: directory)
+                } label: {
                     Image(systemName: "play.fill").frame(width: 36, height: 36)
                 }
                 .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
+                .disabled(session == nil || directoryStore.directoryURL == nil)
+                .opacity(session == nil || directoryStore.directoryURL == nil ? 0.45 : 1)
                 .accessibilityLabel(AppLocalized.resource("cd_start_transfers"))
             }
 
