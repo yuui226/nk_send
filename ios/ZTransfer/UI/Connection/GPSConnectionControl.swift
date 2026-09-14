@@ -80,7 +80,7 @@ private func gpsDiagnosticsSnapshot() -> String {
 private struct GPSInlinePanel: View {
     @ObservedObject var coordinator: GPSCoordinator
     @State private var showingReset = false
-    @State private var holdCompleted = false
+    @State private var holdPressed = false
     @State private var sessionEstablished = false
     @State private var showHelp = false
     @State private var placeBubbleCoordinates: (latitude: Double, longitude: Double)?
@@ -433,7 +433,6 @@ private struct GPSInlinePanel: View {
 
     private func statusControl(width: CGFloat) -> some View {
         Button {
-            if holdCompleted { holdCompleted = false; return }
             if !coordinator.state.enabled { coordinator.setEnabled(true) }
             else if coordinator.state.status == .error { coordinator.retry() }
             else if !requiresHoldToDisable && coordinator.state.status != .apUnavailable { coordinator.setEnabled(false) }
@@ -455,13 +454,31 @@ private struct GPSInlinePanel: View {
         }
         .frame(maxWidth: .infinity).frame(height: 42)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14))
+        // Android's GpsStatusButton gives a held-to-disable press a short
+        // foreground glow (90ms in, 170ms out) while the 800ms progressive
+        // hold is running. Keep the glow inside the button so it never
+        // changes the measured width or the neighbouring wheel's layout.
+        .overlay {
+            RoundedRectangle(cornerRadius: 14)
+                .fill(ZTransferColors.primaryText.opacity(0.055 * (holdPressed ? 1 : 0)))
+                .allowsHitTesting(false)
+        }
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(ZTransferColors.secondaryText.opacity(0.15)))
-        .onLongPressGesture(minimumDuration: 0.7) {
-            if coordinator.state.enabled {
-                holdCompleted = true
+        .onLongPressGesture(
+            minimumDuration: 0.8,
+            maximumDistance: 24,
+            pressing: { pressing in
+                guard requiresHoldToDisable else { return }
+                withAnimation(.easeInOut(duration: pressing ? 0.09 : 0.17)) {
+                    holdPressed = pressing
+                }
+            },
+            perform: {
+                guard requiresHoldToDisable else { return }
+                withAnimation(.easeInOut(duration: 0.17)) { holdPressed = false }
                 coordinator.setEnabled(false)
             }
-        }
+        )
         .animation(.easeInOut(duration: 0.22), value: statusLabel)
     }
 
