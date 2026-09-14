@@ -66,6 +66,9 @@ struct PhotoListView: View {
     @State private var effectPreviewRequested = false
     @State private var effectPreviewFileKey: String?
     @State private var topControlsVisible = true
+    @State private var cellBounds: [UInt32: CGRect] = [:]
+    @State private var queueTargetBounds: CGRect = .zero
+    @State private var queueFlights: [PhotoListQueueFlight] = []
 
     init(repository: CameraRepository, queue: TransferQueue = TransferQueue(), directory: DirectoryAccessStore = DirectoryAccessStore(), effectsStore: PhotoEffectsStore = PhotoEffectsStore(), onDisconnect: @escaping () -> Void) {
         _model = StateObject(wrappedValue: PhotoListViewModel(repository: repository))
@@ -166,6 +169,14 @@ struct PhotoListView: View {
                                                 } else { PlaceholderThumbnail() }
                                         }
                                         .contentShape(Rectangle())
+                                        .background {
+                                            GeometryReader { proxy in
+                                                Color.clear.preference(
+                                                    key: PhotoListCellBoundsPreferenceKey.self,
+                                                    value: [file.id: proxy.frame(in: .global)]
+                                                )
+                                            }
+                                        }
                                         .onTapGesture { handleTap(entry, file: file) }
                                         .onLongPressGesture { if !tapToPreview { selectedFile = file } }
                                     }
@@ -177,6 +188,9 @@ struct PhotoListView: View {
                     }.padding(.horizontal, ZTransferMetrics.pageHorizontal).padding(.top, 62)
                 }
                 .coordinateSpace(name: "photo-list-scroll")
+                .onPreferenceChange(PhotoListCellBoundsPreferenceKey.self) { bounds in
+                    cellBounds.merge(bounds) { _, latest in latest }
+                }
                 .onPreferenceChange(PhotoListScrollOffsetKey.self) { value in
                     showTopButton = value < -360
                 }
@@ -230,6 +244,7 @@ struct PhotoListView: View {
                         .transition(.opacity.combined(with: .scale(scale: 0.88, anchor: .trailing)))
                 }
             }
+            queueFlightOverlay
         }
         .task {
             if let session {
@@ -459,6 +474,14 @@ struct PhotoListView: View {
                     QueuePill(snapshot: queueModel.snapshot)
                         .padding(.horizontal, 10)
                         .frame(height: 36)
+                        .background {
+                            GeometryReader { proxy in
+                                Color.clear.preference(
+                                    key: PhotoListQueueTargetPreferenceKey.self,
+                                    value: proxy.frame(in: .global)
+                                )
+                            }
+                        }
                 }
                 .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
                 .transition(.opacity.combined(with: .scale))
@@ -467,6 +490,7 @@ struct PhotoListView: View {
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
         .animation(ZTransferMotion.standard, value: queueModel.snapshot.items)
+        .onPreferenceChange(PhotoListQueueTargetPreferenceKey.self) { queueTargetBounds = $0 }
     }
 
     /// Android requests the latest visible file on entering Settings: publish
@@ -545,10 +569,111 @@ struct PhotoListView: View {
             showingSettings = true
         } else if !deferTransferStart {
             queueModel.enqueue(file, autoStart: session, directory: directoryStore.directoryURL, organizeByDate: organizeByDate, effects: effectsStore.settings)
+            startListQueueFlight(for: file)
         } else {
             queueModel.enqueue(file, organizeByDate: organizeByDate, effects: effectsStore.settings)
+            startListQueueFlight(for: file)
         }
     }
+
+    @ViewBuilder
+    private var queueFlightOverlay: some View {
+        if !queueFlights.isEmpty {
+            GeometryReader { proxy in
+                ForEach(queueFlights) { flight in
+                    PhotoListQueueFlightView(
+                        flight: flight,
+                        viewport: proxy.frame(in: .global),
+                        target: queueTargetBounds == .zero
+                            ? CGRect(x: proxy.size.width - 74, y: proxy.safeAreaInsets.top + 18, width: 48, height: 36)
+                            : queueTargetBounds
+                    )
+                    .allowsHitTesting(false)
+                }
+            }
+            .ignoresSafeArea()
+        }
+    }
+
+    private func startListQueueFlight(for file: CameraFile) {
+        guard let from = cellBounds[file.id] else { return }
+        let id = UUID()
+        queueFlights.append(PhotoListQueueFlight(id: id, file: file, from: from))
+        withAnimation(.timingCurve(0.5, 0.0, 0.8, 0.35, duration: 0.56)) {
+            guard let index = queueFlights.firstIndex(where: { $0.id == id }) else { return }
+            queueFlights[index].progress = 1
+        }
+        Task { @MainActor in
+            if let session, let data = try? await session.thumbnail(file: file), let image = UIImage(data: data),
+               let index = queueFlights.firstIndex(where: { $0.id == id }) {
+                queueFlights[index].image = image
+            }
+            try? await Task.sleep(nanoseconds: 600_000_000)
+            queueFlights.removeAll { $0.id == id }
+        }
+    }
+}
+
+private struct PhotoListQueueFlight: Identifiable {
+    let id: UUID
+    let file: CameraFile
+    let from: CGRect
+    var progress: CGFloat = 0
+    var image: UIImage?
+}
+
+private struct PhotoListQueueFlightView: View {
+    let flight: PhotoListQueueFlight
+    let viewport: CGRect
+    let target: CGRect
+
+    var body: some View {
+        GeometryReader { _ in
+            let p = min(max(flight.progress, 0), 1)
+            let start = CGPoint(x: flight.from.midX - viewport.minX, y: flight.from.midY - viewport.minY)
+            let end = CGPoint(x: target.midX - viewport.minX, y: target.midY - viewport.minY)
+            let control = CGPoint(
+                x: start.x + (end.x - start.x) * 0.42,
+                y: min(start.y, end.y) - max(56, abs(end.x - start.x) * 0.18)
+            )
+            let position = quadraticBezier(start: start, control: control, end: end, t: p)
+            let width = max(10, flight.from.width * (1 - p * 0.56))
+            let height = max(10, flight.from.height * (1 - p * 0.56))
+            Group {
+                if let image = flight.image {
+                    Image(uiImage: image).resizable().scaledToFill()
+                } else {
+                    RoundedRectangle(cornerRadius: 8).fill(.white.opacity(0.32))
+                }
+            }
+            .frame(width: width, height: height)
+            .clipShape(RoundedRectangle(cornerRadius: max(4, width * 0.08)))
+            .overlay(RoundedRectangle(cornerRadius: max(4, width * 0.08)).stroke(.white.opacity(0.34), lineWidth: 1))
+            .position(position)
+            .opacity(1 - p * 0.2)
+            .rotationEffect(.degrees(Double(p) * 8))
+        }
+    }
+}
+
+private func quadraticBezier(start: CGPoint, control: CGPoint, end: CGPoint, t: CGFloat) -> CGPoint {
+    let oneMinus = 1 - t
+    return CGPoint(
+        x: oneMinus * oneMinus * start.x + 2 * oneMinus * t * control.x + t * t * end.x,
+        y: oneMinus * oneMinus * start.y + 2 * oneMinus * t * control.y + t * t * end.y
+    )
+}
+
+private struct PhotoListCellBoundsPreferenceKey: PreferenceKey {
+    static let defaultValue: [UInt32: CGRect] = [:]
+    static func reduce(value: inout [UInt32: CGRect], nextValue: () -> [UInt32: CGRect]) {
+        value.merge(nextValue()) { _, latest in latest }
+    }
+}
+
+private struct PhotoListQueueTargetPreferenceKey: PreferenceKey {
+    static let defaultValue: CGRect = .zero
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
 }
 
 /// The Android SignalPill has a dedicated USB mark and a four-bar STA mark.
