@@ -20,6 +20,7 @@ final class PhotoListViewModel: ObservableObject {
     private var allFiles: [CameraFile] = []
     private var transferredIDs: Set<UInt32> = []
     var availableFiles: [CameraFile] { allFiles }
+    var transferredFileIDs: Set<UInt32> { transferredIDs }
     private let scanCatalog: @Sendable (Bool, PhotoScanSnapshot?, Bool, @escaping @Sendable ([CameraFile]) async throws -> Void) async throws -> PhotoScanResult
     private let resumeSnapshotProvider: @Sendable () async -> PhotoScanSnapshot?
     private let prefetchBatch: @Sendable ([CameraFile]) async -> Set<UInt32>

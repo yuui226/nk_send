@@ -165,8 +165,15 @@ struct PhotoListView: View {
                                         let file = entry.firstFile
                                         VStack(alignment: .leading, spacing: 0) {
                                             if let session {
-                                                if case let .burst(group) = entry { BurstThumbnailView(session: session, group: group) }
-                                                else { CameraThumbnailView(session: session, handle: file.id, file: file) }
+                                                if case let .burst(group) = entry {
+                                                    BurstThumbnailView(session: session, group: group,
+                                                                       transferred: group.files.allSatisfy { model.transferredFileIDs.contains($0.id) },
+                                                                       queueStatus: queueStatus(for: file.id))
+                                                } else {
+                                                    CameraThumbnailView(session: session, handle: file.id, file: file,
+                                                                        transferred: model.transferredFileIDs.contains(file.id),
+                                                                        queueStatus: queueStatus(for: file.id))
+                                                }
                                                 } else { PlaceholderThumbnail() }
                                         }
                                         .contentShape(Rectangle())
@@ -391,6 +398,11 @@ struct PhotoListView: View {
                 .ignoresSafeArea()
             }
         }
+    }
+
+    private func queueStatus(for id: UInt32) -> TransferStatus? {
+        queueModel.snapshot.items.first(where: { $0.file.id == id &&
+            ($0.status == .waiting || $0.status == .transferring || $0.status == .failed || $0.status == .cancelled) })?.status
     }
 
     private var photoListTopControls: some View {
@@ -919,6 +931,8 @@ private struct CameraThumbnailView: View {
     let session: CameraSession
     let handle: UInt32
     var file: CameraFile?
+    var transferred: Bool = false
+    var queueStatus: TransferStatus? = nil
     @State private var image: UIImage?
 
     var body: some View {
@@ -942,6 +956,19 @@ private struct CameraThumbnailView: View {
                         .padding(4)
                         .background(Color.yellow.opacity(0.9), in: RoundedRectangle(cornerRadius: 6))
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                }
+                if let queueStatus {
+                    TransferStatusBadge(status: queueStatus)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                        .padding(4)
+                } else if transferred {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(3)
+                        .background(ZTransferColors.statusConnected, in: Circle())
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                        .padding(4)
                 }
             }
         }
@@ -969,10 +996,25 @@ private struct CameraThumbnailView: View {
 private struct BurstThumbnailView: View {
     let session: CameraSession
     let group: BurstPhotoGroup
+    var transferred: Bool = false
+    var queueStatus: TransferStatus? = nil
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
-            CameraThumbnailView(session: session, handle: group.files[0].id, file: group.files[0])
+            CameraThumbnailView(session: session, handle: group.files[0].id, file: group.files[0],
+                                transferred: transferred, queueStatus: queueStatus)
             Text("\(group.files.count)").font(.system(size: 12, weight: .bold, design: .rounded)).foregroundStyle(.white).padding(.horizontal, 6).padding(.vertical, 3).background(.black.opacity(0.62), in: Capsule()).padding(6)
         }
+    }
+}
+
+private struct TransferStatusBadge: View {
+    let status: TransferStatus
+    var body: some View {
+        Image(systemName: status == .transferring ? "arrow.down.circle.fill" :
+              status == .waiting ? "clock.fill" : status == .failed ? "exclamationmark.triangle.fill" : "xmark.circle.fill")
+            .font(.system(size: 16, weight: .bold))
+            .foregroundStyle(.white)
+            .padding(3)
+            .background(status == .failed ? ZTransferColors.statusError : ZTransferColors.accentBlue, in: Circle())
     }
 }
