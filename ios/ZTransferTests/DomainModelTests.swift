@@ -113,6 +113,23 @@ final class DomainModelTests: XCTestCase {
         XCTAssertEqual(next?.id, second.id)
     }
 
+    func testThumbnailFillQueuePreservesDatePriorityAcrossBeginScan() async {
+        let queue = PhotoThumbnailFillQueue()
+        let inRange = CameraFile(id: 21, storageID: 1, format: 0x3801, size: 1,
+                                 fileName: "in-range.JPG", captureDate: "20260914T020000", isProtected: false)
+        let outOfRange = CameraFile(id: 22, storageID: 1, format: 0x3801, size: 1,
+                                    fileName: "out-of-range.JPG", captureDate: "20260913T020000", isProtected: false)
+        await queue.beginScan()
+        await queue.seed([], priorityRange: PhotoDateRange(start: "20260914", end: "20260914"))
+        await queue.beginScan()
+        await queue.enqueueNew([outOfRange, inRange])
+
+        let first = await queue.poll()
+        let second = await queue.poll()
+        XCTAssertEqual(first?.id, inRange.id)
+        XCTAssertEqual(second?.id, outOfRange.id)
+    }
+
     func testBurstGroupingMatchesConsecutiveNameAndOneSecondRule() {
         let files = (100...102).map { n in
             CameraFile(id: UInt32(n), storageID: 1, format: 0x3801, size: 1,

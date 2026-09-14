@@ -48,7 +48,9 @@ actor PhotoThumbnailFillQueue {
         pending.removeAll(keepingCapacity: true)
         failed.removeAll(keepingCapacity: true)
         failedOrder.removeAll(keepingCapacity: true)
-        priorityRange = nil
+        // Android's beginScan() deliberately preserves the active date range.
+        // A new enumeration resets only the work lanes; ObjectAdded events
+        // arriving before seed() must still be classified by that range.
     }
 
     func seed(_ files: [CameraFile], priorityRange: PhotoDateRange? = nil) {

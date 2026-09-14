@@ -516,6 +516,12 @@
 - 已修：`PhotoThumbnailFillQueue` 增加容量为 1 的 `AsyncStream` 唤醒通道；队列为空时 worker 等待 `waitForWake()`，`wake()` 保持安卓合并信号语义。`PhotoListViewModel` 不再重复取消正在运行的 worker，新增媒体、筛选变化和显式恢复只唤醒现有任务；只有前台通道仍被占用时才退出，释放后重新建立 worker。对应安卓的 `thumbnailFillWake`、`collectLatest` 让路和 `retryFailed` 触发点。
 - 验证：新增 `testThumbnailFillQueueWakeReleasesAnEmptyWorker`；`xcodebuild -project ios/ZTransfer.xcodeproj -scheme ZTransfer -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test`，140 tests、0 failures。该测试只证明唤醒语义和编译级行为，真实相机前台抢占、断线重连和磁盘写入时序仍未验收，照片列表任务继续保持未完成。
 
+### 2026-09-14 安卓缩略图日期优先范围对账
+
+- 对照 `ThumbnailFillQueue.beginScan()`：安卓重新枚举时只清空 priority/regular/pending/failed 队列，保留当前 `range`；扫描期间到达的 `ObjectAdded` 会继续按当前日期范围进入优先队列。iOS `PhotoThumbnailFillQueue.beginScan()` 原先额外把 `priorityRange` 置空，导致新对象在 `seed()` 前被错误放入普通队列。
+- 已修：iOS `beginScan()` 保留 `priorityRange`，仅重置当前扫描代际的工作项；新增 `testThumbnailFillQueuePreservesDatePriorityAcrossBeginScan`，验证新扫描期间范围内对象优先于范围外对象。
+- 验证：`xcodebuild -project ios/ZTransfer.xcodeproj -scheme ZTransfer -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test`，162 tests、0 failures。真实相机 ObjectAdded 时序仍留在照片列表任务的真机回归范围内。
+
 ### 2026-09-14 安卓资源文案对账
 
 - `TransferQueue` 的目录失效、相机连接中断/超时、照片元数据不可读提示改为直接读取安卓资源键；日期筛选拨轮的年/月/日标签也改为安卓资源键，覆盖系统、英文和繁体语言切换。
