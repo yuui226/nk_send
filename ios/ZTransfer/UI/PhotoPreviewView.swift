@@ -587,6 +587,7 @@ private struct PreviewImage: View {
     let onDisplayImage: (UIImage?) -> Void
     @State private var thumbnail: UIImage?
     @State private var image: UIImage?
+    @State private var remoteThumbnailUnavailable = false
     @State private var highResolutionAlpha: CGFloat = 0
     @State private var scale: CGFloat = 1
     @State private var offset: CGSize = .zero
@@ -605,7 +606,14 @@ private struct PreviewImage: View {
                     .resizable().scaledToFit()
                     .opacity(thumbnail == nil ? 1 : highResolutionAlpha)
             }
-            if thumbnail == nil && image == nil { ProgressView().tint(.white) }
+            if thumbnail == nil && image == nil {
+                if remoteThumbnailUnavailable {
+                    Text(AppLocalized.resource("no_preview"))
+                        .foregroundStyle(.white.opacity(0.8))
+                } else {
+                    ProgressView().tint(.white)
+                }
+            }
             if !zoomEnabled {
                 VStack(spacing: 6) {
                     Text(AppLocalized.resource("video_no_preview"))
@@ -644,6 +652,7 @@ private struct PreviewImage: View {
             thumbnail = nil
             image = nil
             highResolutionAlpha = 0
+            remoteThumbnailUnavailable = false
             // Android publishes a cached thumbnail immediately, then waits
             // for the overlay transition to settle before opening the FHD
             // channel. This avoids competing with the opening animation.
@@ -687,7 +696,10 @@ private struct PreviewImage: View {
         .task(id: allowRemoteThumbnailFallback) {
             guard allowRemoteThumbnailFallback, thumbnail == nil, image == nil else { return }
             guard let data = try? await session.thumbnail(file: file),
-                  let thumb = UIImage(data: data) else { return }
+                  let thumb = UIImage(data: data) else {
+                if !Task.isCancelled { remoteThumbnailUnavailable = true }
+                return
+            }
             guard !Task.isCancelled else { return }
             thumbnail = thumb
             onDisplayImage(thumb)
