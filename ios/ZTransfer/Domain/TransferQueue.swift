@@ -1,4 +1,6 @@
 import Foundation
+import UIKit
+import CryptoKit
 
 func exportedOriginalBaseName(_ name: String) -> String {
     name.replacingOccurrences(of: " \\(\\d+\\)(?=\\.[^.]*$|$)", with: "", options: .regularExpression)
@@ -40,18 +42,28 @@ struct TransferQueueItem: Identifiable, Equatable, Sendable, Codable {
     /// it on the item prevents a later settings change from moving a queued
     /// task between the root and a dated folder.
     var destinationFolderName: String?
+    /// Android snapshots the complete effects editor at enqueue time.
+    /// A later editor change must never alter an already queued export.
+    var effects: PhotoEffectsSettings?
+    var isGeneratingFrame = false
+    var frameURL: URL?
+    var frameError: String?
 
     private enum CodingKeys: String, CodingKey {
-        case id, file, status, progress, bytesPerSecond, error, skipped, outputURL, destinationFolderName
+        case id, file, status, progress, bytesPerSecond, error, skipped, outputURL, destinationFolderName,
+             effects, isGeneratingFrame, frameURL, frameError
     }
 
     init(id: UUID, file: CameraFile, status: TransferStatus = .waiting,
          progress: Double = 0, bytesPerSecond: Int64 = 0, error: String? = nil,
          skipped: Bool = false, outputURL: URL? = nil,
-         destinationFolderName: String? = nil) {
+         destinationFolderName: String? = nil, effects: PhotoEffectsSettings? = nil,
+         isGeneratingFrame: Bool = false, frameURL: URL? = nil, frameError: String? = nil) {
         self.id = id; self.file = file; self.status = status; self.progress = progress
         self.bytesPerSecond = bytesPerSecond; self.error = error; self.skipped = skipped
         self.outputURL = outputURL; self.destinationFolderName = destinationFolderName
+        self.effects = effects; self.isGeneratingFrame = isGeneratingFrame
+        self.frameURL = frameURL; self.frameError = frameError
     }
 
     init(from decoder: Decoder) throws {
@@ -65,6 +77,10 @@ struct TransferQueueItem: Identifiable, Equatable, Sendable, Codable {
         skipped = try values.decodeIfPresent(Bool.self, forKey: .skipped) ?? false
         outputURL = try values.decodeIfPresent(URL.self, forKey: .outputURL)
         destinationFolderName = try values.decodeIfPresent(String.self, forKey: .destinationFolderName)
+        effects = try values.decodeIfPresent(PhotoEffectsSettings.self, forKey: .effects)
+        isGeneratingFrame = try values.decodeIfPresent(Bool.self, forKey: .isGeneratingFrame) ?? false
+        frameURL = try values.decodeIfPresent(URL.self, forKey: .frameURL)
+        frameError = try values.decodeIfPresent(String.self, forKey: .frameError)
     }
 }
 
@@ -143,19 +159,22 @@ actor TransferQueue {
     }
 
     @discardableResult
-    func enqueue(_ file: CameraFile, organizeByDate: Bool = false) -> UUID? {
+    func enqueue(_ file: CameraFile, organizeByDate: Bool = false,
+                 effects: PhotoEffectsSettings? = nil) -> UUID? {
         let item = TransferQueueItem(
             id: UUID(), file: file,
-            destinationFolderName: organizeByDate ? transferDateFolderName(file.captureDate) : nil
+            destinationFolderName: organizeByDate ? transferDateFolderName(file.captureDate) : nil,
+            effects: effects
         )
         items.append(item); publish(); return item.id
     }
 
     @discardableResult
-    func enqueueAutomatic(_ file: CameraFile, organizeByDate: Bool = false) -> UUID? {
+    func enqueueAutomatic(_ file: CameraFile, organizeByDate: Bool = false,
+                          effects: PhotoEffectsSettings? = nil) -> UUID? {
         let identity = automaticIdentity(for: file)
         guard !items.contains(where: { automaticIdentity(for: $0.file) == identity }) else { return nil }
-        return enqueue(file, organizeByDate: organizeByDate)
+        return enqueue(file, organizeByDate: organizeByDate, effects: effects)
     }
 
     func start(session: CameraSession, directory: URL) {
@@ -207,7 +226,8 @@ actor TransferQueue {
         let old = items[index]
         let replacement = TransferQueueItem(
             id: UUID(), file: old.file,
-            destinationFolderName: old.destinationFolderName
+            destinationFolderName: old.destinationFolderName,
+            effects: old.effects
         )
         items[index] = replacement
         publish()
@@ -248,7 +268,8 @@ actor TransferQueue {
             let old = items[index]
             items[index] = TransferQueueItem(
                 id: UUID(), file: old.file,
-                destinationFolderName: old.destinationFolderName
+                destinationFolderName: old.destinationFolderName,
+                effects: old.effects
             )
             replacements = true
         }
@@ -325,6 +346,14 @@ actor TransferQueue {
                 directoryIndexes[destinationDirectory, default: TransferDirectoryIndex.scan(directory: destinationDirectory)]
                     .addOriginal(output, size: originalSize)
                 progressSamples[itemID] = nil
+                // Android keeps the original as completed, then renders the
+                // immutable effect snapshot into the sibling ZTFrames folder.
+                // A frame failure never rolls back a successful original.
+                if let effects = items.first(where: { $0.id == itemID })?.effects,
+                   effects.hasEffect,
+                   Self.supportsRenderedOutput(items.first(where: { $0.id == itemID })?.file.fileExtension ?? "") {
+                    await generateFrame(for: itemID, source: output, settings: effects, in: destinationDirectory)
+                }
             } catch is CancellationError {
                 if let index = items.firstIndex(where: { $0.id == itemID }) { items[index].status = .cancelled; publish() }
                 progressSamples[itemID] = nil
@@ -340,6 +369,59 @@ actor TransferQueue {
     }
 
     private var pauseAfterCurrentFileRequested: Bool { pauseAfterCurrent }
+
+    private static func supportsRenderedOutput(_ ext: String) -> Bool {
+        [".jpg", ".jpeg", ".png", ".heic", ".heif", ".tif", ".tiff"].contains(ext.lowercased())
+    }
+
+    private func generateFrame(for id: UUID, source: URL, settings: PhotoEffectsSettings, in directory: URL) async {
+        guard let index = items.firstIndex(where: { $0.id == id }) else { return }
+        items[index].isGeneratingFrame = true; items[index].frameError = nil; publish()
+        do {
+            let data = try Data(contentsOf: source)
+            guard let image = UIImage(data: data) else { throw CocoaError(.fileReadCorruptFile) }
+            let metadata = PhotoExifParser.parse(data).map(PhotoFrameMetadata.init)
+            let rendered = try await Task.detached(priority: .userInitiated) {
+                try Task.checkCancellation()
+                return try autoreleasepool {
+                    try PhotoEffectsRenderer.render(image, settings: settings, metadata: metadata)
+                }
+            }.value
+            try Task.checkCancellation()
+            guard let encoded = rendered.jpegData(compressionQuality: 1) else { throw CocoaError(.fileWriteUnknown) }
+            let framesDirectory = directory.appendingPathComponent("ZTFrames", isDirectory: true)
+            try FileManager.default.createDirectory(at: framesDirectory, withIntermediateDirectories: true)
+            let stem = source.deletingPathExtension().lastPathComponent
+            let digest = SHA256.hash(data: (try JSONEncoder().encode(settings)))
+                .prefix(6).map { String(format: "%02x", $0) }.joined()
+            let preferred = framesDirectory.appendingPathComponent("\(stem)_frame_\(digest).jpg")
+            let destination = uniqueFrameURL(preferred)
+            try encoded.write(to: destination, options: .atomic)
+            if let index = items.firstIndex(where: { $0.id == id }) {
+                items[index].isGeneratingFrame = false; items[index].frameURL = destination; publish()
+            }
+        } catch is CancellationError {
+            if let index = items.firstIndex(where: { $0.id == id }) { items[index].isGeneratingFrame = false; publish() }
+        } catch {
+            if let index = items.firstIndex(where: { $0.id == id }) {
+                items[index].isGeneratingFrame = false
+                items[index].frameError = error.localizedDescription
+                publish()
+            }
+        }
+    }
+
+    private func uniqueFrameURL(_ preferred: URL) -> URL {
+        guard FileManager.default.fileExists(atPath: preferred.path) else { return preferred }
+        let stem = preferred.deletingPathExtension().lastPathComponent
+        let ext = preferred.pathExtension
+        for i in 1...999 {
+            let candidate = preferred.deletingLastPathComponent().appendingPathComponent("\(stem) (\(i)).\(ext)")
+            if !FileManager.default.fileExists(atPath: candidate.path) { return candidate }
+        }
+        return preferred.deletingLastPathComponent().appendingPathComponent("\(stem)_\(Date().timeIntervalSince1970).\(ext)")
+    }
+
     private func updateProgress(id: UUID, value: Double) {
         guard let index = items.firstIndex(where: { $0.id == id }), items[index].status == .transferring else { return }
         let now = Date()

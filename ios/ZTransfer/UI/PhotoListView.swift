@@ -173,7 +173,8 @@ struct PhotoListView: View {
                       let directory = directoryStore.directoryURL else { return }
                 let deferStart = UserDefaults.standard.bool(forKey: "defer_transfer_start")
                 queueModel.enqueueAutomatic(files, session: session, directory: directory,
-                                            autoStart: !deferStart, organizeByDate: organizeByDate)
+                                            autoStart: !deferStart, organizeByDate: organizeByDate,
+                                            effects: effectsStore.settings)
             }
             model.load()
         }
@@ -223,9 +224,9 @@ struct PhotoListView: View {
                                  directory: directoryStore.directoryURL,
                                  organizeByDate: organizeByDate) { file in
                     if !deferTransferStart {
-                        queueModel.enqueue(file, autoStart: session, directory: directoryStore.directoryURL, organizeByDate: organizeByDate)
+                        queueModel.enqueue(file, autoStart: session, directory: directoryStore.directoryURL, organizeByDate: organizeByDate, effects: effectsStore.settings)
                     } else {
-                        queueModel.enqueue(file, organizeByDate: organizeByDate)
+                        queueModel.enqueue(file, organizeByDate: organizeByDate, effects: effectsStore.settings)
                     }
                 }
                 .onAppear { model.pauseForPreview() }
@@ -440,9 +441,9 @@ struct PhotoListView: View {
         if tapToPreview {
             selectedFile = file
         } else if !deferTransferStart {
-            queueModel.enqueue(file, autoStart: session, directory: directoryStore.directoryURL, organizeByDate: organizeByDate)
+            queueModel.enqueue(file, autoStart: session, directory: directoryStore.directoryURL, organizeByDate: organizeByDate, effects: effectsStore.settings)
         } else {
-            queueModel.enqueue(file, organizeByDate: organizeByDate)
+            queueModel.enqueue(file, organizeByDate: organizeByDate, effects: effectsStore.settings)
         }
     }
 }

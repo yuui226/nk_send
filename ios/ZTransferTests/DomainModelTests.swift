@@ -163,6 +163,24 @@ final class DomainModelTests: XCTestCase {
         XCTAssertFalse(paused)
     }
 
+    func testTransferQueueItemPersistsEffectSnapshotForQueuedExport() throws {
+        let file = CameraFile(id: 44, storageID: 1, format: 0x3801, size: 10,
+                              fileName: "snapshot.JPG", captureDate: "20260914T010203", isProtected: false)
+        var effects = PhotoEffectsSettings()
+        effects.photoFrameEnabled = true
+        effects.photoFramePreset = .minimal
+        effects.watermark.text = "Locked"
+        effects.photoFilterEnabled = true
+        effects.selectedFilter = PhotoFilterSelection(
+            preset: PhotoFilterPreset(id: "NP3_FILM", name: "Film"), intensityPercent: 63
+        )
+        let item = TransferQueueItem(id: UUID(), file: file, effects: effects)
+        let data = try JSONEncoder().encode(item)
+        let decoded = try JSONDecoder().decode(TransferQueueItem.self, from: data)
+        XCTAssertEqual(decoded.effects, effects)
+        XCTAssertTrue(decoded.effects?.hasEffect == true)
+    }
+
     func testAutomaticQueueDeduplicatesCameraIdentity() async {
         let defaults = UserDefaults.standard
         let persistenceKey = "transferQueue.items.v1"
