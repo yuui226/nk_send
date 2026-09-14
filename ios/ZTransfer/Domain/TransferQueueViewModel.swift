@@ -32,6 +32,12 @@ final class TransferQueueViewModel: ObservableObject {
             if let session, let directory { await queue.start(session: session, directory: directory) }
         }
     }
+    func enqueue(_ files: [CameraFile], organizeByDate: Bool = false, effects: PhotoEffectsSettings? = nil) {
+        guard !files.isEmpty else { return }
+        Task {
+            for file in files { _ = await queue.enqueue(file, organizeByDate: organizeByDate, effects: effects) }
+        }
+    }
     /// Android's automatic-new-media entry point deduplicates by logical
     /// identity before adding and starts the worker only when the user has not
     /// deferred transfer start.

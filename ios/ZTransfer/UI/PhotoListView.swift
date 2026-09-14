@@ -336,9 +336,7 @@ struct PhotoListView: View {
                         queueModel.enqueue(burstFiles, autoStart: session, directory: directory,
                                            organizeByDate: organizeByDate, effects: effectsStore.settings)
                     } else {
-                        for file in burstFiles {
-                            queueModel.enqueue(file, organizeByDate: organizeByDate, effects: effectsStore.settings)
-                        }
+                        queueModel.enqueue(burstFiles, organizeByDate: organizeByDate, effects: effectsStore.settings)
                     }
                     return true
                 }
@@ -839,7 +837,8 @@ private struct QueuePill: View {
     var body: some View {
         HStack(spacing: 5) {
             if showDoneLabel {
-                Text(AppLocalized.resource("done"))
+                // Android keeps this transient badge literal across locales.
+                Text("Done")
                     .zTransferText(size: ZTransferMetrics.caption, weight: .semibold)
                     .transition(.opacity.combined(with: .scale(scale: 0.82)))
             } else {
@@ -851,6 +850,9 @@ private struct QueuePill: View {
                         .id(remainingCount)
                         .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .move(edge: .top).combined(with: .opacity)))
                 } else if generationCount > 0 {
+                    Text(AppLocalized.resource("queue_pill_generating"))
+                        .zTransferText(size: ZTransferMetrics.caption, weight: .semibold)
+                        .foregroundStyle(ZTransferColors.accentPurple)
                     Text("\(generationCount)")
                         .monospacedDigit()
                         .id("generation-\(generationCount)")
