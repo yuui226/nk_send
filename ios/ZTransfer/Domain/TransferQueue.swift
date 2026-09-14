@@ -437,11 +437,30 @@ actor TransferQueue {
 
     private func frameURL(source: URL, settings: PhotoEffectsSettings, framesDirectory: URL) -> URL {
         let stem = source.deletingPathExtension().lastPathComponent
+        let renderSettings = RenderFingerprint(
+            photoFrameEnabled: settings.photoFrameEnabled,
+            photoFrameBorderEnabled: settings.photoFrameBorderEnabled,
+            photoFramePreset: settings.photoFramePreset,
+            watermark: settings.watermark,
+            metadata: settings.metadata,
+            photoFilterEnabled: settings.photoFilterEnabled,
+            selectedFilter: settings.selectedFilter
+        )
         var encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
-        let digest = (try? encoder.encode(settings)).map { SHA256.hash(data: $0) }
+        let digest = (try? encoder.encode(renderSettings)).map { SHA256.hash(data: $0) }
             .map { $0.prefix(6).map { String(format: "%02x", $0) }.joined() } ?? "000000"
         return framesDirectory.appendingPathComponent("\(stem)_frame_\(digest).jpg")
+    }
+
+    private struct RenderFingerprint: Codable {
+        let photoFrameEnabled: Bool
+        let photoFrameBorderEnabled: Bool
+        let photoFramePreset: PhotoFramePreset
+        let watermark: PhotoFrameWatermark
+        let metadata: PhotoFrameMetadataSettings
+        let photoFilterEnabled: Bool
+        let selectedFilter: PhotoFilterSelection?
     }
 
     private func uniqueFrameURL(_ preferred: URL) -> URL {
