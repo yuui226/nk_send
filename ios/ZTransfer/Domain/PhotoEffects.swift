@@ -211,6 +211,193 @@ struct PhotoEffectsSettings: Codable, Equatable, Sendable {
     }
 }
 
+// MARK: Android-compatible rendered-output identity
+
+/// Returns the exact derived-image filename used by PhotoFrameExporter.kt.
+/// The identity deliberately contains only rendering inputs and version
+/// tokens, never the full Codable description of a Swift value.
+func androidPhotoFrameOutputName(sourceName: String, settings: PhotoEffectsSettings) -> String {
+    let preset = settings.photoFramePreset
+    let borderEnabled = settings.photoFrameEnabled && settings.photoFrameBorderEnabled
+    let renderedWatermark = androidWatermarkForBorderMode(settings.watermark, borderEnabled: borderEnabled)
+    let metadata = settings.metadataByPreset[preset.rawValue]
+        ?? PhotoFrameMetadataSettings.defaults(for: preset)
+    let filter = settings.photoFilterEnabled ? settings.selectedFilter : nil
+    let watermarkSuffix: String
+    if borderEnabled || renderedWatermark.enabled {
+        watermarkSuffix = "_w\(androidWatermarkFingerprint(renderedWatermark, preset: preset, metadata: metadata))"
+    } else {
+        watermarkSuffix = ""
+    }
+    let filterSuffix = filter.map {
+        "_f\(androidFilterFingerprint($0))i\($0.normalizedIntensityPercent)"
+    } ?? ""
+    let style: String
+    if borderEnabled {
+        style = "frame_\(androidFramePresetSuffix(preset))"
+    } else if renderedWatermark.enabled {
+        style = "watermark"
+    } else if filter != nil {
+        style = "filter"
+    } else {
+        style = "watermark"
+    }
+    let stem = URL(fileURLWithPath: sourceName).deletingPathExtension().lastPathComponent
+    return "\(stem)_\(style)\(watermarkSuffix)\(filterSuffix).jpg"
+}
+
+private func androidWatermarkForBorderMode(_ watermark: PhotoFrameWatermark, borderEnabled: Bool) -> PhotoFrameWatermark {
+    guard !borderEnabled,
+          !androidPhotoPlacement(watermark.position) else { return watermark }
+    var result = watermark
+    result.position = .photoBottomCenter
+    return result
+}
+
+private func androidPhotoPlacement(_ position: PhotoFrameWatermarkPosition) -> Bool {
+    switch position {
+    case .photoTopLeft, .photoTopCenter, .photoTopRight,
+         .photoCenter, .photoBottomLeft, .photoBottomCenter, .photoBottomRight:
+        return true
+    default:
+        return false
+    }
+}
+
+private func androidFramePresetSuffix(_ preset: PhotoFramePreset) -> String {
+    switch preset {
+    case .mist: return "mist"
+    case .cinema: return "dark"
+    case .minimal: return "clean"
+    case .frosted: return "glass"
+    case .plaque: return "plaque"
+    case .immersive: return "immersive"
+    case .brandInset: return "brand_inset"
+    case .brandGallery: return "brand_gallery"
+    case .classicSignature: return "classic_signature"
+    case .galleryMat: return "gallery_mat"
+    case .colorArchive: return "color_archive"
+    case .filmGallery: return "film_gallery"
+    case .filmEdge: return "film_edge"
+    }
+}
+
+private func androidIsBrandFrame(_ preset: PhotoFramePreset) -> Bool {
+    preset == .brandInset || preset == .brandGallery
+}
+
+private func androidIsEditorialFrame(_ preset: PhotoFramePreset) -> Bool {
+    switch preset {
+    case .classicSignature, .galleryMat, .colorArchive, .filmGallery, .filmEdge: return true
+    default: return false
+    }
+}
+
+private func androidResolvedWatermarkPosition(_ preset: PhotoFramePreset, _ requested: PhotoFrameWatermarkPosition) -> PhotoFrameWatermarkPosition {
+    guard requested == .auto else { return requested }
+    switch preset {
+    case .plaque: return .left
+    case .immersive: return .auto
+    case .brandInset, .brandGallery, .classicSignature, .colorArchive, .filmEdge: return .photoBottomRight
+    case .galleryMat, .filmGallery: return .center
+    default: return .center
+    }
+}
+
+private func androidNormalizedWatermarkSize(_ value: Int) -> Int { min(max(value, 1), 300) }
+private func androidNormalizedWatermarkOpacity(_ value: Int) -> Int { min(max(value, 1), 100) }
+
+private func androidWatermarkSizeToken(_ watermark: PhotoFrameWatermark) -> String {
+    let size = androidNormalizedWatermarkSize(watermark.sizePercent) + 49
+    switch (watermark.content, size) {
+    case (.text, 58): return "SMALL"
+    case (.text, 75): return "MEDIUM"
+    case (.text, 100): return "LARGE"
+    case (.image, 47): return "SMALL"
+    case (.image, 69): return "MEDIUM"
+    case (.image, 100): return "LARGE"
+    default: return "\(size)P"
+    }
+}
+
+private func androidWatermarkOpacityToken(_ value: Int) -> String {
+    switch androidNormalizedWatermarkOpacity(value) {
+    case 40: return "SUBTLE"
+    case 72: return "STANDARD"
+    case 100: return "STRONG"
+    default: return "\(androidNormalizedWatermarkOpacity(value))P"
+    }
+}
+
+private func androidNormalizedDatePattern(_ value: String) -> String {
+    let allowed = ["yyyy-MM-dd", "yyyy/MM/dd", "yyyy.MM.dd", "MM-dd-yyyy"]
+    return allowed.contains(value.trimmingCharacters(in: .whitespacesAndNewlines))
+        ? value.trimmingCharacters(in: .whitespacesAndNewlines) : "yyyy-MM-dd"
+}
+
+private func androidNormalizedTimePattern(_ value: String) -> String {
+    let allowed = ["HH:mm", "HH:mm:ss", "HH.mm", "HH.mm.ss"]
+    return allowed.contains(value.trimmingCharacters(in: .whitespacesAndNewlines))
+        ? value.trimmingCharacters(in: .whitespacesAndNewlines) : "HH:mm:ss"
+}
+
+private func androidMetadataFingerprintToken(_ preset: PhotoFramePreset, _ metadata: PhotoFrameMetadataSettings) -> String? {
+    let defaults = PhotoFrameMetadataSettings.defaults(for: preset)
+    var rendered = metadata
+    if !rendered.showDate { rendered.datePattern = defaults.datePattern }
+    if !rendered.showTime { rendered.timePattern = defaults.timePattern }
+    rendered.datePattern = androidNormalizedDatePattern(rendered.datePattern)
+    rendered.timePattern = androidNormalizedTimePattern(rendered.timePattern)
+    guard rendered != defaults else { return nil }
+    return [preset.rawValue, String(rendered.showDate), String(rendered.showTime),
+            String(rendered.showFocalLength), String(rendered.showExposure),
+            String(rendered.showBrand), String(rendered.showModel),
+            String(rendered.showLensModel), String(rendered.showCoordinates),
+            String(rendered.showAltitude), rendered.datePattern, rendered.timePattern].joined(separator: "|")
+}
+
+private func androidWatermarkFingerprint(_ watermark: PhotoFrameWatermark, preset: PhotoFramePreset, metadata: PhotoFrameMetadataSettings) -> String {
+    var base: [String]
+    if watermark.enabled {
+        let resolved = androidResolvedWatermarkPosition(preset, watermark.position)
+        base = ["v=2"]
+        if androidIsBrandFrame(preset) { base.append("brand-v=4") }
+        if androidIsEditorialFrame(preset) { base.append("editorial-v=2") }
+        if preset == .filmGallery { base.append("film-gallery-v=1") }
+        base += ["on", watermark.content.rawValue, androidWatermarkSizeToken(watermark),
+                 resolved.rawValue, "opacity=\(androidWatermarkOpacityToken(watermark.opacityPercent))"]
+        if watermark.content == .text {
+            base += [watermark.displayText, watermark.font.rawValue, watermark.color.rawValue,
+                     "effect=\(watermark.effect.rawValue)"]
+        } else if let hash = watermark.imageHash,
+                  hash.range(of: "^[0-9a-fA-F]{64}$", options: .regularExpression) != nil {
+            base.append(hash)
+        }
+    } else if androidIsBrandFrame(preset) {
+        base = ["brand-v=4", "off"]
+    } else if androidIsEditorialFrame(preset) {
+        base = ["editorial-v=2"]
+        if preset == .filmGallery { base.append("film-gallery-v=1") }
+        base.append("off")
+    } else {
+        base = ["off"]
+    }
+    if let metadataToken = androidMetadataFingerprintToken(preset, metadata) {
+        base += ["metadata=\(metadataToken)"]
+    }
+    if metadata.showCoordinates || metadata.showAltitude { base.append("location-v=1") }
+    return androidSHA256Hex(base.joined(separator: "\u{0}"), bytes: 6)
+}
+
+private func androidFilterFingerprint(_ filter: PhotoFilterSelection) -> String {
+    androidSHA256Hex("v=2\u{0}\(filter.preset.id)", bytes: 4)
+}
+
+private func androidSHA256Hex(_ value: String, bytes: Int) -> String {
+    SHA256.hash(data: Data(value.utf8)).prefix(bytes)
+        .map { String(format: "%02x", $0) }.joined()
+}
+
 @MainActor
 final class PhotoEffectsStore: ObservableObject {
     @Published private(set) var settings: PhotoEffectsSettings

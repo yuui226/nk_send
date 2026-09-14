@@ -261,6 +261,28 @@ final class DomainModelTests: XCTestCase {
         XCTAssertEqual(existingTransferDestination(for: unknownSize, in: directory)?.lastPathComponent, "same.JPG")
     }
 
+    func testAndroidPhotoFrameOutputNameUsesVersionedRenderingIdentity() {
+        var settings = PhotoEffectsSettings()
+        settings.photoFrameEnabled = true
+        settings.photoFramePreset = .mist
+        XCTAssertEqual(
+            androidPhotoFrameOutputName(sourceName: "DSC_0001.JPG", settings: settings),
+            "DSC_0001_frame_mist_w5188c3de1416.jpg"
+        )
+
+        settings.photoFrameBorderEnabled = false
+        settings.watermark.enabled = false
+        settings.photoFilterEnabled = true
+        settings.selectedFilter = PhotoFilterSelection(
+            preset: PhotoFilterPreset(id: "NP3_FILM", name: "Film"),
+            intensityPercent: 63
+        )
+        XCTAssertEqual(
+            androidPhotoFrameOutputName(sourceName: "DSC_0001.JPG", settings: settings),
+            "DSC_0001_filter_f42f030dci64.jpg"
+        )
+    }
+
     func testTransferDateFolderMatchesAndroidAndFallsBackForInvalidDate() {
         let fallback = Calendar(identifier: .gregorian).date(from: DateComponents(year: 2026, month: 3, day: 21))!
         XCTAssertEqual(transferDateFolderName("20260817T142530", fallback: fallback), "ZT2026-08-17")
