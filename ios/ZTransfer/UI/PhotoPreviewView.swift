@@ -66,6 +66,10 @@ struct PhotoPreviewView: View {
     @State private var queueFlightImages: [UIImage?] = []
     @State private var queueFlightCount = 0
     @State private var expandedBurstIDs: Set<String> = []
+    /// Android snapshots already-exported originals when the preview overlay
+    /// opens; a transfer completing underneath must not replace the source of
+    /// the current page halfway through its load.
+    @State private var localOriginalURLs: [UInt32: URL]
 
     init(session: CameraSession, files: [CameraFile], selectedFile: Binding<CameraFile?>,
          directory: URL? = nil, organizeByDate: Bool = false,
@@ -93,6 +97,20 @@ struct PhotoPreviewView: View {
         } ?? 0
         _previewEntries = State(initialValue: entries)
         _index = State(initialValue: initialIndex)
+        var sources: [UInt32: URL] = [:]
+        if let directory {
+            for file in files {
+                guard localOriginalPreviewRoute(for: file.fileExtension) != .cameraFHD else { continue }
+                let destination = transferDestinationDirectory(
+                    root: directory,
+                    folderName: organizeByDate ? transferDateFolderName(file.captureDate) : nil
+                )
+                if let original = existingTransferDestination(for: file, in: destination) {
+                    sources[file.id] = original
+                }
+            }
+        }
+        _localOriginalURLs = State(initialValue: sources)
     }
 
     var body: some View {
@@ -104,7 +122,7 @@ struct PhotoPreviewView: View {
                         switch entry {
                         case .photo(let file, _):
                             PreviewImage(session: session, file: file,
-                                         localOriginalURL: localOriginalURL(for: file),
+                                         localOriginalURL: localOriginalURLs[file.id],
                                          rotationDegrees: rotationDegrees,
                                          zoomEnabled: !file.fileExtension.lowercased().hasSuffix(".mov") &&
                                             !file.fileExtension.lowercased().hasSuffix(".mp4"))
@@ -294,7 +312,7 @@ struct PhotoPreviewView: View {
             guard let file = currentPhoto, !exifLoading else { return }
             histogramBars = []
             exifLoading = true
-            if let localURL = localOriginalURL(for: file) {
+            if let localURL = localOriginalURLs[file.id] {
                 if let data = try? Data(contentsOf: localURL) {
                     exif = PhotoExifParser.parse(data)
                 }
@@ -335,19 +353,6 @@ struct PhotoPreviewView: View {
             index = collectionIndex + 1
             selectedFile = group.files.first
         }
-    }
-
-    /// Android checks the exact destination folder and file size before asking
-    /// the camera for FHD. RAW and TIFF intentionally keep their camera/embedded
-    /// preview routes; videos remain thumbnail-only.
-    private func localOriginalURL(for file: CameraFile) -> URL? {
-        guard let directory,
-              localOriginalPreviewRoute(for: file.fileExtension) != .cameraFHD else { return nil }
-        let destination = transferDestinationDirectory(
-            root: directory,
-            folderName: organizeByDate ? transferDateFolderName(file.captureDate) : nil
-        )
-        return existingTransferDestination(for: file, in: destination)
     }
 
     private func startQueueFlight(for file: CameraFile) {
