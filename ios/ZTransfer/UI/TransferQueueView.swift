@@ -57,7 +57,7 @@ struct TransferQueueView: View {
                             Button { pendingConfirmation = .retry } label: { Image(systemName: "arrow.clockwise") }
                                 .accessibilityLabel(AppLocalized.resource("cd_retry_failed"))
                         }
-                        if model.snapshot.items.contains(where: { $0.status != .transferring }) {
+                        if model.snapshot.items.contains(where: { $0.status != .transferring && !$0.isGeneratingFrame }) {
                             Button { pendingConfirmation = .clear } label: { Image(systemName: "trash") }
                                 .accessibilityLabel(AppLocalized.resource("cd_clear_queue"))
                         }
@@ -144,7 +144,7 @@ private struct QueueItemView: View {
                 Button(action: onRetry) { Image(systemName: "arrow.clockwise") }.buttonStyle(.bordered).accessibilityLabel(AppLocalized.resource("retry"))
             } else if item.status == .waiting {
                 Button(action: onCancel) { Image(systemName: "xmark") }.buttonStyle(.bordered).accessibilityLabel(AppLocalized.resource("cancel"))
-            } else if item.status == .completed || item.status == .cancelled {
+            } else if (item.status == .completed || item.status == .cancelled) && !item.isGeneratingFrame {
                 Button(action: onRemove) { Image(systemName: "trash") }.buttonStyle(.bordered).accessibilityLabel(AppLocalized.resource("cd_remove_from_queue"))
             }
         }
