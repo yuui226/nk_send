@@ -1,9 +1,9 @@
 import SwiftUI
 import UIKit
 
-/// The queue is a sheet from the same compact pill used on the photo page.  It
-/// intentionally contains only the Android queue actions: retry, remove and
-/// pause/resume.  Directory selection remains in Settings.
+/// The queue is the second page of the photo-list transfer workspace. It keeps
+/// the Android queue actions: retry, remove and pause/resume. Directory
+/// selection remains in Settings.
 struct TransferQueueView: View {
     @ObservedObject var model: TransferQueueViewModel
     @ObservedObject var directory: DirectoryAccessStore
