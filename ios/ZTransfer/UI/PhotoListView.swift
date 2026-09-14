@@ -572,6 +572,9 @@ private func photoGridEntries(_ files: [CameraFile], collapse: Bool = true, expa
 
 private struct QueuePill: View {
     let snapshot: TransferQueueSnapshot
+    @State private var showDoneLabel = false
+    @State private var sawActiveBatch = false
+    @State private var doneTask: Task<Void, Never>?
     private var remainingCount: Int {
         snapshot.items.reduce(into: 0) { count, item in
             if item.status == .waiting || item.status == .transferring || item.isGeneratingFrame {
@@ -580,18 +583,72 @@ private struct QueuePill: View {
         }
     }
 
+    private var generationCount: Int {
+        snapshot.items.reduce(into: 0) { count, item in
+            if item.isGeneratingFrame { count += 1 }
+        }
+    }
+
+    private var activeItem: TransferQueueItem? {
+        snapshot.items.first(where: { $0.status == .transferring })
+    }
+
+    private var hasActive: Bool { remainingCount > 0 || generationCount > 0 }
+
     var body: some View {
         HStack(spacing: 5) {
-            Image(systemName: snapshot.isTransferring ? "arrow.down.circle.fill" : "checklist")
-                .scaleEffect(remainingCount > 0 ? 1 : 0.9)
-            if remainingCount > 0 {
-                Text("\(remainingCount)")
-                    .monospacedDigit()
-                    .id(remainingCount)
-                    .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .move(edge: .top).combined(with: .opacity)))
+            if showDoneLabel {
+                Text("Done").font(.system(size: ZTransferMetrics.caption, weight: .semibold))
+                    .transition(.opacity.combined(with: .scale(scale: 0.82)))
+            } else {
+                Image(systemName: snapshot.isTransferring ? "arrow.down.circle.fill" : "checklist")
+                    .scaleEffect(hasActive ? 1 : 0.9)
+                if remainingCount > 0 {
+                    Text("\(remainingCount)")
+                        .monospacedDigit()
+                        .id(remainingCount)
+                        .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .move(edge: .top).combined(with: .opacity)))
+                } else if generationCount > 0 {
+                    Text("\(generationCount)")
+                        .monospacedDigit()
+                        .id("generation-\(generationCount)")
+                        .foregroundStyle(ZTransferColors.accentPurple)
+                }
+                if let activeItem, activeItem.bytesPerSecond > 0 {
+                    Text(speedText(activeItem.bytesPerSecond))
+                        .monospacedDigit()
+                        .transition(.opacity.combined(with: .move(edge: .leading)))
+                }
             }
         }
         .animation(ZTransferMotion.standard, value: remainingCount)
+        .animation(ZTransferMotion.standard, value: generationCount)
+        .animation(ZTransferMotion.standard, value: showDoneLabel)
+        .onChange(of: hasActive) { active in
+            if active {
+                sawActiveBatch = true
+                doneTask?.cancel()
+                showDoneLabel = false
+            } else if sawActiveBatch {
+                sawActiveBatch = false
+                showDoneLabel = true
+                doneTask?.cancel()
+                doneTask = Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 1_800_000_000)
+                    guard !Task.isCancelled else { return }
+                    withAnimation(ZTransferMotion.standard) { showDoneLabel = false }
+                }
+            }
+        }
+        .onDisappear { doneTask?.cancel() }
+    }
+
+    private func speedText(_ bytesPerSecond: Int64) -> String {
+        switch bytesPerSecond {
+        case ..<1024: return "\(bytesPerSecond) B/s"
+        case ..<(1024 * 1024): return String(format: "%.1f KB/s", Double(bytesPerSecond) / 1024)
+        default: return String(format: "%.1f MB/s", Double(bytesPerSecond) / (1024 * 1024))
+        }
     }
 }
 
