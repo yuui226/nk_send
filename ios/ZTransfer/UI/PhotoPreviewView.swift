@@ -63,7 +63,7 @@ struct PhotoPreviewView: View {
     @State private var queueFlightActive = false
     @State private var queueFlightProgress: CGFloat = 0
     @State private var queueFlightImage: UIImage?
-    @State private var queueFlightImages: [UIImage] = []
+    @State private var queueFlightImages: [UIImage?] = []
     @State private var queueFlightCount = 0
     @State private var expandedBurstIDs: Set<String> = []
 
@@ -368,13 +368,17 @@ struct PhotoPreviewView: View {
         queueFlightTask = Task { @MainActor in
             let burstFiles = burst?.files.prefix(3).map { $0 } ?? [file]
             var cachedImages: [UIImage] = []
+            var cachedLayers: [UIImage?] = []
             for candidate in burstFiles {
                 if let data = try? await session.cachedThumbnail(file: candidate),
                    let image = UIImage(data: data) {
                     cachedImages.append(image)
+                    cachedLayers.append(image)
+                } else {
+                    cachedLayers.append(nil)
                 }
             }
-            queueFlightImages = cachedImages
+            queueFlightImages = cachedLayers
             if let image = cachedImages.first {
                 queueFlightImage = image
             }
@@ -408,7 +412,7 @@ private func luminanceHistogram(_ image: UIImage) -> [CGFloat] {
 private struct PhotoPreviewQueueFlightView: View {
     let progress: CGFloat
     let image: UIImage?
-    let images: [UIImage]
+    let images: [UIImage?]
     let from: CGPoint
     let target: CGPoint
     let size: CGSize
@@ -426,7 +430,7 @@ private struct PhotoPreviewQueueFlightView: View {
         ZStack {
             ForEach(Array(0..<min(max(stackCount, 1), 3)), id: \.self) { layer in
                 Group {
-                    if let image = images.indices.contains(layer) ? images[layer] : image {
+                    if let image = (images.indices.contains(layer) ? images[layer] : nil) ?? image {
                         Image(uiImage: image).resizable().scaledToFill()
                     } else {
                         RoundedRectangle(cornerRadius: 18).fill(.white.opacity(0.26))
