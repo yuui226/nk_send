@@ -63,6 +63,7 @@ struct PhotoPreviewView: View {
     @State private var queueFlightProgress: CGFloat = 0
     @State private var queueFlightImage: UIImage?
     @State private var queueFlightCount = 0
+    @State private var expandedBurstIDs: Set<String> = []
 
     init(session: CameraSession, files: [CameraFile], selectedFile: Binding<CameraFile?>,
          directory: URL? = nil, organizeByDate: Bool = false,
@@ -87,14 +88,25 @@ struct PhotoPreviewView: View {
             Color.black.ignoresSafeArea()
             TabView(selection: $index) {
                 ForEach(Array(files.enumerated()), id: \.element.id) { itemIndex, file in
-                    PreviewImage(
-                        session: session,
-                        file: file,
-                        localOriginalURL: localOriginalURL(for: file),
-                        rotationDegrees: rotationDegrees,
-                        zoomEnabled: !file.fileExtension.lowercased().hasSuffix(".mov") &&
-                            !file.fileExtension.lowercased().hasSuffix(".mp4"),
-                    )
+                    Group {
+                        if let group = burstGroups.first(where: { $0.files.first?.id == file.id }),
+                           !expandedBurstIDs.contains(group.id) {
+                            BurstCollectionPreview(session: session, group: group) {
+                                withAnimation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.28)) {
+                                    _ = expandedBurstIDs.insert(group.id)
+                                }
+                            }
+                        } else {
+                            PreviewImage(
+                                session: session,
+                                file: file,
+                                localOriginalURL: localOriginalURL(for: file),
+                                rotationDegrees: rotationDegrees,
+                                zoomEnabled: !file.fileExtension.lowercased().hasSuffix(".mov") &&
+                                    !file.fileExtension.lowercased().hasSuffix(".mp4"),
+                            )
+                        }
+                    }
                         .tag(itemIndex)
                         .padding(.horizontal, 12)
                 }
@@ -177,6 +189,24 @@ struct PhotoPreviewView: View {
                 .foregroundStyle(.white.opacity(0.88))
                 .transition(.opacity)
             }
+            if files.indices.contains(index),
+               let group = burstGroups.first(where: { $0.files.dropFirst().contains(where: { $0.id == files[index].id }) }),
+               expandedBurstIDs.contains(group.id) {
+                Button {
+                    withAnimation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.28)) {
+                        _ = expandedBurstIDs.remove(group.id)
+                        if let first = files.firstIndex(where: { $0.id == group.files[0].id }) { index = first }
+                    }
+                } label: {
+                    Image(systemName: "chevron.left").frame(width: 44, height: 44)
+                }
+                .font(.system(size: 18, weight: .semibold))
+                .background(.black.opacity(0.28), in: Capsule())
+                .foregroundStyle(.white)
+                .padding(.leading, 16)
+                .padding(.top, 54)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            }
             VStack {
                 Spacer()
                 HStack(spacing: 12) {
@@ -236,7 +266,7 @@ struct PhotoPreviewView: View {
             }
         }
         .task(id: files.indices.contains(index) ? files[index].id : 0) {
-            guard files.indices.contains(index), !exifLoading else { return }
+            guard files.indices.contains(index), !isCollapsedBurst(at: index), !exifLoading else { return }
             histogramBars = []
             exifLoading = true
             let file = files[index]
@@ -263,6 +293,12 @@ struct PhotoPreviewView: View {
             if let data = await loadedThumb, let image = UIImage(data: data) { histogramBars = luminanceHistogram(image) }
             exifLoading = false
         }
+    }
+
+    private func isCollapsedBurst(at index: Int) -> Bool {
+        guard files.indices.contains(index),
+              let group = burstGroups.first(where: { $0.files.first?.id == files[index].id }) else { return false }
+        return !expandedBurstIDs.contains(group.id)
     }
 
     /// Android checks the exact destination folder and file size before asking
@@ -361,6 +397,74 @@ private func previewQuadraticBezier(start: CGPoint, control: CGPoint, end: CGPoi
         x: oneMinus * oneMinus * start.x + 2 * oneMinus * t * control.x + t * t * end.x,
         y: oneMinus * oneMinus * start.y + 2 * oneMinus * t * control.y + t * t * end.y
     )
+}
+
+/// Android's collapsed burst page: a compact stack of up to three cached
+/// thumbnails with a count badge and an explicit expand affordance.  It never
+/// starts a camera request solely to draw the stack; uncached members remain
+/// placeholders until their normal preview page is selected.
+private struct BurstCollectionPreview: View {
+    let session: CameraSession
+    let group: BurstPhotoGroup
+    let onExpand: () -> Void
+
+    var body: some View {
+        GeometryReader { proxy in
+            let side = min(proxy.size.width * 0.72, proxy.size.height * 0.46)
+            ZStack {
+                ForEach(Array(group.files.prefix(3).reversed().enumerated()), id: \.element.id) { index, file in
+                    CachedBurstThumbnail(session: session, file: file)
+                        .frame(width: side * 0.86, height: side * 0.86)
+                        .rotationEffect(.degrees(index == 0 ? -6 : index == 1 ? 5 : 0))
+                        .offset(x: index == 0 ? -12 : index == 1 ? 12 : 0,
+                                y: index == 2 ? 2 : 5)
+                }
+                Text("\(group.files.count)")
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(.black.opacity(0.62), in: Capsule())
+                    .frame(width: side, height: side, alignment: .topLeading)
+                    .padding(8)
+                Button(action: onExpand) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 18, weight: .semibold))
+                        .frame(width: 44, height: 44)
+                }
+                .foregroundStyle(.white)
+                .background(.black.opacity(0.32), in: Circle())
+                .frame(width: side, height: side, alignment: .bottomTrailing)
+                .padding(8)
+            }
+            .frame(width: side, height: side)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+}
+
+private struct CachedBurstThumbnail: View {
+    let session: CameraSession
+    let file: CameraFile
+    @State private var image: UIImage?
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image).resizable().scaledToFill()
+            } else {
+                RoundedRectangle(cornerRadius: 12).fill(.white.opacity(0.14))
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(.white.opacity(0.32), lineWidth: 1))
+        .task {
+            guard image == nil else { return }
+            if let data = try? await session.cachedThumbnail(file: file), let decoded = UIImage(data: data) {
+                image = decoded
+            }
+        }
+    }
 }
 
 private struct PreviewImage: View {

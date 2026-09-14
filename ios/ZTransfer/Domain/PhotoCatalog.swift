@@ -11,6 +11,75 @@ struct BurstPhotoGroup: Identifiable, Equatable, Sendable {
     let files: [CameraFile]
 }
 
+/// Paging model used by the Android preview: a collapsed burst occupies one
+/// page and its members are inserted only after the user explicitly expands it.
+/// Keeping this separate from the flat camera catalog prevents preview paging
+/// from silently changing list order or transfer selection.
+enum PhotoPreviewEntry: Identifiable, Equatable, Sendable {
+    case photo(CameraFile, burstID: String? = nil)
+    case burst(BurstPhotoGroup)
+
+    var id: String {
+        switch self {
+        case .photo(let file, _): return "photo_\(file.id)"
+        case .burst(let group): return "preview_burst_\(group.id)"
+        }
+    }
+
+    var file: CameraFile? {
+        guard case .photo(let value, _) = self else { return nil }
+        return value
+    }
+
+    var burstID: String? {
+        guard case .photo(_, let value) = self else { return nil }
+        return value
+    }
+}
+
+/// Reproduces Android's initial preview item list.  Only the first member of a
+/// recognized burst becomes the collection page; all other files retain their
+/// catalog order and non-burst photos remain independent pages.
+func collapsedPhotoPreviewEntries(files: [CameraFile]) -> [PhotoPreviewEntry] {
+    let groupsByFirstID = Dictionary(uniqueKeysWithValues: PhotoCatalogGrouping.bursts(in: files).compactMap { group in
+        group.files.first.map { ($0.id, group) }
+    })
+    var consumed = Set<UInt32>()
+    var result: [PhotoPreviewEntry] = []
+    for file in files {
+        guard consumed.insert(file.id).inserted else { continue }
+        if let group = groupsByFirstID[file.id] {
+            result.append(.burst(group))
+            consumed.formUnion(group.files.dropFirst().map(\.id))
+        } else {
+            result.append(.photo(file))
+        }
+    }
+    return result
+}
+
+func expandPhotoPreviewBurst(_ entries: [PhotoPreviewEntry], at index: Int) -> [PhotoPreviewEntry] {
+    guard entries.indices.contains(index), case .burst(let group) = entries[index] else { return entries }
+    let members = group.files.map { PhotoPreviewEntry.photo($0, burstID: group.id) }
+    return Array(entries.prefix(index + 1)) + members + Array(entries.dropFirst(index + 1))
+}
+
+func collapsePhotoPreviewBurst(_ entries: [PhotoPreviewEntry], burstID: String) -> [PhotoPreviewEntry] {
+    entries.filter { entry in
+        guard case .photo(_, let memberBurstID) = entry else { return true }
+        return memberBurstID != burstID
+    }
+}
+
+func photoPreviewCollectionIndex(_ entries: [PhotoPreviewEntry], memberIndex: Int) -> Int? {
+    guard entries.indices.contains(memberIndex), let burstID = entries[memberIndex].burstID else { return nil }
+    let collectionIndex = entries.firstIndex { entry in
+        if case .burst(let group) = entry { return group.id == burstID }
+        return false
+    }
+    return collectionIndex.flatMap { $0 < memberIndex ? $0 : nil }
+}
+
 enum PhotoCatalogGrouping {
     static let unknownDay = "zzz_unknown"
 

@@ -138,6 +138,36 @@ final class DomainModelTests: XCTestCase {
         XCTAssertEqual(PhotoCatalogGrouping.bursts(in: files).first?.files.map(\.id), [UInt32(100), UInt32(101), UInt32(102)])
     }
 
+    func testPreviewUsesIndependentCollapsedBurstPageAndRestoresMembersOnExpand() {
+        let files = (100...103).map { n in
+            CameraFile(id: UInt32(n), storageID: 1, format: 0x3801, size: 1,
+                       fileName: "DSC_\(n).JPG", captureDate: n == 103 ? "20260913T010204" : "20260913T01020\(n - 100)", isProtected: false)
+        }
+        let collapsed = collapsedPhotoPreviewEntries(files: files)
+        XCTAssertEqual(collapsed.count, 2)
+        guard case .burst(let group) = collapsed[0] else {
+            return XCTFail("the first three consecutive shots must be one collection page")
+        }
+        XCTAssertEqual(group.files.map(\.id), [100, 101, 102])
+        let expanded = expandPhotoPreviewBurst(collapsed, at: 0)
+        XCTAssertEqual(expanded.compactMap(\.file).map(\.id), [100, 101, 102, 103])
+        XCTAssertEqual(photoPreviewCollectionIndex(expanded, memberIndex: 2), 0)
+        let collapsedAgain = collapsePhotoPreviewBurst(expanded, burstID: group.id)
+        XCTAssertEqual(collapsedAgain, collapsed)
+    }
+
+    func testPreviewDoesNotTreatNonFirstBurstMemberAsCollectionPage() {
+        let files = (200...202).map { n in
+            CameraFile(id: UInt32(n), storageID: 1, format: 0x3801, size: 1,
+                       fileName: "IMG_\(n).JPG", captureDate: "20260913T02030\(n - 200)", isProtected: false)
+        }
+        let entries = collapsedPhotoPreviewEntries(files: files)
+        XCTAssertEqual(entries.count, 1)
+        let expanded = expandPhotoPreviewBurst(entries, at: 0)
+        XCTAssertEqual(expanded.compactMap(\.burstID).count, 3)
+        XCTAssertNil(photoPreviewCollectionIndex(expanded, memberIndex: 0))
+    }
+
     func testManualQueueAllowsRepeatedExportsOfSameCameraHandle() async {
         let defaults = UserDefaults.standard
         let persistenceKey = "transferQueue.items.v1"
