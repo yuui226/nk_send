@@ -20,7 +20,7 @@ enum USBConnectionPhase: Equatable, Sendable {
 }
 
 enum WiFiConnectionPhase: Equatable, Sendable {
-    case unavailable, idle, discovering, pairing, connecting, connected, failed(String)
+    case unavailable, idle, discovering, pairing, connecting, connected, reconnecting, failed(String)
 }
 
 /// Android keeps the AP card's short title/body separate from the transport

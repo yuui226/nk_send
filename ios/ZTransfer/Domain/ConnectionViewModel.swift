@@ -119,7 +119,7 @@ final class ConnectionViewModel: ObservableObject {
                 // iOS has no public gateway API; this subnet gate is the closest
                 // available equivalent and the PTP handshake remains authoritative.
                 if self.wifiDiscovery.isOnCameraHotspot(), self.wifiConnectTask == nil {
-                    await self.connectSelectedWiFi()
+                    await self.connectSelectedWiFi(reconnect: self.state.wifiPhase == .reconnecting)
                 }
                 let delay: UInt64 = {
                     if case .failed = self.state.wifiPhase { return 3_000_000_000 }
@@ -175,11 +175,11 @@ final class ConnectionViewModel: ObservableObject {
         state.wirelessMode == .sta && [.discovering, .pairing, .connecting].contains(state.wifiPhase)
     }
 
-    func connectSelectedWiFi() async {
+    func connectSelectedWiFi(reconnect: Bool = false) async {
         if staBusy { cancelWiFiConnection(); return }
         wifiRetryAttempt = 0
         wifiRetryTask?.cancel(); wifiRetryTask = nil
-        await beginWiFiConnection(reconnect: false)
+        await beginWiFiConnection(reconnect: reconnect)
     }
 
     func cancelWiFiConnection() {
@@ -221,7 +221,7 @@ final class ConnectionViewModel: ObservableObject {
         let mode = state.wirelessMode
         wifiGeneration &+= 1
         let generation = wifiGeneration
-        state.wifiPhase = mode == .sta ? .discovering : .connecting
+        state.wifiPhase = mode == .sta ? .discovering : (reconnect ? .reconnecting : .connecting)
         state.wifiFailureKind = nil
         state.staProgressIP = nil
         let pendingCleanup = wifiCleanupTask
@@ -259,8 +259,11 @@ final class ConnectionViewModel: ObservableObject {
                 guard self.wifiGeneration == generation else { return }
                 self.wifiConnectTask = nil
                 if Task.isCancelled || error is CancellationError { self.state.wifiPhase = .idle; return }
-                self.state.wifiPhase = .failed(self.wifiErrorMessage(error))
-                if mode == .ap { self.state.wifiFailureKind = Self.wifiFailureKind(for: error) }
+                let preserveReconnect = mode == .ap && reconnect && self.state.wifiPhase == .reconnecting
+                if !preserveReconnect {
+                    self.state.wifiPhase = .failed(self.wifiErrorMessage(error))
+                    if mode == .ap { self.state.wifiFailureKind = Self.wifiFailureKind(for: error) }
+                }
                 self.state.staProgressIP = nil
                 await self.refreshSTAProfiles()
                 if mode == .sta {
@@ -299,7 +302,8 @@ final class ConnectionViewModel: ObservableObject {
     private func wifiTransportLost(generation: Int, mode: WirelessMode) async {
         guard wifiGeneration == generation, state.wifiPhase == .connected else { return }
         cameraSession = nil; cameraRepository = nil
-        state.wifiPhase = .idle
+        state.wifiPhase = .reconnecting
+        state.wifiFailureKind = nil
         await wifiService.disconnect()
         if mode == .sta { scheduleSTARetry(generation: generation) }
         else { startAPWatcherIfNeeded() }

@@ -78,8 +78,8 @@ struct ConnectionMethodCard: View {
                 .animation(.timingCurve(0.4, 0.0, 0.2, 1.0, duration: 0.22), value: state.wifiPhase)
             } else {
                 instructions
-                if let failure {
-                    ConnectionFeedback(title: feedbackTitle(for: failure), message: feedbackMessage(for: failure))
+                if let feedback = wifiFeedback {
+                    ConnectionFeedback(title: feedback.title, message: feedback.message)
                         .padding(.top, 12)
                         .transition(.asymmetric(
                             insertion: .opacity.animation(.timingCurve(0.0, 0.0, 0.2, 1.0, duration: 0.22).delay(0.035)),
@@ -255,30 +255,27 @@ struct ConnectionMethodCard: View {
         case .pairing: return AppLocalized.resource("sta_status_pairing")
         case .connecting: return AppLocalized.resource("sta_status_connecting")
         case .connected: return AppLocalized.resource("sta_status_connected")
-        case .idle, .unavailable, .failed: return AppLocalized.resource("sta_connect_action")
+        case .idle, .unavailable, .reconnecting, .failed: return AppLocalized.resource("sta_connect_action")
         }
     }
-    private var failure: String? {
-        if mode == .usb, case let .failed(message) = state.usbPhase { return message }
-        if mode == .wifi, case let .failed(message) = state.wifiPhase { return message }
-        return nil
-    }
-
-    private func feedbackTitle(for failure: String) -> String {
-        guard mode == .wifi, !isSTA else { return AppLocalized.resource("connection_failed_short") }
-        switch state.wifiFailureKind {
-        case .notFound: return AppLocalized.resource("wifi_camera_not_found")
-        case .refused: return AppLocalized.resource("wifi_camera_refused")
-        case .failed, .none: return AppLocalized.resource("wifi_camera_connection_failed")
+    private var wifiFeedback: (title: String, message: String)? {
+        guard mode == .wifi, !isSTA else {
+            if mode == .usb, case let .failed(message) = state.usbPhase {
+                return (AppLocalized.resource("connection_failed_short"), message)
+            }
+            return nil
         }
-    }
-
-    private func feedbackMessage(for failure: String) -> String {
-        guard mode == .wifi, !isSTA else { return failure }
-        switch state.wifiFailureKind {
-        case .notFound: return AppLocalized.resource("wifi_connect_camera")
-        case .refused: return AppLocalized.resource("wifi_check_camera_connection")
-        case .failed, .none: return AppLocalized.resource("wifi_restart_camera")
+        switch state.wifiPhase {
+        case .reconnecting:
+            return (AppLocalized.resource("wifi_connection_interrupted"), AppLocalized.resource("wifi_reconnecting"))
+        case .failed:
+            switch state.wifiFailureKind {
+            case .notFound: return (AppLocalized.resource("wifi_camera_not_found"), AppLocalized.resource("wifi_connect_camera"))
+            case .refused: return (AppLocalized.resource("wifi_camera_refused"), AppLocalized.resource("wifi_check_camera_connection"))
+            case .failed, .none: return (AppLocalized.resource("wifi_camera_connection_failed"), AppLocalized.resource("wifi_restart_camera"))
+            }
+        default:
+            return nil
         }
     }
 }
