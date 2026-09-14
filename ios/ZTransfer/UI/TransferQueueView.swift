@@ -74,8 +74,8 @@ struct TransferQueueView: View {
                 .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
                 .accessibilityLabel(AppLocalized.resource("cd_start_transfers"))
             }
-            if session != nil {
-                Image(systemName: "wifi")
+            if let session {
+                Image(systemName: session.isUSB ? "cable.connector" : "wifi")
                     .frame(width: 36, height: 36)
                     .foregroundStyle(ZTransferColors.statusConnected)
             }
