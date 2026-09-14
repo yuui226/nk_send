@@ -74,9 +74,7 @@ struct ConnectionPage: View {
                         },
                         onSTAHotspotSettings: {
                             model.cancelWiFiConnection()
-                            if let url = URL(string: UIApplication.openSettingsURLString) {
-                                UIApplication.shared.open(url)
-                            }
+                            openWirelessSettings(.sta)
                         },
                         onAPHelpRequested: { anchor in
                             tipsAnchor = anchor
@@ -86,9 +84,7 @@ struct ConnectionPage: View {
                         },
                         onAPHotspotSettings: {
                             model.cancelWiFiConnection()
-                            if let url = URL(string: UIApplication.openSettingsURLString) {
-                                UIApplication.shared.open(url)
-                            }
+                            openWirelessSettings(.ap)
                         },
                         staHelpViewed: staHelpViewed,
                         apHelpViewed: apHelpViewed)
@@ -154,6 +150,19 @@ struct ConnectionPage: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onChange(of: gpsCoordinator.state.enabled) { enabled in
             if !enabled { attentionOrigin = Date() }
+        }
+    }
+
+    /// Android opens the phone's hotspot settings for STA and Wi‑Fi settings
+    /// for AP. iOS has no public deep-link API for either page, so try the
+    /// corresponding system route and fall back to the app settings page if
+    /// the installed iOS version rejects that route.
+    private func openWirelessSettings(_ mode: WirelessMode) {
+        let route = mode == .sta ? "App-Prefs:root=INTERNET_TETHERING" : "App-Prefs:root=WIFI"
+        guard let url = URL(string: route) else { return }
+        UIApplication.shared.open(url, options: [:]) { opened in
+            guard !opened, let fallback = URL(string: UIApplication.openSettingsURLString) else { return }
+            UIApplication.shared.open(fallback)
         }
     }
 }
