@@ -10,6 +10,7 @@ struct TransferQueueView: View {
     let session: CameraSession?
     let onNavigateBack: () -> Void
     @State private var pendingConfirmation: QueueConfirmation?
+    @State private var removingItemIDs: Set<UUID> = []
 
     fileprivate enum QueueConfirmation: Identifiable {
         case clear, retry
@@ -35,19 +36,13 @@ struct TransferQueueView: View {
                     LazyVStack(spacing: 10) {
                         ForEach(model.snapshot.items.reversed()) { item in
                             QueueItemView(item: item, session: session,
+                                          isRemoving: removingItemIDs.contains(item.id),
                                           onRetry: { model.retry(id: item.id) },
-                                          onRemove: { model.remove(id: item.id) },
-                                          onCancel: {
-                                              model.cancel(id: item.id)
-                                              Task { @MainActor in
-                                                  try? await Task.sleep(nanoseconds: 280_000_000)
-                                                  model.remove(id: item.id)
-                                              }
-                                          })
-                                .transition(.asymmetric(
-                                    insertion: .opacity.combined(with: .scale(scale: 0.96, anchor: .top)),
-                                    removal: .opacity.combined(with: .scale(scale: 0.94, anchor: .top))
-                                ))
+                                          onRemove: { beginRemoval(item.id, withdraw: false) },
+                                          onCancel: { beginRemoval(item.id, withdraw: true) })
+                                // Android first collapses the row's reported height;
+                                // data removal happens after the 280 ms exit.
+                                .transition(.identity)
                         }
                     }
                     .padding(.horizontal, 16)
@@ -60,6 +55,22 @@ struct TransferQueueView: View {
             queueBottomControls
         }
         .overlay { queueConfirmationOverlay }
+        .onChange(of: model.snapshot.items.map(\.id)) { ids in
+            // Keep the collapse state until the actor publishes the actual
+            // removal; clearing it in the same task as `remove` would briefly
+            // expand the old row before the snapshot arrives.
+            removingItemIDs = removingItemIDs.filter { ids.contains($0) }
+        }
+    }
+
+    private func beginRemoval(_ id: UUID, withdraw: Bool) {
+        guard !removingItemIDs.contains(id) else { return }
+        removingItemIDs.insert(id)
+        if withdraw { model.cancel(id: id) }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 280_000_000)
+            model.remove(id: id)
+        }
     }
 
     private var queueTopControls: some View {
@@ -123,7 +134,9 @@ struct TransferQueueView: View {
             }
             if model.snapshot.items.contains(where: { $0.status != .transferring && !$0.isGeneratingFrame }) {
                 Button { withAnimation(ZTransferMotion.standard) { pendingConfirmation = .clear } } label: {
-                    Image(systemName: "trash").frame(width: 48, height: 48)
+                    QueueBroomMark(color: ZTransferColors.primaryText)
+                        .frame(width: 22, height: 22)
+                        .frame(width: 48, height: 48)
                 }
                 .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 24))
                 .accessibilityLabel(AppLocalized.resource("cd_clear_queue"))
@@ -241,9 +254,12 @@ private struct QueueConfirmationCard: View {
 private struct QueueItemView: View {
     let item: TransferQueueItem
     let session: CameraSession?
+    let isRemoving: Bool
     let onRetry: () -> Void
     let onRemove: () -> Void
     let onCancel: () -> Void
+    @State private var measuredHeight: CGFloat = 0
+    @State private var collapseProgress: CGFloat = 1
 
     private var stateColor: Color {
         if item.isGeneratingFrame { return ZTransferColors.accentPurple }
@@ -266,7 +282,6 @@ private struct QueueItemView: View {
             HStack(spacing: 12) {
                 ZStack(alignment: .bottomTrailing) {
                     QueueThumbnail(session: session, handle: item.file.id, item: item)
-                    QueueTaskStatusBadge(item: item)
                 }
                 .frame(width: 56, height: 56)
                 VStack(alignment: .leading, spacing: 5) {
@@ -304,17 +319,16 @@ private struct QueueItemView: View {
             }
                 Spacer(minLength: 4)
                 if item.status == .failed {
-                    Button(action: onRetry) { Image(systemName: "arrow.clockwise") }
-                        .buttonStyle(.bordered)
+                    QueueActionButton(icon: "arrow.clockwise", action: onRetry)
                         .disabled(session == nil && retryNeedsCamera)
                         .opacity(session == nil && retryNeedsCamera ? 0.45 : 1)
                         .accessibilityLabel(AppLocalized.resource("retry"))
                 } else if item.status == .waiting {
-                    Button(action: onCancel) { Image(systemName: "trash") }
-                        .buttonStyle(.bordered)
+                    QueueActionButton(icon: "broom", action: onCancel)
                         .accessibilityLabel(AppLocalized.resource("cd_remove_from_queue"))
                 } else if (item.status == .completed || item.status == .cancelled) && !item.isGeneratingFrame {
-                    Button(action: onRemove) { Image(systemName: "trash") }.buttonStyle(.bordered).accessibilityLabel(AppLocalized.resource("cd_remove_from_queue"))
+                    QueueActionButton(icon: "broom", action: onRemove)
+                        .accessibilityLabel(AppLocalized.resource("cd_remove_from_queue"))
                 }
             }
         }
@@ -324,6 +338,20 @@ private struct QueueItemView: View {
         .animation(ZTransferMotion.standard, value: item.status)
         .animation(ZTransferMotion.standard, value: item.bytesPerSecond)
         .animation(ZTransferMotion.standard, value: item.elapsedMs)
+        .background {
+            GeometryReader { proxy in
+                Color.clear.preference(key: QueueItemHeightPreferenceKey.self, value: proxy.size.height)
+            }
+        }
+        .onPreferenceChange(QueueItemHeightPreferenceKey.self) { measuredHeight = $0 }
+        .frame(height: measuredHeight > 0 ? measuredHeight * collapseProgress : nil, alignment: .top)
+        .clipped()
+        .opacity(collapseProgress)
+        .onChange(of: isRemoving) { removing in
+            withAnimation(.easeInOut(duration: 0.28)) {
+                collapseProgress = removing ? 0 : 1
+            }
+        }
     }
 
     private var retryNeedsCamera: Bool {
@@ -396,6 +424,61 @@ private struct QueueItemView: View {
         case .filmGallery: return AppLocalized.resource("photo_frame_film_gallery")
         case .filmEdge: return AppLocalized.resource("photo_frame_film_edge")
         }
+    }
+}
+
+private struct QueueItemHeightPreferenceKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+private struct QueueActionButton: View {
+    let icon: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Group {
+                if icon == "broom" {
+                    QueueBroomMark(color: ZTransferColors.primaryText)
+                } else {
+                    Image(systemName: icon)
+                        .font(.system(size: 15, weight: .semibold))
+                }
+            }
+            .frame(width: 28, height: 28)
+        }
+        .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 16))
+    }
+}
+
+/// The queue uses the same single-color broom mark for both “remove” actions
+/// and the clear FAB. Keeping it as a path avoids substituting a platform trash
+/// glyph whose silhouette and baseline differ from Android.
+private struct QueueBroomMark: View {
+    let color: Color
+
+    var body: some View {
+        Canvas { context, size in
+            let s = min(size.width, size.height)
+            var mark = Path()
+            mark.move(to: CGPoint(x: s * 0.57, y: s * 0.10))
+            mark.addLine(to: CGPoint(x: s * 0.42, y: s * 0.46))
+            mark.move(to: CGPoint(x: s * 0.31, y: s * 0.48))
+            mark.addLine(to: CGPoint(x: s * 0.67, y: s * 0.63))
+            for index in 0..<5 {
+                let x = s * (0.35 + CGFloat(index) * 0.075)
+                mark.move(to: CGPoint(x: x, y: s * 0.61))
+                mark.addQuadCurve(
+                    to: CGPoint(x: x - s * 0.10, y: s * (0.88 + CGFloat(index) * 0.012)),
+                    control: CGPoint(x: x + s * 0.02, y: s * 0.72)
+                )
+            }
+            context.stroke(mark, with: .color(color), style: StrokeStyle(lineWidth: max(1.4, s * 0.075), lineCap: .round, lineJoin: .round))
+        }
+        .rotationEffect(.degrees(45))
     }
 }
 
