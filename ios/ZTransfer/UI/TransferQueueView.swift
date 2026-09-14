@@ -136,7 +136,12 @@ private struct QueueItemView: View {
                     ProgressView(value: item.progress).tint(ZTransferColors.accentBlue)
                 }
                 if let effectText {
-                    TransferInfoPill(text: effectText, color: ZTransferColors.accentPurple)
+                    HStack(spacing: 6) {
+                        TransferInfoPill(text: effectText, color: ZTransferColors.accentPurple)
+                        if let elapsed = item.frameGenerationElapsedMs {
+                            TransferInfoPill(text: formatDuration(elapsed), color: ZTransferColors.accentYellow)
+                        }
+                    }
                 }
             }
             Spacer(minLength: 4)
@@ -165,8 +170,18 @@ private struct QueueItemView: View {
     }
 
     private var speedText: String {
-        let mb = Double(item.bytesPerSecond) / 1_000_000
-        return String(format: "%.1f MB/s", mb)
+        switch item.bytesPerSecond {
+        case ..<1024: return "\(item.bytesPerSecond) B/s"
+        case ..<(1024 * 1024): return String(format: "%.1f KB/s", Double(item.bytesPerSecond) / 1024)
+        default: return String(format: "%.1f MB/s", Double(item.bytesPerSecond) / (1024 * 1024))
+        }
+    }
+
+    private func formatDuration(_ milliseconds: Int64) -> String {
+        guard milliseconds >= 0 else { return "0.0s" }
+        let seconds = Double(milliseconds) / 1000
+        if seconds < 60 { return String(format: "%.1fs", seconds) }
+        return String(format: "%dm%02ds", milliseconds / 60000, (milliseconds % 60000) / 1000)
     }
 
     private var fileSizeText: String {

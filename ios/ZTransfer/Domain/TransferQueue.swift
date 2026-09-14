@@ -46,23 +46,28 @@ struct TransferQueueItem: Identifiable, Equatable, Sendable, Codable {
     /// A later editor change must never alter an already queued export.
     var effects: PhotoEffectsSettings?
     var isGeneratingFrame = false
+    var frameGenerationStartedAt: Date?
+    var frameGenerationElapsedMs: Int64?
     var frameURL: URL?
     var frameError: String?
 
     private enum CodingKeys: String, CodingKey {
         case id, file, status, progress, bytesPerSecond, error, skipped, outputURL, destinationFolderName,
-             effects, isGeneratingFrame, frameURL, frameError
+             effects, isGeneratingFrame, frameGenerationStartedAt, frameGenerationElapsedMs, frameURL, frameError
     }
 
     init(id: UUID, file: CameraFile, status: TransferStatus = .waiting,
          progress: Double = 0, bytesPerSecond: Int64 = 0, error: String? = nil,
          skipped: Bool = false, outputURL: URL? = nil,
          destinationFolderName: String? = nil, effects: PhotoEffectsSettings? = nil,
-         isGeneratingFrame: Bool = false, frameURL: URL? = nil, frameError: String? = nil) {
+         isGeneratingFrame: Bool = false, frameGenerationStartedAt: Date? = nil,
+         frameGenerationElapsedMs: Int64? = nil, frameURL: URL? = nil, frameError: String? = nil) {
         self.id = id; self.file = file; self.status = status; self.progress = progress
         self.bytesPerSecond = bytesPerSecond; self.error = error; self.skipped = skipped
         self.outputURL = outputURL; self.destinationFolderName = destinationFolderName
         self.effects = effects; self.isGeneratingFrame = isGeneratingFrame
+        self.frameGenerationStartedAt = frameGenerationStartedAt
+        self.frameGenerationElapsedMs = frameGenerationElapsedMs
         self.frameURL = frameURL; self.frameError = frameError
     }
 
@@ -79,6 +84,8 @@ struct TransferQueueItem: Identifiable, Equatable, Sendable, Codable {
         destinationFolderName = try values.decodeIfPresent(String.self, forKey: .destinationFolderName)
         effects = try values.decodeIfPresent(PhotoEffectsSettings.self, forKey: .effects)
         isGeneratingFrame = try values.decodeIfPresent(Bool.self, forKey: .isGeneratingFrame) ?? false
+        frameGenerationStartedAt = try values.decodeIfPresent(Date.self, forKey: .frameGenerationStartedAt)
+        frameGenerationElapsedMs = try values.decodeIfPresent(Int64.self, forKey: .frameGenerationElapsedMs)
         frameURL = try values.decodeIfPresent(URL.self, forKey: .frameURL)
         frameError = try values.decodeIfPresent(String.self, forKey: .frameError)
     }
@@ -144,6 +151,8 @@ actor TransferQueue {
                 recovered.bytesPerSecond = 0
                 recovered.error = nil
                 recovered.isGeneratingFrame = false
+                recovered.frameGenerationStartedAt = nil
+                recovered.frameGenerationElapsedMs = nil
                 recovered.frameError = nil
                 return recovered
             }
@@ -401,7 +410,12 @@ actor TransferQueue {
 
     private func generateFrame(for id: UUID, source: URL, settings: PhotoEffectsSettings, in directory: URL) async {
         guard let index = items.firstIndex(where: { $0.id == id }) else { return }
-        items[index].isGeneratingFrame = true; items[index].frameError = nil; publish()
+        let startedAt = Date()
+        items[index].isGeneratingFrame = true
+        items[index].frameGenerationStartedAt = startedAt
+        items[index].frameGenerationElapsedMs = nil
+        items[index].frameError = nil
+        publish()
         do {
             let data = try Data(contentsOf: source)
             guard let image = UIImage(data: data) else { throw CocoaError(.fileReadCorruptFile) }
@@ -420,13 +434,23 @@ actor TransferQueue {
             let destination = uniqueFrameURL(preferred)
             try encoded.write(to: destination, options: .atomic)
             if let index = items.firstIndex(where: { $0.id == id }) {
-                items[index].isGeneratingFrame = false; items[index].frameURL = destination; publish()
+                items[index].isGeneratingFrame = false
+                items[index].frameGenerationStartedAt = nil
+                items[index].frameGenerationElapsedMs = Int64(max(0, Date().timeIntervalSince(startedAt) * 1000).rounded())
+                items[index].frameURL = destination
+                publish()
             }
         } catch is CancellationError {
-            if let index = items.firstIndex(where: { $0.id == id }) { items[index].isGeneratingFrame = false; publish() }
+            if let index = items.firstIndex(where: { $0.id == id }) {
+                items[index].isGeneratingFrame = false
+                items[index].frameGenerationStartedAt = nil
+                publish()
+            }
         } catch {
             if let index = items.firstIndex(where: { $0.id == id }) {
                 items[index].isGeneratingFrame = false
+                items[index].frameGenerationStartedAt = nil
+                items[index].frameGenerationElapsedMs = Int64(max(0, Date().timeIntervalSince(startedAt) * 1000).rounded())
                 items[index].frameError = error.localizedDescription
                 publish()
             }
