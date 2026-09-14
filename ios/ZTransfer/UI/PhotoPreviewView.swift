@@ -148,7 +148,8 @@ struct PhotoPreviewView: View {
                             x: (queueTarget?.midX ?? (proxy.size.width - 74)) - proxy.frame(in: .global).minX,
                             y: (queueTarget?.midY ?? (proxy.safeAreaInsets.top + 18)) - proxy.frame(in: .global).minY
                         ),
-                        size: CGSize(width: proxy.size.width * 0.72, height: proxy.size.height * 0.52)
+                        size: CGSize(width: proxy.size.width * 0.72, height: proxy.size.height * 0.52),
+                        stackCount: queueFlightCount
                     )
                     .allowsHitTesting(false)
                 }
@@ -367,6 +368,7 @@ private struct PhotoPreviewQueueFlightView: View {
     let from: CGPoint
     let target: CGPoint
     let size: CGSize
+    let stackCount: Int
 
     var body: some View {
         let p = min(max(progress, 0), 1)
@@ -377,19 +379,24 @@ private struct PhotoPreviewQueueFlightView: View {
         let position = previewQuadraticBezier(start: from, control: control, end: target, t: p)
         let width = max(10, size.width * (1 - p * 0.56))
         let height = max(10, size.height * (1 - p * 0.56))
-        Group {
-            if let image {
-                Image(uiImage: image).resizable().scaledToFill()
-            } else {
-                RoundedRectangle(cornerRadius: 18).fill(.white.opacity(0.26))
+        ZStack {
+            ForEach(Array(0..<min(max(stackCount, 1), 3)), id: \.self) { layer in
+                Group {
+                    if let image {
+                        Image(uiImage: image).resizable().scaledToFill()
+                    } else {
+                        RoundedRectangle(cornerRadius: 18).fill(.white.opacity(0.26))
+                    }
+                }
+                .frame(width: width, height: height)
+                .clipShape(RoundedRectangle(cornerRadius: max(8, width * 0.04)))
+                .overlay(RoundedRectangle(cornerRadius: max(8, width * 0.04)).stroke(.white.opacity(0.32), lineWidth: 1))
+                .offset(x: CGFloat(layer - 1) * min(12, width * 0.04), y: CGFloat(layer) * 5)
+                .rotationEffect(.degrees(Double(p) * 8 + Double(layer - 1) * 3))
             }
         }
-        .frame(width: width, height: height)
-        .clipShape(RoundedRectangle(cornerRadius: max(8, width * 0.04)))
-        .overlay(RoundedRectangle(cornerRadius: max(8, width * 0.04)).stroke(.white.opacity(0.32), lineWidth: 1))
         .position(position)
         .opacity(1 - p * 0.2)
-        .rotationEffect(.degrees(Double(p) * 8))
     }
 }
 
