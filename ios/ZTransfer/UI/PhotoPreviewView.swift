@@ -46,6 +46,8 @@ struct PhotoPreviewView: View {
     /// rejects the task. The queue flight must not play without a real task.
     let onEnqueue: (CameraFile) -> Bool
     let onEnqueueBurst: ([CameraFile]) -> Bool
+    let onQueueFlightStarted: (Int) -> Void
+    let onQueueFlightFinished: (Int) -> Void
     @State private var index: Int
     @State private var rotationDegrees: Double = 0
     @AppStorage("preview_rotation_quarter_turns") private var rotationQuarterTurns = 0
@@ -60,17 +62,22 @@ struct PhotoPreviewView: View {
     @State private var queueFlightActive = false
     @State private var queueFlightProgress: CGFloat = 0
     @State private var queueFlightImage: UIImage?
+    @State private var queueFlightCount = 0
 
     init(session: CameraSession, files: [CameraFile], selectedFile: Binding<CameraFile?>,
          directory: URL? = nil, organizeByDate: Bool = false,
          queueTarget: CGRect? = nil,
          onEnqueue: @escaping (CameraFile) -> Bool = { _ in false },
-         onEnqueueBurst: @escaping ([CameraFile]) -> Bool = { _ in false }) {
+         onEnqueueBurst: @escaping ([CameraFile]) -> Bool = { _ in false },
+         onQueueFlightStarted: @escaping (Int) -> Void = { _ in },
+         onQueueFlightFinished: @escaping (Int) -> Void = { _ in }) {
         self.session = session; self.files = files; self.directory = directory
         self.burstGroups = PhotoCatalogGrouping.bursts(in: files)
         self.queueTarget = queueTarget
         self.organizeByDate = organizeByDate; _selectedFile = selectedFile
         self.onEnqueue = onEnqueue; self.onEnqueueBurst = onEnqueueBurst
+        self.onQueueFlightStarted = onQueueFlightStarted
+        self.onQueueFlightFinished = onQueueFlightFinished
         let first = selectedFile.wrappedValue ?? files.first
         _index = State(initialValue: first.flatMap { files.firstIndex(of: $0) } ?? 0)
     }
@@ -216,6 +223,8 @@ struct PhotoPreviewView: View {
         .onDisappear {
             queueFlightTask?.cancel()
             queueFlightTask = nil
+            if queueFlightCount > 0 { onQueueFlightFinished(queueFlightCount) }
+            queueFlightCount = 0
             queueFlightProgress = 0
             queueFlightImage = nil
         }
@@ -272,6 +281,9 @@ struct PhotoPreviewView: View {
     private func startQueueFlight(for file: CameraFile) {
         let burst = burstGroups.first(where: { $0.files.first?.id == file.id })
         guard burst == nil ? onEnqueue(file) : onEnqueueBurst(burst!.files) else { return }
+        let flightCount = burst?.files.count ?? 1
+        onQueueFlightStarted(flightCount)
+        queueFlightCount = flightCount
         queueFlightActive = true
         queueFlightProgress = 0
         queueFlightImage = nil
@@ -290,6 +302,8 @@ struct PhotoPreviewView: View {
                 queueDragOffset = 0
                 queueFlightActive = false
             }
+            onQueueFlightFinished(flightCount)
+            queueFlightCount = 0
             queueFlightTask = nil
         }
     }

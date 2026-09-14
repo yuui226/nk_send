@@ -69,6 +69,7 @@ struct PhotoListView: View {
     @State private var cellBounds: [UInt32: CGRect] = [:]
     @State private var queueTargetBounds: CGRect = .zero
     @State private var queueFlights: [PhotoListQueueFlight] = []
+    @State private var heldFlightCount = 0
 
     init(repository: CameraRepository, queue: TransferQueue = TransferQueue(), directory: DirectoryAccessStore = DirectoryAccessStore(), effectsStore: PhotoEffectsStore = PhotoEffectsStore(), onDisconnect: @escaping () -> Void) {
         _model = StateObject(wrappedValue: PhotoListViewModel(repository: repository))
@@ -340,6 +341,10 @@ struct PhotoListView: View {
                         queueModel.enqueue(burstFiles, organizeByDate: organizeByDate, effects: effectsStore.settings)
                     }
                     return true
+                } onQueueFlightStarted: { count in
+                    heldFlightCount += count
+                } onQueueFlightFinished: { count in
+                    heldFlightCount = max(0, heldFlightCount - count)
                 }
                 .onAppear { model.pauseForPreview() }
                 .onDisappear {
@@ -485,7 +490,7 @@ struct PhotoListView: View {
                         showingQueue = true
                     }
                 } label: {
-                    QueuePill(snapshot: queueModel.snapshot)
+                    QueuePill(snapshot: queueModel.snapshot, heldCount: heldFlightCount)
                         .padding(.horizontal, 10)
                         .frame(height: 36)
                         .background {
@@ -613,6 +618,7 @@ struct PhotoListView: View {
         guard let from = cellBounds[file.id] else { return }
         let id = UUID()
         queueFlights.append(PhotoListQueueFlight(id: id, file: file, from: from))
+        heldFlightCount += 1
         withAnimation(.timingCurve(0.5, 0.0, 0.8, 0.35, duration: 0.56)) {
             guard let index = queueFlights.firstIndex(where: { $0.id == id }) else { return }
             queueFlights[index].progress = 1
@@ -623,6 +629,7 @@ struct PhotoListView: View {
                 queueFlights[index].image = image
             }
             try? await Task.sleep(nanoseconds: 600_000_000)
+            heldFlightCount = max(0, heldFlightCount - 1)
             queueFlights.removeAll { $0.id == id }
         }
     }
@@ -812,6 +819,7 @@ private func photoGridEntries(_ files: [CameraFile], collapse: Bool = true, expa
 
 private struct QueuePill: View {
     let snapshot: TransferQueueSnapshot
+    let heldCount: Int
     @State private var showDoneLabel = false
     @State private var sawActiveBatch = false
     @State private var doneTask: Task<Void, Never>?
@@ -823,6 +831,8 @@ private struct QueuePill: View {
         }
     }
 
+    private var displayRemainingCount: Int { max(0, remainingCount - heldCount) }
+
     private var generationCount: Int {
         snapshot.items.reduce(into: 0) { count, item in
             if item.isGeneratingFrame { count += 1 }
@@ -833,7 +843,7 @@ private struct QueuePill: View {
         snapshot.items.first(where: { $0.status == .transferring })
     }
 
-    private var hasActive: Bool { remainingCount > 0 || generationCount > 0 }
+    private var hasActive: Bool { remainingCount > 0 || generationCount > 0 || heldCount > 0 }
 
     var body: some View {
         HStack(spacing: 5) {
@@ -845,10 +855,10 @@ private struct QueuePill: View {
             } else {
                 Image(systemName: snapshot.isTransferring ? "arrow.down.circle.fill" : "checklist")
                     .scaleEffect(hasActive ? 1 : 0.9)
-                if remainingCount > 0 {
-                    Text("\(remainingCount)")
+                if displayRemainingCount > 0 {
+                    Text("\(displayRemainingCount)")
                         .monospacedDigit()
-                        .id(remainingCount)
+                        .id(displayRemainingCount)
                         .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .move(edge: .top).combined(with: .opacity)))
                 } else if generationCount > 0 {
                     Text(AppLocalized.resource("queue_pill_generating"))
@@ -866,7 +876,7 @@ private struct QueuePill: View {
                 }
             }
         }
-        .animation(ZTransferMotion.standard, value: remainingCount)
+        .animation(ZTransferMotion.standard, value: displayRemainingCount)
         .animation(ZTransferMotion.standard, value: generationCount)
         .animation(ZTransferMotion.standard, value: showDoneLabel)
         .onChange(of: hasActive) { active in
