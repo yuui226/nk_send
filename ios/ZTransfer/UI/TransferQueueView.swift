@@ -112,20 +112,21 @@ private struct QueueItemView: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            QueueThumbnail(session: session, handle: item.file.id)
+            QueueThumbnail(session: session, handle: item.file.id, item: item)
             VStack(alignment: .leading, spacing: 5) {
                 Text(item.file.fileName).zTransferText(size: ZTransferMetrics.caption, weight: .semibold).lineLimit(1)
                 HStack(spacing: 6) {
                     if item.isGeneratingFrame {
                         ProgressView().controlSize(.small)
                         Text(AppLocalized.resource("queue_pill_generating")).zTransferText(size: ZTransferMetrics.caption)
-                    } else if item.status != .transferring {
-                        Circle().fill(stateColor).frame(width: 7, height: 7)
-                        Text(statusText).zTransferText(size: ZTransferMetrics.caption)
+                    } else {
+                        TransferInfoPill(text: fileSizeText, color: ZTransferColors.secondaryText)
+                        if item.status == .transferring, item.bytesPerSecond > 0 {
+                            TransferInfoPill(text: speedText, color: ZTransferColors.statusConnected)
+                        }
                     }
                     if item.status == .transferring {
                         Text("\(Int(item.progress * 100))%").zTransferText(size: ZTransferMetrics.caption)
-                        if item.bytesPerSecond > 0 { Text(speedText).zTransferText(size: ZTransferMetrics.caption) }
                     }
                 }
                 if let error = item.error, !error.isEmpty {
@@ -133,6 +134,9 @@ private struct QueueItemView: View {
                 }
                 if item.status == .transferring {
                     ProgressView(value: item.progress).tint(ZTransferColors.accentBlue)
+                }
+                if let effectText {
+                    TransferInfoPill(text: effectText, color: ZTransferColors.accentPurple)
                 }
             }
             Spacer(minLength: 4)
@@ -164,23 +168,110 @@ private struct QueueItemView: View {
         let mb = Double(item.bytesPerSecond) / 1_000_000
         return String(format: "%.1f MB/s", mb)
     }
+
+    private var fileSizeText: String {
+        let bytes = item.file.size
+        if bytes == UInt64(UInt32.max) { return "—" }
+        if bytes < 1024 { return "\(bytes) B" }
+        if bytes < 1024 * 1024 { return "\(bytes / 1024) KB" }
+        if bytes < 1024 * 1024 * 1024 { return String(format: "%.1f MB", Double(bytes) / (1024 * 1024)) }
+        return String(format: "%.2f GB", Double(bytes) / (1024 * 1024 * 1024))
+    }
+
+    private var effectText: String? {
+        var parts: [String] = []
+        if let preset = item.effects?.photoFramePreset, item.effects?.photoFrameEnabled == true,
+           let label = frameLabel(preset) { parts.append(label) }
+        if let filter = item.effects?.selectedFilter, item.effects?.photoFilterEnabled == true {
+            parts.append("\(filter.preset.name) \(filter.normalizedIntensityPercent)%")
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    private func frameLabel(_ preset: PhotoFramePreset) -> String? {
+        switch preset {
+        case .mist: return AppLocalized.resource("photo_frame_mist")
+        case .cinema: return AppLocalized.resource("photo_frame_cinema")
+        case .minimal: return AppLocalized.resource("photo_frame_minimal")
+        case .frosted: return AppLocalized.resource("photo_frame_frosted")
+        case .plaque: return AppLocalized.resource("photo_frame_plaque")
+        case .immersive: return AppLocalized.resource("photo_frame_immersive")
+        case .brandInset: return AppLocalized.resource("photo_frame_brand_inset")
+        case .brandGallery: return AppLocalized.resource("photo_frame_brand_gallery")
+        case .classicSignature: return AppLocalized.resource("photo_frame_classic_signature")
+        case .galleryMat: return AppLocalized.resource("photo_frame_gallery_mat")
+        case .colorArchive: return AppLocalized.resource("photo_frame_color_archive")
+        case .filmGallery: return AppLocalized.resource("photo_frame_film_gallery")
+        case .filmEdge: return AppLocalized.resource("photo_frame_film_edge")
+        }
+    }
+}
+
+private struct TransferInfoPill: View {
+    let text: String
+    let color: Color
+
+    var body: some View {
+        Text(text)
+            .zTransferText(size: ZTransferMetrics.caption, weight: .medium)
+            .foregroundStyle(color)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(color.opacity(0.10), in: Capsule())
+            .overlay(Capsule().stroke(color.opacity(0.22), lineWidth: 1))
+            .lineLimit(1)
+    }
 }
 
 private struct QueueThumbnail: View {
     let session: CameraSession?
     let handle: UInt32
+    let item: TransferQueueItem
     @State private var image: UIImage?
 
     var body: some View {
-        Group {
+        ZStack(alignment: .bottomTrailing) {
+            Group {
             if let image { Image(uiImage: image).resizable().scaledToFill() }
             else { RoundedRectangle(cornerRadius: 8).fill(Color.black.opacity(0.08)).overlay { Image(systemName: "photo") } }
+            }
+            Circle()
+                .fill(stateColor)
+                .frame(width: 22, height: 22)
+                .overlay {
+                    Image(systemName: statusIcon)
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.white)
+                }
+                .overlay(Circle().stroke(ZTransferColors.background, lineWidth: 2))
         }
         .frame(width: 56, height: 56)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .task {
             guard image == nil, let session else { return }
             if let data = try? await session.thumbnail(handle: handle), let image = UIImage(data: data) { self.image = image }
+        }
+    }
+
+    private var stateColor: Color {
+        if item.isGeneratingFrame { return ZTransferColors.accentPurple }
+        switch item.status {
+        case .waiting: return ZTransferColors.accentYellow
+        case .transferring: return ZTransferColors.accentBlue
+        case .completed: return ZTransferColors.statusConnected
+        case .failed: return ZTransferColors.statusError
+        case .cancelled: return ZTransferColors.secondaryText
+        }
+    }
+
+    private var statusIcon: String {
+        if item.isGeneratingFrame { return "sparkles" }
+        switch item.status {
+        case .waiting: return "clock"
+        case .transferring: return "arrow.down"
+        case .completed: return "checkmark"
+        case .failed: return "exclamationmark"
+        case .cancelled: return "xmark"
         }
     }
 }
