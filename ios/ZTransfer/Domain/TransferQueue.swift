@@ -494,30 +494,52 @@ actor TransferQueue {
 
     private func frameURL(source: URL, settings: PhotoEffectsSettings, framesDirectory: URL) -> URL {
         let stem = source.deletingPathExtension().lastPathComponent
-        let renderSettings = RenderFingerprint(
-            photoFrameEnabled: settings.photoFrameEnabled,
-            photoFrameBorderEnabled: settings.photoFrameBorderEnabled,
-            photoFramePreset: settings.photoFramePreset,
-            watermark: settings.watermark,
-            metadata: settings.metadata,
-            photoFilterEnabled: settings.photoFilterEnabled,
-            selectedFilter: settings.selectedFilter
+        let border = settings.photoFrameEnabled && settings.photoFrameBorderEnabled
+        let watermark = settings.photoFrameEnabled && settings.watermark.enabled
+        let filter = settings.photoFilterEnabled ? settings.selectedFilter : nil
+        let style: String
+        switch (border, watermark, filter != nil) {
+        case (true, _, _): style = "frame_\(photoFrameFileSuffix(settings.photoFramePreset))"
+        case (false, true, _): style = "watermark"
+        default: style = "filter"
+        }
+        let watermarkDigest = stableDigest(
+            "v=2\0\(settings.photoFramePreset.rawValue)\0\(settings.watermark)\0\(settings.metadata)",
+            bytes: 6,
         )
-        var encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        let digest = (try? encoder.encode(renderSettings)).map { SHA256.hash(data: $0) }
-            .map { $0.prefix(6).map { String(format: "%02x", $0) }.joined() } ?? "000000"
-        return framesDirectory.appendingPathComponent("\(stem)_frame_\(digest).jpg")
+        let filterPart: String
+        if let filter {
+            let digest = stableDigest("v=2\0\(filter.preset.id)", bytes: 4)
+            filterPart = "_f\(digest)i\(filter.normalizedIntensityPercent)"
+        } else {
+            filterPart = ""
+        }
+        return framesDirectory.appendingPathComponent(
+            "\(stem)_\(style)_w\(watermarkDigest)\(filterPart).jpg"
+        )
     }
 
-    private struct RenderFingerprint: Codable {
-        let photoFrameEnabled: Bool
-        let photoFrameBorderEnabled: Bool
-        let photoFramePreset: PhotoFramePreset
-        let watermark: PhotoFrameWatermark
-        let metadata: PhotoFrameMetadataSettings
-        let photoFilterEnabled: Bool
-        let selectedFilter: PhotoFilterSelection?
+    private func stableDigest(_ value: String, bytes: Int) -> String {
+        SHA256.hash(data: Data(value.utf8)).prefix(bytes)
+            .map { String(format: "%02x", $0) }.joined()
+    }
+
+    private func photoFrameFileSuffix(_ preset: PhotoFramePreset) -> String {
+        switch preset {
+        case .mist: return "mist"
+        case .cinema: return "dark"
+        case .minimal: return "clean"
+        case .frosted: return "glass"
+        case .plaque: return "plaque"
+        case .immersive: return "immersive"
+        case .brandInset: return "brand_inset"
+        case .brandGallery: return "brand_gallery"
+        case .classicSignature: return "classic_signature"
+        case .galleryMat: return "gallery_mat"
+        case .colorArchive: return "color_archive"
+        case .filmGallery: return "film_gallery"
+        case .filmEdge: return "film_edge"
+        }
     }
 
     private func uniqueFrameURL(_ preferred: URL) -> URL {
