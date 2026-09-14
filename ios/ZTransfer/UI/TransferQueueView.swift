@@ -38,12 +38,17 @@ struct TransferQueueView: View {
                                           onRetry: { model.retry(id: item.id) },
                                           onRemove: { model.remove(id: item.id) },
                                           onCancel: { model.cancel(id: item.id) })
+                                .transition(.asymmetric(
+                                    insertion: .opacity.combined(with: .scale(scale: 0.96, anchor: .top)),
+                                    removal: .opacity.combined(with: .scale(scale: 0.94, anchor: .top))
+                                ))
                         }
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 62)
                     .padding(.bottom, 112)
                 }
+                .animation(ZTransferMotion.standard, value: model.snapshot.items)
             }
             queueTopControls
             queueBottomControls
@@ -213,46 +218,53 @@ private struct QueueItemView: View {
     }
 
     var body: some View {
-        HStack(spacing: 12) {
-            QueueThumbnail(session: session, handle: item.file.id, item: item)
-            VStack(alignment: .leading, spacing: 5) {
+        ZStack {
+            if item.status == .transferring {
+                LiquidTransferProgressFill(progress: item.progress, seed: item.id.uuidString)
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .transition(.opacity)
+            }
+            HStack(spacing: 12) {
+                QueueThumbnail(session: session, handle: item.file.id, item: item)
+                VStack(alignment: .leading, spacing: 5) {
                 Text(item.file.fileName).zTransferText(size: ZTransferMetrics.caption, weight: .semibold).lineLimit(1)
                 HStack(spacing: 6) {
-                    if item.isGeneratingFrame {
-                        ProgressView().controlSize(.small)
-                        Text(AppLocalized.resource("queue_pill_generating")).zTransferText(size: ZTransferMetrics.caption)
-                    } else {
-                        TransferInfoPill(text: fileSizeText, color: ZTransferColors.secondaryText)
-                        if item.status == .transferring, item.bytesPerSecond > 0 {
-                            TransferInfoPill(text: speedText, color: ZTransferColors.statusConnected)
-                        }
-                        if let elapsed = item.elapsedMs {
-                            TransferInfoPill(text: formatDuration(elapsed), color: ZTransferColors.accentBlue)
-                        }
+                    TransferInfoPill(text: fileSizeText, color: ZTransferColors.secondaryText)
+                    if item.status == .transferring, item.bytesPerSecond > 0 {
+                        TransferInfoPill(text: speedText, color: ZTransferColors.statusConnected)
+                    }
+                    if let elapsed = item.elapsedMs {
+                        TransferInfoPill(text: formatDuration(elapsed), color: ZTransferColors.accentBlue)
                     }
                 }
                 if let error = item.error, !error.isEmpty {
                     Text(error).zTransferText(size: ZTransferMetrics.caption).foregroundStyle(.red).lineLimit(2)
                 }
-                if item.status == .transferring {
-                    ProgressView(value: item.progress).tint(ZTransferColors.accentBlue)
-                }
-                if let effectText {
-                    HStack(spacing: 6) {
-                        TransferInfoPill(text: effectText, color: ZTransferColors.accentPurple)
-                        if let elapsed = item.frameGenerationElapsedMs {
-                            TransferInfoPill(text: formatDuration(elapsed), color: ZTransferColors.accentYellow)
+                Group {
+                    if let effectText {
+                        HStack(spacing: 6) {
+                            TransferInfoPill(text: effectText, color: ZTransferColors.accentPurple)
+                            TimelineView(.periodic(from: Date(), by: 0.2)) { timeline in
+                                if let elapsed = generationElapsedMs(at: timeline.date) {
+                                    TransferInfoPill(text: formatDuration(elapsed), color: ZTransferColors.accentYellow)
+                                }
+                            }
                         }
                     }
                 }
+                .transition(.asymmetric(
+                    insertion: .opacity.combined(with: .move(edge: .leading)).combined(with: .scale(scale: 0.82, anchor: .leading)),
+                    removal: .opacity.combined(with: .scale(scale: 0.82, anchor: .leading))
+                ))
             }
-            Spacer(minLength: 4)
-            if item.status == .failed {
-                Button(action: onRetry) { Image(systemName: "arrow.clockwise") }.buttonStyle(.bordered).accessibilityLabel(AppLocalized.resource("retry"))
-            } else if item.status == .waiting {
-                Button(action: onCancel) { Image(systemName: "xmark") }.buttonStyle(.bordered).accessibilityLabel(AppLocalized.resource("cancel"))
-            } else if (item.status == .completed || item.status == .cancelled) && !item.isGeneratingFrame {
-                Button(action: onRemove) { Image(systemName: "trash") }.buttonStyle(.bordered).accessibilityLabel(AppLocalized.resource("cd_remove_from_queue"))
+                Spacer(minLength: 4)
+                if item.status == .failed {
+                    Button(action: onRetry) { Image(systemName: "arrow.clockwise") }.buttonStyle(.bordered).accessibilityLabel(AppLocalized.resource("retry"))
+                } else if item.status == .waiting {
+                    Button(action: onCancel) { Image(systemName: "xmark") }.buttonStyle(.bordered).accessibilityLabel(AppLocalized.resource("cancel"))
+                } else if (item.status == .completed || item.status == .cancelled) && !item.isGeneratingFrame {
+                    Button(action: onRemove) { Image(systemName: "trash") }.buttonStyle(.bordered).accessibilityLabel(AppLocalized.resource("cd_remove_from_queue"))
+                }
             }
         }
         .padding(12)
@@ -305,6 +317,12 @@ private struct QueueItemView: View {
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
+    private func generationElapsedMs(at date: Date) -> Int64? {
+        if let elapsed = item.frameGenerationElapsedMs { return elapsed }
+        guard item.isGeneratingFrame, let started = item.frameGenerationStartedAt else { return nil }
+        return Int64(max(0, date.timeIntervalSince(started) * 1000).rounded())
+    }
+
     private func frameLabel(_ preset: PhotoFramePreset) -> String? {
         switch preset {
         case .mist: return AppLocalized.resource("photo_frame_mist")
@@ -321,6 +339,56 @@ private struct QueueItemView: View {
         case .filmGallery: return AppLocalized.resource("photo_frame_film_gallery")
         case .filmEdge: return AppLocalized.resource("photo_frame_film_edge")
         }
+    }
+}
+
+/// Android's transfer cards use a low-amplitude liquid fill instead of a
+/// static progress bar. The phase is driven by TimelineView so progress
+/// updates do not create a second task per card.
+private struct LiquidTransferProgressFill: View {
+    let progress: Double
+    let seed: String
+
+    var body: some View {
+        GeometryReader { proxy in
+            TimelineView(.periodic(from: Date(), by: 1.0 / 30.0)) { timeline in
+                LiquidTransferShape(
+                    progress: min(max(progress, 0), 1),
+                    phase: CGFloat(timeline.date.timeIntervalSinceReferenceDate
+                                   .truncatingRemainder(dividingBy: 2.4) / 2.4) + seedPhase
+                )
+                    .fill(LinearGradient(
+                        gradient: Gradient(colors: [ZTransferColors.accentBlue.opacity(0.16), ZTransferColors.accentBlue.opacity(0.30)]),
+                        startPoint: .top, endPoint: .bottom
+                    ))
+            }
+        }
+        .allowsHitTesting(false)
+    }
+
+    private var seedPhase: CGFloat { CGFloat(abs(seed.hashValue % 360)) / 360 }
+}
+
+private struct LiquidTransferShape: Shape {
+    var progress: Double
+    var phase: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        let baseline = rect.height * (1 - CGFloat(min(max(progress, 0), 1)))
+        let segments = max(8, Int(rect.width / 12))
+        let amplitude = min(2.2, rect.height * 0.035)
+        var path = Path()
+        path.move(to: CGPoint(x: 0, y: rect.height))
+        path.addLine(to: CGPoint(x: 0, y: baseline))
+        for index in 0...segments {
+            let fraction = CGFloat(index) / CGFloat(segments)
+            let x = rect.width * fraction
+            let wave = sin(fraction * .pi * 2 + phase * .pi * 2) * amplitude
+            path.addLine(to: CGPoint(x: x, y: baseline + wave))
+        }
+        path.addLine(to: CGPoint(x: rect.width, y: rect.height))
+        path.closeSubpath()
+        return path
     }
 }
 
@@ -345,6 +413,7 @@ private struct QueueThumbnail: View {
     let handle: UInt32
     let item: TransferQueueItem
     @State private var image: UIImage?
+    @State private var badgeScale: CGFloat = 1
     private var visualState: String {
         if item.isGeneratingFrame { return "generating" }
         return item.status.rawValue
@@ -369,12 +438,17 @@ private struct QueueThumbnail: View {
                 .overlay(Circle().stroke(ZTransferColors.background, lineWidth: 2))
                 .animation(.easeInOut(duration: 0.18), value: visualState)
                 .transition(.scale(scale: 0.62).combined(with: .opacity))
+                .scaleEffect(badgeScale)
         }
         .frame(width: 56, height: 56)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .task {
             guard image == nil, let session else { return }
             if let data = try? await session.thumbnail(handle: handle), let image = UIImage(data: data) { self.image = image }
+        }
+        .onChange(of: visualState) { _ in
+            withAnimation(.easeOut(duration: 0.10)) { badgeScale = 0.94 }
+            withAnimation(.spring(response: 0.34, dampingFraction: 0.62).delay(0.10)) { badgeScale = 1 }
         }
     }
 
