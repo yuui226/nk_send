@@ -402,7 +402,6 @@ actor TransferQueue {
             guard let encoded = rendered.jpegData(compressionQuality: 1) else { throw CocoaError(.fileWriteUnknown) }
             let framesDirectory = directory.appendingPathComponent("ZTFrames", isDirectory: true)
             try FileManager.default.createDirectory(at: framesDirectory, withIntermediateDirectories: true)
-            let stem = source.deletingPathExtension().lastPathComponent
             let preferred = frameURL(source: source, settings: settings, framesDirectory: framesDirectory)
             let destination = uniqueFrameURL(preferred)
             try encoded.write(to: destination, options: .atomic)
