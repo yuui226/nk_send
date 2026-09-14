@@ -84,8 +84,8 @@ struct TransferQueueView: View {
                     Image(systemName: "arrow.clockwise").frame(width: 48, height: 48)
                 }
                 .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 24))
-                .disabled(session == nil)
-                .opacity(session == nil ? 0.45 : 1)
+                .disabled(session == nil && retryNeedsCamera)
+                .opacity(session == nil && retryNeedsCamera ? 0.45 : 1)
                 .accessibilityLabel(AppLocalized.resource("cd_retry_failed"))
             }
             if model.snapshot.items.contains(where: { $0.status != .transferring && !$0.isGeneratingFrame }) {
@@ -99,6 +99,12 @@ struct TransferQueueView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
         .padding(.trailing, 20)
         .padding(.bottom, 24)
+    }
+
+    private var retryNeedsCamera: Bool {
+        model.snapshot.items.contains {
+            ($0.status == .failed || $0.status == .cancelled) && $0.outputURL == nil
+        }
     }
 
     @ViewBuilder
@@ -264,7 +270,8 @@ private struct QueueItemView: View {
                 if item.status == .failed {
                     Button(action: onRetry) { Image(systemName: "arrow.clockwise") }
                         .buttonStyle(.bordered)
-                        .disabled(session == nil)
+                        .disabled(session == nil && retryNeedsCamera)
+                        .opacity(session == nil && retryNeedsCamera ? 0.45 : 1)
                         .accessibilityLabel(AppLocalized.resource("retry"))
                 } else if item.status == .waiting {
                     Button(action: onCancel) { Image(systemName: "xmark") }.buttonStyle(.bordered).accessibilityLabel(AppLocalized.resource("cancel"))
@@ -279,6 +286,10 @@ private struct QueueItemView: View {
         .animation(ZTransferMotion.standard, value: item.status)
         .animation(ZTransferMotion.standard, value: item.bytesPerSecond)
         .animation(ZTransferMotion.standard, value: item.elapsedMs)
+    }
+
+    private var retryNeedsCamera: Bool {
+        item.outputURL == nil
     }
 
     private var statusText: String {
