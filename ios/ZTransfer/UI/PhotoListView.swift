@@ -178,6 +178,14 @@ struct PhotoListView: View {
                 }
             }
             }
+            if showingQueue {
+                GeometryReader { proxy in
+                    queueTopRightControls
+                        .padding(.horizontal, 12)
+                        .padding(.top, proxy.safeAreaInsets.top + 6)
+                        .transition(.opacity.combined(with: .scale(scale: 0.88, anchor: .trailing)))
+                }
+            }
         }
         .task {
             if let session {
@@ -367,21 +375,38 @@ struct PhotoListView: View {
 
             Spacer(minLength: 0)
 
+            queueTopRightControls
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 6)
+        .animation(ZTransferMotion.standard, value: queueModel.snapshot.items.count)
+        .onPreferenceChange(PhotoListSettingsAnchorPreferenceKey.self) { settingsAnchor = $0 }
+        .onPreferenceChange(PhotoListFilterAnchorPreferenceKey.self) { filterAnchor = $0 }
+    }
+
+    /// Android keeps queue execution and the queue pill outside the files ↔
+    /// transfer page transition. Reusing this group in both pages preserves
+    /// one source of truth for start/pause availability and pill animation.
+    private var queueTopRightControls: some View {
+        HStack(spacing: 8) {
             if queueModel.snapshot.isTransferring {
                 Button { queueModel.pause() } label: {
                     Image(systemName: "pause.fill").frame(width: 36, height: 36)
                 }
                 .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
+                .accessibilityLabel(AppLocalized.resource("cd_pause_after_current"))
             } else if queueModel.snapshot.items.contains(where: { $0.status == .waiting }),
                       let session, let directory = directoryStore.directoryURL {
                 Button { queueModel.start(session: session, directory: directory) } label: {
                     Image(systemName: "play.fill").frame(width: 36, height: 36)
                 }
                 .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
+                .accessibilityLabel(AppLocalized.resource("cd_start_transfers"))
             }
 
             if !queueModel.snapshot.items.isEmpty {
                 Button {
+                    guard !showingQueue else { return }
                     withAnimation(.timingCurve(0.4, 0.0, 0.2, 1.0, duration: 0.22)) {
                         showingQueue = true
                     }
@@ -392,13 +417,11 @@ struct PhotoListView: View {
                 }
                 .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
                 .transition(.opacity.combined(with: .scale))
+                .accessibilityLabel(AppLocalized.resource("cd_transfer"))
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 6)
-        .animation(ZTransferMotion.standard, value: queueModel.snapshot.items.count)
-        .onPreferenceChange(PhotoListSettingsAnchorPreferenceKey.self) { settingsAnchor = $0 }
-        .onPreferenceChange(PhotoListFilterAnchorPreferenceKey.self) { filterAnchor = $0 }
+        .frame(maxWidth: .infinity, alignment: .trailing)
+        .animation(ZTransferMotion.standard, value: queueModel.snapshot.items)
     }
 
     /// Android requests the latest visible file on entering Settings: publish
