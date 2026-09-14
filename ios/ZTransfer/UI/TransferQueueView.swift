@@ -37,7 +37,13 @@ struct TransferQueueView: View {
                             QueueItemView(item: item, session: session,
                                           onRetry: { model.retry(id: item.id) },
                                           onRemove: { model.remove(id: item.id) },
-                                          onCancel: { model.cancel(id: item.id) })
+                                          onCancel: {
+                                              model.cancel(id: item.id)
+                                              Task { @MainActor in
+                                                  try? await Task.sleep(nanoseconds: 280_000_000)
+                                                  model.remove(id: item.id)
+                                              }
+                                          })
                                 .transition(.asymmetric(
                                     insertion: .opacity.combined(with: .scale(scale: 0.96, anchor: .top)),
                                     removal: .opacity.combined(with: .scale(scale: 0.94, anchor: .top))
@@ -274,7 +280,9 @@ private struct QueueItemView: View {
                         .opacity(session == nil && retryNeedsCamera ? 0.45 : 1)
                         .accessibilityLabel(AppLocalized.resource("retry"))
                 } else if item.status == .waiting {
-                    Button(action: onCancel) { Image(systemName: "xmark") }.buttonStyle(.bordered).accessibilityLabel(AppLocalized.resource("cancel"))
+                    Button(action: onCancel) { Image(systemName: "trash") }
+                        .buttonStyle(.bordered)
+                        .accessibilityLabel(AppLocalized.resource("cd_remove_from_queue"))
                 } else if (item.status == .completed || item.status == .cancelled) && !item.isGeneratingFrame {
                     Button(action: onRemove) { Image(systemName: "trash") }.buttonStyle(.bordered).accessibilityLabel(AppLocalized.resource("cd_remove_from_queue"))
                 }
