@@ -281,6 +281,13 @@ final class DomainModelTests: XCTestCase {
             androidPhotoFrameOutputName(sourceName: "DSC_0001.JPG", settings: settings),
             "DSC_0001_filter_f42f030dci64.jpg"
         )
+
+        settings.watermark.enabled = true
+        settings.photoFrameEnabled = false
+        XCTAssertEqual(
+            androidPhotoFrameOutputName(sourceName: "DSC_0001.JPG", settings: settings),
+            "DSC_0001_filter_f42f030dci64.jpg"
+        )
     }
 
     func testTransferDateFolderMatchesAndroidAndFallsBackForInvalidDate() {

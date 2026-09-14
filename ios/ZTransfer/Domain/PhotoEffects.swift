@@ -219,7 +219,13 @@ struct PhotoEffectsSettings: Codable, Equatable, Sendable {
 func androidPhotoFrameOutputName(sourceName: String, settings: PhotoEffectsSettings) -> String {
     let preset = settings.photoFramePreset
     let borderEnabled = settings.photoFrameEnabled && settings.photoFrameBorderEnabled
-    let renderedWatermark = androidWatermarkForBorderMode(settings.watermark, borderEnabled: borderEnabled)
+    // Android's queue snapshot only carries a watermark when the decoration
+    // feature is enabled. The persisted watermark preference defaults to on,
+    // but it must not turn a filter-only export into a watermark render.
+    let watermarkPreference = settings.photoFrameEnabled
+        ? settings.watermark
+        : PhotoFrameWatermark(enabled: false)
+    let renderedWatermark = androidWatermarkForBorderMode(watermarkPreference, borderEnabled: borderEnabled)
     let metadata = settings.metadataByPreset[preset.rawValue]
         ?? PhotoFrameMetadataSettings.defaults(for: preset)
     let filter = settings.photoFilterEnabled ? settings.selectedFilter : nil
