@@ -20,6 +20,23 @@ private struct PhotoListTopControlsTransition: AnimatableModifier {
     }
 }
 
+private struct PhotoListWorkspaceTransition: AnimatableModifier {
+    var progress: CGFloat
+    let horizontalMultiplier: CGFloat
+    let initialOpacity: CGFloat
+
+    nonisolated var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(initialOpacity + (1 - initialOpacity) * progress)
+            .offset(x: UIScreen.main.bounds.width * horizontalMultiplier * (1 - progress))
+    }
+}
+
 struct PhotoListView: View {
     @StateObject private var model: PhotoListViewModel
     @StateObject private var queueModel: TransferQueueViewModel
@@ -80,8 +97,14 @@ struct PhotoListView: View {
                     }
                 }
                 .transition(.asymmetric(
-                    insertion: .move(edge: .trailing).combined(with: .opacity),
-                    removal: .move(edge: .trailing).combined(with: .opacity)
+                    insertion: .modifier(
+                        active: PhotoListWorkspaceTransition(progress: 0, horizontalMultiplier: 1, initialOpacity: 0.72),
+                        identity: PhotoListWorkspaceTransition(progress: 1, horizontalMultiplier: 1, initialOpacity: 0.72)
+                    ),
+                    removal: .modifier(
+                        active: PhotoListWorkspaceTransition(progress: 0, horizontalMultiplier: 1, initialOpacity: 0.72),
+                        identity: PhotoListWorkspaceTransition(progress: 1, horizontalMultiplier: 1, initialOpacity: 0.72)
+                    )
                 ))
             } else {
             ScrollViewReader { reader in
@@ -184,6 +207,19 @@ struct PhotoListView: View {
                             .padding(.top, proxy.safeAreaInsets.top)
                     }
                 }
+                // Android keeps the files page in the workspace while the
+                // queue page slides over it: on return it enters from the
+                // left at one third of the width and starts at 50% opacity.
+                .transition(.asymmetric(
+                    insertion: .modifier(
+                        active: PhotoListWorkspaceTransition(progress: 0, horizontalMultiplier: -1.0 / 3.0, initialOpacity: 0.5),
+                        identity: PhotoListWorkspaceTransition(progress: 1, horizontalMultiplier: -1.0 / 3.0, initialOpacity: 0.5)
+                    ),
+                    removal: .modifier(
+                        active: PhotoListWorkspaceTransition(progress: 0, horizontalMultiplier: -1.0 / 3.0, initialOpacity: 0.5),
+                        identity: PhotoListWorkspaceTransition(progress: 1, horizontalMultiplier: -1.0 / 3.0, initialOpacity: 0.5)
+                    )
+                ))
             }
             }
             if showingQueue {
