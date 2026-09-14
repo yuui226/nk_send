@@ -38,6 +38,7 @@ struct PhotoPreviewView: View {
     let session: CameraSession
     let files: [CameraFile]
     let burstGroups: [BurstPhotoGroup]
+    let queueTarget: CGRect?
     let directory: URL?
     let organizeByDate: Bool
     @Binding var selectedFile: CameraFile?
@@ -57,13 +58,17 @@ struct PhotoPreviewView: View {
     @State private var queueDragOffset: CGFloat = 0
     @State private var queueFlightTask: Task<Void, Never>?
     @State private var queueFlightActive = false
+    @State private var queueFlightProgress: CGFloat = 0
+    @State private var queueFlightImage: UIImage?
 
     init(session: CameraSession, files: [CameraFile], selectedFile: Binding<CameraFile?>,
          directory: URL? = nil, organizeByDate: Bool = false,
+         queueTarget: CGRect? = nil,
          onEnqueue: @escaping (CameraFile) -> Bool = { _ in false },
          onEnqueueBurst: @escaping ([CameraFile]) -> Bool = { _ in false }) {
         self.session = session; self.files = files; self.directory = directory
         self.burstGroups = PhotoCatalogGrouping.bursts(in: files)
+        self.queueTarget = queueTarget
         self.organizeByDate = organizeByDate; _selectedFile = selectedFile
         self.onEnqueue = onEnqueue; self.onEnqueueBurst = onEnqueueBurst
         let first = selectedFile.wrappedValue ?? files.first
@@ -114,6 +119,22 @@ struct PhotoPreviewView: View {
                         startQueueFlight(for: files[index])
                     }
             )
+            if queueFlightActive, files.indices.contains(index) {
+                GeometryReader { proxy in
+                    PhotoPreviewQueueFlightView(
+                        progress: queueFlightProgress,
+                        image: queueFlightImage,
+                        from: CGPoint(x: proxy.size.width / 2, y: proxy.size.height * 0.46),
+                        target: CGPoint(
+                            x: (queueTarget?.midX ?? (proxy.size.width - 74)) - proxy.frame(in: .global).minX,
+                            y: (queueTarget?.midY ?? (proxy.safeAreaInsets.top + 18)) - proxy.frame(in: .global).minY
+                        ),
+                        size: CGSize(width: proxy.size.width * 0.72, height: proxy.size.height * 0.52)
+                    )
+                    .allowsHitTesting(false)
+                }
+                .ignoresSafeArea()
+            }
             VStack {
                 HStack {
                     Button { selectedFile = nil } label: { Image(systemName: "xmark").font(.system(size: 18, weight: .semibold)).frame(width: 44, height: 44) }
@@ -195,6 +216,8 @@ struct PhotoPreviewView: View {
         .onDisappear {
             queueFlightTask?.cancel()
             queueFlightTask = nil
+            queueFlightProgress = 0
+            queueFlightImage = nil
         }
         .onChange(of: index) { value in
             if files.indices.contains(value) {
@@ -250,11 +273,17 @@ struct PhotoPreviewView: View {
         let burst = burstGroups.first(where: { $0.files.first?.id == file.id })
         guard burst == nil ? onEnqueue(file) : onEnqueueBurst(burst!.files) else { return }
         queueFlightActive = true
+        queueFlightProgress = 0
+        queueFlightImage = nil
         withAnimation(.timingCurve(0.4, 0.0, 0.2, 1.0, duration: 0.56)) {
             queueDragOffset = -max(240, UIScreen.main.bounds.height * 0.42)
+            queueFlightProgress = 1
         }
         queueFlightTask?.cancel()
         queueFlightTask = Task { @MainActor in
+            if let data = try? await session.thumbnail(file: file), let image = UIImage(data: data) {
+                queueFlightImage = image
+            }
             try? await Task.sleep(nanoseconds: 560_000_000)
             guard !Task.isCancelled else { return }
             withAnimation(ZTransferMotion.standard) {
@@ -278,6 +307,46 @@ private func luminanceHistogram(_ image: UIImage) -> [CGFloat] {
     for pixel in pixels { bins[min(23, Int(pixel) * 24 / 256)] += 1 }
     let maxValue = max(1, bins.max() ?? 1)
     return bins.map { CGFloat($0) / CGFloat(maxValue) }
+}
+
+private struct PhotoPreviewQueueFlightView: View {
+    let progress: CGFloat
+    let image: UIImage?
+    let from: CGPoint
+    let target: CGPoint
+    let size: CGSize
+
+    var body: some View {
+        let p = min(max(progress, 0), 1)
+        let control = CGPoint(
+            x: from.x + (target.x - from.x) * 0.42,
+            y: min(from.y, target.y) - max(56, abs(target.x - from.x) * 0.18)
+        )
+        let position = previewQuadraticBezier(start: from, control: control, end: target, t: p)
+        let width = max(10, size.width * (1 - p * 0.56))
+        let height = max(10, size.height * (1 - p * 0.56))
+        Group {
+            if let image {
+                Image(uiImage: image).resizable().scaledToFill()
+            } else {
+                RoundedRectangle(cornerRadius: 18).fill(.white.opacity(0.26))
+            }
+        }
+        .frame(width: width, height: height)
+        .clipShape(RoundedRectangle(cornerRadius: max(8, width * 0.04)))
+        .overlay(RoundedRectangle(cornerRadius: max(8, width * 0.04)).stroke(.white.opacity(0.32), lineWidth: 1))
+        .position(position)
+        .opacity(1 - p * 0.2)
+        .rotationEffect(.degrees(Double(p) * 8))
+    }
+}
+
+private func previewQuadraticBezier(start: CGPoint, control: CGPoint, end: CGPoint, t: CGFloat) -> CGPoint {
+    let oneMinus = 1 - t
+    return CGPoint(
+        x: oneMinus * oneMinus * start.x + 2 * oneMinus * t * control.x + t * t * end.x,
+        y: oneMinus * oneMinus * start.y + 2 * oneMinus * t * control.y + t * t * end.y
+    )
 }
 
 private struct PreviewImage: View {

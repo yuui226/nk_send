@@ -314,7 +314,8 @@ struct PhotoListView: View {
                 let files = model.sections.flatMap(\.files)
                 PhotoPreviewView(session: session, files: files, selectedFile: $selectedFile,
                                  directory: directoryStore.directoryURL,
-                                 organizeByDate: organizeByDate) { file in
+                                 organizeByDate: organizeByDate,
+                                 queueTarget: queueTargetBounds == .zero ? nil : queueTargetBounds) { file in
                     guard directoryStore.directoryURL != nil else {
                         selectedFile = nil
                         showingSettings = true
