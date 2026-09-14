@@ -116,7 +116,10 @@ private struct QueueItemView: View {
             VStack(alignment: .leading, spacing: 5) {
                 Text(item.file.fileName).zTransferText(size: ZTransferMetrics.caption, weight: .semibold).lineLimit(1)
                 HStack(spacing: 6) {
-                    if item.status != .transferring {
+                    if item.isGeneratingFrame {
+                        ProgressView().controlSize(.small)
+                        Text(AppLocalized.resource("queue_pill_generating")).zTransferText(size: ZTransferMetrics.caption)
+                    } else if item.status != .transferring {
                         Circle().fill(stateColor).frame(width: 7, height: 7)
                         Text(statusText).zTransferText(size: ZTransferMetrics.caption)
                     }
