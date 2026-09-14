@@ -71,6 +71,29 @@ struct TransferQueueView: View {
             }
             .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
             Spacer()
+            if model.snapshot.isTransferring {
+                Button { model.pause() } label: {
+                    Image(systemName: "pause.fill")
+                        .frame(width: 36, height: 36)
+                }
+                .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
+                .accessibilityLabel(AppLocalized.resource("cd_pause_after_current"))
+            } else if model.snapshot.items.contains(where: { $0.status == .waiting }),
+                      let session, let directoryURL = directory.directoryURL {
+                Button { model.start(session: session, directory: directoryURL) } label: {
+                    Image(systemName: "play.fill")
+                        .frame(width: 36, height: 36)
+                }
+                .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
+                .accessibilityLabel(AppLocalized.resource("cd_start_transfers"))
+            }
+            if !model.snapshot.items.isEmpty {
+                QueuePill(snapshot: model.snapshot, heldCount: 0)
+                    .padding(.horizontal, 10)
+                    .frame(height: 36)
+                    .background(.thinMaterial, in: Capsule())
+                    .overlay(Capsule().stroke(.white.opacity(0.35), lineWidth: 1))
+            }
             if let session {
                 Image(systemName: session.isUSB ? "cable.connector" : "wifi")
                     .frame(width: 36, height: 36)

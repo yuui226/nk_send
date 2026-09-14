@@ -852,7 +852,7 @@ private func photoGridEntries(_ files: [CameraFile], collapse: Bool = true, expa
     return entries
 }
 
-private struct QueuePill: View {
+struct QueuePill: View {
     let snapshot: TransferQueueSnapshot
     let heldCount: Int
     @State private var showDoneLabel = false
