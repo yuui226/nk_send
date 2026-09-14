@@ -220,7 +220,11 @@ private struct QueueItemView: View {
                     .transition(.opacity)
             }
             HStack(spacing: 12) {
-                QueueThumbnail(session: session, handle: item.file.id, item: item)
+                ZStack(alignment: .bottomTrailing) {
+                    QueueThumbnail(session: session, handle: item.file.id, item: item)
+                    QueueTaskStatusBadge(item: item)
+                }
+                .frame(width: 56, height: 56)
                 VStack(alignment: .leading, spacing: 5) {
                 Text(item.file.fileName).zTransferText(size: ZTransferMetrics.caption, weight: .semibold).lineLimit(1)
                 HStack(spacing: 6) {
@@ -338,6 +342,47 @@ private struct QueueItemView: View {
         case .filmGallery: return AppLocalized.resource("photo_frame_film_gallery")
         case .filmEdge: return AppLocalized.resource("photo_frame_film_edge")
         }
+    }
+}
+
+/// Android's queue card keeps the task state visible even when the thumbnail
+/// itself is still loading. The badge is deliberately independent of the
+/// progress fill so state changes can animate without relayout.
+private struct QueueTaskStatusBadge: View {
+    let item: TransferQueueItem
+
+    private var color: Color {
+        if item.isGeneratingFrame { return ZTransferColors.accentPurple }
+        switch item.status {
+        case .waiting: return ZTransferColors.accentYellow
+        case .transferring: return ZTransferColors.accentBlue
+        case .completed: return ZTransferColors.statusConnected
+        case .failed: return ZTransferColors.statusError
+        case .cancelled: return ZTransferColors.secondaryText
+        }
+    }
+
+    private var icon: String {
+        if item.isGeneratingFrame { return "wand.and.stars" }
+        switch item.status {
+        case .waiting: return "clock"
+        case .transferring: return "arrow.down"
+        case .completed: return "checkmark"
+        case .failed: return "exclamationmark"
+        case .cancelled: return "xmark"
+        }
+    }
+
+    var body: some View {
+        Image(systemName: icon)
+            .font(.system(size: 11, weight: .bold))
+            .foregroundStyle(.white)
+            .frame(width: 22, height: 22)
+            .background(color, in: Circle())
+            .overlay(Circle().stroke(ZTransferColors.background, lineWidth: 2))
+            .transition(.opacity.combined(with: .scale(scale: 0.62)))
+            .animation(.spring(response: 0.24, dampingFraction: 0.82), value: item.status)
+            .animation(.spring(response: 0.24, dampingFraction: 0.82), value: item.isGeneratingFrame)
     }
 }
 
