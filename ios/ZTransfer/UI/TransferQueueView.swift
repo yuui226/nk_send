@@ -102,8 +102,8 @@ struct TransferQueueView: View {
     @ViewBuilder
     private var queueConfirmationOverlay: some View {
         if let pendingConfirmation {
-            ZStack {
-                Color.black.opacity(0.28)
+                ZStack {
+                    Color.black.opacity(0.28)
                     .ignoresSafeArea()
                     .contentShape(Rectangle())
                     .onTapGesture { self.pendingConfirmation = nil }
@@ -128,6 +128,7 @@ struct TransferQueueView: View {
                 }
             }
             .transition(.opacity)
+            .animation(.spring(response: 0.28, dampingFraction: 0.84), value: pendingConfirmation)
         }
     }
 }
@@ -172,10 +173,16 @@ private struct QueueConfirmationCard: View {
             HStack(spacing: 8) {
                 Spacer()
                 Button(AppLocalized.resource("cancel"), action: onDismiss)
-                    .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 10))
+                    .buttonStyle(.plain)
+                    .foregroundStyle(ZTransferColors.secondaryText)
+                    .padding(.horizontal, 10)
+                    .frame(minHeight: 36)
                 Button(confirmLabel, action: onConfirm)
-                    .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 10))
-                    .foregroundStyle(tint)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .frame(minHeight: 36)
+                    .background(tint, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
         }
         .padding(16)
