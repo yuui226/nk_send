@@ -203,11 +203,23 @@ actor TransferQueue {
         worker = Task { [weak self] in await self?.run() }
     }
 
+    /// Explicitly starting the pending queue is the Android
+    /// `startPendingTransfers` path: it clears a previously requested
+    /// boundary pause before creating the worker. Automatic enqueue uses
+    /// `start` directly so a deferred queue remains deferred.
+    func startPendingTransfers(session: CameraSession, directory: URL) {
+        pauseAfterCurrent = false
+        start(session: session, directory: directory)
+    }
+
     /// Refreshes the transport used by later retries without changing the
     /// deferred-start decision or interrupting an active transfer.
     func attach(session: CameraSession, directory: URL?) {
         self.session = session
-        if let directory { self.directory = directory }
+        // A nil bookmark is meaningful: Android clears the destination after
+        // an invalid directory and must not let a reconnect resurrect the
+        // stale URL for an automatically started task.
+        self.directory = directory
     }
 
     /// Android only records this request while a transfer worker is active.
