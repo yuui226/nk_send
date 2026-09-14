@@ -365,6 +365,10 @@ final class PhotoListViewModel: ObservableObject {
             while !Task.isCancelled {
                 guard let polled = await thumbnailFillQueue.poll() else {
                     await thumbnailFillQueue.waitForWake()
+                    // Android promotes transient failures only after an external
+                    // wake-up (network/session/foreground state), never in a
+                    // hot loop. Keep the same retry boundary here.
+                    await thumbnailFillQueue.retryFailed()
                     continue
                 }
                 let id = polled.id

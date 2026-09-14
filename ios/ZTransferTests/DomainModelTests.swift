@@ -80,6 +80,23 @@ final class DomainModelTests: XCTestCase {
         XCTAssertTrue(released)
     }
 
+    func testThumbnailFillQueueRetriesFailedItemsOnlyAfterWakeBoundary() async {
+        let queue = PhotoThumbnailFillQueue()
+        let file = CameraFile(id: 31, storageID: 1, format: 0x3801, size: 1,
+                              fileName: "retry.JPG", captureDate: "20260914T020000", isProtected: false)
+        await queue.beginScan()
+        await queue.seed([file])
+        _ = await queue.poll()
+        await queue.markFailed(file.id)
+        let beforeWake = await queue.poll()
+        XCTAssertNil(beforeWake)
+        await queue.wake()
+        await queue.waitForWake()
+        await queue.retryFailed()
+        let retried = await queue.poll()
+        XCTAssertEqual(retried?.id, file.id)
+    }
+
     func testThumbnailFillQueueDoesNotRequeueAcrossScanRevision() async {
         let queue = PhotoThumbnailFillQueue()
         let first = CameraFile(id: 11, storageID: 1, format: 0x3801, size: 1,
