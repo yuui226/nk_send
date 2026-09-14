@@ -584,9 +584,15 @@ private struct PreviewImage: View {
             thumbnail = nil
             image = nil
             highResolutionAlpha = 0
-            // Android shows the already cached/low-cost thumbnail first, then
-            // replaces it with the FHD preview. Keep both requests in flight,
-            // but publish the thumbnail as soon as it is available.
+            // Android publishes a cached thumbnail immediately, then waits
+            // for the overlay transition to settle before opening the FHD
+            // channel. This avoids competing with the opening animation.
+            if let data = try? await session.cachedThumbnail(file: file),
+               let thumb = UIImage(data: data) {
+                thumbnail = thumb
+            }
+            try? await Task.sleep(nanoseconds: 340_000_000)
+            guard !Task.isCancelled else { return }
             if let localOriginalURL,
                let localImage = decodeLocalOriginalPreview(
                 at: localOriginalURL,
@@ -597,14 +603,16 @@ private struct PreviewImage: View {
                 return
             }
             if !zoomEnabled {
-                if let data = try? await session.thumbnail(file: file), let thumb = UIImage(data: data) {
+                if thumbnail == nil,
+                   let data = try? await session.thumbnail(file: file),
+                   let thumb = UIImage(data: data) {
                     thumbnail = thumb
                 }
                 return
             }
             await session.setFHDActive(true)
             defer { Task { await session.setFHDActive(false) } }
-            async let thumbnailData = try? await session.thumbnail(file: file)
+            async let thumbnailData: Data? = thumbnail == nil ? (try? await session.thumbnail(file: file)) : nil
             async let previewData = try? await session.preview(handle: file.id)
             if let data = await thumbnailData, let thumb = UIImage(data: data) {
                 thumbnail = thumb
