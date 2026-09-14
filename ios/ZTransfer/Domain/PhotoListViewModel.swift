@@ -379,6 +379,15 @@ final class PhotoListViewModel: ObservableObject {
                     return
                 }
                 let settled = await prefetchBatch([file])
+                // The Android worker treats a foreground owner taking the
+                // channel as a pause, not as a thumbnail failure. The session
+                // prefetch closure can return an empty set when that gate
+                // closes during the request, so check it before classifying
+                // the result and put the item back on the same scan revision.
+                guard !self.transferBusy, await canFill() else {
+                    await thumbnailFillQueue.returnToFront(id, expectedRevision: polled.revision)
+                    return
+                }
                 if settled.contains(id) { await thumbnailFillQueue.markSettled(id) }
                 else { await thumbnailFillQueue.markFailed(id) }
             }
