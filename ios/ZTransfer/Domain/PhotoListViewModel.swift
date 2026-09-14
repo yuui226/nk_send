@@ -33,6 +33,7 @@ final class PhotoListViewModel: ObservableObject {
     private var previewPausedScan = false
     private var transferBusy = false
     private var newMediaHandler: (([CameraFile]) -> Void)?
+    private var transferIndexGeneration = 0
     /// A cancelled/old scan must never publish over a newer camera session.
     private var loadGeneration = 0
 
@@ -349,6 +350,38 @@ final class PhotoListViewModel: ObservableObject {
         transferredIDs = ids
         guard loadState == .loaded else { return }
         publishSections()
+    }
+
+    /// Android refreshes the exported-original index independently of the
+    /// queue. This keeps the list's "untransferred" filter correct even when
+    /// the app is reopened with an empty in-memory queue.
+    func refreshTransferredIDs(directory: URL?, organizeByDate: Bool) {
+        transferIndexGeneration &+= 1
+        let generation = transferIndexGeneration
+        guard let directory else {
+            updateTransferredIDs([])
+            return
+        }
+        let files = allFiles
+        let indexTask = Task.detached(priority: .utility) {
+            guard FileManager.default.fileExists(atPath: directory.path) else { return Set<UInt32>() }
+            var indexes: [String: TransferDirectoryIndex] = ["": TransferDirectoryIndex.scan(directory: directory)]
+            if let children = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isDirectoryKey]) {
+                for child in children where transferDatedFolderName(child.lastPathComponent) {
+                    guard (try? child.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { continue }
+                    indexes[child.lastPathComponent] = TransferDirectoryIndex.scan(directory: child)
+                }
+            }
+            return Set(files.compactMap { file in
+                let folder = organizeByDate ? transferDateFolderName(file.captureDate) : ""
+                return indexes[folder]?.existingOriginal(for: file) == nil ? nil : file.id
+            })
+        }
+        Task { [weak self] in
+            let ids = await indexTask.value
+            guard let self, generation == self.transferIndexGeneration else { return }
+            self.updateTransferredIDs(ids)
+        }
     }
 
     func clearFilter() { setFilter(PhotoFilterState()) }

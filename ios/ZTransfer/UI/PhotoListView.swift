@@ -204,6 +204,13 @@ struct PhotoListView: View {
             // Android retains this demand when Settings opens before the
             // first metadata batch and retries when a candidate appears.
             if effectPreviewRequested { requestEffectPreview() }
+            model.refreshTransferredIDs(directory: directoryStore.directoryURL, organizeByDate: organizeByDate)
+        }
+        .onChange(of: directoryStore.directoryURL) { directory in
+            model.refreshTransferredIDs(directory: directory, organizeByDate: organizeByDate)
+        }
+        .onChange(of: organizeByDate) { _ in
+            model.refreshTransferredIDs(directory: directoryStore.directoryURL, organizeByDate: organizeByDate)
         }
         .onChange(of: queueModel.snapshot.items) { items in
             model.updateTransferredIDs(Set(items.filter { $0.status == .completed }.map { $0.file.id }))
