@@ -7,6 +7,39 @@ enum LocalOriginalPreviewRoute: Equatable {
     case cameraFHD
 }
 
+private let videoFourGiB = UInt64(4) * 1024 * 1024 * 1024
+
+private func videoPreviewMetadata(file: CameraFile) -> String {
+    var values: [String] = []
+    if file.size == UInt64(UInt32.max) || file.size > videoFourGiB {
+        values.append(AppLocalized.resource("video_size_over_4gb"))
+    } else if file.size > 0 {
+        let bytes = file.size
+        if bytes < 1024 { values.append("\(bytes) B") }
+        else if bytes < 1024 * 1024 { values.append("\(bytes / 1024) KB") }
+        else if bytes < 1024 * 1024 * 1024 {
+            values.append(String(format: "%.1f MB", Double(bytes) / (1024 * 1024)))
+        } else {
+            values.append(String(format: "%.2f GB", Double(bytes) / (1024 * 1024 * 1024)))
+        }
+    }
+    if let raw = file.captureDate, raw.count >= 8,
+       let year = Int(raw.prefix(4)), let month = Int(raw.dropFirst(4).prefix(2)),
+       let day = Int(raw.dropFirst(6).prefix(2)),
+       (1...12).contains(month), (1...31).contains(day) {
+        var date = String(format: "%04d-%02d-%02d", year, month, day)
+        if raw.count >= 15, raw.dropFirst(8).first == "T",
+           let hour = Int(raw.dropFirst(9).prefix(2)),
+           let minute = Int(raw.dropFirst(11).prefix(2)),
+           let second = Int(raw.dropFirst(13).prefix(2)),
+           (0...23).contains(hour), (0...59).contains(minute), (0...59).contains(second) {
+            date += String(format: " %02d:%02d:%02d", hour, minute, second)
+        }
+        values.append(date)
+    }
+    return values.joined(separator: "  ·  ")
+}
+
 func localOriginalPreviewRoute(for fileExtension: String) -> LocalOriginalPreviewRoute {
     switch fileExtension.lowercased() {
     case ".nef", ".nrw": return .rawEmbeddedJPEG
@@ -557,12 +590,22 @@ private struct PreviewImage: View {
             }
             if thumbnail == nil && image == nil { ProgressView().tint(.white) }
             if !zoomEnabled {
-                Text(AppLocalized.resource("video_no_preview"))
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 18))
+                VStack(spacing: 6) {
+                    Text(AppLocalized.resource("video_no_preview"))
+                        .font(.system(size: 14, weight: .semibold))
+                    let metadata = videoPreviewMetadata(file: file)
+                    if !metadata.isEmpty {
+                        Text(metadata)
+                            .font(.system(size: 13, weight: .regular))
+                            .foregroundStyle(.white.opacity(0.76))
+                    }
+                }
+                .foregroundStyle(.white)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
+                .background(.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 18))
+                .overlay(RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.22), lineWidth: 1))
             }
         }
         .scaleEffect(scale).offset(offset).rotationEffect(.degrees(rotationDegrees))
