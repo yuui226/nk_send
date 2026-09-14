@@ -512,7 +512,16 @@ private struct QueueThumbnail: View {
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .task {
             guard image == nil, let session else { return }
-            if let data = try? await session.thumbnail(handle: handle), let image = UIImage(data: data) { self.image = image }
+            // Queue cards follow Android's cache-first policy so opening the
+            // queue never adds a fresh camera request for a thumbnail that
+            // the photo grid already resolved.
+            if let data = try? await session.cachedThumbnail(file: item.file),
+               let image = UIImage(data: data) {
+                self.image = image
+            } else if let data = try? await session.thumbnail(handle: handle),
+                      let image = UIImage(data: data) {
+                self.image = image
+            }
         }
         .onChange(of: visualState) { _ in
             withAnimation(.easeOut(duration: 0.10)) { badgeScale = 0.94 }
