@@ -241,6 +241,11 @@ struct PhotoListView: View {
                 PhotoPreviewView(session: session, files: files, selectedFile: $selectedFile,
                                  directory: directoryStore.directoryURL,
                                  organizeByDate: organizeByDate) { file in
+                    guard directoryStore.directoryURL != nil else {
+                        selectedFile = nil
+                        showingSettings = true
+                        return
+                    }
                     if !deferTransferStart {
                         queueModel.enqueue(file, autoStart: session, directory: directoryStore.directoryURL, organizeByDate: organizeByDate, effects: effectsStore.settings)
                     } else {
@@ -459,6 +464,10 @@ struct PhotoListView: View {
         }
         if tapToPreview {
             selectedFile = file
+        } else if directoryStore.directoryURL == nil {
+            // Android routes a transfer attempt with no valid destination to the
+            // existing settings overlay; it does not enqueue an unusable task.
+            showingSettings = true
         } else if !deferTransferStart {
             queueModel.enqueue(file, autoStart: session, directory: directoryStore.directoryURL, organizeByDate: organizeByDate, effects: effectsStore.settings)
         } else {
