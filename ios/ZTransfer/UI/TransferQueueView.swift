@@ -220,9 +220,11 @@ private struct QueueItemView: View {
                     TransferInfoPill(text: fileSizeText, color: ZTransferColors.secondaryText)
                     if item.status == .transferring, item.bytesPerSecond > 0 {
                         TransferInfoPill(text: speedText, color: ZTransferColors.statusConnected)
+                            .transition(.opacity.combined(with: .move(edge: .leading)).combined(with: .scale(scale: 0.86, anchor: .leading)).animation(.easeOut(duration: 0.20).delay(0.06)))
                     }
                     if let elapsed = item.elapsedMs {
                         TransferInfoPill(text: formatDuration(elapsed), color: ZTransferColors.accentBlue)
+                            .transition(.opacity.combined(with: .move(edge: .leading)).combined(with: .scale(scale: 0.86, anchor: .leading)).animation(.easeOut(duration: 0.20).delay(0.15)))
                     }
                 }
                 if let error = item.error, !error.isEmpty {
@@ -241,8 +243,8 @@ private struct QueueItemView: View {
                     }
                 }
                 .transition(.asymmetric(
-                    insertion: .opacity.combined(with: .move(edge: .leading)).combined(with: .scale(scale: 0.82, anchor: .leading)),
-                    removal: .opacity.combined(with: .scale(scale: 0.82, anchor: .leading))
+                    insertion: .opacity.combined(with: .move(edge: .leading)).combined(with: .scale(scale: 0.82, anchor: .leading)).animation(.easeOut(duration: 0.20).delay(0.08)),
+                    removal: .opacity.combined(with: .scale(scale: 0.82, anchor: .leading)).animation(.easeIn(duration: 0.14))
                 ))
             }
                 Spacer(minLength: 4)
@@ -259,6 +261,8 @@ private struct QueueItemView: View {
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(stateColor.opacity(0.22), lineWidth: 1))
         .animation(ZTransferMotion.standard, value: item.status)
+        .animation(ZTransferMotion.standard, value: item.bytesPerSecond)
+        .animation(ZTransferMotion.standard, value: item.elapsedMs)
     }
 
     private var statusText: String {
