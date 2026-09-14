@@ -50,6 +50,9 @@ struct PhotoPreviewView: View {
     // survives leaving the preview and reopening the app.
     @AppStorage("preview_histogram_enabled") private var histogramVisible = false
     @State private var histogramBars: [CGFloat] = []
+    @State private var queueDragOffset: CGFloat = 0
+    @State private var queueFlightTask: Task<Void, Never>?
+    @State private var queueFlightActive = false
 
     init(session: CameraSession, files: [CameraFile], selectedFile: Binding<CameraFile?>,
          directory: URL? = nil, organizeByDate: Bool = false,
@@ -78,6 +81,32 @@ struct PhotoPreviewView: View {
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
+            .offset(y: queueDragOffset)
+            .allowsHitTesting(!queueFlightActive)
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 8)
+                    .onChanged { value in
+                        guard !queueFlightActive else { return }
+                        let translation = value.translation
+                        guard translation.height < 0,
+                              -translation.height >= abs(translation.width) * 1.15 else {
+                            return
+                        }
+                        queueDragOffset = max(-180, translation.height)
+                    }
+                    .onEnded { value in
+                        guard !queueFlightActive,
+                              files.indices.contains(index) else { return }
+                        let translation = value.translation
+                        guard translation.height < 0,
+                              -translation.height >= 96,
+                              -translation.height >= abs(translation.width) * 1.15 else {
+                            withAnimation(ZTransferMotion.standard) { queueDragOffset = 0 }
+                            return
+                        }
+                        startQueueFlight(for: files[index])
+                    }
+            )
             VStack {
                 HStack {
                     Button { selectedFile = nil } label: { Image(systemName: "xmark").font(.system(size: 18, weight: .semibold)).frame(width: 44, height: 44) }
@@ -153,6 +182,10 @@ struct PhotoPreviewView: View {
             rotationQuarterTurns = ((rotationQuarterTurns % 4) + 4) % 4
             rotationDegrees = -90 * Double(rotationQuarterTurns)
         }
+        .onDisappear {
+            queueFlightTask?.cancel()
+            queueFlightTask = nil
+        }
         .onChange(of: index) { value in
             if files.indices.contains(value) {
                 selectedFile = files[value]
@@ -201,6 +234,24 @@ struct PhotoPreviewView: View {
             folderName: organizeByDate ? transferDateFolderName(file.captureDate) : nil
         )
         return existingTransferDestination(for: file, in: destination)
+    }
+
+    private func startQueueFlight(for file: CameraFile) {
+        queueFlightActive = true
+        withAnimation(.timingCurve(0.4, 0.0, 0.2, 1.0, duration: 0.56)) {
+            queueDragOffset = -max(240, UIScreen.main.bounds.height * 0.42)
+        }
+        queueFlightTask?.cancel()
+        queueFlightTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 560_000_000)
+            guard !Task.isCancelled else { return }
+            onEnqueue(file)
+            withAnimation(ZTransferMotion.standard) {
+                queueDragOffset = 0
+                queueFlightActive = false
+            }
+            queueFlightTask = nil
+        }
     }
 }
 
