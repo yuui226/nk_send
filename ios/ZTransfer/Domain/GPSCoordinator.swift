@@ -18,6 +18,11 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
     private var bluetoothObservation: AnyCancellable?
     private var awaitingPairingAction = false
     private var apModeBlocked = false
+    private var placeCache: [String: String] = [:]
+    private var placeCacheOrder: [String] = []
+    private var placeRequestID = 0
+    private var placeGeocoder: CLGeocoder?
+    private var placeTimeoutTask: Task<Void, Never>?
 
     init(defaults: UserDefaults? = nil) {
         let storage = defaults ?? UserDefaults(suiteName: GPSPreferences.suiteName)!
@@ -42,7 +47,12 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
         }
     }
 
-    deinit { writeTask?.cancel(); locationManager.stopUpdatingLocation() }
+    deinit {
+        writeTask?.cancel()
+        placeTimeoutTask?.cancel()
+        placeGeocoder?.cancelGeocode()
+        locationManager.stopUpdatingLocation()
+    }
 
     func setFrequency(_ value: GPSUpdateFrequency) {
         guard value != frequency else { return }
@@ -116,6 +126,104 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
         guard !connectionHelpViewed else { return }
         defaults.set(true, forKey: GPSPreferences.connectionHelpViewed)
         connectionHelpViewed = true
+    }
+
+    /// Android's GpsViewModel resolves one-shot place names through an
+    /// eight-entry LRU cache keyed by a roughly 100 m coordinate cell and the
+    /// active locale. A new request cancels the old one so a late geocoder
+    /// callback can never replace the result for a newer coordinate.
+    func lookupPlaceName(
+        latitude: Double,
+        longitude: Double,
+        completion: @escaping @MainActor (String?) -> Void,
+    ) {
+        placeRequestID += 1
+        let requestID = placeRequestID
+        placeTimeoutTask?.cancel()
+        placeGeocoder?.cancelGeocode()
+        placeGeocoder = nil
+        guard latitude.isFinite, latitude >= -90, latitude <= 90,
+              longitude.isFinite, longitude >= -180, longitude <= 180 else {
+            completion(nil)
+            return
+        }
+
+        let key = placeCacheKey(latitude: latitude, longitude: longitude)
+        if let cached = placeCache[key] {
+            touchPlaceCache(key)
+            completion(cached)
+            return
+        }
+
+        let geocoder = CLGeocoder()
+        placeGeocoder = geocoder
+        geocoder.reverseGeocodeLocation(
+            CLLocation(latitude: latitude, longitude: longitude),
+        ) { [weak self] placemarks, _ in
+            Task { @MainActor [weak self] in
+                guard let self, self.placeRequestID == requestID else { return }
+                let name = placemarks?.first.flatMap(Self.bestPlaceName)
+                guard self.finishPlaceLookup(requestID: requestID, key: key, name: name) else { return }
+                completion(name)
+            }
+        }
+        placeTimeoutTask = Task { @MainActor [weak self] in
+            do { try await Task.sleep(nanoseconds: 8_000_000_000) } catch { return }
+            guard let self, self.placeRequestID == requestID else { return }
+            guard self.finishPlaceLookup(requestID: requestID, key: key, name: nil) else { return }
+            completion(nil)
+        }
+    }
+
+    func cancelPlaceLookup() {
+        placeRequestID += 1
+        placeTimeoutTask?.cancel(); placeTimeoutTask = nil
+        placeGeocoder?.cancelGeocode(); placeGeocoder = nil
+    }
+
+    @discardableResult
+    private func finishPlaceLookup(requestID: Int, key: String, name: String?) -> Bool {
+        guard placeRequestID == requestID else { return false }
+        placeTimeoutTask?.cancel(); placeTimeoutTask = nil
+        placeGeocoder = nil
+        if let name, !name.isEmpty {
+            placeCache[key] = name
+            touchPlaceCache(key)
+            while placeCacheOrder.count > 8 {
+                let evicted = placeCacheOrder.removeFirst()
+                placeCache.removeValue(forKey: evicted)
+            }
+        }
+        // Invalidate any late callback from this request, including one that
+        // arrives after the timeout has already completed it.
+        placeRequestID += 1
+        return true
+    }
+
+    private func placeCacheKey(latitude: Double, longitude: Double) -> String {
+        let locale = Locale.current.identifier
+        return "\(locale)|\(String(format: "%.3f,%.3f", latitude, longitude))"
+    }
+
+    private func touchPlaceCache(_ key: String) {
+        placeCacheOrder.removeAll { $0 == key }
+        placeCacheOrder.append(key)
+    }
+
+    private static func bestPlaceName(_ placemark: CLPlacemark) -> String? {
+        let values: [String?] = [
+            placemark.name,
+            placemark.thoroughfare,
+            placemark.locality,
+            placemark.subLocality,
+            placemark.administrativeArea,
+        ]
+        for value in values {
+            guard let value else { continue }
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { return trimmed }
+        }
+        return nil
     }
 
     private func beginRunning() {

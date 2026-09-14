@@ -182,10 +182,12 @@ private struct GPSInlinePanel: View {
         .onChange(of: coordinator.state.status) { _ in updateSessionEvidence() }
         .onChange(of: coordinator.state.latitude) { _ in
             placeState = .idle
+            coordinator.cancelPlaceLookup()
             updateSessionEvidence()
         }
         .onChange(of: coordinator.state.longitude) { _ in
             placeState = .idle
+            coordinator.cancelPlaceLookup()
             updateSessionEvidence()
         }
         .onChange(of: coordinator.state.enabled) { enabled in
@@ -193,6 +195,7 @@ private struct GPSInlinePanel: View {
                 sessionEstablished = false
                 placeState = .idle
                 showHelp = false
+                coordinator.cancelPlaceLookup()
             } else {
                 updateSessionEvidence()
             }
@@ -326,17 +329,11 @@ private struct GPSInlinePanel: View {
         guard let latitude = coordinator.state.latitude, let longitude = coordinator.state.longitude else { return }
         UIPasteboard.general.string = "\(formatCoordinate(latitude, latitude: true)), \(formatCoordinate(longitude, latitude: false))"
         placeState = .loading
-        let geocoder = CLGeocoder()
-        geocoder.reverseGeocodeLocation(CLLocation(latitude: latitude, longitude: longitude)) { placemarks, error in
-            Task { @MainActor in
-                if let name = placemarks?.first?.name ?? placemarks?.first?.locality ?? placemarks?.first?.administrativeArea,
-                   !name.isEmpty {
-                    withAnimation(.easeInOut(duration: 0.17)) { placeState = .success(name) }
-                } else if error != nil {
-                    withAnimation(.easeInOut(duration: 0.17)) { placeState = .error }
-                } else {
-                    withAnimation(.easeInOut(duration: 0.17)) { placeState = .error }
-                }
+        coordinator.lookupPlaceName(latitude: latitude, longitude: longitude) { name in
+            if let name {
+                withAnimation(.easeInOut(duration: 0.17)) { placeState = .success(name) }
+            } else {
+                withAnimation(.easeInOut(duration: 0.17)) { placeState = .error }
             }
         }
     }
