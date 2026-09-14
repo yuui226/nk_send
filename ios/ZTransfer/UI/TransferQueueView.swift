@@ -48,10 +48,6 @@ struct TransferQueueView: View {
             queueTopControls
             queueBottomControls
         }
-        .task {
-            guard let session, let url = directory.directoryURL else { return }
-            model.start(session: session, directory: url)
-        }
         .overlay { queueConfirmationOverlay }
     }
 

@@ -190,9 +190,6 @@ struct PhotoListView: View {
             }
             model.load()
         }
-        .task {
-            if let session, let directory = directoryStore.directoryURL { queueModel.start(session: session, directory: directory) }
-        }
         .onChange(of: collapseBurstPhotos) { enabled in
             if !enabled { expandedBurstIDs.removeAll() }
         }
@@ -563,16 +560,26 @@ private func photoGridEntries(_ files: [CameraFile], collapse: Bool = true, expa
 
 private struct QueuePill: View {
     let snapshot: TransferQueueSnapshot
+    private var remainingCount: Int {
+        snapshot.items.reduce(into: 0) { count, item in
+            if item.status == .waiting || item.status == .transferring || item.isGeneratingFrame {
+                count += 1
+            }
+        }
+    }
+
     var body: some View {
         HStack(spacing: 5) {
             Image(systemName: snapshot.isTransferring ? "arrow.down.circle.fill" : "checklist")
-                .scaleEffect(snapshot.items.count > 0 ? 1 : 0.9)
-            Text("\(snapshot.items.count)")
-                .monospacedDigit()
-                .id(snapshot.items.count)
-                .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .move(edge: .top).combined(with: .opacity)))
+                .scaleEffect(remainingCount > 0 ? 1 : 0.9)
+            if remainingCount > 0 {
+                Text("\(remainingCount)")
+                    .monospacedDigit()
+                    .id(remainingCount)
+                    .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .move(edge: .top).combined(with: .opacity)))
+            }
         }
-        .animation(ZTransferMotion.standard, value: snapshot.items.count)
+        .animation(ZTransferMotion.standard, value: remainingCount)
     }
 }
 
