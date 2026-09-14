@@ -133,6 +133,7 @@ actor TransferQueue {
     private(set) var isTransferring = false
     private(set) var pauseAfterCurrent = false
     private var worker: Task<Void, Never>?
+    private var frameWorkers: [UUID: Task<Void, Never>] = [:]
     private var session: CameraSession?
     private var directory: URL?
     private var progressSamples: [UUID: (time: Date, value: Double)] = [:]
@@ -164,7 +165,10 @@ actor TransferQueue {
         }
     }
 
-    deinit { worker?.cancel() }
+    deinit {
+        worker?.cancel()
+        frameWorkers.values.forEach { $0.cancel() }
+    }
 
     func snapshots() -> AsyncStream<TransferQueueSnapshot> {
         AsyncStream { continuation in
@@ -361,7 +365,7 @@ actor TransferQueue {
                                 items[index].frameURL = frame; publish()
                             }
                         } else {
-                            await generateFrame(for: itemID, source: destination, settings: effects, in: destinationDirectory)
+                            startFrameGeneration(for: itemID, source: destination, settings: effects, in: destinationDirectory)
                         }
                     }
                     continue
@@ -385,7 +389,7 @@ actor TransferQueue {
                 if let effects = items.first(where: { $0.id == itemID })?.effects,
                    effects.hasEffect,
                    Self.supportsRenderedOutput(items.first(where: { $0.id == itemID })?.file.fileExtension ?? "") {
-                    await generateFrame(for: itemID, source: output, settings: effects, in: destinationDirectory)
+                    startFrameGeneration(for: itemID, source: output, settings: effects, in: destinationDirectory)
                 }
             } catch is CancellationError {
                 // The active transfer has no user-cancel action in Android;
@@ -417,6 +421,20 @@ actor TransferQueue {
         // Android's PhotoFrameExporter deliberately limits transfer effects
         // to JPG/JPEG/PNG; RAW, TIFF, HEIC and video remain original-only.
         [".jpg", ".jpeg", ".png"].contains(ext.lowercased())
+    }
+
+    /// Android hands derivative rendering to a separate worker immediately after the original
+    /// reaches COMPLETED; the FIFO download loop must continue with the next camera object.
+    private func startFrameGeneration(for id: UUID, source: URL, settings: PhotoEffectsSettings, in directory: URL) {
+        guard frameWorkers[id] == nil else { return }
+        frameWorkers[id] = Task { [weak self] in
+            await self?.generateFrame(for: id, source: source, settings: settings, in: directory)
+            await self?.finishFrameWorker(id)
+        }
+    }
+
+    private func finishFrameWorker(_ id: UUID) {
+        frameWorkers[id] = nil
     }
 
     private func generateFrame(for id: UUID, source: URL, settings: PhotoEffectsSettings, in directory: URL) async {

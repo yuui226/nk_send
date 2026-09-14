@@ -827,3 +827,9 @@
 - 传输项新增安卓对应的 `elapsedMs` 字段：真实下载完成时记录本次传输耗时，已有原片跳过时保持为空；字段可持久化并在重试/生命周期恢复时清理。
 - 队列缩略图状态徽标加入 180ms 图标淡入缩放和状态色变化；卡片补显示传输耗时胶囊，移除卡片中安卓不存在的百分比文本。
 - 验证：`xcodebuild -project ios/ZTransfer.xcodeproj -scheme ZTransfer -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test`，165 项、0 失败。安卓横向位移/视差曲线、底部确认卡与全屏遮罩、液态进度波纹及断线重试条件仍待继续对照，任务 28、30–32 保持未完成。
+
+### 2026-09-14 传输派生任务异步调度对账（进行中）
+
+- 安卓原片成功后立即把边框/滤镜派生交给独立 worker，主传输循环继续处理下一项；iOS 原先在 `TransferQueue.run()` 中 `await generateFrame`，会让下一张照片等待上一张渲染结束。
+- iOS 现维护按任务 ID 的 `frameWorkers`，原片完成后立即启动独立派生任务并发布 `isGeneratingFrame`，队列继续 FIFO 下载；生成完成/失败仍回写同一任务的耗时、路径或错误，进程销毁时统一取消 worker。
+- 验证：模拟器 165 项、0 失败；仍待断线/暂停边界、并行派生的磁盘查重和真实大图吞吐对照，任务 28 保持未完成。
