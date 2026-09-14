@@ -274,7 +274,11 @@ actor TransferQueue {
         let replacement = TransferQueueItem(
             id: UUID(), file: old.file,
             destinationFolderName: old.destinationFolderName,
-            effects: old.effects
+            effects: old.effects,
+            // A failed derived-frame task already has its original on disk.
+            // Keep that source so retry can regenerate the frame offline,
+            // matching Android's existing-original short circuit.
+            outputURL: old.outputURL
         )
         items[index] = replacement
         publish()
@@ -316,7 +320,8 @@ actor TransferQueue {
             items[index] = TransferQueueItem(
                 id: UUID(), file: old.file,
                 destinationFolderName: old.destinationFolderName,
-                effects: old.effects
+                effects: old.effects,
+                outputURL: old.outputURL
             )
             replacements = true
         }
@@ -364,14 +369,6 @@ actor TransferQueue {
             // it settles that task as "camera not connected" and advances to
             // the next queued task, preserving the same per-card publication
             // order and retry affordance.
-            guard let session else {
-                let message = AppLocalized.resource("camera_not_connected")
-                items[index].status = .failed
-                items[index].error = message
-                items[index].bytesPerSecond = 0
-                publish()
-                continue
-            }
             let itemID = items[index].id
             let originalSize = items[index].file.size
             items[index].status = .transferring; items[index].error = nil; publish()
@@ -407,6 +404,19 @@ actor TransferQueue {
                         } else {
                             startFrameGeneration(for: itemID, source: destination, settings: effects, in: destinationDirectory)
                         }
+                    }
+                    continue
+                }
+                // Only a real download needs the camera. Android checks the
+                // destination first, allowing a failed derived-frame retry
+                // (or an already-exported original) to finish while offline.
+                guard let session else {
+                    let message = AppLocalized.resource("camera_not_connected")
+                    if let index = items.firstIndex(where: { $0.id == itemID }) {
+                        items[index].status = .failed
+                        items[index].error = message
+                        items[index].bytesPerSecond = 0
+                        publish()
                     }
                     continue
                 }
