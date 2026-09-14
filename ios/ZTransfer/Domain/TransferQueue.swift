@@ -327,6 +327,7 @@ actor TransferQueue {
                     directoryIndexes[destinationDirectory] = TransferDirectoryIndex.scan(directory: destinationDirectory)
                 }
                 if let destination = directoryIndexes[destinationDirectory]?.existingOriginal(for: items[index].file) {
+                    let effects = items[index].effects
                     if let index = items.firstIndex(where: { $0.id == itemID }) {
                         items[index].status = .completed
                         items[index].progress = 1
@@ -334,6 +335,16 @@ actor TransferQueue {
                         items[index].outputURL = destination
                         progressSamples[itemID] = nil
                         publish()
+                    }
+                    if let effects, effects.hasEffect,
+                       Self.supportsRenderedOutput(items.first(where: { $0.id == itemID })?.file.fileExtension ?? "") {
+                        if let frame = existingFrameURL(source: destination, settings: effects, in: destinationDirectory) {
+                            if let index = items.firstIndex(where: { $0.id == itemID }) {
+                                items[index].frameURL = frame; publish()
+                            }
+                        } else {
+                            await generateFrame(for: itemID, source: destination, settings: effects, in: destinationDirectory)
+                        }
                     }
                     continue
                 }
@@ -392,9 +403,7 @@ actor TransferQueue {
             let framesDirectory = directory.appendingPathComponent("ZTFrames", isDirectory: true)
             try FileManager.default.createDirectory(at: framesDirectory, withIntermediateDirectories: true)
             let stem = source.deletingPathExtension().lastPathComponent
-            let digest = SHA256.hash(data: (try JSONEncoder().encode(settings)))
-                .prefix(6).map { String(format: "%02x", $0) }.joined()
-            let preferred = framesDirectory.appendingPathComponent("\(stem)_frame_\(digest).jpg")
+            let preferred = frameURL(source: source, settings: settings, framesDirectory: framesDirectory)
             let destination = uniqueFrameURL(preferred)
             try encoded.write(to: destination, options: .atomic)
             if let index = items.firstIndex(where: { $0.id == id }) {
@@ -409,6 +418,19 @@ actor TransferQueue {
                 publish()
             }
         }
+    }
+
+    private func existingFrameURL(source: URL, settings: PhotoEffectsSettings, in directory: URL) -> URL? {
+        let framesDirectory = directory.appendingPathComponent("ZTFrames", isDirectory: true)
+        let preferred = frameURL(source: source, settings: settings, framesDirectory: framesDirectory)
+        return FileManager.default.fileExists(atPath: preferred.path) ? preferred : nil
+    }
+
+    private func frameURL(source: URL, settings: PhotoEffectsSettings, framesDirectory: URL) -> URL {
+        let stem = source.deletingPathExtension().lastPathComponent
+        let digest = (try? JSONEncoder().encode(settings)).map { SHA256.hash(data: $0) }
+            .map { $0.prefix(6).map { String(format: "%02x", $0) }.joined() } ?? "000000"
+        return framesDirectory.appendingPathComponent("\(stem)_frame_\(digest).jpg")
     }
 
     private func uniqueFrameURL(_ preferred: URL) -> URL {
