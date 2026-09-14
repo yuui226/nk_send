@@ -366,7 +366,17 @@ actor TransferQueue {
                     await generateFrame(for: itemID, source: output, settings: effects, in: destinationDirectory)
                 }
             } catch is CancellationError {
-                if let index = items.firstIndex(where: { $0.id == itemID }) { items[index].status = .cancelled; publish() }
+                // The active transfer has no user-cancel action in Android;
+                // cancellation here is lifecycle/session teardown. Keep it
+                // waiting so the persisted queue can resume from .nkpart_ on
+                // the next live session instead of losing the task.
+                if let index = items.firstIndex(where: { $0.id == itemID }) {
+                    items[index].status = .waiting
+                    items[index].progress = 0
+                    items[index].bytesPerSecond = 0
+                    items[index].error = nil
+                    publish()
+                }
                 progressSamples[itemID] = nil
             } catch {
                 if let index = items.firstIndex(where: { $0.id == itemID }) {
