@@ -95,6 +95,8 @@ struct PhotoPreviewView: View {
     // that reference so enabling the histogram never starts another camera
     // read or decodes the same image a second time.
     @State private var displayedImages: [UInt32: UIImage] = [:]
+    @State private var fhdUnavailable: Set<UInt32> = []
+    @State private var exifFinished: Set<UInt32> = []
     @State private var queueDragOffset: CGFloat = 0
     @State private var queueFlightTask: Task<Void, Never>?
     @State private var queueFlightActive = false
@@ -163,6 +165,12 @@ struct PhotoPreviewView: View {
                                          rotationDegrees: rotationDegrees,
                                          zoomEnabled: !file.fileExtension.lowercased().hasSuffix(".mov") &&
                                             !file.fileExtension.lowercased().hasSuffix(".mp4"),
+                                         allowRemoteThumbnailFallback: fhdUnavailable.contains(file.id) &&
+                                            exifFinished.contains(file.id),
+                                         onFHDUnavailable: { unavailable in
+                                             if unavailable { fhdUnavailable.insert(file.id) }
+                                             else { fhdUnavailable.remove(file.id) }
+                                         },
                                          onDisplayImage: { image in
                                              displayedImages[file.id] = image
                                              guard histogramVisible, currentPhoto?.id == file.id else { return }
@@ -363,6 +371,7 @@ struct PhotoPreviewView: View {
                 if let data = try? Data(contentsOf: localURL) {
                     exif = PhotoExifParser.parse(data)
                 }
+                exifFinished.insert(file.id)
                 exifLoading = false
                 return
             }
@@ -370,6 +379,7 @@ struct PhotoPreviewView: View {
             // independent; requesting another preview here would duplicate
             // the camera read and race the Android-ordered loader.
             exif = try? await session.exif(file: file)
+            exifFinished.insert(file.id)
             exifLoading = false
         }
     }
@@ -572,6 +582,8 @@ private struct PreviewImage: View {
     let localOriginalURL: URL?
     let rotationDegrees: Double
     let zoomEnabled: Bool
+    let allowRemoteThumbnailFallback: Bool
+    let onFHDUnavailable: (Bool) -> Void
     let onDisplayImage: (UIImage?) -> Void
     @State private var thumbnail: UIImage?
     @State private var image: UIImage?
@@ -653,31 +665,32 @@ private struct PreviewImage: View {
                 return
             }
             if !zoomEnabled {
-                if thumbnail == nil,
-                   let data = try? await session.thumbnail(file: file),
-                   let thumb = UIImage(data: data) {
-                    thumbnail = thumb
-                    onDisplayImage(thumb)
-                }
+                onFHDUnavailable(true)
                 return
             }
             await session.setFHDActive(true)
             defer { Task { await session.setFHDActive(false) } }
-            async let thumbnailData: Data? = thumbnail == nil ? (try? await session.thumbnail(file: file)) : nil
             async let previewData = try? await session.preview(handle: file.id)
-            if let data = await thumbnailData, let thumb = UIImage(data: data) {
-                thumbnail = thumb
-                onDisplayImage(thumb)
-            }
             if let data = await previewData, let highResolution = UIImage(data: data) {
                 image = highResolution
+                onFHDUnavailable(false)
                 onDisplayImage(highResolution)
                 if thumbnail == nil {
                     highResolutionAlpha = 1
                 } else {
                     withAnimation(.easeInOut(duration: 0.18)) { highResolutionAlpha = 1 }
                 }
+            } else if !Task.isCancelled {
+                onFHDUnavailable(true)
             }
+        }
+        .task(id: allowRemoteThumbnailFallback) {
+            guard allowRemoteThumbnailFallback, thumbnail == nil, image == nil else { return }
+            guard let data = try? await session.thumbnail(file: file),
+                  let thumb = UIImage(data: data) else { return }
+            guard !Task.isCancelled else { return }
+            thumbnail = thumb
+            onDisplayImage(thumb)
         }
     }
 }
