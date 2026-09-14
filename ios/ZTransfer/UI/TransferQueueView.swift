@@ -123,20 +123,23 @@ struct TransferQueueView: View {
                     .onTapGesture { self.pendingConfirmation = nil }
                 VStack {
                     Spacer()
-                    QueueConfirmationCard(action: pendingConfirmation,
-                                          onConfirm: {
-                        switch pendingConfirmation {
-                        case .clear:
-                            model.withdrawPending()
-                            Task {
-                                try? await Task.sleep(nanoseconds: 320_000_000)
-                                model.removeCleared()
+                    HStack {
+                        Spacer()
+                        QueueConfirmationCard(action: pendingConfirmation,
+                                              onConfirm: {
+                            switch pendingConfirmation {
+                            case .clear:
+                                model.withdrawPending()
+                                Task {
+                                    try? await Task.sleep(nanoseconds: 320_000_000)
+                                    model.removeCleared()
+                                }
+                            case .retry:
+                                model.retryFailed()
                             }
-                        case .retry:
-                            model.retryFailed()
-                        }
-                        self.pendingConfirmation = nil
-                    }, onDismiss: { self.pendingConfirmation = nil })
+                            self.pendingConfirmation = nil
+                        }, onDismiss: { self.pendingConfirmation = nil })
+                    }
                     .padding(.trailing, 20)
                     .padding(.bottom, 92)
                 }
