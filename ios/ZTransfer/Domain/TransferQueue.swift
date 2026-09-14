@@ -221,6 +221,15 @@ actor TransferQueue {
         self.directory = directory
     }
 
+    /// Clears the live camera reference when the root connection disappears.
+    /// The queue remains persisted and its active transfer is allowed to
+    /// unwind; the next task then observes the same nil-provider state as
+    /// Android and is marked camera-not-connected instead of using a stale
+    /// session object.
+    func detach() {
+        session = nil
+    }
+
     /// Android only records this request while a transfer worker is active.
     /// An idle queue must remain startable; setting the flag before the first
     /// task would incorrectly suppress the next explicit start.

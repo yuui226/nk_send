@@ -60,6 +60,7 @@ final class TransferQueueViewModel: ObservableObject {
         }
     }
     func attach(session: CameraSession, directory: URL?) { Task { await queue.attach(session: session, directory: directory) } }
+    func detach() { Task { await queue.detach() } }
     func start(session: CameraSession, directory: URL) { Task { await queue.startPendingTransfers(session: session, directory: directory) } }
     func pause() { Task { await queue.pauseAfterCurrentFile() } }
     func resume() { Task { await queue.resume() } }

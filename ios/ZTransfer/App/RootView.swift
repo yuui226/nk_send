@@ -138,6 +138,10 @@ struct RootView: View {
                 connectionCelebrationStart = Date()
                 connectionCelebrationActive = true
             } else {
+                // Drop the queue's live transport reference together with the
+                // root session. Persisted tasks remain available for retry
+                // after the next camera connection.
+                Task { await transferQueue.detach() }
                 connectionCelebrationStart = nil
                 connectionCelebrationActive = false
             }
