@@ -64,7 +64,11 @@ extension ConnectionState {
                 next.errorMessage = nil
             }
         case let .deviceAdded(device):
-            if !next.discoveredDevices.contains(device) { next.discoveredDevices.append(device) }
+            if let index = next.discoveredDevices.firstIndex(where: { $0.id == device.id }) {
+                next.discoveredDevices[index] = device
+            } else {
+                next.discoveredDevices.append(device)
+            }
             if next.selectedDeviceID == nil || next.selectedDeviceID == device.id {
                 next.selectedDeviceID = device.id
                 // A fresh attach is the Android retry boundary: clear the

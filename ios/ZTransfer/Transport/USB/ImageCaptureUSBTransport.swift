@@ -612,6 +612,9 @@ extension ImageCaptureUSBTransport: ICDeviceBrowserDelegate {
         cameras[descriptor.id] = camera
         lock.unlock()
         camera.delegate = self
+        // A repeated browser callback for the same framework object is not
+        // a cable reattach and must not clear the three-failure retry pause.
+        if replaced === camera { return }
         if let replaced, replaced !== camera {
             // A replug can arrive as add-before-remove with the same UUID.
             // Publish removal first, then wait for the old ImageCaptureCore
