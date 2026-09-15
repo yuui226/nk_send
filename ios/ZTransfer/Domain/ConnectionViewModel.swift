@@ -170,7 +170,9 @@ final class ConnectionViewModel: ObservableObject {
     }
 
     func connectSelectedWiFi(reconnect: Bool = false) async {
-        if staBusy { cancelWiFiConnection(); return }
+        // Android's connection action is disabled by an active STA discovery;
+        // a repeated tap is a no-op and never cancels the current scan.
+        if staBusy { return }
         wifiRetryAttempt = 0
         wifiRetryTask?.cancel(); wifiRetryTask = nil
         await beginWiFiConnection(reconnect: reconnect)
