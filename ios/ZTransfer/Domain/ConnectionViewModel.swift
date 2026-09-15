@@ -20,6 +20,7 @@ final class ConnectionViewModel: ObservableObject {
     private var wifiCleanupTask: Task<Void, Never>?
     private var wifiRetryAttempt = 0
     private var apFailedAttempts = 0
+    private var connectionDiscoveryPaused = false
     private var gpsConnectionPaused = UserDefaults(suiteName: GPSPreferences.suiteName)?
         .bool(forKey: GPSPreferences.enabled) ?? false
     private let wirelessPreferences = UserDefaults(suiteName: "sta_connection")!
@@ -114,12 +115,12 @@ final class ConnectionViewModel: ObservableObject {
     }
 
     private func startAPWatcherIfNeeded() {
-        guard !gpsConnectionPaused, wifiPathAvailable, state.wirelessMode == .ap, cameraSession == nil,
+        guard !connectionDiscoveryPaused, !gpsConnectionPaused, wifiPathAvailable, state.wirelessMode == .ap, cameraSession == nil,
               wifiWatcherTask == nil else { return }
         wifiWatcherTask = Task { [weak self] in
             guard let self else { return }
             while !Task.isCancelled {
-                guard self.wifiPathAvailable, self.state.wirelessMode == .ap,
+                guard !self.connectionDiscoveryPaused, self.wifiPathAvailable, self.state.wirelessMode == .ap,
                       !self.gpsConnectionPaused, self.cameraSession == nil else { break }
                 // Android checks the DHCP gateway before starting a handshake.
                 // iOS has no public gateway API; this subnet gate is the closest
@@ -225,7 +226,7 @@ final class ConnectionViewModel: ObservableObject {
     }
 
     private func beginWiFiConnection(reconnect: Bool) async {
-        guard wifiConnectTask == nil, cameraSession == nil, state.usbPhase != .connecting else { return }
+        guard !connectionDiscoveryPaused, wifiConnectTask == nil, cameraSession == nil, state.usbPhase != .connecting else { return }
         let mode = state.wirelessMode
         guard mode != .ap || !gpsConnectionPaused else { return }
         wifiGeneration &+= 1
@@ -322,7 +323,7 @@ final class ConnectionViewModel: ObservableObject {
     /// already-running discovery keeps ownership of its sockets; the tap only
     /// replaces the scheduled backoff when no discovery is active.
     func retrySTAConnection() {
-        guard cameraSession == nil, state.wirelessMode == .sta,
+        guard !connectionDiscoveryPaused, cameraSession == nil, state.wirelessMode == .sta,
               state.usbPhase != .connecting else { return }
         guard wifiConnectTask == nil else { return }
         wifiRetryTask?.cancel()
@@ -586,6 +587,31 @@ final class ConnectionViewModel: ObservableObject {
         }
     }
 
+    /// Android pauses automatic connection discovery while the local workspace
+    /// owns the page. An accepted camera session stays alive; only pending
+    /// discovery, permission, and handshake work is canceled.
+    func setConnectionDiscoveryPaused(_ paused: Bool) {
+        guard connectionDiscoveryPaused != paused else { return }
+        connectionDiscoveryPaused = paused
+        if paused {
+            wifiWatcherTask?.cancel(); wifiWatcherTask = nil
+            cancelWiFiConnection()
+            if cameraSession == nil {
+                usbConnectTask?.cancel(); usbConnectTask = nil
+                state.usbPhase = .waitingForCamera
+            }
+            return
+        }
+        guard cameraSession == nil else { return }
+        if state.wirelessMode == .ap { startAPWatcherIfNeeded() }
+        if state.usbAuthorization == .authorized,
+           state.selectedDeviceID != nil,
+           state.usbPhase == .waitingForCamera,
+           usbConnectTask == nil {
+            usbConnectTask = Task { [weak self] in await self?.connectSelectedUSB() }
+        }
+    }
+
     /// Android pauses AP auto-discovery while Nikon BLE/GPS owns the phone's
     /// radio. An already accepted camera is left to its transport lifecycle.
     func setGPSConnectionPaused(_ paused: Bool) {
@@ -610,6 +636,14 @@ final class ConnectionViewModel: ObservableObject {
             case .deviceAdded, .deviceRemoved, .ready, .sessionOpened, .sessionClosed, .failed:
                 return
             case .authorization:
+                break
+            }
+        }
+        if connectionDiscoveryPaused {
+            switch event {
+            case .authorization, .deviceAdded, .deviceRemoved, .ready:
+                return
+            case .sessionOpened, .sessionClosed, .failed:
                 break
             }
         }

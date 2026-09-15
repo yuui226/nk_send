@@ -278,7 +278,13 @@ private struct HomeWorkspacePagerIOS: View {
             .background(ZTransferColors.background)
             .tabViewStyle(.page(indexDisplayMode: .never))
             .indexViewStyle(.page(backgroundDisplayMode: .never))
+            .onChange(of: page) { currentPage in
+                connection.setConnectionDiscoveryPaused(currentPage != 0)
+            }
         }
         .background(ZTransferColors.background.ignoresSafeArea())
+        .onAppear {
+            connection.setConnectionDiscoveryPaused(page != 0)
+        }
     }
 }
