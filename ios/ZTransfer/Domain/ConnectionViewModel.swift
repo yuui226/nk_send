@@ -142,6 +142,10 @@ final class ConnectionViewModel: ObservableObject {
     }
 
     func stopUSBDiscovery() {
+        // RootView may temporarily disappear during presentation changes.
+        // An accepted wired session owns this browser until physical loss or
+        // model teardown; stopping it here would close a healthy PTP session.
+        guard cameraSession?.isUSB != true else { return }
         connectionGeneration &+= 1
         let stopGeneration = connectionGeneration
         usbEventsTask?.cancel()
