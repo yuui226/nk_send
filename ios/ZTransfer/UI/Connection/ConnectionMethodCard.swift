@@ -38,6 +38,24 @@ struct ConnectionMethodCard: View {
     }
 
     var body: some View {
+        ZStack(alignment: .topLeading) {
+            cardSurface
+                // Android keeps the selected mode badge above the card while the
+                // rounded card surface fades away. The flying badge and pulse
+                // layer below are therefore deliberately outside this modifier.
+                .modifier(ConnectionCelebrationModifier(progress: selectionSceneProgress))
+            celebrationLayer
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: height)
+        .modifier(ConnectionBreathingModifier(active: attentionActive,
+                                               origin: attentionOrigin,
+                                               offset: mode == .usb ? 0 : 0.5))
+        .zIndex(selected ? 3 : 0)
+        .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.32), value: dimmed)
+    }
+
+    private var cardSurface: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
                 modeBadge
@@ -103,14 +121,45 @@ struct ConnectionMethodCard: View {
                 .allowsHitTesting(false)
         }
         .allowsHitTesting(!dimmed)
-        .modifier(ConnectionBreathingModifier(active: attentionActive,
-                                               origin: attentionOrigin,
-                                               offset: mode == .usb ? 0 : 0.5))
-        .modifier(ConnectionCelebrationModifier(selected: selected,
-                                                success: success,
-                                                progress: selectionSceneProgress,
-                                                successProgress: successEffectProgress))
-        .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.32), value: dimmed)
+    }
+
+    /// Android's selected badge flies from its card origin to the upper third
+    /// of the screen while the card itself is fading. Keeping the calculation
+    /// in a geometry overlay means the card layout never remeasures during the
+    /// celebration, and the same target works for either side of the HStack.
+    @ViewBuilder
+    private var celebrationLayer: some View {
+        GeometryReader { proxy in
+            let scene = connectionCelebrationEase(selectionSceneProgress)
+            if selected, scene > 0.0001 {
+                let cardFrame = proxy.frame(in: .global)
+                let start = CGPoint(x: 14 + 21, y: 16 + 21)
+                let targetX = UIScreen.main.bounds.midX - cardFrame.minX
+                let targetY = UIScreen.main.bounds.height / 3 - cardFrame.minY
+                let travelX = targetX - start.x
+                let travelY = targetY - start.y
+                let arc = sin(scene * .pi) * 10
+                let translation = CGSize(
+                    width: travelX * scene,
+                    height: travelY * scene - arc
+                )
+
+                if success {
+                    ConnectionSuccessOverlay(progress: successEffectProgress)
+                        .frame(width: 220, height: 220)
+                        .position(x: start.x, y: start.y)
+                        .offset(translation)
+                }
+
+                // Android places the free pulse behind the badge so the mode
+                // glyph remains crisp while the rings expand past its edge.
+                modeBadge
+                    .scaleEffect(1 + scene * 1.12)
+                    .position(x: start.x, y: start.y)
+                    .offset(translation)
+            }
+        }
+        .allowsHitTesting(false)
     }
 
     private var instructions: some View {
@@ -133,15 +182,15 @@ struct ConnectionMethodCard: View {
     }
 
     private var modeBadge: some View {
-        Group {
+        let badgeAccent = success ? ZTransferColors.statusConnected : accent
+        return Group {
             if mode == .usb { ClassicUSBIcon(tint: accent) }
             else { Image(systemName: ZTransferIcon.wifi).font(.system(size: 22, weight: .bold)).foregroundStyle(accent) }
         }
         .frame(width: 22, height: 22)
         .frame(width: 42, height: 42)
-        .background(accent.opacity(0.10), in: RoundedRectangle(cornerRadius: 13))
-        .overlay(RoundedRectangle(cornerRadius: 13).strokeBorder(accent.opacity(0.35), lineWidth: 1))
-        .scaleEffect(success ? 1 + successEffectProgress * 1.12 : 1)
+        .background(badgeAccent.opacity(0.10), in: RoundedRectangle(cornerRadius: 13))
+        .overlay(RoundedRectangle(cornerRadius: 13).strokeBorder(badgeAccent.opacity(0.35), lineWidth: 1))
     }
 
     private var modeTabs: some View {
@@ -280,21 +329,80 @@ struct ConnectionMethodCard: View {
     }
 }
 
-/// Mirrors HomeScreen.kt's selected-card exit and badge success treatment.
-/// The card exits to a slight upward/transparent state while its mode badge
-/// remains visible and grows into the success effect.  This modifier is kept
-/// independent of the card layout so the footer does not remeasure each frame.
+/// Mirrors HomeScreen.kt's selected-card exit treatment. Both cards fade and
+/// drift down together; the selected mode badge is rendered by
+/// `celebrationLayer` so it can remain visible above the fading surface.
 private struct ConnectionCelebrationModifier: ViewModifier {
-    let selected: Bool
-    let success: Bool
     let progress: CGFloat
-    let successProgress: CGFloat
 
     func body(content: Content) -> some View {
+        let scene = connectionCelebrationEase(progress)
         content
-            .scaleEffect(selected ? 1 - progress * 0.045 : 1 - progress * 0.045)
-            .offset(y: progress * 8)
-            .opacity(selected ? 1 : 1 - progress)
+            .scaleEffect(1 - scene * 0.045)
+            .offset(y: scene * 8)
+            .opacity(1 - scene)
+    }
+}
+
+/// HomeScreen.kt applies a smootherstep to the shared linear hero clock at the
+/// card boundary. Keeping the same curve here avoids a platform-specific
+/// double easing and preserves the Android start/end velocities.
+private func connectionCelebrationEase(_ value: CGFloat) -> CGFloat {
+    let x = min(1, max(0, value))
+    return x * x * (3 - 2 * x)
+}
+
+/// The free Android success branch emits two green rings from the flying mode
+/// badge. Canvas keeps the pulse independent from SwiftUI layout and matches
+/// the Android radii, stagger, fade-in and stroke widths in points.
+private struct ConnectionSuccessOverlay: View {
+    let progress: CGFloat
+
+    var body: some View {
+        Canvas { context, size in
+            let p = min(1, max(0, progress))
+            guard p > 0 else { return }
+            let center = CGPoint(x: size.width / 2, y: size.height / 2)
+            let startRadius: CGFloat = 42
+            let endRadius: CGFloat = 102
+
+            for index in 0..<2 {
+                let ringProgress = min(1, max(0, (p - CGFloat(index) * 0.14) / 0.82))
+                let visibility: CGFloat
+                if ringProgress <= 0 || ringProgress >= 1 {
+                    visibility = 0
+                } else {
+                    let appear = min(1, max(0, ringProgress / 0.10))
+                    visibility = appear * (1 - ringProgress)
+                }
+                guard visibility > 0 else { continue }
+
+                let radius = startRadius + (endRadius - startRadius) * ringProgress
+                let strength: CGFloat = index == 0 ? 1 : 0.84
+                let rect = CGRect(
+                    x: center.x - radius,
+                    y: center.y - radius,
+                    width: radius * 2,
+                    height: radius * 2
+                )
+                var ring = Path()
+                ring.addEllipse(in: rect)
+                context.stroke(
+                    ring,
+                    with: .color(ZTransferColors.statusConnected.opacity(
+                        0.12 * visibility * strength
+                    )),
+                    lineWidth: 5.2 - 2.2 * ringProgress
+                )
+                context.stroke(
+                    ring,
+                    with: .color(ZTransferColors.statusConnected.opacity(
+                        0.68 * visibility * strength
+                    )),
+                    lineWidth: 1.9 - 0.8 * ringProgress
+                )
+            }
+        }
     }
 }
 

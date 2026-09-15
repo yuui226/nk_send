@@ -67,5 +67,6 @@ if defined ADB_LAUNCH_FAILED (
 
 :finish
 rem The APK build succeeded. ADB installation/launch is optional, so close a window opened by
-rem double-clicking this script regardless of its result. Build failures exit earlier after pause.
-exit /b 0
+rem double-clicking this script. Use a process-level exit so hosts started with `cmd /k`
+rem also close naturally after a successful build. Build failures exit earlier after pause.
+exit 0

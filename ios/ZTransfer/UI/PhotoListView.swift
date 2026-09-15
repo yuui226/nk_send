@@ -558,7 +558,6 @@ private struct PhotoListWorkspaceTransition: AnimatableModifier {
                     if !queueModel.snapshot.items.isEmpty {
                         QueuePill(snapshot: queueModel.snapshot, activeProgress: queueModel.activeProgress,
                               heldCount: heldFlightCount, impact: queueImpact)
-                        .padding(.horizontal, 10)
                         .frame(height: 36)
                         .fixedSize(horizontal: true, vertical: false)
                     } else {
@@ -990,48 +989,69 @@ struct QueuePill: View {
     }
 
     var body: some View {
-        ZStack(alignment: .leading) {
-            if let activeItem, snapshot.isTransferring {
-                LiquidTransferProgressFill(progress: activeProgress?.taskID == activeItem.id ? activeProgress!.fraction : activeItem.progress, seed: activeItem.id.uuidString, isCapsule: true)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .clipShape(Capsule())
-                    .transition(.opacity)
-            }
-            HStack(spacing: 5) {
-                if showDoneLabel {
-                    // Android keeps this transient badge literal across locales.
-                    Text("Done")
-                        .zTransferText(size: ZTransferMetrics.caption, weight: .semibold)
-                        .transition(.opacity.combined(with: .scale(scale: 0.82)))
-                } else if collapsedToIcon {
-                    Image(systemName: "checklist")
-                        .scaleEffect(hasActive ? 1 : 0.9)
-                } else if paused {
-                    Text("\(displayRemainingCount)")
-                        .monospacedDigit()
-                        .id("paused-\(displayRemainingCount)")
-                        .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .move(edge: .top).combined(with: .opacity)))
-                } else if downloadRemaining == 0, generationCount > 0 {
+        HStack(spacing: 5) {
+            if showDoneLabel {
+                // Android keeps this transient badge literal across locales.
+                Text("Done")
+                    .zTransferTypography(.labelLarge, weight: .bold)
+                    .foregroundStyle(ZTransferColors.statusConnected)
+                    .transition(.opacity.combined(with: .scale(scale: 0.82)))
+            } else if collapsedToIcon {
+                Image(systemName: "checklist")
+                    .scaleEffect(hasActive ? 1 : 0.9)
+            } else if paused {
+                Text("\(displayRemainingCount)")
+                    .zTransferTypography(.labelLarge, weight: .bold)
+                    .foregroundStyle(ZTransferColors.primaryText)
+                    .monospacedDigit()
+                    .id("paused-\(displayRemainingCount)")
+                    .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .move(edge: .top).combined(with: .opacity)))
+            } else if downloadRemaining == 0, generationCount > 0 {
+                HStack(spacing: 6) {
                     Text(AppLocalized.resource("queue_pill_generating"))
-                        .zTransferText(size: ZTransferMetrics.caption, weight: .semibold)
+                        .zTransferTypography(.labelLarge, weight: .bold)
                         .foregroundStyle(ZTransferColors.accentBlue)
                     Text("\(generationCount)")
+                        .zTransferTypography(.labelLarge, weight: .bold)
+                        .foregroundStyle(ZTransferColors.primaryText)
                         .monospacedDigit()
-                        .foregroundStyle(ZTransferColors.accentBlue)
-                } else {
-                    HStack(spacing: 8) {
-                        if activeSpeed > 0 {
-                            Text(speedText(activeSpeed))
-                                .monospacedDigit()
-                                .foregroundStyle(ZTransferColors.accentBlue)
-                                .transition(.opacity.combined(with: .move(edge: .leading)))
-                        }
-                        Text("\(displayRemainingCount)")
-                            .monospacedDigit()
-                            .id(displayRemainingCount)
-                            .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .move(edge: .top).combined(with: .opacity)))
-                    }
                 }
+            } else {
+                HStack(spacing: 8) {
+                    if activeSpeed > 0 {
+                        Text(speedText(activeSpeed))
+                            .zTransferTypography(.labelMedium, weight: .bold)
+                            .foregroundStyle(ZTransferColors.accentBlue)
+                            .monospacedDigit()
+                            .transition(.opacity.combined(with: .move(edge: .leading)))
+                    }
+                    Text("\(displayRemainingCount)")
+                        .zTransferTypography(.labelLarge, weight: .bold)
+                        .foregroundStyle(ZTransferColors.primaryText)
+                        .monospacedDigit()
+                        .id(displayRemainingCount)
+                        .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .move(edge: .top).combined(with: .opacity)))
+                }
+            }
+        }
+        // Keep the horizontal inset in the same coordinate space as the
+        // liquid layer. The outer Button used to add this padding after
+        // QueuePill had measured itself, leaving the fill visibly inset from
+        // the glass capsule and offsetting the 100% edge.
+        .padding(.horizontal, 10)
+        .frame(minHeight: 36)
+        .background {
+            if let activeItem, snapshot.isTransferring {
+                LiquidTransferProgressFill(
+                    progress: activeProgress?.taskID == activeItem.id
+                        ? activeProgress!.fraction
+                        : activeItem.progress,
+                    seed: activeItem.id.uuidString,
+                    isCapsule: true
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipShape(Capsule())
+                .transition(.opacity)
             }
         }
         .clipShape(Capsule())

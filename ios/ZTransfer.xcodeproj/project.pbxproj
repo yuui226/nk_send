@@ -119,6 +119,8 @@
 		E64F169475A3D51E7C7D15C7 /* LocalPhotoBatchViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9AE1B278336397EAB6029214 /* LocalPhotoBatchViewModel.swift */; };
 		E8FAC959B890B065FF02DED3 /* TransferQueueView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E17D81EDE19E9E8343BD531F /* TransferQueueView.swift */; };
 		EA2A5E73813646829194CCFC /* SettingsPopupOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = C03DEDD0C14571253802D484 /* SettingsPopupOverlay.swift */; };
+		EA2A5E73813646829194CCFD /* GeniePopupMotion.swift in Sources */ = {isa = PBXBuildFile; fileRef = C03DEDD0C14571253802D485 /* GeniePopupMotion.swift */; };
+		EA2A5E73813646829194CCFE /* GeniePopupPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C03DEDD0C14571253802D486 /* GeniePopupPanel.swift */; };
 		EAA5DF5FD98BD21E0A03F030 /* PhotoEffects.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66FA5BCCCA104E827B8A69A1 /* PhotoEffects.swift */; };
 		F4543194B75979601E536063 /* Np3BitmapFilterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D89F88E0AAFA56543C73E8D2 /* Np3BitmapFilterTests.swift */; };
 		F7DD276D50F864670EB55E91 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4AA2639C7BC0B4B5E3D01734 /* SettingsView.swift */; };
@@ -234,6 +236,8 @@
 		BA7454E422D1473CC4E740CD /* AsyncDeadline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsyncDeadline.swift; sourceTree = "<group>"; };
 		BDD66E5D3F4314C6B66ACD88 /* STAProfileAndMetadataTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = STAProfileAndMetadataTests.swift; sourceTree = "<group>"; };
 		C03DEDD0C14571253802D484 /* SettingsPopupOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsPopupOverlay.swift; sourceTree = "<group>"; };
+		C03DEDD0C14571253802D485 /* GeniePopupMotion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeniePopupMotion.swift; sourceTree = "<group>"; };
+		C03DEDD0C14571253802D486 /* GeniePopupPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeniePopupPanel.swift; sourceTree = "<group>"; };
 		C537587F3F20DEE8C60FA711 /* GPSCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GPSCoordinator.swift; sourceTree = "<group>"; };
 		C88C5ED244217DA340A1F1E5 /* PTPCodec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PTPCodec.swift; sourceTree = "<group>"; };
 		C94CCD158034CC3AA6E8F2F0 /* ConnectionMethodCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionMethodCard.swift; sourceTree = "<group>"; };
@@ -484,6 +488,8 @@
 				9C82DE7EDD874E138885C18B /* PhotoPreviewView.swift */,
 				2482C61B58C4A4EE95210CDA /* RemoteView.swift */,
 				C03DEDD0C14571253802D484 /* SettingsPopupOverlay.swift */,
+				C03DEDD0C14571253802D485 /* GeniePopupMotion.swift */,
+				C03DEDD0C14571253802D486 /* GeniePopupPanel.swift */,
 				4AA2639C7BC0B4B5E3D01734 /* SettingsView.swift */,
 				E17D81EDE19E9E8343BD531F /* TransferQueueView.swift */,
 			);
@@ -740,6 +746,8 @@
 				9D2FA1400CA1F9B6632FFAF8 /* STATipsOverlay.swift in Sources */,
 				D08D5FC66C3B90DDD388F961 /* SelectedUSBPTPTransport.swift in Sources */,
 				EA2A5E73813646829194CCFC /* SettingsPopupOverlay.swift in Sources */,
+				EA2A5E73813646829194CCFD /* GeniePopupMotion.swift in Sources */,
+				EA2A5E73813646829194CCFE /* GeniePopupPanel.swift in Sources */,
 				F7DD276D50F864670EB55E91 /* SettingsView.swift in Sources */,
 				5E9A339B8DCD4C1D4D876DF7 /* ThumbnailCache.swift in Sources */,
 				2605D49FA9859E0E41665E82 /* TransferDirectoryIndex.swift in Sources */,

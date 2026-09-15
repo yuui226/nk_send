@@ -189,14 +189,12 @@ struct ConnectionCelebrationValues: Equatable {
         let successDuration = 760.0
         let heroLinear = min(1, max(0, elapsedMilliseconds / heroDuration))
         let successLinear = min(1, max(0, (elapsedMilliseconds - successDelay) / successDuration))
-        hero = CGFloat(Self.smoother(heroLinear))
+        // HomeScreen.kt exposes the hero clock linearly and applies its
+        // smootherstep once inside ConnectionMethodCard. Keep the raw clock
+        // here so the iOS card uses the same single easing stage.
+        hero = CGFloat(heroLinear)
         // Android's FastOutSlowInEasing is cubic-bezier(0.4, 0, 0.2, 1).
         success = CGFloat(Self.fastOutSlowIn(successLinear))
-    }
-
-    private static func smoother(_ value: Double) -> Double {
-        let x = min(1, max(0, value))
-        return x * x * (3 - 2 * x)
     }
 
     private static func fastOutSlowIn(_ value: Double) -> Double {
