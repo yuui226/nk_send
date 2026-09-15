@@ -31,46 +31,50 @@ struct RemoteExposureTile: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(field.label)
                     .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(ZTransferColors.secondaryText)
                     .opacity(dragging ? 0 : 1)
                 GeometryReader { proxy in
-                let center = proxy.size.height / 2
-                ZStack {
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color.white.opacity(0.10))
-                        .frame(height: rowHeight)
-                    if let descriptor {
-                        let index = min(max(Int(position.rounded()), 0), max(values.count - 1, 0))
-                        Text(RemoteExposureParameters.format(descriptor.property,
-                                                              raw: values.isEmpty ? descriptor.current : values[index]))
-                            .font(.system(size: 15, weight: .semibold))
-                            .lineLimit(1)
-                            .frame(maxWidth: .infinity)
-                    } else {
-                        Text("—").font(.system(size: 15, weight: .semibold)).frame(maxWidth: .infinity)
+                    let center = proxy.size.height / 2
+                    ZStack {
+                        if let descriptor {
+                            let index = min(max(Int(position.rounded()), 0), max(values.count - 1, 0))
+                            Text(displayValue(descriptor, raw: values.isEmpty ? descriptor.current : values[index]))
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundStyle(ZTransferColors.primaryText)
+                                .lineLimit(1)
+                                .frame(maxWidth: .infinity)
+                        } else {
+                            Text("—")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundStyle(ZTransferColors.secondaryText)
+                                .frame(maxWidth: .infinity)
+                        }
                     }
+                    .contentShape(Rectangle())
+                    .gesture(dragGesture)
+                    .onTapGesture { if descriptor != nil { onOpenList() } }
+                    .frame(height: 32)
+                    .position(x: proxy.size.width / 2, y: center)
                 }
-                .contentShape(Rectangle())
-                .gesture(dragGesture)
-                .onTapGesture { if descriptor != nil { onOpenList() } }
-                .frame(height: 42)
-                .position(x: proxy.size.width / 2, y: center)
-                }
-                .frame(height: 42)
+                .frame(height: 32)
             }
             if let autoEnabled, let autoToggle {
                 Button("AUTO", action: autoToggle)
                     .font(.system(size: 8, weight: .semibold))
-                    .foregroundStyle(autoEnabled ? .black : .white.opacity(0.7))
+                    .foregroundStyle(ZTransferColors.secondaryText)
                     .padding(.horizontal, 5).frame(height: 17)
-                    .background(autoEnabled ? Color.yellow.opacity(0.9) : Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 5))
+                    .background(autoEnabled ? ZTransferColors.accentYellow.opacity(0.24) : Color.white.opacity(0.86), in: RoundedRectangle(cornerRadius: 5))
+                    .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.white.opacity(0.9), lineWidth: 1))
                     .disabled(!writable)
                     .padding(4)
             }
         }
-        .padding(.horizontal, 10).padding(.vertical, 7)
-        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.white.opacity(0.12), lineWidth: 1))
-        .opacity(writable || descriptor == nil ? 0.72 : 0.42)
+        .padding(.horizontal, 10).padding(.vertical, 6)
+        .frame(maxWidth: .infinity, minHeight: 54, maxHeight: 54)
+        .background(Color.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Color.white.opacity(0.96), lineWidth: 1))
+        .shadow(color: .black.opacity(0.04), radius: 2, y: 1)
+        .opacity(writable || descriptor == nil ? 1 : 0.48)
         .onAppear { position = CGFloat(selectedIndex) }
         .onChange(of: descriptor?.current) { _ in
             guard !dragging else { return }
@@ -94,6 +98,18 @@ struct RemoteExposureTile: View {
                 withAnimation(ZTransferMotion.standard) { position = CGFloat(target) }
                 if values.indices.contains(target), values[target] != descriptor?.current { onCommit(values[target]) }
             }
+    }
+
+    private func displayValue(_ descriptor: RemotePropertyDescriptor, raw: UInt64) -> String {
+        let value = RemoteExposureParameters.format(descriptor.property, raw: raw)
+        switch field {
+        case .exposureCompensation:
+            return value.replacingOccurrences(of: "EV", with: "")
+        case .iso:
+            return value.replacingOccurrences(of: "ISO", with: "")
+        case .aperture, .shutter:
+            return value
+        }
     }
 }
 
