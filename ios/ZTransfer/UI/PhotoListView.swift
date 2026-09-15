@@ -371,7 +371,7 @@ private let photoQueueWorkspaceAnimation =
         }
         .fullScreenCover(isPresented: $showingRemote) {
             if let session {
-                RemoteView(session: session).onDisappear {
+                RemoteView(session: session) {
                     model.resumeAfterRemote()
                     model.wakeThumbnailFill()
                 }
@@ -491,7 +491,7 @@ private let photoQueueWorkspaceAnimation =
                             }
                         }
                         .padding(.horizontal, 10)
-                        .frame(minWidth: 40, height: 36)
+                        .frame(minWidth: 40, minHeight: 36, maxHeight: 36)
                     }
                     .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
 

@@ -68,6 +68,8 @@ struct RootView: View {
     @State private var connectionPhotoListVisible = false
     // Once established, transport loss must not return the user to connection.
     @State private var establishedSession: CameraSession?
+    // The success scene is an entry transition, never a reconnect transition.
+    @State private var connectionCelebrationConsumed = false
 
     private var locale: Locale {
         switch appLanguage {
@@ -96,6 +98,10 @@ struct RootView: View {
                                   effectsStore: effectsStore) {
                         Task { await connectionModel.disconnectCamera() }
                     }
+                    // A recovered transport owns a new CameraSession. Force
+                    // the list model to bind to that session instead of
+                    // retaining the failed repository from the old one.
+                    .id(ObjectIdentifier(session))
                     .opacity(connectionCelebrationActive ? (connectionPhotoListVisible ? 1 : 0) : 1)
                     .allowsHitTesting(!connectionCelebrationActive || connectionPhotoListVisible)
                     if connectionCelebrationActive {
@@ -130,7 +136,8 @@ struct RootView: View {
         .onAppear {
             UIApplication.shared.isIdleTimerDisabled = keepScreenOn
             gpsCoordinator.setAPModeBlocked(gpsBlockedByAPCamera)
-            if connectionModel.cameraSession != nil {
+            if connectionModel.cameraSession != nil, !connectionCelebrationConsumed {
+                connectionCelebrationConsumed = true
                 establishedSession = connectionModel.cameraSession
                 connectionCelebrationStart = Date()
                 connectionPhotoListVisible = false
@@ -141,9 +148,19 @@ struct RootView: View {
             gpsCoordinator.setAPModeBlocked(gpsBlockedByAPCamera)
             if connected {
                 establishedSession = connectionModel.cameraSession
-                connectionCelebrationStart = Date()
-                connectionPhotoListVisible = false
-                connectionCelebrationActive = true
+                if !connectionCelebrationConsumed {
+                    connectionCelebrationConsumed = true
+                    connectionCelebrationStart = Date()
+                    connectionPhotoListVisible = false
+                    connectionCelebrationActive = true
+                } else {
+                    // A transport recovery updates the mounted session in
+                    // place; it must never send the user through the entry
+                    // scene a second time.
+                    connectionCelebrationStart = nil
+                    connectionPhotoListVisible = true
+                    connectionCelebrationActive = false
+                }
             } else {
                 // Keep the photo workspace mounted; transport loss is handled
                 // in place by the list and queue reconnect flow.
@@ -165,15 +182,17 @@ struct RootView: View {
             UIApplication.shared.isIdleTimerDisabled = keepScreenOn && phase == .active
         }
         .task(id: connectionModel.cameraSession != nil) {
-            guard connectionModel.cameraSession != nil else { return }
+            guard connectionModel.cameraSession != nil, connectionCelebrationActive else { return }
             do {
                 try await Task.sleep(nanoseconds: UInt64(CONNECTION_HANDOFF_FADE_START_MS) * 1_000_000)
-                guard !Task.isCancelled, connectionModel.cameraSession != nil else { return }
+                guard !Task.isCancelled, connectionModel.cameraSession != nil,
+                      connectionCelebrationActive else { return }
                 withAnimation(.easeInOut(duration: CONNECTION_HANDOFF_FADE_DURATION_MS / 1_000)) {
                     connectionPhotoListVisible = true
                 }
                 try await Task.sleep(nanoseconds: UInt64(CONNECTION_HANDOFF_FADE_DURATION_MS) * 1_000_000)
-                guard !Task.isCancelled, connectionModel.cameraSession != nil else { return }
+                guard !Task.isCancelled, connectionModel.cameraSession != nil,
+                      connectionCelebrationActive else { return }
                 connectionCelebrationActive = false
                 connectionCelebrationStart = nil
             } catch {

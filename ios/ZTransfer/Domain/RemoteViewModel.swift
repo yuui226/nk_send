@@ -29,12 +29,18 @@ final class RemoteViewModel: ObservableObject {
     private var recordingCommandTask: Task<Void, Never>?
     private var recordingHintTask: Task<Void, Never>?
     private var started = false
+    // Teardown is cooperative. Cancelling an in-flight PTP request can
+    // invalidate the camera session before the photo list resumes.
+    private var stopRequested = false
+    private var stopTrackingRequested = false
     private var lastFrameAt: ContinuousClock.Instant?
 
     init(camera: RemoteCameraControlling) { self.camera = camera }
 
     func start() {
         guard frameTask == nil else { return }
+        stopRequested = false
+        stopTrackingRequested = false
         state = state.applying(.startRequested)
         frameTask = Task { [weak self] in
             guard let self else { return }
@@ -49,10 +55,10 @@ final class RemoteViewModel: ObservableObject {
                     _ = try? await camera.setRemoteProperty(desired, value: desired.current)
                 }
                 try await camera.startLiveView()
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled, !stopRequested else { return }
                 started = true
                 state = state.applying(.deviceReady)
-                while !Task.isCancelled {
+                while !Task.isCancelled && !stopRequested {
                     do {
                         let payload = try await camera.liveViewFrame(preferEnhanced: hdLiveView)
                         guard let jpegRange = RemoteFrameParser.jpegRange(in: payload) else {
@@ -93,12 +99,16 @@ final class RemoteViewModel: ObservableObject {
             } catch {
                 state = state.applying(.operationFailed(Self.message(for: error)))
             }
+            if stopTrackingRequested {
+                try? await camera.endSubjectTracking()
+                stopTrackingRequested = false
+            }
             await camera.endLiveView()
             started = false
         }
         modeTask = Task { [weak self] in
             guard let self else { return }
-            while !Task.isCancelled {
+            while !Task.isCancelled && !stopRequested {
                 if let descriptor = try? await camera.remoteProperty(.liveViewSelector),
                    descriptor.current <= 1 {
                     let nextMovie = descriptor.current == 1
@@ -204,26 +214,36 @@ final class RemoteViewModel: ObservableObject {
     }
 
     func stop() {
+        stopRequested = true
+        stopTrackingRequested = state.focus.tracking
         focusHideTask?.cancel()
         recordingOperations.invalidate()
-        recordingCommandTask?.cancel()
-        recordingCommandTask = nil
         recordingTimerTask?.cancel()
         recordingTimerTask = nil
         recordingHintTask?.cancel()
         recordingHintTask = nil
         recordingSeconds = 0
-        if state.focus.tracking { Task { try? await camera.endSubjectTracking() } }
-        frameTask?.cancel()
-        modeTask?.cancel()
-        frameTask = nil
-        modeTask = nil
         state = state.applying(.cancelled)
         frameImage = nil
         frameData = nil
         frameMetadata = nil
         lastFrameAt = nil
         state.focus = .init()
+    }
+
+    /// Waits for any active PTP operations to finish their normal protocol
+    /// teardown before the photo list starts catalog work again.
+    func stopAndWait() async {
+        stop()
+        let frame = frameTask
+        let mode = modeTask
+        let recording = recordingCommandTask
+        await frame?.value
+        await mode?.value
+        await recording?.value
+        frameTask = nil
+        modeTask = nil
+        recordingCommandTask = nil
     }
 
     func capture() {

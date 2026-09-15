@@ -2,11 +2,23 @@ import SwiftUI
 import UIKit
 import QuartzCore
 
+private struct RemoteToolTintKey: EnvironmentKey {
+    static let defaultValue = ZTransferColors.secondaryText
+}
+
+private extension EnvironmentValues {
+    var remoteToolTint: Color {
+        get { self[RemoteToolTintKey.self] }
+        set { self[RemoteToolTintKey.self] = newValue }
+    }
+}
+
 /// Native monitor surface. Transport and frame lifecycle live in
 /// `RemoteViewModel`; this view only renders the camera frame and the controls
 /// that are already present in Android's RemoteScreen.
 struct RemoteView: View {
     @Environment(\.dismiss) private var dismiss
+    private let onStopped: (() -> Void)?
     @StateObject private var model: RemoteViewModel
     @State private var zoom: CGFloat = 1
     @State private var selectedField: RemoteExposureField?
@@ -25,8 +37,10 @@ struct RemoteView: View {
     @State private var recordingDotDimmed = false
     @State private var landscapeLayout = false
     @State private var orientationNotificationsActive = false
+    @State private var stopCleanupStarted = false
 
-    init(session: CameraSession) {
+    init(session: CameraSession, onStopped: (() -> Void)? = nil) {
+        self.onStopped = onStopped
         _model = StateObject(wrappedValue: RemoteViewModel(camera: session))
     }
 
@@ -81,11 +95,16 @@ struct RemoteView: View {
             applyDeviceOrientation(device.orientation)
         }
         .onDisappear {
+            guard !stopCleanupStarted else { return }
+            stopCleanupStarted = true
             if orientationNotificationsActive {
                 UIDevice.current.endGeneratingDeviceOrientationNotifications()
                 orientationNotificationsActive = false
             }
-            model.stop()
+            Task { @MainActor in
+                await model.stopAndWait()
+                onStopped?()
+            }
         }
         .onChange(of: model.state.frameSequence) { _ in updateZebraMask() }
         .onChange(of: zebraVisible) { _ in updateZebraMask(force: true) }
@@ -130,11 +149,17 @@ struct RemoteView: View {
     private var landscapeRemoteLayout: some View {
         GeometryReader { proxy in
             HStack(spacing: 10) {
-                landscapeToolColumn
-                    .frame(width: 50, height: proxy.size.height)
+                VStack(spacing: 10) {
+                    // Android's landscape monitor keeps the complete tool strip
+                    // under the viewfinder. It is a horizontal strip, never a
+                    // vertical rail beside the image.
+                    remoteViewfinder
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                remoteViewfinder
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    landscapeToolBar
+                        .frame(maxWidth: .infinity)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                 VStack(spacing: 12) {
                     Spacer(minLength: 28)
@@ -169,9 +194,9 @@ struct RemoteView: View {
                 dismiss()
             } label: {
                 Image(systemName: "arrow.right")
-                    .font(.system(size: 21, weight: .semibold))
+                    .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(ZTransferColors.primaryText)
-                    .frame(width: 52, height: 44)
+                    .frame(width: 36, height: 36)
                     .background(Color.white.opacity(0.86), in: Capsule())
                     .overlay(Capsule().stroke(Color.white.opacity(0.95), lineWidth: 1))
                     .shadow(color: .black.opacity(0.06), radius: 2, y: 1)
@@ -184,9 +209,9 @@ struct RemoteView: View {
     private var remoteSignalButton: some View {
         HStack {
             PhotoListSignalIcon(isUSB: false, wirelessMode: .sta)
-                .frame(width: 22, height: 22)
+                .frame(width: 19, height: 19)
         }
-        .frame(width: 48, height: 44)
+        .frame(width: 40, height: 36)
         .background(Color.white.opacity(0.86), in: Capsule())
         .overlay(Capsule().stroke(Color.white.opacity(0.95), lineWidth: 1))
         .shadow(color: .black.opacity(0.06), radius: 2, y: 1)
@@ -196,9 +221,9 @@ struct RemoteView: View {
     private var remoteBatteryButton: some View {
         HStack(spacing: 5) {
             RemoteBatteryIcon()
-                .frame(width: 25, height: 20)
+                .frame(width: 21, height: 15)
         }
-        .frame(width: 48, height: 44)
+        .frame(width: 48, height: 36)
         .background(Color.white.opacity(0.86), in: Capsule())
         .overlay(Capsule().stroke(Color.white.opacity(0.95), lineWidth: 1))
         .shadow(color: .black.opacity(0.06), radius: 2, y: 1)
@@ -208,38 +233,38 @@ struct RemoteView: View {
     private var portraitToolRows: some View {
         VStack(spacing: 8) {
             HStack(spacing: 4) {
-                remoteToolButton(active: model.hdLiveView, label: { Text("HD").font(.system(size: 14, weight: .bold)) }) {
+                remoteToolButton(active: model.hdLiveView, label: { Text("HD").font(.system(size: 13, weight: .bold)) }) {
                     withAnimation(ZTransferMotion.standard) {
                         model.setHDLiveView(!model.hdLiveView)
                     }
                 }
-                remoteToolButton(active: showFps, label: { Text("FPS").font(.system(size: 13, weight: .bold)) }) {
+                remoteToolButton(active: showFps, label: { Text("FPS").font(.system(size: 10.5, weight: .bold)) }) {
                     withAnimation(ZTransferMotion.standard) { showFps.toggle() }
                 }
-                remoteToolButton(active: histogramVisible, label: { RemoteHistogramIcon() }) {
+                remoteToolButton(active: histogramVisible, label: { RemoteHistogramIcon().frame(width: 19, height: 19) }) {
                     withAnimation(ZTransferMotion.standard) { histogramVisible.toggle() }
                 }
-                remoteToolButton(active: framingGrid != .off, label: { RemoteGridIcon() }) {
+                remoteToolButton(active: framingGrid != .off, label: { RemoteGridIcon().frame(width: 18, height: 18) }) {
                     withAnimation(ZTransferMotion.standard) { framingGrid = framingGrid.next }
                 }
-                remoteToolButton(active: zebraVisible, label: { RemoteZebraIcon() }) {
+                remoteToolButton(active: zebraVisible, label: { RemoteZebraIcon().frame(width: 18, height: 18) }) {
                     withAnimation(ZTransferMotion.standard) { zebraVisible.toggle() }
                 }
-                remoteToolButton(active: desqueeze > 1.001, label: { RemoteAspectIcon() }) {
+                remoteToolButton(active: desqueeze > 1.001, label: { RemoteAspectIcon().frame(width: 18, height: 18) }) {
                     withAnimation(ZTransferMotion.standard) {
                         desqueeze = RemoteDisplayOptions.nextDesqueeze(after: desqueeze)
                     }
                 }
-                remoteToolButton(active: false, label: { RemoteFullscreenIcon() }) {
+                remoteToolButton(active: false, label: { RemoteFullscreenIcon().frame(width: 17, height: 17) }) {
                     withAnimation(ZTransferMotion.standard) { landscapeLayout = true }
                 }
-                remoteToolButton(active: landscapeLayout, label: { RemoteRotateIcon() }) {
+                remoteToolButton(active: landscapeLayout, label: { RemoteRotateIcon().frame(width: 20, height: 20) }) {
                     withAnimation(ZTransferMotion.standard) { landscapeLayout = true }
                 }
             }
             HStack(spacing: 8) {
                 if model.movieMode {
-                    remoteToolButton(active: audioLevelsVisible, label: { RemoteAudioIcon() }) {
+                    remoteToolButton(active: audioLevelsVisible, label: { RemoteAudioIcon().frame(width: 18, height: 18) }) {
                         withAnimation(ZTransferMotion.standard) { audioLevelsVisible.toggle() }
                     }
                     remoteRecordButton
@@ -249,42 +274,42 @@ struct RemoteView: View {
         }
     }
 
-    private var landscapeToolColumn: some View {
-        VStack(spacing: 7) {
-            Spacer(minLength: 6)
+    private var landscapeToolBar: some View {
+        HStack(spacing: 7) {
             remoteToolButton(active: model.hdLiveView, label: { Text("HD").font(.system(size: 13, weight: .bold)) }) {
                 withAnimation(ZTransferMotion.standard) { model.setHDLiveView(!model.hdLiveView) }
             }
-            remoteToolButton(active: showFps, label: { Text("FPS").font(.system(size: 12, weight: .bold)) }) {
+            remoteToolButton(active: showFps, label: { Text("FPS").font(.system(size: 10.5, weight: .bold)) }) {
                 withAnimation(ZTransferMotion.standard) { showFps.toggle() }
             }
-            remoteToolButton(active: histogramVisible, label: { RemoteHistogramIcon() }) {
+            if model.movieMode {
+                remoteToolButton(active: audioLevelsVisible, label: { RemoteAudioIcon().frame(width: 18, height: 18) }) {
+                    withAnimation(ZTransferMotion.standard) { audioLevelsVisible.toggle() }
+                }
+            }
+            remoteToolButton(active: histogramVisible, label: { RemoteHistogramIcon().frame(width: 19, height: 19) }) {
                 withAnimation(ZTransferMotion.standard) { histogramVisible.toggle() }
             }
-            remoteToolButton(active: framingGrid != .off, label: { RemoteGridIcon() }) {
+            remoteToolButton(active: framingGrid != .off, label: { RemoteGridIcon().frame(width: 18, height: 18) }) {
                 withAnimation(ZTransferMotion.standard) { framingGrid = framingGrid.next }
             }
-            remoteToolButton(active: zebraVisible, label: { RemoteZebraIcon() }) {
+            remoteToolButton(active: zebraVisible, label: { RemoteZebraIcon().frame(width: 18, height: 18) }) {
                 withAnimation(ZTransferMotion.standard) { zebraVisible.toggle() }
             }
-            remoteToolButton(active: desqueeze > 1.001, label: { RemoteAspectIcon() }) {
+            remoteToolButton(active: desqueeze > 1.001, label: { RemoteAspectIcon().frame(width: 18, height: 18) }) {
                 withAnimation(ZTransferMotion.standard) {
                     desqueeze = RemoteDisplayOptions.nextDesqueeze(after: desqueeze)
                 }
             }
             if model.movieMode {
-                remoteToolButton(active: audioLevelsVisible, label: { RemoteAudioIcon() }) {
-                    withAnimation(ZTransferMotion.standard) { audioLevelsVisible.toggle() }
-                }
                 remoteRecordButton
             }
-            remoteToolButton(active: false, label: { RemoteFullscreenIcon() }) {
+            remoteToolButton(active: false, label: { RemoteFullscreenIcon().frame(width: 17, height: 17) }) {
                 withAnimation(ZTransferMotion.standard) { landscapeLayout = false }
             }
-            remoteToolButton(active: true, label: { RemoteRotateIcon() }) {
+            remoteToolButton(active: true, label: { RemoteRotateIcon().frame(width: 20, height: 20) }) {
                 withAnimation(ZTransferMotion.standard) { landscapeLayout = false }
             }
-            Spacer(minLength: 6)
         }
     }
 
@@ -298,7 +323,7 @@ struct RemoteView: View {
                     .fill(model.state.capture == .recording ? ZTransferColors.statusError : ZTransferColors.statusError.opacity(0.9))
                     .frame(width: 19, height: 19)
             }
-            .frame(width: 40, height: 40)
+            .frame(width: 36, height: 36)
         }
         .buttonStyle(.plain)
         .disabled(!model.movieMode || model.recordingBusy)
@@ -314,7 +339,9 @@ struct RemoteView: View {
         Button(action: action) {
             label()
                 .foregroundStyle(active ? ZTransferColors.accentBlue : ZTransferColors.secondaryText)
-                .frame(width: 40, height: 40)
+                .environment(\.remoteToolTint, active ? ZTransferColors.accentBlue : ZTransferColors.secondaryText)
+                .frame(width: 20, height: 20)
+                .frame(width: 36, height: 36)
                 .background(active ? ZTransferColors.accentBlue.opacity(0.16) : Color.white.opacity(0.86),
                             in: Circle())
                 .overlay(Circle().stroke(Color.white.opacity(0.95), lineWidth: 1))
@@ -477,84 +504,94 @@ struct RemoteView: View {
     }
 
     private struct RemoteHistogramIcon: View {
+        @Environment(\.remoteToolTint) private var tint
+
         var body: some View {
             Canvas { context, size in
-                let barWidth = size.width * 0.11
-                let gap = size.width * 0.07
+                let barWidth = (size.width - 7) / 5
+                let gap: CGFloat = 1.5
                 let heights: [CGFloat] = [0.38, 0.62, 0.85, 0.55, 0.28]
-                let total = CGFloat(heights.count) * barWidth + CGFloat(heights.count - 1) * gap
-                let start = (size.width - total) / 2
+                let baseY = size.height - 2
                 for (index, height) in heights.enumerated() {
-                    let rect = CGRect(x: start + CGFloat(index) * (barWidth + gap),
-                                      y: size.height * (1 - height), width: barWidth,
-                                      height: size.height * height)
                     var bar = Path()
-                    bar.move(to: CGPoint(x: rect.midX, y: rect.maxY))
-                    bar.addLine(to: CGPoint(x: rect.midX, y: rect.minY))
-                    context.stroke(bar, with: .color(ZTransferColors.secondaryText),
-                                   style: StrokeStyle(lineWidth: max(1.7, barWidth), lineCap: .round))
+                    let x = 2.5 + CGFloat(index) * (barWidth + gap)
+                    bar.move(to: CGPoint(x: x, y: baseY))
+                    bar.addLine(to: CGPoint(x: x, y: baseY - baseY * height))
+                    context.stroke(bar, with: .color(tint),
+                                   style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
                 }
             }
         }
     }
 
     private struct RemoteGridIcon: View {
+        @Environment(\.remoteToolTint) private var tint
+
         var body: some View {
             Canvas { context, size in
-                let stroke = StrokeStyle(lineWidth: 2.2, lineCap: .round)
+                let stroke = StrokeStyle(lineWidth: 1.5, lineCap: .round)
+                let inset: CGFloat = 2
                 for x in [CGFloat(0.30), CGFloat(0.70)] {
                     var path = Path()
-                    path.move(to: CGPoint(x: size.width * x, y: size.height * 0.10))
-                    path.addLine(to: CGPoint(x: size.width * x, y: size.height * 0.90))
-                    context.stroke(path, with: .color(ZTransferColors.secondaryText), style: stroke)
+                    let coordinate = inset + (size.width - inset * 2) * x
+                    path.move(to: CGPoint(x: coordinate, y: inset))
+                    path.addLine(to: CGPoint(x: coordinate, y: size.height - inset))
+                    context.stroke(path, with: .color(tint), style: stroke)
                 }
                 for y in [CGFloat(0.30), CGFloat(0.70)] {
                     var path = Path()
-                    path.move(to: CGPoint(x: size.width * 0.10, y: size.height * y))
-                    path.addLine(to: CGPoint(x: size.width * 0.90, y: size.height * y))
-                    context.stroke(path, with: .color(ZTransferColors.secondaryText), style: stroke)
+                    let coordinate = inset + (size.height - inset * 2) * y
+                    path.move(to: CGPoint(x: inset, y: coordinate))
+                    path.addLine(to: CGPoint(x: size.width - inset, y: coordinate))
+                    context.stroke(path, with: .color(tint), style: stroke)
                 }
             }
         }
     }
 
     private struct RemoteZebraIcon: View {
+        @Environment(\.remoteToolTint) private var tint
+
         var body: some View {
             Canvas { context, size in
-                let stroke = StrokeStyle(lineWidth: 2.2, lineCap: .round)
+                let stroke = StrokeStyle(lineWidth: 1.5, lineCap: .round)
                 for index in 0..<5 {
                     let x = size.width * ((CGFloat(index) + 1) / 6)
                     let d = size.height * 0.24
                     var path = Path()
                     path.move(to: CGPoint(x: x - d, y: size.height * 0.5 - d))
                     path.addLine(to: CGPoint(x: x + d, y: size.height * 0.5 + d))
-                    context.stroke(path, with: .color(ZTransferColors.secondaryText), style: stroke)
+                    context.stroke(path, with: .color(tint), style: stroke)
                 }
             }
         }
     }
 
     private struct RemoteAspectIcon: View {
+        @Environment(\.remoteToolTint) private var tint
+
         var body: some View {
             Canvas { context, size in
                 let rect = CGRect(x: size.width * 0.16, y: size.height * 0.16,
                                   width: size.width * 0.68, height: size.height * 0.68)
-                context.stroke(Path(rect), with: .color(ZTransferColors.secondaryText),
+                context.stroke(Path(rect), with: .color(tint),
                                style: StrokeStyle(lineWidth: 2.1))
                 var arrow = Path()
                 arrow.move(to: CGPoint(x: size.width * 0.58, y: size.height * 0.30))
                 arrow.addLine(to: CGPoint(x: size.width * 0.76, y: size.height * 0.30))
                 arrow.addLine(to: CGPoint(x: size.width * 0.76, y: size.height * 0.48))
-                context.stroke(arrow, with: .color(ZTransferColors.secondaryText),
+                context.stroke(arrow, with: .color(tint),
                                style: StrokeStyle(lineWidth: 2.1, lineCap: .round, lineJoin: .round))
             }
         }
     }
 
     private struct RemoteFullscreenIcon: View {
+        @Environment(\.remoteToolTint) private var tint
+
         var body: some View {
             Canvas { context, size in
-                let stroke = StrokeStyle(lineWidth: 2.2, lineCap: .round)
+                let stroke = StrokeStyle(lineWidth: 1.5, lineCap: .round)
                 let segments: [(CGFloat, CGFloat, CGFloat, CGFloat)] = [
                     (0.14, 0.32, 0.14, 0.14), (0.14, 0.14, 0.32, 0.14),
                     (0.68, 0.14, 0.86, 0.14), (0.86, 0.14, 0.86, 0.32),
@@ -565,31 +602,38 @@ struct RemoteView: View {
                     var path = Path()
                     path.move(to: CGPoint(x: size.width * sx, y: size.height * sy))
                     path.addLine(to: CGPoint(x: size.width * ex, y: size.height * ey))
-                    context.stroke(path, with: .color(ZTransferColors.secondaryText), style: stroke)
+                    context.stroke(path, with: .color(tint), style: stroke)
                 }
             }
         }
     }
 
     private struct RemoteRotateIcon: View {
+        @Environment(\.remoteToolTint) private var tint
+
         var body: some View {
             Canvas { context, size in
-                let center = CGPoint(x: size.width * 0.5, y: size.height * 0.5)
-                let radius = size.width * 0.30
-                let stroke = StrokeStyle(lineWidth: 2.1, lineCap: .round)
+                // Match Android's 20dp RotateMark: 225° open arc plus one
+                // outer arrow wing at the arc tangent.
+                let side = min(size.width, size.height)
+                let center = CGPoint(x: size.width * 0.5, y: size.height * 0.49)
+                let radius = side * 0.29
+                let stroke = StrokeStyle(lineWidth: 1.5, lineCap: .round)
                 var arc = Path()
                 arc.addArc(center: center, radius: radius,
                            startAngle: .degrees(-125), endAngle: .degrees(100), clockwise: false)
-                context.stroke(arc, with: .color(ZTransferColors.secondaryText), style: stroke)
-                let angle = CGFloat(Angle.degrees(100).radians)
-                let tip = CGPoint(x: center.x + cos(angle) * radius,
-                                  y: center.y + sin(angle) * radius)
+                context.stroke(arc, with: .color(tint), style: stroke)
+                let endAngle = 100.0 * Double.pi / 180.0
+                let tip = CGPoint(x: center.x + cos(endAngle) * radius,
+                                  y: center.y + sin(endAngle) * radius)
+                let wingAngle = (100.0 + 90.0 + 180.0 + 32.0) * Double.pi / 180.0
+                let arrowLength = side * 0.16
+                let wingEnd = CGPoint(x: tip.x + cos(wingAngle) * arrowLength,
+                                      y: tip.y + sin(wingAngle) * arrowLength)
                 var wing = Path()
                 wing.move(to: tip)
-                wing.addLine(to: CGPoint(x: tip.x - 4, y: tip.y + 1))
-                wing.move(to: tip)
-                wing.addLine(to: CGPoint(x: tip.x - 1, y: tip.y + 4))
-                context.stroke(wing, with: .color(ZTransferColors.secondaryText), style: stroke)
+                wing.addLine(to: wingEnd)
+                context.stroke(wing, with: .color(tint), style: stroke)
             }
         }
     }
