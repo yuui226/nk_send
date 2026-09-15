@@ -111,7 +111,7 @@ struct PhotoFilterPopupOverlay: View {
             section(AppLocalized.resource("filter_section_status"))
             HStack(spacing: 8) {
                 FilterChip(label: AppLocalized.resource("filter_protected"), selected: working.protectedOnly, systemImage: "key.fill") { commit(working.togglingProtected()) }
-                FilterChip(label: AppLocalized.resource("burst_label"), selected: working.burstOnly, systemImage: "square.stack.3d.up.fill") { commit(working.togglingBurst()) }
+                FilterChip(label: AppLocalized.resource("burst_label"), selected: working.burstOnly, burstIcon: true) { commit(working.togglingBurst()) }
                 FilterChip(label: AppLocalized.resource("filter_untransferred"), selected: working.untransferredOnly, systemImage: "arrow.down.to.line") { commit(working.togglingUntransferred()) }
             }
             if !availableStorageSlots.isEmpty {

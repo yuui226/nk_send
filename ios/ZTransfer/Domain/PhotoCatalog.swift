@@ -40,20 +40,21 @@ enum PhotoPreviewEntry: Identifiable, Equatable, Sendable {
 /// Reproduces Android's initial preview item list.  Only the first member of a
 /// recognized burst becomes the collection page; all other files retain their
 /// catalog order and non-burst photos remain independent pages.
-func collapsedPhotoPreviewEntries(files: [CameraFile]) -> [PhotoPreviewEntry] {
-    let groupsByFirstID = Dictionary(uniqueKeysWithValues: PhotoCatalogGrouping.bursts(in: files).compactMap { group in
-        group.files.first.map { ($0.id, group) }
-    })
-    var consumed = Set<UInt32>()
+func collapsedPhotoPreviewEntries(files: [CameraFile], burstIDByFile: [UInt32: String]? = nil) -> [PhotoPreviewEntry] {
+    let burstIDs = burstIDByFile ?? PhotoCatalogGrouping.bursts(in: files).reduce(into: [:]) { result, group in
+        for file in group.files { result[file.id] = group.id }
+    }
+    let visibleGroups = Dictionary(grouping: files.compactMap { file -> (String, CameraFile)? in
+        burstIDs[file.id].map { ($0, file) }
+    }, by: \.0).mapValues { $0.map(\.1) }
+    var collected = Set<String>()
     var result: [PhotoPreviewEntry] = []
     for file in files {
-        guard consumed.insert(file.id).inserted else { continue }
-        if let group = groupsByFirstID[file.id] {
-            result.append(.burst(group))
-            consumed.formUnion(group.files.dropFirst().map(\.id))
-        } else {
-            result.append(.photo(file))
+        guard let id = burstIDs[file.id], let members = visibleGroups[id], members.count >= 2 else {
+            result.append(.photo(file, burstID: burstIDs[file.id])); continue
         }
+        guard collected.insert(id).inserted else { continue }
+        result.append(.burst(BurstPhotoGroup(id: id, files: members)))
     }
     return result
 }

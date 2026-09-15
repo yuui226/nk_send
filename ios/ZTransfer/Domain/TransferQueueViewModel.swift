@@ -4,8 +4,10 @@ import Foundation
 @MainActor
 final class TransferQueueViewModel: ObservableObject {
     @Published private(set) var snapshot = TransferQueueSnapshot(items: [], isTransferring: false, pauseAfterCurrent: false)
+    @Published private(set) var activeProgress: TransferActiveProgress?
     private let queue: TransferQueue
     private var observation: Task<Void, Never>?
+    private var progressObservation: Task<Void, Never>?
 
     init(queue: TransferQueue) {
         self.queue = queue
@@ -16,9 +18,23 @@ final class TransferQueueViewModel: ObservableObject {
                 self?.snapshot = value
             }
         }
+        progressObservation = Task { [weak self] in
+            let stream = await queue.progressSnapshots()
+            for await value in stream {
+                guard !Task.isCancelled else { return }
+                self?.activeProgress = value
+            }
+        }
     }
 
-    deinit { observation?.cancel() }
+    deinit { observation?.cancel(); progressObservation?.cancel() }
+
+    func task(for fileID: UInt32) -> TransferQueueItem? {
+        let tasks = snapshot.items.filter { $0.file.id == fileID }
+        return tasks.first { $0.status == .transferring }
+            ?? tasks.first { $0.status == .waiting }
+            ?? tasks.last
+    }
 
     func enqueue(_ file: CameraFile, organizeByDate: Bool = false, effects: PhotoEffectsSettings? = nil) { Task { _ = await queue.enqueue(file, organizeByDate: organizeByDate, effects: effects) } }
     /// Batch entry point used by Android's collapsed burst preview. Tasks are
@@ -60,7 +76,7 @@ final class TransferQueueViewModel: ObservableObject {
     func start(session: CameraSession, directory: URL) { Task { await queue.startPendingTransfers(session: session, directory: directory) } }
     func pause() { Task { await queue.pauseAfterCurrentFile() } }
     func resume() { Task { await queue.resume() } }
-    func cancel(id: UUID) { Task { await queue.cancel(id: id) } }
+    func withdraw(id: UUID) { Task { await queue.withdraw(id: id) } }
     func withdrawPending() { Task { await queue.withdrawPending() } }
     func removeCleared() async { await queue.removeCleared() }
     func retryFailed(excluding ids: Set<UUID> = []) { Task { await queue.retryFailed(excluding: ids) } }

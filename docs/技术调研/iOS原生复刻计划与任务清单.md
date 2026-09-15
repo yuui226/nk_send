@@ -25,10 +25,18 @@
 
 ## 进度规则
 
-> 本文件保留安卓源码依据、详细实现说明和历史审计记录。当前执行进度以 [iOS 原生复刻总进度表](./iOS原生复刻进度表.md) 为准；后续完成一个任务或强相关小组时，先更新总进度表，再在这里补充安卓函数和实现细节。
+> 本文件保留安卓源码依据、详细实现说明和历史审计记录。当前执行进度以 [iOS 原生复刻总进度表](./iOS原生复刻进度表.md) 为准；当前核心场景“照片列表 → 预览 → 传输”另有 [专用链路跟踪文档](./iOS照片列表与传输链路复刻跟踪.md)，用于按调用链成组推进。后续完成一个任务或强相关小组时，先更新总进度表，再在这里补充安卓函数和实现细节。
+
+### 2026-09-14 核心链路 T06 门控阶段记录
+
+术语澄清：本节及历史任务中的“取消”须区分内部协程/协议收尾与用户操作。安卓不提供取消正在传输文件的功能；`TransferViewModel.kt:1873` 在当前文件传完后暂停，`3150/3167` 仅撤下等待任务，`TransferScreen.kt:516–546` 隐藏传输中/生成中任务的移除按钮。T05 不新增取消下载入口，也不改变上述行为。本次仅核对源码并修正文档，未构建、安装或修改产品代码。
+
+对照安卓 `NikonCamera.kt:194-248` 的 `CameraIoGate`，iOS 新增 `CameraIOGate`，并接入 `CameraRepository` 的预览、头读取、下载大小查询和每个下载数据事务。门控保留安卓的三项语义：交互预约登记期间，下一下载分块让路给交互命令；整次下载登记期间，空闲心跳直接返回跳过值；等待中的预约取消后不阻塞传输。`CameraIOGateTests` 的 6 项异步并发回放通过。该记录只证明门控局部落地，T06 仍需与真实下载、STA direct reader 和 T05 Cancel/排空组合验证，不能标记任务完成。
+
+同日开始 T05 协议基础：`PTPIPCodec.cancelRequest(transactionID:)` 已按安卓 12 字节 Cancel 包格式实现；`PTPSession` 已接入异常收尾钩子与 PTP/IP 数据相位排空，真实本机 socket 回放和迟到 USB 缓冲回调隔离均已通过。当前仍缺关闭重连、半成品组合和 USB 实机回归，因此 T05 保持进行中；这里的“取消”始终指调用方协程/数据相位异常，不是用户取消正在传输的文件。
 
 - 总任务数：62
-- 当前进度：**3/62**（完成工程基础与文件对象/元数据解析 3 项；其余 59 项按代码闭环状态审计）
+- 当前进度：**4/62**（完成工程基础、PTP 数据层与文件对象/元数据解析 4 项；其余 58 项按代码闭环状态审计）
 - 每完成一个可验收任务，将勾选对应项目、补充实现提交和验证证据，并更新本节进度。
 - “完成”必须包含入口、正常路径、错误/取消路径、状态恢复和对应测试；只有写出界面不算完成。真机回归不再作为代码完成的唯一门槛：如果安卓源码对照、iOS 代码路径、模拟器/自动化证据已经闭环，可先标记代码复刻完成，并把真机回归单独留在任务 19、60、61 的验收记录中；仍存在明确代码缺口时不能因为“真机留给用户”而打勾。
 - 未经确认不进行真机打包；代码阶段优先使用单元测试、模拟数据和 Xcode 预览，最后集中真机回归。
@@ -862,3 +870,51 @@
 - 安卓 `PhotoPreview` 只在单指、未缩放状态下接受垂直上滑；方向需满足上滑距离至少 96dp 且垂直分量超过水平分量 1.15 倍，未达阈值回弹，不穿透到底层列表。
 - iOS `PhotoPreviewView` 现在在预览分页器上加入同一方向门控和 560ms 向上飞行动画；横向翻页、缩放和双指不会触发，页面离开时取消未完成的投递任务。
 - 验证：模拟器 165 项、0 失败；队列胶囊真实坐标残影/接住动画、连拍合集上滑投递和触感仍待补齐，任务 27 保持未完成。
+
+
+## 2026-09-14 下载执行链成组修复与差异清单
+
+同日补充：`TransferQueue` 按安卓 `endToEndBytesPerSecond/retainLastValidTransferSpeed` 接入活动保留速度和完成平均 MB/s；工作结束时清理保留值，本地命中不记录平均速度或耗时。缩略图按 `CameraViewModel.fetchThumbnailToDisk/fetchAndDecodeThumb` 恢复原始相机字节落盘，后台预取不再运行裁剪 transform，可见加载再处理图片；预取共乘增加等待者，原始字节写盘后才完成预取。速度模型 41 项定向测试、缩略图 3 项定向测试通过；未证明整条缓存仲裁和队列动画完成，剩余项见专用链路文档 L03/L04/T08。
+
+当前执行清单集中在 [总进度表的场景差异总表](iOS原生复刻进度表.md#场景差异总表当前执行清单)，按加载缓存、预览、传输、UI 分组。先完整审查当前场景，再依赖排序成组实现；已知差异和待完整审查项明确分开，不把未审查处默认为一致。
+
+本轮依据 `NikonCamera.kt` 的 `shouldUsePartialObjectDownload/downloadChunkSize/downloadToFile`（252、268、3818 起）、`CameraIoGate`（190 起）、`TransferViewModel.processQueue/parseCameraFrameMetadata/launchPhotoFrameExport`（1980、2836、2880 起），以及 `MainActivity.shouldPreferHighThroughputTransfers`（204）。以实际调用条件为准：照片列表和传输页均启用高吞吐，监看禁用；协议层单文件只取一次策略快照。
+
+- 修正 iOS 选择整文件时没有执行 GetObject 的错误，以及未知大小查询失败直接报错、短完整分块被误判为残缺、收到部分字节后错误仍可能回退全量的问题。分块按声明长度及实收校验，收到完整响应后失败不污染下一事务。
+- `PTPSession.executeReceiving` 共用事务所有权、超时和响应验证；PTP/IP 使用 `PTPIPDownloadPhase` 一直读到 COMMAND_RESPONSE，逐包写入 `CameraDownloadWriter`。ImageCaptureCore 仍只能经完整数据回调适配，不声称已具备底层逐包和声明长度；T05 的内部 Cancel/排空已接入并由真实 socket 回放覆盖，关闭重连、半成品组合和 USB 实机回归仍保留为缺口。
+- `CameraDownloadWriter` 使用单调时钟、本次新增字节与200ms回调，排除断点已有字节。新 JPEG 边框下载最多捕获256KiB头；队列传递相机元数据快照并复用本轮缓存。存在原片或续传需要头时按安卓补读相机，派生禁止本地 EXIF 兜底。缺少可见相机信息只让派生失败，新传原片保留成功；已有原片路径标记失败。
+- `CameraRepository.scanCatalog` 的普通 ObjectInfo 与 STA direct 元数据现在按安卓请求预算组成批次，在一次 `CameraIOGate.withCommand` 内完成批内读取；批外再执行双卡拍摄时间归并、列表回调和快照提交，避免逐对象反复取锁。批内失败/取消仍按原有代次与快照规则传播。
+- 保存先尝试原名和可用副本后缀，再复制并校验完整字节；复制失败清理不完整正式文件。完整半成品的捷径仅尝试改名，失败删除后重下，不走复制。相关错误直接使用 `error_incomplete_data/error_copy_incomplete/error_save_failed/error_transfer_failed_reason` 和 `ptp_*` 原资源。
+- 纠正此前“53项通过即可证明下载分支一致”和“本地256KiB EXIF前缀可当作下载头传递完成”的记录；当前测试直接执行仓库、协议会话与文件写入。87项模拟器定向测试通过，协议包62项通过（有交集不累计），最后保存文案调整后19项下载回归通过；无真机打包、安装、提交或推送。
+
+后续具体缺口：T05/T06 的关闭重连、半成品组合、扫描批次持锁及其完整回放，T04 运行期 `renameBroken` 记忆，T07 元数据取消/重复/续传完整回放，T08 速度保留/完成平均速度，L03/L04 缩略图预取分流与解码，以及 U 组的完整状态动画。当前页 FHD→EXIF 组合预约已在 iOS `CameraSession.previewAndExif` 接通，仍需边界回放。所有细目统一跟踪总进度表，不再分散新增独立待办文档。
+
+### 2026-09-15 Burst collection follow-up
+
+- Fixed grid identity: the collection remains present while members are inserted after it. The collection retains + and toggles > / <.
+- Preview receives expanded IDs and reports expansion changes back to the list. Shared BurstGlyph is used in collection, preview and filter.
+- Simulator Debug BUILD SUCCEEDED; installed and launched on the currently booted iPhone 17 Pro, CA046456-B859-45F4-9CB3-2C6E2F8E03B0. Simulator was not shut down.
+- Interaction regression and actual whole-group transfer remain unverified; overall task is not marked complete.
+
+### 2026-09-15 Transfer capsule
+
+- Top right transfer control is now persistent: empty state shows checklist button; queued state morphs to QueuePill with waiting/transferring count, speed, generation count and adjacent start/pause controls. Pause uses pause-after-current-file queue state. Debug simulator build succeeded and installed to the currently booted simulator.
+
+### 2026-09-15 入队飞行坐标修正
+
+- 行为依据：完整阅读 Android `FileListScreen.kt` 的 `queueFlightBezierPoint` / `QueueFlightGhost`，并核对 `PhotoPreview.kt` 的根坐标转换。落点是队列承载区域右边缘内侧 28dp、垂直居中；目标未就绪不播放；单张缩略图不旋转。沿二次贝塞尔飞行 560ms，使用 (0.5, 0, 0.8, 0.35) 曲线。
+- iOS 移除虚构的备用终点与定位后的整体旋转，冻结有效目标区域并统一转换为覆盖层局部坐标；通过 AnimatableModifier 逐帧求曲线点，避免仅在起终点之间直线插值。保留安卓路径控制点、缩放和末段淡出参数。
+- Simulator Debug 最终构建 BUILD SUCCEEDED，已重新查询开机设备并安装、启动于 iPhone 17 Pro（CA046456-B859-45F4-9CB3-2C6E2F8E03B0），未关闭模拟器。通过调试连接进入列表、点击单张照片，确认队列按钮状态变化及照片状态角标出现。截图工具等待界面稳定，未完成飞行过程的逐帧录制和流畅度验证；本记录不代表整个入队/胶囊动画功能完成。
+
+### 2026-09-15 队列布局与常驻右上控件
+
+- Android 依据：TransferScreen 的 TransferTopControls、任务 Card、TaskStatusBadge、TransferInfoPill，以及 TransferQueueActionVisibilityTest。MainActivity 的 SharedQueueControls 位于文件/队列页面转场容器外，右上控件不随两页切换重建或淡入淡出。
+- iOS 改为单一工作区常驻右上控件；删除队列页重复的暂停/开始/胶囊，并固定返回和信号于左上。开始只在停止传输且存在等待任务时显示。卡片使用 12pt 外边距、8pt 间距、14pt 圆角、52pt 缩略图和独立状态角标；填充覆盖整张卡片而非内边距中的区域，信息胶囊字体对照 Android labelSmall 10sp。失败卡保留重试及移出动作，正在传输不提供移出。
+- 首次 Debug BUILD SUCCEEDED 后已安装当前 booted iPhone 17 Pro 并检查队列截图：返回/信号位于左上，清理位于右下，卡片状态角标不再重复。常驻控件与信息胶囊字号的最后调整另行构建验证；尚未据此宣称入队飞行动画目标完成。
+- 常驻控件最后调整构建 BUILD SUCCEEDED，覆盖安装当前开机模拟器后完成空队列往返：右上角保持同一控件，切换前后位置一致。随后按用户要求移除照片列表顶部重复的两层 6pt 留白，并同步去掉公共右上/队列左上的 6pt 留白，保持安全区域内顶部对齐。
+
+### 2026-09-15 四处实时传输进度
+
+- Android 依据：TransferProgressMotion.kt、LiquidProgressFill.kt、Motion.progress、TransferProgressMotionTest；FileListScreen.TransferStatusIndicator（22dp 暗圆底、15dp 确定型圆环、2dp 圆头描边）、PhotoPreview 同组件调用、QueuePill 和 TransferScreen 的液态参数。
+- iOS 新增共用 SmoothTransferProgress，采用质量1/刚度180/临界阻尼弹簧，非有限值归零、进度限制0...1、同任务只接受向前目标。照片列表右下角和预览状态区域接入共用圆环；胶囊改读匹配任务ID的 activeProgress。卡片/胶囊复用三谐波液面、平滑包络和二次曲线，卡片3pt/2600ms/12段/0.55空间缩放，胶囊2pt/2200ms/8段。
+- Simulator Debug BUILD SUCCEEDED，已覆盖安装并启动当前 booted iPhone 17 Pro。完成状态补满后淡出、异常中断和连续任务逐帧视觉回归仍需验证；尚未完成四处流畅度验收，不把构建通过作为动画完成依据。

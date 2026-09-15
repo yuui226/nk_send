@@ -13,12 +13,23 @@ final class PTPIPSocketTransport: @unchecked Sendable, PTPCommandTransport {
     private let lifecycleLock = NSLock()
     private var closed = false
     private var eventTask: Task<Void, Never>?
+    private var activeAbort: PTPIPAbortState?
     private(set) var connectionNumber: UInt32 = 0
     private(set) var responderGUID: String?
 
     private var isClosed: Bool {
         lifecycleLock.lock(); defer { lifecycleLock.unlock() }; return closed
     }
+
+    private func setActiveAbort(_ state: PTPIPAbortState) {
+        lifecycleLock.lock(); activeAbort = state; lifecycleLock.unlock()
+    }
+
+    private var currentAbort: PTPIPAbortState? {
+        lifecycleLock.lock(); defer { lifecycleLock.unlock() }; return activeAbort
+    }
+
+    private static let cancelDrainTimeoutNanoseconds: UInt64 = 3_000_000_000
 
     private init(host: String, port: UInt16, command: NWConnection, event: NWConnection) {
         self.host = host; self.port = port; self.command = command; self.event = event
@@ -41,8 +52,9 @@ final class PTPIPSocketTransport: @unchecked Sendable, PTPCommandTransport {
     }
 
     static func open(host: String, port: UInt16 = 15740, localAddress: String? = nil,
-                     staInitiatorID: Data? = nil, expectedGUID: String? = nil) async throws -> PTPIPSocketTransport {
-        let parameters = parameters(localAddress: localAddress, sta: staInitiatorID != nil)
+                     staInitiatorID: Data? = nil, expectedGUID: String? = nil,
+                     connectionParameters: NWParameters? = nil) async throws -> PTPIPSocketTransport {
+        let parameters = connectionParameters ?? parameters(localAddress: localAddress, sta: staInitiatorID != nil)
         let command = NWConnection(host: .init(host), port: .init(rawValue: port)!, using: parameters)
         let event = NWConnection(host: .init(host), port: .init(rawValue: port)!, using: parameters)
         let transport = PTPIPSocketTransport(host: host, port: port, command: command, event: event)
@@ -126,6 +138,7 @@ final class PTPIPSocketTransport: @unchecked Sendable, PTPCommandTransport {
 
     func sendPTP(command ptpCommand: Data, data: Data?) async throws -> (response: Data, payload: Data) {
         guard !isClosed else { throw PTPSessionError.invalidated }
+        clearPreviousTransfer()
         let request = try PTPIPCodec.commandRequest(from: ptpCommand, dataPhase: data == nil ? 1 : 2)
         try await send(request)
         if let data {
@@ -155,6 +168,72 @@ final class PTPIPSocketTransport: @unchecked Sendable, PTPCommandTransport {
                 continue
             }
         }
+    }
+
+    func receivePTP(command ptpCommand: Data, sink: PTPDataSink) async throws -> PTPDataTransfer {
+        try Task.checkCancellation()
+        guard !isClosed else { throw PTPSessionError.invalidated }
+        let transactionID = try PTPCodec.decode(ptpCommand).transactionID
+        let state = PTPIPAbortState(transactionID: transactionID)
+        setActiveAbort(state)
+        // A local write failure can end the receiver before Cancel is sent.
+        // Retain this transaction's state so recovery can take over the reader.
+        defer { state.finishReceiver() }
+        try await send(PTPIPCodec.commandRequest(from: ptpCommand, dataPhase: 1))
+        var phase = PTPIPDownloadPhase(transactionID: transactionID)
+        while true {
+            let packet = try await receive(on: command, activity: state, onActivity: sink.activity)
+            if packet.type == .ping {
+                try await send(PTPIPCodec.encode(type: .pong), on: command)
+            } else if state.isCancelled {
+                if try state.consumeDrainPacket(packet) {
+                    let response = try PTPIPCodec.commandResponseContainer(packet.payload)
+                    state.markResponseSeen()
+                    return PTPDataTransfer(response: response, receivedByteCount: phase.receivedByteCount,
+                                           declaredByteCount: phase.declaredByteCount)
+                }
+            } else if let completed = try phase.consume(packet, sink: sink) {
+                state.markResponseSeen()
+                return completed
+            }
+        }
+    }
+
+    func cancelPTP(transactionID: UInt32) async -> Bool {
+        // PTPSession invokes recovery in its uncancelled cleanup task.
+        guard let state = currentAbort, state.transactionID == transactionID else { return false }
+        if state.responseSeen { return true }
+        state.requestCancel()
+        do {
+            try await send(PTPIPCodec.cancelRequest(transactionID: transactionID), on: command)
+            while !state.responseSeen {
+                if state.exceeded { throw PTPSessionError.invalidResponse }
+                if state.receiverFinished {
+                    // The original receiver failed after consuming a packet
+                    // (e.g. output.write failed). There is now exactly one reader.
+                    let packet = try await receive(on: command, activity: state,
+                                                   timeoutNanoseconds: Self.cancelDrainTimeoutNanoseconds)
+                    if packet.type == .ping {
+                        try await send(PTPIPCodec.encode(type: .pong), on: command)
+                    } else if try state.consumeDrainPacket(packet) {
+                        state.markResponseSeen()
+                    }
+                } else {
+                    // Android's SO_TIMEOUT is an inactivity limit, not a
+                    // deadline for the whole drain. Renew it on received bytes.
+                    guard !state.drainReadTimedOut else { throw PTPSessionError.timeout }
+                    try await Task.sleep(nanoseconds: 5_000_000)
+                }
+            }
+            return true
+        } catch {
+            close()
+            return false
+        }
+    }
+
+    private func clearPreviousTransfer() {
+        lifecycleLock.lock(); activeAbort = nil; lifecycleLock.unlock()
     }
 
     private func start(_ connection: NWConnection, timeout: UInt64) async throws {
@@ -194,32 +273,49 @@ final class PTPIPSocketTransport: @unchecked Sendable, PTPCommandTransport {
         }, onCancel: { connection.cancel() })
     }
 
-    private func receive(on connection: NWConnection) async throws -> PTPIPPacket {
-        let header = try await readExactly(8, on: connection)
+    private func receive(on connection: NWConnection, activity: PTPIPAbortState? = nil,
+                         timeoutNanoseconds: UInt64? = nil, onActivity: @Sendable () -> Void = {}) async throws -> PTPIPPacket {
+        let header = try await readExactly(8, on: connection, activity: activity, timeoutNanoseconds: timeoutNanoseconds, onActivity: onActivity)
         let length = Int(header.readUInt32LE(at: 0))
         guard length >= 8, length <= PTPIPCodec.maxPacketLength else { throw PTPIPCodecError.malformedLength }
-        let body = try await readExactly(length - 8, on: connection)
+        let body = try await readExactly(length - 8, on: connection, activity: activity, timeoutNanoseconds: timeoutNanoseconds, onActivity: onActivity)
         return try PTPIPCodec.decode(header + body)
     }
 
-    private func readExactly(_ count: Int, on connection: NWConnection) async throws -> Data {
+    private func readExactly(_ count: Int, on connection: NWConnection, activity: PTPIPAbortState? = nil,
+                             timeoutNanoseconds: UInt64? = nil, onActivity: @Sendable () -> Void = {}) async throws -> Data {
         if count == 0 { return Data() }
         var result = Data(capacity: count)
         while result.count < count {
-            let chunk = try await withTaskCancellationHandler(operation: {
-                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
-                    connection.receive(minimumIncompleteLength: 1, maximumLength: count - result.count) { content, _, isComplete, error in
-                        if let error { continuation.resume(throwing: error) }
-                        else if let content, !content.isEmpty { continuation.resume(returning: content) }
-                        else if isComplete { continuation.resume(throwing: PTPSessionError.invalidated) }
-                        else { continuation.resume(throwing: PTPIPCodecError.malformedLength) }
-                    }
+            let remaining = count - result.count
+            let chunk: Data
+            if let timeoutNanoseconds {
+                chunk = try await AsyncDeadline.run(nanoseconds: timeoutNanoseconds, timeoutError: PTPSessionError.timeout) {
+                    try await self.readChunk(remaining, on: connection)
                 }
-            }, onCancel: { connection.cancel() })
+            } else {
+                chunk = try await readChunk(remaining, on: connection)
+            }
+            activity?.recordRead()
+            onActivity()
             result.append(chunk)
         }
         return result
     }
+
+    private func readChunk(_ maximumLength: Int, on connection: NWConnection) async throws -> Data {
+        try await withTaskCancellationHandler(operation: {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
+                connection.receive(minimumIncompleteLength: 1, maximumLength: maximumLength) { content, _, isComplete, error in
+                    if let error { continuation.resume(throwing: error) }
+                    else if let content, !content.isEmpty { continuation.resume(returning: content) }
+                    else if isComplete { continuation.resume(throwing: PTPSessionError.invalidated) }
+                    else { continuation.resume(throwing: PTPIPCodecError.malformedLength) }
+                }
+            }
+        }, onCancel: { connection.cancel() })
+    }
+
 }
 
 private final class OnceFlag: @unchecked Sendable {
@@ -236,4 +332,49 @@ private extension Data {
 }
 private extension FixedWidthInteger {
     var littleEndianBytes: [UInt8] { withUnsafeBytes(of: littleEndian) { Array($0) } }
+}
+
+/// NikonCamera.drainCmdResponse counts the complete payload of every packet
+/// except PING and COMMAND_RESPONSE (including transaction IDs and START_DATA).
+struct PTPIPDrainBudget {
+    private(set) var drained: UInt64 = 0
+    let maximum: UInt64
+
+    init(maximum: UInt64 = 32 * 1024 * 1024) { self.maximum = maximum }
+    var exceeded: Bool { drained > maximum }
+
+    mutating func consume(_ packet: PTPIPPacket) throws -> Bool {
+        guard !exceeded else { throw PTPSessionError.invalidResponse }
+        switch packet.type {
+        case .commandResponse: return true
+        case .ping: break
+        default: drained += UInt64(packet.payload.count)
+        }
+        guard !exceeded else { throw PTPSessionError.invalidResponse }
+        return false
+    }
+}
+
+private final class PTPIPAbortState: @unchecked Sendable {
+    let transactionID: UInt32
+    private let lock = NSLock()
+    private var cancelled = false
+    private var response = false
+    private var finished = false
+    private var budget = PTPIPDrainBudget()
+    private var lastRead = ContinuousClock.now
+
+    init(transactionID: UInt32) { self.transactionID = transactionID }
+    var isCancelled: Bool { lock.withLock { cancelled } }
+    var responseSeen: Bool { lock.withLock { response } }
+    var receiverFinished: Bool { lock.withLock { finished } }
+    var exceeded: Bool { lock.withLock { budget.exceeded } }
+    var drainReadTimedOut: Bool { lock.withLock { lastRead.duration(to: .now) >= .seconds(3) } }
+    func requestCancel() { lock.withLock { cancelled = true; lastRead = .now } }
+    func recordRead() { lock.withLock { lastRead = .now } }
+    func finishReceiver() { lock.withLock { finished = true } }
+    func markResponseSeen() { lock.withLock { response = true } }
+    func consumeDrainPacket(_ packet: PTPIPPacket) throws -> Bool {
+        try lock.withLock { try budget.consume(packet) }
+    }
 }

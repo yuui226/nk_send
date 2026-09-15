@@ -93,9 +93,6 @@ actor CameraSession {
             file: file,
             identity: identity,
             directSTA: direct,
-            transform: { data in
-                AndroidThumbnailProcessor.process(data, fileExtension: file.fileExtension)
-            },
             fetch: { try await self.thumbnail(handle: file.id) }
         )
     }
@@ -133,6 +130,14 @@ actor CameraSession {
 
     func setFHDActive(_ active: Bool) async { await repository.setFHDActive(active) }
     func setTransfersBusy(_ busy: Bool) async { await repository.setTransfersBusy(busy) }
+    func setPreferHighThroughputTransfers(_ enabled: Bool) async {
+        await repository.setPreferHighThroughputTransfers(enabled)
+    }
+    func withInteractivePreviewPriority<T: Sendable>(
+        _ operation: @Sendable () async throws -> T
+    ) async throws -> T {
+        try await repository.withInteractivePreviewPriority(operation)
+    }
     func setEffectPreviewActive(_ active: Bool) async { await repository.setEffectPreviewActive(active) }
     func backgroundThumbnailFillAllowed() async -> Bool {
         await repository.backgroundThumbnailFillAllowed()
@@ -143,6 +148,21 @@ actor CameraSession {
         // only owns discovery/session callbacks; it must not replace Android's
         // FHD → LargeThumb → standard-thumbnail preview fallback.
         return try await repository.preview(handle: handle)
+    }
+
+    /// Android keeps the current-page FHD request and its EXIF read inside one
+    /// interactive-priority reservation (`PhotoPreview.kt:911`).  Keep the
+    /// reservation across both operations so a download slice cannot be
+    /// inserted between them.  A failed FHD request does not suppress the
+    /// subsequent EXIF attempt.
+    func previewAndExif(file: CameraFile) async -> (Data?, PhotoExif?) {
+        await (try? repository.withInteractivePreviewPriority {
+            let image = try? await self.repository.preview(handle: file.id)
+            let metadata = try? await self.exifStore.load(file: file) { length in
+                try await self.repository.readPrefix(handle: file.id, length: length)
+            }
+            return (image, metadata)
+        }) ?? (nil, nil)
     }
 
     func readPrefix(file: CameraFile, length: Int64) async throws -> Data {
@@ -160,6 +180,22 @@ actor CameraSession {
                                              fileName: file.fileName,
                                              captureDate: file.captureDate,
                                              to: directory, progress: progress)
+    }
+
+    func downloadWithMetrics(file: CameraFile, to directory: URL,
+                             progress: (@Sendable (TransferDownloadProgress) -> Void)? = nil) async throws -> URL {
+        try await downloadResult(file: file, to: directory, captureHeader: false, progress: progress).url
+    }
+
+    func downloadResult(file: CameraFile, to directory: URL, captureHeader: Bool,
+                        progress: (@Sendable (TransferDownloadProgress) -> Void)?) async throws -> CameraDownloadResult {
+        try await repository.downloadResult(handle: file.id, size: file.size, fileName: file.fileName,
+                                             captureDate: file.captureDate, to: directory,
+                                             captureHeader: captureHeader, progress: progress)
+    }
+
+    func frameMetadataHeader(file: CameraFile) async throws -> Data? {
+        try await repository.readPrefix(handle: file.id, length: Int64(cameraExifHeaderCaptureBytes))
     }
 
     // Remote monitor operations share the same serialized PTP session as the

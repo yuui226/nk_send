@@ -25,6 +25,38 @@ struct PTPIPPacket: Equatable, Sendable {
     let payload: Data
 }
 
+/// One download data phase. END_DATA is only the last data packet; callers
+/// must continue through COMMAND_RESPONSE before releasing the channel.
+struct PTPIPDownloadPhase {
+    let transactionID: UInt32
+    private(set) var receivedByteCount: UInt64 = 0
+    private(set) var declaredByteCount: UInt64?
+
+    mutating func consume(_ packet: PTPIPPacket, sink: PTPDataSink) throws -> PTPDataTransfer? {
+        switch packet.type {
+        case .startData:
+            guard packet.payload.count >= 4,
+                  packet.payload.readUInt32LE(at: 0) == transactionID else { throw PTPSessionError.invalidResponse }
+            declaredByteCount = packet.payload.count >= 12 ? packet.payload.readUInt64LE(at: 4)
+                : packet.payload.count >= 8 ? UInt64(packet.payload.readUInt32LE(at: 4)) : nil
+            sink.started(declaredByteCount)
+        case .data, .endData:
+            guard packet.payload.count >= 4,
+                  packet.payload.readUInt32LE(at: 0) == transactionID else { throw PTPSessionError.invalidResponse }
+            let bytes = Data(packet.payload.dropFirst(4))
+            try sink.received(bytes)
+            receivedByteCount += UInt64(bytes.count)
+        case .commandResponse:
+            let response = try PTPIPCodec.commandResponseContainer(packet.payload)
+            guard response.readUInt32LE(at: 8) == transactionID else { throw PTPSessionError.invalidResponse }
+            return PTPDataTransfer(response: response, receivedByteCount: receivedByteCount,
+                                   declaredByteCount: declaredByteCount)
+        default: break
+        }
+        return nil
+    }
+}
+
 enum PTPIPCodecError: Error, Equatable, Sendable {
     case malformedLength
     case unsupportedPacketType(UInt32)
@@ -101,6 +133,15 @@ enum PTPIPCodec {
         return try encode(type: .initCommandRequest, payload: payload)
     }
 
+    /// PTP/IP Cancel transaction packet used by Android when a data phase is
+    /// cancelled. The transaction remains on the command socket so the
+    /// transport can drain its final command response before reuse.
+    static func cancelRequest(transactionID: UInt32) throws -> Data {
+        var payload = Data()
+        payload.append(contentsOf: transactionID.littleEndianBytes)
+        return try encode(type: .cancel, payload: payload)
+    }
+
     static func commandResponseContainer(_ payload: Data) throws -> Data {
         guard payload.count >= 6, (payload.count - 6).isMultiple(of: 4) else {
             throw PTPIPCodecError.malformedCommand
@@ -114,6 +155,9 @@ enum PTPIPCodec {
 }
 
 private extension Data {
+    func readUInt64LE(at offset: Int) -> UInt64 {
+        UInt64(readUInt32LE(at: offset)) | UInt64(readUInt32LE(at: offset + 4)) << 32
+    }
     func readUInt16LE(at offset: Int) -> UInt16 {
         UInt16(self[startIndex + offset]) | UInt16(self[startIndex + offset + 1]) << 8
     }

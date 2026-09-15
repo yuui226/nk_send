@@ -65,6 +65,22 @@ struct TransferDirectoryIndex: Sendable {
         return files[key]?.first(where: { file.size == UInt64(UInt32.max) || $0.size == file.size })?.url
     }
 
+    func completePartial(for file: CameraFile) -> URL? {
+        guard file.size > 0, file.size != UInt64(UInt32.max) else { return nil }
+        let name = transferPartialFileName(size: file.size, captureDate: file.captureDate, fileName: file.fileName)
+        guard let url = partials[name],
+              let values = try? url.resourceValues(forKeys: [.fileSizeKey]),
+              let size = values.fileSize,
+              UInt64(max(0, size)) == file.size else { return nil }
+        return url
+    }
+
+    mutating func removePartial(_ url: URL) {
+        if let key = partials.first(where: { $0.value == url })?.key {
+            partials.removeValue(forKey: key)
+        }
+    }
+
     mutating func addOriginal(_ url: URL, size: UInt64) {
         let key = exportedOriginalBaseName(url.lastPathComponent).lowercased()
         files[key, default: []].append((size: size, url: url))

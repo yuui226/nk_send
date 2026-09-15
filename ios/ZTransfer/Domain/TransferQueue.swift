@@ -34,6 +34,9 @@ struct TransferQueueItem: Identifiable, Equatable, Sendable {
     var status: TransferStatus = .waiting
     var progress: Double = 0
     var bytesPerSecond: Int64 = 0
+    /// Android stores the end-to-end average for a completed real download
+    /// (MB/s). Local existing-file hits intentionally keep this at zero.
+    var downloadMBps: Double = 0
     /// Android records the active file transfer duration on completion.
     /// A skipped existing file has no transfer duration.
     var elapsedMs: Int64?
@@ -63,14 +66,76 @@ struct TransferQueueSnapshot: Equatable, Sendable {
     var invalidatedDirectory: URL? = nil
 }
 
+/// High-frequency progress is kept separate from the low-frequency queue
+/// snapshot, matching Android's activeTransferProgress StateFlow. This keeps
+/// inactive cards and list layout out of the 200 ms progress loop.
+struct TransferActiveProgress: Equatable, Sendable {
+    let taskID: UUID
+    let fraction: Double
+    let bytesPerSecond: Int64
+    /// Last non-zero sample retained across the short preparation gap between
+    /// files so the queue capsule does not flash to zero.
+    let retainedBytesPerSecond: Int64
+}
+
+/// Android's endToEndBytesPerSecond: use only bytes transferred in this
+/// attempt and a monotonic elapsed duration; invalid samples are zero.
+internal func endToEndBytesPerSecond(transferredBytes: UInt64, elapsedMs: Int64) -> Int64 {
+    guard transferredBytes > 0, elapsedMs > 0 else { return 0 }
+    let value = Double(transferredBytes) * 1_000.0 / Double(elapsedMs)
+    guard value < Double(Int64.max) else { return .max }
+    return Int64(value)
+}
+
+internal func retainLastValidTransferSpeed(previous: Int64, sample: Int64) -> Int64 {
+    sample > 0 ? sample : max(0, previous)
+}
+
+struct TransferDownloadProgress: Equatable, Sendable {
+    let fraction: Double
+    let downloaded: UInt64
+    let total: UInt64
+    var bytesPerSecond: Int64 = 0
+}
+
 /// The queue only needs the existing camera download operation. Keeping this
 /// boundary explicit also lets state-transition tests hold a real task in flight.
 protocol TransferDownloading: Sendable {
     func download(file: CameraFile, to directory: URL,
                   progress: (@Sendable (Double) -> Void)?) async throws -> URL
+
+    func downloadWithMetrics(file: CameraFile, to directory: URL,
+                             progress: (@Sendable (TransferDownloadProgress) -> Void)?) async throws -> URL
+    func downloadResult(file: CameraFile, to directory: URL, captureHeader: Bool,
+                        progress: (@Sendable (TransferDownloadProgress) -> Void)?) async throws -> CameraDownloadResult
+    func frameMetadataHeader(file: CameraFile) async throws -> Data?
 }
 
 extension CameraSession: TransferDownloading {}
+
+extension TransferDownloading {
+    func frameMetadataHeader(file: CameraFile) async throws -> Data? { nil }
+
+    func downloadResult(file: CameraFile, to directory: URL, captureHeader: Bool,
+                        progress: (@Sendable (TransferDownloadProgress) -> Void)?) async throws -> CameraDownloadResult {
+        let started = ContinuousClock.now
+        let output = try await downloadWithMetrics(file: file, to: directory, progress: progress)
+        let bytes = UInt64(max(0, (try? output.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0))
+        return CameraDownloadResult(url: output, bytes: bytes, transferredBytes: bytes,
+                                    startedAt: started, headerPrefix: nil)
+    }
+    /// Compatibility path for deterministic test cameras and platform
+    /// transports that only expose a fraction. Production CameraSession
+    /// supplies actual bytes from the PTP transaction.
+    func downloadWithMetrics(file: CameraFile, to directory: URL,
+                             progress: (@Sendable (TransferDownloadProgress) -> Void)?) async throws -> URL {
+        try await download(file: file, to: directory) { fraction in
+            let total = file.size == UInt64(UInt32.max) ? 0 : file.size
+            let downloaded = total > 0 ? UInt64((Double(total) * fraction).rounded()) : 0
+            progress?(TransferDownloadProgress(fraction: fraction, downloaded: downloaded, total: total))
+        }
+    }
+}
 
 /// Android keeps execution order separate from the visible task history.
 /// Retrying a card replaces it in place, but appends its attempt to this FIFO.
@@ -133,12 +198,13 @@ func transferDestinationDirectory(root: URL, folderName: String?) -> URL {
 /// handle; only the automatic-new-media path uses an identity de-duplication key.
 /// The active file is never user-cancelled and pause takes effect at its boundary.
 actor TransferQueue {
-    typealias FrameRenderer = @Sendable (URL, PhotoEffectsSettings, URL) async throws -> URL
+    typealias FrameRenderer = @Sendable (URL, PhotoEffectsSettings, URL, PhotoFrameMetadata?) async throws -> URL
     private struct FrameJob: Sendable {
         let id: UUID
         let source: URL
         let settings: PhotoEffectsSettings
         let directory: URL
+        let metadata: PhotoFrameMetadata?
         let failTaskOnError: Bool
         let started: ContinuousClock.Instant
     }
@@ -155,8 +221,11 @@ actor TransferQueue {
     private var session: (any TransferDownloading)?
     private var directory: URL?
     private var invalidatedDirectory: URL?
-    private var progressSamples: [UUID: (time: Date, value: Double)] = [:]
+    private var frameMetadataCache: [UInt32: PhotoFrameMetadata] = [:]
     private var continuations: [UUID: AsyncStream<TransferQueueSnapshot>.Continuation] = [:]
+    private var progressContinuations: [UUID: AsyncStream<TransferActiveProgress?>.Continuation] = [:]
+    private var activeProgress: TransferActiveProgress?
+    private var lastValidTransferSpeed: Int64 = 0
     init(defaults: UserDefaults = .standard, renderFrame: @escaping FrameRenderer = TransferQueue.renderFrameFile) {
         self.renderFrame = renderFrame
         // Android TransferState.tasks is in-memory only. Discard the earlier
@@ -182,6 +251,19 @@ actor TransferQueue {
     }
 
     private func removeObserver(_ id: UUID) { continuations[id] = nil }
+
+    func progressSnapshots() -> AsyncStream<TransferActiveProgress?> {
+        AsyncStream { continuation in
+            let id = UUID()
+            progressContinuations[id] = continuation
+            continuation.yield(activeProgress)
+            continuation.onTermination = { [weak self] _ in
+                Task { await self?.removeProgressObserver(id) }
+            }
+        }
+    }
+
+    private func removeProgressObserver(_ id: UUID) { progressContinuations[id] = nil }
 
     @discardableResult
     func enqueue(_ file: CameraFile, organizeByDate: Bool = false,
@@ -287,7 +369,10 @@ actor TransferQueue {
         startPendingTransfers(session: session, directory: directory)
     }
 
-    func cancel(id: UUID) {
+    /// Withdraw one waiting task from the queue. Android has no user action
+    /// that cancels an active file transfer, so transferring tasks are left
+    /// untouched here and finish normally.
+    func withdraw(id: UUID) {
         guard let index = items.firstIndex(where: { $0.id == id }), items[index].status == .waiting else { return }
         pending.withdraw(id)
         items[index].status = .cancelled
@@ -383,8 +468,12 @@ actor TransferQueue {
     }
 
     private func run() async {
+        frameMetadataCache.removeAll(keepingCapacity: true)
         var stoppedAfterCurrent = false
         defer {
+            activeProgress = nil
+            lastValidTransferSpeed = 0
+            publishProgress()
             isTransferring = false
             worker = nil
             pauseAfterCurrent = stoppedAfterCurrent
@@ -407,8 +496,8 @@ actor TransferQueue {
             if pauseAfterCurrent { stoppedAfterCurrent = true; break }
             guard let itemID = pending.takeFirst() else { break }
             guard let task = items.first(where: { $0.id == itemID && $0.status == .waiting }) else { continue }
+            let destinationDirectory = transferDestinationDirectory(root: directory, folderName: task.destinationFolderName)
             do {
-                let destinationDirectory = transferDestinationDirectory(root: directory, folderName: task.destinationFolderName)
                 if directoryIndexes[destinationDirectory] == nil {
                     directoryIndexes[destinationDirectory] = try await Task.detached(priority: .utility) {
                         try FileManager.default.createDirectory(at: destinationDirectory, withIntermediateDirectories: true)
@@ -431,16 +520,56 @@ actor TransferQueue {
                     items[index].status = .completed
                     items[index].progress = 1
                     items[index].bytesPerSecond = 0
+                    items[index].downloadMBps = 0
                     items[index].elapsedMs = nil
                     items[index].skipped = effects == nil || existingFrame != nil
                     items[index].outputURL = destination
                     items[index].frameURL = existingFrame
                     if let effects, existingFrame == nil {
-                        startFrameGeneration(for: itemID, source: destination, settings: effects,
-                                             in: destinationDirectory, failTaskOnError: true)
+                        await startFrameGeneration(for: itemID, source: destination, file: task.file, settings: effects,
+                                                   in: destinationDirectory, failTaskOnError: true)
                     }
                     publish()
                     continue
+                }
+
+                // Android's DL_RESUME_COMPLETE shortcut: a complete,
+                // identity-matching .nkpart_ means the previous download
+                // finished before its final rename. Finalize it while the
+                // card is still WAITING, then run the same local-original
+                // effect check without touching the camera session.
+                if let partial = directoryIndexes[destinationDirectory]?.completePartial(for: task.file) {
+                    do {
+                        let output = try finalizeTransferTemporary(
+                            temporary: partial, directory: destinationDirectory, fileName: task.file.fileName, allowCopy: false
+                        )
+                        directoryIndexes[destinationDirectory]?.removePartial(partial)
+                        directoryIndexes[destinationDirectory]?.addOriginal(output, size: task.file.size)
+                        guard isWaiting(itemID) else { continue }
+                        let effects = task.effects.flatMap { $0.hasEffect && Self.supportsRenderedOutput(task.file.fileExtension) ? $0 : nil }
+                        guard let index = items.firstIndex(where: { $0.id == itemID }) else { continue }
+                        items[index].status = .completed
+                        items[index].progress = 1
+                        items[index].bytesPerSecond = 0
+                        items[index].downloadMBps = 0
+                        items[index].elapsedMs = nil
+                        items[index].skipped = effects == nil
+                        items[index].outputURL = output
+                        if let effects {
+                            await startFrameGenerationIfNeeded(
+                                for: itemID, source: output, file: task.file, settings: effects,
+                                in: destinationDirectory, failTaskOnError: true
+                            )
+                        }
+                        publish()
+                        continue
+                    } catch {
+                        // A provider may reject both rename and copy. Android
+                        // deletes that unusable part and falls through to a
+                        // fresh download, preserving the task's FIFO slot.
+                        try? FileManager.default.removeItem(at: partial)
+                        directoryIndexes[destinationDirectory]?.removePartial(partial)
+                    }
                 }
                 // No TRANSFERING state for a local hit or disconnected task.
                 // Resolve the current session only after local-file preflight.
@@ -452,25 +581,35 @@ actor TransferQueue {
                 items[index].status = .transferring
                 items[index].error = nil
                 items[index].elapsedMs = nil
-                progressSamples[itemID] = (Date(), 0)
-                let started = ContinuousClock.now
+                activeProgress = TransferActiveProgress(taskID: itemID, fraction: 0, bytesPerSecond: 0,
+                                                        retainedBytesPerSecond: lastValidTransferSpeed)
+                publishProgress()
                 publish()
-                let output = try await session.download(file: task.file, to: destinationDirectory) { [weak self] progress in
-                    Task { await self?.updateProgress(id: itemID, value: progress) }
+                let result = try await session.downloadResult(file: task.file, to: destinationDirectory,
+                                                              captureHeader: Self.needsCameraMetadata(task.effects, file: task.file)) { [weak self] progress in
+                    Task { await self?.updateProgress(id: itemID, progress: progress) }
                 }
+                let output = result.url
                 if let index = items.firstIndex(where: { $0.id == itemID }) {
                     items[index].status = .completed
                     items[index].progress = 1
                     items[index].bytesPerSecond = 0
-                    items[index].elapsedMs = Self.milliseconds(since: started)
+                    let elapsed = Self.milliseconds(since: result.startedAt)
+                    items[index].downloadMBps = Double(endToEndBytesPerSecond(
+                        transferredBytes: result.transferredBytes, elapsedMs: elapsed
+                    )) / (1024 * 1024)
+                    items[index].elapsedMs = elapsed
                     items[index].outputURL = output
                     if let effects = task.effects, effects.hasEffect, Self.supportsRenderedOutput(task.file.fileExtension) {
-                        startFrameGeneration(for: itemID, source: output, settings: effects, in: destinationDirectory)
+                        await startFrameGeneration(
+                            for: itemID, source: output, file: task.file, settings: effects, in: destinationDirectory,
+                            metadata: result.headerPrefix.flatMap(PhotoFrameMetadata.cameraSnapshot),
+                            allowCameraMetadataRead: result.bytes > result.transferredBytes
+                        )
                     }
                     publish()
                 }
-                directoryIndexes[destinationDirectory]?.addOriginal(output, size: task.file.size)
-                progressSamples[itemID] = nil
+                directoryIndexes[destinationDirectory]?.addOriginal(output, size: result.bytes)
             } catch is CancellationError {
                 if let index = items.firstIndex(where: { $0.id == itemID }),
                    items[index].status == .waiting || items[index].status == .transferring {
@@ -479,16 +618,49 @@ actor TransferQueue {
                     items[index].bytesPerSecond = 0
                     items[index].error = nil
                     pending.append(itemID)
+                    if activeProgress?.taskID == itemID {
+                        activeProgress = nil
+                        publishProgress()
+                    }
                     publish()
                 }
-                progressSamples[itemID] = nil
+                if activeProgress?.taskID == itemID {
+                    activeProgress = nil
+                    publishProgress()
+                }
                 // A cancelled session must not be retried in a tight loop.
                 break
+            } catch CameraRepositoryError.resumeUnavailable {
+                // Android deletes the identity-matching part when a resumed
+                // stream cannot use partial-object reads. Keeping it would
+                // make every retry fail at the same preflight boundary.
+                let partial = destinationDirectory.appendingPathComponent(
+                    transferPartialFileName(size: task.file.size,
+                                            captureDate: task.file.captureDate,
+                                            fileName: task.file.fileName),
+                    isDirectory: false
+                )
+                try? FileManager.default.removeItem(at: partial)
+                directoryIndexes[destinationDirectory] = TransferDirectoryIndex.scan(directory: destinationDirectory)
+                if activeProgress?.taskID == itemID {
+                    activeProgress = nil
+                    publishProgress()
+                }
+                fail(itemID, message: AppLocalized.resource("transfer_failed"))
             } catch {
+                // Android refreshes only the failed task's part index so a
+                // retry queued on the same worker can see a newly preserved
+                // .nkpart_ without rescanning unrelated destinations.
+                directoryIndexes[destinationDirectory] = await Task.detached(priority: .utility) {
+                    TransferDirectoryIndex.scan(directory: destinationDirectory)
+                }.value
+                if activeProgress?.taskID == itemID {
+                    activeProgress = nil
+                    publishProgress()
+                }
                 if items.contains(where: { $0.id == itemID && ($0.status == .waiting || $0.status == .transferring) }) {
                     fail(itemID, message: transferErrorMessage(error))
                 }
-                progressSamples[itemID] = nil
             }
         }
     }
@@ -532,17 +704,67 @@ actor TransferQueue {
     /// Mark generation before publishing COMPLETED, including time waiting for
     /// Android's bounded two-worker pool. Clear/remove must protect both active
     /// and queued renders, without delaying subsequent original downloads.
-    private func startFrameGeneration(for id: UUID, source: URL, settings: PhotoEffectsSettings,
-                                      in directory: URL, failTaskOnError: Bool = false) {
+    private func startFrameGeneration(for id: UUID, source: URL, file: CameraFile, settings: PhotoEffectsSettings,
+                                      in directory: URL, failTaskOnError: Bool = false,
+                                      metadata: PhotoFrameMetadata? = nil, allowCameraMetadataRead: Bool = true) async {
         guard frameJobs[id] == nil, let index = items.firstIndex(where: { $0.id == id }) else { return }
+        let started = ContinuousClock.now
         items[index].isGeneratingFrame = true
         items[index].frameGenerationStartedAt = Date()
         items[index].frameGenerationElapsedMs = nil
         items[index].frameError = nil
+        publish()
+        var cameraMetadata = frameMetadataCache[file.id] ?? metadata
+        if cameraMetadata == nil && allowCameraMetadataRead && Self.needsCameraMetadata(settings, file: file) {
+            do {
+                if let header = try await session?.frameMetadataHeader(file: file) {
+                    cameraMetadata = await Task.detached(priority: .utility) {
+                        PhotoFrameMetadata.cameraSnapshot(header)
+                    }.value
+                }
+            } catch is CancellationError {
+                if let index = items.firstIndex(where: { $0.id == id }) {
+                    items[index].isGeneratingFrame = false
+                    items[index].frameGenerationStartedAt = nil
+                }
+                return
+            } catch { /* Android: header failure only affects the derivative. */ }
+        }
+        guard items.contains(where: { $0.id == id && $0.isGeneratingFrame }) else { return }
+        if let cameraMetadata { frameMetadataCache[file.id] = cameraMetadata }
         frameJobs[id] = FrameJob(id: id, source: source, settings: settings, directory: directory,
-                                 failTaskOnError: failTaskOnError, started: .now)
+                                 metadata: cameraMetadata, failTaskOnError: failTaskOnError, started: started)
         pendingFrames.append(id)
         startWaitingFrames()
+    }
+
+    /// Android's launchPhotoFrameExport(skipIfExisting = true) checks the
+    /// deterministic frame path before publishing GENERATING. Keep that
+    /// preflight off the actor so a repeated export never flashes a fake
+    /// generation state or consumes a frame worker.
+    private func startFrameGenerationIfNeeded(
+        for id: UUID,
+        source: URL,
+        file: CameraFile,
+        settings: PhotoEffectsSettings,
+        in directory: URL,
+        failTaskOnError: Bool = false,
+        metadata: PhotoFrameMetadata? = nil,
+        allowCameraMetadataRead: Bool = true,
+    ) async {
+        let existing = await Task.detached(priority: .utility) {
+            Self.existingFrameURL(source: source, settings: settings, in: directory)
+        }.value
+        guard let index = items.firstIndex(where: { $0.id == id }) else { return }
+        if let existing {
+            items[index].frameURL = existing
+            items[index].skipped = true
+            items[index].frameError = nil
+            return
+        }
+        await startFrameGeneration(for: id, source: source, file: file, settings: settings,
+                                   in: directory, failTaskOnError: failTaskOnError,
+                                   metadata: metadata, allowCameraMetadataRead: allowCameraMetadataRead)
     }
 
     private func startWaitingFrames() {
@@ -579,7 +801,11 @@ actor TransferQueue {
                 }
                 return
             }
-            let output = try await renderFrame(job.source, job.settings, job.directory)
+            if Self.needsCameraMetadata(job.settings, name: job.source.lastPathComponent),
+               job.settings.metadata.hasVisibleMetadata, job.metadata == nil {
+                throw CameraRepositoryError.invalidDataset
+            }
+            let output = try await renderFrame(job.source, job.settings, job.directory, job.metadata)
             try Task.checkCancellation()
             if let index = items.firstIndex(where: { $0.id == job.id }) { items[index].frameURL = output }
         } catch is CancellationError {
@@ -598,13 +824,16 @@ actor TransferQueue {
         }
     }
 
-    private nonisolated static func renderFrameFile(source: URL, settings: PhotoEffectsSettings, directory: URL) async throws -> URL {
+    private nonisolated static func renderFrameFile(source: URL, settings: PhotoEffectsSettings, directory: URL, metadata: PhotoFrameMetadata?) async throws -> URL {
         let task = Task.detached(priority: .utility) {
             try Task.checkCancellation()
             return try autoreleasepool {
-                let data = try Data(contentsOf: source)
-                guard let image = UIImage(data: data) else { throw CocoaError(.fileReadCorruptFile) }
-                let metadata = PhotoExifParser.parse(data).map(PhotoFrameMetadata.init)
+                // TransferViewModel passes the immutable camera metadata snapshot
+                // with allowLocalMetadataRead=false. Decode the saved image without
+                // allocating another full Data buffer or rereading local EXIF.
+                guard let image = UIImage(contentsOfFile: source.path) else {
+                    throw CocoaError(.fileReadCorruptFile)
+                }
                 let rendered = try PhotoEffectsRenderer.render(image, settings: settings, metadata: metadata)
                 try Task.checkCancellation()
                 guard let encoded = rendered.jpegData(compressionQuality: 1) else { throw CocoaError(.fileWriteUnknown) }
@@ -618,6 +847,15 @@ actor TransferQueue {
         return try await withTaskCancellationHandler {
             try await task.value
         } onCancel: { task.cancel() }
+    }
+
+    private nonisolated static func needsCameraMetadata(_ settings: PhotoEffectsSettings?, file: CameraFile) -> Bool {
+        needsCameraMetadata(settings, name: file.fileName)
+    }
+
+    private nonisolated static func needsCameraMetadata(_ settings: PhotoEffectsSettings?, name: String) -> Bool {
+        guard let settings, settings.photoFrameEnabled, settings.photoFrameBorderEnabled else { return false }
+        return ["jpg", "jpeg"].contains((name as NSString).pathExtension.lowercased())
     }
 
     private nonisolated static func existingFrameURL(source: URL, settings: PhotoEffectsSettings, in directory: URL) -> URL? {
@@ -656,15 +894,17 @@ actor TransferQueue {
         return preferred.deletingLastPathComponent().appendingPathComponent("\(stem)_\(Date().timeIntervalSince1970).\(ext)")
     }
 
-    private func updateProgress(id: UUID, value: Double) {
+    private func updateProgress(id: UUID, progress: TransferDownloadProgress) {
         guard let index = items.firstIndex(where: { $0.id == id }), items[index].status == .transferring else { return }
-        let now = Date()
-        if let previous = progressSamples[id], now.timeIntervalSince(previous.time) > 0.08 {
-            let delta = max(0, value - previous.value)
-            items[index].bytesPerSecond = Int64(Double(items[index].file.size) * delta / now.timeIntervalSince(previous.time))
-            progressSamples[id] = (now, value)
-        }
-        items[index].progress = value; publish()
+        items[index].bytesPerSecond = progress.bytesPerSecond
+        let retained = retainLastValidTransferSpeed(previous: lastValidTransferSpeed,
+                                                     sample: progress.bytesPerSecond)
+        lastValidTransferSpeed = retained
+        items[index].progress = min(max(progress.fraction, 0), 1)
+        activeProgress = TransferActiveProgress(taskID: id, fraction: items[index].progress,
+                                                bytesPerSecond: items[index].bytesPerSecond,
+                                                retainedBytesPerSecond: retained)
+        publishProgress()
     }
 
     func snapshot() -> TransferQueueSnapshot {
@@ -674,6 +914,11 @@ actor TransferQueue {
     private func publish() {
         let value = snapshot()
         continuations.values.forEach { $0.yield(value) }
+    }
+
+    private func publishProgress() {
+        let value = activeProgress
+        progressContinuations.values.forEach { $0.yield(value) }
     }
 
     private func automaticIdentity(for file: CameraFile) -> String {
@@ -693,6 +938,8 @@ actor TransferQueue {
             return AppLocalized.resource("error_camera_connection_lost")
         case CameraRepositoryError.invalidDataset:
             return AppLocalized.resource("error_camera_metadata_unavailable")
+        case CameraRepositoryError.resumeUnavailable:
+            return AppLocalized.resource("transfer_failed")
         default:
             // Android's friendlyError normalizes transport failures even when
             // ImageCaptureCore/PTP wraps them in an NSError with only a text

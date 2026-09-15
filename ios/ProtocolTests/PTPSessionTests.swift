@@ -8,6 +8,22 @@ import XCTest
 
 @MainActor
 final class PTPSessionTests: XCTestCase {
+    func testCancelledBufferedAdapterRejectsLateCallbackBeforeWritingPayload() async throws {
+        let transport = HeldTransport()
+        let call = Task {
+            try await transport.receivePTP(
+                command: PTPCodec.encodeCommand(code: PTPConstants.getObject, transactionID: 1, parameters: [12]),
+                sink: PTPDataSink(started: { _ in XCTFail("Late data phase started") },
+                                  received: { _ in XCTFail("Late payload was written") })
+            )
+        }
+        try await transport.waitForRequestCount(1)
+        call.cancel()
+        await transport.finishNext()
+        do { _ = try await call.value; XCTFail("Cancelled adapter returned data") }
+        catch { XCTAssertTrue(error is CancellationError) }
+    }
+
     func testIdleKeepaliveAcceptsDeviceBusyAsProofOfLife() async throws {
         let transport = STAScriptTransport([.init(0x1004, response: 0x2019), .init(0x1001)])
         let session = PTPSession(transport: transport)
@@ -118,6 +134,23 @@ final class PTPSessionTests: XCTestCase {
         XCTAssertEqual(commands.count, 1)
     }
 
+    func testPTPIPStyleCancelDrainsDataPhaseAndKeepsSessionReusable() async throws {
+        let transport = CancellableReceiveTransport()
+        let session = PTPSession(transport: transport)
+        let call = Task {
+            try await session.executeReceiving(operation: PTPConstants.getObject, parameters: [1],
+                                               sink: PTPDataSink(started: { _ in }, received: { _ in }),
+                                               timeoutNanoseconds: 10_000_000)
+        }
+        do { _ = try await call.value; XCTFail("Expected timeout") }
+        catch { XCTAssertEqual(error as? PTPSessionError, .timeout) }
+        let cancels = await transport.cancelCount
+        XCTAssertEqual(cancels, 1)
+        _ = try await session.execute(operation: PTPConstants.getDeviceInfo)
+        let sends = await transport.sendCount
+        XCTAssertEqual(sends, 1)
+    }
+
     func testValidNegativeResponseDoesNotInvalidateSession() async throws {
         let transport = RecordingTransport(responseCodes: [0x2019, 0x2005, 0x2001])
         let session = PTPSession(transport: transport)
@@ -205,4 +238,32 @@ private actor HeldTransport: PTPCommandTransport {
     }
 
     private enum TestError: Error { case requestNotReceived }
+}
+
+private actor CancellableReceiveTransport: PTPCommandTransport {
+    private(set) var cancelCount = 0
+    private(set) var sendCount = 0
+    private var pending: CheckedContinuation<PTPDataTransfer, any Error>?
+
+    func sendPTP(command: Data, data: Data?) async throws -> (response: Data, payload: Data) {
+        sendCount += 1
+        let transaction = try PTPCodec.decode(command).transactionID
+        return (PTPCodec.encode(type: .response, code: PTPConstants.responseOK, transactionID: transaction), Data())
+    }
+
+    func receivePTP(command: Data, sink: PTPDataSink) async throws -> PTPDataTransfer {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<PTPDataTransfer, any Error>) in
+            pending = continuation
+        }
+    }
+
+    func cancelPTP(transactionID: UInt32) async -> Bool {
+        cancelCount += 1
+        guard let pending else { return false }
+        self.pending = nil
+        pending.resume(returning: PTPDataTransfer(
+            response: PTPCodec.encode(type: .response, code: PTPConstants.responseOK, transactionID: transactionID),
+            receivedByteCount: 0, declaredByteCount: 0))
+        return true
+    }
 }

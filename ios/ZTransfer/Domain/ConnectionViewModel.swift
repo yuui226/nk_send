@@ -182,6 +182,18 @@ final class ConnectionViewModel: ObservableObject {
         await beginWiFiConnection(reconnect: reconnect)
     }
 
+    #if DEBUG
+    /// Starts the in-process catalog without requiring a camera or Wi-Fi.
+    func connectDebugSimulator() {
+        guard cameraSession == nil else { return }
+        let repository = CameraRepository(debugData: .shared)
+        cameraRepository = repository
+        cameraSession = CameraSession(repository: repository, wirelessMode: .ap)
+        state.wirelessMode = .ap
+        state.wifiPhase = .connected
+    }
+    #endif
+
     func cancelWiFiConnection() {
         guard state.wifiPhase != .connected else { return }
         wifiGeneration &+= 1

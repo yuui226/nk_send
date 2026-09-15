@@ -37,7 +37,7 @@ private struct PhotoListWorkspaceTransition: AnimatableModifier {
     }
 }
 
-struct PhotoListView: View {
+@MainActor struct PhotoListView: View {
     @StateObject private var model: PhotoListViewModel
     @StateObject private var queueModel: TransferQueueViewModel
     @ObservedObject private var directoryStore: DirectoryAccessStore
@@ -70,6 +70,7 @@ struct PhotoListView: View {
     @State private var queueTargetBounds: CGRect = .zero
     @State private var queueFlights: [PhotoListQueueFlight] = []
     @State private var heldFlightCount = 0
+    @State private var queueImpact = 0
 
     init(repository: CameraRepository, queue: TransferQueue = TransferQueue(), directory: DirectoryAccessStore = DirectoryAccessStore(), effectsStore: PhotoEffectsStore = PhotoEffectsStore(), onDisconnect: @escaping () -> Void) {
         _model = StateObject(wrappedValue: PhotoListViewModel(repository: repository))
@@ -114,7 +115,7 @@ struct PhotoListView: View {
                 ))
             } else {
             ScrollViewReader { reader in
-                ScrollView {
+                ScrollView(showsIndicators: false) {
                     Color.clear.frame(height: 1).id("photo-list-top")
                         .background {
                             GeometryReader { proxy in
@@ -138,6 +139,7 @@ struct PhotoListView: View {
                         } else {
                             ForEach(model.sections) { section in
                                 VStack(alignment: .leading, spacing: 8) {
+                                HStack(spacing: 8) {
                                 Button {
                                     withAnimation(ZTransferMotion.standard) {
                                         if collapsedDays.contains(section.day) { collapsedDays.remove(section.day) }
@@ -156,28 +158,58 @@ struct PhotoListView: View {
                                         Text("\(section.files.count)")
                                             .zTransferText(size: ZTransferMetrics.caption)
                                             .monospacedDigit()
-                                        Spacer(minLength: 0)
                                     }
-                                    .padding(.horizontal, 12).frame(height: 28)
-                                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14))
+                                    // Android's date control is an intrinsic
+                                    // width capsule; a trailing Spacer here made
+                                    // it stretch across the entire grid.
+                                    .padding(.horizontal, 14)
+                                    .frame(height: 38)
+                                    .background {
+                                        Capsule()
+                                            .fill(Color.white.opacity(0.78))
+                                            .overlay {
+                                                Capsule().stroke(Color.white.opacity(0.95), lineWidth: 1)
+                                            }
+                                            .shadow(color: .black.opacity(0.06), radius: 2, y: 1)
+                                    }
                                 }
                                 .buttonStyle(.plain)
+                                Spacer(minLength: 0)
+                                Button { enqueueSection(section.files) } label: {
+                                    Image(systemName: "plus").font(.system(size: 20, weight: .medium))
+                                        .foregroundStyle(ZTransferColors.accentBlue)
+                                        .frame(width: 44, height: 38)
+                                        .background(Color.white.opacity(0.78), in: Capsule())
+                                        .overlay(Capsule().stroke(Color.white.opacity(0.95), lineWidth: 1))
+                                }.buttonStyle(.plain)
+                                }
                                 if !collapsedDays.contains(section.day) { LazyVGrid(columns: columns, spacing: 6) {
-                                        ForEach(photoGridEntries(section.files, collapse: collapseBurstPhotos, expandedIDs: expandedBurstIDs)) { entry in
+                                        ForEach(photoGridEntries(section.files, burstIDByFile: model.burstIDByFile,
+                                                                 collapse: collapseBurstPhotos, expandedIDs: expandedBurstIDs)) { entry in
                                         let file = entry.firstFile
                                         VStack(alignment: .leading, spacing: 0) {
                                             if let session {
                                                 if case let .burst(group) = entry {
                                                     BurstThumbnailView(session: session, group: group,
                                                                        transferred: group.files.allSatisfy { model.transferredFileIDs.contains($0.id) },
-                                                                       queueStatus: queueStatus(for: file.id))
+                                                                       expanded: expandedBurstIDs.contains(group.id),
+                                                                       onExpand: { toggleBurst(group.id) },
+                                                                       onEnqueue: { enqueueSection(group.files) })
                                                 } else {
                                                     CameraThumbnailView(session: session, handle: file.id, file: file,
                                                                         transferred: model.transferredFileIDs.contains(file.id),
-                                                                        queueStatus: queueStatus(for: file.id))
+                                                                        inBurst: model.burstIDByFile[file.id] != nil,
+                                                                        queueTask: queueModel.task(for: file.id), liveProgress: queueModel.activeProgress)
                                                 }
                                                 } else { PlaceholderThumbnail() }
                                         }
+                                        // The grid proposes a width but may let a
+                                        // child determine the row height. Lock the
+                                        // cell itself to a square before gestures
+                                        // and overlays are applied.
+                                        .aspectRatio(1, contentMode: .fill)
+                                        .frame(maxWidth: .infinity, minHeight: 0)
+                                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                                         .contentShape(Rectangle())
                                         .background {
                                             GeometryReader { proxy in
@@ -188,14 +220,20 @@ struct PhotoListView: View {
                                             }
                                         }
                                         .onTapGesture { handleTap(entry, file: file) }
-                                        .onLongPressGesture { if !tapToPreview { selectedFile = file } }
+                                        .onLongPressGesture {
+                                            if case let .burst(group) = entry {
+                                                withAnimation(ZTransferMotion.standard) { expandedBurstIDs.insert(group.id) }
+                                                selectedFile = group.files[0]
+                                            } else if !tapToPreview { selectedFile = file }
+                                        }
+
                                     }
                                 } }
                                 }
                             }
                         }
                     }
-                    }.padding(.horizontal, ZTransferMetrics.pageHorizontal).padding(.top, 62)
+                    }.padding(.horizontal, ZTransferMetrics.pageHorizontal).padding(.top, 8)
                 }
                 .coordinateSpace(name: "photo-list-scroll")
                 .onPreferenceChange(PhotoListCellBoundsPreferenceKey.self) { bounds in
@@ -221,15 +259,11 @@ struct PhotoListView: View {
                     }
                 }
                 .overlay(alignment: .bottomLeading) { remoteEntryOverlay }
-                .overlay(alignment: .top) {
-                    // Android's FileListScreen places this floating row inside
-                    // statusBarsPadding().  The list itself is edge-to-edge,
-                    // so the inset must be applied to the overlay rather than
-                    // consuming list content height.
-                    GeometryReader { proxy in
-                        photoListTopControls
-                            .padding(.top, proxy.safeAreaInsets.top)
-                    }
+                // Keep the controls in the safe-area header. This gives them
+                // a stable top position instead of relying on the scroll view
+                // body's proposed height.
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    photoListTopControls
                 }
                 // Android keeps the files page in the workspace while the
                 // queue page slides over it: on return it enters from the
@@ -246,18 +280,17 @@ struct PhotoListView: View {
                 ))
             }
             }
-            if showingQueue {
-                GeometryReader { proxy in
-                    queueTopRightControls
-                        .padding(.horizontal, 12)
-                        .padding(.top, proxy.safeAreaInsets.top + 6)
-                        .transition(.opacity.combined(with: .scale(scale: 0.88, anchor: .trailing)))
-                }
-            }
+            if selectedFile != nil { previewOverlay }
+            // A single workspace-owned control survives both page transitions.
+            queueTopRightControls
+                .padding(.horizontal, 12)
+                .padding(.top, 0)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
             queueFlightOverlay
         }
         .task {
             if let session {
+                await session.setPreferHighThroughputTransfers(!showingRemote)
                 queueModel.attach(session: session, directory: directoryStore.directoryURL)
             }
             model.setNewMediaHandler { files in
@@ -269,6 +302,14 @@ struct PhotoListView: View {
                                             effects: effectsStore.settings)
             }
             model.load()
+        }
+        .onChange(of: showingRemote) { remote in
+            // MainActivity.shouldPreferHighThroughputTransfers: both files and
+            // transfer routes enable this; monitoring disables it.
+            if let session { Task { await session.setPreferHighThroughputTransfers(!remote) } }
+        }
+        .onDisappear {
+            if let session { Task { await session.setPreferHighThroughputTransfers(false) } }
         }
         .onChange(of: collapseBurstPhotos) { enabled in
             if !enabled { expandedBurstIDs.removeAll() }
@@ -321,49 +362,6 @@ struct PhotoListView: View {
                 }
             }
         }
-        .fullScreenCover(item: $selectedFile) { file in
-            if let session {
-                let files = model.sections.flatMap(\.files)
-                PhotoPreviewView(session: session, files: files, selectedFile: $selectedFile,
-                                 directory: directoryStore.directoryURL,
-                                 organizeByDate: organizeByDate,
-                                 queueTarget: queueTargetBounds == .zero ? nil : queueTargetBounds) { file in
-                    guard directoryStore.directoryURL != nil else {
-                        selectedFile = nil
-                        showingSettings = true
-                        return false
-                    }
-                    if !deferTransferStart {
-                        queueModel.enqueue(file, autoStart: session, directory: directoryStore.directoryURL, organizeByDate: organizeByDate, effects: effectsStore.settings)
-                    } else {
-                        queueModel.enqueue(file, organizeByDate: organizeByDate, effects: effectsStore.settings)
-                    }
-                    return true
-                } onEnqueueBurst: { burstFiles in
-                    guard directoryStore.directoryURL != nil else {
-                        selectedFile = nil
-                        showingSettings = true
-                        return false
-                    }
-                    if !deferTransferStart, let directory = directoryStore.directoryURL {
-                        queueModel.enqueue(burstFiles, autoStart: session, directory: directory,
-                                           organizeByDate: organizeByDate, effects: effectsStore.settings)
-                    } else {
-                        queueModel.enqueue(burstFiles, organizeByDate: organizeByDate, effects: effectsStore.settings)
-                    }
-                    return true
-                } onQueueFlightStarted: { count in
-                    heldFlightCount += count
-                } onQueueFlightFinished: { count in
-                    heldFlightCount = max(0, heldFlightCount - count)
-                }
-                .onAppear { model.pauseForPreview() }
-                .onDisappear {
-                    model.resumeAfterPreview()
-                    model.wakeThumbnailFill()
-                }
-            }
-        }
         .fullScreenCover(isPresented: $showingRemote) {
             if let session {
                 RemoteView(session: session).onDisappear {
@@ -404,9 +402,56 @@ struct PhotoListView: View {
         }
     }
 
-    private func queueStatus(for id: UInt32) -> TransferStatus? {
-        queueModel.snapshot.items.first(where: { $0.file.id == id &&
-            ($0.status == .waiting || $0.status == .transferring || $0.status == .failed || $0.status == .cancelled) })?.status
+    @ViewBuilder private var previewOverlay: some View {
+        if let session {
+                let files = model.sections.flatMap(\.files)
+                PhotoPreviewView(session: session, queueModel: queueModel, files: files,
+                                 burstIDByFile: model.burstIDByFile,
+                                 transferredFileIDs: model.transferredFileIDs, selectedFile: $selectedFile,
+                                 directory: directoryStore.directoryURL,
+                                 organizeByDate: organizeByDate,
+                                 queueTarget: queueTargetBounds == .zero ? nil : queueTargetBounds,
+                                 initialExpandedBurstIDs: expandedBurstIDs,
+                                 collapseBursts: collapseBurstPhotos,
+                                 onBurstChanged: { id, expanded in
+                                     if expanded { expandedBurstIDs.insert(id) }
+                                     else { expandedBurstIDs.remove(id) }
+                                 }) { file in
+                    guard directoryStore.directoryURL != nil else {
+                        selectedFile = nil
+                        showingSettings = true
+                        return false
+                    }
+                    if !deferTransferStart {
+                        queueModel.enqueue(file, autoStart: session, directory: directoryStore.directoryURL, organizeByDate: organizeByDate, effects: effectsStore.settings)
+                    } else {
+                        queueModel.enqueue(file, organizeByDate: organizeByDate, effects: effectsStore.settings)
+                    }
+                    return true
+                } onEnqueueBurst: { burstFiles in
+                    guard directoryStore.directoryURL != nil else {
+                        selectedFile = nil
+                        showingSettings = true
+                        return false
+                    }
+                    if !deferTransferStart, let directory = directoryStore.directoryURL {
+                        queueModel.enqueue(burstFiles, autoStart: session, directory: directory,
+                                           organizeByDate: organizeByDate, effects: effectsStore.settings)
+                    } else {
+                        queueModel.enqueue(burstFiles, organizeByDate: organizeByDate, effects: effectsStore.settings)
+                    }
+                    return true
+                } onQueueFlightStarted: { count in
+                    heldFlightCount += count
+                } onQueueFlightFinished: { count in
+                    heldFlightCount = max(0, heldFlightCount - count)
+                }
+                .onAppear { model.pauseForPreview() }
+                .onDisappear {
+                    model.resumeAfterPreview()
+                    model.wakeThumbnailFill()
+                }
+        }
     }
 
     private var photoListTopControls: some View {
@@ -469,11 +514,9 @@ struct PhotoListView: View {
             }
 
             Spacer(minLength: 0)
-
-            queueTopRightControls
         }
         .padding(.horizontal, 12)
-        .padding(.top, 6)
+        .padding(.top, 0)
         .animation(ZTransferMotion.standard, value: queueModel.snapshot.items.count)
         .onPreferenceChange(PhotoListSettingsAnchorPreferenceKey.self) { settingsAnchor = $0 }
         .onPreferenceChange(PhotoListFilterAnchorPreferenceKey.self) { filterAnchor = $0 }
@@ -484,13 +527,16 @@ struct PhotoListView: View {
     /// one source of truth for start/pause availability and pill animation.
     private var queueTopRightControls: some View {
         HStack(spacing: 8) {
-            if queueModel.snapshot.isTransferring {
+            let transferCount = queueModel.snapshot.items.filter { $0.status == .waiting || $0.status == .transferring }.count
+            if queueModel.snapshot.isTransferring && transferCount > 1 {
                 Button { queueModel.pause() } label: {
                     Image(systemName: "pause.fill").frame(width: 36, height: 36)
                 }
                 .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
-                .accessibilityLabel(AppLocalized.resource("cd_pause_after_current"))
-            } else if queueModel.snapshot.items.contains(where: { $0.status == .waiting }) {
+                .accessibilityLabel(AppLocalized.resource(queueModel.snapshot.pauseAfterCurrent
+                                                          ? "cd_pause_after_current_scheduled"
+                                                          : "cd_pause_after_current"))
+            } else if !queueModel.snapshot.isTransferring && queueModel.snapshot.items.contains(where: { $0.status == .waiting }) {
                 Button {
                     guard let session, let directory = directoryStore.directoryURL else { return }
                     queueModel.start(session: session, directory: directory)
@@ -503,32 +549,37 @@ struct PhotoListView: View {
                 .accessibilityLabel(AppLocalized.resource("cd_start_transfers"))
             }
 
-            if !queueModel.snapshot.items.isEmpty {
-                Button {
+            Button {
                     guard !showingQueue else { return }
                     withAnimation(.timingCurve(0.4, 0.0, 0.2, 1.0, duration: 0.22)) {
                         showingQueue = true
                     }
                 } label: {
-                    QueuePill(snapshot: queueModel.snapshot, heldCount: heldFlightCount)
+                    if !queueModel.snapshot.items.isEmpty {
+                        QueuePill(snapshot: queueModel.snapshot, activeProgress: queueModel.activeProgress,
+                              heldCount: heldFlightCount, impact: queueImpact)
                         .padding(.horizontal, 10)
                         .frame(height: 36)
-                        .background {
-                            GeometryReader { proxy in
-                                Color.clear.preference(
-                                    key: PhotoListQueueTargetPreferenceKey.self,
-                                    value: proxy.frame(in: .global)
-                                )
-                            }
-                        }
+                        .fixedSize(horizontal: true, vertical: false)
+                    } else {
+                    Image(systemName: "checklist")
+                        .frame(width: 44, height: 36)
+                    }
                 }
                 .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
-                .transition(.opacity.combined(with: .scale))
+                .background {
+                    GeometryReader { proxy in
+                        Color.clear.preference(key: PhotoListQueueTargetPreferenceKey.self,
+                                               value: proxy.frame(in: .global))
+                    }
+                }
+                .scaleEffect(heldFlightCount > 0 ? 1.06 : 1)
+                .animation(.spring(response: 0.28, dampingFraction: 0.68), value: heldFlightCount > 0)
                 .accessibilityLabel(AppLocalized.resource("cd_transfer"))
-            }
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
         .animation(ZTransferMotion.standard, value: queueModel.snapshot.items)
+        .animation(ZTransferMotion.standard, value: queueModel.snapshot.isTransferring)
         .onPreferenceChange(PhotoListQueueTargetPreferenceKey.self) { queueTargetBounds = $0 }
     }
 
@@ -592,13 +643,25 @@ struct PhotoListView: View {
         }
     }
 
+    private func toggleBurst(_ id: String) {
+        withAnimation(ZTransferMotion.standard) {
+            if expandedBurstIDs.contains(id) { expandedBurstIDs.remove(id) }
+            else { expandedBurstIDs.insert(id) }
+        }
+    }
+
+    private func enqueueSection(_ files: [CameraFile]) {
+        guard directoryStore.directoryURL != nil || deferTransferStart else { showingSettings = true; return }
+        for file in files {
+            if deferTransferStart { queueModel.enqueue(file, organizeByDate: organizeByDate, effects: effectsStore.settings) }
+            else { queueModel.enqueue(file, autoStart: session, directory: directoryStore.directoryURL, organizeByDate: organizeByDate, effects: effectsStore.settings) }
+        }
+    }
+
     private func handleTap(_ entry: PhotoGridEntry, file: CameraFile) {
         if case let .burst(group) = entry {
-            let shouldExpand = collapseBurstPhotos && !expandedBurstIDs.contains(group.id)
-            if shouldExpand {
-                _ = withAnimation(ZTransferMotion.standard) { expandedBurstIDs.insert(group.id) }
-                return
-            }
+            toggleBurst(group.id)
+            return
         }
         if tapToPreview {
             selectedFile = file
@@ -623,9 +686,7 @@ struct PhotoListView: View {
                     PhotoListQueueFlightView(
                         flight: flight,
                         viewport: proxy.frame(in: .global),
-                        target: queueTargetBounds == .zero
-                            ? CGRect(x: proxy.size.width - 74, y: proxy.safeAreaInsets.top + 18, width: 48, height: 36)
-                            : queueTargetBounds
+                        target: flight.target
                     )
                     .allowsHitTesting(false)
                 }
@@ -635,23 +696,35 @@ struct PhotoListView: View {
     }
 
     private func startListQueueFlight(for file: CameraFile) {
-        guard let from = cellBounds[file.id] else { return }
+        guard let from = cellBounds[file.id], !from.isEmpty,
+              !queueTargetBounds.isEmpty, !queueTargetBounds.isInfinite,
+              !queueTargetBounds.isNull else { return }
         let id = UUID()
-        queueFlights.append(PhotoListQueueFlight(id: id, file: file, from: from))
+        queueFlights.append(PhotoListQueueFlight(id: id, file: file, from: from, target: queueTargetBounds))
         heldFlightCount += 1
+        // Start the flight immediately. Thumbnail lookup is decoration and must
+        // never delay (or suppress) the visible Android-style flight.
         withAnimation(.timingCurve(0.5, 0.0, 0.8, 0.35, duration: 0.56)) {
-            guard let index = queueFlights.firstIndex(where: { $0.id == id }) else { return }
-            queueFlights[index].progress = 1
+            if let index = queueFlights.firstIndex(where: { $0.id == id }) {
+                queueFlights[index].progress = 1
+            }
         }
         Task { @MainActor in
             // Android's flight uses the synchronous in-memory thumbnail cache;
             // it never adds a camera request just to decorate a 560ms flight.
-            if let session, let data = try? await session.cachedThumbnail(file: file), let image = UIImage(data: data),
+            if let session {
+               let cached = try? await session.cachedThumbnail(file: file)
+               let data: Data?
+               if let cached { data = cached }
+               else { data = try? await session.thumbnail(file: file) }
+               if let data, let image = UIImage(data: data),
                let index = queueFlights.firstIndex(where: { $0.id == id }) {
                 queueFlights[index].image = image
+               }
             }
             try? await Task.sleep(nanoseconds: 600_000_000)
             heldFlightCount = max(0, heldFlightCount - 1)
+            queueImpact &+= 1
             queueFlights.removeAll { $0.id == id }
         }
     }
@@ -661,6 +734,7 @@ private struct PhotoListQueueFlight: Identifiable {
     let id: UUID
     let file: CameraFile
     let from: CGRect
+    let target: CGRect
     var progress: CGFloat = 0
     var image: UIImage?
 }
@@ -671,45 +745,55 @@ private struct PhotoListQueueFlightView: View {
     let target: CGRect
 
     var body: some View {
-        GeometryReader { _ in
-            let p = min(max(flight.progress, 0), 1)
-            let start = CGPoint(x: flight.from.midX - viewport.minX, y: flight.from.midY - viewport.minY)
-            // Android lands on the capsule's right edge, 28dp inward, and
-            // computes the control point from an adaptive lift plus a short
-            // inward bow for near-vertical paths.
-            let endOnCapsule = CGPoint(
-                x: target.maxX - 28 - viewport.minX,
-                y: target.midY - viewport.minY
-            )
-            let dx = abs(endOnCapsule.x - start.x)
-            let lift = min(90, 36 + 0.35 * dx)
-            let minApex = 12.0
-            let controlY = max(
-                min(start.y, endOnCapsule.y) - lift,
-                (4 * minApex - start.y - endOnCapsule.y) / 2
-            )
-            let bow = 52 * (1 - min(dx / 160, 1))
-            let control = CGPoint(
-                x: (start.x + endOnCapsule.x) / 2 - bow,
-                y: controlY
-            )
-            let position = quadraticBezier(start: start, control: control, end: endOnCapsule, t: p)
-            let width = max(10, flight.from.width * (1 - p * 0.56))
-            let height = max(10, flight.from.height * (1 - p * 0.56))
-            Group {
-                if let image = flight.image {
-                    Image(uiImage: image).resizable().scaledToFill()
-                } else {
-                    RoundedRectangle(cornerRadius: 8).fill(.white.opacity(0.32))
+        Group {
+            if let image = flight.image {
+                Image(uiImage: image).resizable().scaledToFill()
+            } else {
+                ZTransferColors.accentBlue.overlay {
+                    Image(systemName: "photo").foregroundStyle(.white)
                 }
             }
-            .frame(width: width, height: height)
-            .clipShape(RoundedRectangle(cornerRadius: max(4, width * 0.08)))
-            .overlay(RoundedRectangle(cornerRadius: max(4, width * 0.08)).stroke(.white.opacity(0.34), lineWidth: 1))
-            .position(position)
-            .opacity(1 - p * 0.2)
-            .rotationEffect(.degrees(Double(p) * 8))
         }
+        .frame(width: 44, height: 44)
+        .clipShape(RoundedRectangle(cornerRadius: 9))
+        .overlay(RoundedRectangle(cornerRadius: 9).stroke(.white.opacity(0.8), lineWidth: 1))
+        .modifier(QueueFlightArc(
+            progress: flight.progress,
+            start: CGPoint(x: flight.from.midX - viewport.minX, y: flight.from.midY - viewport.minY),
+            end: CGPoint(x: target.maxX - 28 - viewport.minX, y: target.midY - viewport.minY)
+        ))
+        .animation(.timingCurve(0.5, 0.0, 0.8, 0.35, duration: 0.56), value: flight.progress)
+    }
+}
+
+/// Interpolate the path parameter, not the resulting endpoints. This recomputes
+/// the Bezier position on each animation frame and never rotates the viewport.
+@preconcurrency
+private struct QueueFlightArc: AnimatableModifier {
+    var progress: CGFloat
+    let start: CGPoint
+    let end: CGPoint
+
+    nonisolated var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    func body(content: Content) -> some View {
+        let t = min(max(progress, 0), 1)
+        let dx = abs(end.x - start.x)
+        let lift = min(90, 36 + 0.35 * dx)
+        let control = CGPoint(
+            x: (start.x + end.x) / 2 - 52 * (1 - min(dx / 160, 1)),
+            y: max(min(start.y, end.y) - lift, (48 - start.y - end.y) / 2)
+        )
+        let point = quadraticBezier(start: start, control: control, end: end, t: t)
+        let appear = min(t / 0.12, 1)
+        let scale = (0.7 + 0.3 * appear) * (1 - 0.62 * t)
+        return content
+            .scaleEffect(scale)
+            .opacity(appear * (t > 0.94 ? (1 - t) / 0.06 : 1))
+            .position(point)
     }
 }
 
@@ -737,7 +821,7 @@ private struct PhotoListQueueTargetPreferenceKey: PreferenceKey {
 /// AP has no public RSSI API on iOS, so it retains the existing Wi-Fi glyph
 /// until a platform-equivalent signal value is available; no synthetic level
 /// is introduced.
-private struct PhotoListSignalIcon: View {
+struct PhotoListSignalIcon: View {
     let isUSB: Bool
     let wirelessMode: WirelessMode?
 
@@ -839,33 +923,37 @@ private enum PhotoGridEntry: Identifiable {
     }
 }
 
-private func photoGridEntries(_ files: [CameraFile], collapse: Bool = true, expandedIDs: Set<String> = []) -> [PhotoGridEntry] {
+private func photoGridEntries(_ files: [CameraFile], burstIDByFile: [UInt32: String], collapse: Bool = true,
+                              expandedIDs: Set<String> = []) -> [PhotoGridEntry] {
     guard collapse else { return files.map(PhotoGridEntry.photo) }
-    let groups = PhotoCatalogGrouping.bursts(in: files)
-    let groupedIDs = groups.reduce(into: Set<UInt32>()) { result, group in result.formUnion(group.files.map(\.id)) }
-    let byFirstID = Dictionary(uniqueKeysWithValues: groups.compactMap { group in group.files.first.map { ($0.id, group) } })
+    let visibleGroups = Dictionary(grouping: files.compactMap { file -> (String, CameraFile)? in
+        burstIDByFile[file.id].map { ($0, file) }
+    }, by: \.0).mapValues { $0.map(\.1) }
     var entries: [PhotoGridEntry] = []
+    var collected = Set<String>()
     for file in files {
-        if let group = byFirstID[file.id] {
-            if expandedIDs.contains(group.id) {
-                entries.append(contentsOf: group.files.map(PhotoGridEntry.photo))
-            } else {
-                entries.append(.burst(group))
-            }
+        guard let id = burstIDByFile[file.id], let members = visibleGroups[id], members.count >= 2 else {
+            entries.append(.photo(file)); continue
         }
-        else if !groupedIDs.contains(file.id) { entries.append(.photo(file)) }
+        if collected.insert(id).inserted {
+            entries.append(.burst(BurstPhotoGroup(id: id, files: members)))
+            if expandedIDs.contains(id) { entries.append(contentsOf: members.map(PhotoGridEntry.photo)) }
+        }
     }
     return entries
 }
 
 struct QueuePill: View {
     let snapshot: TransferQueueSnapshot
+    let activeProgress: TransferActiveProgress?
     let heldCount: Int
+    var impact: Int = 0
     @State private var showDoneLabel = false
     @State private var sawActiveBatch = false
     @State private var previousAllDone: Bool?
     @State private var countingVisible = false
     @State private var doneTask: Task<Void, Never>?
+    @State private var impactScale = false
     private var downloadRemaining: Int {
         snapshot.items.reduce(into: 0) { count, item in
             if item.status == .waiting || item.status == .transferring {
@@ -884,20 +972,28 @@ struct QueuePill: View {
         snapshot.items.first(where: { $0.status == .transferring })
     }
 
+    private var activeSpeed: Int64 {
+        guard snapshot.isTransferring else { return 0 }
+        return activeProgress?.retainedBytesPerSecond ?? activeItem?.bytesPerSecond ?? 0
+    }
+
     private var displayRemainingCount: Int { max(0, downloadRemaining - heldCount) }
     private var hasActive: Bool { downloadRemaining > 0 || generationCount > 0 || heldCount > 0 }
     private var allDone: Bool { downloadRemaining == 0 && generationCount == 0 }
     private var paused: Bool { !snapshot.isTransferring && downloadRemaining > 0 }
     private var hasCancelled: Bool { snapshot.items.contains { $0.status == .cancelled } }
     private var collapsedToIcon: Bool {
-        let allRemainingInFlight = downloadRemaining > 0 && heldCount >= downloadRemaining
-        return allRemainingInFlight || (!paused && !countingVisible && !allDone) || (allDone && !showDoneLabel)
+        // Keep the carrier visible while a thumbnail is flying. Collapsing it
+        // to the checklist icon changes the target frame mid-flight and makes
+        // the Android-style animation appear to disappear.
+        return (!hasActive && !countingVisible) || (allDone && !showDoneLabel && heldCount == 0)
     }
 
     var body: some View {
         ZStack(alignment: .leading) {
             if let activeItem, snapshot.isTransferring {
-                LiquidTransferProgressFill(progress: activeItem.progress, seed: activeItem.id.uuidString)
+                LiquidTransferProgressFill(progress: activeProgress?.taskID == activeItem.id ? activeProgress!.fraction : activeItem.progress, seed: activeItem.id.uuidString, isCapsule: true)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .clipShape(Capsule())
                     .transition(.opacity)
             }
@@ -924,8 +1020,8 @@ struct QueuePill: View {
                         .foregroundStyle(ZTransferColors.accentBlue)
                 } else {
                     HStack(spacing: 8) {
-                        if let activeItem, activeItem.bytesPerSecond > 0 {
-                            Text(speedText(activeItem.bytesPerSecond))
+                        if activeSpeed > 0 {
+                            Text(speedText(activeSpeed))
                                 .monospacedDigit()
                                 .foregroundStyle(ZTransferColors.accentBlue)
                                 .transition(.opacity.combined(with: .move(edge: .leading)))
@@ -939,6 +1035,8 @@ struct QueuePill: View {
             }
         }
         .clipShape(Capsule())
+        .scaleEffect(impactScale ? 1.10 : 1)
+        .animation(.spring(response: 0.22, dampingFraction: 0.62), value: impactScale)
         .animation(ZTransferMotion.standard, value: displayRemainingCount)
         .animation(ZTransferMotion.standard, value: generationCount)
         .animation(ZTransferMotion.standard, value: showDoneLabel)
@@ -947,6 +1045,14 @@ struct QueuePill: View {
                 sawActiveBatch = true
                 doneTask?.cancel()
                 showDoneLabel = false
+            }
+        }
+        .onChange(of: impact) { _ in
+            impactScale = true
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 180_000_000)
+                guard !Task.isCancelled else { return }
+                impactScale = false
             }
         }
         .task(id: "\(hasActive)-\(paused)-\(displayRemainingCount)") {
@@ -997,13 +1103,16 @@ private struct CameraThumbnailView: View {
     let handle: UInt32
     var file: CameraFile?
     var transferred: Bool = false
-    var queueStatus: TransferStatus? = nil
+    var inBurst: Bool = false
+    var queueTask: TransferQueueItem? = nil
+    var liveProgress: TransferActiveProgress? = nil
     @State private var image: UIImage?
 
     var body: some View {
+        GeometryReader { geometry in
         ZStack(alignment: .topLeading) {
             Group {
-                if let image { Image(uiImage: image).resizable().scaledToFill() }
+                if let image { Image(uiImage: image).resizable().scaledToFill().frame(width: geometry.size.width, height: geometry.size.height).clipped() }
                 else { RoundedRectangle(cornerRadius: 8).fill(Color.black.opacity(0.08)).overlay { ProgressView() } }
             }
             if let file {
@@ -1012,32 +1121,43 @@ private struct CameraThumbnailView: View {
                         .font(.system(size: 9, weight: .medium))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 4).padding(.vertical, 2)
-                        .background(extensionColor(file.fileExtension), in: RoundedRectangle(cornerRadius: 6))
+                        .background(extensionColor(file.fileExtension), in: UnevenRoundedRectangle(cornerRadii: .init(bottomTrailing: 6)))
+                }
+                if inBurst {
+                    BurstGlyph(size: 13)
+                        .frame(width: 23, height: 13)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 4).padding(.vertical, 2)
+                        .background(Color.teal.opacity(0.85), in: UnevenRoundedRectangle(cornerRadii: .init(bottomLeading: 6)))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                 }
                 if file.isProtected {
                     Image(systemName: "key.fill")
                         .font(.system(size: 10, weight: .bold))
+                        .rotationEffect(.degrees(90))
                         .foregroundStyle(.black.opacity(0.8))
                         .padding(4)
-                        .background(Color.yellow.opacity(0.9), in: RoundedRectangle(cornerRadius: 6))
+                        .background(Color.yellow.opacity(0.9), in: UnevenRoundedRectangle(cornerRadii: .init(topTrailing: 6)))
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                 }
-                if let queueStatus {
-                    TransferStatusBadge(status: queueStatus)
+                if let task = queueTask, task.status != .completed {
+                    Color.black.opacity(0.35).frame(width: geometry.size.width, height: geometry.size.height)
+                    TransferStatusBadge(status: task.status, progress: liveProgress?.taskID == task.id ? liveProgress!.fraction : task.progress, taskID: task.id)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
                         .padding(4)
                 } else if transferred {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundStyle(.white)
-                        .padding(3)
-                        .background(ZTransferColors.statusConnected, in: Circle())
+                    TransferredPhotoBadge()
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
                         .padding(4)
                 }
             }
         }
-        .frame(maxWidth: .infinity).aspectRatio(1, contentMode: .fit).clipShape(RoundedRectangle(cornerRadius: 8))
+        .frame(width: geometry.size.width, height: geometry.size.height)
+        }
+        .aspectRatio(1, contentMode: .fit)
+        .frame(maxWidth: .infinity, minHeight: 0)
+        .clipped()
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .task {
             guard image == nil else { return }
             if let file, let data = try? await session.thumbnail(file: file), let image = UIImage(data: data) {
@@ -1049,7 +1169,7 @@ private struct CameraThumbnailView: View {
     }
 
     private func extensionColor(_ ext: String) -> Color {
-        switch ext {
+        switch ext.lowercased() {
         case ".jpg": return ZTransferColors.accentBlue.opacity(0.85)
         case ".nef": return Color.purple.opacity(0.85)
         case ".mov", ".mp4": return ZTransferColors.accentOrange.opacity(0.85)
@@ -1062,33 +1182,134 @@ private struct BurstThumbnailView: View {
     let session: CameraSession
     let group: BurstPhotoGroup
     var transferred: Bool = false
-    var queueStatus: TransferStatus? = nil
+    var expanded = false
+    var onExpand: () -> Void = {}
+    var onEnqueue: () -> Void = {}
     var body: some View {
-        ZStack(alignment: .bottomTrailing) {
-            CameraThumbnailView(session: session, handle: group.files[0].id, file: group.files[0],
-                                transferred: transferred, queueStatus: queueStatus)
-            HStack(spacing: 4) {
-                Image(systemName: "square.stack.3d.up.fill")
-                    .font(.system(size: 10, weight: .semibold))
-                Text(String(format: AppLocalized.resource("burst_collection_count"), group.files.count))
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+        GeometryReader { proxy in
+            let side = min(proxy.size.width, proxy.size.height)
+            let cardSide = side * 0.86
+            ZStack {
+                ForEach(Array(group.files.prefix(3).enumerated().reversed()), id: \.element.id) { item in
+                    CameraThumbnailView(session: session, handle: item.element.id, file: item.element)
+                        .frame(width: cardSide, height: cardSide)
+                        .clipped()
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .rotationEffect(.degrees(item.offset == 0 ? 0 : item.offset == 1 ? -5 : 5))
+                        .offset(x: item.offset == 0 ? 0 : item.offset == 1 ? -side * 0.025 : side * 0.025,
+                                y: item.offset == 0 ? 0 : side * 0.02)
+                }
+                VStack {
+                    HStack {
+                        HStack(spacing: 4) {
+                            BurstGlyph(size: 13).frame(width: 23, height: 13)
+                            Text("\(group.files.count)")
+                        }.font(.system(size: 12, weight: .bold)).foregroundStyle(.white)
+                            .padding(.horizontal, 8).padding(.vertical, 5)
+                            .background(Color.teal.opacity(0.9), in: Capsule())
+                        Spacer(minLength: 0)
+                    }
+                    Spacer(minLength: 0)
+                    HStack {
+                        burstButton("plus", size: side * 0.32, action: onEnqueue)
+                        Spacer(minLength: 0)
+                        burstArrowButton(size: side * 0.32, expanded: expanded, action: onExpand)
+                    }
+                }.frame(width: cardSide, height: cardSide)
+            }.frame(width: proxy.size.width, height: proxy.size.height)
+        }.aspectRatio(1, contentMode: .fit)
+    }
+
+    private func burstButton(_ icon: String, size: CGFloat, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: size * 0.4, weight: .semibold))
+                .foregroundStyle(ZTransferColors.accentBlue)
+                .frame(width: size, height: size)
+                .background(.thinMaterial, in: Circle())
+                .overlay(Circle().stroke(Color.white.opacity(0.55), lineWidth: 1))
+        }.buttonStyle(.plain)
+    }
+
+    private func extensionColor(_ ext: String) -> Color {
+        ext.lowercased() == ".nef" ? Color.purple.opacity(0.9) : ZTransferColors.accentBlue.opacity(0.9)
+    }
+
+    private func burstArrowButton(size: CGFloat, expanded: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: "chevron.right")
+                .rotationEffect(.degrees(expanded ? 180 : 0))
+            .font(.system(size: size * 0.4, weight: .semibold))
+            .foregroundStyle(ZTransferColors.accentBlue)
+            .frame(width: size, height: size)
+            .background(.thinMaterial, in: Circle())
+            .overlay(Circle().stroke(Color.white.opacity(0.55), lineWidth: 1))
+            .animation(.easeInOut(duration: 0.24), value: expanded)
+        }.buttonStyle(.plain)
+    }
+
+}
+
+/// Shared burst marker matching Android: stacked frames with motion trails.
+struct BurstGlyph: View {
+    var size: CGFloat = 13
+    var body: some View {
+        HStack(spacing: size * 0.18) {
+            GeometryReader { proxy in
+                Path { p in
+                    let unit = proxy.size.width / 24
+                    for x in [1.0, 5.0] { p.addRect(CGRect(x: x * unit, y: 3 * unit, width: 2 * unit, height: 18 * unit)) }
+                    p.addRect(CGRect(x: 9 * unit, y: 3 * unit, width: 14 * unit, height: 18 * unit))
+                    p.move(to: CGPoint(x: 10 * unit, y: 19 * unit))
+                    p.addLine(to: CGPoint(x: 14 * unit, y: 13 * unit))
+                    p.addLine(to: CGPoint(x: 17 * unit, y: 17 * unit))
+                    p.addLine(to: CGPoint(x: 19 * unit, y: 14 * unit))
+                    p.addLine(to: CGPoint(x: 22 * unit, y: 19 * unit))
+                    p.closeSubpath()
+                }.fill(style: FillStyle(eoFill: true))
+            }.frame(width: size, height: size)
+            VStack(alignment: .leading, spacing: size * 0.11) {
+                ForEach([0.64, 0.45, 0.27], id: \.self) { ratio in
+                    Capsule().frame(width: size * ratio, height: size * 0.09)
+                }
             }
-            .foregroundStyle(.white)
-            .padding(.horizontal, 6).padding(.vertical, 4)
-            .background(ZTransferColors.statusConnected.opacity(0.9), in: Capsule())
-            .padding(6)
         }
     }
 }
 
-private struct TransferStatusBadge: View {
+struct TransferStatusBadge: View {
     let status: TransferStatus
+    var progress: Double = 0
+    var taskID: UUID?
     var body: some View {
-        Image(systemName: status == .transferring ? "arrow.down.circle.fill" :
-              status == .waiting ? "clock.fill" : status == .failed ? "exclamationmark.triangle.fill" : "xmark.circle.fill")
-            .font(.system(size: 16, weight: .bold))
-            .foregroundStyle(.white)
-            .padding(3)
-            .background(status == .failed ? ZTransferColors.statusError : ZTransferColors.accentBlue, in: Circle())
+        ZStack {
+            Circle().fill(.black.opacity(0.45))
+            if status == .transferring {
+                SmoothTransferProgress(target: progress, resetKey: taskID) { value in
+                    ZStack {
+                        Circle().stroke(.white.opacity(0.25), lineWidth: 2)
+                        Circle().trim(from: 0, to: value)
+                            .stroke(ZTransferColors.accentBlue, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                            .rotationEffect(.degrees(-90))
+                    }.frame(width: 15, height: 15)
+                }
+            } else {
+                Image(systemName: status == .completed ? "checkmark" : status == .waiting ? "clock" : status == .failed ? "exclamationmark" : "xmark")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(status == .completed ? ZTransferColors.statusConnected : status == .failed ? ZTransferColors.statusError : status == .waiting ? ZTransferColors.accentYellow : ZTransferColors.secondaryText)
+            }
+        }.frame(width: 22, height: 22)
+        .animation(.linear(duration: 0.2), value: status)
+    }
+}
+
+struct TransferredPhotoBadge: View {
+    var body: some View {
+        Image(systemName: "checkmark")
+            .font(.system(size: 15, weight: .semibold))
+            .foregroundStyle(ZTransferColors.statusConnected)
+            .frame(width: 24, height: 24)
+            .background(.regularMaterial, in: Circle())
+            .overlay(Circle().stroke(ZTransferColors.statusConnected.opacity(0.72), lineWidth: 1))
     }
 }

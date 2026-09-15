@@ -73,7 +73,7 @@ actor CameraConnectionService {
             }
             try Task.checkCancellation()
             let session = PTPSession(transport: SelectedUSBPTPTransport(transport: transport, deviceID: deviceID))
-            let repository = CameraRepository(session: session)
+            let repository = CameraRepository(session: session, isUSBConnection: true)
             _ = try await repository.loadDeviceInfo()
             try Task.checkCancellation()
             activeDeviceID = deviceID

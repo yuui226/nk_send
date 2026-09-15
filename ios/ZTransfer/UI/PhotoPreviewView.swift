@@ -68,9 +68,12 @@ private func decodeLocalOriginalPreview(at url: URL, route: LocalOriginalPreview
 }
 
 struct PhotoPreviewView: View {
+    @ObservedObject var queueModel: TransferQueueViewModel
     let session: CameraSession
     let files: [CameraFile]
     let burstGroups: [BurstPhotoGroup]
+    let burstIDByFile: [UInt32: String]
+    let transferredFileIDs: Set<UInt32>
     let queueTarget: CGRect?
     let directory: URL?
     let organizeByDate: Bool
@@ -79,6 +82,7 @@ struct PhotoPreviewView: View {
     /// rejects the task. The queue flight must not play without a real task.
     let onEnqueue: (CameraFile) -> Bool
     let onEnqueueBurst: ([CameraFile]) -> Bool
+    let onBurstChanged: (String, Bool) -> Void
     let onQueueFlightStarted: (Int) -> Void
     let onQueueFlightFinished: (Int) -> Void
     @State private var index: Int
@@ -98,6 +102,7 @@ struct PhotoPreviewView: View {
     @State private var fhdUnavailable: Set<UInt32> = []
     @State private var exifFinished: Set<UInt32> = []
     @State private var queueDragOffset: CGFloat = 0
+    @State private var currentZoomed = false
     @State private var queueFlightTask: Task<Void, Never>?
     @State private var queueFlightActive = false
     @State private var queueFlightProgress: CGFloat = 0
@@ -110,27 +115,43 @@ struct PhotoPreviewView: View {
     /// the current page halfway through its load.
     @State private var localOriginalURLs: [UInt32: URL]
 
-    init(session: CameraSession, files: [CameraFile], selectedFile: Binding<CameraFile?>,
+    init(session: CameraSession, queueModel: TransferQueueViewModel, files: [CameraFile],
+         burstIDByFile: [UInt32: String] = [:], transferredFileIDs: Set<UInt32> = [],
+         selectedFile: Binding<CameraFile?>,
          directory: URL? = nil, organizeByDate: Bool = false,
          queueTarget: CGRect? = nil,
+         initialExpandedBurstIDs: Set<String> = [],
+         collapseBursts: Bool = true,
+         onBurstChanged: @escaping (String, Bool) -> Void = { _, _ in },
          onEnqueue: @escaping (CameraFile) -> Bool = { _ in false },
          onEnqueueBurst: @escaping ([CameraFile]) -> Bool = { _ in false },
          onQueueFlightStarted: @escaping (Int) -> Void = { _ in },
          onQueueFlightFinished: @escaping (Int) -> Void = { _ in }) {
+        self.queueModel = queueModel
         self.session = session; self.files = files; self.directory = directory
         self.burstGroups = PhotoCatalogGrouping.bursts(in: files)
+        self.burstIDByFile = burstIDByFile
+        self.transferredFileIDs = transferredFileIDs
         self.queueTarget = queueTarget
         self.organizeByDate = organizeByDate; _selectedFile = selectedFile
         self.onEnqueue = onEnqueue; self.onEnqueueBurst = onEnqueueBurst
         self.onQueueFlightStarted = onQueueFlightStarted
         self.onQueueFlightFinished = onQueueFlightFinished
-        let entries = collapsedPhotoPreviewEntries(files: files)
+        self.onBurstChanged = onBurstChanged
+        var entries = collapseBursts ? collapsedPhotoPreviewEntries(files: files, burstIDByFile: burstIDByFile)
+                                     : files.map { PhotoPreviewEntry.photo($0, burstID: burstIDByFile[$0.id]) }
+        for position in entries.indices.reversed() {
+            if case .burst(let group) = entries[position], initialExpandedBurstIDs.contains(group.id) {
+                entries = expandPhotoPreviewBurst(entries, at: position)
+            }
+        }
+        _expandedBurstIDs = State(initialValue: initialExpandedBurstIDs)
         let first = selectedFile.wrappedValue ?? files.first
         let initialIndex = first.flatMap { selected in
             entries.firstIndex { entry in
                 switch entry {
                 case .photo(let file, _): return file.id == selected.id
-                case .burst(let group): return group.files.first?.id == selected.id
+                case .burst: return false
                 }
             }
         } ?? 0
@@ -154,7 +175,7 @@ struct PhotoPreviewView: View {
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            Color.black.opacity(0.74).ignoresSafeArea()
             TabView(selection: $index) {
                 ForEach(Array(previewEntries.enumerated()), id: \.element.id) { itemIndex, entry in
                     Group {
@@ -171,19 +192,23 @@ struct PhotoPreviewView: View {
                                              if unavailable { fhdUnavailable.insert(file.id) }
                                              else { fhdUnavailable.remove(file.id) }
                                          },
+                                         onRemoteExif: { metadata in
+                                             guard currentPhoto?.id == file.id else { return }
+                                             exif = metadata
+                                             exifFinished.insert(file.id)
+                                         },
                                          onDisplayImage: { image in
                                              displayedImages[file.id] = image
                                              guard histogramVisible, currentPhoto?.id == file.id else { return }
                                              histogramBars = image.map(luminanceHistogram) ?? []
-                                         })
+                                         }, onTap: { selectedFile = nil },
+                                         onZoomedChange: { zoomed in if index == itemIndex { currentZoomed = zoomed } },
+                                         isCurrent: index == itemIndex)
                         case .burst(let group):
-                            BurstCollectionPreview(session: session, group: group) {
-                                expandBurst(group)
-                            }
+                            BurstCollectionPreview(session: session, group: group, onTap: { selectedFile = nil })
                         }
                     }
                         .tag(itemIndex)
-                        .padding(.horizontal, 12)
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
@@ -194,14 +219,14 @@ struct PhotoPreviewView: View {
                     .onChanged { value in
                         guard !queueFlightActive else { return }
                         let translation = value.translation
-                        guard translation.height < 0,
+                        guard currentPhoto != nil, !currentZoomed, !queueFlightActive, translation.height < 0,
                               -translation.height >= abs(translation.width) * 1.15 else {
                             return
                         }
                         queueDragOffset = max(-180, translation.height)
                     }
                     .onEnded { value in
-                        guard !queueFlightActive,
+                        guard !currentZoomed, !queueFlightActive,
                               previewEntries.indices.contains(index) else { return }
                         let translation = value.translation
                         guard translation.height < 0,
@@ -210,13 +235,10 @@ struct PhotoPreviewView: View {
                             withAnimation(ZTransferMotion.standard) { queueDragOffset = 0 }
                             return
                         }
-                        switch previewEntries[index] {
-                        case .photo(let file, _): startQueueFlight(for: file)
-                        case .burst(let group): startQueueFlight(for: group.files[0])
-                        }
+                        if let file = currentPhoto { startQueueFlight(for: file) }
                     }
             )
-            if queueFlightActive, previewEntries.indices.contains(index) {
+            if queueFlightActive, let queueTarget, previewEntries.indices.contains(index) {
                 GeometryReader { proxy in
                     PhotoPreviewQueueFlightView(
                         progress: queueFlightProgress,
@@ -224,8 +246,8 @@ struct PhotoPreviewView: View {
                         images: queueFlightImages,
                         from: CGPoint(x: proxy.size.width / 2, y: proxy.size.height * 0.46),
                         target: CGPoint(
-                            x: (queueTarget?.midX ?? (proxy.size.width - 74)) - proxy.frame(in: .global).minX,
-                            y: (queueTarget?.midY ?? (proxy.safeAreaInsets.top + 18)) - proxy.frame(in: .global).minY
+                            x: queueTarget.midX - proxy.frame(in: .global).minX,
+                            y: queueTarget.midY - proxy.frame(in: .global).minY
                         ),
                         size: CGSize(width: proxy.size.width * 0.72, height: proxy.size.height * 0.52),
                         stackCount: queueFlightCount
@@ -234,93 +256,74 @@ struct PhotoPreviewView: View {
                 }
                 .ignoresSafeArea()
             }
-            VStack {
-                HStack {
-                    Button { selectedFile = nil } label: { Image(systemName: "xmark").font(.system(size: 18, weight: .semibold)).frame(width: 44, height: 44) }
-                    Spacer()
-                }
-                Spacer()
-                if let exif { PreviewExifBar(exif: exif).padding(.bottom, 78) }
+            if let exif, currentPhoto != nil {
+                PreviewExifBar(exif: exif)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                    .padding(.horizontal, 12).padding(.bottom, 24)
             }
-            .foregroundStyle(.white)
-            if previewEntries.indices.contains(index), let file = previewEntries[index].file {
-                VStack {
-                    HStack {
-                        Text(file.fileName)
-                            .font(.system(size: 16, weight: .semibold, design: .rounded))
-                            .lineLimit(1)
-                            // Android PreviewInfoText scales the filename to
-                            // its measured width and clips only as a last
-                            // resort; SwiftUI's default ellipsis changes the
-                            // visible text, so prefer the same shrink-first
-                            // behavior here.
-                            .minimumScaleFactor(0.5)
-                            .allowsTightening(true)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .id(file.id)
-                            .transition(.opacity.combined(with: .move(edge: .top)))
-                        Spacer(minLength: 44)
+            if let file = currentPhoto {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        Text("\(index + 1)/\(previewEntries.count) · \(file.fileName)")
+                            .font(.system(size: 16, weight: .semibold))
+                            .lineLimit(1).minimumScaleFactor(0.5).allowsTightening(true)
+                        if let task = queueModel.task(for: file.id), task.status != .completed {
+                            TransferStatusBadge(status: task.status,
+                                progress: queueModel.activeProgress?.taskID == task.id ? queueModel.activeProgress!.fraction : task.progress,
+                                taskID: task.id)
+                        } else if transferredOriginal(file) { TransferredPhotoBadge() }
                     }
-                    .padding(.horizontal, 12)
+                    .foregroundStyle(.white.opacity(0.88))
                     .frame(height: 36)
-                    .animation(ZTransferMotion.standard, value: index)
-                    Spacer()
-                }
-                .foregroundStyle(.white.opacity(0.88))
-                .transition(.opacity)
-            }
-            if previewEntries.indices.contains(index),
-               let burstID = previewEntries[index].burstID,
-               let group = burstGroups.first(where: { $0.id == burstID }) {
-                Button {
-                    withAnimation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.28)) {
-                        previewEntries = collapsePhotoPreviewBurst(previewEntries, burstID: group.id)
-                        _ = expandedBurstIDs.remove(group.id)
-                        index = previewEntries.firstIndex { entry in
-                            if case .burst(let value) = entry { return value.id == group.id }
-                            return false
-                        } ?? index
+                    if burstIDByFile[file.id] != nil || file.isProtected {
+                        HStack(spacing: 8) {
+                            if burstIDByFile[file.id] != nil {
+                                Label(AppLocalized.resource("burst_label"), systemImage: "square.on.square")
+                                    .padding(.horizontal, 9).padding(.vertical, 5)
+                                    .background(Color.teal.opacity(0.85), in: RoundedRectangle(cornerRadius: 9))
+                            }
+                            if file.isProtected {
+                                Label(AppLocalized.resource("filter_protected"), systemImage: "key.fill")
+                                    .padding(.horizontal, 9).padding(.vertical, 5)
+                                    .background(.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 9))
+                                    .overlay(RoundedRectangle(cornerRadius: 9).stroke(.white.opacity(0.22), lineWidth: 1))
+                            }
+                        }
+                        .font(.system(size: 12, weight: .medium)).foregroundStyle(.white)
                     }
-                } label: {
-                    Image(systemName: "chevron.left").frame(width: 44, height: 44)
                 }
-                .font(.system(size: 18, weight: .semibold))
-                .background(.black.opacity(0.28), in: Capsule())
-                .foregroundStyle(.white)
-                .padding(.leading, 16)
-                .padding(.top, 54)
+                .padding(.top, 6).padding(.leading, 12).padding(.trailing, 184)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
-            VStack {
-                Spacer()
-                HStack(spacing: 12) {
-                    Spacer()
-                    if let file = currentPhoto, !file.fileExtension.lowercased().contains(".mov"), !file.fileExtension.lowercased().contains(".mp4") {
-                        Button { withAnimation(ZTransferMotion.standard) { histogramVisible.toggle() } } label: {
-                            Image(systemName: "chart.bar.fill").frame(width: 44, height: 44)
+            if let file = currentPhoto {
+                VStack(spacing: 12) {
+                    if photoPreviewCollectionIndex(previewEntries, memberIndex: index) != nil {
+                        PreviewCircleButton(symbol: "chevron.left", accessibilityKey: "cd_collapse") {
+                            collapseCurrentBurst()
                         }
-                        .opacity(histogramVisible ? 1 : 0.82)
                     }
-                    if currentPhoto != nil {
-                        Button {
-                            withAnimation(ZTransferMotion.standard) {
-                                rotationQuarterTurns = (rotationQuarterTurns + 1) % 4
-                                rotationDegrees = -90 * Double(rotationQuarterTurns)
-                            }
-                        } label: { Image(systemName: "rotate.left").frame(width: 44, height: 44) }
-                    }
-                    Button {
-                        guard previewEntries.indices.contains(index) else { return }
-                        switch previewEntries[index] {
-                        case .photo(let file, _): startQueueFlight(for: file)
-                        case .burst(let group): startQueueFlight(for: group.files[0])
+                    if !isVideo(file) {
+                        PreviewCircleButton(symbol: "chart.bar.fill", accessibilityKey: "cd_preview_histogram", active: histogramVisible) {
+                            histogramVisible.toggle()
                         }
-                    } label: { Image(systemName: "plus").frame(width: 44, height: 44) }
+                        PreviewCircleButton(symbol: "rotate.left", accessibilityKey: "cd_rotate_photo") {
+                            rotationDegrees -= 90
+                            rotationQuarterTurns = ((Int(-rotationDegrees / 90) % 4) + 4) % 4
+                        }
+                    }
+                    PreviewCircleButton(symbol: "plus", accessibilityKey: "cd_transfer") { startQueueFlight(for: file) }
                 }
-                .font(.system(size: 18, weight: .semibold))
-                .background(.black.opacity(0.28), in: Capsule())
-                .padding(.trailing, 16)
-                .padding(.bottom, 22)
+                .padding(.trailing, 20).padding(.bottom, 80)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+            } else if previewEntries.indices.contains(index), case let .burst(group) = previewEntries[index] {
+                HStack(spacing: 22) {
+                    PreviewCircleButton(symbol: "plus", accessibilityKey: "cd_transfer_group", size: 48) {
+                        if let first = group.files.first { startQueueFlight(for: first, burstFiles: group.files) }
+                    }
+                    PreviewCircleButton(symbol: "chevron.right", accessibilityKey: "cd_expand") { expandBurst(group) }
+                }
+                .padding(.bottom, 112)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
             }
             if histogramVisible, !histogramBars.isEmpty {
                 HStack(alignment: .bottom, spacing: 2) {
@@ -332,7 +335,8 @@ struct PhotoPreviewView: View {
                 .padding(8)
                 .background(.black.opacity(0.35), in: RoundedRectangle(cornerRadius: 12))
                 .transition(.opacity)
-                .padding(.bottom, 94)
+                .padding(.leading, 20).padding(.bottom, 72)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
             }
         }
         .onAppear {
@@ -356,6 +360,7 @@ struct PhotoPreviewView: View {
                 }()
                 exif = nil
                 exifLoading = false
+                currentZoomed = false
             }
         }
         .onChange(of: histogramVisible) { visible in
@@ -375,11 +380,12 @@ struct PhotoPreviewView: View {
                 exifLoading = false
                 return
             }
-            // PreviewImage owns the single thumbnail/FHD pipeline. EXIF is
-            // independent; requesting another preview here would duplicate
-            // the camera read and race the Android-ordered loader.
-            exif = try? await session.exif(file: file)
-            exifFinished.insert(file.id)
+            // Remote EXIF is loaded by PreviewImage in the same interactive
+            // reservation as FHD. Local originals remain on this path above.
+            guard localOriginalURLs[file.id] != nil else {
+                exifLoading = false
+                return
+            }
             exifLoading = false
         }
     }
@@ -389,39 +395,65 @@ struct PhotoPreviewView: View {
         return previewEntries[index].file
     }
 
+    private func isVideo(_ file: CameraFile) -> Bool {
+        [".mov", ".mp4"].contains(file.fileExtension.lowercased())
+    }
+
+    private func transferredOriginal(_ file: CameraFile) -> Bool {
+        transferredFileIDs.contains(file.id) || localOriginalURLs[file.id] != nil ||
+            queueModel.task(for: file.id)?.status == .completed
+    }
+
+    private func collapseCurrentBurst() {
+        guard let collectionIndex = photoPreviewCollectionIndex(previewEntries, memberIndex: index),
+              case let .burst(group) = previewEntries[collectionIndex] else { return }
+        withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.26)) {
+            previewEntries = collapsePhotoPreviewBurst(previewEntries, burstID: group.id)
+            expandedBurstIDs.remove(group.id)
+            onBurstChanged(group.id, false)
+            index = collectionIndex
+            selectedFile = group.files.first
+        }
+    }
+
     private func expandBurst(_ group: BurstPhotoGroup) {
         guard let collectionIndex = previewEntries.firstIndex(where: { entry in
             if case .burst(let value) = entry { return value.id == group.id }
             return false
         }) else { return }
         withAnimation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.28)) {
-            previewEntries = expandPhotoPreviewBurst(previewEntries, at: collectionIndex)
+            if !expandedBurstIDs.contains(group.id) { previewEntries = expandPhotoPreviewBurst(previewEntries, at: collectionIndex) }
             expandedBurstIDs.insert(group.id)
+            onBurstChanged(group.id, true)
             index = collectionIndex + 1
             selectedFile = group.files.first
         }
     }
 
-    private func startQueueFlight(for file: CameraFile) {
-        let burst = burstGroups.first(where: { $0.files.first?.id == file.id })
-        guard burst == nil ? onEnqueue(file) : onEnqueueBurst(burst!.files) else { return }
-        let flightCount = burst?.files.count ?? 1
+    private func startQueueFlight(for file: CameraFile, burstFiles: [CameraFile]? = nil) {
+        guard burstFiles.map(onEnqueueBurst) ?? onEnqueue(file) else { return }
+        let flightCount = burstFiles?.count ?? 1
         onQueueFlightStarted(flightCount)
         queueFlightCount = flightCount
         queueFlightActive = true
         queueFlightProgress = 0
         queueFlightImage = nil
         queueFlightImages = []
-        withAnimation(.timingCurve(0.4, 0.0, 0.2, 1.0, duration: 0.56)) {
-            queueDragOffset = -max(240, UIScreen.main.bounds.height * 0.42)
+        withAnimation(.timingCurve(0.4, 0.0, 0.2, 1.0, duration: 0.155)) {
+            queueDragOffset = -132
+        }
+        withAnimation(.spring(response: 0.36, dampingFraction: 0.78).delay(0.155)) {
+            queueDragOffset = 0
+        }
+        withAnimation(.timingCurve(0.5, 0, 0.8, 0.35, duration: 0.56).delay(0.035)) {
             queueFlightProgress = 1
         }
         queueFlightTask?.cancel()
         queueFlightTask = Task { @MainActor in
-            let burstFiles = burst?.files.prefix(3).map { $0 } ?? [file]
+            let flightFiles = burstFiles?.prefix(3).map { $0 } ?? [file]
             var cachedImages: [UIImage] = []
             var cachedLayers: [UIImage?] = []
-            for candidate in burstFiles {
+            for candidate in flightFiles {
                 if let data = try? await session.cachedThumbnail(file: candidate),
                    let image = UIImage(data: data) {
                     cachedImages.append(image)
@@ -436,10 +468,8 @@ struct PhotoPreviewView: View {
             }
             try? await Task.sleep(nanoseconds: 560_000_000)
             guard !Task.isCancelled else { return }
-            withAnimation(ZTransferMotion.standard) {
-                queueDragOffset = 0
-                queueFlightActive = false
-            }
+            queueDragOffset = 0
+            queueFlightActive = false
             onQueueFlightFinished(flightCount)
             queueFlightCount = 0
             queueFlightTask = nil
@@ -508,6 +538,27 @@ private func previewQuadraticBezier(start: CGPoint, control: CGPoint, end: CGPoi
     )
 }
 
+private struct PreviewCircleButton: View {
+    let symbol: String
+    let accessibilityKey: String
+    var active = false
+    var size: CGFloat = 44
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: symbol == "plus" ? size * 0.5 : 20, weight: .semibold))
+                .foregroundStyle(ZTransferColors.accentBlue)
+                .frame(width: size, height: size)
+                .background(.regularMaterial, in: Circle())
+                .overlay(Circle().stroke(.white.opacity(active ? 0.9 : 0.55), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(AppLocalized.resource(accessibilityKey))
+    }
+}
+
 /// Android's collapsed burst page: a compact stack of up to three cached
 /// thumbnails with a count badge and an explicit expand affordance.  It never
 /// starts a camera request solely to draw the stack; uncached members remain
@@ -515,7 +566,7 @@ private func previewQuadraticBezier(start: CGPoint, control: CGPoint, end: CGPoi
 private struct BurstCollectionPreview: View {
     let session: CameraSession
     let group: BurstPhotoGroup
-    let onExpand: () -> Void
+    let onTap: () -> Void
 
     var body: some View {
         GeometryReader { proxy in
@@ -528,26 +579,21 @@ private struct BurstCollectionPreview: View {
                         .offset(x: index == 0 ? -12 : index == 1 ? 12 : 0,
                                 y: index == 2 ? 2 : 5)
                 }
-                Text("\(group.files.count)")
+                HStack(spacing: 4) {
+                    BurstGlyph().frame(width: 23, height: 13)
+                    Text("\(group.files.count)")
+                }
                     .font(.system(size: 13, weight: .bold, design: .rounded))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 5)
-                    .background(.black.opacity(0.62), in: Capsule())
+                    .background(Color.teal.opacity(0.9), in: Capsule())
                     .frame(width: side, height: side, alignment: .topLeading)
                     .padding(8)
-                Button(action: onExpand) {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 18, weight: .semibold))
-                        .frame(width: 44, height: 44)
-                }
-                .foregroundStyle(.white)
-                .background(.black.opacity(0.32), in: Circle())
-                .frame(width: side, height: side, alignment: .bottomTrailing)
-                .padding(8)
             }
             .frame(width: side, height: side)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .onTapGesture(perform: onTap)
         }
     }
 }
@@ -584,13 +630,19 @@ private struct PreviewImage: View {
     let zoomEnabled: Bool
     let allowRemoteThumbnailFallback: Bool
     let onFHDUnavailable: (Bool) -> Void
+    let onRemoteExif: (PhotoExif?) -> Void
     let onDisplayImage: (UIImage?) -> Void
+    let onTap: () -> Void
+    let onZoomedChange: (Bool) -> Void
+    let isCurrent: Bool
     @State private var thumbnail: UIImage?
     @State private var image: UIImage?
     @State private var remoteThumbnailUnavailable = false
     @State private var highResolutionAlpha: CGFloat = 0
     @State private var scale: CGFloat = 1
     @State private var offset: CGSize = .zero
+    @State private var gestureStartScale: CGFloat = 1
+    @State private var gestureStartOffset: CGSize = .zero
 
     var body: some View {
         ZStack {
@@ -636,17 +688,39 @@ private struct PreviewImage: View {
         .scaleEffect(scale).offset(offset).rotationEffect(.degrees(rotationDegrees))
         .gesture(MagnificationGesture().onChanged { value in
             guard zoomEnabled else { return }
-            scale = min(max(value, 1), 4)
+            scale = min(max(gestureStartScale * value, 1), 4)
+            onZoomedChange(scale > 1.01)
         }.onEnded { _ in
             guard zoomEnabled else { return }
-            withAnimation(ZTransferMotion.standard) { scale = min(max(scale, 1), 4) }
+            gestureStartScale = scale
+            if scale <= 1.01 { offset = .zero; gestureStartOffset = .zero }
         })
         .simultaneousGesture(DragGesture().onChanged { value in
-            if zoomEnabled, scale > 1 { offset = value.translation }
-        }.onEnded { _ in if !zoomEnabled || scale <= 1 { offset = .zero } })
+            if zoomEnabled, scale > 1.01 {
+                offset = CGSize(width: gestureStartOffset.width + value.translation.width,
+                                height: gestureStartOffset.height + value.translation.height)
+            }
+        }.onEnded { _ in
+            gestureStartOffset = scale > 1.01 ? offset : .zero
+            if scale <= 1.01 { offset = .zero }
+        })
         .onTapGesture(count: 2) {
             guard zoomEnabled else { return }
-            withAnimation(ZTransferMotion.standard) { scale = scale > 1 ? 1 : 2 }
+            withAnimation(.linear(duration: 0.24)) {
+                scale = scale > 1.01 ? 1 : 2.5
+                if scale <= 1.01 { offset = .zero }
+            }
+            gestureStartScale = scale
+            gestureStartOffset = offset
+            onZoomedChange(scale > 1.01)
+        }
+        .onTapGesture { if scale <= 1.01 { onTap() } }
+        .onChange(of: isCurrent) { current in
+            if !current { scale = 1; offset = .zero; gestureStartScale = 1; gestureStartOffset = .zero }
+        }
+        .onChange(of: rotationDegrees) { _ in
+            scale = 1; offset = .zero; gestureStartScale = 1; gestureStartOffset = .zero
+            onZoomedChange(false)
         }
         .task(id: file.id) {
             thumbnail = nil
@@ -679,8 +753,9 @@ private struct PreviewImage: View {
             }
             await session.setFHDActive(true)
             defer { Task { await session.setFHDActive(false) } }
-            async let previewData = try? await session.preview(handle: file.id)
-            if let data = await previewData, let highResolution = UIImage(data: data) {
+            let (previewData, metadata) = await session.previewAndExif(file: file)
+            onRemoteExif(metadata)
+            if let data = previewData, let highResolution = UIImage(data: data) {
                 image = highResolution
                 onFHDUnavailable(false)
                 onDisplayImage(highResolution)

@@ -11,6 +11,10 @@ finish_terminal() {
     if [[ -t 0 ]]; then
       read -r -p 'Press Enter to close this window...' _ || true
     fi
+  elif [[ "${TERM_PROGRAM:-}" == "Apple_Terminal" ]] && command -v osascript >/dev/null 2>&1; then
+    # Finder-launched .command scripts run in a temporary Terminal window.
+    # Close only that frontmost Terminal window after a successful build.
+    osascript -e 'tell application "Terminal" to close front window' >/dev/null 2>&1 || true
   fi
   exit "$status"
 }
@@ -84,10 +88,42 @@ ditto "$APP_PATH" "$PAYLOAD_DIR/ZTransfer.app"
 echo "APP: $APP_ARTIFACT"
 echo "IPA: $IPA_ARTIFACT"
 
+# If an iOS Simulator is already booted, also build the simulator slice,
+# reinstall over the existing app, and launch it. The device archive above is
+# not installable on a simulator, so this is a separate simulator build.
+SIMCTL="$(command -v xcrun || true)"
+if [[ -n "$SIMCTL" ]]; then
+  BOOTED_SIM_IDS="$(xcrun simctl list devices booted 2>/dev/null | sed -nE 's/.*\(([A-F0-9-]+)\) \(Booted\).*/\1/p')"
+  if [[ -n "$BOOTED_SIM_IDS" ]]; then
+    SIM_DERIVED_DATA="$DERIVED_DATA-simulator"
+    echo "Booted simulator(s) detected; building simulator app..."
+    SIM_BUILD_ARGS=(-project "$PROJECT_ROOT/ios/ZTransfer.xcodeproj" -scheme ZTransfer
+      -configuration Debug -destination "generic/platform=iOS Simulator"
+      -derivedDataPath "$SIM_DERIVED_DATA" CODE_SIGNING_ALLOWED=NO build)
+    xcodebuild "${SIM_BUILD_ARGS[@]}"
+    SIM_APP_PATH="$SIM_DERIVED_DATA/Build/Products/Debug-iphonesimulator/ZTransfer.app"
+    while IFS= read -r BOOTED_SIM_ID; do
+      [[ -z "$BOOTED_SIM_ID" ]] && continue
+      xcrun simctl install "$BOOTED_SIM_ID" "$SIM_APP_PATH"
+      xcrun simctl launch "$BOOTED_SIM_ID" "$BUNDLE_ID"
+      echo "Installed and launched ZTransfer on simulator $BOOTED_SIM_ID."
+    done <<< "$BOOTED_SIM_IDS"
+    # A booted simulator is the explicit UI-debug target; do not subsequently
+    # block on a merely paired (possibly disconnected) physical device.
+    SKIP_PHYSICAL_DEVICE=1
+  fi
+fi
+
 # Pick an explicitly requested device first, otherwise the first available
 # CoreDevice. A disconnected phone does not make the build fail; when a device
 # is found, install and launch are required and failures keep this window open.
 DEVICE_ID="${IOS_DEVICE_ID:-}"
+if [[ "${SKIP_PHYSICAL_DEVICE:-0}" == "1" && -z "${IOS_DEVICE_ID:-}" ]]; then
+  DEVICE_ID=""
+  echo "Simulator target handled; skipping physical-device installation."
+  echo "iOS Debug build complete."
+  exit 0
+fi
 LEGACY_DEVICE_ID=""
 if [[ -z "$DEVICE_ID" ]] && command -v xcrun >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1; then
   DEVICE_JSON="$DERIVED_DATA/devices.json"

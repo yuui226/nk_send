@@ -35,6 +35,8 @@
 
 ### 当前场景门：照片列表 → 传输
 
+本场景的专用执行文档是 [iOS 照片列表与传输链路复刻跟踪](./iOS照片列表与传输链路复刻跟踪.md)。总表登记全局任务状态，专用文档登记完整调用链、分组依赖、安卓依据和验证矩阵；两者状态必须同步，不能用专用文档替代总表任务编号。
+
 在 20–32 全部满足闭环条件前，不切换到设置、工作台、监看或 GPS。验收顺序固定为：
 
 1. 相册扫描、日期/连拍分组、缩略图缓存与预取；
@@ -43,7 +45,40 @@
 4. 队列顶栏/胶囊、传输卡片、派生图异步生成、暂停/继续、取消/重试/清空和异常恢复；
 5. 仅当上述每一项都有安卓依据、iOS 可观察行为、异常/取消/恢复路径、自动化证据后，才把本场景任务标记完成。
 
-当前继续推进第 3–4 项的同一执行链路：本轮核对并修复重试 FIFO、暂停边界、清空/撤下竞态、会话替换、目录重新选择和原片/派生图生命周期。逐场景证据见下方“队列执行场景核对”。尚未关闭 20–32 场景门，不切换到无关页面。
+当前先维护下方“场景差异总表”，按调用链系统审查，再按依赖成组实现。下载流式写盘、策略与头快照这一组已经落地；剩余差异分组登记，不再发现一处就立即跨组修改。20–32 场景门仍未关闭。
+
+## 场景差异总表（当前执行清单）
+
+先按源码完整审查本场景，再按依赖成组实现和验证。此表覆盖整条链的审查范围；“待完整审查”不等于没有问题，也不算完成。每个结论须同时核对安卓分支、iOS 调用方和测试覆盖，不能仅凭函数名或旧注释判断。Android 源码固定使用本分支 `app/`，不修改。
+
+| 编号 | 场景/依赖 | 安卓事实来源 | 当前结论与下一步 |
+|---|---|---|---|
+| L01 | 初次扫描→批次发布→缩略图预取 | `CameraViewModel.loadFiles/prefetchPublishedFileBatch`；`NikonCamera.streamMergedFileInfo/streamStaDirectMergedFileInfo` | iOS 已有每卡反转、真实日期归并及 1/3/12 批次。确认预取必须在下一元数据批次前结束；仍须完整扫描命令回放，不能用分组模型测试替代。 |
+| L02 | 刷新/前台暂停→快照恢复→失败重连 | `CameraViewModel.loadFiles/setFhdActive/onCameraTransportLost` | iOS 有 generation/快照/已发布列表保留；需要完整核对 STA 扫描异常是否触发宿主重连，以及会话替换、元数据部分成功时的终态。 |
+| L03 | 可见缩略图请求和后台预取共享 | `CameraViewModel.loadThumbnail/prefetchThumbnail/fetchThumbnailToDisk` | 已补预取共乘的等待者计数，预取完成点移至原始字节写盘之后；仍共用单个 Flight 表。安卓区分 inflightThumbs/inflightPrefetches，可见请求等预取后重查缓存；失败接管和取消边界仍未闭环。 |
+| L04 | 缩略图解码、负缓存、内存预算 | 同上及 `fetchAndDecodeThumb` | 已移除后台预取图片 transform，并把磁盘缓存改回相机原始字节，仅可见加载处理图片，避免重复裁剪。**剩余差异**：内存仍保存压缩 Data 并按整机内存分配预算，安卓缓存解码 Bitmap 且按进程堆预算。解码失败负缓存和可见纹理复用须一起对齐。 |
+| L05 | 磁盘缓存迁移/对账/清扫/写盘失败 | `ThumbnailDiskCache`；`CameraViewModel.thumbnailDiskWritesBlocked` | 已有键、90天清扫、目录重建和成功扫描对账测试；磁盘写入阻断后的停止/唤醒状态尚须从调用方完整审查。 |
+| L06 | 新照片事件→目录更新→自动入队 | `CameraViewModel` 新媒体流；`TransferViewModel.addFiles` | 有身份去重和自动入口；需逐步回放扫描期间 ObjectAdded、两卡相同逻辑照片及失败枚举，检查不重复入队/不丢事件。 |
+| P01 | 日期/连拍/筛选→显示集合 | `FileListScreen.groupFilesByDate/computeBurstGroups`、筛选状态 | 已有分组/过滤模型测试；筛选前连拍归属、分页快照、日期收合状态与网格角标几何待完整审查。 |
+| P02 | 点击/长按→预览或入队 | `FileListScreen` 文件格入口与列表操作设置 | 待完整审查长按阈值、触感、目录缺失、连拍封面/成员和快速重复触发，统一登记明确差异。 |
+| P03 | 预览首帧→本地原片/FHD→EXIF/直方图 | `PhotoPreview` 的 source snapshot；`CameraViewModel.loadFhdPreview/loadExif` | 已接入本地优先与 340ms 等待；当前页远端 FHD→EXIF 已由 `CameraSession.previewAndExif` 共用一个交互预约，仍需完整核对 RAW/TIFF/视频回退、纹理缓存预算、解码尺寸、错误/取消和邻页预取边界。 |
+| P04 | 预览翻页/连拍展开/缩放/旋转/关闭 | `PhotoPreviewOverlay/PreviewPage/ZoomablePreviewViewport` | **明确未完成**：iOS 通用缩放拖动未完整实现安卓手势边界、锚点转场与中断恢复；按一组 UI 状态机搬，不逐个按钮修。 |
+| P05 | 预览上滑入队→飞行→胶囊接住 | `previewQueueDragDirection/previewQueueVisualOffset`、预览飞行与 `QueuePill` | 已有方向门限和入队前预检；剩余残影/接住弹簧、取消/超时和多次飞行计数待完整审查并同组实现。 |
+| T01 | 入队快照→FIFO→暂停/撤下/重试 | `PendingTransferQueue/processQueue/retrySingleTask/retryFailed` | 13 项真实 queue actor 场景已验证；保留既有结果，后续协议与 UI 分组不得改变执行顺序。 |
+| T02 | 目录恢复/索引→原片/半成品查重 | `TransferViewModel.init/processQueue/ExistingFileNameIndex` | 已有身份、大小、日期目录和启动清扫；本轮明确完整半成品改名失败不能复制，须删后重下。仍需保存权限失效与调用方状态完整核对。 |
+| T03 | 大小解析→整包/分块→完成校验 | `NikonCamera.downloadToFile/shouldUsePartialObjectDownload/downloadChunkSize`；`MainActivity.shouldPreferHighThroughputTransfers` | **本轮已实现并回放**：两种数据路径、未知大小回退、短完整分块继续、失败后是否降级、声明长度/零推进/最终大小。照片列表和队列页都启用高吞吐，监看关闭，单文件快照冻结。 |
+| T04 | 实收字节→有界文件头→正式保存 | `downloadToFile.writeChunk/DownloadStats`；`processQueue` 保存阶段 | **本轮已实现并回放**：PTP/IP 逐包写入，最多256KiB头；原名/后缀改名→复制校验→删除临时文件；**剩余**：worker 内 `renameBroken` 记忆和系统目录提供者能力映射。 |
+| T05 | 数据事务异常→内部 Cancel/排空→继续或断连 | `NikonCamera.transferTransaction/abortActiveTransaction` | **进行中**：真实 PTP/IP socket 已回放调用方协程取消、写盘失败、剩余数据/PING/超时、GetObjectSize 超时及会话复用；仍补关闭重连、USB 关闭与半成品组合验证，详见专用链路文档。这里的 Cancel 是内部异常收尾，不是用户取消当前下载。 |
+| T06 | 普通锁/FHD与EXIF预约→下载让路→空闲心跳 | `CameraIoGate` 及普通 `ioMutex` 调用方 | **进行中**：已纠正缩略图/目录误用交互优先级，普通命令取 FIFO 锁，仅下载分块受预约阻挡；扫描普通与 STA direct 元数据已按安卓请求预算批量持锁，当前页 FHD→EXIF 已共用预约。仍须补扫描取消/断线、邻页预取边界及整组回放（L01/P03）。 |
+| T07 | 原片完成→头快照/头补读→派生预检/双worker | `processQueue/parseCameraFrameMetadata/launchPhotoFrameExport` | **本轮已接通**：新传捕获、存在/续传相机头、元数据缓存、可见信息缺失失败、不读本地EXIF兜底、原片不回滚。已有离线缺失/新传无二次请求证据，剩余续传/重复/取消完整回放。 |
+| T08 | 传输速度→保留速度→完成平均速度 | `endToEndBytesPerSecond/retainLastValidTransferSpeed`、`DownloadStats` | iOS 已加入安卓同义的无效采样保留、跨文件短间隙 retained speed、真实下载完成后的端到端平均 MB/s 入模与队列胶囊展示；仍需与所有队列卡片动画/完成态展示联合回放。 |
+| U01 | 列表顶栏/信号/筛选窗及滚动布局 | `FileListScreen` 顶栏、筛选和文件格 | 范围已纳入；宽度、显隐、文案、切换及日期拨轮动画待完整审查，不能只依据此前截图修复记录打勾。 |
+| U02 | 列表/队列切页与共享执行入口 | `MainActivity` 工作区；`QueueExecutionButton` | **确定未完成**：32dp材质/图标、180ms暂停着色、按压回弹、提示和预览显隐。按共享宿主一次实现两个入口。 |
+| U03 | 队列胶囊状态摘要和飞行联动 | `QueuePill`、队列摘要函数 | 已有摘要与350ms宽限；飞行计数、暂停/派生/Done切换、接住回弹须与 P05/T08 联合验证。 |
+| U04 | 卡片正文/徽标/错误/效果/速度/时长 | `TransferTaskCardContent/TaskStatusBadge/transferTaskFileSizeText` | **确定差异**：iOS完成后无平均速度；错误与效果可能同时显示；行间距5/6而安卓6/7、胶囊间距6而安卓5，颜色字号和失败按钮预留也未逐项迁移。 |
+| U05 | 卡片胶囊/液态进度/收合/中断及重组 | `TransferPillVisibility/transferCardPillEnter/TransferProgressMotion` | **确定差异**：安卓0.78缩放、damping0.62/stiffness360、60/150/80ms交错，iOS仍用通用easeOut/不同缩放；恢复200ms与退出280ms未分开。独立进度仍发布在共享ViewModel，需实证只更新活动卡。 |
+
+执行分组依赖：**T03/T04/T07 当前组收尾 → T05/T06 协议生命周期 → T08/U02–U05及P05 状态展示 → L01–L06 扫描缓存完整闭环 → P01–P04/U01 列表预览完整闭环**。每组开工前把待审查项追到最后一个出口；组内统一改、统一验证，新增发现回填本表。
 
 ## 任务表
 
@@ -60,7 +95,7 @@
 | 9 | B. USB 有线连接与 PTP | 相机信息与能力读取 | 🟡 进行中 | 已修：补回 FunctionalMode 和五组数组，保留 vendor description、operations、events、properties、capture/image formats，之后读取制造商、型号、版本和序列号。 | 待完成：连接层能力初始化和异常重试；解析边界使用固定自动化样本验证，不依赖相机日志。 | 继续按旧文档安卓函数逐项补齐，并补对应测试 |
 | 10 | B. USB 有线连接与 PTP | 文件对象与元数据解析 | ✅ 已完成 | 已修：ObjectInfo 文件名从固定偏移 52 读取；32 位无符号大小保留 0xFFFFFFFF；目录成功但不形成照片；扩展名从实际文件名获取，缺文件名时按安卓格式表和 handle 低 16 位生成兜底名称。 | 144 项 Xcode 模拟器测试通过；真机样本留任务 60/61 | 保持回归，出现安卓差异时开修复项 |
 | 11 | B. USB 有线连接与 PTP | 缩略图和原图读取 | 🟡 进行中 | 本轮统一 USB/Wi‑Fi 经过同一 PTP 仓库，并保留安卓 FHD→LargeThumb→标准缩略图顺序；缓存并发合并、负缓存和 ImageCaptureCore 错误映射已补齐。新增 `AndroidThumbnailProcessor`，在缩略图进入 iOS 内存/磁盘缓存前按安卓 `cropLetterbox`（97% 近黑、15% 上限、对称校验、每侧 +1px）及视频 16:9 暗带回退规则处理；预览现在按安卓目标目录规则优先读取本地原片，按文件类型区分 direct bitmap、RAW embedded JPEG、TIFF/视频 CAMERA_FHD，命中可解码原片时不占用 FHD 通道，EXIF/直方图也优先从本地文件读取，未命中才走缩略图→FHD；视频现在仅显示压暗缩略图和占位提示，不发送 FHD 请求。 | 待修：RAW 嵌入 JPEG 的完整 Nikon 解码回退、视频固定帧回退的完整 UI/自动化覆盖；当前路由、ImageIO 嵌入预览尝试和本地命中已接入，但仍需补齐所有文件类型和完整状态路径。 | 继续按安卓 `PhotoPreview.kt` 的原片优先路径搬运，并把固定帧结果接入预览 UI 后再验收 |
-| 12 | B. USB 有线连接与 PTP | USB 下载保存 | 🟡 进行中 | 已有：ImageCaptureCore 下载接口和进度回调；队列任务保存入队时锁定的目标目录，按安卓规则写入根目录或 `ZTyyyy-MM-dd` 子目录；队列启动时扫描根目录及合法日期目录并复用 `TransferDirectoryIndex`，已存在判断按选定目录内的规范化文件名+大小匹配，未知大小沿用 0xFFFFFFFF 规则；PTP 下载现在使用 `.nkpart_<大小>.<拍摄时间>_<文件名>` 身份临时文件，保留断线/取消半成品并按 4 MiB 边界续传，完整大小会直接进入保存阶段；保存阶段按安卓顺序先改名，改名被目录提供者拒绝时复制到同名副本并清理临时文件；同名不同内容不会覆盖，按安卓副本命名规则选择 `(1)…(99)`；PTP 超时/失效统一映射为安卓“相机连接中断，重连后重试可续传”；恢复已保存目录时会在后台清扫根目录及合法日期目录中的 `.nkpart_`、`.nkframe_` 遗留临时文件，运行期重试仍保留当前半成品。 | 待修：复制回退尚无目录提供者拒绝改名的模拟样本；真实大文件待任务 60。 | 继续按旧文档安卓函数逐项补齐，并补对应测试 |
+| 12 | B. USB 有线连接与 PTP | USB 下载保存 | 🟡 进行中 | 已按 `NikonCamera.downloadToFile` 补齐整文件/分块策略、未知大小解析失败后的整文件回退、实际收到字节推进、响应声明长度校验、首个零字节 unsupported 才回退、断点身份及 4MiB 截断。PTP/IP 逐包写盘；ImageCaptureCore 经完整数据相位适配器。新下载保存先尝试原名和可用后缀改名，再复制并校验长度；完整半成品仅尝试改名，失败删除重下。已有目录锁定和启动清扫保留。 | `CameraDownloadTests` 覆盖生产仓库命令序列和实际文件字节；仍缺运行期记忆 `renameBroken`、取消时 Cancel/排空恢复、USB 数据相位声明长度/逐包进度适配。 | 按下方场景差异表 T05/T06 成组处理 |
 | 13 | B. USB 有线连接与 PTP | 断线/重连恢复 | ⚪ 待开始 | 尚未登记实现 | 尚无可标记的完整闭环 | 先整理安卓入口、状态、错误和动画，再实现 iOS |
 | 14 | C. 连接页 | 连接页结构 | 🟡 进行中 | 本轮修正：按本机 Xcode SwiftUI App 模板补齐生成启动屏/场景清单；抽出 ConnectionPage/ConnectionMethodCard，按 HomeScreen.kt 使用 56 顶栏、真机测得 310/250 双卡、12 卡间距、10 GPS 间距及 (可用高度−56−310−62)×0.28/1.28×0.94 的顶部比例留白… | 待完成：Z 标/按钮几何、工作台位置和安卓截图逐项测量验收。 | 继续按旧文档安卓函数逐项补齐，并补对应测试 |
 | 15 | C. 连接页 | USB 卡片状态动画 | 🟡 进行中 | 本轮修正：呼吸保留安卓 2.4 秒、0.38/0.82 分段五次平滑曲线和 Wi‑Fi 半周期错位；将逐帧更新移到捕获卡片内容的变换修饰器，后台或禁用时暂停时钟。完整连接成功图标转场及真机帧率仍待验证。 | 存在局部实现，尚未满足完整验收条件 | 继续按旧文档安卓函数逐项补齐，并补对应测试 |
@@ -76,11 +111,11 @@
 | 25 | D. 照片列表与大图预览 | 大图预览容器 | 🟡 进行中 | 已修：iOS 预览使用黑底分页容器，支持缩放、双击、放大后拖动、旋转和异步高清预览回退。 | 待完成：从缩略图位置展开/收起的锚点动画、旋转持久化和安卓手势冲突规则。 | 继续按旧文档安卓函数逐项补齐，并补对应测试 |
 | 26 | D. 照片列表与大图预览 | 预览信息与翻页 | 🟡 进行中 | 已修：预览移除无意义的“第几张/总数”文本；文件名翻页时淡入更新，曝光信息沿用同一字号常量；直方图现在只分析预览已经显示的位图，开启时复用已保存图像，不再为直方图重复请求相机；预览打开时固定已传原片来源快照，传输在预览期间完成不会热切换当前页图像；缩略图先走缓存，随后按安卓 340ms 延迟再进入 FHD/原片请求，避免与预览展开动画争用通道；视频占位页补齐安卓同样的大小、拍摄时间和 `视频暂不支持播放` 信息卡。 | 待完成：高清原图/FHD 回退、保护/连拍/传输标记和安卓翻页时序对照。 | 继续按旧文档安卓函数逐项补齐，并补对应测试 |
 | 27 | D. 照片列表与大图预览 | 预览入队飞行动画 | 🟡 进行中 | 已有：预览右下角入队按钮；新增安卓同方向判定（上滑 96dp、垂直/水平比例 1.15）和 560ms 向上投递动画；现在先完成目录/连接预检并立即入队，再开始飞行，失败不会播放假动画；翻页/缩放期间不触发，动画取消会清理任务；连拍封面从预览入队时按整组创建任务。 | 待完成：复用安卓队列胶囊真实坐标的残影/接住动画、触感和超时回退；飞行残影已支持最多三层叠片，并只复用合集成员已有的缓存纹理；未命中时保持占位，不为短动画新增相机请求。 | 继续按安卓 `PhotoPreview.kt` 逐项补齐，并补对应测试 |
-| 28 | E. 传输队列 | 队列模型 | 🟡 进行中 | 原有入队目录/照片效果快照、原片查重、断点文件及派生输出身份已接入。已纠正此前错误：安卓任务列表不持久化，iOS 已移除自增的任务重启恢复和每次进度整队写盘；设置/目录仍走各自存储。本轮按 `TransferViewModel.PendingTransferQueue/processQueue/retrySingleTask/retryFailed` 分离展示顺序与待执行 FIFO；批次原子入队、同批 handle 去重、自动入口逻辑身份去重；重试原位置换 ID、执行排到队尾。原片命中先于相机守卫，不发布虚假传输态；重试可离线运行。效果图在原片完成的同次发布中进入生成态，最多 2 个 worker，排队中的生成也受移除保护；已有原片派生失败标记失败，新下载原片的派生失败保留下载成功。 | 队列执行场景定向测试已补齐，见下表。尚有具体缺口：完整 `.nkpart_` 改名捷径仍在 repository 内，需核对是否会短暂发布传输态；安卓相机元数据头快照及派生前置检查尚未完整迁移；高频进度仍会更新完整 UI 快照，需要按安卓隔离高频和低频状态。 | 继续闭合完整断点捷径 → 原片/派生统一复查 → 元数据头传递 → 高频进度路径，不跳场景 |
+| 28 | E. 传输队列 | 队列模型 | 🟡 进行中 | 展示顺序与待执行 FIFO 已分离；批次原子入队、同批去重、重试原位置换 ID 并排队尾、任务仅存内存、目录/效果入队快照、原片与派生状态独立。JPEG 边框新传最多捕获 256KiB 文件头，直接传解析快照；已存在/续传按安卓读取相机头并在同一 worker 内缓存。派生不再读取本地 EXIF 兜底，信息缺失按安卓分支失败；下载速度已接入协议单调时钟、本次实际新增字节、无效采样保留和完成平均 MB/s。 | 执行回放及新传元数据→派生/离线元数据缺失测试通过；仍缺所有元数据取消/重连/查重复用分支，以及队列卡片完成态和动画的完整回放。 | 按 T07/T08 成组闭环 |
 | 29 | E. 传输队列 | 顶部队列胶囊 | 🟡 进行中 | 已有：照片列表与队列页共用同一组执行控件；等待任务在断连时仍显示置灰的开始按钮；胶囊按安卓摘要区分下载剩余、暂停、派生生成和纯图标态，速度在计数前显示，生成态使用安卓强调色；仅在完成态从非完成态切换且未包含取消任务时短暂显示安卓同款 `Done`，计数出现保留 350ms 宽限；数量变化使用上下交错过渡；列表与预览入队缩略图现在以队列胶囊右缘内侧的安卓落点沿自适应弧线吸入，飞行中的数量抵达后才计入显示；飞行残影只使用已有缩略图缓存，不为动画新增相机请求；胶囊复用队列卡片的液态进度波纹。 | 待完成：安卓的飞行中多片叠影和胶囊接住回弹动画仍未完全接入。 | 继续按安卓 `FileListScreen.kt` 的 `QueuePill` 补齐状态摘要与动画 |
-| 30 | E. 传输队列 | 队列页面 | 🟡 进行中 | 已有横向队列页、共用队列胶囊/执行入口、缓存优先缩略图、液态进度与状态徽标。本轮清空先撤下等待项，再标记可移除卡片播放 280ms 收合，320ms 统一清理；动画中的卡片不参与全局重试/清空，重试全部排除退场 ID；正在执行时不显示重试全部。actor 拒绝移除时取消收合标记，恢复卡片；移除和清空均保护正在排队或执行的派生图。 | 执行/清空竞态有定向测试；仍需卡片高度、信息胶囊交错时序、按钮坐标和取消/恢复动画逐项核对，不能把执行测试当成视觉验收。 | 继续按 `TransferScreen` 完整卡片状态对照 |
+| 30 | E. 传输队列 | 队列页面 | 🟡 进行中 | 已有队列页、执行控件、缩略图、液态进度和状态徽标；清空先撤下等待项，280ms 收合、320ms 清理；退场 ID 排除重试，生成中和等待生成任务受保护。下载进度已独立成流。 | 仍有确定 UI 差异：胶囊间距/颜色/字号、完成速度缺失、错误和效果信息互斥、0.78 缩放/弹簧/延迟/恢复曲线；独立进度发布在共同 ObservableObject 上，不能据此声称已证明只刷新活动卡。 | 按 U04/U05 统一实现并观察更新范围 |
 | 31 | E. 传输队列 | 暂停与继续 | 🟡 进行中 | 已对齐：仅活动队列接受暂停，当前文件完整结束后才停；活动队列上的重复开始不撤销暂停；单项/全部重试均不能绕过暂停；显式开始恢复待执行 FIFO；重连后后续任务读取新会话。`TransferQueueScenarioTests.testPauseWaitsForCurrentFileAndRetryCannotReleaseIt` 及断线替换用例覆盖实际 actor 状态流转。 | 执行状态已检查；未闭环的是 `QueueExecutionButton` 的 32dp 材质/图标、180ms 暂停着色、按压回弹、暂停提示与预览时显隐，当前 iOS 仍用通用按钮代替。 | 按 `FileListScreen.QueueExecutionButton` 和 `MainActivity` 顶部宿主统一实现两个页面入口 |
-| 32 | E. 传输队列 | 取消与异常 | 🟡 进行中 | 等待项撤下不会启动；活动传输不可移除；批量清空保留派生生成。目录失效现在发布具体失效目录并清空执行目标；页面仅清理当前匹配书签，不再用历史错误文本反复清掉新目录。重新选目录会更新 actor 的目录与会话，旧失败卡可重试。异步目录/派生预检查返回后按任务 ID 与 waiting 状态复核，撤下或替换的旧任务不能继续发布结果。 | 目录失效→重新选择→离线重试、断线→重连→重试、清空与重试交叉操作均有定向用例。仍需针对实际分段下载的错误/取消/改名失败路径建立协议回放证据；真机回归独立留任务 60/61。 | 继续在同一链路检查 repository 部分文件生命周期 |
+| 32 | E. 传输队列 | 取消与异常 | 🟡 进行中 | 已覆盖撤下不启动、活动下载不可移除、派生保护、目录失效后重新选择、会话替换重试和退场任务不复活。生产下载回放新增完整负响应、部分字节后错误、短读及复制失败验证；错误读取安卓资源。 | Android 在数据相位异常时先 Cancel/排空，成功可保留连接；iOS 已接入 PTP/IP 的内部取消钩子，仍需实际取消中的文件写盘/晚回调和 USB 隔离回放。 | 先按 T05 完成整个事务恢复分支 |
 | 33 | F. 设置页 | 设置主页面 | 🟡 进行中 | 已修：照片效果摘要按安卓结构显示“照片滤镜”及名称/强度、以及“边框和水印”下的边框/水印两行；连接页继续通过 showPhotoEffectsEntry=false 隐藏该模块；“屏幕常亮”现在按安卓 `FLAG_KEEP_SCREEN_ON` 语义绑定到 iOS 根窗口，并在前后台切换时同步。 | 待完成：高级版徽标/续费、检查更新、换机、主设置说明气泡和目录关注动画。 | 继续按旧文档安卓函数逐项补齐，并补对应测试 |
 | 34 | F. 设置页 | 通用拨轮组件 | 🟡 进行中 | 实现：ios/ZTransfer/UI/Components/DetentWheel.swift | 待完成：长按分类选择弹窗、收藏图标/拖动提示、无障碍描述、边界与真机动画对照。 | 继续按旧文档安卓函数逐项补齐，并补对应测试 |
 | 35 | F. 设置页 | 照片效果设置 | 🟡 进行中 | 已修：设置页接收根页面持有的相机传输 PhotoEffectsStore，设置入口复用同一份传输配置；工作台保持独立配置作用域。设置保存仍通过草稿回调提交。 | 待完成：安卓完整分类选择、边框水印位置约束、曝光信息细节和设置弹窗动画/渲染真机对照；当前仍不能勾选。 | 继续按旧文档安卓函数逐项补齐，并补对应测试 |
@@ -128,11 +163,12 @@
 
 ## 队列执行场景核对（2026-09-14）
 
-1. **本次关闭的任务**：未关闭 62 项中的整项；以下队列执行子场景代码已对照并有定向测试，不再将其混写成“暂停/恢复尚未实现”。任务 28/30/31/32 的剩余代码缺口已具体列在表中。
+1. **本次关闭的任务**：未关闭 62 项中的整项；已完成下载命令选择、流式写盘、逐相位长度检查、JPEG 头快照传入派生以及保存回退的本轮子场景。旧版 53 项测试没有执行生产下载分支，不能证明整文件下载可用；本轮新增真实仓库/会话命令回放。
 2. **安卓依据**：`viewmodel/TransferViewModel.kt`：`createQueueTasks`、`PendingTransferQueue`、`processQueue`、`requestPauseAfterCurrent`、`startPendingTransfers`、`withdrawPending/withdrawTask`、`removeTask/removeCleared`、`retryFailed/retrySingleTask`、`launchPhotoFrameExport`；`ui/screen/TransferScreen.kt`：`transferQueueActionVisibility`、280ms 卡片收合与 320ms 清空收尾。测试依据为 `TransferStateTest`、`TransferQueueActionVisibilityTest` 和 `ExistingFileNameIndexTest`；另核对 `TransferViewModel.init/recordExistingExport`，确认任务仅在内存保存、原片索引独立于队列。
 3. **iOS 改动**：`TransferQueue.swift` 承载上述执行状态与两个派生 worker；`TransferQueueViewModel.swift` 批次一次提交、转发退场排除集并释放失效订阅；`TransferQueueView.swift` 接入清空和移除结果；`PhotoListView.swift` 接入一次性的目录失效与重新选择。`TransferDirectoryIndex.swift` 新增安卓同名 `ExportedOriginalIndex`，`PhotoListViewModel.swift` 使用独立的磁盘/运行期原片索引，原片状态不再被队列完成项集合覆盖。没有修改安卓代码，没有新增用户文案。
-4. **验证证据**：`TransferQueueScenarioTests` 11 项 + `DomainModelTests` 39 项，最终代码 50 项定向测试通过、0 失败（2026-09-14 15:20，`TEST SUCCEEDED`）。命令：`xcodebuild -project ios/ZTransfer.xcodeproj -scheme ZTransfer -destination 'platform=iOS Simulator,id=CA046456-B859-45F4-9CB3-2C6E2F8E03B0' -only-testing:ZTransferTests/TransferQueueScenarioTests -only-testing:ZTransferTests/DomainModelTests test`。仅运行这两个测试类，没有生成分发包、真机安装、提交或推送。
-5. **剩余阻塞**：按任务表继续完整断点捷径、相机元数据快照、进度发布与 UI 刷新隔离及执行按钮动画；这些是代码缺口，不能用“等真机”代替。
+4. **验证证据**：2026-09-14 17:20：`CameraDownloadTests` 19 + `DomainModelTests` 40 + `PTPIPCodecTests` 6 + `PTPSessionTests` 9 + `TransferQueueScenarioTests` 13，共 87 项通过，`TEST SUCCEEDED`；随后协议独立包 `ZTRANSFER_PROTOCOL_ONLY=1 swift test --package-path ios` 的 62 项通过。这两组有交集，不相加计数。保存错误资源对齐后，17:26 的 `CameraDownloadTests` 最终 19 项回归通过，`TEST SUCCEEDED`。仅模拟器测试和协议测试，无真机分发包、提交或推送。
+5. **剩余工作**：以场景差异总表为准；通道优先级、Cancel/排空、速度保留和完成统计、缓存预取分流、UI 状态动画都有具体缺口，不用“等待真机”替代。
+
 
 | 子场景 | 对照后的结果 | 定向测试 |
 |---|---|---|
@@ -143,7 +179,7 @@
 | 撤下、清空、重试交叉 | 退场卡不被重试复活，当前下载不被删除 | `testWithdrawAndRetryAllExcludeCardsAlreadyLeaving` |
 | 断线与会话替换 | 后续项不使用旧相机；重试使用新会话 | `testDetachDoesNotReuseOldCameraAndReconnectRetryUsesNewOne` |
 | 派生并发与清空 | 最多 2 个 worker，生成中及等待生成的任务均不可清理 | `testFramesUseTwoWorkersAndClearProtectsActiveAndWaitingRenders` |
-| 已有原片派生失败 | 任务失败但保留原片，可离线用原快照重试 | `testExistingOriginalFrameFailureCanRetryOfflineWithLockedEffects` |
+| 已有原片派生失败 | 保留原片；离线水印/滤镜可用原快照重试，要求相机信息的 JPEG 边框在无信息时仍失败 | `testExistingOriginalFrameFailureCanRetryOfflineWithLockedEffects` |
 | 新下载原片派生失败 | 原片仍是传输成功，不回滚或删除 | `testNewDownloadRemainsCompletedWhenOnlyItsFrameFails` |
 | 目录失效 | 待传任务失败，清除目标；未重新选择不能重试 | `testInvalidDestinationClearsQueueDirectoryAndDoesNotRestartOnRetry` |
 | 重新选择目录 | 清除本次失效信号，旧错误不影响新目录，重试可继续 | `testReselectedDirectoryCanRetryWithoutHistoricalErrorInvalidatingIt` |

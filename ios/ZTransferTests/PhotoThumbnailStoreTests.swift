@@ -62,6 +62,26 @@ final class PhotoThumbnailStoreTests: XCTestCase {
         XCTAssertTrue(secondResult)
         XCTAssertEqual(counter.value, 1)
     }
+
+    func testPrefetchStoresRawBytesAndVisibleLoadProcessesExactlyOnce() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ztransfer-thumb-raw-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = PhotoThumbnailStore(disk: PhotoThumbnailDiskCache(root: root))
+        let counter = LockedCounter()
+        let prefetched = try await store.prefetch(file: file(), identity: "camera-raw") {
+            counter.increment()
+            return Data([1, 2, 3])
+        }
+        XCTAssertTrue(prefetched)
+        let visible = try await store.load(file: file(), identity: "camera-raw", allowRemote: true,
+                                           transform: { $0 + Data([9]) }) {
+            counter.increment()
+            return Data([8])
+        }
+        XCTAssertEqual(visible, Data([1, 2, 3, 9]))
+        XCTAssertEqual(counter.value, 1)
+    }
 }
 
 private final class LockedCounter: @unchecked Sendable {

@@ -9,6 +9,18 @@ enum AsyncDeadline {
         timeoutError: any Error,
         operation: @escaping @Sendable () async throws -> Value
     ) async throws -> Value {
+        try await run(timeout: {
+            try await Task.sleep(nanoseconds: nanoseconds)
+            throw timeoutError
+        }, operation: operation)
+    }
+
+    /// Allows a data-phase watchdog to renew its deadline on incoming bytes
+    /// while preserving the same prompt cancellation and late-result rules.
+    static func run<Value: Sendable>(
+        timeout: @escaping @Sendable () async throws -> Void,
+        operation: @escaping @Sendable () async throws -> Value
+    ) async throws -> Value {
         try Task.checkCancellation()
         let completion = Completion<Value>()
         return try await withTaskCancellationHandler {
@@ -23,9 +35,9 @@ enum AsyncDeadline {
                     }
                 }
                 let timer = Task {
-                    do { try await Task.sleep(nanoseconds: nanoseconds) }
-                    catch { return }
-                    completion.resolve(.failure(timeoutError))
+                    do { try await timeout() }
+                    catch is CancellationError { return }
+                    catch { completion.resolve(.failure(error)) }
                 }
                 completion.attach([work, timer])
             }

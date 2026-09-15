@@ -12,6 +12,7 @@ enum PhotoListLoadState: Equatable, Sendable {
 final class PhotoListViewModel: ObservableObject {
     @Published private(set) var loadState: PhotoListLoadState = .idle
     @Published private(set) var sections: [PhotoDaySection] = []
+    @Published private(set) var burstIDByFile: [UInt32: String] = [:]
     @Published private(set) var filter = PhotoFilterState()
     /// Mirrors Android's `isLoadingFiles`/`hasCompletedFileScan` pair.  The
     /// view may receive several published batches before the scan completes.
@@ -235,6 +236,9 @@ final class PhotoListViewModel: ObservableObject {
         // A refreshed catalog may reuse a handle for another file. Resolve
         // current file identity against the indexes, never a stale handle set.
         transferredIDs = indexedTransferredIDs
+        burstIDByFile = PhotoCatalogGrouping.bursts(in: allFiles).reduce(into: [:]) { result, group in
+            for file in group.files { result[file.id] = group.id }
+        }
         sections = PhotoCatalogGrouping.byCaptureDay(
             PhotoFilter.apply(allFiles, state: filter, transferredIDs: transferredIDs),
         )
@@ -267,8 +271,19 @@ final class PhotoListViewModel: ObservableObject {
         // filter change to be retried.
         let channelAllowed = await canFill()
         let fillAllowed = !transferBusy && channelAllowed
-        let settled = fillAllowed ? await prefetchBatch(additions) : Set<UInt32>()
-        for id in settled { await thumbnailFillQueue.markSettled(id) }
+        // Android publishes thumbnail work in its configured pipeline windows
+        // (currently twelve photos). Keep
+        // the window small so each completed window can render immediately;
+        // cache hits are resolved by prefetchBatch without camera IO.
+        if fillAllowed {
+            let pipelineBatchSize = 12
+            for windowStart in stride(from: 0, to: additions.count, by: pipelineBatchSize) {
+                try Task.checkCancellation()
+                let end = min(windowStart + pipelineBatchSize, additions.count)
+                let settled = await prefetchBatch(Array(additions[windowStart..<end]))
+                for id in settled { await thumbnailFillQueue.markSettled(id) }
+            }
+        }
         // Misses and transient errors are intentionally not marked failed here.
         // They are discovered by the post-scan seed and handled by the same
         // background worker as every other unsettled file, matching Android's

@@ -3,6 +3,14 @@ import UIKit
 @testable import ZTransfer
 
 final class DomainModelTests: XCTestCase {
+    func testTransferSpeedMatchesAndroidInvalidAndRetainedSampleRules() {
+        XCTAssertEqual(endToEndBytesPerSecond(transferredBytes: 0, elapsedMs: 100), 0)
+        XCTAssertEqual(endToEndBytesPerSecond(transferredBytes: 1_048_576, elapsedMs: 1_000), 1_048_576)
+        XCTAssertEqual(endToEndBytesPerSecond(transferredBytes: 1_048_576, elapsedMs: 0), 0)
+        XCTAssertEqual(retainLastValidTransferSpeed(previous: 2_400, sample: 0), 2_400)
+        XCTAssertEqual(retainLastValidTransferSpeed(previous: 2_400, sample: 1_200), 1_200)
+    }
+
     @MainActor
     func testEffectPreviewCandidateSkipsVideoAndUsesNewestCaptureDateThenHandle() {
         let files = [
@@ -168,6 +176,22 @@ final class DomainModelTests: XCTestCase {
         XCTAssertNil(photoPreviewCollectionIndex(expanded, memberIndex: 0))
     }
 
+    func testBurstIdentitySurvivesDisablingCollectionsAndFilteringToOneMember() {
+        let originals = (300...302).map { number in
+            CameraFile(id: UInt32(number), storageID: 1, format: 0x3801, size: 1,
+                       fileName: "DSC_\(number).JPG", captureDate: "20260913T02030\(number - 300)", isProtected: false)
+        }
+        let group = PhotoCatalogGrouping.bursts(in: originals)[0]
+        let membership = Dictionary(uniqueKeysWithValues: group.files.map { ($0.id, group.id) })
+        let single = collapsedPhotoPreviewEntries(files: [originals[1]], burstIDByFile: membership)
+        XCTAssertEqual(single.count, 1)
+        XCTAssertEqual(single[0].burstID, group.id)
+        let dispersed = originals.map { PhotoPreviewEntry.photo($0, burstID: membership[$0.id]) }
+        XCTAssertEqual(dispersed.compactMap(\.burstID).count, 3)
+        XCTAssertTrue(dispersed.allSatisfy { $0.file != nil })
+        XCTAssertNil(photoPreviewCollectionIndex(dispersed, memberIndex: 0))
+    }
+
     func testManualQueueAllowsRepeatedExportsOfSameCameraHandle() async {
         let queue = TransferQueue(defaults: UserDefaults(suiteName: "TransferQueueTests.\(UUID())")!)
         let file = CameraFile(id: 9, storageID: 1, format: 0x3801, size: 10, fileName: "a.JPG", captureDate: nil, isProtected: false)
@@ -322,6 +346,32 @@ final class DomainModelTests: XCTestCase {
             transferResumeOffset(existingSize: 8 * 1024 * 1024, totalSize: 8 * 1024 * 1024, reportedSize: 8 * 1024 * 1024),
             8 * 1024 * 1024
         )
+    }
+
+    func testTransferChunkStrategyMatchesAndroidThresholds() {
+        XCTAssertTrue(shouldUsePartialObjectDownload(partialObjectSupported: nil, effectiveSize: 1))
+        XCTAssertFalse(shouldUsePartialObjectDownload(
+            partialObjectSupported: nil,
+            effectiveSize: UInt64(UInt32.max)
+        ))
+        XCTAssertFalse(shouldUsePartialObjectDownload(
+            partialObjectSupported: nil, effectiveSize: 64 * 1024 * 1024,
+            isUSBConnection: true
+        ))
+        XCTAssertTrue(shouldUsePartialObjectDownload(
+            partialObjectSupported: nil, effectiveSize: 64 * 1024 * 1024,
+            resumeOffset: 4 * 1024 * 1024, isUSBConnection: true
+        ))
+        XCTAssertTrue(shouldUsePartialObjectDownload(
+            partialObjectSupported: nil, effectiveSize: 64 * 1024 * 1024,
+            isUSBConnection: true, forcePartial: true
+        ))
+        XCTAssertFalse(shouldUsePartialObjectDownload(
+            partialObjectSupported: false, effectiveSize: 1024
+        ))
+        XCTAssertEqual(transferDownloadChunkSize(effectiveSize: 1), 4 * 1024 * 1024)
+        XCTAssertEqual(transferDownloadChunkSize(effectiveSize: 600 * 1024 * 1024), 32 * 1024 * 1024)
+        XCTAssertEqual(transferDownloadChunkSize(effectiveSize: 600 * 1024 * 1024, isUSBConnection: true), 64 * 1024 * 1024)
     }
 
     func testTransferOutputNeverOverwritesAnExistingSameNameFile() throws {
@@ -583,11 +633,54 @@ final class TransferQueueScenarioTests: XCTestCase {
         XCTAssertEqual(finished?.items[1].error, AppLocalized.resource("camera_not_connected"))
     }
 
+    func testCompletePartialIsRenamedBeforeCameraStateAndRecheckedAsLocalOriginal() async throws {
+        let (queue, directory) = try fixture()
+        let source = file(7)
+        let partialName = transferPartialFileName(
+            size: source.size, captureDate: source.captureDate, fileName: source.fileName
+        )
+        let partial = directory.appendingPathComponent(partialName)
+        try Data(repeating: 7, count: Int(source.size)).write(to: partial)
+        await queue.enqueue(source)
+
+        let stream = await queue.snapshots()
+        await queue.start(session: nil, directory: directory)
+        var finished: TransferQueueSnapshot?
+        for await value in stream {
+            if !value.isTransferring && value.items.first?.status == .completed {
+                finished = value
+                break
+            }
+        }
+        let item = try XCTUnwrap(finished?.items.first)
+        XCTAssertEqual(item.status, .completed)
+        XCTAssertTrue(item.skipped)
+        XCTAssertEqual(item.outputURL?.lastPathComponent, source.fileName)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: partial.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: directory.appendingPathComponent(source.fileName).path))
+    }
+
+    func testResumeUnavailableDeletesPartAndUsesAndroidFailureText() async throws {
+        let (queue, directory) = try fixture()
+        let source = CameraFile(id: 8, storageID: 1, format: 0x3801,
+                                size: 8 * 1024 * 1024,
+                                fileName: "DSC_8.JPG", captureDate: "20260914T120000", isProtected: false)
+        let partial = directory.appendingPathComponent(
+            transferPartialFileName(size: source.size, captureDate: source.captureDate, fileName: source.fileName)
+        )
+        try Data(repeating: 8, count: 4 * 1024 * 1024).write(to: partial)
+        await queue.enqueue(source)
+        await queue.start(session: ResumeUnavailableCamera(), directory: directory)
+        let failed = try await wait(queue) { !$0.isTransferring && $0.items.first?.status == .failed }
+        XCTAssertEqual(failed.items.first?.error, AppLocalized.resource("transfer_failed"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: partial.path))
+    }
+
     func testRetryKeepsCardPositionButExecutesAfterAlreadyPendingTasks() async throws {
         let (queue, directory) = try fixture()
         let camera = ControlledTransferCamera()
         let old = await queue.enqueue(file(9))!
-        await queue.cancel(id: old)
+        await queue.withdraw(id: old)
         await queue.enqueue([file(1), file(2)])
         await queue.start(session: camera, directory: directory)
         _ = try await wait(queue) { $0.items[1].status == .transferring }
@@ -610,7 +703,7 @@ final class TransferQueueScenarioTests: XCTestCase {
         let (queue, directory) = try fixture()
         let camera = ControlledTransferCamera()
         let ids = await queue.enqueue([file(1), file(2), file(3)])
-        await queue.cancel(id: ids[2])
+        await queue.withdraw(id: ids[2])
         await queue.start(session: camera, directory: directory)
         _ = try await wait(queue) { $0.items[0].status == .transferring }
         await queue.pauseAfterCurrentFile()
@@ -685,11 +778,12 @@ final class TransferQueueScenarioTests: XCTestCase {
 
     func testFramesUseTwoWorkersAndClearProtectsActiveAndWaitingRenders() async throws {
         let renderer = ControlledFrameRenderer()
-        let (queue, directory) = try fixture { source, _, target in
+        let (queue, directory) = try fixture { source, _, target, _ in
             try await renderer.render(source: source, directory: target)
         }
         var effects = PhotoEffectsSettings()
         effects.photoFrameEnabled = true
+        effects.photoFrameBorderEnabled = false // Android permits offline watermark-only export.
         let files = [file(1), file(2), file(3)]
         for file in files { try Data(repeating: 1, count: 10).write(to: directory.appendingPathComponent(file.fileName)) }
         let ids = await queue.enqueue(files, effects: effects)
@@ -718,13 +812,14 @@ final class TransferQueueScenarioTests: XCTestCase {
 
     func testExistingOriginalFrameFailureCanRetryOfflineWithLockedEffects() async throws {
         let renderer = FailOnceFrameRenderer()
-        let (queue, directory) = try fixture { source, settings, target in
+        let (queue, directory) = try fixture { source, settings, target, _ in
             try await renderer.render(source: source, settings: settings, directory: target)
         }
         let source = directory.appendingPathComponent(file(1).fileName)
         try Data(repeating: 1, count: 10).write(to: source)
         var effects = PhotoEffectsSettings()
         effects.photoFrameEnabled = true
+        effects.photoFrameBorderEnabled = false // Android permits offline watermark-only export.
         effects.photoFramePreset = .minimal
         let id = await queue.enqueue(file(1), effects: effects)!
         await queue.start(session: nil, directory: directory)
@@ -742,9 +837,10 @@ final class TransferQueueScenarioTests: XCTestCase {
     }
 
     func testNewDownloadRemainsCompletedWhenOnlyItsFrameFails() async throws {
-        let (queue, directory) = try fixture { _, _, _ in throw CocoaError(.fileWriteUnknown) }
+        let (queue, directory) = try fixture { _, _, _, _ in throw CocoaError(.fileWriteUnknown) }
         var effects = PhotoEffectsSettings()
         effects.photoFrameEnabled = true
+        effects.photoFrameBorderEnabled = false // Android permits offline watermark-only export.
         await queue.enqueue(file(1), effects: effects)
         let camera = ControlledTransferCamera()
         await queue.start(session: camera, directory: directory)
@@ -807,6 +903,12 @@ private actor ControlledTransferCamera: TransferDownloading {
     func finish(_ id: UInt32) {
         if let continuation = waiting.removeValue(forKey: id) { continuation.resume() }
         else { finished.insert(id) }
+    }
+}
+
+private actor ResumeUnavailableCamera: TransferDownloading {
+    func download(file: CameraFile, to directory: URL, progress: (@Sendable (Double) -> Void)?) async throws -> URL {
+        throw CameraRepositoryError.resumeUnavailable
     }
 }
 

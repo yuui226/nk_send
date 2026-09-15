@@ -33,21 +33,22 @@ struct TransferQueueView: View {
                 DoubleZMark(tint: ZTransferColors.secondaryText.opacity(0.45))
                     .frame(width: 74, height: 58)
             } else {
-                ScrollView {
-                    LazyVStack(spacing: 10) {
+                ScrollView(showsIndicators: false) {
+                    LazyVStack(spacing: 8) {
                         ForEach(model.snapshot.items.reversed()) { item in
                             QueueItemView(item: item, session: session,
+                                          activeProgress: model.activeProgress,
                                           isRemoving: removingItemIDs.contains(item.id),
                                           onRetry: { model.retry(id: item.id) },
                                           onRemove: { beginRemoval(item.id, withdraw: false) },
-                                          onCancel: { beginRemoval(item.id, withdraw: true) })
+                                          onWithdraw: { beginRemoval(item.id, withdraw: true) })
                                 // Android first collapses the row's reported height;
                                 // data removal happens after the 280 ms exit.
                                 .transition(.identity)
                         }
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 62)
+                    .padding(.horizontal, 12)
+                    .padding(.top, 58)
                     .padding(.bottom, 112)
                 }
                 .animation(ZTransferMotion.standard, value: model.snapshot.items)
@@ -67,7 +68,7 @@ struct TransferQueueView: View {
     private func beginRemoval(_ id: UUID, withdraw: Bool) {
         guard !removingItemIDs.contains(id) else { return }
         removingItemIDs.insert(id)
-        if withdraw { model.cancel(id: id) }
+        if withdraw { model.withdraw(id: id) }
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 280_000_000)
             if !(await model.remove(id: id)) { removingItemIDs.remove(id) }
@@ -77,49 +78,23 @@ struct TransferQueueView: View {
     private var queueTopControls: some View {
         HStack(spacing: 8) {
             Button(action: onNavigateBack) {
-                Image(systemName: "chevron.left")
+                Image(systemName: "arrow.left")
                     .font(.system(size: 16, weight: .bold))
                     .frame(width: 36, height: 36)
             }
             .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
-            Spacer()
-            if model.snapshot.isTransferring {
-                Button { model.pause() } label: {
-                    Image(systemName: "pause.fill")
-                        .frame(width: 36, height: 36)
-                }
-                .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
-                .accessibilityLabel(AppLocalized.resource("cd_pause_after_current"))
-            } else if model.snapshot.items.contains(where: { $0.status == .waiting }) {
-                Button {
-                    guard let session, let directoryURL = directory.directoryURL else { return }
-                    model.start(session: session, directory: directoryURL)
-                } label: {
-                    Image(systemName: "play.fill")
-                        .frame(width: 36, height: 36)
-                }
-                .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
-                .disabled(session == nil || directory.directoryURL == nil)
-                .opacity(session == nil || directory.directoryURL == nil ? 0.45 : 1)
-                .accessibilityLabel(AppLocalized.resource("cd_start_transfers"))
-            }
-            if !model.snapshot.items.isEmpty {
-                QueuePill(snapshot: model.snapshot, heldCount: 0)
-                    .padding(.horizontal, 10)
-                    .frame(height: 36)
-                    .background(.thinMaterial, in: Capsule())
-                    .overlay(Capsule().stroke(.white.opacity(0.35), lineWidth: 1))
-            }
             if let session {
-                Image(systemName: session.isUSB ? "cable.connector" : "wifi")
+                PhotoListSignalIcon(isUSB: session.isUSB, wirelessMode: session.wirelessMode)
                     .frame(width: 36, height: 36)
-                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18))
-                    .overlay(RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.45), lineWidth: 1))
-                    .foregroundStyle(ZTransferColors.statusConnected)
+                    .background(.thinMaterial, in: Capsule())
+                    .overlay(Capsule().stroke(.white.opacity(0.45), lineWidth: 1))
             }
+            Spacer()
+
         }
         .padding(.horizontal, 12)
-        .padding(.top, 6)
+        .padding(.top, 0)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     private var queueBottomControls: some View {
@@ -264,10 +239,11 @@ private struct QueueConfirmationCard: View {
 private struct QueueItemView: View {
     let item: TransferQueueItem
     let session: CameraSession?
+    let activeProgress: TransferActiveProgress?
     let isRemoving: Bool
     let onRetry: () -> Void
     let onRemove: () -> Void
-    let onCancel: () -> Void
+    let onWithdraw: () -> Void
     @State private var measuredHeight: CGFloat = 0
     @State private var collapseProgress: CGFloat = 1
 
@@ -285,20 +261,21 @@ private struct QueueItemView: View {
     var body: some View {
         ZStack {
             if item.status == .transferring {
-                LiquidTransferProgressFill(progress: item.progress, seed: item.id.uuidString)
+                LiquidTransferProgressFill(progress: displayedProgress, seed: item.id.uuidString)
                     .clipShape(RoundedRectangle(cornerRadius: 14))
                     .transition(.opacity)
             }
             HStack(spacing: 12) {
                 ZStack(alignment: .bottomTrailing) {
                     QueueThumbnail(session: session, handle: item.file.id, item: item)
+                    QueueTaskStatusBadge(item: item)
                 }
                 .frame(width: 56, height: 56)
-                VStack(alignment: .leading, spacing: 5) {
+                VStack(alignment: .leading, spacing: 6) {
                 Text(item.file.fileName).zTransferText(size: ZTransferMetrics.caption, weight: .semibold).lineLimit(1)
                 HStack(spacing: 6) {
                     TransferInfoPill(text: fileSizeText, color: ZTransferColors.secondaryText)
-                    if item.status == .transferring, item.bytesPerSecond > 0 {
+                    if let speedText {
                         TransferInfoPill(text: speedText, color: ZTransferColors.statusConnected)
                             .transition(.opacity.combined(with: .move(edge: .leading)).combined(with: .scale(scale: 0.86, anchor: .leading)).animation(.easeOut(duration: 0.20).delay(0.06)))
                     }
@@ -328,23 +305,31 @@ private struct QueueItemView: View {
                 ))
             }
                 Spacer(minLength: 4)
-                if item.status == .failed {
+                if item.status == .failed && !isRemoving {
                     QueueActionButton(icon: "arrow.clockwise", action: onRetry)
                         .disabled(session == nil && retryNeedsCamera)
                         .opacity(session == nil && retryNeedsCamera ? 0.45 : 1)
                         .accessibilityLabel(AppLocalized.resource("retry"))
-                } else if item.status == .waiting {
-                    QueueActionButton(icon: "broom", action: onCancel)
+                        .transition(.opacity.combined(with: .scale(scale: 0.75, anchor: .topTrailing)))
+                }
+                if item.status == .waiting && !isRemoving {
+                    QueueActionButton(icon: "broom", action: onWithdraw)
                         .accessibilityLabel(AppLocalized.resource("cd_remove_from_queue"))
-                } else if (item.status == .completed || item.status == .cancelled) && !item.isGeneratingFrame {
+                        .transition(.opacity.combined(with: .scale(scale: 0.75, anchor: .trailing)))
+                } else if (item.status == .completed || item.status == .cancelled || item.status == .failed) && !item.isGeneratingFrame && !isRemoving {
                     QueueActionButton(icon: "broom", action: onRemove)
                         .accessibilityLabel(AppLocalized.resource("cd_remove_from_queue"))
+                        .transition(.opacity.combined(with: .scale(scale: 0.75, anchor: .trailing)))
                 }
             }
+            .padding(12)
         }
-        .padding(12)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(stateColor.opacity(0.22), lineWidth: 1))
+        .background {
+            Color(uiColor: .secondarySystemGroupedBackground)
+                .overlay(stateColor.opacity(0.055))
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.gray.opacity(0.35), lineWidth: 1))
         .animation(ZTransferMotion.standard, value: item.status)
         .animation(ZTransferMotion.standard, value: item.bytesPerSecond)
         .animation(ZTransferMotion.standard, value: item.elapsedMs)
@@ -378,12 +363,24 @@ private struct QueueItemView: View {
         }
     }
 
-    private var speedText: String {
-        switch item.bytesPerSecond {
-        case ..<1024: return "\(item.bytesPerSecond) B/s"
-        case ..<(1024 * 1024): return String(format: "%.1f KB/s", Double(item.bytesPerSecond) / 1024)
-        default: return String(format: "%.1f MB/s", Double(item.bytesPerSecond) / (1024 * 1024))
+    private var speedText: String? {
+        if item.status == .completed, item.downloadMBps > 0 {
+            return String(format: "%.1f MB/s", item.downloadMBps)
         }
+        guard item.status == .transferring, displayedBytesPerSecond > 0 else { return nil }
+        switch displayedBytesPerSecond {
+        case ..<1024: return "\(displayedBytesPerSecond) B/s"
+        case ..<(1024 * 1024): return String(format: "%.1f KB/s", Double(displayedBytesPerSecond) / 1024)
+        default: return String(format: "%.1f MB/s", Double(displayedBytesPerSecond) / (1024 * 1024))
+        }
+    }
+
+    private var displayedProgress: Double {
+        activeProgress?.taskID == item.id ? activeProgress!.fraction : item.progress
+    }
+
+    private var displayedBytesPerSecond: Int64 {
+        activeProgress?.taskID == item.id ? activeProgress!.bytesPerSecond : item.bytesPerSecond
     }
 
     private func formatDuration(_ milliseconds: Int64) -> String {
@@ -536,48 +533,94 @@ private struct QueueTaskStatusBadge: View {
 /// Android's transfer cards use a low-amplitude liquid fill instead of a
 /// static progress bar. The phase is driven by TimelineView so progress
 /// updates do not create a second task per card.
+/// All four transfer surfaces use Android's critically damped progress spring.
+struct SmoothTransferProgress<Content: View>: View {
+    let target: Double
+    let resetKey: AnyHashable?
+    @ViewBuilder let content: (Double) -> Content
+    @State private var accepted = 0.0
+    var body: some View {
+        content(accepted)
+            .onAppear { advance() }
+            .onChange(of: target) { _ in advance() }
+            .onChange(of: resetKey) { _ in
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) { accepted = 0 }
+                advance()
+            }
+    }
+    private func advance() {
+        let normalized = target.isFinite ? min(max(target, 0), 1) : 0
+        guard normalized > accepted else { return }
+        withAnimation(.interpolatingSpring(mass: 1, stiffness: 180, damping: 2 * sqrt(180))) {
+            accepted = normalized
+        }
+    }
+}
+
 struct LiquidTransferProgressFill: View {
     let progress: Double
     let seed: String
-
+    var isCapsule = false
     var body: some View {
-        GeometryReader { proxy in
-            TimelineView(.periodic(from: Date(), by: 1.0 / 30.0)) { timeline in
-                LiquidTransferShape(
-                    progress: min(max(progress, 0), 1),
-                    phase: CGFloat(timeline.date.timeIntervalSinceReferenceDate
-                                   .truncatingRemainder(dividingBy: 2.4) / 2.4) + seedPhase
-                )
-                    .fill(LinearGradient(
-                        gradient: Gradient(colors: [ZTransferColors.accentBlue.opacity(0.16), ZTransferColors.accentBlue.opacity(0.30)]),
-                        startPoint: .top, endPoint: .bottom
-                    ))
+        SmoothTransferProgress(target: progress, resetKey: seed) { value in
+            TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: value <= 0 || value >= 1)) { timeline in
+                LiquidTransferShape(progress: value,
+                    phase: CGFloat(timeline.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: isCapsule ? 2.2 : 2.6) / (isCapsule ? 2.2 : 2.6)),
+                    seed: seedPhase, amplitude: isCapsule ? 2 : 3,
+                    segments: isCapsule ? 8 : 12, spatialScale: isCapsule ? 1 : 0.55)
+                    .fill(ZTransferColors.accentBlue.opacity(isCapsule ? 0.22 : 0.14))
             }
-        }
-        .allowsHitTesting(false)
+        }.allowsHitTesting(false)
     }
-
-    private var seedPhase: CGFloat { CGFloat(abs(seed.hashValue % 360)) / 360 }
+    private var seedPhase: CGFloat {
+        let hash = seed.utf8.reduce(UInt32(0)) { ($0 &* 31) &+ UInt32($1) }
+        return CGFloat(hash & 0xffff) / 65535
+    }
 }
 
 struct LiquidTransferShape: Shape {
     var progress: Double
     var phase: CGFloat
-
+    var seed: CGFloat = 0
+    var amplitude: CGFloat = 3
+    var segments: Int = 12
+    var spatialScale: CGFloat = 0.55
+    var animatableData: Double {
+        get { progress }
+        set { progress = newValue }
+    }
     func path(in rect: CGRect) -> Path {
-        let baseline = rect.height * (1 - CGFloat(min(max(progress, 0), 1)))
-        let segments = max(8, Int(rect.width / 12))
-        let amplitude = min(2.2, rect.height * 0.035)
-        var path = Path()
-        path.move(to: CGPoint(x: 0, y: rect.height))
-        path.addLine(to: CGPoint(x: 0, y: baseline))
-        for index in 0...segments {
-            let fraction = CGFloat(index) / CGFloat(segments)
-            let x = rect.width * fraction
-            let wave = sin(fraction * .pi * 2 + phase * .pi * 2) * amplitude
-            path.addLine(to: CGPoint(x: x, y: baseline + wave))
+        let p = CGFloat(progress.isFinite ? min(max(progress, 0), 1) : 0)
+        guard p > 0 else { return Path() }
+        func smooth(_ start: CGFloat, _ end: CGFloat) -> CGFloat {
+            let t = min(max((p - start) / (end - start), 0), 1)
+            return t * t * (3 - 2 * t)
         }
-        path.addLine(to: CGPoint(x: rect.width, y: rect.height))
+        let envelope = smooth(0.05, 0.14) * (1 - smooth(0.90, 0.98))
+        let time = phase * 2 * .pi
+        let seedAngle = seed * 2 * .pi
+        let waveAmplitude = amplitude * envelope * (0.90 + 0.10 * sin(2 * time + seedAngle))
+        func edge(_ y: CGFloat) -> CGFloat {
+            let y = y * spatialScale * 2 * .pi
+            let wave = 0.64 * sin(time + y * 1.15 + seedAngle)
+                + 0.24 * sin(-2 * time + y * 2.40 + seedAngle * 0.73)
+                + 0.12 * sin(3 * time + y * 3.35 + seedAngle * 1.31)
+            return min(max(rect.width * p + waveAmplitude * wave, 0), rect.width)
+        }
+        var path = Path()
+        path.move(to: .zero)
+        var previous = CGPoint(x: edge(0), y: 0)
+        path.addLine(to: previous)
+        for i in 1...max(2, segments) {
+            let fraction = CGFloat(i) / CGFloat(max(2, segments))
+            let next = CGPoint(x: edge(fraction), y: rect.height * fraction)
+            path.addQuadCurve(to: CGPoint(x: (previous.x + next.x) / 2, y: (previous.y + next.y) / 2), control: previous)
+            previous = next
+        }
+        path.addQuadCurve(to: previous, control: previous)
+        path.addLine(to: CGPoint(x: 0, y: rect.height))
         path.closeSubpath()
         return path
     }
@@ -589,7 +632,7 @@ private struct TransferInfoPill: View {
 
     var body: some View {
         Text(text)
-            .zTransferText(size: ZTransferMetrics.caption, weight: .medium)
+            .zTransferText(size: 10, weight: .medium)
             .foregroundStyle(color)
             .padding(.horizontal, 7)
             .padding(.vertical, 3)
@@ -604,73 +647,20 @@ private struct QueueThumbnail: View {
     let handle: UInt32
     let item: TransferQueueItem
     @State private var image: UIImage?
-    @State private var badgeScale: CGFloat = 1
-    private var visualState: String {
-        if item.isGeneratingFrame { return "generating" }
-        return item.status.rawValue
-    }
-
     var body: some View {
-        ZStack(alignment: .bottomTrailing) {
-            Group {
+        Group {
             if let image { Image(uiImage: image).resizable().scaledToFill() }
             else { RoundedRectangle(cornerRadius: 8).fill(Color.black.opacity(0.08)).overlay { Image(systemName: "photo") } }
-            }
-            Circle()
-                .fill(stateColor)
-                .frame(width: 22, height: 22)
-                .overlay {
-                    Image(systemName: statusIcon)
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(.white)
-                        .id(visualState)
-                        .transition(.opacity.combined(with: .scale(scale: 0.62)))
-                }
-                .overlay(Circle().stroke(ZTransferColors.background, lineWidth: 2))
-                .animation(.easeInOut(duration: 0.18), value: visualState)
-                .transition(.scale(scale: 0.62).combined(with: .opacity))
-                .scaleEffect(badgeScale)
         }
-        .frame(width: 56, height: 56)
+        .frame(width: 52, height: 52)
         .clipShape(RoundedRectangle(cornerRadius: 8))
-        .task {
+        .task(id: item.id) {
             guard image == nil, let session else { return }
-            // Queue cards follow Android's cache-first policy so opening the
-            // queue never adds a fresh camera request for a thumbnail that
-            // the photo grid already resolved.
-            if let data = try? await session.cachedThumbnail(file: item.file),
-               let image = UIImage(data: data) {
+            if let data = try? await session.cachedThumbnail(file: item.file), let image = UIImage(data: data) {
                 self.image = image
-            } else if let data = try? await session.thumbnail(handle: handle),
-                      let image = UIImage(data: data) {
+            } else if let data = try? await session.thumbnail(handle: handle), let image = UIImage(data: data) {
                 self.image = image
             }
-        }
-        .onChange(of: visualState) { _ in
-            withAnimation(.easeOut(duration: 0.10)) { badgeScale = 0.94 }
-            withAnimation(.spring(response: 0.34, dampingFraction: 0.62).delay(0.10)) { badgeScale = 1 }
-        }
-    }
-
-    private var stateColor: Color {
-        if item.isGeneratingFrame { return ZTransferColors.accentPurple }
-        switch item.status {
-        case .waiting: return ZTransferColors.accentYellow
-        case .transferring: return ZTransferColors.accentBlue
-        case .completed: return ZTransferColors.statusConnected
-        case .failed: return ZTransferColors.statusError
-        case .cancelled: return ZTransferColors.secondaryText
-        }
-    }
-
-    private var statusIcon: String {
-        if item.isGeneratingFrame { return "sparkles" }
-        switch item.status {
-        case .waiting: return "clock"
-        case .transferring: return "arrow.down"
-        case .completed: return "checkmark"
-        case .failed: return "exclamationmark"
-        case .cancelled: return "xmark"
         }
     }
 }

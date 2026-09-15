@@ -66,6 +66,8 @@ struct RootView: View {
     // as soon as the transport handshake completes.
     @State private var connectionCelebrationActive = false
     @State private var connectionCelebrationStart: Date?
+    // Once established, transport loss must not return the user to connection.
+    @State private var establishedSession: CameraSession?
 
     private var locale: Locale {
         switch appLanguage {
@@ -82,7 +84,7 @@ struct RootView: View {
     }
     var body: some View {
         Group {
-            if let session = connectionModel.cameraSession {
+            if let session = connectionModel.cameraSession ?? establishedSession {
                 // Android starts the file scan as soon as the camera session is
                 // ready, while HomeScreen remains visible for the 1260 ms
                 // success hand-off. Keep the list mounted (but hidden and
@@ -128,6 +130,7 @@ struct RootView: View {
             UIApplication.shared.isIdleTimerDisabled = keepScreenOn
             gpsCoordinator.setAPModeBlocked(gpsBlockedByAPCamera)
             if connectionModel.cameraSession != nil {
+                establishedSession = connectionModel.cameraSession
                 connectionCelebrationStart = Date()
                 connectionCelebrationActive = true
             }
@@ -135,13 +138,12 @@ struct RootView: View {
         .onChange(of: connectionModel.cameraSession != nil) { connected in
             gpsCoordinator.setAPModeBlocked(gpsBlockedByAPCamera)
             if connected {
+                establishedSession = connectionModel.cameraSession
                 connectionCelebrationStart = Date()
                 connectionCelebrationActive = true
             } else {
-                // Drop the queue's live transport reference together with the
-                // root session. Persisted tasks remain available for retry
-                // after the next camera connection.
-                Task { await transferQueue.detach() }
+                // Keep the photo workspace mounted; transport loss is handled
+                // in place by the list and queue reconnect flow.
                 connectionCelebrationStart = nil
                 connectionCelebrationActive = false
             }

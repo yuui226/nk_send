@@ -93,6 +93,7 @@ struct ConnectionPage: View {
                     .padding(.horizontal, layout.horizontalPadding)
                     .padding(.top, layout.cardsTop)
 
+                    HStack(spacing: 8) {
                     Button { showSettings = true } label: {
                         DoubleZMark(tint: ZTransferColors.primaryText)
                             .frame(width: 20 * DoubleZMark.aspectRatio, height: 20)
@@ -100,6 +101,15 @@ struct ConnectionPage: View {
                             .frame(height: 36)
                     }
                     .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
+                    #if DEBUG
+                    Button { model.connectDebugSimulator() } label: {
+                        Image(systemName: "photo.on.rectangle.angled")
+                            .font(.system(size: 18, weight: .semibold))
+                            .frame(width: 36, height: 36)
+                    }
+                    .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
+                    #endif
+                    }
                     .padding(.leading, 12)
                     .padding(.top, 6)
                     .background {

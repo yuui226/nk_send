@@ -6,6 +6,43 @@ import XCTest
 #endif
 
 final class PTPIPCodecTests: XCTestCase {
+    func testDownloadPhaseConsumesEndDataThenCommandResponseAndRetainsDeclaration() throws {
+        let sink = PTPDataSink(started: { _ in }, received: { _ in })
+        var phase = PTPIPDownloadPhase(transactionID: 7)
+        let start = Data(UInt32(7).littleEndianBytes + UInt64(6).littleEndianBytes)
+        XCTAssertNil(try phase.consume(PTPIPPacket(type: .startData, payload: start), sink: sink))
+        let end = Data(UInt32(7).littleEndianBytes + [1, 2, 3])
+        XCTAssertNil(try phase.consume(PTPIPPacket(type: .endData, payload: end), sink: sink))
+        let response = Data(UInt16(0x2001).littleEndianBytes + UInt32(7).littleEndianBytes)
+        let completed = try XCTUnwrap(phase.consume(PTPIPPacket(type: .commandResponse, payload: response), sink: sink))
+        XCTAssertEqual(completed.receivedByteCount, 3)
+        XCTAssertEqual(completed.declaredByteCount, 6)
+    }
+
+    func testDrainBudgetCountsWholePayloadsAndIgnoresPing() throws {
+        var budget = PTPIPDrainBudget(maximum: 20)
+        XCTAssertFalse(try budget.consume(.init(type: .startData, payload: Data(repeating: 0, count: 12))))
+        XCTAssertFalse(try budget.consume(.init(type: .data, payload: Data(repeating: 0, count: 8))))
+        XCTAssertFalse(try budget.consume(.init(type: .ping, payload: Data(repeating: 0, count: 100))))
+        XCTAssertEqual(budget.drained, 20)
+        XCTAssertTrue(try budget.consume(.init(type: .commandResponse, payload: Data(repeating: 0, count: 6))))
+    }
+
+    func testDrainRejectsAnotherPacketAfterBudgetIsExceeded() throws {
+        var budget = PTPIPDrainBudget(maximum: 8)
+        XCTAssertThrowsError(try budget.consume(.init(type: .endData, payload: Data(repeating: 0, count: 9))))
+        XCTAssertTrue(budget.exceeded)
+        XCTAssertThrowsError(try budget.consume(.init(type: .commandResponse, payload: Data())))
+    }
+
+    func testDownloadPhaseRejectsMismatchedStartAndResponseTransaction() throws {
+        let sink = PTPDataSink(started: { _ in }, received: { _ in })
+        var phase = PTPIPDownloadPhase(transactionID: 7)
+        let start = Data(UInt32(8).littleEndianBytes + UInt64(6).littleEndianBytes)
+        XCTAssertThrowsError(try phase.consume(PTPIPPacket(type: .startData, payload: start), sink: sink))
+        let response = Data(UInt16(0x2001).littleEndianBytes + UInt32(8).littleEndianBytes)
+        XCTAssertThrowsError(try phase.consume(PTPIPPacket(type: .commandResponse, payload: response), sink: sink))
+    }
     func testCommandRequestWrapsStandardPTPContainer() throws {
         let command = PTPCodec.encodeCommand(code: 0x1002, transactionID: 7, parameters: [1])
         let packet = try PTPIPCodec.decode(try PTPIPCodec.commandRequest(from: command))
@@ -26,6 +63,13 @@ final class PTPIPCodecTests: XCTestCase {
         let ap = try PTPIPCodec.decode(PTPIPCodec.initCommandRequest(guid: id))
         XCTAssertEqual(ap.payload.suffix(2), Data([1, 0]))
         XCTAssertEqual(ap.payload.count, 36)
+    }
+
+    func testCancelRequestContainsOnlyTheActiveTransactionID() throws {
+        let packet = try PTPIPCodec.decode(try PTPIPCodec.cancelRequest(transactionID: 0xA1B2C3D4))
+        XCTAssertEqual(packet.type, .cancel)
+        XCTAssertEqual(packet.payload.count, 4)
+        XCTAssertEqual(packet.payload.readUInt32LE(at: 0), 0xA1B2C3D4)
     }
 
     func testResponseContainerLengthIncludesLengthAndTypeFields() throws {

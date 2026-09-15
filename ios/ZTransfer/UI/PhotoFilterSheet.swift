@@ -150,11 +150,13 @@ struct FilterChip: View {
     let label: String?
     let selected: Bool
     var systemImage: String? = nil
+    var burstIcon = false
     let action: () -> Void
     var body: some View {
         Button(action: action) {
             HStack(spacing: 5) {
-                if let systemImage {
+                if burstIcon { BurstGlyph() }
+                else if let systemImage {
                     Image(systemName: systemImage)
                         .font(.system(size: 13, weight: .semibold))
                 }
