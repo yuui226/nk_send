@@ -83,12 +83,12 @@ extension ConnectionState {
             }
         case let .ready(id):
             if next.selectedDeviceID == nil { next.selectedDeviceID = id }
-        case let .sessionOpened(id):
+        case let .sessionOpened(id, _):
             // ImageCaptureCore's session-open callback precedes DeviceInfo and
             // catalog loading. The user-visible connected state is committed by
             // ConnectionViewModel only after that handshake succeeds.
             next.selectedDeviceID = id; next.usbPhase = .connecting; next.errorMessage = nil
-        case let .sessionClosed(id):
+        case let .sessionClosed(id, _):
             if next.selectedDeviceID == id { next.usbPhase = .waitingForCamera }
         case let .failed(id, message):
             if id == nil || id == next.selectedDeviceID { next.usbPhase = .failed(message); next.errorMessage = message }

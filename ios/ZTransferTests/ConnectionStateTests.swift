@@ -21,7 +21,7 @@ final class ConnectionStateTests: XCTestCase {
         var state = ConnectionState().applying(.deviceAdded(device))
         XCTAssertEqual(state.selectedDeviceID, "camera")
         XCTAssertEqual(state.discoveredDevices, [device])
-        state = state.applying(.sessionOpened(id: "camera"))
+        state = state.applying(.sessionOpened(id: "camera", token: UUID()))
         XCTAssertEqual(state.usbPhase, .connecting)
         state = state.applying(.failed(id: "camera", message: "断开"))
         XCTAssertEqual(state.usbPhase, .failed("断开"))

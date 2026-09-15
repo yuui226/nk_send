@@ -21,8 +21,8 @@ enum USBTransportEvent: Sendable, Equatable {
     case deviceAdded(USBDeviceDescriptor)
     case deviceRemoved(id: String)
     case ready(id: String)
-    case sessionOpened(id: String)
-    case sessionClosed(id: String)
+    case sessionOpened(id: String, token: UUID)
+    case sessionClosed(id: String, token: UUID)
     case failed(id: String?, message: String)
 }
 
@@ -231,7 +231,9 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
                     } else {
                         if self.markOpened(camera, for: id, generation: generation) {
                             if box.finish(.success(())) {
-                                self.emit(.sessionOpened(id: id))
+                                if let token = self.ownedSessionToken(for: id, camera: camera) {
+                                    self.emit(.sessionOpened(id: id, token: token))
+                                }
                             } else {
                                 // The caller cancelled just as the framework
                                 // accepted the open; retire that exact object.
@@ -256,16 +258,17 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
     }
 
     func closeSession(for id: String, expectedSessionToken: UUID? = nil) async {
-        let camera = expectedSessionToken.flatMap { openedCamera(for: id, token: $0) }
+        let camera = expectedSessionToken.flatMap { ownedOpenedCamera(for: id, token: $0) }
             ?? (expectedSessionToken == nil ? openedCamera(for: id) : nil)
         guard let camera else { return }
+        let sessionToken = ownedSessionToken(for: id, camera: camera)
         let box = ThrowingContinuationBox<Void>()
         _ = try? await withTaskCancellationHandler(operation: {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                 box.install(continuation)
                 camera.requestCloseSession(options: nil) { [weak self] _ in
-                    if self?.removeSession(camera, for: id) == true {
-                        self?.emit(.sessionClosed(id: id))
+                    if self?.removeSession(camera, for: id) == true, let sessionToken {
+                        self?.emit(.sessionClosed(id: id, token: sessionToken))
                     }
                     _ = box.finish(.success(()))
                 }
@@ -415,6 +418,20 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
         guard openedSessionTokens[id] == token,
               let camera = cameras[id], openedCameras[id] === camera else { return nil }
         return camera
+    }
+
+    /// Cleanup must still close an old owned object after discovery has
+    /// removed or replaced it; only command sends require current discovery.
+    private func ownedOpenedCamera(for id: String, token: UUID) -> ICCameraDevice? {
+        lock.lock(); defer { lock.unlock() }
+        guard openedSessionTokens[id] == token else { return nil }
+        return openedCameras[id]
+    }
+
+    private func ownedSessionToken(for id: String, camera: ICCameraDevice) -> UUID? {
+        lock.lock(); defer { lock.unlock() }
+        guard openedCameras[id] === camera else { return nil }
+        return openedSessionTokens[id]
     }
 
     private func markOpening(_ camera: ICCameraDevice, for id: String, generation: UInt64) {

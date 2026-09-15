@@ -438,13 +438,20 @@ final class ConnectionViewModel: ObservableObject {
                 return
             }
             cameraRepository = repository
-            if let cameraRepository {
-                cameraSession = CameraSession(repository: cameraRepository, transport: usbTransport, deviceID: id)
+            if let cameraRepository, let sessionToken = usbTransport.openedSessionToken(for: id) {
+                cameraSession = CameraSession(repository: cameraRepository, transport: usbTransport,
+                                              deviceID: id, sessionToken: sessionToken)
                 lastEstablishedUSBDeviceID = id
                 if let cameraSession {
                     startUSBKeepalive(for: cameraSession, deviceID: id, generation: generation)
                     startUSBCatalogMonitoring(for: cameraSession, generation: generation)
                 }
+            }
+            guard cameraSession != nil else {
+                cameraRepository = nil
+                await connectionService.disconnect()
+                usbConnectTask = nil
+                return
             }
             state.usbPhase = .connected
         } catch is CancellationError {
@@ -596,6 +603,28 @@ final class ConnectionViewModel: ObservableObject {
     }
 
     private func apply(_ event: USBTransportEvent) {
+        // Android ignores USB attach/detach while an accepted Wi-Fi session
+        // owns the workspace. ImageCaptureCore can still enumerate devices,
+        // but those callbacks must not select USB or start a second session.
+        if let cameraSession, !cameraSession.isUSB {
+            switch event {
+            case .deviceAdded, .deviceRemoved, .ready, .sessionOpened, .sessionClosed, .failed:
+                return
+            case .authorization:
+                break
+            }
+        }
+        switch event {
+        case .sessionOpened where cameraSession?.isUSB == true:
+            // An event queued just before DeviceInfo completed cannot move an
+            // already accepted session back to the connecting card.
+            return
+        case let .sessionClosed(id, token):
+            if let cameraSession, cameraSession.usbSessionToken != token { return }
+            if let current = usbTransport.openedSessionToken(for: id), current != token { return }
+        default:
+            break
+        }
         let previous = state
         state = state.applying(event)
         switch event {
@@ -659,9 +688,10 @@ final class ConnectionViewModel: ObservableObject {
             }
         case .sessionOpened:
             break
-        case let .sessionClosed(id):
+        case let .sessionClosed(id, token):
             if let failedSession = cameraSession,
                (id == previous.selectedDeviceID || id == failedSession.transportDeviceID),
+               failedSession.usbSessionToken == token,
                let deviceID = failedSession.transportDeviceID {
                 let generation = connectionGeneration
                 Task { [weak self] in

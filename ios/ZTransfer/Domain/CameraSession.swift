@@ -10,6 +10,7 @@ actor CameraSession {
     /// Stable identity exposed to connection recovery without crossing actor
     /// isolation. It is immutable for the lifetime of a camera session.
     nonisolated let transportDeviceID: String?
+    nonisolated let usbSessionToken: UUID?
     /// The connection pill uses the transport kind just like Android's
     /// SignalPill (USB icon for wired sessions, Wi‑Fi icon otherwise).
     nonisolated let isUSB: Bool
@@ -20,14 +21,14 @@ actor CameraSession {
     private let thumbnailStore = PhotoThumbnailStore()
     private let exifStore = PhotoExifStore()
 
-    init(repository: CameraRepository, transport: ImageCaptureUSBTransport, deviceID: String) {
-        self.repository = repository; self.usbTransport = transport; self.deviceID = deviceID; self.transportDeviceID = deviceID; self.isUSB = true; self.wirelessMode = nil
+    init(repository: CameraRepository, transport: ImageCaptureUSBTransport, deviceID: String, sessionToken: UUID) {
+        self.repository = repository; self.usbTransport = transport; self.deviceID = deviceID; self.transportDeviceID = deviceID; self.usbSessionToken = sessionToken; self.isUSB = true; self.wirelessMode = nil
     }
 
     /// Creates a network-backed session. The repository's PTPSession is the
     /// serialized command channel for thumbnails, reads and downloads.
     init(repository: CameraRepository, wirelessMode: WirelessMode = .ap) {
-        self.repository = repository; self.usbTransport = nil; self.deviceID = nil; self.transportDeviceID = nil; self.isUSB = false; self.wirelessMode = wirelessMode
+        self.repository = repository; self.usbTransport = nil; self.deviceID = nil; self.transportDeviceID = nil; self.usbSessionToken = nil; self.isUSB = false; self.wirelessMode = wirelessMode
     }
 
     func catalog() async throws -> [CameraFile] { try await repository.loadCatalog() }
