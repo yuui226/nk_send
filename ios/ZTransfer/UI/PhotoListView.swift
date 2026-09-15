@@ -24,6 +24,7 @@ private struct PhotoListWorkspaceTransition: AnimatableModifier {
     var progress: CGFloat
     let horizontalMultiplier: CGFloat
     let initialOpacity: CGFloat
+    let initialScale: CGFloat
 
     nonisolated var animatableData: CGFloat {
         get { progress }
@@ -34,8 +35,12 @@ private struct PhotoListWorkspaceTransition: AnimatableModifier {
         content
             .opacity(initialOpacity + (1 - initialOpacity) * progress)
             .offset(x: UIScreen.main.bounds.width * horizontalMultiplier * (1 - progress))
+            .scaleEffect(initialScale + (1 - initialScale) * progress, anchor: .center)
     }
 }
+
+private let photoQueueWorkspaceAnimation =
+    Animation.timingCurve(0.22, 0.84, 0.24, 1.0, duration: 0.34)
 
 @MainActor struct PhotoListView: View {
     @StateObject private var model: PhotoListViewModel
@@ -99,18 +104,18 @@ private struct PhotoListWorkspaceTransition: AnimatableModifier {
             ZTransferColors.background.ignoresSafeArea()
             if showingQueue {
                 TransferQueueView(model: queueModel, session: session, directory: directoryStore) {
-                    withAnimation(.timingCurve(0.4, 0.0, 0.2, 1.0, duration: 0.22)) {
+                    withAnimation(photoQueueWorkspaceAnimation) {
                         showingQueue = false
                     }
                 }
                 .transition(.asymmetric(
                     insertion: .modifier(
-                        active: PhotoListWorkspaceTransition(progress: 0, horizontalMultiplier: 1, initialOpacity: 0.72),
-                        identity: PhotoListWorkspaceTransition(progress: 1, horizontalMultiplier: 1, initialOpacity: 0.72)
+                        active: PhotoListWorkspaceTransition(progress: 0, horizontalMultiplier: 1, initialOpacity: 0.82, initialScale: 0.985),
+                        identity: PhotoListWorkspaceTransition(progress: 1, horizontalMultiplier: 1, initialOpacity: 0.82, initialScale: 0.985)
                     ),
                     removal: .modifier(
-                        active: PhotoListWorkspaceTransition(progress: 0, horizontalMultiplier: 1, initialOpacity: 0.72),
-                        identity: PhotoListWorkspaceTransition(progress: 1, horizontalMultiplier: 1, initialOpacity: 0.72)
+                        active: PhotoListWorkspaceTransition(progress: 0, horizontalMultiplier: 1, initialOpacity: 0.82, initialScale: 0.985),
+                        identity: PhotoListWorkspaceTransition(progress: 1, horizontalMultiplier: 1, initialOpacity: 0.82, initialScale: 0.985)
                     )
                 ))
             } else {
@@ -163,7 +168,7 @@ private struct PhotoListWorkspaceTransition: AnimatableModifier {
                                     // width capsule; a trailing Spacer here made
                                     // it stretch across the entire grid.
                                     .padding(.horizontal, 14)
-                                    .frame(height: 38)
+                                    .frame(height: 28)
                                     .background {
                                         Capsule()
                                             .fill(Color.white.opacity(0.78))
@@ -178,7 +183,7 @@ private struct PhotoListWorkspaceTransition: AnimatableModifier {
                                 Button { enqueueSection(section.files) } label: {
                                     Image(systemName: "plus").font(.system(size: 20, weight: .medium))
                                         .foregroundStyle(ZTransferColors.accentBlue)
-                                        .frame(width: 44, height: 38)
+                                        .frame(width: 40, height: 28)
                                         .background(Color.white.opacity(0.78), in: Capsule())
                                         .overlay(Capsule().stroke(Color.white.opacity(0.95), lineWidth: 1))
                                 }.buttonStyle(.plain)
@@ -233,7 +238,9 @@ private struct PhotoListWorkspaceTransition: AnimatableModifier {
                             }
                         }
                     }
-                    }.padding(.horizontal, ZTransferMetrics.pageHorizontal).padding(.top, 8)
+                    // Match Android's 12dp list inset so thumbnails align with
+                    // the floating top controls instead of leaving a wider gutter.
+                    }.padding(.horizontal, 12).padding(.top, 8)
                 }
                 .coordinateSpace(name: "photo-list-scroll")
                 .onPreferenceChange(PhotoListCellBoundsPreferenceKey.self) { bounds in
@@ -265,17 +272,17 @@ private struct PhotoListWorkspaceTransition: AnimatableModifier {
                 .safeAreaInset(edge: .top, spacing: 0) {
                     photoListTopControls
                 }
-                // Android keeps the files page in the workspace while the
-                // queue page slides over it: on return it enters from the
-                // left at one third of the width and starts at 50% opacity.
+                // The two workspace pages are a horizontal pair. The files
+                // page enters from the left when returning from the queue and
+                // keeps a subtle scale/opacity settle during the hand-off.
                 .transition(.asymmetric(
                     insertion: .modifier(
-                        active: PhotoListWorkspaceTransition(progress: 0, horizontalMultiplier: -1.0 / 3.0, initialOpacity: 0.5),
-                        identity: PhotoListWorkspaceTransition(progress: 1, horizontalMultiplier: -1.0 / 3.0, initialOpacity: 0.5)
+                        active: PhotoListWorkspaceTransition(progress: 0, horizontalMultiplier: -1, initialOpacity: 0.72, initialScale: 0.985),
+                        identity: PhotoListWorkspaceTransition(progress: 1, horizontalMultiplier: -1, initialOpacity: 0.72, initialScale: 0.985)
                     ),
                     removal: .modifier(
-                        active: PhotoListWorkspaceTransition(progress: 0, horizontalMultiplier: -1.0 / 3.0, initialOpacity: 0.5),
-                        identity: PhotoListWorkspaceTransition(progress: 1, horizontalMultiplier: -1.0 / 3.0, initialOpacity: 0.5)
+                        active: PhotoListWorkspaceTransition(progress: 0, horizontalMultiplier: -1, initialOpacity: 0.72, initialScale: 0.985),
+                        identity: PhotoListWorkspaceTransition(progress: 1, horizontalMultiplier: -1, initialOpacity: 0.72, initialScale: 0.985)
                     )
                 ))
             }
@@ -484,14 +491,14 @@ private struct PhotoListWorkspaceTransition: AnimatableModifier {
                             }
                         }
                         .padding(.horizontal, 10)
-                        .frame(height: 36)
+                        .frame(minWidth: 40, height: 36)
                     }
                     .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
 
                     Button { showingFilter = true } label: {
-                        Image(systemName: "line.3.horizontal.decrease.circle")
-                            .font(.system(size: 18, weight: .semibold))
-                            .frame(width: 36, height: 36)
+                        PhotoListFilterIcon(active: model.filter.isActive)
+                            .frame(width: 20, height: 20)
+                            .frame(width: 40, height: 36)
                     }
                     .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
                     .background {
@@ -551,7 +558,7 @@ private struct PhotoListWorkspaceTransition: AnimatableModifier {
 
             Button {
                     guard !showingQueue else { return }
-                    withAnimation(.timingCurve(0.4, 0.0, 0.2, 1.0, duration: 0.22)) {
+                    withAnimation(photoQueueWorkspaceAnimation) {
                         showingQueue = true
                     }
                 } label: {
@@ -561,8 +568,9 @@ private struct PhotoListWorkspaceTransition: AnimatableModifier {
                         .frame(height: 36)
                         .fixedSize(horizontal: true, vertical: false)
                     } else {
-                    Image(systemName: "checklist")
-                        .frame(width: 44, height: 36)
+                    PhotoListQueueIcon()
+                        .frame(width: 20, height: 20)
+                        .frame(width: 40, height: 36)
                     }
                 }
                 .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
@@ -850,6 +858,66 @@ struct PhotoListSignalIcon: View {
     }
 }
 
+/// Android's hand-drawn funnel mark, kept as a line icon instead of the
+/// circular SF Symbols variant so the compact top buttons share one visual
+/// language across platforms.
+private struct PhotoListFilterIcon: View {
+    let active: Bool
+
+    var body: some View {
+        Canvas { context, size in
+            let s = min(size.width, size.height)
+            let path = Path { path in
+                path.move(to: CGPoint(x: 0.12 * s, y: 0.18 * s))
+                path.addLine(to: CGPoint(x: 0.88 * s, y: 0.18 * s))
+                path.addLine(to: CGPoint(x: 0.60 * s, y: 0.51 * s))
+                path.addLine(to: CGPoint(x: 0.60 * s, y: 0.76 * s))
+                path.addLine(to: CGPoint(x: 0.40 * s, y: 0.86 * s))
+                path.addLine(to: CGPoint(x: 0.40 * s, y: 0.51 * s))
+                path.closeSubpath()
+            }
+            let color = active ? ZTransferColors.accentBlue : ZTransferColors.primaryText
+            if active {
+                context.fill(path, with: .color(color))
+            } else {
+                context.stroke(path, with: .color(color), style: StrokeStyle(
+                    lineWidth: 2.1,
+                    lineCap: .round,
+                    lineJoin: .round
+                ))
+            }
+        }
+        .accessibilityLabel(AppLocalized.resource("cd_filter_type"))
+    }
+}
+
+/// Android's compact checklist entry mark: two rounded checks paired with
+/// short rules. It stays legible at the same 20pt mark used by the signal icon.
+private struct PhotoListQueueIcon: View {
+    var tint: Color = ZTransferColors.statusConnected
+
+    var body: some View {
+        Canvas { context, size in
+            let stroke = StrokeStyle(lineWidth: max(1.8, size.width * 0.11), lineCap: .round, lineJoin: .round)
+            let rowGap = size.height * 0.46
+            for row in 0..<2 {
+                let y = size.height * 0.28 + CGFloat(row) * rowGap
+                var check = Path()
+                check.move(to: CGPoint(x: size.width * 0.06, y: y))
+                check.addLine(to: CGPoint(x: size.width * 0.22, y: y + size.height * 0.16))
+                check.addLine(to: CGPoint(x: size.width * 0.42, y: y - size.height * 0.13))
+                context.stroke(check, with: .color(tint), style: stroke)
+
+                var rule = Path()
+                rule.move(to: CGPoint(x: size.width * 0.58, y: y - size.height * 0.01))
+                rule.addLine(to: CGPoint(x: size.width * 0.94, y: y - size.height * 0.01))
+                context.stroke(rule, with: .color(tint), style: stroke)
+            }
+        }
+        .accessibilityLabel(AppLocalized.resource("cd_transfer"))
+    }
+}
+
 private struct PhotoListSettingsAnchorPreferenceKey: PreferenceKey {
     static let defaultValue: CGRect = .zero
     static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
@@ -997,7 +1065,8 @@ struct QueuePill: View {
                     .foregroundStyle(ZTransferColors.statusConnected)
                     .transition(.opacity.combined(with: .scale(scale: 0.82)))
             } else if collapsedToIcon {
-                Image(systemName: "checklist")
+                PhotoListQueueIcon()
+                    .frame(width: 20, height: 20)
                     .scaleEffect(hasActive ? 1 : 0.9)
             } else if paused {
                 Text("\(displayRemainingCount)")

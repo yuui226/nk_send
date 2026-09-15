@@ -347,7 +347,7 @@ private struct ConnectionCelebrationModifier: ViewModifier {
 /// HomeScreen.kt applies a smootherstep to the shared linear hero clock at the
 /// card boundary. Keeping the same curve here avoids a platform-specific
 /// double easing and preserves the Android start/end velocities.
-private func connectionCelebrationEase(_ value: CGFloat) -> CGFloat {
+func connectionCelebrationEase(_ value: CGFloat) -> CGFloat {
     let x = min(1, max(0, value))
     return x * x * (3 - 2 * x)
 }

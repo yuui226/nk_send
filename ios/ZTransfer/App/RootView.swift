@@ -60,12 +60,12 @@ struct RootView: View {
     @AppStorage("app_language") private var appLanguage = "system"
     @AppStorage("keep_screen_on") private var keepScreenOn = true
     @Environment(\.scenePhase) private var scenePhase
-    // Android keeps HomeScreen alive for the connection-success celebration
-    // (500 ms delay + 760 ms effect) before entering the file list.  Keep the
-    // newly-created session in this hand-off state instead of switching views
-    // as soon as the transport handshake completes.
+    // Keep HomeScreen alive for the connection-success celebration before
+    // handing off to the file list. The final hand-off is a short cross-fade,
+    // so the icon can disappear cleanly while the first list frame appears.
     @State private var connectionCelebrationActive = false
     @State private var connectionCelebrationStart: Date?
+    @State private var connectionPhotoListVisible = false
     // Once established, transport loss must not return the user to connection.
     @State private var establishedSession: CameraSession?
 
@@ -85,11 +85,10 @@ struct RootView: View {
     var body: some View {
         Group {
             if let session = connectionModel.cameraSession ?? establishedSession {
-                // Android starts the file scan as soon as the camera session is
-                // ready, while HomeScreen remains visible for the 1260 ms
-                // success hand-off. Keep the list mounted (but hidden and
-                // untouchable) so its scanner/cache lifecycle starts at the
-                // same boundary instead of being delayed by the animation.
+                // Start the photo scan as soon as the session is ready, but
+                // keep the list visually hidden until the connection scene
+                // reaches its final cross-fade. A boolean hand-off keeps the
+                // large list out of the per-frame celebration redraw.
                 ZStack {
                     PhotoListView(session: session,
                                   queue: transferQueue,
@@ -97,14 +96,16 @@ struct RootView: View {
                                   effectsStore: effectsStore) {
                         Task { await connectionModel.disconnectCamera() }
                     }
-                    .opacity(connectionCelebrationActive ? 0 : 1)
-                    .allowsHitTesting(!connectionCelebrationActive)
+                    .opacity(connectionCelebrationActive ? (connectionPhotoListVisible ? 1 : 0) : 1)
+                    .allowsHitTesting(!connectionCelebrationActive || connectionPhotoListVisible)
                     if connectionCelebrationActive {
                         HomeWorkspacePagerIOS(connection: connectionModel,
                                                effectsStore: effectsStore,
                                                gpsCoordinator: gpsCoordinator,
                                                directory: directoryStore,
                                                celebrationStart: connectionCelebrationStart)
+                            .opacity(connectionPhotoListVisible ? 0 : 1)
+                            .allowsHitTesting(!connectionPhotoListVisible)
                     }
                 }
             } else {
@@ -132,6 +133,7 @@ struct RootView: View {
             if connectionModel.cameraSession != nil {
                 establishedSession = connectionModel.cameraSession
                 connectionCelebrationStart = Date()
+                connectionPhotoListVisible = false
                 connectionCelebrationActive = true
             }
         }
@@ -140,11 +142,13 @@ struct RootView: View {
             if connected {
                 establishedSession = connectionModel.cameraSession
                 connectionCelebrationStart = Date()
+                connectionPhotoListVisible = false
                 connectionCelebrationActive = true
             } else {
                 // Keep the photo workspace mounted; transport loss is handled
                 // in place by the list and queue reconnect flow.
                 connectionCelebrationStart = nil
+                connectionPhotoListVisible = true
                 connectionCelebrationActive = false
             }
         }
@@ -163,7 +167,12 @@ struct RootView: View {
         .task(id: connectionModel.cameraSession != nil) {
             guard connectionModel.cameraSession != nil else { return }
             do {
-                try await Task.sleep(nanoseconds: 1_260_000_000)
+                try await Task.sleep(nanoseconds: UInt64(CONNECTION_HANDOFF_FADE_START_MS) * 1_000_000)
+                guard !Task.isCancelled, connectionModel.cameraSession != nil else { return }
+                withAnimation(.easeInOut(duration: CONNECTION_HANDOFF_FADE_DURATION_MS / 1_000)) {
+                    connectionPhotoListVisible = true
+                }
+                try await Task.sleep(nanoseconds: UInt64(CONNECTION_HANDOFF_FADE_DURATION_MS) * 1_000_000)
                 guard !Task.isCancelled, connectionModel.cameraSession != nil else { return }
                 connectionCelebrationActive = false
                 connectionCelebrationStart = nil
@@ -173,6 +182,9 @@ struct RootView: View {
         }
     }
 }
+
+private let CONNECTION_HANDOFF_FADE_START_MS = 1_380.0
+private let CONNECTION_HANDOFF_FADE_DURATION_MS = 220.0
 
 
 /// Android HomeWorkspacePager equivalent. The workbench is the page below the

@@ -32,6 +32,7 @@ struct ConnectionPage: View {
 
     @ViewBuilder
     private func pageBody(celebration: ConnectionCelebrationValues) -> some View {
+        let pageFade = 1 - connectionCelebrationEase(celebration.hero)
         ZStack {
             GeometryReader { proxy in
                 let layout = ConnectionLayout(size: proxy.size)
@@ -50,6 +51,7 @@ struct ConnectionPage: View {
                             selectionSceneProgress: celebration.hero,
                             successEffectProgress: celebration.success)
                         GPSConnectionControl(coordinator: gpsCoordinator)
+                            .opacity(pageFade)
                     }
                     .frame(width: layout.cardWidth)
                     .zIndex(1)
@@ -112,6 +114,7 @@ struct ConnectionPage: View {
                     }
                     .padding(.leading, 12)
                     .padding(.top, 6)
+                    .opacity(pageFade)
                     .background {
                         GeometryReader { anchor in
                             Color.clear.preference(key: SettingsAnchorPreferenceKey.self,
@@ -126,6 +129,7 @@ struct ConnectionPage: View {
                         action: onOpenWorkspace,
                     )
                         .padding(.bottom, 18)
+                        .opacity(pageFade)
                 }
                 .onPreferenceChange(SettingsAnchorPreferenceKey.self) { settingsAnchor = $0 }
             }
@@ -138,6 +142,7 @@ struct ConnectionPage: View {
                     onConfirm: { showSTAReset = false; Task { await model.resetSTAPairing() } },
                     onDismiss: { showSTAReset = false })
                     .ignoresSafeArea()
+                    .opacity(pageFade)
             }
             if showSettings {
                 SettingsPopupOverlay(
@@ -151,10 +156,12 @@ struct ConnectionPage: View {
                     onEffectPreviewRequested: {}
                 )
                 .ignoresSafeArea()
+                .opacity(pageFade)
             }
             if showSTATips {
                 STATipsOverlay(isPresented: $showSTATips, wirelessMode: tipsWirelessMode, anchor: tipsAnchor)
                     .ignoresSafeArea()
+                    .opacity(pageFade)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -177,15 +184,16 @@ struct ConnectionPage: View {
     }
 }
 
-/// Timing copied from HomeScreen.kt.  The first 500 ms is the selected-card
-/// hero flight; the following 760 ms is the success effect before navigation.
+/// The selected-card hero runs first; once the icon is at its destination the
+/// success effect plays behind it. The final 220 ms is owned by RootView's
+/// cross-fade into the photo list.
 struct ConnectionCelebrationValues: Equatable {
     let hero: CGFloat
     let success: CGFloat
 
     init(elapsedMilliseconds: Double) {
         let heroDuration = 620.0
-        let successDelay = 500.0
+        let successDelay = 620.0
         let successDuration = 760.0
         let heroLinear = min(1, max(0, elapsedMilliseconds / heroDuration))
         let successLinear = min(1, max(0, (elapsedMilliseconds - successDelay) / successDuration))

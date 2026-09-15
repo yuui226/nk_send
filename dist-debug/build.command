@@ -11,6 +11,17 @@ finish_terminal() {
     if [[ -t 0 ]]; then
       read -r -p 'Press Enter to close this window...' _ || true
     fi
+  elif [[ "${TERM_PROGRAM:-}" == "Apple_Terminal" ]] &&
+       command -v osascript >/dev/null 2>&1; then
+    # Let this shell exit first. Closing the Terminal window from inside the
+    # EXIT trap makes Terminal think a process is still running and show a
+    # confirmation dialog. A detached delayed task closes it after the shell
+    # has gone away, so a successful Finder-launched run needs no click.
+    nohup osascript \
+      -e 'delay 0.35' \
+      -e 'tell application "Terminal" to close front window' \
+      >/dev/null 2>&1 </dev/null &
+    disown 2>/dev/null || true
   fi
   exit "$status"
 }
