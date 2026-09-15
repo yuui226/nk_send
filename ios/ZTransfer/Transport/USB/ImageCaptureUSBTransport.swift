@@ -587,7 +587,6 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
         lock.lock()
         let existing = cameraIDsByObject[objectID]
         let id = camera.uuidString.flatMap { $0.isEmpty ? nil : $0 }
-            ?? camera.name.flatMap { $0.isEmpty ? nil : $0 }
             ?? existing
             ?? "usb-\(String(UInt(bitPattern: Unmanaged.passUnretained(camera).toOpaque()), radix: 16))"
         cameraIDsByObject[objectID] = id
