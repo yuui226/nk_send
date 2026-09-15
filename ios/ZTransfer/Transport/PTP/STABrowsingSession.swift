@@ -137,6 +137,9 @@ actor STABrowsingSession {
         throw STAConnectionError.pairingCompleted
     }
     private func command(_ operation: UInt16, _ parameters: [UInt32] = []) async throws -> PTPResponse {
-        try await session.executeResponse(operation: operation, parameters: parameters, timeoutNanoseconds: 5_000_000_000)
+        // Android switches both PTP/IP sockets from the 5 s handshake timeout
+        // to its 60 s normal read timeout before initializeStaBrowsingSession.
+        try await session.executeResponse(operation: operation, parameters: parameters,
+                                          timeoutNanoseconds: 60_000_000_000)
     }
 }
