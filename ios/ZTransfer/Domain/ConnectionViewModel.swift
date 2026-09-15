@@ -104,10 +104,7 @@ final class ConnectionViewModel: ObservableObject {
             // transport/keepalive failure path instead of being force-closed.
             if cameraSession == nil && state.wirelessMode == .ap {
                 apFailedAttempts = 0
-                wifiGeneration &+= 1
-                wifiConnectTask?.cancel()
-                wifiConnectTask = nil
-                if state.wifiPhase != .idle { state.wifiPhase = .idle }
+                cancelWiFiConnection()
             }
             wifiWatcherTask?.cancel()
             wifiWatcherTask = nil
@@ -597,11 +594,7 @@ final class ConnectionViewModel: ObservableObject {
             wifiWatcherTask?.cancel()
             wifiWatcherTask = nil
             if cameraSession == nil {
-                wifiGeneration &+= 1
-                wifiConnectTask?.cancel()
-                wifiConnectTask = nil
-                state.wifiPhase = .idle
-                state.wifiFailureKind = nil
+                cancelWiFiConnection()
             }
         } else if cameraSession == nil { startAPWatcherIfNeeded() }
     }
