@@ -604,6 +604,7 @@ private fun RemoteContent(
 
     // ---------- 开发者面板 ----------
     val logLines = remember { mutableStateListOf<String>() }
+    var diagnosticCapture by remember { mutableStateOf(false) }
     var devPanel by remember { mutableStateOf(false) }
     // 开发者入口默认隐藏：1.5s 内连按 4 次 FPS 键才现身（FPS 连按 4 次开关状态
     // 恰好复原，不留副作用）。仅本次进页有效，退页复位——这是诊断后门不是常驻功能。
@@ -662,6 +663,15 @@ private fun RemoteContent(
     // 直接读它不会触发重组，暂停/继续按钮图标会卡住不切换。
     var recPaused by remember { mutableStateOf(false) }
     fun devLog(line: String) {
+        if (!diagnosticCapture) return
+        // 监看页调试窗专用于快门兼容反馈；其余高频取帧/对焦/录像日志会淹没
+        // 用户真正需要复制的属性能力信息。
+        val lower = line.lowercase()
+        val diagnosticLine =
+            "capability" in lower || "selected=" in lower || " write " in lower ||
+                "probe complete" in lower || "0xD100" in line || "0x500D" in line ||
+                "0x5007" in line || "0x5001" in line || "0xD100" in line
+        if (!diagnosticLine) return
         logLines.add(line)
         // 全量能力探测会为每个属性保留 DESC/VALUE 原始载荷，通常有数百行。
         // 留足容量，确保用户点“复制日志”时开头的机型与完整码表没有被环形淘汰。
@@ -723,7 +733,61 @@ private fun RemoteContent(
 
     suspend fun refreshParam(prop: Int) {
         val cam = cameraViewModel.getCamera() ?: return
-        runCatching { cam.rcGetCompatibleParam(prop) }.getOrNull()?.let { params[prop] = it }
+        val exposureDiagnostic = prop in setOf(
+            Lab.PROP_NK_SHUTTER, Lab.PROP_F_NUMBER,
+            Lab.PROP_EXP_COMPENSATION, Lab.PROP_ISO,
+            Lab.PROP_NK_MOVIE_SHUTTER, Lab.PROP_NK_MOVIE_F_NUMBER,
+            Lab.PROP_NK_MOVIE_EXP_COMP, Lab.PROP_NK_MOVIE_ISO
+        )
+        if (diagnosticCapture && exposureDiagnostic && prop != Lab.PROP_NK_SHUTTER) {
+            devLog("exposure capability logical=0x%04X: querying".format(prop))
+        }
+        val shutterLogical = prop == Lab.PROP_NK_SHUTTER || prop == Lab.PROP_NK_MOVIE_SHUTTER
+        if (shutterLogical) {
+            val candidates = if (prop == Lab.PROP_NK_MOVIE_SHUTTER) {
+                intArrayOf(Lab.PROP_NK_MOVIE_SHUTTER)
+            } else intArrayOf(Lab.PROP_NK_SHUTTER, Lab.PROP_EXPOSURE_TIME_STD)
+            candidates.forEach { actual ->
+                val candidate = runCatching { cam.rcGetParam(actual) }.getOrNull()
+                devLog(
+                    "shutter capability prop=0x%04X %s".format(
+                        actual,
+                        candidate?.let {
+                            "writable=${it.writable} type=0x%04X current=%d values=%d first=%s last=%s".format(
+                                it.dataType, it.current, it.values.size,
+                                it.values.firstOrNull()?.toString() ?: "-",
+                                it.values.lastOrNull()?.toString() ?: "-"
+                            )
+                        } ?: "unavailable"
+                    )
+                )
+            }
+        }
+        val selected = runCatching { cam.rcGetCompatibleParam(prop) }.getOrNull()
+        if (diagnosticCapture && exposureDiagnostic && prop != Lab.PROP_NK_SHUTTER) {
+            devLog(
+                "exposure selected logical=0x%04X %s".format(
+                    prop,
+                    selected?.let {
+                        "prop=0x%04X writable=%s current=%d values=%d first=%s last=%s".format(
+                            it.prop, it.writable, it.current, it.values.size,
+                            it.values.firstOrNull()?.toString() ?: "-",
+                            it.values.lastOrNull()?.toString() ?: "-"
+                        )
+                    } ?: "none"
+                )
+            )
+        }
+        if (shutterLogical) {
+            devLog(
+                "shutter selected=" + (selected?.let {
+                    "prop=0x%04X writable=%s current=%d values=%d".format(
+                        it.prop, it.writable, it.current, it.values.size
+                    )
+                } ?: "none")
+            )
+        }
+        selected?.let { params[prop] = it }
     }
 
     suspend fun refreshBattery(forceDescribe: Boolean = false) {
@@ -1510,6 +1574,15 @@ private fun RemoteContent(
                 null
             }
             result?.actual?.let { params[prop] = it }
+            if (prop == Lab.PROP_NK_SHUTTER || prop == Lab.PROP_NK_MOVIE_SHUTTER) {
+                devLog(
+                    "shutter write prop=0x%04X target=%d confirmed=%s read=%s resp=0x%04X".format(
+                        p.prop, value, result?.confirmed == true,
+                        result?.actual?.current?.toString() ?: "unreadable",
+                        (result?.responseCode ?: -1) and 0xFFFF
+                    )
+                )
+            }
             if (result?.confirmed != true) {
                 val rc = result?.responseCode ?: -1
                 val actual = result?.actual?.current?.toString() ?: "unreadable"
@@ -1673,19 +1746,22 @@ private fun RemoteContent(
 
     fun runProbe() {
         if (probing) return
-        val cam = cameraViewModel.getCamera() ?: return
+        if (cameraViewModel.getCamera() == null) return
         scope.launch {
             probing = true
+            diagnosticCapture = true
             // 一次探测对应一份可直接回传的完整报告，避免混入旧会话日志。
             logLines.clear()
             try {
-                lvJob?.cancelAndJoin()   // 探测自带 LV 测试，先停会话
-                cam.runLabProbe({ devLog(it) }, { bytes -> decode(bytes)?.let { frame = it } })
+                // 只读取当前模式下的曝光能力，不停止监看、不执行全量协议探测。
+                val props = if (movieMode) MOVIE_EXPOSURE_PROPS else EXPOSURE_PROPS
+                props.forEach { refreshParam(it) }
+                devLog("probe complete: 请点击复制按钮反馈以上日志")
             } catch (e: Exception) {
-                devLog("!! probe: $e")
+                devLog("probe capability error: $e")
             } finally {
                 probing = false
-                startSession(hdLiveView)
+                diagnosticCapture = false
             }
         }
     }

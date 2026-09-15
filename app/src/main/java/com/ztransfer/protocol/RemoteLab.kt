@@ -566,7 +566,10 @@ private data class PropDescData(
     val dataType: Int,
     val writable: Boolean,
     val current: Long,
-    val enumValues: List<Long>
+    val enumValues: List<Long>,
+    val rangeMin: Long? = null,
+    val rangeMax: Long? = null,
+    val rangeStep: Long? = null
 )
 
 private fun parsePropDescData(d: ByteArray): PropDescData {
@@ -577,6 +580,9 @@ private fun parsePropDescData(d: ByteArray): PropDescData {
     c.typed(dataType)                    // default
     val (cur, _) = c.typed(dataType)
     val formFlag = c.u8()
+    var rangeMin: Long? = null
+    var rangeMax: Long? = null
+    var rangeStep: Long? = null
     val values = when (formFlag) {
         // Nikon 的布尔属性常用 Range(0..1) 而不是 Enumeration。只把严格的
         // 二值范围展开；其他连续范围仍保持为空，避免为曝光参数制造庞大值表。
@@ -584,6 +590,7 @@ private fun parsePropDescData(d: ByteArray): PropDescData {
             val min = c.typed(dataType).first
             val max = c.typed(dataType).first
             val step = c.typed(dataType).first
+            rangeMin = min; rangeMax = max; rangeStep = step
             if (min == 0L && max == 1L && step == 1L) listOf(0L, 1L) else emptyList()
         }
         2 -> {
@@ -592,7 +599,20 @@ private fun parsePropDescData(d: ByteArray): PropDescData {
         }
         else -> emptyList()
     }
-    return PropDescData(dataType, writable, cur, values)
+    return PropDescData(dataType, writable, cur, values, rangeMin, rangeMax, rangeStep)
+}
+
+private fun shutterRangeValues(desc: PropDescData): List<Long> {
+    val min = desc.rangeMin ?: return emptyList()
+    val max = desc.rangeMax ?: return emptyList()
+    val step = desc.rangeStep ?: return emptyList()
+    if (step <= 0L || max < min) return emptyList()
+    val count = (max - min) / step + 1L
+    if (count <= 0L) return emptyList()
+    // Keep the UI bounded for an unusually large range while preserving alignment
+    // to the camera-declared step. Typical 1/3-stop ranges are far below this limit.
+    val stride = if (count <= 256L) 1L else (count + 255L) / 256L
+    return (0L until count step stride).map { min + it * step }
 }
 
 private fun encodeScalar(dataType: Int, v: Long): ByteArray {
@@ -701,7 +721,10 @@ suspend fun NikonCamera.rcGetParam(prop: Int): RcParam? {
     val (rc, d) = labCommand(Lab.GET_DEVICE_PROP_DESC, prop)
     if (rc != Lab.OK || d == null) return null
     val desc = runCatching { parsePropDescData(d) }.getOrNull() ?: return null
-    return RcParam(prop, desc.dataType, desc.writable, desc.current, desc.enumValues)
+    val values = if (desc.enumValues.isNotEmpty()) desc.enumValues
+    else if (prop == Lab.PROP_NK_SHUTTER || prop == Lab.PROP_EXPOSURE_TIME_STD)
+        shutterRangeValues(desc) else emptyList()
+    return RcParam(prop, desc.dataType, desc.writable, desc.current, values)
 }
 
 /**
