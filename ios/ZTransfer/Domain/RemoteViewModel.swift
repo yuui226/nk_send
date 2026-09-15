@@ -109,7 +109,7 @@ final class RemoteViewModel: ObservableObject {
                 // Stop is the normal lifecycle path; do not surface a fake error.
             } catch {
                 if Self.isTransportFailure(error) { notifyTransportLost() }
-                state = state.applying(.operationFailed(Self.message(for: error)))
+                else { state = state.applying(.operationFailed(Self.message(for: error))) }
             }
             if stopTrackingRequested {
                 try? await camera.endSubjectTracking()
@@ -426,6 +426,10 @@ final class RemoteViewModel: ObservableObject {
         transportLossNotified = true
         stopRequested = true
         modeTask?.cancel()
+        frameImage = nil
+        frameData = nil
+        frameMetadata = nil
+        state = state.applying(.disconnected)
         onTransportLost?()
     }
 

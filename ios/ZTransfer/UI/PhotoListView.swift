@@ -383,6 +383,8 @@ private let photoQueueWorkspaceAnimation =
         .fullScreenCover(isPresented: $showingRemote) {
             if let session {
                 RemoteView(session: session,
+                           isSessionConnected: isSessionConnected,
+                           onRetrySTA: onRetrySTA,
                            onStopped: { transportLost in
                                // A transport failure tears down this mounted
                                // session and reconnects in place. Do not
@@ -394,11 +396,9 @@ private let photoQueueWorkspaceAnimation =
                                }
                            },
                            onTransportLost: {
-                               // Close the monitor surface immediately when
-                               // its command channel dies. The workspace
-                               // remains mounted while the connection layer
-                               // replaces the session in place.
-                               showingRemote = false
+                               // Android keeps monitor navigation mounted
+                               // during a dropped session so its STA signal
+                               // control can request immediate recovery.
                                onTransportLost(session)
                            })
             }

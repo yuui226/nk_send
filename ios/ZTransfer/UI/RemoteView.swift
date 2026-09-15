@@ -20,6 +20,10 @@ struct RemoteView: View {
     @Environment(\.dismiss) private var dismiss
     private let onStopped: ((Bool) -> Void)?
     private let onTransportLost: (() -> Void)?
+    private let isSessionConnected: Bool
+    private let onRetrySTA: () -> Void
+    private let isUSBSession: Bool
+    private let wirelessMode: WirelessMode?
     @StateObject private var model: RemoteViewModel
     @State private var zoom: CGFloat = 1
     @State private var selectedField: RemoteExposureField?
@@ -40,10 +44,15 @@ struct RemoteView: View {
     @State private var orientationNotificationsActive = false
     @State private var stopCleanupStarted = false
 
-    init(session: CameraSession, onStopped: ((Bool) -> Void)? = nil,
+    init(session: CameraSession, isSessionConnected: Bool = true,
+         onRetrySTA: @escaping () -> Void = {}, onStopped: ((Bool) -> Void)? = nil,
          onTransportLost: (() -> Void)? = nil) {
         self.onStopped = onStopped
         self.onTransportLost = onTransportLost
+        self.isSessionConnected = isSessionConnected
+        self.onRetrySTA = onRetrySTA
+        self.isUSBSession = session.isUSB
+        self.wirelessMode = session.wirelessMode
         _model = StateObject(wrappedValue: RemoteViewModel(camera: session,
                                                             onTransportLost: onTransportLost))
     }
@@ -211,15 +220,22 @@ struct RemoteView: View {
     }
 
     private var remoteSignalButton: some View {
-        HStack {
-            PhotoListSignalIcon(isUSB: false, wirelessMode: .sta)
-                .frame(width: 19, height: 19)
+        Button {
+            if wirelessMode == .sta && !isSessionConnected { onRetrySTA() }
+        } label: {
+            HStack {
+                PhotoListSignalIcon(isUSB: isUSBSession, wirelessMode: wirelessMode,
+                                    connected: isSessionConnected)
+                    .frame(width: 19, height: 19)
+            }
+            .frame(width: 40, height: 36)
+            .background(Color.white.opacity(0.86), in: Capsule())
+            .overlay(Capsule().stroke(Color.white.opacity(0.95), lineWidth: 1))
+            .shadow(color: .black.opacity(0.06), radius: 2, y: 1)
         }
-        .frame(width: 40, height: 36)
-        .background(Color.white.opacity(0.86), in: Capsule())
-        .overlay(Capsule().stroke(Color.white.opacity(0.95), lineWidth: 1))
-        .shadow(color: .black.opacity(0.06), radius: 2, y: 1)
-        .accessibilityLabel(AppLocalized.resource("sta_signal_connected"))
+        .buttonStyle(.plain)
+        .accessibilityLabel(AppLocalized.resource(wirelessMode == .sta && !isSessionConnected
+                                                  ? "sta_signal_disconnected_reconnect" : "sta_signal_connected"))
     }
 
     private var remoteBatteryButton: some View {
