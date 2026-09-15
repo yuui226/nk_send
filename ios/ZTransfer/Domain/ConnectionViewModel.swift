@@ -277,10 +277,10 @@ final class ConnectionViewModel: ObservableObject {
                 self.wifiConnectTask = nil
                 if Task.isCancelled || error is CancellationError { self.state.wifiPhase = .idle; return }
                 let preserveReconnect = mode == .ap && reconnect && self.state.wifiPhase == .reconnecting
+                if mode == .ap { self.apFailedAttempts += 1 }
                 if !preserveReconnect {
                     self.state.wifiPhase = .failed(self.wifiErrorMessage(error))
                     if mode == .ap {
-                        self.apFailedAttempts += 1
                         self.state.wifiFailureKind = Self.wifiFailureKind(for: error)
                     }
                 }
