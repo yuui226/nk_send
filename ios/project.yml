@@ -36,6 +36,10 @@ targets:
           - great_vibes_regular.ttf
           - bebas_neue_regular.ttf
           - cormorant_garamond_medium_italic.ttf
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: true
           UISceneConfigurations: {}

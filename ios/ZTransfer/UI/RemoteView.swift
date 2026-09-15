@@ -24,6 +24,7 @@ struct RemoteView: View {
     @State private var lastZebraUpdate = 0.0
     @State private var recordingDotDimmed = false
     @State private var landscapeLayout = false
+    @State private var orientationNotificationsActive = false
 
     init(session: CameraSession) {
         _model = StateObject(wrappedValue: RemoteViewModel(camera: session))
@@ -62,10 +63,30 @@ struct RemoteView: View {
             }
         }
         .animation(ZTransferMotion.standard, value: model.recordingHint)
+        .animation(ZTransferMotion.standard, value: landscapeLayout)
         .statusBarHidden(false)
         .task { model.start() }
         .task { model.loadExposure(movie: false) }
-        .onDisappear { model.stop() }
+        // Orientation is intentionally scoped to the monitor page. The rest
+        // of the app stays portrait; this page rotates its own canvas to match
+        // the device instead of changing the application's interface size.
+        .onAppear {
+            guard !orientationNotificationsActive else { return }
+            orientationNotificationsActive = true
+            UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+            applyDeviceOrientation(UIDevice.current.orientation)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { notification in
+            guard let device = notification.object as? UIDevice else { return }
+            applyDeviceOrientation(device.orientation)
+        }
+        .onDisappear {
+            if orientationNotificationsActive {
+                UIDevice.current.endGeneratingDeviceOrientationNotifications()
+                orientationNotificationsActive = false
+            }
+            model.stop()
+        }
         .onChange(of: model.state.frameSequence) { _ in updateZebraMask() }
         .onChange(of: zebraVisible) { _ in updateZebraMask(force: true) }
         .sheet(item: $selectedField) { field in
@@ -589,6 +610,22 @@ struct RemoteView: View {
         guard force || now - lastZebraUpdate >= 0.25 else { return }
         lastZebraUpdate = now
         zebraMask = IOSZebraMask(image: image)
+    }
+
+    private func applyDeviceOrientation(_ orientation: UIDeviceOrientation) {
+        let target: Bool
+        switch orientation {
+        case .landscapeLeft, .landscapeRight:
+            target = true
+        case .portrait, .portraitUpsideDown:
+            target = false
+        default:
+            return
+        }
+        guard target != landscapeLayout else { return }
+        withAnimation(ZTransferMotion.standard) {
+            landscapeLayout = target
+        }
     }
 
     private func fitImageRect(in size: CGSize, aspect: CGFloat) -> CGRect {
