@@ -47,7 +47,9 @@ private let photoQueueWorkspaceAnimation =
     @StateObject private var queueModel: TransferQueueViewModel
     @ObservedObject private var directoryStore: DirectoryAccessStore
     let effectsStore: PhotoEffectsStore
-    let onDisconnect: () -> Void
+    let isSessionConnected: Bool
+    let onRetrySTA: () -> Void
+    let onTransportLost: (CameraSession) -> Void
     private let session: CameraSession?
     @AppStorage("tap_to_preview") private var tapToPreview = false
     @State private var selectedFile: CameraFile?
@@ -62,6 +64,8 @@ private let photoQueueWorkspaceAnimation =
     @State private var collapsedDays: Set<String> = []
     @State private var showTopButton = false
     @State private var showingRemote = false
+    @State private var remoteEntryHint: String?
+    @State private var remoteEntryHintID = UUID()
     @State private var showingSettings = false
     @State private var settingsAnchor: CGRect = .zero
     @State private var signalExpanded = false
@@ -77,20 +81,21 @@ private let photoQueueWorkspaceAnimation =
     @State private var heldFlightCount = 0
     @State private var queueImpact = 0
 
-    init(repository: CameraRepository, queue: TransferQueue = TransferQueue(), directory: DirectoryAccessStore = DirectoryAccessStore(), effectsStore: PhotoEffectsStore = PhotoEffectsStore(), onDisconnect: @escaping () -> Void) {
+    init(repository: CameraRepository, queue: TransferQueue = TransferQueue(), directory: DirectoryAccessStore = DirectoryAccessStore(), effectsStore: PhotoEffectsStore = PhotoEffectsStore(), isSessionConnected: Bool = true, onRetrySTA: @escaping () -> Void = {}, onTransportLost: @escaping (CameraSession) -> Void = { _ in }) {
         _model = StateObject(wrappedValue: PhotoListViewModel(repository: repository))
         _queueModel = StateObject(wrappedValue: TransferQueueViewModel(queue: queue))
         _directoryStore = ObservedObject(wrappedValue: directory)
-        self.effectsStore = effectsStore
-        self.onDisconnect = onDisconnect; self.session = nil
+        self.effectsStore = effectsStore; self.isSessionConnected = isSessionConnected; self.onRetrySTA = onRetrySTA
+        self.onTransportLost = onTransportLost; self.session = nil
     }
 
-    init(session: CameraSession, queue: TransferQueue, directory: DirectoryAccessStore = DirectoryAccessStore(), effectsStore: PhotoEffectsStore = PhotoEffectsStore(), onDisconnect: @escaping () -> Void) {
-        _model = StateObject(wrappedValue: PhotoListViewModel(session: session))
+    init(session: CameraSession, queue: TransferQueue, directory: DirectoryAccessStore = DirectoryAccessStore(), effectsStore: PhotoEffectsStore = PhotoEffectsStore(), isSessionConnected: Bool = true, onRetrySTA: @escaping () -> Void = {}, onTransportLost: @escaping (CameraSession) -> Void = { _ in }) {
+        _model = StateObject(wrappedValue: PhotoListViewModel(session: session,
+                                                               onTransportLost: { onTransportLost(session) }))
         _queueModel = StateObject(wrappedValue: TransferQueueViewModel(queue: queue))
         _directoryStore = ObservedObject(wrappedValue: directory)
-        self.effectsStore = effectsStore
-        self.onDisconnect = onDisconnect; self.session = session
+        self.effectsStore = effectsStore; self.isSessionConnected = isSessionConnected; self.onRetrySTA = onRetrySTA
+        self.onTransportLost = onTransportLost; self.session = session
     }
 
     private var columns: [GridItem] {
@@ -103,7 +108,8 @@ private let photoQueueWorkspaceAnimation =
         ZStack {
             ZTransferColors.background.ignoresSafeArea()
             if showingQueue {
-                TransferQueueView(model: queueModel, session: session, directory: directoryStore) {
+                TransferQueueView(model: queueModel, session: session, directory: directoryStore,
+                                  isSessionConnected: isSessionConnected, onRetrySTA: onRetrySTA) {
                     withAnimation(photoQueueWorkspaceAnimation) {
                         showingQueue = false
                     }
@@ -129,19 +135,12 @@ private let photoQueueWorkspaceAnimation =
                             }
                         }
                     LazyVStack(alignment: .leading, spacing: 18) {
-                    switch model.loadState {
-                    case .idle, .loading:
-                        ProgressView().frame(maxWidth: .infinity).padding(.top, 48)
-                    case let .failed(message):
-                        Text(message).zTransferText(size: ZTransferMetrics.body).padding()
-                    case .loaded:
-                        if model.sections.isEmpty {
-                            PhotoListEmptyState(filterActive: model.filter.isActive,
-                                                usb: session?.isUSB == true,
-                                                onClearFilter: model.clearFilter)
-                                .frame(maxWidth: .infinity)
-                                .padding(.top, 150)
-                        } else {
+                    // The scanner publishes each newest-first metadata batch
+                    // before fetching that batch's thumbnails. Render those
+                    // rows immediately, even while the remaining catalog is
+                    // loading; otherwise the first 12 stay hidden until the
+                    // entire camera scan completes.
+                    if !model.sections.isEmpty {
                             ForEach(model.sections) { section in
                                 VStack(alignment: .leading, spacing: 8) {
                                 HStack(spacing: 8) {
@@ -236,6 +235,18 @@ private let photoQueueWorkspaceAnimation =
                                 } }
                                 }
                             }
+                    } else {
+                        switch model.loadState {
+                        case .idle, .loading:
+                            ProgressView().frame(maxWidth: .infinity).padding(.top, 48)
+                        case let .failed(message):
+                            Text(message).zTransferText(size: ZTransferMetrics.body).padding()
+                        case .loaded:
+                            PhotoListEmptyState(filterActive: model.filter.isActive,
+                                                usb: session?.isUSB == true,
+                                                onClearFilter: model.clearFilter)
+                                .frame(maxWidth: .infinity)
+                                .padding(.top, 150)
                         }
                     }
                     // Match Android's 12dp list inset so thumbnails align with
@@ -371,10 +382,25 @@ private let photoQueueWorkspaceAnimation =
         }
         .fullScreenCover(isPresented: $showingRemote) {
             if let session {
-                RemoteView(session: session) {
-                    model.resumeAfterRemote()
-                    model.wakeThumbnailFill()
-                }
+                RemoteView(session: session,
+                           onStopped: { transportLost in
+                               // A transport failure tears down this mounted
+                               // session and reconnects in place. Do not
+                               // start a second scan against the invalid PTP
+                               // channel while the replacement is opening.
+                               if !transportLost {
+                                   model.resumeAfterRemote()
+                                   model.wakeThumbnailFill()
+                               }
+                           },
+                           onTransportLost: {
+                               // Close the monitor surface immediately when
+                               // its command channel dies. The workspace
+                               // remains mounted while the connection layer
+                               // replaces the session in place.
+                               showingRemote = false
+                               onTransportLost(session)
+                           })
             }
         }
                 .overlay {
@@ -480,11 +506,14 @@ private let photoQueueWorkspaceAnimation =
                     }
 
                     Button {
-                        if session?.wirelessMode != .sta { signalExpanded.toggle() }
+                        if session?.wirelessMode == .sta {
+                            if !isSessionConnected { onRetrySTA() }
+                        } else { signalExpanded.toggle() }
                     } label: {
                         HStack(spacing: 5) {
                             PhotoListSignalIcon(isUSB: session?.isUSB == true,
-                                                wirelessMode: session?.wirelessMode)
+                                                wirelessMode: session?.wirelessMode,
+                                                connected: isSessionConnected)
                             if signalExpanded && session?.wirelessMode != .sta {
                                 Image(systemName: "chevron.down")
                                     .font(.system(size: 10, weight: .bold))
@@ -638,16 +667,48 @@ private let photoQueueWorkspaceAnimation =
     @ViewBuilder
     private var remoteEntryOverlay: some View {
         if session != nil {
-            Button { showingRemote = true } label: {
-                Image(systemName: "camera.aperture")
-                    .font(.system(size: 18, weight: .semibold))
-                    .frame(width: 44, height: 44)
-                    .background(.thinMaterial, in: Circle())
-                    .overlay(Circle().stroke(.white.opacity(0.55), lineWidth: 1))
+            VStack(alignment: .leading, spacing: 8) {
+                if let remoteEntryHint {
+                    Text(remoteEntryHint)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(ZTransferColors.primaryText)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 9)
+                        .background(.regularMaterial, in: Capsule())
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                }
+                Button(action: openRemote) {
+                    Image(systemName: "camera.aperture")
+                        .font(.system(size: 18, weight: .semibold))
+                        .frame(width: 44, height: 44)
+                        .background(.thinMaterial, in: Circle())
+                        .overlay(Circle().stroke(.white.opacity(0.55), lineWidth: 1))
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
             .padding(.leading, 18).padding(.bottom, 22)
+            .animation(ZTransferMotion.standard, value: remoteEntryHint)
         }
+    }
+
+    private func openRemote() {
+        // Android keeps the PTP channel exclusive while a transfer worker is
+        // active. Do the same here instead of allowing live view to collide
+        // with an in-flight download and surface a session error.
+        guard !queueModel.snapshot.isTransferring else {
+            let hintID = UUID()
+            remoteEntryHintID = hintID
+            withAnimation(ZTransferMotion.standard) {
+                remoteEntryHint = AppLocalized.resource("remote_blocked_transfer")
+            }
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 2_200_000_000)
+                guard !Task.isCancelled, remoteEntryHintID == hintID else { return }
+                withAnimation(ZTransferMotion.standard) { remoteEntryHint = nil }
+            }
+            return
+        }
+        withAnimation(ZTransferMotion.standard) { showingRemote = true }
     }
 
     private func toggleBurst(_ id: String) {
@@ -831,12 +892,14 @@ private struct PhotoListQueueTargetPreferenceKey: PreferenceKey {
 struct PhotoListSignalIcon: View {
     let isUSB: Bool
     let wirelessMode: WirelessMode?
+    var connected = true
 
     var body: some View {
         if isUSB {
             ClassicUSBIcon(tint: ZTransferColors.accentBlue)
                 .frame(width: 18, height: 18)
         } else if wirelessMode == .sta {
+            let tint = connected ? ZTransferColors.accentBlue : ZTransferColors.statusError
             Canvas { context, size in
                 let width = size.width * 0.16
                 let gap = size.width * 0.10
@@ -846,11 +909,11 @@ struct PhotoListSignalIcon: View {
                 for (index, height) in heights.enumerated() {
                     let x = start + CGFloat(index) * (width + gap)
                     let rect = CGRect(x: x, y: size.height - height, width: width, height: height)
-                        context.fill(Path(roundedRect: rect, cornerRadius: width * 0.35), with: .color(ZTransferColors.accentBlue))
+                        context.fill(Path(roundedRect: rect, cornerRadius: width * 0.35), with: .color(tint))
                 }
             }
             .frame(width: 19, height: 18)
-            .accessibilityLabel(AppLocalized.resource("sta_signal_connected"))
+            .accessibilityLabel(AppLocalized.resource(connected ? "sta_signal_connected" : "sta_signal_disconnected_reconnect"))
         } else {
             Image(systemName: ZTransferIcon.wifi)
                 .font(.system(size: 17, weight: .semibold))

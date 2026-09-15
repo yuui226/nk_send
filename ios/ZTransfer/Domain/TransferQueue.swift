@@ -212,6 +212,11 @@ actor TransferQueue {
     private(set) var isTransferring = false
     private(set) var pauseAfterCurrent = false
     private var worker: Task<Void, Never>?
+    /// iOS has no Android-style foreground service. Keep a bounded system
+    /// background assertion while the queue is active so short background
+    /// transitions can finish the current file and flush its part file.
+    private var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
+    private var backgroundTaskToken: UUID?
     private var pending = PendingTransferQueue()
     private var frameWorkers: [UUID: Task<Void, Never>] = [:]
     private var frameJobs: [UUID: FrameJob] = [:]
@@ -323,6 +328,35 @@ actor TransferQueue {
         worker = Task { [weak self] in await self?.run() }
     }
 
+    private func beginBackgroundTransferActivity() async {
+        guard backgroundTaskID == .invalid else { return }
+        let token = UUID()
+        backgroundTaskToken = token
+        let id = await MainActor.run { [weak self] in
+            UIApplication.shared.beginBackgroundTask(withName: "ZTransfer transfer") {
+                Task { await self?.backgroundTransferExpired(token: token) }
+            }
+        }
+        backgroundTaskID = id
+        if id == .invalid { backgroundTaskToken = nil }
+    }
+
+    private func endBackgroundTransferActivity() {
+        let id = backgroundTaskID
+        backgroundTaskID = .invalid
+        backgroundTaskToken = nil
+        guard id != .invalid else { return }
+        Task { @MainActor in UIApplication.shared.endBackgroundTask(id) }
+    }
+
+    private func backgroundTransferExpired(token: UUID) {
+        guard backgroundTaskToken == token else { return }
+        // Cancellation preserves the current .nkpart_ file. The worker's
+        // normal cancellation path returns the item to WAITING so a later
+        // foreground reconnect can resume it from the next chunk boundary.
+        worker?.cancel()
+    }
+
     /// Explicitly starting the pending queue is the Android
     /// `startPendingTransfers` path: it clears a previously requested
     /// boundary pause before creating the worker. Automatic enqueue uses
@@ -353,6 +387,13 @@ actor TransferQueue {
     /// Android and is marked camera-not-connected instead of using a stale
     /// session object.
     func detach() {
+        session = nil
+    }
+
+    /// A delayed loss callback from a previous CameraSession must not clear
+    /// the provider installed by a faster reconnect.
+    func detach(ifCurrentSessionIs failedSession: CameraSession) {
+        guard let current = session as? CameraSession, current === failedSession else { return }
         session = nil
     }
 
@@ -468,9 +509,11 @@ actor TransferQueue {
     }
 
     private func run() async {
+        await beginBackgroundTransferActivity()
         frameMetadataCache.removeAll(keepingCapacity: true)
         var stoppedAfterCurrent = false
         defer {
+            endBackgroundTransferActivity()
             activeProgress = nil
             lastValidTransferSpeed = 0
             publishProgress()

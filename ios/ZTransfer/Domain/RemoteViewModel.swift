@@ -20,8 +20,11 @@ final class RemoteViewModel: ObservableObject {
 
     var recordingBusy: Bool { recordingOperations.isBusy }
     var recordingHint: String? { state.recordingHint?.message }
+    var transportLossWasNotified: Bool { transportLossNotified }
 
     private let camera: RemoteCameraControlling
+    private let onTransportLost: (() -> Void)?
+    private var transportLossNotified = false
     private var frameTask: Task<Void, Never>?
     private var modeTask: Task<Void, Never>?
     private var focusHideTask: Task<Void, Never>?
@@ -35,12 +38,16 @@ final class RemoteViewModel: ObservableObject {
     private var stopTrackingRequested = false
     private var lastFrameAt: ContinuousClock.Instant?
 
-    init(camera: RemoteCameraControlling) { self.camera = camera }
+    init(camera: RemoteCameraControlling, onTransportLost: (() -> Void)? = nil) {
+        self.camera = camera
+        self.onTransportLost = onTransportLost
+    }
 
     func start() {
         guard frameTask == nil else { return }
         stopRequested = false
         stopTrackingRequested = false
+        transportLossNotified = false
         state = state.applying(.startRequested)
         frameTask = Task { [weak self] in
             guard let self else { return }
@@ -88,6 +95,10 @@ final class RemoteViewModel: ObservableObject {
                     } catch is CancellationError {
                         break
                     } catch {
+                        if Self.isTransportFailure(error) {
+                            notifyTransportLost()
+                            break
+                        }
                         state = state.applying(.frameLost)
                         // Android keeps the session alive and retries the next frame;
                         // a short yield prevents a camera error from spinning the CPU.
@@ -97,6 +108,7 @@ final class RemoteViewModel: ObservableObject {
             } catch is CancellationError {
                 // Stop is the normal lifecycle path; do not surface a fake error.
             } catch {
+                if Self.isTransportFailure(error) { notifyTransportLost() }
                 state = state.applying(.operationFailed(Self.message(for: error)))
             }
             if stopTrackingRequested {
@@ -183,6 +195,7 @@ final class RemoteViewModel: ObservableObject {
                 try await camera.setRemoteProperty(descriptor, value: enabled ? 1 : 0)
                 autoISODescriptor = try? await camera.remoteProperty(descriptor.property)
             } catch {
+                if Self.isTransportFailure(error) { notifyTransportLost() }
                 if var current = autoISODescriptor {
                     current.current = previous
                     autoISODescriptor = current
@@ -205,6 +218,7 @@ final class RemoteViewModel: ObservableObject {
                     exposureDescriptors[field] = refreshed
                 }
             } catch {
+                if Self.isTransportFailure(error) { notifyTransportLost() }
                 if var current = exposureDescriptors[field] {
                     current.current = previous
                     exposureDescriptors[field] = current
@@ -257,6 +271,7 @@ final class RemoteViewModel: ObservableObject {
             } catch is CancellationError {
                 state = state.applying(.cancelled)
             } catch {
+                if Self.isTransportFailure(error) { notifyTransportLost() }
                 state = state.applying(.operationFailed(Self.message(for: error)))
             }
         }
@@ -295,6 +310,7 @@ final class RemoteViewModel: ObservableObject {
                 // Leaving cancels ownership; no hint or late recording state.
             } catch {
                 guard !Task.isCancelled, recordingOperations.accepts(token) else { return }
+                if Self.isTransportFailure(error) { notifyTransportLost() }
                 showRecordingHint(command == .start ? .startFailed(nil) : .stopFailed())
             }
         }
@@ -361,6 +377,7 @@ final class RemoteViewModel: ObservableObject {
                 }
             } catch is CancellationError {
             } catch {
+                if Self.isTransportFailure(error) { notifyTransportLost() }
                 state = state.applying(.focusFailed)
                 scheduleFocusHide(after: 1.2)
             }
@@ -382,7 +399,10 @@ final class RemoteViewModel: ObservableObject {
         guard state.focus.tracking else { return }
         Task { [weak self] in
             guard let self else { return }
-            try? await camera.endSubjectTracking()
+            do { try await camera.endSubjectTracking() }
+            catch {
+                if Self.isTransportFailure(error) { notifyTransportLost() }
+            }
             state = state.applying(.trackingEnded)
         }
     }
@@ -399,6 +419,27 @@ final class RemoteViewModel: ObservableObject {
     private static func message(for error: Error) -> String {
         if let error = error as? LocalizedError, let description = error.errorDescription { return description }
         return AppLocalized.resource("connection_failed_short")
+    }
+
+    private func notifyTransportLost() {
+        guard !transportLossNotified else { return }
+        transportLossNotified = true
+        stopRequested = true
+        modeTask?.cancel()
+        onTransportLost?()
+    }
+
+    private static func isTransportFailure(_ error: Error) -> Bool {
+        switch error {
+        case PTPSessionError.timeout, PTPSessionError.invalidated,
+             CameraTransportError.disconnected, CameraTransportError.timeout:
+            return true
+        case let url as URLError:
+            return [.timedOut, .networkConnectionLost, .cannotConnectToHost,
+                    .notConnectedToInternet, .secureConnectionFailed].contains(url.code)
+        default:
+            return false
+        }
     }
 }
 

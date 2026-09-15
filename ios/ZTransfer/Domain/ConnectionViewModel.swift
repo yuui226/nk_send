@@ -13,10 +13,15 @@ final class ConnectionViewModel: ObservableObject {
     @Published private(set) var cameraSession: CameraSession?
     private var usbEventsTask: Task<Void, Never>?
     private var usbConnectTask: Task<Void, Never>?
+    private var usbKeepaliveTask: Task<Void, Never>?
+    private var usbCatalogTask: Task<Void, Never>?
     private var wifiConnectTask: Task<Void, Never>?
     private var wifiRetryTask: Task<Void, Never>?
     private var wifiCleanupTask: Task<Void, Never>?
     private var wifiRetryAttempt = 0
+    private var apFailedAttempts = 0
+    private var gpsConnectionPaused = UserDefaults(suiteName: GPSPreferences.suiteName)?
+        .bool(forKey: GPSPreferences.enabled) ?? false
     private let wirelessPreferences = UserDefaults(suiteName: "sta_connection")!
     @Published private(set) var pairedCameraCount = 0
     @Published private(set) var pairedCameraModels: [String] = []
@@ -29,6 +34,7 @@ final class ConnectionViewModel: ObservableObject {
     /// late ImageCaptureCore callback from an old camera must not publish into
     /// the replacement connection (the Android code checks deviceId for this).
     private var connectionGeneration = 0
+    private var lastEstablishedUSBDeviceID: String?
     private let usbMaxAttempts = 3
     private let usbRetryDelayNanoseconds: UInt64 = 1_000_000_000
 
@@ -40,6 +46,8 @@ final class ConnectionViewModel: ObservableObject {
     deinit {
         usbEventsTask?.cancel()
         usbConnectTask?.cancel()
+        usbKeepaliveTask?.cancel()
+        usbCatalogTask?.cancel()
         wifiConnectTask?.cancel()
         wifiWatcherTask?.cancel()
         wifiRetryTask?.cancel()
@@ -95,6 +103,7 @@ final class ConnectionViewModel: ObservableObject {
             // the in-flight discovery; an established session is left to its
             // transport/keepalive failure path instead of being force-closed.
             if cameraSession == nil && state.wirelessMode == .ap {
+                apFailedAttempts = 0
                 wifiGeneration &+= 1
                 wifiConnectTask?.cancel()
                 wifiConnectTask = nil
@@ -108,13 +117,13 @@ final class ConnectionViewModel: ObservableObject {
     }
 
     private func startAPWatcherIfNeeded() {
-        guard wifiPathAvailable, state.wirelessMode == .ap, cameraSession == nil,
+        guard !gpsConnectionPaused, wifiPathAvailable, state.wirelessMode == .ap, cameraSession == nil,
               wifiWatcherTask == nil else { return }
         wifiWatcherTask = Task { [weak self] in
             guard let self else { return }
             while !Task.isCancelled {
                 guard self.wifiPathAvailable, self.state.wirelessMode == .ap,
-                      self.cameraSession == nil else { break }
+                      !self.gpsConnectionPaused, self.cameraSession == nil else { break }
                 // Android checks the DHCP gateway before starting a handshake.
                 // iOS has no public gateway API; this subnet gate is the closest
                 // available equivalent and the PTP handshake remains authoritative.
@@ -122,7 +131,8 @@ final class ConnectionViewModel: ObservableObject {
                     await self.connectSelectedWiFi(reconnect: self.state.wifiPhase == .reconnecting)
                 }
                 let delay: UInt64 = {
-                    if case .failed = self.state.wifiPhase { return 3_000_000_000 }
+                    if case .failed = self.state.wifiPhase,
+                       self.apFailedAttempts > 1 { return 3_000_000_000 }
                     return 1_000_000_000
                 }()
                 do { try await Task.sleep(nanoseconds: delay) } catch { break }
@@ -138,6 +148,10 @@ final class ConnectionViewModel: ObservableObject {
         usbEventsTask = nil
         usbConnectTask?.cancel()
         usbConnectTask = nil
+        usbKeepaliveTask?.cancel()
+        usbKeepaliveTask = nil
+        usbCatalogTask?.cancel()
+        usbCatalogTask = nil
         // stop() can race an OpenSession callback.  Close the service first and
         // only then stop ImageCaptureCore, so it still owns the camera reference
         // while the non-cancellable close request is in flight.  Android keeps
@@ -148,27 +162,6 @@ final class ConnectionViewModel: ObservableObject {
             guard self.connectionGeneration == stopGeneration else { return }
             self.usbTransport.stop()
         }
-    }
-
-    func disconnectCamera() async {
-        connectionGeneration &+= 1
-        usbConnectTask?.cancel()
-        usbConnectTask = nil
-        cancelWiFiConnection()
-        await wifiCleanupTask?.value
-        wifiGeneration &+= 1
-        await wifiService.disconnect()
-        await connectionService.disconnect()
-        cameraRepository = nil
-        cameraSession = nil
-        state.usbPhase = .waitingForCamera
-        state.selectedDeviceID = nil
-        state.wifiPhase = .idle
-        state.wifiFailureKind = nil
-        // Returning from the photo list keeps Android's AP watcher alive;
-        // restart it after the explicit session teardown when Wi‑Fi is still
-        // on the camera candidate network.
-        startAPWatcherIfNeeded()
     }
 
     var staBusy: Bool {
@@ -231,6 +224,7 @@ final class ConnectionViewModel: ObservableObject {
     private func beginWiFiConnection(reconnect: Bool) async {
         guard wifiConnectTask == nil, cameraSession == nil, state.usbPhase != .connecting else { return }
         let mode = state.wirelessMode
+        guard mode != .ap || !gpsConnectionPaused else { return }
         wifiGeneration &+= 1
         let generation = wifiGeneration
         state.wifiPhase = mode == .sta ? .discovering : (reconnect ? .reconnecting : .connecting)
@@ -242,6 +236,11 @@ final class ConnectionViewModel: ObservableObject {
             do {
                 await pendingCleanup?.value
                 try Task.checkCancellation()
+                guard self.wifiGeneration == generation,
+                      mode != .ap || !self.gpsConnectionPaused else {
+                    if self.wifiGeneration == generation { self.wifiConnectTask = nil }
+                    return
+                }
                 let repository: CameraRepository
                 if mode == .sta {
                     repository = try await self.wifiService.connectSTA(discovery: self.wifiDiscovery) { [weak self] stage in
@@ -252,7 +251,8 @@ final class ConnectionViewModel: ObservableObject {
                 }
                 try Task.checkCancellation()
                 guard self.wifiGeneration == generation, self.state.wirelessMode == mode,
-                      self.cameraSession == nil, self.state.usbPhase != .connecting else {
+                      self.cameraSession == nil, self.state.usbPhase != .connecting,
+                      mode != .ap || !self.gpsConnectionPaused else {
                     if self.wifiGeneration == generation { await self.wifiService.disconnect() }
                     return
                 }
@@ -263,6 +263,7 @@ final class ConnectionViewModel: ObservableObject {
                 self.wifiConnectTask = nil
                 self.wifiWatcherTask?.cancel(); self.wifiWatcherTask = nil
                 self.wifiRetryAttempt = 0
+                if mode == .ap { self.apFailedAttempts = 0 }
                 await self.refreshSTAProfiles()
                 await self.wifiService.startKeepalive(for: repository) { [weak self] in
                     await self?.wifiTransportLost(generation: generation, mode: mode)
@@ -274,7 +275,10 @@ final class ConnectionViewModel: ObservableObject {
                 let preserveReconnect = mode == .ap && reconnect && self.state.wifiPhase == .reconnecting
                 if !preserveReconnect {
                     self.state.wifiPhase = .failed(self.wifiErrorMessage(error))
-                    if mode == .ap { self.state.wifiFailureKind = Self.wifiFailureKind(for: error) }
+                    if mode == .ap {
+                        self.apFailedAttempts += 1
+                        self.state.wifiFailureKind = Self.wifiFailureKind(for: error)
+                    }
                 }
                 self.state.staProgressIP = nil
                 await self.refreshSTAProfiles()
@@ -311,14 +315,53 @@ final class ConnectionViewModel: ObservableObject {
         }
     }
 
+    /// The disconnected STA signal pill requests an immediate retry. An
+    /// already-running discovery keeps ownership of its sockets; the tap only
+    /// replaces the scheduled backoff when no discovery is active.
+    func retrySTAConnection() {
+        guard cameraSession == nil, state.wirelessMode == .sta,
+              state.usbPhase != .connecting else { return }
+        guard wifiConnectTask == nil else { return }
+        wifiRetryTask?.cancel()
+        wifiRetryTask = nil
+        wifiRetryAttempt = 0
+        Task { [weak self] in await self?.beginWiFiConnection(reconnect: true) }
+    }
+
     private func wifiTransportLost(generation: Int, mode: WirelessMode) async {
         guard wifiGeneration == generation, state.wifiPhase == .connected else { return }
         cameraSession = nil; cameraRepository = nil
         state.wifiPhase = .reconnecting
         state.wifiFailureKind = nil
-        await wifiService.disconnect()
-        if mode == .sta { scheduleSTARetry(generation: generation) }
-        else { startAPWatcherIfNeeded() }
+        // Serialize socket teardown with an immediate signal-pill retry. The
+        // new discovery waits for this cleanup rather than racing Close/stop
+        // of the failed repository with its own accepted connection.
+        let previousCleanup = wifiCleanupTask
+        let service = wifiService
+        wifiCleanupTask = Task {
+            await previousCleanup?.value
+            await service.disconnect()
+        }
+        await wifiCleanupTask?.value
+        guard wifiGeneration == generation, cameraSession == nil else { return }
+        if mode == .sta {
+            if wifiConnectTask == nil { scheduleSTARetry(generation: generation) }
+        } else { startAPWatcherIfNeeded() }
+    }
+
+    /// Remote operations share the same PTP channel as catalog and transfer
+    /// work. If one of them proves that the channel is gone, use the normal
+    /// transport recovery path immediately instead of letting the next screen
+    /// operation discover a stale session and replaying the entry animation.
+    func handleTransportLost(_ failedSession: CameraSession) async {
+        guard cameraSession === failedSession else { return }
+        if failedSession.isUSB {
+            guard let deviceID = failedSession.transportDeviceID else { return }
+            await usbTransportLost(failedSession, deviceID: deviceID, generation: connectionGeneration)
+        } else {
+            await wifiTransportLost(generation: wifiGeneration,
+                                    mode: failedSession.wirelessMode ?? state.wirelessMode)
+        }
     }
 
     private func wifiErrorMessage(_ error: Error) -> String {
@@ -397,6 +440,11 @@ final class ConnectionViewModel: ObservableObject {
             cameraRepository = repository
             if let cameraRepository {
                 cameraSession = CameraSession(repository: cameraRepository, transport: usbTransport, deviceID: id)
+                lastEstablishedUSBDeviceID = id
+                if let cameraSession {
+                    startUSBKeepalive(for: cameraSession, deviceID: id, generation: generation)
+                    startUSBCatalogMonitoring(for: cameraSession, generation: generation)
+                }
             }
             state.usbPhase = .connected
         } catch is CancellationError {
@@ -432,14 +480,82 @@ final class ConnectionViewModel: ObservableObject {
         usbConnectTask = nil
     }
 
+    /// Android probes both active transport kinds every ten seconds. A probe
+    /// skipped because a download owns the PTP channel counts as alive.
+    private func startUSBKeepalive(for expectedSession: CameraSession, deviceID: String, generation: Int) {
+        usbKeepaliveTask?.cancel()
+        usbKeepaliveTask = Task { [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                do { try await Task.sleep(nanoseconds: 10_000_000_000) } catch { return }
+                guard !Task.isCancelled, self.connectionGeneration == generation,
+                      self.cameraSession === expectedSession else { return }
+                if !(await expectedSession.keepalive()) {
+                    guard !Task.isCancelled else { return }
+                    await self.usbTransportLost(expectedSession, deviceID: deviceID, generation: generation)
+                    return
+                }
+            }
+        }
+    }
+
+    private func startUSBCatalogMonitoring(for expectedSession: CameraSession, generation: Int) {
+        usbCatalogTask?.cancel()
+        usbCatalogTask = Task { [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                do { try await Task.sleep(nanoseconds: 2_000_000_000) } catch { return }
+                guard !Task.isCancelled, self.connectionGeneration == generation,
+                      self.cameraSession === expectedSession else { return }
+                await expectedSession.maintainCatalogIfIdle()
+            }
+        }
+    }
+
+    private func usbTransportLost(_ failedSession: CameraSession, deviceID: String, generation: Int) async {
+        guard connectionGeneration == generation, cameraSession === failedSession else { return }
+        connectionGeneration &+= 1
+        let reconnectGeneration = connectionGeneration
+        usbKeepaliveTask?.cancel()
+        usbKeepaliveTask = nil
+        usbCatalogTask?.cancel()
+        usbCatalogTask = nil
+        cameraSession = nil
+        cameraRepository = nil
+        state.usbPhase = .waitingForCamera
+        // Reuse only the currently attached and authorized camera. A late
+        // failure from a removed/replaced device cannot start another session.
+        guard state.selectedDeviceID == deviceID,
+              state.usbAuthorization == .authorized,
+              state.discoveredDevices.contains(where: { $0.id == deviceID }) else {
+            await connectionService.disconnect()
+            return
+        }
+        state.usbPhase = .connecting
+        usbConnectTask = Task { [weak self] in
+            guard let self else { return }
+            await self.connectionService.disconnect()
+            guard self.connectionGeneration == reconnectGeneration, !Task.isCancelled else {
+                self.usbConnectTask = nil
+                return
+            }
+            await self.connectSelectedUSB(id: deviceID, generation: reconnectGeneration, attempt: 1)
+        }
+    }
+
     func selectDevice(id: String) {
         guard state.discoveredDevices.contains(where: { $0.id == id }) else { return }
         guard state.selectedDeviceID != id else { return }
         connectionGeneration &+= 1
         usbConnectTask?.cancel()
         usbConnectTask = nil
+        usbKeepaliveTask?.cancel()
+        usbKeepaliveTask = nil
+        usbCatalogTask?.cancel()
+        usbCatalogTask = nil
         Task { [weak self] in await self?.connectionService.disconnect() }
         state.selectedDeviceID = id
+        lastEstablishedUSBDeviceID = nil
         state.usbPhase = .waitingForCamera
     }
 
@@ -460,6 +576,25 @@ final class ConnectionViewModel: ObservableObject {
         }
     }
 
+    /// Android pauses AP auto-discovery while Nikon BLE/GPS owns the phone's
+    /// radio. An already accepted camera is left to its transport lifecycle.
+    func setGPSConnectionPaused(_ paused: Bool) {
+        guard gpsConnectionPaused != paused else { return }
+        gpsConnectionPaused = paused
+        guard state.wirelessMode == .ap else { return }
+        if paused {
+            wifiWatcherTask?.cancel()
+            wifiWatcherTask = nil
+            if cameraSession == nil {
+                wifiGeneration &+= 1
+                wifiConnectTask?.cancel()
+                wifiConnectTask = nil
+                state.wifiPhase = .idle
+                state.wifiFailureKind = nil
+            }
+        } else if cameraSession == nil { startAPWatcherIfNeeded() }
+    }
+
     private func apply(_ event: USBTransportEvent) {
         let previous = state
         state = state.applying(event)
@@ -472,6 +607,12 @@ final class ConnectionViewModel: ObservableObject {
                   usbConnectTask == nil else { break }
             usbConnectTask = Task { [weak self] in await self?.connectSelectedUSB() }
         case .deviceAdded:
+            // Android suspends AP watching and any STA scan as soon as a PTP
+            // USB device is recognized, including its permission wait.
+            if cameraSession == nil {
+                wifiWatcherTask?.cancel(); wifiWatcherTask = nil
+                cancelWiFiConnection()
+            }
             if state.usbAuthorization == .authorized,
                state.usbPhase == .waitingForCamera,
                (previous.usbPhase == .waitingForCamera ||
@@ -483,7 +624,11 @@ final class ConnectionViewModel: ObservableObject {
             }
         case let .deviceRemoved(id):
             if previous.selectedDeviceID == id {
+                let wasEstablished = lastEstablishedUSBDeviceID == id
+                lastEstablishedUSBDeviceID = nil
                 connectionGeneration &+= 1
+                usbKeepaliveTask?.cancel(); usbKeepaliveTask = nil
+                usbCatalogTask?.cancel(); usbCatalogTask = nil
                 usbConnectTask?.cancel(); usbConnectTask = nil
                 // A removed camera invalidates the PTP channel. Tear down the
                 // session immediately; the queue remains owned by RootView and
@@ -494,6 +639,10 @@ final class ConnectionViewModel: ObservableObject {
                     guard let self else { return }
                     await connectionService.disconnect()
                 }
+                // A cable removed before the first accepted USB session only
+                // borrowed the connection slot. Restore AP automatic discovery
+                // as Android does; an established USB workspace stays mounted.
+                if !wasEstablished { startAPWatcherIfNeeded() }
             }
             break
         case let .ready(id):
@@ -510,20 +659,27 @@ final class ConnectionViewModel: ObservableObject {
             }
         case .sessionOpened:
             break
-        case .sessionClosed:
-            break
+        case let .sessionClosed(id):
+            if let failedSession = cameraSession,
+               (id == previous.selectedDeviceID || id == failedSession.transportDeviceID),
+               let deviceID = failedSession.transportDeviceID {
+                let generation = connectionGeneration
+                Task { [weak self] in
+                    await self?.usbTransportLost(failedSession, deviceID: deviceID, generation: generation)
+                }
+            }
         case let .failed(id, message):
-            // A transport error after a successful handshake invalidates the
-            // session immediately.  Leaving cameraSession alive would keep
-            // the photo list visible while every subsequent command fails;
-            // Android returns to its disconnected USB state instead.
-            if let id, id == previous.selectedDeviceID, cameraSession != nil {
-                connectionGeneration &+= 1
-                cameraRepository = nil
-                cameraSession = nil
-                usbConnectTask?.cancel()
-                usbConnectTask = nil
-                Task { [weak self] in await self?.connectionService.disconnect() }
+            // ImageCaptureCore can report the same broken channel before the
+            // next heartbeat. Route it through the same stale-session guard
+            // and reconnect path that handles a failed idle probe.
+            if let failedSession = cameraSession,
+               (id == nil || id == previous.selectedDeviceID),
+               let deviceID = failedSession.transportDeviceID {
+                let generation = connectionGeneration
+                Task { [weak self] in
+                    await self?.usbTransportLost(failedSession, deviceID: deviceID, generation: generation)
+                }
+            } else if id == nil || id == previous.selectedDeviceID {
                 state.usbPhase = .failed(message)
             }
         }

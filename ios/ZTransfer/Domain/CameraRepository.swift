@@ -101,6 +101,9 @@ func finalizeTransferTemporary(temporary: URL, directory: URL, fileName: String,
 
 enum CameraRepositoryError: Error, Equatable, Sendable {
     case invalidDataset
+    /// The connected STA session failed during its catalog handshake. Android
+    /// rebuilds the session instead of leaving a half-readable camera alive.
+    case transportLost
     /// A resumed object must continue through the partial-object operation.
     /// Android refuses to fill a seeked stream with GET_OBJECT because that
     /// would duplicate bytes and corrupt the destination.
@@ -857,7 +860,7 @@ actor CameraRepository {
                 // Android's non-STA getStorageIds() maps a command/transport
                 // failure to an empty result; the no-usable-storage branch
                 // completes the scan without authorizing cache reconciliation.
-                if staAlbum != nil { throw error }
+                if staAlbum != nil { throw CameraRepositoryError.transportLost }
                 raw = []
             }
             // Android ignores sentinel/invalid stores and, for non-STA
@@ -911,9 +914,7 @@ actor CameraRepository {
                 }
                 guard result.successful else {
                     handleQueriesSucceeded = false
-                    if staAlbum != nil {
-                        throw PTPSessionError.responseCode(result.responseCode ?? PTPConstants.deviceBusy)
-                    }
+                    if staAlbum != nil { throw CameraRepositoryError.transportLost }
                     // Android keeps the partial list for a non-STA response
                     // failure and skips authoritative cache reconciliation.
                     groups.append((storage, []))
@@ -955,7 +956,12 @@ actor CameraRepository {
         try await waitForForegroundPreview()
         if let directReader {
             let preparationGroups = groups
-            try await ioGate.withCommand { try await directReader.prepare(groups: preparationGroups) }
+            do {
+                try await ioGate.withCommand { try await directReader.prepare(groups: preparationGroups) }
+            } catch {
+                if staAlbum != nil { throw CameraRepositoryError.transportLost }
+                throw error
+            }
         }
 
         var files = existingFiles
@@ -1025,7 +1031,13 @@ actor CameraRepository {
                 }
             }
             if !requests.isEmpty {
-                let results = try await readCatalogMetadataBatch(requests)
+                let results: [CatalogMetadataResult]
+                do {
+                    results = try await readCatalogMetadataBatch(requests)
+                } catch {
+                    if staAlbum != nil { throw CameraRepositoryError.transportLost }
+                    throw error
+                }
                 for result in results { metadataBuffers[result.groupIndex].append(result) }
                 for index in groups.indices { fillHead(index) }
             }
@@ -1168,7 +1180,9 @@ actor CameraRepository {
     /// Android's 2 s polling and 10 s handle-only reconciliation. Never turn a
     /// failed/DeviceBusy response into an authoritative empty card.
     func maintainCatalogIfIdle() async {
-        guard staAlbum != nil, backgroundReadsAllowed, !(await session.hasPendingCommand) else { return }
+        // Android's event poller runs for USB and Wi-Fi. The transport only
+        // changes how storage IDs are queried; the idle gate is shared.
+        guard backgroundReadsAllowed, !(await session.hasPendingCommand) else { return }
         if catalogSyncRequested || lastCatalogCheck.duration(to: .now) >= .seconds(10) {
             catalogSyncRequested = false
             lastCatalogCheck = .now
@@ -1212,7 +1226,7 @@ actor CameraRepository {
         for handle in current.subtracting(knownHandles) { receiveEvent(STAEvent(code: 0x4002, handle: handle)) }
     }
     private func scheduleObjectResolver() {
-        guard staAlbum != nil, eventResolveTask == nil, backgroundReadsAllowed,
+        guard eventResolveTask == nil, backgroundReadsAllowed,
               let earliest = pendingObjects.values.map(\.ready).min() else { return }
         eventResolveTask = Task { [weak self] in
             do { try await ContinuousClock().sleep(until: earliest) } catch { return }

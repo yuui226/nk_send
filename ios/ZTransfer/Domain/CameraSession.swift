@@ -7,6 +7,9 @@ actor CameraSession {
     let repository: CameraRepository
     private let usbTransport: ImageCaptureUSBTransport?
     private let deviceID: String?
+    /// Stable identity exposed to connection recovery without crossing actor
+    /// isolation. It is immutable for the lifetime of a camera session.
+    nonisolated let transportDeviceID: String?
     /// The connection pill uses the transport kind just like Android's
     /// SignalPill (USB icon for wired sessions, Wi‑Fi icon otherwise).
     nonisolated let isUSB: Bool
@@ -18,13 +21,13 @@ actor CameraSession {
     private let exifStore = PhotoExifStore()
 
     init(repository: CameraRepository, transport: ImageCaptureUSBTransport, deviceID: String) {
-        self.repository = repository; self.usbTransport = transport; self.deviceID = deviceID; self.isUSB = true; self.wirelessMode = nil
+        self.repository = repository; self.usbTransport = transport; self.deviceID = deviceID; self.transportDeviceID = deviceID; self.isUSB = true; self.wirelessMode = nil
     }
 
     /// Creates a network-backed session. The repository's PTPSession is the
     /// serialized command channel for thumbnails, reads and downloads.
     init(repository: CameraRepository, wirelessMode: WirelessMode = .ap) {
-        self.repository = repository; self.usbTransport = nil; self.deviceID = nil; self.isUSB = false; self.wirelessMode = wirelessMode
+        self.repository = repository; self.usbTransport = nil; self.deviceID = nil; self.transportDeviceID = nil; self.isUSB = false; self.wirelessMode = wirelessMode
     }
 
     func catalog() async throws -> [CameraFile] { try await repository.loadCatalog() }
@@ -130,6 +133,13 @@ actor CameraSession {
 
     func setFHDActive(_ active: Bool) async { await repository.setFHDActive(active) }
     func setTransfersBusy(_ busy: Bool) async { await repository.setTransfersBusy(busy) }
+
+    /// The active transport is probed only when the command channel is idle.
+    /// Both USB and Wi-Fi use the same Nikon GetStorageIDs liveness rule.
+    func keepalive() async -> Bool { await repository.keepalive() }
+    /// Android polls camera events for USB as well as PTP/IP. Keep the same
+    /// idle catalog maintenance path for both transports.
+    func maintainCatalogIfIdle() async { await repository.maintainCatalogIfIdle() }
     func setPreferHighThroughputTransfers(_ enabled: Bool) async {
         await repository.setPreferHighThroughputTransfers(enabled)
     }

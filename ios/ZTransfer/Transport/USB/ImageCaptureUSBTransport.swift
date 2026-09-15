@@ -110,6 +110,7 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
     /// report a remove/add pair with the same UUID while an old close callback is
     /// still in flight, so closing by UUID alone can close the replacement.
     private var openedCameras: [String: ICCameraDevice] = [:]
+    private var openedSessionTokens: [String: UUID] = [:]
     /// Keep a reference while requestOpenSession is in flight.  A cancelled
     /// open can still complete later; retaining it lets the non-cancellable
     /// cleanup issue requestCloseSession just like Android closes NikonCamera
@@ -188,6 +189,7 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
         cameras.removeAll()
         cameraIDsByObject.removeAll()
         openedCameras.removeAll()
+        openedSessionTokens.removeAll()
         openingCameras.removeAll()
         openingGenerations.removeAll()
         replacementTokens.removeAll()
@@ -226,10 +228,19 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
                             self.emit(.failed(id: id, message: error.localizedDescription))
                         }
                         _ = box.finish(.failure(mapped))
-                    } else if box.finish(.success(())) {
+                    } else {
                         if self.markOpened(camera, for: id, generation: generation) {
-                            self.emit(.sessionOpened(id: id))
+                            if box.finish(.success(())) {
+                                self.emit(.sessionOpened(id: id))
+                            } else {
+                                // The caller cancelled just as the framework
+                                // accepted the open; retire that exact object.
+                                camera.requestCloseSession(options: nil) { [weak self] _ in
+                                    self?.removeSession(camera, for: id)
+                                }
+                            }
                         } else {
+                            _ = box.finish(.failure(CameraTransportError.disconnected))
                             // The browser was stopped while OpenSession was in
                             // flight. Close the late success immediately and
                             // keep it out of the next lifecycle generation.
@@ -238,29 +249,24 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
                                 self?.removeSession(camera, for: id)
                             }
                         }
-                    } else {
-                        // Open completed after its caller was cancelled. The
-                        // late success must be closed before another attempt.
-                        self.removeOpening(camera, for: id)
-                        camera.requestCloseSession(options: nil) { [weak self] _ in
-                            self?.removeSession(camera, for: id)
-                        }
                     }
                 }
             }
         }, onCancel: { box.cancel() })
     }
 
-    func closeSession(for id: String) async {
-        let camera = openedCamera(for: id)
+    func closeSession(for id: String, expectedSessionToken: UUID? = nil) async {
+        let camera = expectedSessionToken.flatMap { openedCamera(for: id, token: $0) }
+            ?? (expectedSessionToken == nil ? openedCamera(for: id) : nil)
         guard let camera else { return }
         let box = ThrowingContinuationBox<Void>()
         _ = try? await withTaskCancellationHandler(operation: {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                 box.install(continuation)
                 camera.requestCloseSession(options: nil) { [weak self] _ in
-                    self?.removeSession(camera, for: id)
-                    self?.emit(.sessionClosed(id: id))
+                    if self?.removeSession(camera, for: id) == true {
+                        self?.emit(.sessionClosed(id: id))
+                    }
                     _ = box.finish(.success(()))
                 }
             }
@@ -270,8 +276,11 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
         removeSession(camera, for: id)
     }
 
-    func sendPTP(command: Data, data: Data? = nil, to id: String) async throws -> (response: Data, payload: Data) {
-        guard let camera = camera(for: id) else { throw CameraTransportError.disconnected }
+    func sendPTP(command: Data, data: Data? = nil, to id: String,
+                 expectedSessionToken: UUID) async throws -> (response: Data, payload: Data) {
+        guard let camera = openedCamera(for: id, token: expectedSessionToken) else {
+            throw CameraTransportError.disconnected
+        }
         let box = ThrowingContinuationBox<(Data, Data)>()
         return try await withTaskCancellationHandler(operation: {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<(Data, Data), Error>) in
@@ -395,6 +404,19 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
         return camera === opened
     }
 
+    func openedSessionToken(for id: String) -> UUID? {
+        lock.lock(); defer { lock.unlock() }
+        guard let camera = cameras[id], openedCameras[id] === camera else { return nil }
+        return openedSessionTokens[id]
+    }
+
+    private func openedCamera(for id: String, token: UUID) -> ICCameraDevice? {
+        lock.lock(); defer { lock.unlock() }
+        guard openedSessionTokens[id] == token,
+              let camera = cameras[id], openedCameras[id] === camera else { return nil }
+        return camera
+    }
+
     private func markOpening(_ camera: ICCameraDevice, for id: String, generation: UInt64) {
         lock.lock()
         openingCameras[id] = camera
@@ -424,16 +446,23 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
         if openingCameras[id] === camera { openingCameras.removeValue(forKey: id) }
         openingGenerations.removeValue(forKey: id)
         openedCameras[id] = camera
+        openedSessionTokens[id] = UUID()
         return true
     }
 
-    private func removeSession(_ camera: ICCameraDevice, for id: String) {
+    @discardableResult
+    private func removeSession(_ camera: ICCameraDevice, for id: String) -> Bool {
         lock.lock(); defer { lock.unlock() }
-        if openedCameras[id] === camera { openedCameras.removeValue(forKey: id) }
+        let wasOpened = openedCameras[id] === camera
+        if openedCameras[id] === camera {
+            openedCameras.removeValue(forKey: id)
+            openedSessionTokens.removeValue(forKey: id)
+        }
         if openingCameras[id] === camera {
             openingCameras.removeValue(forKey: id)
             openingGenerations.removeValue(forKey: id)
         }
+        return wasOpened
     }
 
     private func currentGeneration() -> UInt64 {

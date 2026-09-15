@@ -18,7 +18,8 @@ private extension EnvironmentValues {
 /// that are already present in Android's RemoteScreen.
 struct RemoteView: View {
     @Environment(\.dismiss) private var dismiss
-    private let onStopped: (() -> Void)?
+    private let onStopped: ((Bool) -> Void)?
+    private let onTransportLost: (() -> Void)?
     @StateObject private var model: RemoteViewModel
     @State private var zoom: CGFloat = 1
     @State private var selectedField: RemoteExposureField?
@@ -39,9 +40,12 @@ struct RemoteView: View {
     @State private var orientationNotificationsActive = false
     @State private var stopCleanupStarted = false
 
-    init(session: CameraSession, onStopped: (() -> Void)? = nil) {
+    init(session: CameraSession, onStopped: ((Bool) -> Void)? = nil,
+         onTransportLost: (() -> Void)? = nil) {
         self.onStopped = onStopped
-        _model = StateObject(wrappedValue: RemoteViewModel(camera: session))
+        self.onTransportLost = onTransportLost
+        _model = StateObject(wrappedValue: RemoteViewModel(camera: session,
+                                                            onTransportLost: onTransportLost))
     }
 
     var body: some View {
@@ -103,7 +107,7 @@ struct RemoteView: View {
             }
             Task { @MainActor in
                 await model.stopAndWait()
-                onStopped?()
+                onStopped?(model.transportLossWasNotified)
             }
         }
         .onChange(of: model.state.frameSequence) { _ in updateZebraMask() }

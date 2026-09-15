@@ -11,6 +11,7 @@ enum CameraConnectionServiceError: Error, Equatable, Sendable {
 actor CameraConnectionService {
     private let transport: ImageCaptureUSBTransport
     private var activeDeviceID: String?
+    private var activeSessionToken: UUID?
     private var repository: CameraRepository?
     private var connectTask: Task<CameraRepository, Error>?
     private var connectToken: UUID?
@@ -26,11 +27,13 @@ actor CameraConnectionService {
             // not reuse the old repository unless ImageCaptureCore confirms
             // that its opened object is still the object currently published
             // by discovery.
-            if transport.hasCurrentOpenedSession(for: deviceID) {
+            if let activeSessionToken,
+               transport.openedSessionToken(for: deviceID) == activeSessionToken {
                 return repository
             }
-            await closeWithDeadline(deviceID: deviceID)
+            await closeWithDeadline(deviceID: deviceID, sessionToken: activeSessionToken)
             self.activeDeviceID = nil
+            self.activeSessionToken = nil
             self.repository = nil
         }
         if let connectTask {
@@ -63,6 +66,7 @@ actor CameraConnectionService {
     }
 
     private func performConnect(deviceID: String) async throws -> CameraRepository {
+        var openedToken: UUID?
         do {
             let transport = self.transport
             try await AsyncDeadline.run(
@@ -72,15 +76,32 @@ actor CameraConnectionService {
                 try await transport.openSession(for: deviceID)
             }
             try Task.checkCancellation()
-            let session = PTPSession(transport: SelectedUSBPTPTransport(transport: transport, deviceID: deviceID))
+            guard let sessionToken = transport.openedSessionToken(for: deviceID) else {
+                throw CameraTransportError.disconnected
+            }
+            openedToken = sessionToken
+            // Android uses a 5 s USB handshake timeout, then restores the
+            // normal 60 s command timeout after DeviceInfo. Keep the longer
+            // timeout for photo/catalog/remote commands on this session.
+            let session = PTPSession(transport: SelectedUSBPTPTransport(transport: transport, deviceID: deviceID,
+                                                                       sessionToken: sessionToken),
+                                     defaultTimeoutNanoseconds: 60_000_000_000)
             let repository = CameraRepository(session: session, isUSBConnection: true)
-            _ = try await repository.loadDeviceInfo()
+            let info = try await session.executeResponse(operation: PTPConstants.getDeviceInfo,
+                                                         timeoutNanoseconds: 5_000_000_000)
+            guard info.code == PTPConstants.responseOK else {
+                throw PTPSessionError.responseCode(info.code)
+            }
+            // Android accepts an OK response with missing/unparseable info;
+            // model metadata is optional, while the PTP handshake is valid.
+            _ = PTPDatasetParser.parseDeviceInfo(info.data)
             try Task.checkCancellation()
             activeDeviceID = deviceID
+            activeSessionToken = sessionToken
             self.repository = repository
             return repository
         } catch {
-            await closeWithDeadline(deviceID: deviceID)
+            await closeWithDeadline(deviceID: deviceID, sessionToken: openedToken)
             throw error
         }
     }
@@ -93,12 +114,13 @@ actor CameraConnectionService {
             connectToken = nil
         }
         guard let id = activeDeviceID else { return }
-        await closeWithDeadline(deviceID: id)
+        await closeWithDeadline(deviceID: id, sessionToken: activeSessionToken)
         activeDeviceID = nil
+        activeSessionToken = nil
         repository = nil
     }
 
-    private func closeWithDeadline(deviceID: String) async {
+    private func closeWithDeadline(deviceID: String, sessionToken: UUID? = nil) async {
         let transport = self.transport
         // Cancellation of the connect owner must not cancel cleanup. Android
         // closes NikonCamera in NonCancellable; a detached cleanup task gives
@@ -108,7 +130,7 @@ actor CameraConnectionService {
                 nanoseconds: 2_000_000_000,
                 timeoutError: CameraConnectionServiceError.timeout
             ) {
-                await transport.closeSession(for: deviceID)
+                await transport.closeSession(for: deviceID, expectedSessionToken: sessionToken)
             }
         }
         await cleanup.value

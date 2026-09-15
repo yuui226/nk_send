@@ -8,6 +8,8 @@ struct TransferQueueView: View {
     @ObservedObject var model: TransferQueueViewModel
     @ObservedObject var directory: DirectoryAccessStore
     let session: CameraSession?
+    let isSessionConnected: Bool
+    let onRetrySTA: () -> Void
     let onNavigateBack: () -> Void
     @State private var pendingConfirmation: QueueConfirmation?
     @State private var removingItemIDs: Set<UUID> = []
@@ -19,9 +21,12 @@ struct TransferQueueView: View {
     }
 
     init(model: TransferQueueViewModel, session: CameraSession?, directory: DirectoryAccessStore,
+         isSessionConnected: Bool = true, onRetrySTA: @escaping () -> Void = {},
          onNavigateBack: @escaping () -> Void) {
         self.model = model
         self.session = session
+        self.isSessionConnected = isSessionConnected
+        self.onRetrySTA = onRetrySTA
         self.directory = directory
         self.onNavigateBack = onNavigateBack
     }
@@ -84,10 +89,16 @@ struct TransferQueueView: View {
             }
             .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
             if let session {
-                PhotoListSignalIcon(isUSB: session.isUSB, wirelessMode: session.wirelessMode)
-                    .frame(width: 36, height: 36)
-                    .background(.thinMaterial, in: Capsule())
-                    .overlay(Capsule().stroke(.white.opacity(0.45), lineWidth: 1))
+                Button {
+                    if session.wirelessMode == .sta && !isSessionConnected { onRetrySTA() }
+                } label: {
+                    PhotoListSignalIcon(isUSB: session.isUSB, wirelessMode: session.wirelessMode,
+                                        connected: isSessionConnected)
+                        .frame(width: 36, height: 36)
+                        .background(.thinMaterial, in: Capsule())
+                        .overlay(Capsule().stroke(.white.opacity(0.45), lineWidth: 1))
+                }
+                .buttonStyle(.plain)
             }
             Spacer()
 

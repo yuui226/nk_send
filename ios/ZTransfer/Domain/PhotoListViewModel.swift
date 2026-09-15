@@ -27,6 +27,7 @@ final class PhotoListViewModel: ObservableObject {
     private let prefetchBatch: @Sendable ([CameraFile]) async -> Set<UInt32>
     private let canFill: @Sendable () async -> Bool
     private let reconcileCache: @Sendable ([CameraFile], Bool) async -> Void
+    private let onTransportLost: (() -> Void)?
     private let thumbnailFillQueue = PhotoThumbnailFillQueue()
     private var catalogUpdatesTask: Task<Void, Never>?
     private var loadTask: Task<Void, Never>?
@@ -60,7 +61,8 @@ final class PhotoListViewModel: ObservableObject {
         Self.latestEffectPreviewFile(in: allFiles)
     }
 
-    init(repository: CameraRepository) {
+    init(repository: CameraRepository, onTransportLost: (() -> Void)? = nil) {
+        self.onTransportLost = onTransportLost
         self.scanCatalog = { preserve, snapshot, detect, handler in
             try await repository.scanCatalog(preserveExisting: preserve,
                                               resumeSnapshot: snapshot,
@@ -73,7 +75,8 @@ final class PhotoListViewModel: ObservableObject {
         self.reconcileCache = { _, _ in }
         observeCatalog(repository)
     }
-    init(session: CameraSession) {
+    init(session: CameraSession, onTransportLost: (() -> Void)? = nil) {
+        self.onTransportLost = onTransportLost
         self.scanCatalog = { preserve, snapshot, detect, handler in
             try await session.scanCatalog(preserveExisting: preserve,
                                           resumeSnapshot: snapshot,
@@ -222,6 +225,12 @@ final class PhotoListViewModel: ObservableObject {
             isLoadingFiles = false
             loadState = allFiles.isEmpty ? .idle : .loaded
             hasCompletedFileScan = false
+        } catch CameraRepositoryError.transportLost {
+            guard generation == loadGeneration else { return }
+            isLoadingFiles = false
+            hasCompletedFileScan = false
+            loadState = allFiles.isEmpty ? .failed(AppLocalized.resource("connection_failed_short")) : .loaded
+            onTransportLost?()
         } catch {
             guard !Task.isCancelled, generation == loadGeneration else { return }
             // Preserve any already published files. A failed/incomplete scan

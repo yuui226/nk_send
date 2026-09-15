@@ -95,9 +95,12 @@ struct RootView: View {
                     PhotoListView(session: session,
                                   queue: transferQueue,
                                   directory: directoryStore,
-                                  effectsStore: effectsStore) {
-                        Task { await connectionModel.disconnectCamera() }
-                    }
+                                  effectsStore: effectsStore,
+                                  isSessionConnected: connectionModel.cameraSession === session,
+                                  onRetrySTA: { connectionModel.retrySTAConnection() },
+                                  onTransportLost: { failedSession in
+                                      Task { await connectionModel.handleTransportLost(failedSession) }
+                                  })
                     // A recovered transport owns a new CameraSession. Force
                     // the list model to bind to that session instead of
                     // retaining the failed repository from the old one.
@@ -127,6 +130,7 @@ struct RootView: View {
         .task {
             connectionModel.startUSBDiscovery()
             connectionModel.startWiFiDiscovery()
+            connectionModel.setGPSConnectionPaused(gpsCoordinator.state.enabled)
         }
         .onDisappear {
             connectionModel.stopUSBDiscovery()
@@ -148,6 +152,17 @@ struct RootView: View {
             gpsCoordinator.setAPModeBlocked(gpsBlockedByAPCamera)
             if connected {
                 establishedSession = connectionModel.cameraSession
+                // The queue belongs to the workspace, not to the old camera.
+                // A recovered session must replace its download provider.
+                if let session = connectionModel.cameraSession {
+                    Task {
+                        guard connectionModel.cameraSession === session else { return }
+                        await transferQueue.attach(session: session, directory: directoryStore.directoryURL)
+                        if connectionModel.cameraSession !== session {
+                            await transferQueue.detach(ifCurrentSessionIs: session)
+                        }
+                    }
+                }
                 if !connectionCelebrationConsumed {
                     connectionCelebrationConsumed = true
                     connectionCelebrationStart = Date()
@@ -164,6 +179,9 @@ struct RootView: View {
             } else {
                 // Keep the photo workspace mounted; transport loss is handled
                 // in place by the list and queue reconnect flow.
+                if let failedSession = establishedSession {
+                    Task { await transferQueue.detach(ifCurrentSessionIs: failedSession) }
+                }
                 connectionCelebrationStart = nil
                 connectionPhotoListVisible = true
                 connectionCelebrationActive = false
@@ -174,6 +192,9 @@ struct RootView: View {
         }
         .onChange(of: connectionModel.cameraSession?.wirelessMode) { _ in
             gpsCoordinator.setAPModeBlocked(gpsBlockedByAPCamera)
+        }
+        .onChange(of: gpsCoordinator.state.enabled) { enabled in
+            connectionModel.setGPSConnectionPaused(enabled)
         }
         .onChange(of: keepScreenOn) { enabled in
             UIApplication.shared.isIdleTimerDisabled = enabled && scenePhase == .active

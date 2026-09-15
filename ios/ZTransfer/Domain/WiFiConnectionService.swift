@@ -17,7 +17,11 @@ actor WiFiConnectionService {
         let request = generation
         let socket = try await PTPIPSocketTransport.open(host: host)
         do {
-            let session = PTPSession(transport: socket)
+            // NikonCamera.connect switches its sockets to the shared 60 s
+            // response timeout. A 15 s default can retire a healthy AP
+            // session during a slow metadata or live-view command.
+            let session = PTPSession(transport: socket,
+                                     defaultTimeoutNanoseconds: 60_000_000_000)
             let result = try await session.executeResponse(operation: PTPConstants.openSession, parameters: [socket.connectionNumber])
             guard result.code == PTPConstants.responseOK || result.code == PTPConstants.sessionAlreadyOpen else {
                 throw PTPSessionError.responseCode(result.code)
