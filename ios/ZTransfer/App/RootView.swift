@@ -70,6 +70,7 @@ struct RootView: View {
     @State private var establishedSession: CameraSession?
     // The success scene is an entry transition, never a reconnect transition.
     @State private var connectionCelebrationConsumed = false
+    @State private var monitorPresented = false
 
     private var locale: Locale {
         switch appLanguage {
@@ -98,6 +99,7 @@ struct RootView: View {
                                   effectsStore: effectsStore,
                                   isSessionConnected: connectionModel.cameraSession === session,
                                   onRetrySTA: { connectionModel.retrySTAConnection() },
+                                  remotePresentation: $monitorPresented,
                                   onTransportLost: { failedSession in
                                       Task { await connectionModel.handleTransportLost(failedSession) }
                                   })
@@ -127,14 +129,26 @@ struct RootView: View {
         }
         .preferredColorScheme(themeMode == "DARK" ? .dark : themeMode == "LIGHT" ? .light : nil)
         .environment(\.locale, locale)
+        .fullScreenCover(isPresented: $monitorPresented) {
+            if let session = connectionModel.cameraSession ?? establishedSession {
+                RemoteView(session: session,
+                           isSessionConnected: connectionModel.cameraSession === session,
+                           onRetrySTA: { connectionModel.retrySTAConnection() },
+                           onTransportLost: {
+                               Task { await connectionModel.handleTransportLost(session) }
+                           })
+                    .id(ObjectIdentifier(session))
+            }
+        }
         .task {
             connectionModel.startUSBDiscovery()
             connectionModel.startWiFiDiscovery()
             connectionModel.setGPSConnectionPaused(gpsCoordinator.state.enabled)
         }
         .onDisappear {
-            connectionModel.stopUSBDiscovery()
-            connectionModel.stopWiFiDiscovery()
+            // Full-screen routes can make the root temporarily disappear.
+            // Connection ownership remains in the model until its teardown;
+            // navigation must not stop discovery or an accepted USB session.
             UIApplication.shared.isIdleTimerDisabled = false
         }
         .onAppear {

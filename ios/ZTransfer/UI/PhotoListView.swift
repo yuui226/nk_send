@@ -63,7 +63,15 @@ private let photoQueueWorkspaceAnimation =
     @State private var expandedBurstIDs: Set<String> = []
     @State private var collapsedDays: Set<String> = []
     @State private var showTopButton = false
-    @State private var showingRemote = false
+    @State private var internalShowingRemote = false
+    private let remotePresentation: Binding<Bool>?
+    private var showingRemote: Bool {
+        get { remotePresentation?.wrappedValue ?? internalShowingRemote }
+        nonmutating set {
+            if let remotePresentation { remotePresentation.wrappedValue = newValue }
+            else { internalShowingRemote = newValue }
+        }
+    }
     @State private var remoteEntryHint: String?
     @State private var remoteEntryHintID = UUID()
     @State private var showingSettings = false
@@ -81,20 +89,22 @@ private let photoQueueWorkspaceAnimation =
     @State private var heldFlightCount = 0
     @State private var queueImpact = 0
 
-    init(repository: CameraRepository, queue: TransferQueue = TransferQueue(), directory: DirectoryAccessStore = DirectoryAccessStore(), effectsStore: PhotoEffectsStore = PhotoEffectsStore(), isSessionConnected: Bool = true, onRetrySTA: @escaping () -> Void = {}, onTransportLost: @escaping (CameraSession) -> Void = { _ in }) {
+    init(repository: CameraRepository, queue: TransferQueue = TransferQueue(), directory: DirectoryAccessStore = DirectoryAccessStore(), effectsStore: PhotoEffectsStore = PhotoEffectsStore(), isSessionConnected: Bool = true, onRetrySTA: @escaping () -> Void = {}, remotePresentation: Binding<Bool>? = nil, onTransportLost: @escaping (CameraSession) -> Void = { _ in }) {
         _model = StateObject(wrappedValue: PhotoListViewModel(repository: repository))
         _queueModel = StateObject(wrappedValue: TransferQueueViewModel(queue: queue))
         _directoryStore = ObservedObject(wrappedValue: directory)
         self.effectsStore = effectsStore; self.isSessionConnected = isSessionConnected; self.onRetrySTA = onRetrySTA
+        self.remotePresentation = remotePresentation
         self.onTransportLost = onTransportLost; self.session = nil
     }
 
-    init(session: CameraSession, queue: TransferQueue, directory: DirectoryAccessStore = DirectoryAccessStore(), effectsStore: PhotoEffectsStore = PhotoEffectsStore(), isSessionConnected: Bool = true, onRetrySTA: @escaping () -> Void = {}, onTransportLost: @escaping (CameraSession) -> Void = { _ in }) {
+    init(session: CameraSession, queue: TransferQueue, directory: DirectoryAccessStore = DirectoryAccessStore(), effectsStore: PhotoEffectsStore = PhotoEffectsStore(), isSessionConnected: Bool = true, onRetrySTA: @escaping () -> Void = {}, remotePresentation: Binding<Bool>? = nil, onTransportLost: @escaping (CameraSession) -> Void = { _ in }) {
         _model = StateObject(wrappedValue: PhotoListViewModel(session: session,
                                                                onTransportLost: { onTransportLost(session) }))
         _queueModel = StateObject(wrappedValue: TransferQueueViewModel(queue: queue))
         _directoryStore = ObservedObject(wrappedValue: directory)
         self.effectsStore = effectsStore; self.isSessionConnected = isSessionConnected; self.onRetrySTA = onRetrySTA
+        self.remotePresentation = remotePresentation
         self.onTransportLost = onTransportLost; self.session = session
     }
 
@@ -325,6 +335,10 @@ private let photoQueueWorkspaceAnimation =
             // MainActivity.shouldPreferHighThroughputTransfers: both files and
             // transfer routes enable this; monitoring disables it.
             if let session { Task { await session.setPreferHighThroughputTransfers(!remote) } }
+            if !remote {
+                model.resumeAfterRemote()
+                model.wakeThumbnailFill()
+            }
         }
         .onDisappear {
             if let session { Task { await session.setPreferHighThroughputTransfers(false) } }
@@ -380,7 +394,7 @@ private let photoQueueWorkspaceAnimation =
                 }
             }
         }
-        .fullScreenCover(isPresented: $showingRemote) {
+        .fullScreenCover(isPresented: $internalShowingRemote) {
             if let session {
                 RemoteView(session: session,
                            isSessionConnected: isSessionConnected,
