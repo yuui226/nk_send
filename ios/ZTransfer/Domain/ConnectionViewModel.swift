@@ -641,9 +641,12 @@ final class ConnectionViewModel: ObservableObject {
         }
         if connectionDiscoveryPaused {
             switch event {
-            case .authorization, .deviceAdded, .deviceRemoved, .ready:
+            case .authorization, .deviceAdded, .ready, .sessionOpened:
                 return
-            case .sessionOpened, .sessionClosed, .failed:
+            case .deviceRemoved:
+                break
+            case .sessionClosed, .failed:
+                if cameraSession == nil { return }
                 break
             }
         }
