@@ -167,6 +167,24 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
         browser.start()
     }
 
+    /// The browser keeps its device objects while local-workspace discovery is
+    /// paused. Android rescans attached USB devices on resume; replay this
+    /// authoritative snapshot because callbacks emitted during pause are ignored.
+    func attachedDevices() -> [USBDeviceDescriptor] {
+        lock.lock()
+        let snapshot = cameras.filter { replacementTokens[$0.key] == nil }
+        lock.unlock()
+        return snapshot.map { id, camera in
+            USBDeviceDescriptor(id: id, name: camera.name ?? "",
+                                productKind: camera.productKind,
+                                transportType: camera.transportType)
+        }
+    }
+
+    func currentAuthorization() -> USBAuthorizationState {
+        status(from: browser.contentsAuthorizationStatus)
+    }
+
     func stop() {
         lock.lock()
         stopped = true

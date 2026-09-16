@@ -13,6 +13,7 @@ final class ConnectionViewModel: ObservableObject {
     @Published private(set) var cameraSession: CameraSession?
     private var usbEventsTask: Task<Void, Never>?
     private var usbConnectTask: Task<Void, Never>?
+    private var usbCleanupTask: Task<Void, Never>?
     private var usbKeepaliveTask: Task<Void, Never>?
     private var usbCatalogTask: Task<Void, Never>?
     private var wifiConnectTask: Task<Void, Never>?
@@ -21,6 +22,8 @@ final class ConnectionViewModel: ObservableObject {
     private var wifiRetryAttempt = 0
     private var apFailedAttempts = 0
     private var connectionDiscoveryPaused = false
+    private var staWorkspaceEstablished = false
+    private var usbWorkspaceEstablished = false
     private var gpsConnectionPaused = UserDefaults(suiteName: GPSPreferences.suiteName)?
         .bool(forKey: GPSPreferences.enabled) ?? false
     private let wirelessPreferences = UserDefaults(suiteName: "sta_connection")!
@@ -115,12 +118,16 @@ final class ConnectionViewModel: ObservableObject {
     }
 
     private func startAPWatcherIfNeeded() {
-        guard !connectionDiscoveryPaused, !gpsConnectionPaused, wifiPathAvailable, state.wirelessMode == .ap, cameraSession == nil,
+        guard !connectionDiscoveryPaused, !gpsConnectionPaused,
+              !usbWorkspaceEstablished, state.selectedDeviceID == nil,
+              wifiPathAvailable, state.wirelessMode == .ap, cameraSession == nil,
               wifiWatcherTask == nil else { return }
         wifiWatcherTask = Task { [weak self] in
             guard let self else { return }
             while !Task.isCancelled {
-                guard !self.connectionDiscoveryPaused, self.wifiPathAvailable, self.state.wirelessMode == .ap,
+                guard !self.connectionDiscoveryPaused, !self.usbWorkspaceEstablished,
+                      self.state.selectedDeviceID == nil,
+                      self.wifiPathAvailable, self.state.wirelessMode == .ap,
                       !self.gpsConnectionPaused, self.cameraSession == nil else { break }
                 // Android checks the DHCP gateway before starting a handshake.
                 // iOS has no public gateway API; this subnet gate is the closest
@@ -226,7 +233,10 @@ final class ConnectionViewModel: ObservableObject {
     }
 
     private func beginWiFiConnection(reconnect: Bool) async {
-        guard !connectionDiscoveryPaused, wifiConnectTask == nil, cameraSession == nil, state.usbPhase != .connecting else { return }
+        guard !connectionDiscoveryPaused, !usbWorkspaceEstablished,
+              state.selectedDeviceID == nil,
+              wifiConnectTask == nil, cameraSession == nil,
+              state.usbPhase != .connecting else { return }
         let mode = state.wirelessMode
         guard mode != .ap || !gpsConnectionPaused else { return }
         wifiGeneration &+= 1
@@ -262,6 +272,7 @@ final class ConnectionViewModel: ObservableObject {
                 }
                 self.cameraRepository = repository
                 self.cameraSession = CameraSession(repository: repository, wirelessMode: mode)
+                if mode == .sta { self.staWorkspaceEstablished = true }
                 self.state.wifiPhase = .connected
                 self.state.staProgressIP = nil
                 self.wifiConnectTask = nil
@@ -323,7 +334,9 @@ final class ConnectionViewModel: ObservableObject {
     /// already-running discovery keeps ownership of its sockets; the tap only
     /// replaces the scheduled backoff when no discovery is active.
     func retrySTAConnection() {
-        guard !connectionDiscoveryPaused, cameraSession == nil, state.wirelessMode == .sta,
+        guard !connectionDiscoveryPaused, staWorkspaceEstablished,
+              !usbWorkspaceEstablished, state.selectedDeviceID == nil,
+              cameraSession == nil, state.wirelessMode == .sta,
               state.usbPhase != .connecting else { return }
         guard wifiConnectTask == nil else { return }
         wifiRetryTask?.cancel()
@@ -417,6 +430,9 @@ final class ConnectionViewModel: ObservableObject {
     func connectSelectedUSB() async {
         let generation = connectionGeneration
         guard let id = state.selectedDeviceID else { return }
+        await usbCleanupTask?.value
+        guard !connectionDiscoveryPaused, generation == connectionGeneration,
+              state.selectedDeviceID == id else { return }
         await connectSelectedUSB(id: id, generation: generation, attempt: 1)
     }
 
@@ -446,6 +462,7 @@ final class ConnectionViewModel: ObservableObject {
                 cameraSession = CameraSession(repository: cameraRepository, transport: usbTransport,
                                               deviceID: id, sessionToken: sessionToken)
                 lastEstablishedUSBDeviceID = id
+                usbWorkspaceEstablished = true
                 if let cameraSession {
                     startUSBKeepalive(for: cameraSession, deviceID: id, generation: generation)
                     startUSBCatalogMonitoring(for: cameraSession, generation: generation)
@@ -576,7 +593,8 @@ final class ConnectionViewModel: ObservableObject {
 
     func select(wirelessMode: WirelessMode) {
         guard state.wirelessMode != wirelessMode else { return }
-        guard cameraSession == nil else { return }
+        guard cameraSession == nil, !usbWorkspaceEstablished,
+              state.selectedDeviceID == nil else { return }
         cancelWiFiConnection()
         state.wirelessMode = wirelessMode
         state.wifiFailureKind = nil
@@ -597,18 +615,33 @@ final class ConnectionViewModel: ObservableObject {
             wifiWatcherTask?.cancel(); wifiWatcherTask = nil
             cancelWiFiConnection()
             if cameraSession == nil {
-                usbConnectTask?.cancel(); usbConnectTask = nil
-                state.usbPhase = .waitingForCamera
+                let cancelledUSB = usbConnectTask
+                cancelledUSB?.cancel(); usbConnectTask = nil
+                let previousCleanup = usbCleanupTask
+                let service = connectionService
+                usbCleanupTask = Task {
+                    await previousCleanup?.value
+                    await cancelledUSB?.value
+                    await service.disconnect()
+                }
+                // Pausing an in-flight open does not consume a retry; a
+                // three-attempt failure stays paused until a real reattach.
+                if state.usbPhase == .connecting { state.usbPhase = .waitingForCamera }
             }
             return
         }
         guard cameraSession == nil else { return }
-        if state.wirelessMode == .ap { startAPWatcherIfNeeded() }
-        if state.usbAuthorization == .authorized,
-           state.selectedDeviceID != nil,
-           state.usbPhase == .waitingForCamera,
-           usbConnectTask == nil {
-            usbConnectTask = Task { [weak self] in await self?.connectSelectedUSB() }
+        apply(.authorization(usbTransport.currentAuthorization()))
+        for device in usbTransport.attachedDevices() {
+            if !state.discoveredDevices.contains(where: { $0.id == device.id }) {
+                apply(.deviceAdded(device))
+            }
+        }
+        if state.selectedDeviceID == nil, !usbWorkspaceEstablished {
+            if state.wirelessMode == .ap { startAPWatcherIfNeeded() }
+            else if state.wirelessMode == .sta && staWorkspaceEstablished {
+                Task { [weak self] in await self?.beginWiFiConnection(reconnect: true) }
+            }
         }
     }
 
