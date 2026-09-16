@@ -30,6 +30,7 @@ struct SettingsPopupOverlay: View {
     @State private var effectsDraft = PhotoEffectsSettings()
     @State private var filterChooser = PhotoFilterChooserState()
     @State private var effectsHint: PhotoEffectsHint?
+    @State private var contentHeight: CGFloat?
 
     var body: some View {
         GeometryReader { proxy in
@@ -37,7 +38,8 @@ struct SettingsPopupOverlay: View {
             let localAnchor = anchor.offsetBy(dx: -overlayFrame.minX, dy: -overlayFrame.minY)
             let panelLeft: CGFloat = 12
             let panelWidth = max(0, proxy.size.width - panelLeft * 2)
-            let panelTop = anchor == .zero ? 74 : localAnchor.maxY + 8
+            let panelTop = anchor == .zero ? proxy.safeAreaInsets.top + 50 : localAnchor.maxY + 8
+            let availableHeight = max(1, proxy.size.height - panelTop - max(12, proxy.safeAreaInsets.bottom))
             ZStack(alignment: .topLeading) {
                 // A transparent hit area still closes the popup on outside
                 // taps without altering the photo list or system bars.
@@ -59,6 +61,10 @@ struct SettingsPopupOverlay: View {
                         effectPreviewSource: effectPreviewSource,
                         effectPreviewExif: effectPreviewExif,
                         onEffectPreviewRequested: onEffectPreviewRequested,
+                        onContentHeightChange: { height in
+                            contentHeight = height
+                            if !dismissalRequested { animationProgress = 1 }
+                        },
                         onClose: { close() }
                     ),
                     targetProgress: animationProgress,
@@ -68,12 +74,11 @@ struct SettingsPopupOverlay: View {
                     onCollapsed: { isPresented = false }
                 )
                 .frame(width: panelWidth)
-                // AnchorPopup measures its content intrinsically and only
-                // clamps when the available window is smaller. Keep the same
-                // behavior here: the main page stays compact, while the
-                // longer effects page can still scroll on a small phone.
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxHeight: max(0, min(proxy.size.height - 150, proxy.size.height * 0.82)), alignment: .top)
+                // The panel grows to its content height, then clamps to the
+                // space below the Z row. SettingsView's ScrollView takes the
+                // remaining height on compact phones instead of covering the
+                // fixed top controls.
+                .frame(height: min(contentHeight ?? availableHeight, availableHeight), alignment: .top)
                 .padding(.horizontal, panelLeft)
                 .padding(.top, panelTop)
                 if filterChooser.isPresented {
@@ -83,7 +88,6 @@ struct SettingsPopupOverlay: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .onAppear {
                 effectsDraft = effectsStore.beginDraft()
-                animationProgress = 1
             }
         }
         .ignoresSafeArea()
@@ -98,6 +102,10 @@ struct SettingsPopupOverlay: View {
     private func close() {
         guard isPresented && !dismissalRequested else { return }
         dismissalRequested = true
+        if contentHeight == nil {
+            isPresented = false
+            return
+        }
         // The native mesh reports completion; the live panel is kept in the
         // hierarchy until it has reached the Z button, even if close interrupts
         // the opening animation.

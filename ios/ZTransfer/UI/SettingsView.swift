@@ -2,6 +2,24 @@ import SwiftUI
 import UIKit
 import PhotosUI
 
+private struct SettingsContentHeightKey: PreferenceKey {
+    static let defaultValue: [String: CGFloat] = [:]
+    static func reduce(value: inout [String: CGFloat], nextValue: () -> [String: CGFloat]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, next in next })
+    }
+}
+
+private extension View {
+    func settingsHeight(_ key: String) -> some View {
+        background {
+            GeometryReader { proxy in
+                Color.clear.preference(key: SettingsContentHeightKey.self,
+                                       value: [key: proxy.size.height])
+            }
+        }
+    }
+}
+
 struct SettingsView: View {
     @ObservedObject private var directory: DirectoryAccessStore
     @ObservedObject private var effectsStore: PhotoEffectsStore
@@ -39,6 +57,7 @@ struct SettingsView: View {
     let effectPreviewSource: UIImage?
     let effectPreviewExif: PhotoExif?
     let onEffectPreviewRequested: () -> Void
+    let onContentHeightChange: (CGFloat) -> Void
 
     private enum SettingsPage {
         case main
@@ -49,7 +68,8 @@ struct SettingsView: View {
          effectsDraft: Binding<PhotoEffectsSettings>, filterChooser: Binding<PhotoFilterChooserState>,
          effectsHint: Binding<PhotoEffectsHint?>, dismissalRequested: Bool,
          effectPreviewSource: UIImage? = nil, effectPreviewExif: PhotoExif? = nil,
-         onEffectPreviewRequested: @escaping () -> Void = {}, onClose: (() -> Void)? = nil) {
+         onEffectPreviewRequested: @escaping () -> Void = {},
+         onContentHeightChange: @escaping (CGFloat) -> Void = { _ in }, onClose: (() -> Void)? = nil) {
         self.showPhotoEffectsEntry = showPhotoEffectsEntry
         self.onClose = onClose
         _effectsStore = ObservedObject(wrappedValue: effectsStore)
@@ -61,6 +81,7 @@ struct SettingsView: View {
         self.effectPreviewSource = effectPreviewSource
         self.effectPreviewExif = effectPreviewExif
         self.onEffectPreviewRequested = onEffectPreviewRequested
+        self.onContentHeightChange = onContentHeightChange
     }
 
     var body: some View {
@@ -69,7 +90,8 @@ struct SettingsView: View {
                 if settingsPage == .main {
                     VStack(spacing: 0) {
                         header
-                        ScrollView { mainSettingsContent }
+                            .settingsHeight("mainHeader")
+                        ScrollView { mainSettingsContent.settingsHeight("mainContent") }
                     }
                     .transition(.asymmetric(
                         insertion: .offset(x: settingsTransitionDirection * 24)
@@ -80,21 +102,25 @@ struct SettingsView: View {
                 } else {
                     VStack(spacing: 0) {
                         effectsHeader
+                            .settingsHeight("effectsHeader")
                         ScrollView {
-                            PhotoEffectsSettingsPreview(source: effectPreviewSource,
-                                metadata: effectPreviewExif.map(PhotoFrameMetadata.init),
-                                settings: effectsDraft,
-                                onRequest: onEffectPreviewRequested)
-                                .padding(.horizontal, 16).padding(.top, 10)
-                            PhotoEffectsControls(draft: $effectsDraft,
-                                showingWatermarkPicker: $showingWatermarkPicker,
-                                textFieldFocused: $watermarkTextFocused,
-                                showLocationFields: true,
-                                filterChooser: $filterChooser,
-                                onWatermarkTextCommitted: { _ in commitFrameDraft() },
-                                onFavoriteImageMissing: { effectsHint = .init(resource: "photo_effect_favorite_image_missing") })
-                                .padding(.horizontal, 16)
-                                .padding(.bottom, 14)
+                            VStack(spacing: 0) {
+                                PhotoEffectsSettingsPreview(source: effectPreviewSource,
+                                    metadata: effectPreviewExif.map(PhotoFrameMetadata.init),
+                                    settings: effectsDraft,
+                                    onRequest: onEffectPreviewRequested)
+                                    .padding(.horizontal, 16).padding(.top, 10)
+                                PhotoEffectsControls(draft: $effectsDraft,
+                                    showingWatermarkPicker: $showingWatermarkPicker,
+                                    textFieldFocused: $watermarkTextFocused,
+                                    showLocationFields: true,
+                                    filterChooser: $filterChooser,
+                                    onWatermarkTextCommitted: { _ in commitFrameDraft() },
+                                    onFavoriteImageMissing: { effectsHint = .init(resource: "photo_effect_favorite_image_missing") })
+                                    .padding(.horizontal, 16)
+                                    .padding(.bottom, 14)
+                            }
+                            .settingsHeight("effectsContent")
                         }
                     }
                     .transition(.asymmetric(
@@ -125,6 +151,12 @@ struct SettingsView: View {
                     .offset(x: max(12, helpAnchor.minX - 10), y: helpAnchor.maxY + 8)
                     .transition(.scale(scale: 0.94, anchor: .topLeading).combined(with: .opacity))
                     .zIndex(2)
+            }
+        }
+        .onPreferenceChange(SettingsContentHeightKey.self) { heights in
+            let prefix = settingsPage == .main ? "main" : "effects"
+            if let header = heights[prefix + "Header"], let content = heights[prefix + "Content"] {
+                onContentHeightChange(header + content)
             }
         }
         // Android AnchorPopup uses glassSurfaceHeavy (0.92/0.95 alpha). A

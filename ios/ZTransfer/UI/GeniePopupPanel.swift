@@ -114,7 +114,7 @@ import UIKit
     override func layoutSubviews() {
         super.layoutSubviews()
         meshView.frame = bounds
-        if requestedProgress != currentProgress && runningTarget == nil &&
+        if requestedProgress != currentProgress && runningTarget != requestedProgress &&
             bounds.width > 0 && bounds.height > 0 {
             beginTransition(to: requestedProgress)
         }
@@ -133,8 +133,14 @@ import UIKit
         guard requestedProgress != target ||
                 (runningTarget == nil && currentProgress != target) else { return }
         requestedProgress = target
-        guard bounds.width > 0 && bounds.height > 0 else { return }
-        beginTransition(to: target)
+        // Closing before the opening layout pass still completes dismissal.
+        if currentProgress == target {
+            finish(at: target)
+            return
+        }
+        // Capture only after SwiftUI has applied the measured content height.
+        // Starting here could snapshot the previous, full-height bounds.
+        setNeedsLayout()
     }
 
     private func beginTransition(to target: CGFloat) {
