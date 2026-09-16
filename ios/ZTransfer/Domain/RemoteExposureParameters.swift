@@ -114,6 +114,7 @@ enum RemoteExposureParameters {
 
     static func format(_ property: RemoteProperty, raw: UInt64) -> String {
         switch property {
+        case .batteryLevel: return "\(raw)%"
         case .fNumber, .movieFNumber: return String(format: "f/%.1f", Double(raw) / 100)
         case .nikonShutter, .movieShutter:
             switch raw {

@@ -278,7 +278,8 @@ struct RemoteView: View {
                     .foregroundStyle(ZTransferColors.primaryText)
             }
         }
-        .frame(minWidth: model.batteryPercent == nil ? 48 : 62, height: 36)
+        .frame(minWidth: model.batteryPercent == nil ? 48 : 62)
+        .frame(height: 36)
         .background(Color.white.opacity(0.86), in: Capsule())
         .overlay(Capsule().stroke(Color.white.opacity(0.95), lineWidth: 1))
         .shadow(color: .black.opacity(0.06), radius: 2, y: 1)
