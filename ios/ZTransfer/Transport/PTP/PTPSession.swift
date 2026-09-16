@@ -105,6 +105,7 @@ actor PTPSession {
     }
 
     var hasPendingCommand: Bool { executing || !waiters.isEmpty }
+    var isInvalidated: Bool { invalidated }
 
     func keepaliveIfIdle() async -> Bool {
         guard !executing, waiters.isEmpty else { return true }

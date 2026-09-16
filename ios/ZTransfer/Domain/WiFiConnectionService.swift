@@ -30,6 +30,10 @@ actor WiFiConnectionService {
             opened = true
             let repo = CameraRepository(session: session)
             _ = try? await repo.loadDeviceInfo()
+            // A complete negative DeviceInfo response is optional on Android.
+            // A timed-out or malformed transaction poisons iOS's command
+            // stream, so it cannot be published as a successful connection.
+            guard !(await session.isInvalidated) else { throw PTPSessionError.invalidated }
             try Task.checkCancellation()
             guard request == generation else { throw CancellationError() }
             socket.startEvents()
