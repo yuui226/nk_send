@@ -3,6 +3,7 @@ import Foundation
 /// Nikon remote-control property codes and value rules. Keep these values in one place so the
 /// iOS monitor can follow the Android RemoteLab protocol without inventing a second mapping.
 enum RemoteProperty: UInt32, CaseIterable, Sendable {
+    case batteryLevel = 0x5001
     case focusMode = 0x500A
     case angleLevel = 0xD067
     case fNumber = 0x5007

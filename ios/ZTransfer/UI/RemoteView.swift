@@ -270,10 +270,15 @@ struct RemoteView: View {
 
     private var remoteBatteryButton: some View {
         HStack(spacing: 5) {
-            RemoteBatteryIcon()
+            RemoteBatteryIcon(percent: model.batteryPercent)
                 .frame(width: 21, height: 15)
+            if let percent = model.batteryPercent {
+                Text("\(percent)%")
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundStyle(ZTransferColors.primaryText)
+            }
         }
-        .frame(width: 48, height: 36)
+        .frame(minWidth: model.batteryPercent == nil ? 48 : 62, height: 36)
         .background(Color.white.opacity(0.86), in: Capsule())
         .overlay(Capsule().stroke(Color.white.opacity(0.95), lineWidth: 1))
         .shadow(color: .black.opacity(0.06), radius: 2, y: 1)
@@ -555,13 +560,15 @@ struct RemoteView: View {
     }
 
     private struct RemoteBatteryIcon: View {
+        let percent: Int?
         var body: some View {
             Canvas { context, size in
                 let body = CGRect(x: 1, y: 2, width: size.width - 5, height: size.height - 4)
                 context.stroke(Path(roundedRect: body, cornerRadius: 3),
                                with: .color(ZTransferColors.accentOrange), lineWidth: 2)
+                let fraction = CGFloat(min(max(percent ?? 0, 0), 100)) / 100
                 context.fill(Path(roundedRect: CGRect(x: body.minX + 3, y: body.minY + 3,
-                                                       width: max(CGFloat(2), body.width * 0.19), height: body.height - 6),
+                                                       width: max(CGFloat(2), (body.width - 6) * fraction), height: body.height - 6),
                                   cornerRadius: 1.5),
                              with: .color(ZTransferColors.accentOrange))
                 context.fill(Path(roundedRect: CGRect(x: body.maxX, y: size.height * 0.34,

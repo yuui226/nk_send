@@ -17,6 +17,7 @@ final class RemoteViewModel: ObservableObject {
     @Published private(set) var recordingSeconds = 0
     @Published private var recordingOperations = RemoteRecordingOperationGate()
     @Published private(set) var levelRoll: Double?
+    @Published private(set) var batteryPercent: Int?
 
     var recordingBusy: Bool { recordingOperations.isBusy }
     var recordingHint: String? { state.recordingHint?.message }
@@ -133,6 +134,10 @@ final class RemoteViewModel: ObservableObject {
                 if let descriptor = try? await camera.remoteProperty(.angleLevel) {
                     let signed = Int64(bitPattern: descriptor.current)
                     levelRoll = Double(signed) / 65536
+                }
+                if let descriptor = try? await camera.remoteProperty(.batteryLevel) {
+                    let value = Int(min(descriptor.current, 100))
+                    if batteryPercent != value { batteryPercent = value }
                 }
                 try? await Task.sleep(nanoseconds: 600_000_000)
             }
