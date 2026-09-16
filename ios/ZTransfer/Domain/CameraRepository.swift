@@ -265,6 +265,14 @@ actor CameraRepository {
         }
     }
 
+    /// Android's shutter half-press runs AF at the already selected focus area
+    /// without starting subject tracking or changing the area first.
+    func halfPressFocus() async throws -> RemoteFocusResult {
+        let af = try await afDriveAndWait()
+        return RemoteFocusResult(trackingStarted: false, polls: af.polls,
+                                 timedOut: af.timedOut)
+    }
+
     func endSubjectTracking() async throws {
         guard subjectTrackingActive else { return }
         do { _ = try await session.execute(operation: PTPConstants.endTracking) }

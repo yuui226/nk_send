@@ -35,7 +35,6 @@ struct SettingsView: View {
     @State private var showingHelp = false
     @State private var showingEffectsHelp = false
     @State private var helpAnchor: CGRect = .zero
-    @State private var helpAttentionScale: CGFloat = 1
     @State private var settingsTransitionDirection: CGFloat = 1
     @AppStorage("organize_transfers_by_date") private var organizeByDate = false
     @AppStorage("auto_transfer_new_media") private var autoTransfer = false
@@ -199,12 +198,6 @@ struct SettingsView: View {
             if !["system", "en", "zh-Hans", "zh-Hant"].contains(appLanguage) {
                 appLanguage = "system"
             }
-            if !mainSettingsHelpViewed {
-                helpAttentionScale = 1.09
-                withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
-                    helpAttentionScale = 1
-                }
-            }
         }
     }
 
@@ -234,23 +227,13 @@ struct SettingsView: View {
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
             Spacer()
-            Button {
+            TipLightbulbButton(
+                attention: !photoEffectsHelpViewed, size: 28,
+                accessibilityLabel: AppLocalized.resource("photo_effects_info_title")
+            ) {
                 photoEffectsHelpViewed = true
                 showingEffectsHelp.toggle()
-            } label: {
-                ZStack(alignment: .topTrailing) {
-                    Image(systemName: "lightbulb.fill")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(ZTransferColors.accentOrange)
-                    if !photoEffectsHelpViewed {
-                        Circle()
-                            .fill(Color(red: 1, green: 0.30, blue: 0.24))
-                            .frame(width: 7, height: 7)
-                    }
-                }
-                .frame(width: 30, height: 30)
             }
-            .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 12))
             .background {
                 GeometryReader { proxy in
                     Color.clear.preference(
@@ -310,28 +293,13 @@ struct SettingsView: View {
                 .zTransferText(size: ZTransferMetrics.title, weight: .bold)
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
-            Button {
-                showingHelp.toggle()
-                // Android persists this exact preference when the guide is opened;
-                // the attention marker must not reappear on the next visit.
+            TipLightbulbButton(
+                attention: !mainSettingsHelpViewed, size: 30,
+                accessibilityLabel: AppLocalized.resource("settings_help_title")
+            ) {
                 mainSettingsHelpViewed = true
-            } label: {
-                ZStack(alignment: .topTrailing) {
-                    Image(systemName: "lightbulb.fill")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(ZTransferColors.accentOrange)
-                    if !mainSettingsHelpViewed {
-                        Circle()
-                            .fill(Color(red: 1, green: 0.30, blue: 0.24))
-                            .frame(width: 7, height: 7)
-                            .scaleEffect(helpAttentionScale)
-                            .transition(.scale.combined(with: .opacity))
-                    }
-                }
-                .frame(width: 30, height: 30)
+                showingHelp.toggle()
             }
-            .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 12))
-            .scaleEffect(mainSettingsHelpViewed ? 1 : helpAttentionScale)
             .background {
                 GeometryReader { proxy in
                     Color.clear.preference(
@@ -418,7 +386,7 @@ struct SettingsView: View {
                 }, onCommit: { skinPreset = $0 }, rowHeight: 16, wheelHeight: 42, optionFontSize: 13).frame(maxWidth: .infinity)
             }
             SettingsDivider()
-            HStack(spacing: 8) { ToggleWheel(label: AppLocalized.resource("haptic_feedback"), isOn: $haptics); ToggleWheel(label: AppLocalized.resource("keep_screen_on"), isOn: $keepScreenOn) }
+            HStack(spacing: 8) { ToggleWheel(label: AppLocalized.resource("haptic_feedback"), isOn: $haptics, isHapticsPreference: true); ToggleWheel(label: AppLocalized.resource("keep_screen_on"), isOn: $keepScreenOn) }
         }
     }
 
@@ -623,6 +591,7 @@ private struct ToggleWheel: View {
     let label: String
     @Binding var isOn: Bool
     var disabled = false
+    var isHapticsPreference = false
     var body: some View {
         DetentWheel(
             label: label,
@@ -635,6 +604,7 @@ private struct ToggleWheel: View {
             enabled: !disabled,
             accentColor: isOn ? ZTransferColors.accentBlue : ZTransferColors.secondaryText,
             emphasized: isOn,
+            onDetent: { ZTransferHaptics.shared.tick(isPreferenceToggle: isHapticsPreference) },
         )
         .frame(maxWidth: .infinity)
     }

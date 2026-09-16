@@ -41,6 +41,30 @@ struct ConnectionState: Equatable, Sendable {
     var discoveredDevices: [USBDeviceDescriptor] = []
     var selectedDeviceID: String?
     var errorMessage: String?
+
+    /// HomeScreen.connectionHapticOutcome folds changing error details into
+    /// one outcome. A rebuilt view or an AP error subtype change stays silent.
+    func hapticOutcome(connectedViaUSB: Bool?) -> ConnectionHapticOutcome {
+        if let connectedViaUSB {
+            return connectedViaUSB ? .usbSuccess : (wirelessMode == .sta ? .staSuccess : .apSuccess)
+        }
+        if selectedMode == .usb, case .failed = usbPhase { return .usbFailure }
+        if case .failed = wifiPhase {
+            if wirelessMode == .sta { return .staFailure }
+            if selectedMode != .usb { return .apFailure }
+        }
+        return .none
+    }
+}
+
+enum ConnectionHapticOutcome: Equatable {
+    case none, usbSuccess, staSuccess, apSuccess, usbFailure, staFailure, apFailure
+    var isFailure: Bool {
+        switch self {
+        case .usbFailure, .staFailure, .apFailure: return true
+        default: return false
+        }
+    }
 }
 
 extension ConnectionState {

@@ -22,7 +22,7 @@ struct DetentWheel<Option: Hashable>: View {
     var emphasized = false
     var showEmphasisBorder = true
     var showDragHint = true
-    var onDetent: () -> Void = {}
+    var onDetent: (() -> Void)? = nil
     var onActivated: (() -> Void)? = nil
     var onLongClick: (() -> Void)? = nil
     var centerIcon: ((Color) -> AnyView)? = nil
@@ -35,7 +35,6 @@ struct DetentWheel<Option: Hashable>: View {
     @State private var dragging = false
     @State private var suppressNextTap = false
     @GestureState private var gestureActive = false
-    @AppStorage("haptics_enabled") private var hapticsEnabled = true
 
     init(label: String, options: [Option], selected: Option,
          optionLabel: @escaping (Option) -> String,
@@ -46,7 +45,7 @@ struct DetentWheel<Option: Hashable>: View {
          optionFontSize: CGFloat = 14, optionFontWeight: Font.Weight? = nil,
          accentColor: Color? = nil, emphasized: Bool = false,
          showEmphasisBorder: Bool = true, showDragHint: Bool = true,
-         onDetent: @escaping () -> Void = {}, onActivated: (() -> Void)? = nil,
+         onDetent: (() -> Void)? = nil, onActivated: (() -> Void)? = nil,
          onLongClick: (() -> Void)? = nil,
          centerIcon: ((Color) -> AnyView)? = nil,
          favoriteOption: @escaping (Option) -> Bool = { _ in false },
@@ -237,10 +236,8 @@ struct DetentWheel<Option: Hashable>: View {
     }
 
     private func emitDetent() {
-        guard hapticsEnabled else { return }
-        onDetent()
-        let generator = UISelectionFeedbackGenerator()
-        generator.prepare()
-        generator.selectionChanged()
+        // A custom callback replaces the default, never adds a second tick.
+        if let onDetent { onDetent() }
+        else { ZTransferHaptics.shared.tick() }
     }
 }

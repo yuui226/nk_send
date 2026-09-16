@@ -12,6 +12,7 @@ struct LocalPhotoEffectsView: View {
     @State private var previewPage = 0
     @State private var showingPicker = false
     @State private var showingHelp = false
+    @AppStorage("local_photo_effects_help_viewed") private var localPhotoEffectsHelpViewed = false
     @State private var showingWatermarkPicker = false
     @State private var filterChooser = PhotoFilterChooserState()
     @State private var effectsHint: PhotoEffectsHint?
@@ -151,11 +152,13 @@ struct LocalPhotoEffectsView: View {
                 }
                 .buttonStyle(WorkbenchGlassButtonStyle()).disabled(batch.state.generating)
             }
-            Button { showingHelp = true } label: {
-                Image(systemName: "lightbulb.fill").foregroundStyle(ZTransferColors.accentOrange)
-                    .frame(width: 38, height: 38)
+            TipLightbulbButton(
+                attention: !localPhotoEffectsHelpViewed, size: 38,
+                accessibilityLabel: AppLocalized.resource("photo_effects_info_title")
+            ) {
+                localPhotoEffectsHelpViewed = true
+                showingHelp = true
             }
-            .buttonStyle(WorkbenchGlassButtonStyle()).accessibilityLabel(AppLocalized.resource("photo_effects_info_title"))
         }
         .foregroundStyle(ZTransferColors.primaryText)
     }

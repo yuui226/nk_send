@@ -168,6 +168,32 @@ struct ConnectionPage: View {
         .onChange(of: gpsCoordinator.state.enabled) { enabled in
             if !enabled { attentionOrigin = Date() }
         }
+        // HomeScreen resets the STA guide after a failed discovery so the
+        // next attempt can surface the same one-shot entry point again. Keep
+        // the persisted unread flag in sync with that boundary; AP and GPS
+        // guides remain permanently quiet once acknowledged.
+        .onChange(of: model.state.wifiPhase) { phase in
+            guard model.state.wirelessMode == .sta else { return }
+            switch phase {
+            case .failed:
+                if staHelpViewed { staHelpViewed = false }
+            case .connected:
+                if !staHelpViewed { staHelpViewed = true }
+            default:
+                break
+            }
+        }
+        .task(id: celebrationStart) {
+            guard let celebrationStart else { return }
+            // HomeScreen fires CONFIRM after the 620ms connection hero delay.
+            let remaining = max(0, 0.62 - Date().timeIntervalSince(celebrationStart))
+            try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
+            guard !Task.isCancelled, model.cameraSession != nil else { return }
+            ZTransferHaptics.shared.success()
+        }
+        .onChange(of: model.state.hapticOutcome(connectedViaUSB: model.cameraSession?.isUSB)) { outcome in
+            if outcome.isFailure { ZTransferHaptics.shared.failure() }
+        }
     }
 
     /// Android opens the phone's hotspot settings for STA and Wi‑Fi settings

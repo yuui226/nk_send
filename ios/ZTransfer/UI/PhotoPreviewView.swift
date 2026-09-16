@@ -201,6 +201,8 @@ struct PhotoPreviewView: View {
                                              displayedImages[file.id] = image
                                              guard histogramVisible, currentPhoto?.id == file.id else { return }
                                              histogramBars = image.map(luminanceHistogram) ?? []
+                                         }, onHighResolutionLoaded: {
+                                             if currentPhoto?.id == file.id { ZTransferHaptics.shared.tick() }
                                          }, onTap: { selectedFile = nil },
                                          onZoomedChange: { zoomed in if index == itemIndex { currentZoomed = zoomed } },
                                          isCurrent: index == itemIndex)
@@ -407,6 +409,7 @@ struct PhotoPreviewView: View {
     private func collapseCurrentBurst() {
         guard let collectionIndex = photoPreviewCollectionIndex(previewEntries, memberIndex: index),
               case let .burst(group) = previewEntries[collectionIndex] else { return }
+        ZTransferHaptics.shared.tick()
         withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.26)) {
             previewEntries = collapsePhotoPreviewBurst(previewEntries, burstID: group.id)
             expandedBurstIDs.remove(group.id)
@@ -421,6 +424,7 @@ struct PhotoPreviewView: View {
             if case .burst(let value) = entry { return value.id == group.id }
             return false
         }) else { return }
+        ZTransferHaptics.shared.tick()
         withAnimation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.28)) {
             if !expandedBurstIDs.contains(group.id) { previewEntries = expandPhotoPreviewBurst(previewEntries, at: collectionIndex) }
             expandedBurstIDs.insert(group.id)
@@ -432,6 +436,7 @@ struct PhotoPreviewView: View {
 
     private func startQueueFlight(for file: CameraFile, burstFiles: [CameraFile]? = nil) {
         guard burstFiles.map(onEnqueueBurst) ?? onEnqueue(file) else { return }
+        ZTransferHaptics.shared.tick()
         let flightCount = burstFiles?.count ?? 1
         onQueueFlightStarted(flightCount)
         queueFlightCount = flightCount
@@ -632,6 +637,7 @@ private struct PreviewImage: View {
     let onFHDUnavailable: (Bool) -> Void
     let onRemoteExif: (PhotoExif?) -> Void
     let onDisplayImage: (UIImage?) -> Void
+    let onHighResolutionLoaded: () -> Void
     let onTap: () -> Void
     let onZoomedChange: (Bool) -> Void
     let isCurrent: Bool
@@ -745,6 +751,7 @@ private struct PreviewImage: View {
                 image = localImage
                 highResolutionAlpha = 1
                 onDisplayImage(localImage)
+                onHighResolutionLoaded()
                 return
             }
             if !zoomEnabled {
@@ -754,11 +761,13 @@ private struct PreviewImage: View {
             await session.setFHDActive(true)
             defer { Task { await session.setFHDActive(false) } }
             let (previewData, metadata) = await session.previewAndExif(file: file)
+            guard !Task.isCancelled else { return }
             onRemoteExif(metadata)
             if let data = previewData, let highResolution = UIImage(data: data) {
                 image = highResolution
                 onFHDUnavailable(false)
                 onDisplayImage(highResolution)
+                onHighResolutionLoaded()
                 if thumbnail == nil {
                     highResolutionAlpha = 1
                 } else {

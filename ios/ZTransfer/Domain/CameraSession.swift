@@ -243,6 +243,10 @@ actor CameraSession {
                                       focusX: focusX, focusY: focusY)
     }
 
+    func halfPressFocus() async throws -> RemoteFocusResult {
+        try await repository.halfPressFocus()
+    }
+
     func endSubjectTracking() async throws { try await repository.endSubjectTracking() }
     func startMovieRecording() async throws -> RemoteMovieStartResult {
         try await repository.startMovieRecording()
@@ -259,6 +263,7 @@ protocol RemoteCameraControlling: Sendable {
     func setRemoteProperty(_ descriptor: RemotePropertyDescriptor, value: UInt64) async throws
     func focusAt(trackingX: UInt32, trackingY: UInt32,
                  focusX: UInt32, focusY: UInt32) async throws -> RemoteFocusResult
+    func halfPressFocus() async throws -> RemoteFocusResult
     func endSubjectTracking() async throws
     func startMovieRecording() async throws -> RemoteMovieStartResult
     func endMovieRecording() async throws -> UInt16

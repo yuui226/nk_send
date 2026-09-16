@@ -159,7 +159,10 @@ struct PhotoEffectsControls: View {
                                 rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, enabled: frameEnabled,
                                 accentColor: ZTransferColors.accentOrange,
                                 emphasized: metadataExpanded, showDragHint: false,
-                                onActivated: { withAnimation(ZTransferMotion.inlineExpansion) { metadataExpanded.toggle() } })
+                                onActivated: {
+                                    ZTransferHaptics.shared.tick()
+                                    withAnimation(ZTransferMotion.inlineExpansion) { metadataExpanded.toggle() }
+                                })
                     .frame(maxWidth: .infinity)
                     PhotoEffectFavoriteButton(
                         favorite: frameEnabled && draft.favoriteFrameEffects.contains { $0.preset == draft.photoFramePreset },
@@ -228,7 +231,10 @@ struct PhotoEffectsControls: View {
                                 optionLabel: { _ in AppLocalized.resource("photo_frame_watermark_settings_button") }, onCommit: { _ in }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height,
                                 enabled: watermarkEnabled, accentColor: ZTransferColors.accentPurple,
                                 emphasized: watermarkExpanded, showDragHint: false,
-                                onActivated: { withAnimation(ZTransferMotion.inlineExpansion) { watermarkExpanded.toggle() } })
+                                onActivated: {
+                                    ZTransferHaptics.shared.tick()
+                                    withAnimation(ZTransferMotion.inlineExpansion) { watermarkExpanded.toggle() }
+                                })
                 }
                 if watermarkExpanded && watermarkEnabled {
                     VStack(spacing: 8) {
@@ -313,7 +319,12 @@ struct PhotoEffectsControls: View {
     }
 
     private func metadataButton(_ title: String, _ selected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) { Text(title).font(.system(size: 14, weight: .semibold)).foregroundStyle(selected ? .white : ZTransferColors.primaryText).frame(maxWidth: .infinity).frame(height: 48).background(selected ? ZTransferColors.accentBlue : ZTransferColors.background.opacity(0.55), in: RoundedRectangle(cornerRadius: 12)) }.buttonStyle(.plain)
+        Button {
+            ZTransferHaptics.shared.tick()
+            action()
+        } label: {
+            Text(title).font(.system(size: 14, weight: .semibold)).foregroundStyle(selected ? .white : ZTransferColors.primaryText).frame(maxWidth: .infinity).frame(height: 48).background(selected ? ZTransferColors.accentBlue : ZTransferColors.background.opacity(0.55), in: RoundedRectangle(cornerRadius: 12))
+        }.buttonStyle(.plain)
     }
     private func toggleFrameFavorite() {
         guard frameEnabled else { return }
@@ -855,7 +866,6 @@ private struct PhotoEffectFavoriteButton: View {
     let action: () -> Void
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage("skin_preset") private var skin = "FROSTED_GLASS"
-    @AppStorage("haptics_enabled") private var haptics = true
 
     private var markColor: Color {
         let dark = colorScheme == .dark
@@ -869,7 +879,7 @@ private struct PhotoEffectFavoriteButton: View {
 
     var body: some View {
         Button {
-            if haptics { UISelectionFeedbackGenerator().selectionChanged() }
+            ZTransferHaptics.shared.tick()
             action()
         } label: {
             ZStack {

@@ -7,6 +7,7 @@ struct RemoteExposureTile: View {
     let descriptor: RemotePropertyDescriptor?
     let onOpenList: () -> Void
     let onCommit: (UInt64) -> Void
+    var onDetent: (() -> Void)? = nil
     var autoEnabled: Bool? = nil
     var autoToggle: (() -> Void)? = nil
     var rowHeight: CGFloat = 18
@@ -14,6 +15,7 @@ struct RemoteExposureTile: View {
     @State private var position: CGFloat = 0
     @State private var dragStart: CGFloat = 0
     @State private var dragging = false
+    @State private var lastFeedbackIndex: Int?
 
     private var values: [UInt64] { descriptor?.values ?? [] }
     private var selectedIndex: Int {
@@ -86,15 +88,25 @@ struct RemoteExposureTile: View {
         DragGesture(minimumDistance: writable ? 2 : .infinity)
             .onChanged { value in
                 guard writable else { return }
-                if !dragging { dragging = true; dragStart = CGFloat(selectedIndex) }
+                if !dragging {
+                    dragging = true
+                    dragStart = CGFloat(selectedIndex)
+                    lastFeedbackIndex = selectedIndex
+                }
                 let raw = dragStart + downSign * value.translation.height / max(rowHeight, 1)
                 position = min(max(raw, 0), CGFloat(max(values.count - 1, 0)))
+                let index = Int(position.rounded())
+                if index != lastFeedbackIndex, values.indices.contains(index) {
+                    lastFeedbackIndex = index
+                    onDetent?()
+                }
             }
             .onEnded { value in
                 guard writable else { return }
                 let raw = dragStart + downSign * value.translation.height / max(rowHeight, 1)
                 let target = Int(min(max(raw, 0), CGFloat(values.count - 1)).rounded())
                 dragging = false
+                lastFeedbackIndex = nil
                 withAnimation(ZTransferMotion.standard) { position = CGFloat(target) }
                 if values.indices.contains(target), values[target] != descriptor?.current { onCommit(values[target]) }
             }

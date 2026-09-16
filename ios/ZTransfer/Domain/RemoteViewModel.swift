@@ -25,10 +25,13 @@ final class RemoteViewModel: ObservableObject {
 
     private let camera: RemoteCameraControlling
     private let onTransportLost: (() -> Void)?
+    private let haptics: ZTransferHaptics
     private var transportLossNotified = false
     private var frameTask: Task<Void, Never>?
     private var modeTask: Task<Void, Never>?
     private var focusHideTask: Task<Void, Never>?
+    private var halfPressTask: Task<Void, Never>?
+    private var halfPressHeld = false
     private var recordingTimerTask: Task<Void, Never>?
     private var recordingCommandTask: Task<Void, Never>?
     private var recordingHintTask: Task<Void, Never>?
@@ -39,9 +42,11 @@ final class RemoteViewModel: ObservableObject {
     private var stopTrackingRequested = false
     private var lastFrameAt: ContinuousClock.Instant?
 
-    init(camera: RemoteCameraControlling, onTransportLost: (() -> Void)? = nil) {
+    init(camera: RemoteCameraControlling, onTransportLost: (() -> Void)? = nil,
+         haptics: ZTransferHaptics = .shared) {
         self.camera = camera
         self.onTransportLost = onTransportLost
+        self.haptics = haptics
     }
 
     func start() {
@@ -188,12 +193,21 @@ final class RemoteViewModel: ObservableObject {
 
     var autoISOEnabled: Bool { autoISODescriptor?.current != 0 }
 
+    /// One feedback pulse per camera detent, matching RemoteScreen's
+    /// onValueStep callback. The eventual write remains coalesced by the
+    /// control and is committed once the drag ends.
+    func detentFeedback() {
+        haptics.tick()
+    }
+
     func setAutoISO(_ enabled: Bool) {
         guard let descriptor = autoISODescriptor, descriptor.writable else { return }
         let previous = descriptor.current
+        guard (previous != 0) != enabled else { return }
         var optimistic = descriptor
         optimistic.current = enabled ? 1 : 0
         autoISODescriptor = optimistic
+        haptics.tick()
         Task { [weak self] in
             guard let self else { return }
             do {
@@ -209,12 +223,14 @@ final class RemoteViewModel: ObservableObject {
         }
     }
 
-    func setExposure(_ field: RemoteExposureField, value: UInt64) {
+    func setExposure(_ field: RemoteExposureField, value: UInt64, feedback: Bool = true) {
         guard let descriptor = exposureDescriptors[field], descriptor.writable else { return }
         let previous = descriptor.current
+        guard previous != value else { return }
         var optimistic = descriptor
         optimistic.current = value
         exposureDescriptors[field] = optimistic
+        if feedback { haptics.tick() }
         Task { [weak self] in
             guard let self else { return }
             do {
@@ -234,6 +250,9 @@ final class RemoteViewModel: ObservableObject {
 
     func stop() {
         stopRequested = true
+        halfPressHeld = false
+        halfPressTask?.cancel()
+        halfPressTask = nil
         stopTrackingRequested = state.focus.tracking
         focusHideTask?.cancel()
         recordingOperations.invalidate()
@@ -265,13 +284,63 @@ final class RemoteViewModel: ObservableObject {
         recordingCommandTask = nil
     }
 
+    /// Starts the Android two-stage shutter AF. The initial tick is emitted
+    /// when the half-press is accepted; the second tick only arrives while the
+    /// finger is still held when AF actually locks.
+    func beginHalfPress() {
+        guard state.session == .ready, state.capture == .idle,
+              !state.focus.manual, !halfPressHeld, halfPressTask == nil,
+              !stopRequested else { return }
+        halfPressHeld = true
+        haptics.tick()
+        halfPressTask = Task { [weak self] in
+            guard let self else { return }
+            defer { halfPressTask = nil }
+            do {
+                let result = try await camera.halfPressFocus()
+                guard !Task.isCancelled, !stopRequested, halfPressHeld else { return }
+                guard !result.timedOut else { return }
+                haptics.tick()
+                state = state.applying(.focusLocked)
+            } catch is CancellationError {
+            } catch {
+                if Self.isTransportFailure(error) { notifyTransportLost() }
+            }
+        }
+    }
+
+    /// Releases the two-stage shutter. A long press only fires after the AF
+    /// transaction has reached its terminal result; moving off the button
+    /// cancels the visual/haptic completion without sending a late tick.
+    func endHalfPress(fire: Bool) {
+        guard halfPressHeld || halfPressTask != nil else {
+            if fire { capture() }
+            return
+        }
+        halfPressHeld = false
+        let pending = halfPressTask
+        guard fire else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            await pending?.value
+            guard !Task.isCancelled, !stopRequested, state.session == .ready,
+                  state.capture == .idle else { return }
+            if movieMode { toggleRecording() }
+            else { capture() }
+        }
+    }
+
     func capture() {
         guard state.session == .ready, state.capture == .idle, !movieMode else { return }
         state = state.applying(.captureRequested)
         Task { [weak self] in
             guard let self else { return }
             do {
+                guard !Task.isCancelled, !stopRequested, state.session == .ready,
+                      state.capture == .capturing else { return }
+                haptics.longPress()
                 try await camera.capturePhoto()
+                guard !Task.isCancelled, !stopRequested else { return }
                 state = state.applying(.captureConfirmed)
             } catch is CancellationError {
                 state = state.applying(.cancelled)
@@ -297,6 +366,8 @@ final class RemoteViewModel: ObservableObject {
                 if recordingOperations.complete(token) { recordingCommandTask = nil }
             }
             do {
+                guard !Task.isCancelled, !stopRequested else { return }
+                haptics.longPress()
                 switch command {
                 case .start:
                     let result = try await camera.startMovieRecording()
@@ -358,6 +429,7 @@ final class RemoteViewModel: ObservableObject {
         }
         guard state.focus.phase != .focusing else { return }
         state = state.applying(.focusRequested(point))
+        haptics.tick()
         focusHideTask?.cancel()
         let trackingX = UInt32((point.x * Double(max(1, Int(coordinateSize.width) - 1))).rounded())
         let trackingY = UInt32((point.y * Double(max(1, Int(coordinateSize.height) - 1))).rounded())
@@ -366,9 +438,10 @@ final class RemoteViewModel: ObservableObject {
             do {
                 let result = try await camera.focusAt(trackingX: trackingX, trackingY: trackingY,
                                                       focusX: trackingX, focusY: trackingY)
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled, !stopRequested else { return }
                 if result.timedOut { state = state.applying(.focusFailed); scheduleFocusHide(after: 1.2) }
                 else {
+                    haptics.tick()
                     state.focus.tracking = result.trackingStarted
                     state = state.applying(.focusLocked)
                     let nonce = state.focus.nonce
@@ -402,6 +475,7 @@ final class RemoteViewModel: ObservableObject {
 
     func cancelTracking() {
         guard state.focus.tracking else { return }
+        haptics.tick()
         Task { [weak self] in
             guard let self else { return }
             do { try await camera.endSubjectTracking() }
@@ -416,6 +490,7 @@ final class RemoteViewModel: ObservableObject {
         frameTask?.cancel()
         modeTask?.cancel()
         focusHideTask?.cancel()
+        halfPressTask?.cancel()
         recordingTimerTask?.cancel()
         recordingCommandTask?.cancel()
         recordingHintTask?.cancel()

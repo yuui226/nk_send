@@ -215,19 +215,12 @@ struct ConnectionMethodCard: View {
         if isSTA {
             VStack(spacing: 8) {
                 HStack {
-                    Button { onSTAHelpRequested?(helpButtonFrame) } label: {
-                        ZStack(alignment: .topTrailing) {
-                            utilityIcon("lightbulb.fill", tint: ZTransferColors.accentOrange)
-                            if !staHelpViewed {
-                                Circle()
-                                    .fill(ZTransferColors.statusError)
-                                    .frame(width: 7, height: 7)
-                                    .offset(x: -2, y: 2)
-                            }
-                        }
+                    TipLightbulbButton(
+                        attention: !staHelpViewed, size: 34,
+                        accessibilityLabel: AppLocalized.resource("tip_sta_title")
+                    ) {
+                        onSTAHelpRequested?(helpButtonFrame)
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(AppLocalized.resource("tip_sta_title"))
                     .background(GeometryReader { proxy in
                         Color.clear.onAppear { helpButtonFrame = proxy.frame(in: .global) }
                     })
@@ -260,19 +253,12 @@ struct ConnectionMethodCard: View {
             }
         } else {
             HStack(spacing: 8) {
-                Button { onAPHelpRequested?(helpButtonFrame) } label: {
-                    ZStack(alignment: .topTrailing) {
-                        utilityIcon("lightbulb.fill", tint: ZTransferColors.accentOrange, size: 36)
-                        if !apHelpViewed {
-                            Circle()
-                                .fill(ZTransferColors.statusError)
-                                .frame(width: 7, height: 7)
-                                .offset(x: -2, y: 2)
-                        }
-                    }
+                TipLightbulbButton(
+                    attention: !apHelpViewed, size: 36,
+                    accessibilityLabel: AppLocalized.resource("tip_title")
+                ) {
+                    onAPHelpRequested?(helpButtonFrame)
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel(AppLocalized.resource("tip_title"))
                 .background(GeometryReader { proxy in
                     Color.clear.onAppear { helpButtonFrame = proxy.frame(in: .global) }
                 })

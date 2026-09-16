@@ -42,6 +42,14 @@ private struct PhotoListWorkspaceTransition: AnimatableModifier {
 private let photoQueueWorkspaceAnimation =
     Animation.timingCurve(0.22, 0.84, 0.24, 1.0, duration: 0.34)
 
+/// Android's FileListScreen shows the remote entry introduction across the
+/// first six app starts, incrementing only when the expansion actually begins.
+let remoteEntryIntroMaxPlays = 6
+
+func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
+    max(0, playCount) < remoteEntryIntroMaxPlays
+}
+
 @MainActor struct PhotoListView: View {
     @StateObject private var model: PhotoListViewModel
     @StateObject private var queueModel: TransferQueueViewModel
@@ -65,6 +73,7 @@ private let photoQueueWorkspaceAnimation =
     @State private var expandedBurstIDs: Set<String> = []
     @State private var collapsedDays: Set<String> = []
     @State private var showTopButton = false
+    @State private var photoListScrollOffset: CGFloat = 0
     @State private var internalShowingRemote = false
     private let remotePresentation: Binding<Bool>?
     private var showingRemote: Bool {
@@ -76,6 +85,10 @@ private let photoQueueWorkspaceAnimation =
     }
     @State private var remoteEntryHint: String?
     @State private var remoteEntryHintID = UUID()
+    @State private var remoteExpandedAwayFromTop = false
+    @State private var remoteIntroExpanded = false
+    @State private var remoteIntroHandledForEntry = false
+    @AppStorage("remote_entry_intro_play_count") private var remoteEntryIntroPlayCount = 0
     @State private var showingSettings = false
     @State private var settingsAnchor: CGRect = .zero
     @State private var signalExpanded = false
@@ -226,10 +239,11 @@ private let photoQueueWorkspaceAnimation =
                                         }
                                         .onTapGesture { handleTap(entry, file: file) }
                                         .onLongPressGesture {
+                                            ZTransferHaptics.shared.longPress()
                                             if case let .burst(group) = entry {
                                                 withAnimation(ZTransferMotion.standard) { _ = expandedBurstIDs.insert(group.id) }
                                                 selectedFile = group.files[0]
-                                            } else if !tapToPreview { selectedFile = file }
+                                            } else { selectedFile = file }
                                         }
 
                                     }
@@ -259,7 +273,14 @@ private let photoQueueWorkspaceAnimation =
                     cellBounds.merge(bounds) { _, latest in latest }
                 }
                 .onPreferenceChange(PhotoListScrollOffsetKey.self) { value in
+                    photoListScrollOffset = value
                     showTopButton = value < -360
+                    if value < -2 {
+                        withAnimation(ZTransferMotion.standard) {
+                            remoteIntroExpanded = false
+                            remoteExpandedAwayFromTop = false
+                        }
+                    }
                 }
                 .refreshable { await model.reload() }
                 .overlay(alignment: .bottomTrailing) {
@@ -319,6 +340,26 @@ private let photoQueueWorkspaceAnimation =
                                             effects: effectsStore.settings)
             }
             model.load()
+        }
+        .task {
+            guard isRemoteEntryIntroEligible(playCount: remoteEntryIntroPlayCount),
+                  !remoteIntroHandledForEntry else { return }
+            try? await Task.sleep(nanoseconds: 160_000_000)
+            guard !Task.isCancelled,
+                  !remoteIntroHandledForEntry,
+                  photoListScrollOffset >= -2,
+                  selectedFile == nil,
+                  !showingQueue else { return }
+            remoteIntroHandledForEntry = true
+            remoteEntryIntroPlayCount = max(0, remoteEntryIntroPlayCount) + 1
+            withAnimation(.spring(response: 0.34, dampingFraction: 0.58)) {
+                remoteIntroExpanded = true
+            }
+            try? await Task.sleep(nanoseconds: 2_200_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.24)) {
+                remoteIntroExpanded = false
+            }
         }
         .onChange(of: showingRemote) { remote in
             // MainActivity.shouldPreferHighThroughputTransfers: both files and
@@ -564,7 +605,11 @@ private let photoQueueWorkspaceAnimation =
         HStack(spacing: 8) {
             let transferCount = queueModel.snapshot.items.filter { $0.status == .waiting || $0.status == .transferring }.count
             if queueModel.snapshot.isTransferring && transferCount > 1 {
-                Button { queueModel.pause() } label: {
+                Button {
+                    guard !queueModel.snapshot.pauseAfterCurrent else { return }
+                    ZTransferHaptics.shared.tick()
+                    queueModel.pause()
+                } label: {
                     Image(systemName: "pause.fill").frame(width: 36, height: 36)
                 }
                 .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
@@ -574,6 +619,7 @@ private let photoQueueWorkspaceAnimation =
             } else if !queueModel.snapshot.isTransferring && queueModel.snapshot.items.contains(where: { $0.status == .waiting }) {
                 Button {
                     guard let directory = directoryStore.directoryURL else { return }
+                    ZTransferHaptics.shared.tick()
                     queueModel.start(session: session, directory: directory)
                 } label: {
                     Image(systemName: "play.fill").frame(width: 36, height: 36)
@@ -665,6 +711,9 @@ private let photoQueueWorkspaceAnimation =
 
     @ViewBuilder
     private var remoteEntryOverlay: some View {
+        let remoteExpanded = photoListScrollOffset >= -2 || remoteExpandedAwayFromTop || remoteIntroExpanded
+        let introText = AppLocalized.resource("remote_entry_intro")
+            .replacingOccurrences(of: "\\n", with: "\n")
         VStack(alignment: .leading, spacing: 8) {
             if let remoteEntryHint {
                 Text(remoteEntryHint)
@@ -675,16 +724,46 @@ private let photoQueueWorkspaceAnimation =
                     .background(.regularMaterial, in: Capsule())
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
-            Button(action: openRemote) {
-                Image(systemName: "camera.aperture")
-                    .font(.system(size: 18, weight: .semibold))
-                    .frame(width: 44, height: 44)
-                    .background(.thinMaterial, in: Circle())
-                    .overlay(Circle().stroke(.white.opacity(0.55), lineWidth: 1))
+            Button {
+                if remoteExpanded {
+                    openRemote()
+                } else {
+                    ZTransferHaptics.shared.tick()
+                    withAnimation(.spring(response: 0.34, dampingFraction: 0.58)) {
+                        remoteExpandedAwayFromTop = true
+                    }
+                }
+            } label: {
+                HStack(spacing: remoteIntroExpanded ? 6 : 0) {
+                    Image(systemName: "camera.aperture")
+                        .font(.system(size: 18, weight: .semibold))
+                        .frame(width: 24, height: 24)
+                    if remoteIntroExpanded {
+                        Text(introText)
+                            .font(.system(size: 10, weight: .semibold))
+                            .multilineTextAlignment(.center)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .foregroundStyle(remoteIntroExpanded ? ZTransferColors.accentBlue : ZTransferColors.primaryText)
+                .frame(width: remoteIntroExpanded ? 108 : 44, height: 44)
+                .background(.thinMaterial, in: Capsule())
+                .overlay(Capsule().stroke(
+                    remoteIntroExpanded ? ZTransferColors.accentBlue.opacity(0.62) : .white.opacity(0.55),
+                    lineWidth: remoteIntroExpanded ? 1.4 : 1
+                ))
+                .shadow(color: remoteIntroExpanded ? ZTransferColors.accentBlue.opacity(0.22) : .clear,
+                        radius: remoteIntroExpanded ? 8 : 0)
             }
             .buttonStyle(.plain)
         }
-        .padding(.leading, 18).padding(.bottom, 22)
+        .padding(.leading, remoteExpanded ? 18 : -6)
+        .padding(.bottom, 22)
+        .scaleEffect(remoteExpanded ? 1 : 0.88, anchor: .leading)
+        .rotationEffect(.degrees(remoteExpanded ? 0 : -3.5), anchor: .leading)
+        .animation(.spring(response: 0.34, dampingFraction: 0.58), value: remoteExpanded)
+        .animation(.spring(response: 0.34, dampingFraction: 0.58), value: remoteIntroExpanded)
         .animation(ZTransferMotion.standard, value: remoteEntryHint)
     }
 
@@ -716,7 +795,8 @@ private let photoQueueWorkspaceAnimation =
     }
 
     private func enqueueSection(_ files: [CameraFile]) {
-        guard directoryStore.directoryURL != nil || deferTransferStart else { showingSettings = true; return }
+        guard directoryStore.directoryURL != nil else { showingSettings = true; return }
+        ZTransferHaptics.shared.tick()
         for file in files {
             if deferTransferStart { queueModel.enqueue(file, organizeByDate: organizeByDate, effects: effectsStore.settings) }
             else { queueModel.enqueue(file, autoStart: session, directory: directoryStore.directoryURL, organizeByDate: organizeByDate, effects: effectsStore.settings) }
@@ -729,15 +809,18 @@ private let photoQueueWorkspaceAnimation =
             return
         }
         if tapToPreview {
+            ZTransferHaptics.shared.longPress()
             selectedFile = file
         } else if directoryStore.directoryURL == nil {
             // Android routes a transfer attempt with no valid destination to the
             // existing settings overlay; it does not enqueue an unusable task.
             showingSettings = true
         } else if !deferTransferStart {
+            ZTransferHaptics.shared.tick()
             queueModel.enqueue(file, autoStart: session, directory: directoryStore.directoryURL, organizeByDate: organizeByDate, effects: effectsStore.settings)
             startListQueueFlight(for: file)
         } else {
+            ZTransferHaptics.shared.tick()
             queueModel.enqueue(file, organizeByDate: organizeByDate, effects: effectsStore.settings)
             startListQueueFlight(for: file)
         }
@@ -1212,6 +1295,7 @@ struct QueuePill: View {
             }
             if done && !previousAllDone {
                 if !hasCancelled {
+                    if sawActiveBatch { ZTransferHaptics.shared.success() }
                     withAnimation(ZTransferMotion.standard) { showDoneLabel = true }
                     doneTask?.cancel()
                     doneTask = Task { @MainActor in
@@ -1224,7 +1308,10 @@ struct QueuePill: View {
             }
             self.previousAllDone = done
         }
-        .onAppear { previousAllDone = allDone }
+        .onAppear {
+            previousAllDone = allDone
+            sawActiveBatch = hasActive
+        }
         .onDisappear { doneTask?.cancel() }
     }
 

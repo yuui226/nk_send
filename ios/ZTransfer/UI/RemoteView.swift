@@ -413,23 +413,14 @@ struct RemoteView: View {
     }
 
     private var shutterButton: some View {
-        Button {
-            if model.movieMode { model.toggleRecording() } else { model.capture() }
-        } label: {
-            ZStack {
-                Circle().stroke(ZTransferColors.primaryText.opacity(0.88), lineWidth: 4)
-                    .frame(width: 82, height: 82)
-                RoundedRectangle(cornerRadius: model.state.capture == .recording ? 8 : 41)
-                    .fill(model.movieMode ? ZTransferColors.statusError : Color.white)
-                    .frame(width: model.state.capture == .recording ? 30 : 64,
-                           height: model.state.capture == .recording ? 30 : 64)
-                    .animation(ZTransferMotion.emphasized, value: model.state.capture)
-            }
-        }
-        .buttonStyle(.plain)
-        .disabled(model.state.session != .ready || model.recordingBusy)
-        .opacity(model.state.session == .ready ? 1 : 0.72)
-        .accessibilityLabel(AppLocalized.resource("cd_remote_entry"))
+        RemoteShutterButton(
+            capture: model.state.capture,
+            movieMode: model.movieMode,
+            enabled: model.state.session == .ready && !model.recordingBusy,
+            onQuickTap: { if model.movieMode { model.toggleRecording() } else { model.capture() } },
+            onFocusStart: { model.beginHalfPress() },
+            onRelease: { model.endHalfPress(fire: $0) }
+        )
     }
 
     private var remoteViewfinder: some View {
@@ -842,13 +833,88 @@ struct RemoteView: View {
             ForEach(fields, id: \.self) { field in
                 RemoteExposureTile(field: field, descriptor: model.exposureDescriptors[field],
                                    onOpenList: { selectedField = field },
-                                   onCommit: { model.setExposure(field, value: $0) },
+                                   onCommit: { model.setExposure(field, value: $0, feedback: false) },
+                                   onDetent: { model.detentFeedback() },
                                    autoEnabled: field == .iso ? model.autoISOEnabled : nil,
                                    autoToggle: field == .iso && model.autoISODescriptor != nil ?
                                        { model.setAutoISO(!model.autoISOEnabled) } : nil)
             }
         }
         .padding(.horizontal, 14)
+    }
+}
+
+/// Two-stage shutter matching Android's 300 ms quick-tap/half-press split.
+private struct RemoteShutterButton: View {
+    let capture: RemoteCapturePhase
+    let movieMode: Bool
+    let enabled: Bool
+    let onQuickTap: () -> Void
+    let onFocusStart: () -> Void
+    let onRelease: (Bool) -> Void
+    @State private var pressed = false
+    @State private var halfPressStarted = false
+    @State private var timerTask: Task<Void, Never>?
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(ZTransferColors.primaryText.opacity(enabled ? 0.88 : 0.30), lineWidth: 4)
+                .frame(width: 82, height: 82)
+            if capture == .capturing {
+                ProgressView().controlSize(.large)
+            } else {
+                RoundedRectangle(cornerRadius: capture == .recording ? 8 : 41)
+                    .fill(movieMode ? ZTransferColors.statusError : Color.white)
+                    .frame(width: capture == .recording ? 30 : 64,
+                           height: capture == .recording ? 30 : 64)
+                    .scaleEffect(halfPressStarted ? 0.8 : 1)
+                    .animation(ZTransferMotion.emphasized, value: capture)
+            }
+        }
+        .frame(width: 82, height: 82)
+        .scaleEffect(pressed ? 0.95 : 1)
+        .animation(pressed ? .easeOut(duration: 0.1) : ZTransferMotion.emphasized, value: pressed)
+        .contentShape(Circle())
+        .gesture(dragGesture)
+        .opacity(enabled ? 1 : 0.72)
+        .accessibilityLabel(AppLocalized.resource("cd_remote_entry"))
+        .onDisappear {
+            timerTask?.cancel()
+            timerTask = nil
+            pressed = false
+            halfPressStarted = false
+        }
+    }
+
+    private var dragGesture: some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { value in
+                guard enabled, !pressed else { return }
+                pressed = true
+                halfPressStarted = false
+                timerTask?.cancel()
+                timerTask = Task { @MainActor in
+                    do { try await Task.sleep(nanoseconds: 300_000_000) }
+                    catch { return }
+                    guard pressed else { return }
+                    halfPressStarted = true
+                    onFocusStart()
+                }
+            }
+            .onEnded { value in
+                timerTask?.cancel()
+                timerTask = nil
+                pressed = false
+                let inside = value.location.x >= 0 && value.location.x <= 82 &&
+                    value.location.y >= 0 && value.location.y <= 82
+                if halfPressStarted {
+                    halfPressStarted = false
+                    onRelease(inside)
+                } else if inside {
+                    onQuickTap()
+                }
+            }
     }
 }
 

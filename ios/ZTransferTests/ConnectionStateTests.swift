@@ -62,6 +62,40 @@ final class ConnectionStateTests: XCTestCase {
         XCTAssertEqual(complete.success, 1, accuracy: 0.0001)
     }
 
+    func testRemoteEntryIntroStopsAfterSixRecordedStarts() {
+        XCTAssertTrue(isRemoteEntryIntroEligible(playCount: -1))
+        XCTAssertTrue(isRemoteEntryIntroEligible(playCount: 0))
+        XCTAssertTrue(isRemoteEntryIntroEligible(playCount: remoteEntryIntroMaxPlays - 1))
+        XCTAssertFalse(isRemoteEntryIntroEligible(playCount: remoteEntryIntroMaxPlays))
+        XCTAssertFalse(isRemoteEntryIntroEligible(playCount: remoteEntryIntroMaxPlays + 1))
+    }
+
+    func testUnreadTipUsesAndroidBreathingEndpoints() {
+        let start = TipAttentionValues(elapsed: 0)
+        XCTAssertEqual(start.buttonScale, 1)
+        XCTAssertEqual(start.dotScale, 0.72)
+        XCTAssertEqual(start.dotOpacity, 0.58)
+        let peak = TipAttentionValues(elapsed: 0.9)
+        XCTAssertEqual(peak.buttonScale, 1.09, accuracy: 0.000001)
+        XCTAssertEqual(peak.dotScale, 1.12, accuracy: 0.000001)
+        XCTAssertEqual(peak.dotOpacity, 1, accuracy: 0.000001)
+        XCTAssertEqual(TipAttentionValues(elapsed: 1.8), start)
+        XCTAssertEqual(TipAttentionValues.read.buttonScale, 1)
+        XCTAssertEqual(TipAttentionValues.read.dotOpacity, 0)
+    }
+
+    func testUnreadTipReversesTheSameCurveRatherThanStartingANewEase() {
+        // At half of the outward leg, FastOutSlowIn is ~0.77556, not 0.5.
+        let outward = TipAttentionValues(elapsed: 0.45)
+        XCTAssertEqual(outward.buttonScale, 1.06980052, accuracy: 0.000001)
+        let returning = TipAttentionValues(elapsed: 1.35)
+        XCTAssertEqual(returning.buttonScale, outward.buttonScale, accuracy: 0.000001)
+        XCTAssertEqual(returning.dotScale, outward.dotScale, accuracy: 0.000001)
+        XCTAssertEqual(returning.dotOpacity, outward.dotOpacity, accuracy: 0.000001)
+        let nextCycle = TipAttentionValues(elapsed: 2.25)
+        XCTAssertEqual(nextCycle.buttonScale, outward.buttonScale, accuracy: 0.000001)
+    }
+
     func testAPFailureClassificationMatchesAndroid() async {
         let refusal = await MainActor.run {
             ConnectionViewModel.wifiFailureKind(for: STAConnectionError.cameraRefused)

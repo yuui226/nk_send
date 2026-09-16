@@ -78,9 +78,13 @@ private func gpsDiagnosticsSnapshot() -> String {
 }
 
 private struct GPSInlinePanel: View {
+    @Environment(\.scenePhase) private var scenePhase
+    @AppStorage("haptics_enabled") private var hapticsEnabled = true
     @ObservedObject var coordinator: GPSCoordinator
     @State private var showingReset = false
     @State private var holdPressed = false
+    @State private var holdConsumedTap = false
+    @State private var holdCompleted = false
     @State private var sessionEstablished = false
     @State private var showHelp = false
     @State private var placeBubbleCoordinates: (latitude: Double, longitude: Double)?
@@ -161,6 +165,16 @@ private struct GPSInlinePanel: View {
         }
         .onAppear { updateSessionEvidence() }
         .onAppear { previousStatusRank = statusRank }
+        .onDisappear { ZTransferHaptics.shared.cancelProgressiveHold() }
+        .onChange(of: scenePhase) { phase in
+            if phase != .active { ZTransferHaptics.shared.cancelProgressiveHold() }
+        }
+        .onChange(of: hapticsEnabled) { enabled in
+            if !enabled { ZTransferHaptics.shared.cancelProgressiveHold() }
+        }
+        .onChange(of: requiresHoldToDisable) { required in
+            if !required { ZTransferHaptics.shared.cancelProgressiveHold() }
+        }
         .onChange(of: coordinator.state.status) { _ in updateSessionEvidence() }
         .onChange(of: statusRank) { newRank in
             statusTransitionDirection = newRank >= previousStatusRank ? 1 : -1
@@ -256,16 +270,13 @@ private struct GPSInlinePanel: View {
             }
             .padding(.trailing, 36)
             if !coordinator.state.enabled {
-                Button { showHelp = true } label: {
-                    Image(systemName: "lightbulb.fill")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(ZTransferColors.accentOrange)
-                        .frame(width: 30, height: 30)
-                        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(ZTransferColors.secondaryText.opacity(0.14)))
-                        .scaleEffect(coordinator.connectionHelpViewed ? 1 : 1.06)
+                TipLightbulbButton(
+                    attention: !coordinator.connectionHelpViewed, size: 30,
+                    accessibilityLabel: AppLocalized.resource("gps_auto_write")
+                ) {
+                    coordinator.markConnectionHelpViewed()
+                    showHelp = true
                 }
-                .buttonStyle(.plain)
                 .popover(isPresented: $showHelp, attachmentAnchor: .rect(.bounds), arrowEdge: .top) {
                     VStack(alignment: .leading, spacing: 10) {
                         Text(AppLocalized.resource("gps_detail_description"))
@@ -281,9 +292,6 @@ private struct GPSInlinePanel: View {
                     }
                     .padding(14)
                     .frame(width: 244)
-                }
-                .onChange(of: showHelp) { isPresented in
-                    if isPresented { coordinator.markConnectionHelpViewed() }
                 }
             }
         }
@@ -427,12 +435,14 @@ private struct GPSInlinePanel: View {
                         optionLabel: { $0.title }, onCommit: coordinator.setFrequency,
                         rowHeight: 16, wheelHeight: 42, enabled: !coordinator.state.enabled,
                         cornerRadius: 14, optionFontSize: 13,
-                        accentColor: ZTransferColors.accentBlue)
+                        accentColor: ZTransferColors.accentBlue, onDetent: {})
         }
     }
 
     private func statusControl(width: CGFloat) -> some View {
         Button {
+            guard !requiresHoldToDisable, !holdConsumedTap else { return }
+            ZTransferHaptics.shared.tick()
             if !coordinator.state.enabled { coordinator.setEnabled(true) }
             else if coordinator.state.status == .error { coordinator.retry() }
             else if !requiresHoldToDisable && coordinator.state.status != .apUnavailable { coordinator.setEnabled(false) }
@@ -468,13 +478,22 @@ private struct GPSInlinePanel: View {
             minimumDuration: 0.8,
             maximumDistance: 24,
             pressing: { pressing in
-                guard requiresHoldToDisable else { return }
+                if pressing {
+                    holdConsumedTap = requiresHoldToDisable
+                    holdCompleted = false
+                    guard requiresHoldToDisable else { return }
+                    ZTransferHaptics.shared.startProgressiveHold()
+                } else {
+                    if !holdCompleted { ZTransferHaptics.shared.cancelProgressiveHold() }
+                }
                 withAnimation(.easeInOut(duration: pressing ? 0.09 : 0.17)) {
                     holdPressed = pressing
                 }
             },
             perform: {
                 guard requiresHoldToDisable else { return }
+                holdCompleted = true
+                ZTransferHaptics.shared.completeProgressiveHold()
                 withAnimation(.easeInOut(duration: 0.17)) { holdPressed = false }
                 coordinator.setEnabled(false)
             }

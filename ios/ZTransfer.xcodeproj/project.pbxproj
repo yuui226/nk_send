@@ -7,6 +7,11 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A9145A100000000000000007 /* HapticPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9145A100000000000000008 /* HapticPolicy.swift */; };
+		A9145A100000000000000009 /* HapticsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9145A10000000000000000A /* HapticsTests.swift */; };
+		A9145A100000000000000005 /* ZTransferHaptics.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9145A100000000000000006 /* ZTransferHaptics.swift */; };
+		A9145A100000000000000001 /* TipLightbulbButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9145A100000000000000002 /* TipLightbulbButton.swift */; };
+		A9145A100000000000000003 /* TipAttentionMotion.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9145A100000000000000004 /* TipAttentionMotion.swift */; };
 		D1B7A1D2E3F4456789012352 /* debug_sample_fhd.jpg in Resources */ = {isa = PBXBuildFile; fileRef = D1B7A1D2E3F4456789012353 /* debug_sample_fhd.jpg */; };
 		D1B7A1D2E3F4456789012350 /* debug_sample_01.jpg in Resources */ = {isa = PBXBuildFile; fileRef = D1B7A1D2E3F4456789012351 /* debug_sample_01.jpg */; };
 		D1B7A1D2E3F4456789012345 /* DebugCameraData.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1B7A1D2E3F4456789012346 /* DebugCameraData.swift */; };
@@ -139,6 +144,11 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		A9145A100000000000000008 /* HapticPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HapticPolicy.swift; sourceTree = "<group>"; };
+		A9145A10000000000000000A /* HapticsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HapticsTests.swift; sourceTree = "<group>"; };
+		A9145A100000000000000006 /* ZTransferHaptics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZTransferHaptics.swift; sourceTree = "<group>"; };
+		A9145A100000000000000002 /* TipLightbulbButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TipLightbulbButton.swift; sourceTree = "<group>"; };
+		A9145A100000000000000004 /* TipAttentionMotion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TipAttentionMotion.swift; sourceTree = "<group>"; };
 		D1B7A1D2E3F4456789012353 /* debug_sample_fhd.jpg */ = {isa = PBXFileReference; lastKnownFileType = image.jpeg; path = ZTransfer/Resources/debug_sample_fhd.jpg; sourceTree = "<group>"; };
 		D1B7A1D2E3F4456789012351 /* debug_sample_01.jpg */ = {isa = PBXFileReference; lastKnownFileType = image.jpeg; path = ZTransfer/Resources/debug_sample_01.jpg; sourceTree = "<group>"; };
 		D1B7A1D2E3F4456789012346 /* DebugCameraData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugCameraData.swift; sourceTree = "<group>"; };
@@ -307,6 +317,7 @@
 				61F577AFF70C53D32A99AB7B /* ConnectionStateTests.swift */,
 				9165B39E86D240D0CAB4F2F0 /* DomainModelTests.swift */,
 				E5D5E41AAFFA785D2FE92689 /* ImageCaptureErrorMappingTests.swift */,
+				A9145A10000000000000000A /* HapticsTests.swift */,
 				1449968BB2DEF0E632E53EAE /* PhotoThumbnailDiskCacheTests.swift */,
 				341299C34669842D43A516C0 /* PhotoThumbnailStoreTests.swift */,
 				25DA65AB7E6B869A2B7A6F7B /* RemoteExposureParametersTests.swift */,
@@ -352,6 +363,7 @@
 			isa = PBXGroup;
 			children = (
 				FDDA62402A7BB9E32721C7D4 /* DetentWheel.swift */,
+				A9145A100000000000000002 /* TipLightbulbButton.swift */,
 				125A2CF683765CC9A3041412 /* RemoteExposureTile.swift */,
 			);
 			path = Components;
@@ -457,6 +469,9 @@
 				D403B031ADD1B0F9C560F22D /* ClassicUSBIcon.swift */,
 				1DF8FBC08956F02D0F24ACFD /* DoubleZMark.swift */,
 				77FF345DD1F232661C243E4F /* ZTransferColors.swift */,
+				A9145A100000000000000004 /* TipAttentionMotion.swift */,
+				A9145A100000000000000006 /* ZTransferHaptics.swift */,
+				A9145A100000000000000008 /* HapticPolicy.swift */,
 				B8E5F0504E1E56C59E21D761 /* ZTransferDesign.swift */,
 				D2B51C2A8D807D8A9CA21F9E /* ZTransferGlassSurface.swift */,
 			);
@@ -642,6 +657,7 @@
 				3576AE9BA7B2A502352BA26B /* DomainModelTests.swift in Sources */,
 				8FB26966AAE2721DCF13FEF9 /* GPSProtocolTests.swift in Sources */,
 				3E8C1CA06EBC3AB08DB250B3 /* ImageCaptureErrorMappingTests.swift in Sources */,
+				A9145A100000000000000009 /* HapticsTests.swift in Sources */,
 				6E67243D68222B05469B1AAE /* Np3AndroidGoldenTests.swift in Sources */,
 				F4543194B75979601E536063 /* Np3BitmapFilterTests.swift in Sources */,
 				2168F57038D1C9802791EAB7 /* Np3FilterEngineTests.swift in Sources */,
@@ -685,6 +701,10 @@
 				73C7544A106A7E21D8421C92 /* ConnectionState.swift in Sources */,
 				B8FB7D2547F6FFA961FEB3CE /* ConnectionViewModel.swift in Sources */,
 				873A6B7B39D069D290ECD832 /* DetentWheel.swift in Sources */,
+				A9145A100000000000000001 /* TipLightbulbButton.swift in Sources */,
+				A9145A100000000000000003 /* TipAttentionMotion.swift in Sources */,
+				A9145A100000000000000005 /* ZTransferHaptics.swift in Sources */,
+				A9145A100000000000000007 /* HapticPolicy.swift in Sources */,
 				82C69505CC0D0D6BC02C6A80 /* DirectoryAccessStore.swift in Sources */,
 				2B14E3B205CBC8ED8289E7EC /* DoubleZMark.swift in Sources */,
 				8D6DA87271A2A18C83AAC752 /* GPSConnectionControl.swift in Sources */,
