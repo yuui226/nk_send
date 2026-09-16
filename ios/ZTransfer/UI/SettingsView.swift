@@ -432,13 +432,17 @@ struct SettingsView: View {
     @ViewBuilder
     private var photoEffectsCard: some View {
         let settings = effectsStore.settings
-        let filterSummary: String = {
+        let filterName: String = {
             guard settings.photoFilterEnabled, let selection = settings.selectedFilter else {
                 return AppLocalized.resource("photo_filter_off_option")
             }
-            let name = Np3FilterCatalog.preset(id: selection.preset.id).map { AppLocalized.resource("photo_filter_builtin_\($0.legacyID)") } ?? selection.preset.name
-            return "\(name)\n\(AppLocalized.formattedResource("photo_filter_intensity_summary", ["%1$d": "\(selection.intensityPercent)"]))"
+            return Np3FilterCatalog.preset(id: selection.preset.id).map {
+                AppLocalized.resource("photo_filter_builtin_\($0.legacyID)")
+            } ?? selection.preset.name
         }()
+        let filterIntensity: String? = settings.photoFilterEnabled
+            ? settings.selectedFilter.map { "\($0.intensityPercent)%" }
+            : nil
         let frameSummary = settings.photoFrameEnabled && settings.photoFrameBorderEnabled
             ? settings.photoFramePreset.displayName : AppLocalized.resource("photo_frame_off")
         let watermarkSummary: String = {
@@ -449,20 +453,37 @@ struct SettingsView: View {
             }
         }()
         Button(action: showEffectsSettings) {
-            SettingsCard {
-                HStack { Text(AppLocalized.resource("photo_effects")).zTransferText(size: ZTransferMetrics.body, weight: .semibold); Spacer(); Image(systemName: "chevron.right").foregroundStyle(ZTransferColors.secondaryText) }
+            VStack(spacing: 8) {
+                HStack {
+                    Text(AppLocalized.resource("photo_effects"))
+                        .font(.system(size: ZTransferMetrics.body, weight: .semibold))
+                        .foregroundStyle(ZTransferColors.accentOrange)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(ZTransferColors.secondaryText)
+                }
                 Divider().opacity(0.35)
                 HStack(spacing: 8) {
-                    Text(AppLocalized.resource("photo_filter")).zTransferText(size: ZTransferMetrics.caption, weight: .semibold)
-                    Text(filterSummary).zTransferText(size: ZTransferMetrics.caption).multilineTextAlignment(.leading)
-                    Spacer()
-                    VStack(alignment: .trailing, spacing: 2) {
-                        Text(AppLocalized.resource("photo_frame_and_watermark_short")).zTransferText(size: ZTransferMetrics.caption, weight: .semibold)
-                        Text(AppLocalized.formattedResource("photo_frame_summary_line", ["%1$s": frameSummary])).zTransferText(size: ZTransferMetrics.caption)
-                        Text(AppLocalized.formattedResource("photo_watermark_summary_line", ["%1$s": watermarkSummary])).zTransferText(size: ZTransferMetrics.caption)
-                    }
+                    PhotoEffectsSummaryTile(
+                        accent: ZTransferColors.accentOrange,
+                        title: AppLocalized.resource("photo_filter"),
+                        values: [filterName] + (filterIntensity.map { [$0] } ?? [])
+                    )
+                    PhotoEffectsSummaryTile(
+                        accent: ZTransferColors.accentBlue,
+                        title: AppLocalized.resource("photo_frame_and_watermark_short"),
+                        values: [
+                            AppLocalized.formattedResource("photo_frame_summary_line", ["%1$s": frameSummary]),
+                            AppLocalized.formattedResource("photo_watermark_summary_line", ["%1$s": watermarkSummary])
+                        ]
+                    )
                 }
             }
+            .padding(12)
+            .background(ZTransferGlassSurface(cornerRadius: 14, kind: .button))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(ZTransferColors.accentOrange.opacity(0.62), lineWidth: 1.2))
         }.buttonStyle(.plain)
     }
 
@@ -485,6 +506,32 @@ struct SettingsView: View {
         withAnimation(.timingCurve(0.4, 0, 1, 1, duration: 0.18)) {
             showingEffectsHelp = false
         }
+    }
+}
+
+private struct PhotoEffectsSummaryTile: View {
+    let accent: Color
+    let title: String
+    let values: [String]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.system(size: ZTransferMetrics.caption, weight: .semibold))
+                .foregroundStyle(accent)
+            ForEach(Array(values.enumerated()), id: \.offset) { _, value in
+                Text(value)
+                    .zTransferText(size: ZTransferMetrics.caption)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(accent.opacity(0.075), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .stroke(accent.opacity(0.28), lineWidth: 1))
     }
 }
 

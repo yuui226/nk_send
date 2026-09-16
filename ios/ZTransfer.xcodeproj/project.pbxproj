@@ -46,7 +46,7 @@
 		53050A00F15AA49DE998807E /* RemoteView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2482C61B58C4A4EE95210CDA /* RemoteView.swift */; };
 		5847B86DF637C69FB7A9E604 /* Np3FilterEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = F372F3899BF36619208BF340 /* Np3FilterEngine.swift */; };
 		5AC62E28F7193D5C5D250853 /* RemoteExposureParametersTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25DA65AB7E6B869A2B7A6F7B /* RemoteExposureParametersTests.swift */; };
-		5CB1D72BEF5ABC8FDAB563A0 /* PhotoFilterSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0B6DB7E3BF3A4EC8555BE3C /* PhotoFilterSheet.swift */; };
+		5CB1D72BEF5ABC8FDAB563A0 /* PhotoFilterComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0B6DB7E3BF3A4EC8555BE3C /* PhotoFilterComponents.swift */; };
 		5E9A339B8DCD4C1D4D876DF7 /* ThumbnailCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83180466B40E5CA9AE7D2B7E /* ThumbnailCache.swift */; };
 		5EBA0A39B2B0C20C327BC1AC /* PTPIPCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7FF25E1E6430F77DDD7AF2A7 /* PTPIPCodec.swift */; };
 		676480E34AEAD2A4C86B50B6 /* CameraSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C31C90D73DDE407941D9C78 /* CameraSession.swift */; };
@@ -244,7 +244,7 @@
 		CB36939BEE4031E42F768A83 /* PTPCodecTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PTPCodecTests.swift; sourceTree = "<group>"; };
 		CEC2E153F5F165AE7B762862 /* CameraDownload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraDownload.swift; sourceTree = "<group>"; };
 		CF061766E1A0B9F3060190ED /* PTPDatasetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PTPDatasetTests.swift; sourceTree = "<group>"; };
-		D0B6DB7E3BF3A4EC8555BE3C /* PhotoFilterSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoFilterSheet.swift; sourceTree = "<group>"; };
+		D0B6DB7E3BF3A4EC8555BE3C /* PhotoFilterComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoFilterComponents.swift; sourceTree = "<group>"; };
 		D0D0D8FBAB87B8180493B22E /* GPSView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GPSView.swift; sourceTree = "<group>"; };
 		D2B51C2A8D807D8A9CA21F9E /* ZTransferGlassSurface.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZTransferGlassSurface.swift; sourceTree = "<group>"; };
 		D403B031ADD1B0F9C560F22D /* ClassicUSBIcon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClassicUSBIcon.swift; sourceTree = "<group>"; };
@@ -483,7 +483,7 @@
 				B7580B5DC6E6B426AFDCD70C /* LocalPhotoEffectsView.swift */,
 				6C73EF01969DAC563DA91DD0 /* PhotoEffectsEditorView.swift */,
 				319C94935AB93C922D1BE545 /* PhotoFilterPopupOverlay.swift */,
-				D0B6DB7E3BF3A4EC8555BE3C /* PhotoFilterSheet.swift */,
+				D0B6DB7E3BF3A4EC8555BE3C /* PhotoFilterComponents.swift */,
 				0994973567FB60B02328A65F /* PhotoListView.swift */,
 				9C82DE7EDD874E138885C18B /* PhotoPreviewView.swift */,
 				2482C61B58C4A4EE95210CDA /* RemoteView.swift */,
@@ -718,7 +718,7 @@
 				3B5B3D5F069C7122B459035C /* PhotoExifStore.swift in Sources */,
 				CCC3F71A5AF4D6584D1FC2EE /* PhotoFilter.swift in Sources */,
 				CB99922E4C5C868F6F4EAA41 /* PhotoFilterPopupOverlay.swift in Sources */,
-				5CB1D72BEF5ABC8FDAB563A0 /* PhotoFilterSheet.swift in Sources */,
+				5CB1D72BEF5ABC8FDAB563A0 /* PhotoFilterComponents.swift in Sources */,
 				C3B0EBF639B834E335A187A5 /* PhotoFrameTextLayout.swift in Sources */,
 				9D3DFDDB82CBADF50CC379C5 /* PhotoListView.swift in Sources */,
 				AAC92E7A80B4911C1DA5126E /* PhotoListViewModel.swift in Sources */,

@@ -16,7 +16,10 @@ struct PhotoFilterPopupOverlay: View {
     @State private var editingDate = false
     @State private var startDate: Date
     @State private var endDate: Date
-    @State private var appeared = false
+    @State private var animationProgress: CGFloat = 0
+    @State private var contentHeight: CGFloat?
+    @State private var openingStarted = false
+    @State private var dismissalRequested = false
 
     init(isPresented: Binding<Bool>, anchor: CGRect, initial: PhotoFilterState,
          availableExtensions: [String], availableStorageSlots: [UInt32],
@@ -39,46 +42,88 @@ struct PhotoFilterPopupOverlay: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let width = min(340, max(0, proxy.size.width - 24))
-            let left = min(max(anchor == .zero ? 12 : anchor.minX, 12),
+            let overlayFrame = proxy.frame(in: .global)
+            let localAnchor = anchor.offsetBy(dx: -overlayFrame.minX, dy: -overlayFrame.minY)
+            let width = min(340, max(1, proxy.size.width - 24))
+            // Match Android FilterOverlay: the panel starts 8dp below the
+            // measured filter button and clamps only horizontally. The old
+            // bottom-based top clamp made a tall popup jump upward and lose
+            // its relationship with the button.
+            let left = min(max(anchor == .zero ? 12 : localAnchor.minX, 12),
                            max(12, proxy.size.width - width - 12))
-            let top = anchor == .zero ? 74 : min(anchor.maxY + 8, proxy.size.height - 120)
+            let fallbackTop = max(proxy.safeAreaInsets.top + 106, 106)
+            let top = anchor == .zero
+                ? fallbackTop
+                : localAnchor.maxY + 8
+            let availableHeight = max(1, proxy.size.height - top - max(12, proxy.safeAreaInsets.bottom))
+            let panelHeight = min(contentHeight ?? availableHeight, availableHeight)
+            let sourceAnchor = (anchor == .zero
+                ? CGRect(x: min(max(proxy.size.width * 0.35, 12), proxy.size.width - 48),
+                         y: top - 36, width: 36, height: 36)
+                : localAnchor)
+                .offsetBy(dx: -left, dy: -top)
             ZStack(alignment: .topLeading) {
                 Color.clear
+                    .ignoresSafeArea()
                     .contentShape(Rectangle())
                     .onTapGesture { close() }
 
-                Group {
-                    if editingDate {
-                        dateEditor
-                            .transition(.opacity.combined(with: .offset(x: 12)))
-                    } else {
-                        filterForm
-                            .transition(.opacity.combined(with: .offset(x: -12)))
-                    }
-                }
-                .frame(width: width)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(14)
-                .background(ZTransferGlassSurface(cornerRadius: 16, kind: .panel))
-                .shadow(color: .black.opacity(0.16), radius: 10, y: 5)
-                .scaleEffect(appeared ? 1 : 0.92, anchor: .topLeading)
-                .opacity(appeared ? 1 : 0)
-                .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.24), value: appeared)
-                .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.15), value: editingDate)
-                // Keep the popup's top-left corner attached to the filter button.
-                // `position(y: top + constant)` used the panel's implicit center and
-                // therefore drifted as sections were added or removed.
-                .offset(x: left, y: top)
+                GeniePopupPanel(
+                    content: panelContent(width: width) { height in
+                        contentHeight = height
+                        guard !dismissalRequested, !openingStarted else { return }
+                        openingStarted = true
+                        // Let the hosted tree commit its measured height before
+                        // the first snapshot, avoiding a provisional-height flash.
+                        DispatchQueue.main.async {
+                            guard !dismissalRequested else { return }
+                            animationProgress = 1
+                        }
+                    },
+                    targetProgress: animationProgress,
+                    anchor: sourceAnchor,
+                    panelOrigin: .zero,
+                    viewport: proxy.size,
+                    onCollapsed: { isPresented = false }
+                )
+                .frame(width: width, height: panelHeight, alignment: .top)
+                .padding(.leading, left)
+                .padding(.top, top)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .onAppear {
-                appeared = false
-                withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.24)) { appeared = true }
+                openingStarted = false
+                dismissalRequested = false
             }
         }
         .ignoresSafeArea()
         .zIndex(150)
+    }
+
+    @ViewBuilder
+    private func panelContent(width: CGFloat, reportHeight: @escaping (CGFloat) -> Void) -> some View {
+        Group {
+            if editingDate {
+                dateEditor
+                    .transition(.opacity.combined(with: .offset(x: 12)))
+            } else {
+                filterForm
+                    .transition(.opacity.combined(with: .offset(x: -12)))
+            }
+        }
+        .frame(width: width)
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(14)
+        .background(ZTransferGlassSurface(cornerRadius: 16, kind: .panel))
+        .shadow(color: .black.opacity(0.16), radius: 10, y: 5)
+        .background {
+            GeometryReader { geometry in
+                Color.clear
+                    .onAppear { reportHeight(geometry.size.height) }
+                    .onChange(of: geometry.size.height) { reportHeight($0) }
+            }
+        }
+        .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.15), value: editingDate)
     }
 
     private var filterForm: some View {
@@ -204,8 +249,9 @@ struct PhotoFilterPopupOverlay: View {
     }
 
     private func close() {
-        withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.18)) { appeared = false }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) { isPresented = false }
+        guard isPresented, !dismissalRequested else { return }
+        dismissalRequested = true
+        animationProgress = 0
     }
 
     private static func date(from value: String?) -> Date? {

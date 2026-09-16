@@ -155,7 +155,7 @@ actor PhotoThumbnailStore {
         // and must not start a duplicate GetThumb in the write window.
         let task = Task<Data, Error> {
             let raw = try await self.remoteGate.withPermit { try await fetch() }
-            try await self.persistPrefetch(raw, key: key, expectedIdentity: expectedIdentity)
+            try self.persistPrefetch(raw, key: key, expectedIdentity: expectedIdentity)
             return raw
         }
         let flight = Flight(task: task)
@@ -213,7 +213,7 @@ actor PhotoThumbnailStore {
 
     private func awaitFlight(_ token: WaiterToken) async throws -> Data {
         defer {
-            Task { await self.release(token, cancelUnderlying: Task.isCancelled) }
+            Task { self.release(token, cancelUnderlying: Task.isCancelled) }
         }
         return try await withTaskCancellationHandler {
             try await token.flight.task.value

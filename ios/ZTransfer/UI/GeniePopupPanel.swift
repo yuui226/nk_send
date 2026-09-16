@@ -91,6 +91,7 @@ import UIKit
         meshView.backgroundColor = .clear
         meshView.isUserInteractionEnabled = false
         meshView.isHidden = true
+        meshView.layer.allowsEdgeAntialiasing = true
         addSubview(meshView)
         host.view.isHidden = true
     }
@@ -202,10 +203,15 @@ import UIKit
         let bands = GeniePopupMotion.renderBands
         let pixelWidth = cgImage.width
         let pixelHeight = cgImage.height
+        let pixelOverlap = max(1, Int(ceil(window?.screen.scale ?? UIScreen.main.scale)))
         for index in 0..<bands {
-            let start = Int(floor(Double(index) * Double(pixelHeight) / Double(bands)))
+            // Neighboring transformed strips can land on opposite sides of a
+            // fractional pixel. Overlap their source rows by one screen pixel
+            // so antialiased edges never expose a hairline of the clear mesh.
+            let start = max(0, Int(floor(Double(index) * Double(pixelHeight) / Double(bands))) - pixelOverlap)
             let end = max(start + 1,
-                          Int(ceil(Double(index + 1) * Double(pixelHeight) / Double(bands))))
+                          min(pixelHeight,
+                              Int(ceil(Double(index + 1) * Double(pixelHeight) / Double(bands))) + pixelOverlap))
             let crop = CGRect(x: 0, y: start, width: pixelWidth,
                               height: min(pixelHeight - start, end - start))
             guard let part = cgImage.cropping(to: crop) else { continue }
@@ -215,6 +221,14 @@ import UIKit
             strip.backgroundColor = .clear
             strip.contentMode = .scaleToFill
             strip.isUserInteractionEnabled = false
+            // The strips are continuously rotated and resampled while the
+            // panel travels from the Z button. Explicit linear filtering and
+            // edge antialiasing avoid the stair-stepped diagonal seams that
+            // UIKit otherwise produces for transformed image views.
+            strip.layer.allowsEdgeAntialiasing = true
+            strip.layer.magnificationFilter = .linear
+            strip.layer.minificationFilter = .trilinear
+            strip.layer.contentsScale = window?.screen.scale ?? UIScreen.main.scale
             meshView.addSubview(strip)
             strips.append(strip)
         }
@@ -237,7 +251,9 @@ import UIKit
             ? anchor
             : CGRect(x: panel.minX + 8, y: panel.minY - 44, width: 36, height: 36)
         let bands = GeniePopupMotion.renderBands
-        let sourceBandHeight = max(1, snapshotSize.height / CGFloat(bands))
+        let screenScale = window?.screen.scale ?? UIScreen.main.scale
+        let overlap = 2 / max(screenScale, 1)
+        let sourceBandHeight = max(1, snapshotSize.height / CGFloat(bands)) + overlap
         let alpha = GeniePopupMotion.panelAlpha(currentProgress)
 
         for index in 0..<min(bands, strips.count) {
@@ -252,7 +268,11 @@ import UIKit
             let topY = min(top.leftY, top.rightY)
             let bottomY = max(bottom.leftY, bottom.rightY)
             let width = max(0.5, right - left)
-            let height = max(0.5, bottomY - topY)
+            // Expand each band by a small amount in both directions. This is
+            // the destination-side counterpart to the source overlap above;
+            // it closes fractional-pixel seams while preserving the mesh's
+            // silhouette and keeps UIKit's edge antialiasing effective.
+            let height = max(0.5, bottomY - topY) + overlap
             let center = CGPoint(x: (left + right) / 2,
                                  y: (topY + bottomY) / 2)
             let tilt = ((top.rightY - top.leftY) + (bottom.rightY - bottom.leftY)) / 2

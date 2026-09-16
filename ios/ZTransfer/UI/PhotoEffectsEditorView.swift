@@ -361,6 +361,13 @@ struct PhotoEffectsSettingsPreview: View {
     @State private var unfiltered: UIImage?
     @State private var showUnfiltered = false
     @State private var prefetched: [String: UIImage] = [:]
+    @State private var rotationQuarterTurns = 0
+    @State private var expanded = false
+
+    private var sourceIsPortrait: Bool {
+        let portrait = source.map { $0.size.height > $0.size.width } ?? false
+        return rotationQuarterTurns.isMultiple(of: 2) ? portrait : !portrait
+    }
 
     private var renderKey: String {
         Self.makeRenderKey(settings: settings, source: source, metadata: metadata)
@@ -385,6 +392,31 @@ struct PhotoEffectsSettingsPreview: View {
         return settingsKey + "|" + sourceKey + "|" + metadataKey
     }
 
+    private var renderKeyWithRotation: String {
+        "\(renderKey)|rotation:\(rotationQuarterTurns)"
+    }
+
+    private static func rotate(_ image: UIImage, quarterTurns: Int) -> UIImage {
+        let turns = ((quarterTurns % 4) + 4) % 4
+        guard turns != 0 else { return image }
+        let sourceSize = image.size
+        let rotatedSize = turns.isMultiple(of: 2)
+            ? sourceSize
+            : CGSize(width: sourceSize.height, height: sourceSize.width)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = image.scale
+        format.opaque = image.cgImage != nil
+        return UIGraphicsImageRenderer(size: rotatedSize, format: format).image { renderer in
+            let context = renderer.cgContext
+            context.translateBy(x: rotatedSize.width / 2, y: rotatedSize.height / 2)
+            context.rotate(by: -.pi / 2 * CGFloat(turns))
+            context.translateBy(x: -sourceSize.width / 2, y: -sourceSize.height / 2)
+            image.draw(in: CGRect(origin: .zero, size: sourceSize))
+        }
+    }
+
+    private var expandedImage: UIImage? { rendered ?? source }
+
     var body: some View {
         Group {
             if let displayed = showUnfiltered ? (unfiltered ?? rendered) : rendered {
@@ -396,11 +428,22 @@ struct PhotoEffectsSettingsPreview: View {
                     .fill(ZTransferColors.primaryText.opacity(0.045))
                     .overlay { ProgressView().tint(ZTransferColors.secondaryText) }
             } else {
-                EmptyView()
+                // Keep a real 4:3 preview surface while the connected list is
+                // still resolving its latest file. An EmptyView collapses the
+                // aspect-ratio proposal to zero, which prevents the fallback
+                // render task from ever producing a visible preview in the
+                // settings page.
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(ZTransferColors.primaryText.opacity(0.045))
+                    .overlay { ProgressView().tint(ZTransferColors.secondaryText) }
             }
         }
         .frame(maxWidth: .infinity)
-        .aspectRatio(source.map { $0.size.height > $0.size.width ? CGFloat(3) / 4 : CGFloat(4) / 3 }, contentMode: .fit)
+        // Android keeps a stable 4:3 / 3:4 viewport and fits the rendered
+        // canvas inside it. The frame can add a metadata band, so using the
+        // rendered bitmap's ratio here would make the preview jump in height.
+        .aspectRatio(source == nil || !sourceIsPortrait ? CGFloat(4) / 3 : CGFloat(3) / 4,
+                     contentMode: .fit)
         .contentShape(Rectangle())
         .onLongPressGesture(minimumDuration: 0.5, pressing: { pressing in
             if !pressing { showUnfiltered = false }
@@ -408,7 +451,26 @@ struct PhotoEffectsSettingsPreview: View {
             guard unfiltered != nil else { return }
             showUnfiltered = true
         })
-        .task(id: renderKey) {
+        .onTapGesture(count: 2) {
+            guard expanded == false else { return }
+            rotationQuarterTurns = (rotationQuarterTurns + 1) % 4
+        }
+        .onTapGesture {
+            guard expandedImage != nil else { return }
+            expanded = true
+        }
+        .fullScreenCover(isPresented: $expanded) {
+            if let expandedImage {
+                PhotoEffectsExpandedPreview(image: expandedImage) {
+                    expanded = false
+                }
+            }
+        }
+        .task(id: renderKeyWithRotation) {
+            // A rotated source is a different pixel canvas. Never promote a
+            // prefetch rendered for the previous orientation into the new
+            // frame, otherwise the border height briefly snaps back.
+            prefetched.removeAll(keepingCapacity: true)
             guard let source else {
                 onRequest()
                 // Android gives the real thumbnail/FHD request a 2200 ms
@@ -416,12 +478,13 @@ struct PhotoEffectsSettingsPreview: View {
                 try? await Task.sleep(nanoseconds: 2_200_000_000)
                 guard !Task.isCancelled else { return }
                 let fallback = PhotoEffectsFallbackSource.make()
+                let rotatedFallback = Self.rotate(fallback, quarterTurns: rotationQuarterTurns)
                 let fallbackSettings = settings
                 let fallbackResult = try? await Task.detached(priority: .utility) {
                     try Task.checkCancellation()
                     return try await PhotoEffectsPreviewRenderGate.shared.withPermit {
                         try autoreleasepool {
-                            try PhotoEffectsRenderer.render(fallback, settings: fallbackSettings, metadata: nil)
+                            try PhotoEffectsRenderer.render(rotatedFallback, settings: fallbackSettings, metadata: nil)
                         }
                     }
                 }.value
@@ -433,6 +496,8 @@ struct PhotoEffectsSettingsPreview: View {
             unfiltered = nil
             let metadata = metadata
             let settings = settings
+            let rotationQuarterTurns = rotationQuarterTurns
+            let rotatedSource = Self.rotate(source, quarterTurns: rotationQuarterTurns)
             let result: UIImage?
             if let cached = prefetched.removeValue(forKey: renderKey) {
                 result = cached
@@ -441,7 +506,7 @@ struct PhotoEffectsSettingsPreview: View {
                     try Task.checkCancellation()
                     return try await PhotoEffectsPreviewRenderGate.shared.withPermit {
                         try autoreleasepool {
-                            try PhotoEffectsRenderer.render(source, settings: settings, metadata: metadata)
+                            try PhotoEffectsRenderer.render(rotatedSource, settings: settings, metadata: metadata)
                         }
                     }
                 }.value
@@ -463,7 +528,7 @@ struct PhotoEffectsSettingsPreview: View {
                 try Task.checkCancellation()
                 return try await PhotoEffectsPreviewRenderGate.shared.withPermit {
                     try autoreleasepool {
-                        try PhotoEffectsRenderer.render(source, settings: baseline, metadata: metadata)
+                        try PhotoEffectsRenderer.render(rotatedSource, settings: baseline, metadata: metadata)
                     }
                 }
             }.value
@@ -488,7 +553,7 @@ struct PhotoEffectsSettingsPreview: View {
                     try Task.checkCancellation()
                     return try await PhotoEffectsPreviewRenderGate.shared.withPermit {
                         try autoreleasepool {
-                            try PhotoEffectsRenderer.render(source, settings: next, metadata: metadata)
+                            try PhotoEffectsRenderer.render(rotatedSource, settings: next, metadata: metadata)
                         }
                     }
                 }.value
@@ -501,6 +566,98 @@ struct PhotoEffectsSettingsPreview: View {
                 }
             }
         }
+    }
+}
+
+/// Android's expanded effects preview uses the same fitted image surface as
+/// the photo viewer: a tap dismisses at 1x, a double tap toggles 2.5x, and a
+/// pinch/drag pair keeps the image inside the viewport while zoomed.
+private struct PhotoEffectsExpandedPreview: View {
+    let image: UIImage
+    let onDismiss: () -> Void
+    @State private var scale: CGFloat = 1
+    @State private var offset: CGSize = .zero
+    @State private var gestureStartScale: CGFloat = 1
+    @State private var gestureStartOffset: CGSize = .zero
+
+    private let maximumScale: CGFloat = 4
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack {
+                Color.black.ignoresSafeArea()
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .scaleEffect(scale)
+                    .offset(offset)
+                    .contentShape(Rectangle())
+                    .gesture(
+                        MagnificationGesture()
+                            .onChanged { value in
+                                let next = min(max(gestureStartScale * value, 1), maximumScale)
+                                scale = next
+                                offset = clamped(offset, scale: next, viewport: proxy.size)
+                            }
+                            .onEnded { _ in
+                                gestureStartScale = scale
+                                gestureStartOffset = offset
+                                if scale <= 1.01 {
+                                    scale = 1
+                                    offset = .zero
+                                    gestureStartOffset = .zero
+                                }
+                            }
+                    )
+                    .simultaneousGesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { value in
+                                guard scale > 1.01 else { return }
+                                offset = clamped(
+                                    CGSize(width: gestureStartOffset.width + value.translation.width,
+                                           height: gestureStartOffset.height + value.translation.height),
+                                    scale: scale,
+                                    viewport: proxy.size,
+                                )
+                            }
+                            .onEnded { _ in
+                                gestureStartOffset = offset
+                            }
+                    )
+                    .onTapGesture(count: 2) {
+                        let target: CGFloat = scale > 1.01 ? 1 : 2.5
+                        withAnimation(.easeInOut(duration: 0.24)) {
+                            scale = target
+                            offset = target > 1 ? .zero : .zero
+                        }
+                        gestureStartScale = target
+                        gestureStartOffset = offset
+                    }
+                    .onTapGesture {
+                        if scale <= 1.01 { onDismiss() }
+                    }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .statusBarHidden(true)
+    }
+
+    private func clamped(_ proposed: CGSize, scale: CGFloat, viewport: CGSize) -> CGSize {
+        // Match Android's fitted-image bounds: only the part that grows past
+        // the viewport can be panned, so a portrait image does not acquire a
+        // loose horizontal drift when it is enlarged.
+        let imageAspect = max(image.size.width, 1) / max(image.size.height, 1)
+        let viewportAspect = max(viewport.width, 1) / max(viewport.height, 1)
+        let fittedWidth = imageAspect > viewportAspect
+            ? viewport.width
+            : viewport.height * imageAspect
+        let fittedHeight = imageAspect > viewportAspect
+            ? viewport.width / imageAspect
+            : viewport.height
+        let maxX = max(0, (fittedWidth * scale - viewport.width) / 2)
+        let maxY = max(0, (fittedHeight * scale - viewport.height) / 2)
+        return CGSize(width: min(max(proposed.width, -maxX), maxX),
+                      height: min(max(proposed.height, -maxY), maxY))
     }
 }
 

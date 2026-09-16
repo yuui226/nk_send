@@ -48,16 +48,16 @@ final class ConnectionStateTests: XCTestCase {
     }
 
     func testConnectionCelebrationUsesAndroidTiming() {
-        let beforeSuccess = ConnectionCelebrationValues(elapsedMilliseconds: 499)
+        let beforeSuccess = ConnectionCelebrationValues(elapsedMilliseconds: 619)
         XCTAssertEqual(beforeSuccess.success, 0, accuracy: 0.0001)
 
-        let successStart = ConnectionCelebrationValues(elapsedMilliseconds: 500)
+        let successStart = ConnectionCelebrationValues(elapsedMilliseconds: 620)
         XCTAssertEqual(successStart.success, 0, accuracy: 0.0001)
 
         let heroFinished = ConnectionCelebrationValues(elapsedMilliseconds: 620)
         XCTAssertEqual(heroFinished.hero, 1, accuracy: 0.0001)
 
-        let complete = ConnectionCelebrationValues(elapsedMilliseconds: 1_260)
+        let complete = ConnectionCelebrationValues(elapsedMilliseconds: 1_380)
         XCTAssertEqual(complete.hero, 1, accuracy: 0.0001)
         XCTAssertEqual(complete.success, 1, accuracy: 0.0001)
     }

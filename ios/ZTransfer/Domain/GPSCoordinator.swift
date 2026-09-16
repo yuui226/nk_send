@@ -185,7 +185,6 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
         placeLookupState = .idle
     }
 
-    @discardableResult
     private func finishPlaceLookup(
         requestID: Int,
         key: String,

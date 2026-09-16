@@ -256,7 +256,6 @@ enum PhotoEffectsRenderer {
         case .brandInset, .brandGallery: rect.width * 0.014
         case .mist, .cinema, .minimal, .frosted: max(1, metadataBandHeight * 0.26)
         case .plaque, .immersive, .classicSignature, .galleryMat, .filmGallery, .filmEdge: 0
-        default: rect.width * 0.018
         }
         let path = UIBezierPath(roundedRect: rect, cornerRadius: radius).cgPath
         if [.mist, .cinema, .minimal, .frosted, .brandInset, .brandGallery, .colorArchive].contains(preset) {

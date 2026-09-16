@@ -38,8 +38,31 @@ struct SettingsPopupOverlay: View {
             let localAnchor = anchor.offsetBy(dx: -overlayFrame.minX, dy: -overlayFrame.minY)
             let panelLeft: CGFloat = 12
             let panelWidth = max(0, proxy.size.width - panelLeft * 2)
-            let panelTop = anchor == .zero ? proxy.safeAreaInsets.top + 50 : localAnchor.maxY + 8
+            // The settings button normally supplies the exact anchor. During
+            // the first layout pass the preference can still be zero (for
+            // example when the connected list is handed off in the same
+            // transaction as the tap). Keep the fallback below the complete
+            // top-control row so the panel never covers the Z button.
+            // The connected photo list's top controls occupy roughly the
+            // first 100 points below the status bar on iPhone. The pre-
+            // connection page has its compact controls at the very top, so
+            // preserve its shorter fallback while keeping the connected list
+            // clear of the Z row.
+            let fallbackClearance: CGFloat = showPhotoEffectsEntry ? 106 : 50
+            let fallbackPanelTop = max(proxy.safeAreaInsets.top + fallbackClearance,
+                                       fallbackClearance)
+            let panelTop = anchor == .zero
+                ? fallbackPanelTop
+                : max(localAnchor.maxY + 8, fallbackPanelTop)
             let availableHeight = max(1, proxy.size.height - panelTop - max(12, proxy.safeAreaInsets.bottom))
+            // GeniePanelContainer is already positioned at panelTop by the
+            // SwiftUI padding below. Convert both rectangles into that
+            // container's local coordinate space; otherwise the mesh uses the
+            // panel origin twice and opens from a point above the button.
+            let sourceAnchor = (anchor == .zero
+                ? CGRect(x: panelLeft, y: panelTop - 44, width: 36, height: 36)
+                : localAnchor)
+                .offsetBy(dx: -panelLeft, dy: -panelTop)
             ZStack(alignment: .topLeading) {
                 // A transparent hit area still closes the popup on outside
                 // taps without altering the photo list or system bars.
@@ -63,13 +86,23 @@ struct SettingsPopupOverlay: View {
                         onEffectPreviewRequested: onEffectPreviewRequested,
                         onContentHeightChange: { height in
                             contentHeight = height
-                            if !dismissalRequested { animationProgress = 1 }
+                            guard !dismissalRequested else { return }
+                            // Let SwiftUI commit the measured height before
+                            // Genie captures the panel. Starting in the same
+                            // update used to snapshot the provisional
+                            // available-height layout, which caused the
+                            // visible height flash on open.
+                            DispatchQueue.main.async {
+                                guard !dismissalRequested,
+                                      contentHeight == height else { return }
+                                animationProgress = 1
+                            }
                         },
                         onClose: { close() }
                     ),
                     targetProgress: animationProgress,
-                    anchor: localAnchor,
-                    panelOrigin: CGPoint(x: panelLeft, y: panelTop),
+                    anchor: sourceAnchor,
+                    panelOrigin: .zero,
                     viewport: proxy.size,
                     onCollapsed: { isPresented = false }
                 )

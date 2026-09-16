@@ -236,7 +236,7 @@ private let photoQueueWorkspaceAnimation =
                                         .onTapGesture { handleTap(entry, file: file) }
                                         .onLongPressGesture {
                                             if case let .burst(group) = entry {
-                                                withAnimation(ZTransferMotion.standard) { expandedBurstIDs.insert(group.id) }
+                                                withAnimation(ZTransferMotion.standard) { _ = expandedBurstIDs.insert(group.id) }
                                                 selectedFile = group.files[0]
                                             } else if !tapToPreview { selectedFile = file }
                                         }
