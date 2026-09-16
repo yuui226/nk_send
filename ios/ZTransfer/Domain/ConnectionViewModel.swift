@@ -132,8 +132,18 @@ final class ConnectionViewModel: ObservableObject {
                 // Android checks the DHCP gateway before starting a handshake.
                 // iOS has no public gateway API; this subnet gate is the closest
                 // available equivalent and the PTP handshake remains authoritative.
-                if self.wifiDiscovery.isOnCameraHotspot(), self.wifiConnectTask == nil {
-                    await self.connectSelectedWiFi(reconnect: self.state.wifiPhase == .reconnecting)
+                if self.wifiDiscovery.isOnCameraHotspot() {
+                    if self.wifiConnectTask == nil {
+                        await self.connectSelectedWiFi(reconnect: self.state.wifiPhase == .reconnecting)
+                    }
+                } else if self.apFailedAttempts != 0 ||
+                            self.wifiConnectTask != nil || self.state.wifiPhase != .idle {
+                    // A Wi-Fi-to-Wi-Fi switch does not make NWPath unsatisfied.
+                    // Android clears a vanished camera candidate on the next
+                    // watcher pass instead of carrying its failed retry state
+                    // into an ordinary network or the next hotspot visit.
+                    self.apFailedAttempts = 0
+                    self.cancelWiFiConnection()
                 }
                 let delay: UInt64 = {
                     if case .failed = self.state.wifiPhase,
