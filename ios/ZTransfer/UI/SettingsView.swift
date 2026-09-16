@@ -136,9 +136,8 @@ struct SettingsView: View {
                     .contentShape(Rectangle())
                     .onTapGesture { dismissHelp() }
                     .zIndex(1)
-                SettingsHelpBubble()
-                    .offset(x: max(12, helpAnchor.minX - 10), y: helpAnchor.maxY + 8)
-                    .transition(.scale(scale: 0.94, anchor: .topLeading).combined(with: .opacity))
+                AdaptiveTipPanel(anchor: helpAnchor) { SettingsHelpBubble() }
+                    .transition(.opacity)
                     .zIndex(2)
             }
             if showingEffectsHelp && settingsPage == .effects {
@@ -146,9 +145,8 @@ struct SettingsView: View {
                     .contentShape(Rectangle())
                     .onTapGesture { dismissEffectsHelp() }
                     .zIndex(1)
-                PhotoEffectsHelpBubble()
-                    .offset(x: max(12, helpAnchor.minX - 10), y: helpAnchor.maxY + 8)
-                    .transition(.scale(scale: 0.94, anchor: .topLeading).combined(with: .opacity))
+                AdaptiveTipPanel(anchor: helpAnchor) { PhotoEffectsHelpBubble() }
+                    .transition(.opacity)
                     .zIndex(2)
             }
         }
@@ -530,7 +528,7 @@ private struct SettingsHelpBubble: View {
         }
         .foregroundStyle(ZTransferColors.primaryText)
         .padding(16)
-        .frame(width: 300, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(ZTransferGlassSurface(cornerRadius: 18, kind: .panel))
         .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
             .stroke(ZTransferColors.primaryText.opacity(0.12), lineWidth: 1))
@@ -556,7 +554,7 @@ private struct PhotoEffectsHelpBubble: View {
         }
         .foregroundStyle(ZTransferColors.primaryText)
         .padding(16)
-        .frame(width: 300, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(ZTransferGlassSurface(cornerRadius: 18, kind: .panel))
         .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
             .stroke(ZTransferColors.primaryText.opacity(0.12), lineWidth: 1))

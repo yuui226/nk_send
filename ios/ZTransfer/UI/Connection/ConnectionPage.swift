@@ -96,7 +96,7 @@ struct ConnectionPage: View {
                     .padding(.top, layout.cardsTop)
 
                     HStack(spacing: 8) {
-                    Button { showSettings = true } label: {
+                    Button { Task { @MainActor in showSettings = true } } label: {
                         DoubleZMark(tint: ZTransferColors.primaryText)
                             .frame(width: 20 * DoubleZMark.aspectRatio, height: 20)
                             .padding(.horizontal, 14)

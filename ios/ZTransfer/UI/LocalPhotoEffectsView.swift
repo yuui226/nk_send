@@ -97,16 +97,6 @@ struct LocalPhotoEffectsView: View {
                 await MainActor.run { watermarkPickerItems = [] }
             }
         }
-        .alert(AppLocalized.resource("photo_effects_info_title"), isPresented: $showingHelp) {
-            Button(AppLocalized.resource("cd_close"), role: .cancel) {}
-        } message: {
-            Text([
-                AppLocalized.resource("local_photo_effects_info_description"),
-                AppLocalized.resource("local_photo_effects_gesture_hint"),
-                AppLocalized.resource("local_photo_effects_exif_hint"),
-                AppLocalized.resource("local_photo_same_folder_hint")
-            ].joined(separator: "\n"))
-        }
     }
 
     private var batchHasFailure: Bool {
@@ -158,6 +148,19 @@ struct LocalPhotoEffectsView: View {
             ) {
                 localPhotoEffectsHelpViewed = true
                 showingHelp = true
+            }
+            .bulbPopover(isPresented: $showingHelp) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(AppLocalized.resource("photo_effects_info_title")).font(.headline)
+                    Text([
+                        AppLocalized.resource("local_photo_effects_info_description"),
+                        AppLocalized.resource("local_photo_effects_gesture_hint"),
+                        AppLocalized.resource("local_photo_effects_exif_hint"),
+                        AppLocalized.resource("local_photo_same_folder_hint")
+                    ].joined(separator: "\n"))
+                    .font(.system(size: 13))
+                }
+                .padding(16)
             }
         }
         .foregroundStyle(ZTransferColors.primaryText)

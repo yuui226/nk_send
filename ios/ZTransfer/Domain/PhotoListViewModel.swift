@@ -10,6 +10,18 @@ enum PhotoListLoadState: Equatable, Sendable {
 
 @MainActor
 final class PhotoListViewModel: ObservableObject {
+    // The workspace swaps between the photo list, transfer queue and monitor.
+    // Keep one model per camera session so those routes never discard the
+    // already enumerated files or their in-memory thumbnail work state.
+    private static var sessionModels: [ObjectIdentifier: PhotoListViewModel] = [:]
+
+    static func cached(session: CameraSession, onTransportLost: (() -> Void)? = nil) -> PhotoListViewModel {
+        let key = ObjectIdentifier(session)
+        if let existing = sessionModels[key] { return existing }
+        let model = PhotoListViewModel(session: session, onTransportLost: onTransportLost)
+        sessionModels[key] = model
+        return model
+    }
     @Published private(set) var loadState: PhotoListLoadState = .idle
     @Published private(set) var sections: [PhotoDaySection] = []
     @Published private(set) var burstIDByFile: [UInt32: String] = [:]
@@ -122,6 +134,10 @@ final class PhotoListViewModel: ObservableObject {
     deinit { loadTask?.cancel(); fillTask?.cancel(); catalogUpdatesTask?.cancel() }
 
     func load() {
+        guard case .idle = loadState else {
+            // Returning from another workspace must not start a second scan.
+            return
+        }
         loadTask?.cancel()
         fillTask?.cancel()
         fillTask = nil

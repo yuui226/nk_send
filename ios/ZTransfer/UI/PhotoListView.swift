@@ -105,8 +105,8 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
     @State private var queueImpact = 0
 
     init(session: CameraSession, queue: TransferQueue, directory: DirectoryAccessStore = DirectoryAccessStore(), effectsStore: PhotoEffectsStore = PhotoEffectsStore(), isSessionConnected: Bool = true, onRetrySTA: @escaping () -> Void = {}, remotePresentation: Binding<Bool>? = nil, onTransportLost: @escaping (CameraSession) -> Void = { _ in }) {
-        _model = StateObject(wrappedValue: PhotoListViewModel(session: session,
-                                                               onTransportLost: { onTransportLost(session) }))
+        _model = StateObject(wrappedValue: PhotoListViewModel.cached(session: session,
+                                                                      onTransportLost: { onTransportLost(session) }))
         _queueModel = StateObject(wrappedValue: TransferQueueViewModel(queue: queue))
         _directoryStore = ObservedObject(wrappedValue: directory)
         self.effectsStore = effectsStore; self.isSessionConnected = isSessionConnected; self.onRetrySTA = onRetrySTA
@@ -1251,6 +1251,10 @@ struct QueuePill: View {
                     seed: activeItem.id.uuidString,
                     isCapsule: true
                 )
+                // The queue pill is reused while the active task advances.
+                // Recreate the liquid state for each file so its spring cannot
+                // carry the previous file's fraction into the new transfer.
+                .id(activeItem.id)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .clipShape(Capsule())
                 .transition(.opacity)

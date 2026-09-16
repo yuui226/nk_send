@@ -456,7 +456,7 @@ private struct QueueActionButton: View {
                         .font(.system(size: 15, weight: .semibold))
                 }
             }
-            .frame(width: 28, height: 28)
+            .frame(width: 32, height: 32)
         }
         .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 16))
     }
@@ -472,12 +472,12 @@ private struct QueueBroomMark: View {
         Canvas { context, size in
             let s = min(size.width, size.height)
             var mark = Path()
-            mark.move(to: CGPoint(x: s * 0.57, y: s * 0.10))
-            mark.addLine(to: CGPoint(x: s * 0.42, y: s * 0.46))
-            mark.move(to: CGPoint(x: s * 0.31, y: s * 0.48))
-            mark.addLine(to: CGPoint(x: s * 0.67, y: s * 0.63))
+            mark.move(to: CGPoint(x: s * 0.60, y: s * 0.08))
+            mark.addLine(to: CGPoint(x: s * 0.43, y: s * 0.47))
+            mark.move(to: CGPoint(x: s * 0.28, y: s * 0.49))
+            mark.addLine(to: CGPoint(x: s * 0.70, y: s * 0.66))
             for index in 0..<5 {
-                let x = s * (0.35 + CGFloat(index) * 0.075)
+                let x = s * (0.31 + CGFloat(index) * 0.085)
                 mark.move(to: CGPoint(x: x, y: s * 0.61))
                 mark.addQuadCurve(
                     to: CGPoint(x: x - s * 0.10, y: s * (0.88 + CGFloat(index) * 0.012)),

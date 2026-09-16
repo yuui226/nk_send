@@ -277,7 +277,7 @@ private struct GPSInlinePanel: View {
                     coordinator.markConnectionHelpViewed()
                     showHelp = true
                 }
-                .popover(isPresented: $showHelp, attachmentAnchor: .rect(.bounds), arrowEdge: .top) {
+                .bulbPopover(isPresented: $showHelp, width: 244) {
                     VStack(alignment: .leading, spacing: 10) {
                         Text(AppLocalized.resource("gps_detail_description"))
                             .zTransferText(size: 14, weight: .semibold)
@@ -291,7 +291,6 @@ private struct GPSInlinePanel: View {
                             .foregroundStyle(ZTransferColors.secondaryText)
                     }
                     .padding(14)
-                    .frame(width: 244)
                 }
             }
         }

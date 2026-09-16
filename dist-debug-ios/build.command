@@ -108,22 +108,13 @@ if [[ -n "$SIMCTL" ]]; then
       xcrun simctl launch "$BOOTED_SIM_ID" "$BUNDLE_ID"
       echo "Installed and launched ZTransfer on simulator $BOOTED_SIM_ID."
     done <<< "$BOOTED_SIM_IDS"
-    # A booted simulator is the explicit UI-debug target; do not subsequently
-    # block on a merely paired (possibly disconnected) physical device.
-    SKIP_PHYSICAL_DEVICE=1
   fi
 fi
 
-# Pick an explicitly requested device first, otherwise the first available
-# CoreDevice. A disconnected phone does not make the build fail; when a device
-# is found, install and launch are required and failures keep this window open.
+# Pick an explicitly requested device first, otherwise the first paired physical
+# CoreDevice. A booted simulator does not suppress this pass: the same run may
+# install the simulator build and the connected iPhone build.
 DEVICE_ID="${IOS_DEVICE_ID:-}"
-if [[ "${SKIP_PHYSICAL_DEVICE:-0}" == "1" && -z "${IOS_DEVICE_ID:-}" ]]; then
-  DEVICE_ID=""
-  echo "Simulator target handled; skipping physical-device installation."
-  echo "iOS Debug build complete."
-  exit 0
-fi
 LEGACY_DEVICE_ID=""
 if [[ -z "$DEVICE_ID" ]] && command -v xcrun >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1; then
   DEVICE_JSON="$DERIVED_DATA/devices.json"

@@ -3,6 +3,7 @@ import PhotosUI
 import SwiftUI
 import UIKit
 import ImageIO
+import UniformTypeIdentifiers
 
 /// Owns references to picker items, never an array of full-resolution UIImages.
 /// A batch snapshots both sources and effects before any worker starts.
@@ -14,7 +15,10 @@ final class LocalPhotoBatchViewModel: ObservableObject {
     private var idleTimerGeneration: UInt64?
 
     func select(_ items: [PhotosPickerItem]) {
-        guard state.select(items) else { return }
+        // Android's photo-effects batch is JPEG-only. RAW assets must remain
+        // selectable elsewhere, but never enter this renderer.
+        let jpegItems = items.filter { $0.supportedContentTypes.contains(where: { $0.conforms(to: .jpeg) }) }
+        guard state.select(jpegItems) else { return }
         // A terminal result may still have its 2400 ms timer running. A fresh
         // picker selection must never be replaced by that older timer.
         generationTask?.cancel()

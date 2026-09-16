@@ -2,6 +2,10 @@ import SwiftUI
 import UIKit
 
 enum AppLocalized {
+    private static func decodeAndroidEscapes(_ value: String) -> String {
+        value.replacingOccurrences(of: "\\n", with: "\n")
+    }
+
     /// Uses the Android string resources as the source of truth. The maps are
     /// generated from app/src/main/res/values*/strings.xml; do not hand-edit
     /// or add alternate translations here.
@@ -16,9 +20,9 @@ enum AppLocalized {
             language = "zh"
         }
         switch language {
-        case "en": return AndroidLocalization.en[value] ?? value
-        case "hant": return AndroidLocalization.hant[value] ?? value
-        default: return value
+        case "en": return decodeAndroidEscapes(AndroidLocalization.en[value] ?? value)
+        case "hant": return decodeAndroidEscapes(AndroidLocalization.hant[value] ?? value)
+        default: return decodeAndroidEscapes(value)
         }
     }
 
@@ -32,7 +36,7 @@ enum AppLocalized {
         } else {
             language = "zh"
         }
-        return AndroidLocalization.byResource[name]?[language] ?? name
+        return decodeAndroidEscapes(AndroidLocalization.byResource[name]?[language] ?? name)
     }
 
     static func versionText(_ version: String) -> String {
