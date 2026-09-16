@@ -476,11 +476,7 @@ struct RemoteView: View {
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                     }
                     if levelVisible, let roll = model.levelRoll {
-                        Rectangle()
-                            .fill(.yellow.opacity(0.8))
-                            .frame(width: 120, height: 2)
-                            .rotationEffect(.degrees(roll))
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        IOSLevelOverlay(rollDegrees: roll)
                             .allowsHitTesting(false)
                     }
                     if framingGrid != .off {
@@ -517,6 +513,23 @@ struct RemoteView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
                         .padding(10)
                         .allowsHitTesting(false)
+                }
+                if model.state.capture == .recording {
+                    HStack(spacing: 5) {
+                        Circle()
+                            .fill(ZTransferColors.statusError)
+                            .frame(width: 7, height: 7)
+                        Text(String(format: "%d:%02d", model.recordingSeconds / 60,
+                                    model.recordingSeconds % 60))
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .foregroundStyle(.white)
+                    }
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                    .padding(10)
+                    .allowsHitTesting(false)
                 }
                 if model.state.liveViewStable {
                     HStack(spacing: 4) {
@@ -1105,6 +1118,40 @@ private struct IOSFocusFrameOverlay: View {
     }
 }
 
+private struct IOSLevelOverlay: View {
+    let rollDegrees: Double
+
+    var body: some View {
+        Canvas { context, size in
+            let roll = CGFloat(rollDegrees)
+            let tolerance: CGFloat = 2
+            let color = abs(roll) <= tolerance
+                ? ZTransferColors.statusConnected.opacity(0.84)
+                : ZTransferColors.accentOrange.opacity(0.84)
+            let center = CGPoint(x: size.width / 2, y: size.height / 2)
+            let arm = min(size.width * 0.27, size.height * 0.42)
+            let gap: CGFloat = 16
+            guard arm > gap else { return }
+            context.withCGContext { cg in
+                cg.saveGState()
+                cg.translateBy(x: center.x, y: center.y)
+                cg.rotate(by: -roll * .pi / 180)
+                cg.setStrokeColor(color.cgColor ?? CGColor(gray: 1, alpha: 1))
+                cg.setLineCap(.round)
+                cg.setLineWidth(1.2)
+                cg.move(to: CGPoint(x: -arm, y: 0)); cg.addLine(to: CGPoint(x: -gap, y: 0))
+                cg.move(to: CGPoint(x: gap, y: 0)); cg.addLine(to: CGPoint(x: arm, y: 0))
+                cg.strokePath()
+                cg.restoreGState()
+            }
+            var ref = Path()
+            ref.move(to: CGPoint(x: center.x - 10, y: center.y))
+            ref.addLine(to: CGPoint(x: center.x + 10, y: center.y))
+            context.stroke(ref, with: .color(.white.opacity(0.45)), lineWidth: 1.5)
+        }
+    }
+}
+
 private struct IOSSoundMeter: View {
     let levels: RemoteLiveViewSoundLevels
 
@@ -1123,9 +1170,9 @@ private struct IOSSoundMeter: View {
         VStack(spacing: 2) {
             ForEach((0...Int(RemoteLiveViewSoundLevels.maxSegment)).reversed(), id: \.self) { segment in
                 Capsule()
-                    .fill(segment <= peak ? (segment >= 12 ? .red : segment >= 9 ? .yellow : .green) : .white.opacity(0.16))
+                    .fill(segment <= peak ? (segment >= 13 ? .red : segment >= 11 ? .yellow : .white.opacity(0.94)) : .white.opacity(0.14))
                     .frame(width: 7, height: 5)
-                    .opacity(segment <= current ? 1 : 0.42)
+                    .opacity(segment <= current ? 1 : 0.68)
             }
         }
     }
