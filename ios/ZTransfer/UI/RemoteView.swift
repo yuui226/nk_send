@@ -2,6 +2,24 @@ import SwiftUI
 import UIKit
 import QuartzCore
 
+private enum RemoteLayoutOrientation: Equatable {
+    case portrait
+    case landscapeLeft
+    case landscapeRight
+
+    var isLandscape: Bool {
+        self != .portrait
+    }
+
+    var rotationDegrees: Double {
+        switch self {
+        case .portrait: 0
+        case .landscapeLeft: 90
+        case .landscapeRight: -90
+        }
+    }
+}
+
 private struct RemoteToolTintKey: EnvironmentKey {
     static let defaultValue = ZTransferColors.secondaryText
 }
@@ -40,7 +58,7 @@ struct RemoteView: View {
     @State private var zebraMask: IOSZebraMask?
     @State private var lastZebraUpdate = 0.0
     @State private var recordingDotDimmed = false
-    @State private var landscapeLayout = false
+    @State private var layoutOrientation: RemoteLayoutOrientation = .portrait
     @State private var orientationNotificationsActive = false
     @State private var stopCleanupStarted = false
 
@@ -61,12 +79,12 @@ struct RemoteView: View {
         ZStack {
             ZTransferColors.background.ignoresSafeArea()
             GeometryReader { proxy in
-                if landscapeLayout {
+                if layoutOrientation.isLandscape {
                     landscapeRemoteLayout
                         // Android keeps the host portrait and rotates a measured
                         // landscape canvas inside it, so system bars stay put.
                         .frame(width: proxy.size.height, height: proxy.size.width)
-                        .rotationEffect(.degrees(90))
+                        .rotationEffect(.degrees(layoutOrientation.rotationDegrees))
                         .frame(width: proxy.size.width, height: proxy.size.height)
                         .transition(.opacity)
                 } else {
@@ -90,7 +108,7 @@ struct RemoteView: View {
             }
         }
         .animation(ZTransferMotion.standard, value: model.recordingHint)
-        .animation(ZTransferMotion.standard, value: landscapeLayout)
+        .animation(ZTransferMotion.standard, value: layoutOrientation)
         .statusBarHidden(false)
         .task { model.start() }
         .task { model.loadExposure(movie: false) }
@@ -187,7 +205,7 @@ struct RemoteView: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
             .overlay(alignment: .topTrailing) {
-                remoteTopBar
+                landscapeRemoteTopBar
                     .padding(.horizontal, 10)
                     .padding(.top, 8)
             }
@@ -203,20 +221,32 @@ struct RemoteView: View {
                 remoteBatteryButton
             }
             Spacer(minLength: 0)
-            Button {
-                dismiss()
-            } label: {
-                Image(systemName: "arrow.right")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(ZTransferColors.primaryText)
-                    .frame(width: 36, height: 36)
-                    .background(Color.white.opacity(0.86), in: Capsule())
-                    .overlay(Capsule().stroke(Color.white.opacity(0.95), lineWidth: 1))
-                    .shadow(color: .black.opacity(0.06), radius: 2, y: 1)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(AppLocalized.resource("cd_back"))
+            remoteBackButton
         }
+    }
+
+    /// Android's landscape toolbar keeps all three fixed controls together at
+    /// the trailing edge: signal, battery, then the return button.
+    private var landscapeRemoteTopBar: some View {
+        HStack(spacing: 8) {
+            remoteSignalButton
+            remoteBatteryButton
+            remoteBackButton
+        }
+    }
+
+    private var remoteBackButton: some View {
+        Button { dismiss() } label: {
+            Image(systemName: "arrow.right")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(ZTransferColors.primaryText)
+                .frame(width: 36, height: 36)
+                .background(Color.white.opacity(0.86), in: Capsule())
+                .overlay(Capsule().stroke(Color.white.opacity(0.95), lineWidth: 1))
+                .shadow(color: .black.opacity(0.06), radius: 2, y: 1)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(AppLocalized.resource("cd_back"))
     }
 
     private var remoteSignalButton: some View {
@@ -253,12 +283,12 @@ struct RemoteView: View {
     private var portraitToolRows: some View {
         VStack(spacing: 8) {
             HStack(spacing: 4) {
-                remoteToolButton(active: model.hdLiveView, label: { Text("HD").font(.system(size: 13, weight: .bold)) }) {
+                remoteToolButton(active: model.hdLiveView, label: { Text("HD").font(.system(size: 13, weight: .bold)).fixedSize() }) {
                     withAnimation(ZTransferMotion.standard) {
                         model.setHDLiveView(!model.hdLiveView)
                     }
                 }
-                remoteToolButton(active: showFps, label: { Text("FPS").font(.system(size: 10.5, weight: .bold)) }) {
+                remoteToolButton(active: showFps, label: { Text("FPS").font(.system(size: 10.5, weight: .bold)).fixedSize() }) {
                     withAnimation(ZTransferMotion.standard) { showFps.toggle() }
                 }
                 remoteToolButton(active: histogramVisible, label: { RemoteHistogramIcon().frame(width: 19, height: 19) }) {
@@ -279,10 +309,10 @@ struct RemoteView: View {
                     withAnimation(ZTransferMotion.standard) { levelVisible.toggle() }
                 }
                 remoteToolButton(active: false, label: { RemoteFullscreenIcon().frame(width: 17, height: 17) }) {
-                    withAnimation(ZTransferMotion.standard) { landscapeLayout = true }
+                    withAnimation(ZTransferMotion.standard) { layoutOrientation = .landscapeLeft }
                 }
-                remoteToolButton(active: landscapeLayout, label: { RemoteRotateIcon().frame(width: 20, height: 20) }) {
-                    withAnimation(ZTransferMotion.standard) { landscapeLayout = true }
+                remoteToolButton(active: layoutOrientation.isLandscape, label: { RemoteRotateIcon().frame(width: 20, height: 20) }) {
+                    cycleLayoutOrientation()
                 }
             }
             HStack(spacing: 8) {
@@ -299,10 +329,10 @@ struct RemoteView: View {
 
     private var landscapeToolBar: some View {
         HStack(spacing: 7) {
-            remoteToolButton(active: model.hdLiveView, label: { Text("HD").font(.system(size: 13, weight: .bold)) }) {
+            remoteToolButton(active: model.hdLiveView, label: { Text("HD").font(.system(size: 13, weight: .bold)).fixedSize() }) {
                 withAnimation(ZTransferMotion.standard) { model.setHDLiveView(!model.hdLiveView) }
             }
-            remoteToolButton(active: showFps, label: { Text("FPS").font(.system(size: 10.5, weight: .bold)) }) {
+            remoteToolButton(active: showFps, label: { Text("FPS").font(.system(size: 10.5, weight: .bold)).fixedSize() }) {
                 withAnimation(ZTransferMotion.standard) { showFps.toggle() }
             }
             if model.movieMode {
@@ -331,10 +361,10 @@ struct RemoteView: View {
                 remoteRecordButton
             }
             remoteToolButton(active: false, label: { RemoteFullscreenIcon().frame(width: 17, height: 17) }) {
-                withAnimation(ZTransferMotion.standard) { landscapeLayout = false }
+                withAnimation(ZTransferMotion.standard) { layoutOrientation = .portrait }
             }
             remoteToolButton(active: true, label: { RemoteRotateIcon().frame(width: 20, height: 20) }) {
-                withAnimation(ZTransferMotion.standard) { landscapeLayout = false }
+                cycleLayoutOrientation()
             }
         }
     }
@@ -366,7 +396,7 @@ struct RemoteView: View {
             label()
                 .foregroundStyle(active ? ZTransferColors.accentBlue : ZTransferColors.secondaryText)
                 .environment(\.remoteToolTint, active ? ZTransferColors.accentBlue : ZTransferColors.secondaryText)
-                .frame(width: 20, height: 20)
+                .frame(minWidth: 20, minHeight: 20)
                 .frame(width: 36, height: 36)
                 .background(active ? ZTransferColors.accentBlue.opacity(0.16) : Color.white.opacity(0.86),
                             in: Circle())
@@ -753,18 +783,27 @@ struct RemoteView: View {
     }
 
     private func applyDeviceOrientation(_ orientation: UIDeviceOrientation) {
-        let target: Bool
+        let target: RemoteLayoutOrientation
         switch orientation {
-        case .landscapeLeft, .landscapeRight:
-            target = true
-        case .portrait, .portraitUpsideDown:
-            target = false
+        case .landscapeLeft: target = .landscapeLeft
+        case .landscapeRight: target = .landscapeRight
+        case .portrait, .portraitUpsideDown: target = .portrait
         default:
             return
         }
-        guard target != landscapeLayout else { return }
+        guard target != layoutOrientation else { return }
         withAnimation(ZTransferMotion.standard) {
-            landscapeLayout = target
+            layoutOrientation = target
+        }
+    }
+
+    private func cycleLayoutOrientation() {
+        withAnimation(ZTransferMotion.standard) {
+            switch layoutOrientation {
+            case .portrait: layoutOrientation = .landscapeLeft
+            case .landscapeLeft: layoutOrientation = .landscapeRight
+            case .landscapeRight: layoutOrientation = .portrait
+            }
         }
     }
 
