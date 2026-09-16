@@ -283,13 +283,6 @@ struct SettingsView: View {
         }
     }
 
-    private func closeSettings() {
-        if settingsPage == .effects {
-            commitEffectsDraft()
-        }
-        onClose?()
-    }
-
     private func commitFrameDraft() {
         var persisted = effectsStore.settings.persistingEditorPreferences(from: effectsDraft)
         persisted.photoFrameEnabled = effectsDraft.photoFrameEnabled

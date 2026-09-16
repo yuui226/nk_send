@@ -26,7 +26,6 @@ struct PhotoEffectsControls: View {
     private func filterKey(_ id: String) -> String {
         PhotoEffectsSettings.filterKey(id)
     }
-    private func isFavorite(_ preset: PhotoFilterPreset) -> Bool { draft.favoriteFilterIDs.contains(filterKey(preset.id)) }
     private func isFavoriteID(_ id: String) -> Bool { draft.favoriteFilterIDs.contains(filterKey(id)) }
     private var selectedFilterID: String? { draft.photoFilterEnabled ? draft.selectedFilter?.preset.id : nil }
     private var frameEnabled: Bool { draft.photoFrameEnabled && draft.photoFrameBorderEnabled }

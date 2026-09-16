@@ -50,7 +50,9 @@ private let photoQueueWorkspaceAnimation =
     let isSessionConnected: Bool
     let onRetrySTA: () -> Void
     let onTransportLost: (CameraSession) -> Void
-    private let session: CameraSession?
+    // RootView creates this workspace with an established session and keeps it
+    // mounted after transport loss; isSessionConnected tracks live connectivity.
+    private let session: CameraSession
     @AppStorage("tap_to_preview") private var tapToPreview = false
     @State private var selectedFile: CameraFile?
     @State private var showingFilter = false
@@ -88,15 +90,6 @@ private let photoQueueWorkspaceAnimation =
     @State private var queueFlights: [PhotoListQueueFlight] = []
     @State private var heldFlightCount = 0
     @State private var queueImpact = 0
-
-    init(repository: CameraRepository, queue: TransferQueue = TransferQueue(), directory: DirectoryAccessStore = DirectoryAccessStore(), effectsStore: PhotoEffectsStore = PhotoEffectsStore(), isSessionConnected: Bool = true, onRetrySTA: @escaping () -> Void = {}, remotePresentation: Binding<Bool>? = nil, onTransportLost: @escaping (CameraSession) -> Void = { _ in }) {
-        _model = StateObject(wrappedValue: PhotoListViewModel(repository: repository))
-        _queueModel = StateObject(wrappedValue: TransferQueueViewModel(queue: queue))
-        _directoryStore = ObservedObject(wrappedValue: directory)
-        self.effectsStore = effectsStore; self.isSessionConnected = isSessionConnected; self.onRetrySTA = onRetrySTA
-        self.remotePresentation = remotePresentation
-        self.onTransportLost = onTransportLost; self.session = nil
-    }
 
     init(session: CameraSession, queue: TransferQueue, directory: DirectoryAccessStore = DirectoryAccessStore(), effectsStore: PhotoEffectsStore = PhotoEffectsStore(), isSessionConnected: Bool = true, onRetrySTA: @escaping () -> Void = {}, remotePresentation: Binding<Bool>? = nil, onTransportLost: @escaping (CameraSession) -> Void = { _ in }) {
         _model = StateObject(wrappedValue: PhotoListViewModel(session: session,
@@ -202,20 +195,18 @@ private let photoQueueWorkspaceAnimation =
                                                                  collapse: collapseBurstPhotos, expandedIDs: expandedBurstIDs)) { entry in
                                         let file = entry.firstFile
                                         VStack(alignment: .leading, spacing: 0) {
-                                            if let session {
-                                                if case let .burst(group) = entry {
-                                                    BurstThumbnailView(session: session, group: group,
-                                                                       transferred: group.files.allSatisfy { model.transferredFileIDs.contains($0.id) },
-                                                                       expanded: expandedBurstIDs.contains(group.id),
-                                                                       onExpand: { toggleBurst(group.id) },
-                                                                       onEnqueue: { enqueueSection(group.files) })
-                                                } else {
-                                                    CameraThumbnailView(session: session, handle: file.id, file: file,
-                                                                        transferred: model.transferredFileIDs.contains(file.id),
-                                                                        inBurst: model.burstIDByFile[file.id] != nil,
-                                                                        queueTask: queueModel.task(for: file.id), liveProgress: queueModel.activeProgress)
-                                                }
-                                                } else { PlaceholderThumbnail() }
+                                            if case let .burst(group) = entry {
+                                                BurstThumbnailView(session: session, group: group,
+                                                                   transferred: group.files.allSatisfy { model.transferredFileIDs.contains($0.id) },
+                                                                   expanded: expandedBurstIDs.contains(group.id),
+                                                                   onExpand: { toggleBurst(group.id) },
+                                                                   onEnqueue: { enqueueSection(group.files) })
+                                            } else {
+                                                CameraThumbnailView(session: session, handle: file.id, file: file,
+                                                                    transferred: model.transferredFileIDs.contains(file.id),
+                                                                    inBurst: model.burstIDByFile[file.id] != nil,
+                                                                    queueTask: queueModel.task(for: file.id), liveProgress: queueModel.activeProgress)
+                                            }
                                         }
                                         // The grid proposes a width but may let a
                                         // child determine the row height. Lock the
@@ -253,7 +244,7 @@ private let photoQueueWorkspaceAnimation =
                             Text(message).zTransferText(size: ZTransferMetrics.body).padding()
                         case .loaded:
                             PhotoListEmptyState(filterActive: model.filter.isActive,
-                                                usb: session?.isUSB == true,
+                                                usb: session.isUSB,
                                                 onClearFilter: model.clearFilter)
                                 .frame(maxWidth: .infinity)
                                 .padding(.top, 150)
@@ -317,12 +308,10 @@ private let photoQueueWorkspaceAnimation =
             queueFlightOverlay
         }
         .task {
-            if let session {
-                await session.setPreferHighThroughputTransfers(!showingRemote)
-                queueModel.attach(session: session, directory: directoryStore.directoryURL)
-            }
+            await session.setPreferHighThroughputTransfers(!showingRemote)
+            queueModel.attach(session: session, directory: directoryStore.directoryURL)
             model.setNewMediaHandler { files in
-                guard UserDefaults.standard.bool(forKey: "auto_transfer_new_media"), let session,
+                guard UserDefaults.standard.bool(forKey: "auto_transfer_new_media"),
                       let directory = directoryStore.directoryURL else { return }
                 let deferStart = UserDefaults.standard.bool(forKey: "defer_transfer_start")
                 queueModel.enqueueAutomatic(files, session: session, directory: directory,
@@ -334,14 +323,14 @@ private let photoQueueWorkspaceAnimation =
         .onChange(of: showingRemote) { remote in
             // MainActivity.shouldPreferHighThroughputTransfers: both files and
             // transfer routes enable this; monitoring disables it.
-            if let session { Task { await session.setPreferHighThroughputTransfers(!remote) } }
+            Task { await session.setPreferHighThroughputTransfers(!remote) }
             if !remote {
                 model.resumeAfterRemote()
                 model.wakeThumbnailFill()
             }
         }
         .onDisappear {
-            if let session { Task { await session.setPreferHighThroughputTransfers(false) } }
+            Task { await session.setPreferHighThroughputTransfers(false) }
         }
         .onChange(of: collapseBurstPhotos) { enabled in
             if !enabled { expandedBurstIDs.removeAll() }
@@ -375,7 +364,7 @@ private let photoQueueWorkspaceAnimation =
         }
         .onChange(of: queueModel.snapshot.isTransferring) { busy in
             model.setTransferBusy(busy)
-            if let session { Task { await session.setTransfersBusy(busy) } }
+            Task { await session.setTransfersBusy(busy) }
         }
         .onChange(of: selectedFile) { file in
             if file == nil {
@@ -395,29 +384,27 @@ private let photoQueueWorkspaceAnimation =
             }
         }
         .fullScreenCover(isPresented: $internalShowingRemote) {
-            if let session {
-                RemoteView(session: session,
-                           isSessionConnected: isSessionConnected,
-                           onRetrySTA: onRetrySTA,
-                           onStopped: { transportLost in
-                               // A transport failure tears down this mounted
-                               // session and reconnects in place. Do not
-                               // start a second scan against the invalid PTP
-                               // channel while the replacement is opening.
-                               if !transportLost {
-                                   model.resumeAfterRemote()
-                                   model.wakeThumbnailFill()
-                               }
-                           },
-                           onTransportLost: {
-                               // Android keeps monitor navigation mounted
-                               // during a dropped session so its STA signal
-                               // control can request immediate recovery.
-                               onTransportLost(session)
-                           })
-            }
+            RemoteView(session: session,
+                       isSessionConnected: isSessionConnected,
+                       onRetrySTA: onRetrySTA,
+                       onStopped: { transportLost in
+                           // A transport failure tears down this mounted
+                           // session and reconnects in place. Do not
+                           // start a second scan against the invalid PTP
+                           // channel while the replacement is opening.
+                           if !transportLost {
+                               model.resumeAfterRemote()
+                               model.wakeThumbnailFill()
+                           }
+                       },
+                       onTransportLost: {
+                           // Android keeps monitor navigation mounted
+                           // during a dropped session so its STA signal
+                           // control can request immediate recovery.
+                           onTransportLost(session)
+                       })
         }
-                .overlay {
+        .overlay {
             if showingSettings {
                 SettingsPopupOverlay(
                     isPresented: $showingSettings,
@@ -450,54 +437,52 @@ private let photoQueueWorkspaceAnimation =
     }
 
     @ViewBuilder private var previewOverlay: some View {
-        if let session {
-                let files = model.sections.flatMap(\.files)
-                PhotoPreviewView(session: session, queueModel: queueModel, files: files,
-                                 burstIDByFile: model.burstIDByFile,
-                                 transferredFileIDs: model.transferredFileIDs, selectedFile: $selectedFile,
-                                 directory: directoryStore.directoryURL,
-                                 organizeByDate: organizeByDate,
-                                 queueTarget: queueTargetBounds == .zero ? nil : queueTargetBounds,
-                                 initialExpandedBurstIDs: expandedBurstIDs,
-                                 collapseBursts: collapseBurstPhotos,
-                                 onBurstChanged: { id, expanded in
-                                     if expanded { expandedBurstIDs.insert(id) }
-                                     else { expandedBurstIDs.remove(id) }
-                                 }) { file in
-                    guard directoryStore.directoryURL != nil else {
-                        selectedFile = nil
-                        showingSettings = true
-                        return false
-                    }
-                    if !deferTransferStart {
-                        queueModel.enqueue(file, autoStart: session, directory: directoryStore.directoryURL, organizeByDate: organizeByDate, effects: effectsStore.settings)
-                    } else {
-                        queueModel.enqueue(file, organizeByDate: organizeByDate, effects: effectsStore.settings)
-                    }
-                    return true
-                } onEnqueueBurst: { burstFiles in
-                    guard directoryStore.directoryURL != nil else {
-                        selectedFile = nil
-                        showingSettings = true
-                        return false
-                    }
-                    if !deferTransferStart, let directory = directoryStore.directoryURL {
-                        queueModel.enqueue(burstFiles, autoStart: session, directory: directory,
-                                           organizeByDate: organizeByDate, effects: effectsStore.settings)
-                    } else {
-                        queueModel.enqueue(burstFiles, organizeByDate: organizeByDate, effects: effectsStore.settings)
-                    }
-                    return true
-                } onQueueFlightStarted: { count in
-                    heldFlightCount += count
-                } onQueueFlightFinished: { count in
-                    heldFlightCount = max(0, heldFlightCount - count)
-                }
-                .onAppear { model.pauseForPreview() }
-                .onDisappear {
-                    model.resumeAfterPreview()
-                    model.wakeThumbnailFill()
-                }
+        let files = model.sections.flatMap(\.files)
+        PhotoPreviewView(session: session, queueModel: queueModel, files: files,
+                         burstIDByFile: model.burstIDByFile,
+                         transferredFileIDs: model.transferredFileIDs, selectedFile: $selectedFile,
+                         directory: directoryStore.directoryURL,
+                         organizeByDate: organizeByDate,
+                         queueTarget: queueTargetBounds == .zero ? nil : queueTargetBounds,
+                         initialExpandedBurstIDs: expandedBurstIDs,
+                         collapseBursts: collapseBurstPhotos,
+                         onBurstChanged: { id, expanded in
+                             if expanded { expandedBurstIDs.insert(id) }
+                             else { expandedBurstIDs.remove(id) }
+                         }) { file in
+            guard directoryStore.directoryURL != nil else {
+                selectedFile = nil
+                showingSettings = true
+                return false
+            }
+            if !deferTransferStart {
+                queueModel.enqueue(file, autoStart: session, directory: directoryStore.directoryURL, organizeByDate: organizeByDate, effects: effectsStore.settings)
+            } else {
+                queueModel.enqueue(file, organizeByDate: organizeByDate, effects: effectsStore.settings)
+            }
+            return true
+        } onEnqueueBurst: { burstFiles in
+            guard directoryStore.directoryURL != nil else {
+                selectedFile = nil
+                showingSettings = true
+                return false
+            }
+            if !deferTransferStart, let directory = directoryStore.directoryURL {
+                queueModel.enqueue(burstFiles, autoStart: session, directory: directory,
+                                   organizeByDate: organizeByDate, effects: effectsStore.settings)
+            } else {
+                queueModel.enqueue(burstFiles, organizeByDate: organizeByDate, effects: effectsStore.settings)
+            }
+            return true
+        } onQueueFlightStarted: { count in
+            heldFlightCount += count
+        } onQueueFlightFinished: { count in
+            heldFlightCount = max(0, heldFlightCount - count)
+        }
+        .onAppear { model.pauseForPreview() }
+        .onDisappear {
+            model.resumeAfterPreview()
+            model.wakeThumbnailFill()
         }
     }
 
@@ -520,15 +505,15 @@ private let photoQueueWorkspaceAnimation =
                     }
 
                     Button {
-                        if session?.wirelessMode == .sta {
+                        if session.wirelessMode == .sta {
                             if !isSessionConnected { onRetrySTA() }
                         } else { signalExpanded.toggle() }
                     } label: {
                         HStack(spacing: 5) {
-                            PhotoListSignalIcon(isUSB: session?.isUSB == true,
-                                                wirelessMode: session?.wirelessMode,
+                            PhotoListSignalIcon(isUSB: session.isUSB,
+                                                wirelessMode: session.wirelessMode,
                                                 connected: isSessionConnected)
-                            if signalExpanded && session?.wirelessMode != .sta {
+                            if signalExpanded && session.wirelessMode != .sta {
                                 Image(systemName: "chevron.down")
                                     .font(.system(size: 10, weight: .bold))
                             }
@@ -588,14 +573,14 @@ private let photoQueueWorkspaceAnimation =
                                                           : "cd_pause_after_current"))
             } else if !queueModel.snapshot.isTransferring && queueModel.snapshot.items.contains(where: { $0.status == .waiting }) {
                 Button {
-                    guard let session, let directory = directoryStore.directoryURL else { return }
+                    guard let directory = directoryStore.directoryURL else { return }
                     queueModel.start(session: session, directory: directory)
                 } label: {
                     Image(systemName: "play.fill").frame(width: 36, height: 36)
                 }
                 .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
-                .disabled(session == nil || directoryStore.directoryURL == nil)
-                .opacity(session == nil || directoryStore.directoryURL == nil ? 0.45 : 1)
+                .disabled(directoryStore.directoryURL == nil)
+                .opacity(directoryStore.directoryURL == nil ? 0.45 : 1)
                 .accessibilityLabel(AppLocalized.resource("cd_start_transfers"))
             }
 
@@ -638,7 +623,7 @@ private let photoQueueWorkspaceAnimation =
     /// preview and EXIF. A late response for an older file is discarded.
     private func requestEffectPreview() {
         effectPreviewRequested = true
-        guard let session, let file = model.latestEffectPreviewFile else { return }
+        guard let file = model.latestEffectPreviewFile else { return }
         let key = "\(file.id)|\(file.fileName)|\(file.size)|\(file.captureDate ?? "")"
         guard effectPreviewFileKey != key || (effectPreviewSource == nil && effectPreviewExif == nil) else { return }
         effectPreviewFileKey = key
@@ -680,29 +665,27 @@ private let photoQueueWorkspaceAnimation =
 
     @ViewBuilder
     private var remoteEntryOverlay: some View {
-        if session != nil {
-            VStack(alignment: .leading, spacing: 8) {
-                if let remoteEntryHint {
-                    Text(remoteEntryHint)
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(ZTransferColors.primaryText)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 9)
-                        .background(.regularMaterial, in: Capsule())
-                        .transition(.opacity.combined(with: .move(edge: .bottom)))
-                }
-                Button(action: openRemote) {
-                    Image(systemName: "camera.aperture")
-                        .font(.system(size: 18, weight: .semibold))
-                        .frame(width: 44, height: 44)
-                        .background(.thinMaterial, in: Circle())
-                        .overlay(Circle().stroke(.white.opacity(0.55), lineWidth: 1))
-                }
-                .buttonStyle(.plain)
+        VStack(alignment: .leading, spacing: 8) {
+            if let remoteEntryHint {
+                Text(remoteEntryHint)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(ZTransferColors.primaryText)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 9)
+                    .background(.regularMaterial, in: Capsule())
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
-            .padding(.leading, 18).padding(.bottom, 22)
-            .animation(ZTransferMotion.standard, value: remoteEntryHint)
+            Button(action: openRemote) {
+                Image(systemName: "camera.aperture")
+                    .font(.system(size: 18, weight: .semibold))
+                    .frame(width: 44, height: 44)
+                    .background(.thinMaterial, in: Circle())
+                    .overlay(Circle().stroke(.white.opacity(0.55), lineWidth: 1))
+            }
+            .buttonStyle(.plain)
         }
+        .padding(.leading, 18).padding(.bottom, 22)
+        .animation(ZTransferMotion.standard, value: remoteEntryHint)
     }
 
     private func openRemote() {
@@ -794,15 +777,13 @@ private let photoQueueWorkspaceAnimation =
         Task { @MainActor in
             // Android's flight uses the synchronous in-memory thumbnail cache;
             // it never adds a camera request just to decorate a 560ms flight.
-            if let session {
-               let cached = try? await session.cachedThumbnail(file: file)
-               let data: Data?
-               if let cached { data = cached }
-               else { data = try? await session.thumbnail(file: file) }
-               if let data, let image = UIImage(data: data),
+            let cached = try? await session.cachedThumbnail(file: file)
+            let data: Data?
+            if let cached { data = cached }
+            else { data = try? await session.thumbnail(file: file) }
+            if let data, let image = UIImage(data: data),
                let index = queueFlights.firstIndex(where: { $0.id == id }) {
                 queueFlights[index].image = image
-               }
             }
             try? await Task.sleep(nanoseconds: 600_000_000)
             heldFlightCount = max(0, heldFlightCount - 1)
@@ -1010,14 +991,6 @@ private func formatDateHeader(_ raw: String) -> String {
           raw.allSatisfy(\.isNumber) else { return raw }
     let chars = Array(raw)
     return "\(chars[0])\(chars[1])\(chars[2])\(chars[3])-\(chars[4])\(chars[5])-\(chars[6])\(chars[7])"
-}
-
-private struct PlaceholderThumbnail: View {
-    var body: some View {
-        RoundedRectangle(cornerRadius: 8)
-            .fill(Color.black.opacity(0.08))
-            .aspectRatio(1, contentMode: .fit)
-    }
 }
 
 private struct PhotoListEmptyState: View {

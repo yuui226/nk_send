@@ -364,16 +364,6 @@ private struct QueueItemView: View {
         item.outputURL == nil
     }
 
-    private var statusText: String {
-        switch item.status {
-        case .waiting: return AppLocalized.resource("status_waiting")
-        case .transferring: return ""
-        case .completed: return AppLocalized.resource("done")
-        case .failed: return AppLocalized.resource("transfer_failed")
-        case .cancelled: return AppLocalized.resource("status_cancelled")
-        }
-    }
-
     private var speedText: String? {
         if item.status == .completed, item.downloadMBps > 0 {
             return String(format: "%.1f MB/s", item.downloadMBps)

@@ -836,11 +836,6 @@ struct RemoteView: View {
                       width: width, height: fitted)
     }
 
-    private var sessionFailed: Bool {
-        if case .failed = model.state.session { return true }
-        return false
-    }
-
     private var exposureGrid: some View {
         let fields: [RemoteExposureField] = [.exposureCompensation, .iso, .aperture, .shutter]
         return LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {

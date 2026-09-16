@@ -17,7 +17,6 @@
 		07536DCEAC6F73F298D92823 /* PhotoThumbnailFillQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C2D3F7511237006742926D0 /* PhotoThumbnailFillQueue.swift */; };
 		0E1739467119ADD78EC6FFB0 /* STAResetPairingOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B84B48793ED342FBA1F6D10 /* STAResetPairingOverlay.swift */; };
 		0E49CC3D11A2B396AD9D5F4D /* CameraIOGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D347C0A0D7091DF932D1DBA /* CameraIOGate.swift */; };
-		0E6852CA1F77C714DAAF2215 /* GPSView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0D0D8FBAB87B8180493B22E /* GPSView.swift */; };
 		10BA2D27B0425D2A34F982F2 /* RemoteViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B2971CFDD3F6EBEF2ACA1A8 /* RemoteViewModel.swift */; };
 		16939A4A3006E233A957DD0E /* PTPDatasetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF061766E1A0B9F3060190ED /* PTPDatasetTests.swift */; };
 		16B7898C274ABFF0A370585B /* ZTransferGlassSurface.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2B51C2A8D807D8A9CA21F9E /* ZTransferGlassSurface.swift */; };
@@ -245,7 +244,6 @@
 		CEC2E153F5F165AE7B762862 /* CameraDownload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraDownload.swift; sourceTree = "<group>"; };
 		CF061766E1A0B9F3060190ED /* PTPDatasetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PTPDatasetTests.swift; sourceTree = "<group>"; };
 		D0B6DB7E3BF3A4EC8555BE3C /* PhotoFilterComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoFilterComponents.swift; sourceTree = "<group>"; };
-		D0D0D8FBAB87B8180493B22E /* GPSView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GPSView.swift; sourceTree = "<group>"; };
 		D2B51C2A8D807D8A9CA21F9E /* ZTransferGlassSurface.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZTransferGlassSurface.swift; sourceTree = "<group>"; };
 		D403B031ADD1B0F9C560F22D /* ClassicUSBIcon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClassicUSBIcon.swift; sourceTree = "<group>"; };
 		D40B340AC13401D86C00C2D8 /* PTPDataset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PTPDataset.swift; sourceTree = "<group>"; };
@@ -479,7 +477,6 @@
 			children = (
 				4FA1CAF4109968AFCC0043BC /* Components */,
 				3D3D1368E7A58C6452F8211F /* Connection */,
-				D0D0D8FBAB87B8180493B22E /* GPSView.swift */,
 				B7580B5DC6E6B426AFDCD70C /* LocalPhotoEffectsView.swift */,
 				6C73EF01969DAC563DA91DD0 /* PhotoEffectsEditorView.swift */,
 				319C94935AB93C922D1BE545 /* PhotoFilterPopupOverlay.swift */,
@@ -694,7 +691,6 @@
 				7CDDBA710E50C3C90D89338F /* GPSCoordinator.swift in Sources */,
 				9BD36C93DE99E708A9E68AF5 /* GPSProtocol.swift in Sources */,
 				823A11BECB918BA55D0BE52D /* GPSState.swift in Sources */,
-				0E6852CA1F77C714DAAF2215 /* GPSView.swift in Sources */,
 				68059AEA1C896EBC6F5103E6 /* ImageCaptureUSBTransport.swift in Sources */,
 				E64F169475A3D51E7C7D15C7 /* LocalPhotoBatchViewModel.swift in Sources */,
 				BADF7CD7F32B68DCF3D97C3F /* LocalPhotoEffectsView.swift in Sources */,

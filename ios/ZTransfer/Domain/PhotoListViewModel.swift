@@ -61,20 +61,6 @@ final class PhotoListViewModel: ObservableObject {
         Self.latestEffectPreviewFile(in: allFiles)
     }
 
-    init(repository: CameraRepository, onTransportLost: (() -> Void)? = nil) {
-        self.onTransportLost = onTransportLost
-        self.scanCatalog = { preserve, snapshot, detect, handler in
-            try await repository.scanCatalog(preserveExisting: preserve,
-                                              resumeSnapshot: snapshot,
-                                              detectNewHandles: detect,
-                                              onBatch: handler)
-        }
-        self.resumeSnapshotProvider = { nil }
-        self.prefetchBatch = { _ in [] }
-        self.canFill = { true }
-        self.reconcileCache = { _, _ in }
-        observeCatalog(repository)
-    }
     init(session: CameraSession, onTransportLost: (() -> Void)? = nil) {
         self.onTransportLost = onTransportLost
         self.scanCatalog = { preserve, snapshot, detect, handler in
@@ -98,14 +84,6 @@ final class PhotoListViewModel: ObservableObject {
         }
         catalogUpdatesTask = Task { [weak self] in
             let repository = session.repository
-            for await files in await repository.catalogUpdates() {
-                guard !Task.isCancelled else { return }
-                self?.applyCatalogUpdate(files)
-            }
-        }
-    }
-    private func observeCatalog(_ repository: CameraRepository) {
-        catalogUpdatesTask = Task { [weak self] in
             for await files in await repository.catalogUpdates() {
                 guard !Task.isCancelled else { return }
                 self?.applyCatalogUpdate(files)
