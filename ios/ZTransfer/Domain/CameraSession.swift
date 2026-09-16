@@ -133,6 +133,12 @@ actor CameraSession {
     }
 
     func setFHDActive(_ active: Bool) async { await repository.setFHDActive(active) }
+    func setRemoteActive(_ active: Bool) async { await repository.setRemoteActive(active) }
+    func refreshRemoteProperty(_ descriptor: RemotePropertyDescriptor) async throws -> RemotePropertyDescriptor? {
+        try await repository.refreshRemoteProperty(descriptor)
+    }
+    func remoteFocusMode() async throws -> RemotePropertyDescriptor? { try await repository.remoteFocusMode() }
+    func remoteEvents() async throws -> [STAEvent] { try await repository.remoteEvents() }
     func setTransfersBusy(_ busy: Bool) async { await repository.setTransfersBusy(busy) }
 
     /// The active transport is probed only when the command channel is idle.
@@ -255,6 +261,11 @@ actor CameraSession {
 }
 
 protocol RemoteCameraControlling: Sendable {
+    var isUSB: Bool { get }
+    func setRemoteActive(_ active: Bool) async
+    func refreshRemoteProperty(_ descriptor: RemotePropertyDescriptor) async throws -> RemotePropertyDescriptor?
+    func remoteFocusMode() async throws -> RemotePropertyDescriptor?
+    func remoteEvents() async throws -> [STAEvent]
     func startLiveView() async throws
     func endLiveView() async
     func liveViewFrame(preferEnhanced: Bool) async throws -> Data

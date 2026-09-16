@@ -138,6 +138,11 @@ struct RootView: View {
                 RemoteView(session: session,
                            isSessionConnected: connectionModel.cameraSession === session,
                            onRetrySTA: { connectionModel.retrySTAConnection() },
+                           onPreparing: { await PhotoListViewModel.cached(session: session).pauseForRemote() },
+                           onStopped: { transportLost in
+                               PhotoListViewModel.cached(session: session).resumeAfterRemote(
+                                   isConnected: connectionModel.cameraSession === session && !transportLost)
+                           },
                            onTransportLost: {
                                Task { await connectionModel.handleTransportLost(session) }
                            })

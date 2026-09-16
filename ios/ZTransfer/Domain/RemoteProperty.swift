@@ -12,6 +12,10 @@ struct ParsedRemoteProperty: Equatable, Sendable {
 }
 
 enum RemotePropertyCodec {
+    static func parseValue(_ data: Data, dataType: UInt16) -> Int64? {
+        var reader = ScalarReader(data)
+        return readScalar(&reader, dataType)
+    }
     static func parseDescription(_ data: Data) -> ParsedRemoteProperty? {
         var reader = ScalarReader(data)
         guard let code = reader.readUInt16(),

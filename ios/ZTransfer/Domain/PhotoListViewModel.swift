@@ -39,6 +39,7 @@ final class PhotoListViewModel: ObservableObject {
     private let prefetchBatch: @Sendable ([CameraFile]) async -> Set<UInt32>
     private let canFill: @Sendable () async -> Bool
     private let reconcileCache: @Sendable ([CameraFile], Bool) async -> Void
+    private let setRemoteGate: @Sendable (Bool) async -> Void
     private let onTransportLost: (() -> Void)?
     private let thumbnailFillQueue = PhotoThumbnailFillQueue()
     private var catalogUpdatesTask: Task<Void, Never>?
@@ -46,6 +47,9 @@ final class PhotoListViewModel: ObservableObject {
     private var fillTask: Task<Void, Never>?
     private var fillWorkerActive = false
     private var previewPausedScan = false
+    private var previewActive = false
+    private var remoteActive = false
+    private var remoteRefreshPending = false
     private var transferBusy = false
     private var newMediaHandler: (([CameraFile]) -> Void)?
     private var transferIndexGeneration = 0
@@ -75,6 +79,7 @@ final class PhotoListViewModel: ObservableObject {
 
     init(session: CameraSession, onTransportLost: (() -> Void)? = nil) {
         self.onTransportLost = onTransportLost
+        self.setRemoteGate = { await session.setRemoteActive($0) }
         self.scanCatalog = { preserve, snapshot, detect, handler in
             try await session.scanCatalog(preserveExisting: preserve,
                                           resumeSnapshot: snapshot,
@@ -167,7 +172,7 @@ final class PhotoListViewModel: ObservableObject {
         await reload(generation: loadGeneration, resumeSnapshot: nil)
     }
 
-    private func reload(generation: Int, resumeSnapshot: PhotoScanSnapshot?) async {
+    private func reload(generation: Int, resumeSnapshot: PhotoScanSnapshot?, preserve: Bool? = nil) async {
         guard generation == loadGeneration else { return }
         // Android's fill collector is gated by hasCompletedFileScan. Cancel
         // the existing worker for refreshes too, otherwise an old worker can
@@ -184,12 +189,13 @@ final class PhotoListViewModel: ObservableObject {
             // re-queries handles and removes only confirmed missing objects.
             // Android's FHD resume is keyed by the explicit handle snapshot,
             // not by whether a metadata row happened to reach the UI yet.
-            let preserveExisting = !allFiles.isEmpty || resumeSnapshot != nil
+            let preserveExisting = preserve ?? (!allFiles.isEmpty || resumeSnapshot != nil)
             if !preserveExisting {
                 allFiles.removeAll(keepingCapacity: true)
                 sections.removeAll()
             }
             let accumulator = ScanAccumulator()
+            accumulator.publishedIDs = Set(allFiles.map(\.id))
             let result = try await scanCatalog(preserveExisting, resumeSnapshot, preserveExisting) { [weak self] batch in
                 guard let self else { throw CancellationError() }
                 try await self.acceptBatch(batch, generation: generation, accumulator: accumulator)
@@ -310,6 +316,7 @@ final class PhotoListViewModel: ObservableObject {
     /// Android pauses the metadata pipeline while an interactive FHD preview
     /// owns the camera channel, retaining the published rows for resumption.
     func pauseForPreview() {
+        previewActive = true
         guard isLoadingFiles else { return }
         previewPausedScan = true
         loadGeneration &+= 1
@@ -319,6 +326,13 @@ final class PhotoListViewModel: ObservableObject {
     }
 
     func resumeAfterPreview() {
+        previewActive = false
+        guard !remoteActive else { return }
+        if remoteRefreshPending {
+            remoteRefreshPending = false
+            refreshAfterRemote()
+            return
+        }
         guard previewPausedScan else { return }
         previewPausedScan = false
         loadTask?.cancel()
@@ -359,7 +373,26 @@ final class PhotoListViewModel: ObservableObject {
 
     /// Remote monitor can capture new media, therefore its return path starts
     /// a fresh handle enumeration rather than resuming the old scan snapshot.
-    func resumeAfterRemote() {
+    /// Android RemoteScreen sets its page gate before loading any parameters.
+    /// Drain the current command, then stop before the next metadata request;
+    /// cancelling a live iOS PTP transaction would invalidate the connection.
+    func pauseForRemote() async {
+        guard !remoteActive else { return }
+        remoteActive = true
+        await setRemoteGate(true)
+        await loadTask?.value
+        isLoadingFiles = false
+    }
+
+    func resumeAfterRemote(isConnected: Bool) {
+        guard remoteActive else { return }
+        remoteActive = false
+        guard isConnected else { return }
+        if previewActive { remoteRefreshPending = true; return }
+        refreshAfterRemote()
+    }
+
+    private func refreshAfterRemote() {
         loadTask?.cancel()
         loadGeneration &+= 1
         let generation = loadGeneration
@@ -367,7 +400,7 @@ final class PhotoListViewModel: ObservableObject {
         isLoadingFiles = true
         hasCompletedFileScan = false
         loadTask = Task { [weak self] in
-            await self?.reload(generation: generation, resumeSnapshot: nil)
+            await self?.reload(generation: generation, resumeSnapshot: nil, preserve: true)
         }
     }
 

@@ -23,12 +23,21 @@ final class RemoteViewModel: ObservableObject {
     var recordingHint: String? { state.recordingHint?.message }
     var transportLossWasNotified: Bool { transportLossNotified }
 
+
     private let camera: RemoteCameraControlling
     private let onTransportLost: (() -> Void)?
     private let haptics: ZTransferHaptics
     private var transportLossNotified = false
     private var frameTask: Task<Void, Never>?
     private var modeTask: Task<Void, Never>?
+    private var batteryTask: Task<Void, Never>?
+    private var levelTask: Task<Void, Never>?
+    private var levelVisible = false
+    private var restartLiveView = false
+    private var disposed = false
+    private var initialLoaded = false
+    private var batteryDescriptor: RemotePropertyDescriptor?
+    @Published private(set) var exposureProgram: RemotePropertyDescriptor?
     private var focusHideTask: Task<Void, Never>?
     private var halfPressTask: Task<Void, Never>?
     private var halfPressHeld = false
@@ -50,72 +59,96 @@ final class RemoteViewModel: ObservableObject {
     }
 
     func start() {
-        guard frameTask == nil else { return }
+        guard frameTask == nil, !disposed else { return }
         stopRequested = false
-        stopTrackingRequested = false
         transportLossNotified = false
         state = state.applying(.startRequested)
         frameTask = Task { [weak self] in
             guard let self else { return }
-            do {
-                // Android sets 0xD1AC while live view is closed before every
-                // session (2=VGA, 3=XGA). Keep the same ordering so changing
-                // the HD choice never races StartLiveView.
-                if let descriptor = try? await camera.remoteProperty(.liveViewImageSize),
-                   descriptor.writable {
-                    var desired = descriptor
-                    desired.current = hdLiveView ? 3 : 2
-                    _ = try? await camera.setRemoteProperty(desired, value: desired.current)
+            await camera.setRemoteActive(true)
+            if !stopRequested {
+                // RemoteScreen: selector -> matching exposure group -> Auto ISO
+                // -> exposure mode -> focus -> battery, before starting Live View.
+                movieMode = false
+                if let selector = try? await camera.remoteProperty(.liveViewSelector) {
+                    movieMode = selector.current == 1
                 }
-                try await camera.startLiveView()
-                guard !Task.isCancelled, !stopRequested else { return }
-                started = true
-                state = state.applying(.deviceReady)
-                while !Task.isCancelled && !stopRequested {
-                    do {
-                        let payload = try await camera.liveViewFrame(preferEnhanced: hdLiveView)
-                        guard let jpegRange = RemoteFrameParser.jpegRange(in: payload) else {
-                            throw RemoteViewModelError.invalidFrame
-                        }
-                        let data = Data(payload[jpegRange])
-                        guard let image = UIImage(data: data) else {
-                            throw RemoteViewModelError.invalidFrame
-                        }
-                        let now = ContinuousClock.now
-                        let rate: Double
-                        if let previous = lastFrameAt {
-                            let duration = previous.duration(to: now)
-                            let seconds = Double(duration.components.seconds) +
-                                Double(duration.components.attoseconds) / 1e18
-                            rate = seconds > 0 ? 1 / seconds : 0
-                        } else { rate = 0 }
-                        lastFrameAt = now
-                        frameData = data
-                        frameImage = image
-                        frameMetadata = RemoteFrameParser.metadata(
-                            from: payload,
-                            jpegOffset: jpegRange.lowerBound,
-                            operation: PTPConstants.getLiveViewImageEx
-                        )
-                        state = state.applying(.frameReceived(fps: rate))
-                    } catch is CancellationError {
-                        break
-                    } catch {
-                        if Self.isTransportFailure(error) {
-                            notifyTransportLost()
-                            break
-                        }
-                        state = state.applying(.frameLost)
-                        // Android keeps the session alive and retries the next frame;
-                        // a short yield prevents a camera error from spinning the CPU.
-                        try? await Task.sleep(nanoseconds: 80_000_000)
+                state.movieMode = movieMode
+                await loadExposure(movie: movieMode)
+                if !stopRequested { exposureProgram = try? await camera.remoteProperty(.exposureProgram) }
+                if !stopRequested { await refreshFocusMode() }
+                if !stopRequested { await refreshBattery() }
+                initialLoaded = !stopRequested
+            }
+            if initialLoaded { startPolling() }
+            while !Task.isCancelled && !stopRequested {
+                restartLiveView = false
+                state = state.applying(.startRequested)
+                lastFrameAt = nil
+                do {
+                    if let descriptor = try? await camera.remoteProperty(.liveViewImageSize), descriptor.writable {
+                        try? await camera.setRemoteProperty(descriptor, value: hdLiveView ? 3 : 2)
                     }
+                    if stopRequested { break }
+                    try await camera.startLiveView()
+                    if stopRequested { break }
+                    started = true
+                    state = state.applying(.deviceReady)
+                    if camera.isUSB { try? await Task.sleep(for: .milliseconds(750)) }
+                    var successes = 0
+                    var errors = 0
+                    var windowStart: ContinuousClock.Instant?
+                    var intervals = 0
+                    while !Task.isCancelled && !stopRequested && !restartLiveView {
+                        do {
+                            // Android probes the camera's advertised enhanced
+                            // frame operation independently from the XGA/HD
+                            // size switch. The HD toggle controls resolution,
+                            // not whether metadata frames are requested.
+                            let payload = try await camera.liveViewFrame(preferEnhanced: true)
+                            errors = 0
+                            successes += 1
+                            guard !stopRequested else { break }
+                            let now = ContinuousClock.now
+                            var fps = state.fps
+                            if let previous = windowStart {
+                                intervals += 1
+                                let duration = previous.duration(to: now)
+                                let seconds = Double(duration.components.seconds) + Double(duration.components.attoseconds) / 1e18
+                                if seconds >= 1 { fps = Double(intervals) / seconds; intervals = 0; windowStart = now }
+                            } else { windowStart = now; fps = 0 }
+                            if let jpegRange = RemoteFrameParser.jpegRange(in: payload),
+                               let image = UIImage(data: Data(payload[jpegRange])) {
+                                frameData = Data(payload[jpegRange])
+                                frameImage = image
+                                frameMetadata = RemoteFrameParser.metadata(from: payload, jpegOffset: jpegRange.lowerBound,
+                                                                            operation: PTPConstants.getLiveViewImageEx)
+                                state = state.applying(.frameReceived(fps: fps))
+                            }
+                            state.liveViewStable = !camera.isUSB || successes >= 8
+                        } catch is CancellationError { break }
+                        catch PTPSessionError.responseCode(PTPConstants.deviceBusy) {
+                            // Busy is not a failed frame and does not count toward restart.
+                            try? await Task.sleep(for: .milliseconds(40))
+                        } catch {
+                            if Self.isTransportFailure(error) { notifyTransportLost(); break }
+                            errors += 1
+                            if errors >= 3 { break }
+                            try? await Task.sleep(for: .milliseconds(300))
+                        }
+                    }
+                    state.liveViewStable = false
+                    state.fps = 0
+                    await camera.endLiveView()
+                    started = false
+                    if !stopRequested && !restartLiveView { try? await Task.sleep(for: .seconds(2)) }
+                } catch is CancellationError { break }
+                catch {
+                    if Self.isTransportFailure(error) { notifyTransportLost(); break }
+                    state = state.applying(.frameLost)
+                    // Android retries failed LV startup for the lifetime of the page.
+                    if !stopRequested { try? await Task.sleep(for: .seconds(3)) }
                 }
-            } catch is CancellationError {
-                // Stop is the normal lifecycle path; do not surface a fake error.
-            } catch {
-                if Self.isTransportFailure(error) { notifyTransportLost() }
-                else { state = state.applying(.operationFailed(Self.message(for: error))) }
             }
             if stopTrackingRequested {
                 try? await camera.endSubjectTracking()
@@ -124,74 +157,172 @@ final class RemoteViewModel: ObservableObject {
             await camera.endLiveView()
             started = false
         }
+    }
+
+    private var cameraBusy: Bool {
+        state.capture == .capturing || state.capture == .recording || recordingBusy
+    }
+
+    private func startPolling() {
         modeTask = Task { [weak self] in
             guard let self else { return }
+            var pollTick = 0
             while !Task.isCancelled && !stopRequested {
-                if let descriptor = try? await camera.remoteProperty(.liveViewSelector),
-                   descriptor.current <= 1 {
-                    let nextMovie = descriptor.current == 1
-                    if nextMovie != movieMode {
-                        movieMode = nextMovie
-                        state.movieMode = nextMovie
-                        loadExposure(movie: nextMovie)
+                if !state.liveViewStable {
+                    try? await Task.sleep(for: .milliseconds(600))
+                    if !cameraBusy && !stopRequested { await refreshMovieMode() }
+                    continue
+                }
+                let events = (try? await camera.remoteEvents()) ?? []
+                for event in events where !stopRequested {
+                    if event.code == 0x4006 {
+                        await handlePropertyChanged(event.handle)
                     }
                 }
-                if let descriptor = try? await camera.remoteProperty(.angleLevel) {
-                    let signed = Int64(bitPattern: descriptor.current)
-                    levelRoll = Double(signed) / 65536
-                }
-                if let descriptor = try? await camera.remoteProperty(.batteryLevel) {
-                    let value = Int(min(descriptor.current, 100))
-                    if batteryPercent != value { batteryPercent = value }
-                }
-                try? await Task.sleep(nanoseconds: 600_000_000)
+                pollTick += 1
+                if pollTick % 5 == 0 && !cameraBusy && !stopRequested { await refreshMovieMode() }
+                try? await Task.sleep(for: .milliseconds(state.capture == .capturing ? 150 : 600))
             }
         }
+        batteryTask = Task { [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled && !stopRequested {
+                await pause(for: .seconds(120))
+                while !stopRequested && (!state.liveViewStable || cameraBusy) {
+                    do { try await Task.sleep(for: .seconds(1)) } catch { return }
+                }
+                if !stopRequested { await refreshBattery() }
+            }
+        }
+    }
+
+    private func handlePropertyChanged(_ raw: UInt32) async {
+        guard !stopRequested else { return }
+        if raw == RemoteProperty.batteryLevel.rawValue {
+            await refreshBattery()
+            return
+        }
+        if raw == RemoteProperty.liveViewSelector.rawValue {
+            if !cameraBusy { await refreshMovieMode() }
+            return
+        }
+        if raw == RemoteProperty.exposureProgram.rawValue {
+            exposureProgram = try? await camera.remoteProperty(.exposureProgram)
+            await loadExposure(movie: movieMode)
+            return
+        }
+        if raw == RemoteProperty.focusMode.rawValue || raw == RemoteProperty.nikonAFMode.rawValue {
+            await refreshFocusMode()
+            return
+        }
+        if RemoteExposureParameters.autoISOProperties(movie: movieMode).contains(where: { $0.rawValue == raw }) {
+            await loadExposure(movie: movieMode)
+            return
+        }
+        for (field, descriptor) in exposureDescriptors where descriptor.property.rawValue == raw {
+            if let updated = try? await camera.refreshRemoteProperty(descriptor) {
+                exposureDescriptors[field] = updated
+            }
+        }
+    }
+
+    private func pause(for duration: Duration) async {
+        let deadline = ContinuousClock.now.advanced(by: duration)
+        while !stopRequested && !Task.isCancelled && ContinuousClock.now < deadline {
+            try? await Task.sleep(for: min(.milliseconds(100), ContinuousClock.now.duration(to: deadline)))
+        }
+    }
+
+    private func refreshMovieMode() async {
+        guard !stopRequested,
+              let descriptor = try? await camera.remoteProperty(.liveViewSelector) else { return }
+        let nextMovie = descriptor.current == 1
+        if nextMovie != movieMode {
+            movieMode = nextMovie
+            state.movieMode = nextMovie
+            await loadExposure(movie: nextMovie)
+        }
+    }
+
+    private func refreshBattery() async {
+        guard !stopRequested else { return }
+        let next: RemotePropertyDescriptor?
+        if let batteryDescriptor { next = try? await camera.refreshRemoteProperty(batteryDescriptor) }
+        else { next = try? await camera.remoteProperty(.batteryLevel) }
+        guard let next, !stopRequested else { return }
+        guard next.property == .batteryLevel,
+              next.dataType == 0x0002,
+              next.current <= 100 else { return }
+        batteryDescriptor = next
+        batteryPercent = Int(next.current)
+    }
+
+    private func refreshFocusMode() async {
+        focusModeDescriptor = try? await camera.remoteFocusMode()
+        state.focus.manual = focusModeDescriptor?.property == .focusMode && focusModeDescriptor?.current == 1
     }
 
     func setHDLiveView(_ enabled: Bool) {
-        guard hdLiveView != enabled else { return }
+        guard hdLiveView != enabled, !stopRequested else { return }
         hdLiveView = enabled
-        guard let previousTask = frameTask else { return }
-        // Android's HD switch starts a fresh live-view session because the
-        // 0xD1AC size property is only effective while LV is closed. Join the
-        // cancelled task before starting again so EndLiveView always precedes
-        // the next size write and StartLiveView.
-        frameTask = nil
-        previousTask.cancel()
-        Task { [weak self] in
-            await previousTask.value
-            guard let self, !Task.isCancelled else { return }
-            self.start()
-        }
+        // Cooperatively finish the command on the wire. EndLiveView precedes
+        // the new size write/start, without releasing the page's remote gate.
+        restartLiveView = true
     }
 
-    func loadExposure(movie: Bool) {
-        Task { [weak self] in
-            guard let self else { return }
-            var loaded: [RemoteExposureField: RemotePropertyDescriptor] = [:]
-            for field in [RemoteExposureField.exposureCompensation, .iso, .aperture, .shutter] {
-                for property in RemoteExposureParameters.compatibleProperties(for: field, movie: movie) {
-                    if let descriptor = try? await camera.remoteProperty(property) {
-                        loaded[field] = descriptor
-                        break
-                    }
-                }
+    private func loadExposure(movie: Bool) async {
+        var loaded: [RemoteExposureField: RemotePropertyDescriptor] = [:]
+        for field in [RemoteExposureField.exposureCompensation, .iso, .aperture, .shutter] {
+            for property in RemoteExposureParameters.compatibleProperties(for: field, movie: movie) {
+                guard !stopRequested else { return }
+                if let descriptor = try? await camera.remoteProperty(property) { loaded[field] = descriptor; break }
             }
-            exposureDescriptors = loaded
-            autoISODescriptor = nil
-            for property in RemoteExposureParameters.autoISOProperties(movie: movie) {
-                if let descriptor = try? await camera.remoteProperty(property) {
-                    autoISODescriptor = descriptor
-                    break
-                }
+        }
+        guard !stopRequested else { return }
+        exposureDescriptors = loaded
+        autoISODescriptor = nil
+        for property in RemoteExposureParameters.autoISOProperties(movie: movie) {
+            guard !stopRequested else { return }
+            if let descriptor = try? await camera.remoteProperty(property),
+               descriptor.writable,
+               ((descriptor.values.contains(0) && descriptor.values.contains(where: { $0 != 0 })) ||
+                (descriptor.values.isEmpty && [0x0001, 0x0002].contains(descriptor.dataType) && descriptor.current <= 1)) {
+                autoISODescriptor = descriptor
+                break
             }
-            focusModeDescriptor = try? await camera.remoteProperty(.focusMode)
-            state.focus.manual = focusModeDescriptor?.current == 1
         }
     }
 
     var autoISOEnabled: Bool { autoISODescriptor?.current != 0 }
+
+    func setLevelVisible(_ visible: Bool) {
+        levelVisible = visible
+        levelTask?.cancel()
+        levelRoll = nil
+        guard visible, !stopRequested else { return }
+        levelTask = Task { [weak self] in
+            guard let self else { return }
+            var descriptor: RemotePropertyDescriptor?
+            var failures = 0
+            while !Task.isCancelled && !stopRequested && levelVisible {
+                if descriptor == nil {
+                    descriptor = try? await camera.remoteProperty(.angleLevel)
+                    if descriptor == nil { levelVisible = false; break }
+                }
+                guard let current = descriptor else { break }
+                if let refreshed = try? await camera.refreshRemoteProperty(current) {
+                    let signed = Int64(bitPattern: refreshed.current)
+                    levelRoll = (Double(signed) / 65536.0 * 10).rounded() / 10
+                    descriptor = refreshed
+                    failures = 0
+                } else {
+                    failures += 1
+                    if failures >= 3 { levelRoll = nil; levelVisible = false; break }
+                }
+                try? await Task.sleep(for: .milliseconds(250))
+            }
+        }
+    }
 
     /// One feedback pulse per camera detent, matching RemoteScreen's
     /// onValueStep callback. The eventual write remains coalesced by the
@@ -249,10 +380,14 @@ final class RemoteViewModel: ObservableObject {
     }
 
     func stop() {
+        disposed = true
         stopRequested = true
         halfPressHeld = false
         halfPressTask?.cancel()
         halfPressTask = nil
+        levelTask?.cancel()
+        levelTask = nil
+        levelVisible = false
         stopTrackingRequested = state.focus.tracking
         focusHideTask?.cancel()
         recordingOperations.invalidate()
@@ -276,12 +411,15 @@ final class RemoteViewModel: ObservableObject {
         let frame = frameTask
         let mode = modeTask
         let recording = recordingCommandTask
+        await batteryTask?.value
+        batteryTask = nil
         await frame?.value
         await mode?.value
         await recording?.value
         frameTask = nil
         modeTask = nil
         recordingCommandTask = nil
+        await camera.setRemoteActive(false)
     }
 
     /// Starts the Android two-stage shutter AF. The initial tick is emitted
@@ -431,13 +569,22 @@ final class RemoteViewModel: ObservableObject {
         state = state.applying(.focusRequested(point))
         haptics.tick()
         focusHideTask?.cancel()
-        let trackingX = UInt32((point.x * Double(max(1, Int(coordinateSize.width) - 1))).rounded())
-        let trackingY = UInt32((point.y * Double(max(1, Int(coordinateSize.height) - 1))).rounded())
+        // Android uses two coordinate spaces from the enhanced frame header:
+        // the full image space for StartTracking and the AF grid for
+        // ChangeAfArea. Never reuse the JPEG dimensions for both commands.
+        let trackingWidth = frameMetadata?.trackingCoordinateWidth ?? Int(coordinateSize.width)
+        let trackingHeight = frameMetadata?.trackingCoordinateHeight ?? Int(coordinateSize.height)
+        let focusWidth = frameMetadata?.focusCoordinateWidth ?? trackingWidth
+        let focusHeight = frameMetadata?.focusCoordinateHeight ?? trackingHeight
+        let trackingX = UInt32((point.x * Double(max(1, trackingWidth - 1))).rounded())
+        let trackingY = UInt32((point.y * Double(max(1, trackingHeight - 1))).rounded())
+        let focusX = UInt32((point.x * Double(max(1, focusWidth - 1))).rounded())
+        let focusY = UInt32((point.y * Double(max(1, focusHeight - 1))).rounded())
         Task { [weak self] in
             guard let self else { return }
             do {
                 let result = try await camera.focusAt(trackingX: trackingX, trackingY: trackingY,
-                                                      focusX: trackingX, focusY: trackingY)
+                                                      focusX: focusX, focusY: focusY)
                 guard !Task.isCancelled, !stopRequested else { return }
                 if result.timedOut { state = state.applying(.focusFailed); scheduleFocusHide(after: 1.2) }
                 else {
@@ -489,6 +636,8 @@ final class RemoteViewModel: ObservableObject {
     deinit {
         frameTask?.cancel()
         modeTask?.cancel()
+        batteryTask?.cancel()
+        levelTask?.cancel()
         focusHideTask?.cancel()
         halfPressTask?.cancel()
         recordingTimerTask?.cancel()

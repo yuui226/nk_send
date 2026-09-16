@@ -365,10 +365,6 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
             // MainActivity.shouldPreferHighThroughputTransfers: both files and
             // transfer routes enable this; monitoring disables it.
             Task { await session.setPreferHighThroughputTransfers(!remote) }
-            if !remote {
-                model.resumeAfterRemote()
-                model.wakeThumbnailFill()
-            }
         }
         .onDisappear {
             Task { await session.setPreferHighThroughputTransfers(false) }
@@ -428,15 +424,13 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
             RemoteView(session: session,
                        isSessionConnected: isSessionConnected,
                        onRetrySTA: onRetrySTA,
+                       onPreparing: { await model.pauseForRemote() },
                        onStopped: { transportLost in
                            // A transport failure tears down this mounted
                            // session and reconnects in place. Do not
                            // start a second scan against the invalid PTP
                            // channel while the replacement is opening.
-                           if !transportLost {
-                               model.resumeAfterRemote()
-                               model.wakeThumbnailFill()
-                           }
+                           model.resumeAfterRemote(isConnected: isSessionConnected && !transportLost)
                        },
                        onTransportLost: {
                            // Android keeps monitor navigation mounted

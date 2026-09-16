@@ -37,6 +37,7 @@ private extension EnvironmentValues {
 struct RemoteView: View {
     @Environment(\.dismiss) private var dismiss
     private let onStopped: ((Bool) -> Void)?
+    private let onPreparing: (() async -> Void)?
     private let onTransportLost: (() -> Void)?
     private let isSessionConnected: Bool
     private let onRetrySTA: () -> Void
@@ -63,9 +64,11 @@ struct RemoteView: View {
     @State private var stopCleanupStarted = false
 
     init(session: CameraSession, isSessionConnected: Bool = true,
-         onRetrySTA: @escaping () -> Void = {}, onStopped: ((Bool) -> Void)? = nil,
+         onRetrySTA: @escaping () -> Void = {}, onPreparing: (() async -> Void)? = nil,
+         onStopped: ((Bool) -> Void)? = nil,
          onTransportLost: (() -> Void)? = nil) {
         self.onStopped = onStopped
+        self.onPreparing = onPreparing
         self.onTransportLost = onTransportLost
         self.isSessionConnected = isSessionConnected
         self.onRetrySTA = onRetrySTA
@@ -110,8 +113,11 @@ struct RemoteView: View {
         .animation(ZTransferMotion.standard, value: model.recordingHint)
         .animation(ZTransferMotion.standard, value: layoutOrientation)
         .statusBarHidden(false)
-        .task { model.start() }
-        .task { model.loadExposure(movie: false) }
+        .task {
+            await onPreparing?()
+            guard !Task.isCancelled, !stopCleanupStarted, isSessionConnected else { return }
+            model.start()
+        }
         // Orientation is intentionally scoped to the monitor page. The rest
         // of the app stays portrait; this page rotates its own canvas to match
         // the device instead of changing the application's interface size.
@@ -312,7 +318,10 @@ struct RemoteView: View {
                     }
                 }
                 remoteToolButton(active: levelVisible, label: { RemoteLevelIcon().frame(width: 18, height: 18) }) {
-                    withAnimation(ZTransferMotion.standard) { levelVisible.toggle() }
+                    withAnimation(ZTransferMotion.standard) {
+                        levelVisible.toggle()
+                        model.setLevelVisible(levelVisible)
+                    }
                 }
                 remoteToolButton(active: false, label: { RemoteFullscreenIcon().frame(width: 17, height: 17) }) {
                     withAnimation(ZTransferMotion.standard) { layoutOrientation = .landscapeLeft }
@@ -360,8 +369,11 @@ struct RemoteView: View {
                     desqueeze = RemoteDisplayOptions.nextDesqueeze(after: desqueeze)
                 }
             }
-            remoteToolButton(active: levelVisible, label: { RemoteLevelIcon().frame(width: 18, height: 18) }) {
-                withAnimation(ZTransferMotion.standard) { levelVisible.toggle() }
+                remoteToolButton(active: levelVisible, label: { RemoteLevelIcon().frame(width: 18, height: 18) }) {
+                    withAnimation(ZTransferMotion.standard) {
+                        levelVisible.toggle()
+                        model.setLevelVisible(levelVisible)
+                    }
             }
             if model.movieMode {
                 remoteRecordButton
@@ -530,9 +542,11 @@ struct RemoteView: View {
                 }
                 if model.state.liveViewStable {
                     HStack(spacing: 4) {
-                        RemoteStatusBadge(text: "M", weight: .bold)
+                        if let program = model.exposureProgram {
+                            RemoteStatusBadge(text: RemoteExposureParameters.format(program.property, raw: program.current), weight: .bold)
+                        }
                         if let focusMode = model.focusModeDescriptor {
-                            RemoteStatusBadge(text: focusMode.current == 1 ? "MF" : "AF-S", weight: .semibold)
+                            RemoteStatusBadge(text: RemoteExposureParameters.format(focusMode.property, raw: focusMode.current), weight: .semibold)
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

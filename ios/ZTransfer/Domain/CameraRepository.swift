@@ -316,13 +316,42 @@ actor CameraRepository {
                                       parameters: [descriptor.property.rawValue], data: encoded)
     }
 
+    func refreshRemoteProperty(_ descriptor: RemotePropertyDescriptor) async throws -> RemotePropertyDescriptor? {
+        let response = try await session.execute(operation: PTPConstants.getDevicePropValue,
+                                                 parameters: [descriptor.property.rawValue])
+        guard let value = RemotePropertyCodec.parseValue(response.data, dataType: descriptor.dataType) else { return nil }
+        var updated = descriptor
+        updated.current = UInt64(bitPattern: value)
+        return updated
+    }
+
+    func remoteFocusMode() async throws -> RemotePropertyDescriptor? {
+        for property in [RemoteProperty.focusMode, .nikonAFMode] {
+            let response = try await session.executeResponse(operation: PTPConstants.getDevicePropValue,
+                                                             parameters: [property.rawValue])
+            guard response.code == PTPConstants.responseOK, [1, 2, 4, 8].contains(response.data.count) else { continue }
+            let value = response.data.enumerated().reduce(UInt64(0)) { $0 | UInt64($1.element) << ($1.offset * 8) }
+            let known = property == .focusMode ? [1, 2, 3, 0x8010, 0x8011, 0x8012, 0x8013].contains(value)
+                : [0, 1, 2].contains(value)
+            if known { return .init(property: property, writable: false, current: value, values: []) }
+        }
+        return nil
+    }
+
+    func remoteEvents() async throws -> [STAEvent] {
+        if staAlbum != nil {
+            let response = try await session.executeResponse(operation: PTPConstants.nikonCompatibilityInit)
+            if response.code == PTPConstants.responseOK { return STAEvent.polled(response.data, extended: true) ?? [] }
+            if response.code != PTPConstants.operationNotSupported { return [] }
+        }
+        let response = try await session.executeResponse(operation: 0x90C7)
+        return response.code == PTPConstants.responseOK ? STAEvent.polled(response.data, extended: false) ?? [] : []
+    }
+
     /// Starts Nikon Live View using the same bounded busy retry and DeviceReady
     /// poll as Android RemoteLab. A successful call means the camera is ready
     /// to accept frame requests; callers still wait for the first frame.
     func startLiveView() async throws {
-        remoteActive = true
-        var started = false
-        defer { if !started { remoteActive = false; scheduleObjectResolver() } }
         var attempts = 0
         while true {
             do {
@@ -339,17 +368,16 @@ actor CameraRepository {
             do {
                 _ = try await session.execute(operation: PTPConstants.deviceReady,
                                               timeoutNanoseconds: 1_000_000_000)
-                started = true
                 return
             } catch PTPSessionError.responseCode(let code) where code == PTPConstants.deviceBusy {
                 try await Task.sleep(nanoseconds: 20_000_000)
             }
         }
-        throw PTPSessionError.timeout
+        // Android logs a four-second DeviceBusy warm-up but still attempts
+        // frames; this response is not a transport timeout/disconnection.
     }
 
     func endLiveView() async {
-        defer { remoteActive = false; scheduleObjectResolver() }
         _ = try? await session.execute(operation: PTPConstants.endLiveView)
     }
 
@@ -449,13 +477,18 @@ actor CameraRepository {
     /// scan keeps its handle snapshot and resumes at the same cursor when the
     /// preview releases the channel.
     func setFHDActive(_ active: Bool) { fhdActive = active }
+    /// Remote page owns the foreground channel from the moment it appears,
+    /// before parameter loading or Live View startup begins.
+    func setRemoteActive(_ active: Bool) {
+        remoteActive = active
+        if !active { scheduleObjectResolver() }
+    }
 
     private func waitForForegroundPreview() async throws {
         // Android cancels a list scan when remote monitor takes ownership. The
         // monitor may capture new media, so its next list load must enumerate
         // fresh handles instead of resuming the old snapshot.
         if remoteActive {
-            scanSnapshot = nil
             throw CameraRepositoryError.foregroundPreempted
         }
         // Interactive FHD is a short same-session pause and resumes at the
@@ -537,6 +570,9 @@ actor CameraRepository {
             var results: [CatalogMetadataResult] = []
             results.reserveCapacity(requests.count)
             for request in requests {
+                // Finish a command already on the wire, but never start the
+                // next ObjectInfo/header read after the remote page takes over.
+                try await self.checkRemoteScanOwnership()
                 do {
                     let file: CameraFile
                     if let directReader {
@@ -572,6 +608,10 @@ actor CameraRepository {
             }
             return results
         }
+    }
+
+    private func checkRemoteScanOwnership() throws {
+        if remoteActive { throw CameraRepositoryError.foregroundPreempted }
     }
 
     func thumbnail(handle: UInt32) async throws -> Data {
@@ -834,7 +874,8 @@ actor CameraRepository {
 
         // A resume snapshot is valid only for this repository/session.  A fresh
         // scan invalidates old rows and cache state exactly like Android.
-        let reusable = resumeSnapshot ?? (preserveExisting ? scanSnapshot : nil)
+        let reusable = resumeSnapshot
+        if reusable == nil { scanSnapshot = nil }
         if !preserveExisting && reusable == nil {
             catalogFiles.removeAll(keepingCapacity: true)
             indexedCatalogFiles.removeAll(keepingCapacity: true)
@@ -1042,6 +1083,8 @@ actor CameraRepository {
                 let results: [CatalogMetadataResult]
                 do {
                     results = try await readCatalogMetadataBatch(requests)
+                } catch CameraRepositoryError.foregroundPreempted {
+                    throw CameraRepositoryError.foregroundPreempted
                 } catch {
                     if staAlbum != nil { throw CameraRepositoryError.transportLost }
                     throw error
@@ -1085,6 +1128,11 @@ actor CameraRepository {
                 }
             }
             if !batch.isEmpty { try await onBatch?(batch) }
+            // Only accepted rows survive a page pause. Without this checkpoint
+            // returning from remote would reread every partial-scan ObjectInfo.
+            catalogFiles = Dictionary(files.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            indexedCatalogFiles = indexed
+            catalogOrder = files.map(\.id)
             scanSnapshot?.processedHandles.formUnion(pendingProcessedHandles)
             directPublishedCount += pendingProcessedHandles.count
             batch.removeAll(keepingCapacity: true)

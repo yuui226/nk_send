@@ -7,28 +7,23 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		A9145A100000000000000007 /* HapticPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9145A100000000000000008 /* HapticPolicy.swift */; };
-		A9145A100000000000000009 /* HapticsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9145A10000000000000000A /* HapticsTests.swift */; };
-		A9145A100000000000000005 /* ZTransferHaptics.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9145A100000000000000006 /* ZTransferHaptics.swift */; };
-		A9145A100000000000000001 /* TipLightbulbButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9145A100000000000000002 /* TipLightbulbButton.swift */; };
-		A9145A100000000000000003 /* TipAttentionMotion.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9145A100000000000000004 /* TipAttentionMotion.swift */; };
-		D1B7A1D2E3F4456789012352 /* debug_sample_fhd.jpg in Resources */ = {isa = PBXBuildFile; fileRef = D1B7A1D2E3F4456789012353 /* debug_sample_fhd.jpg */; };
-		D1B7A1D2E3F4456789012350 /* debug_sample_01.jpg in Resources */ = {isa = PBXBuildFile; fileRef = D1B7A1D2E3F4456789012351 /* debug_sample_01.jpg */; };
-		D1B7A1D2E3F4456789012345 /* DebugCameraData.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1B7A1D2E3F4456789012346 /* DebugCameraData.swift */; };
 		045977539EBCC80962632AF7 /* TransferQueueViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CC8C5625130C6409DD261D3 /* TransferQueueViewModel.swift */; };
 		04FDA089E2E70E83E18527AD /* Np3BitmapFilter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B088B7DE128919633A28EF1C /* Np3BitmapFilter.swift */; };
 		06198A7AC9FA3FCAFFDB49D7 /* RemoteMovieRecording.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FE8BFEAB58818B4214C9EA2 /* RemoteMovieRecording.swift */; };
 		075325CEBC09C41F344985F4 /* STAProfileStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FC4F7B00A76D4F318D10B0E /* STAProfileStore.swift */; };
 		07536DCEAC6F73F298D92823 /* PhotoThumbnailFillQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C2D3F7511237006742926D0 /* PhotoThumbnailFillQueue.swift */; };
+		0A8544825B726D3116C5420F /* debug_sample_01.jpg in Resources */ = {isa = PBXBuildFile; fileRef = F4065A70797FFC0036A880A0 /* debug_sample_01.jpg */; };
 		0E1739467119ADD78EC6FFB0 /* STAResetPairingOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B84B48793ED342FBA1F6D10 /* STAResetPairingOverlay.swift */; };
 		0E49CC3D11A2B396AD9D5F4D /* CameraIOGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D347C0A0D7091DF932D1DBA /* CameraIOGate.swift */; };
 		10BA2D27B0425D2A34F982F2 /* RemoteViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B2971CFDD3F6EBEF2ACA1A8 /* RemoteViewModel.swift */; };
+		14F1909057D896C4625EB14E /* RemoteLifecycleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6B1A824F148592609E317A8 /* RemoteLifecycleTests.swift */; };
 		16939A4A3006E233A957DD0E /* PTPDatasetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF061766E1A0B9F3060190ED /* PTPDatasetTests.swift */; };
 		16B7898C274ABFF0A370585B /* ZTransferGlassSurface.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2B51C2A8D807D8A9CA21F9E /* ZTransferGlassSurface.swift */; };
 		171B3B7D9317366D04867322 /* CameraConnectionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1623B90210C055F71FFFB2FD /* CameraConnectionService.swift */; };
 		20AAC3573791D9D583C064FF /* ZTransferApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECDEA795752767FBE8FFC99F /* ZTransferApp.swift */; };
 		2168F57038D1C9802791EAB7 /* Np3FilterEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCD67906893DA353A437E6A3 /* Np3FilterEngineTests.swift */; };
 		2605D49FA9859E0E41665E82 /* TransferDirectoryIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = B61EB2E2964B68484692D083 /* TransferDirectoryIndex.swift */; };
+		27B42A4945BF0DA7716E8C2A /* HapticsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08F760D1D1890D58F122FDA6 /* HapticsTests.swift */; };
 		28B3F74FF921D952492C8C1C /* PhotoFrameTextLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95AB5EA7C8D3692B4E2C4C23 /* PhotoFrameTextLayoutTests.swift */; };
 		2B14E3B205CBC8ED8289E7EC /* DoubleZMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DF8FBC08956F02D0F24ACFD /* DoubleZMark.swift */; };
 		3155D971BF9B55A0B0AC26A1 /* ZTransferDesign.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8E5F0504E1E56C59E21D761 /* ZTransferDesign.swift */; };
@@ -39,10 +34,12 @@
 		3B5B3D5F069C7122B459035C /* PhotoExifStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F0B7C798712246B70C8C2D0 /* PhotoExifStore.swift */; };
 		3C86D76849976090B4967FFB /* PhotoEffectsBatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD45F35C4B19629A11F32A1C /* PhotoEffectsBatch.swift */; };
 		3E8C1CA06EBC3AB08DB250B3 /* ImageCaptureErrorMappingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5D5E41AAFFA785D2FE92689 /* ImageCaptureErrorMappingTests.swift */; };
+		3FA699D39934C67DCD4D5B47 /* TipLightbulbButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC25EF6BF137048DFDF0AC15 /* TipLightbulbButton.swift */; };
 		44E63D0E5E2D65EDD52F8A6B /* WiFiConnectionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21F79BF7C97A481859ECB202 /* WiFiConnectionService.swift */; };
 		481FE39822F171E89584DA10 /* great_vibes_regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 3DE23631DD841D16961C9AA6 /* great_vibes_regular.ttf */; };
 		48EBBB7703B0E57F6AC878EA /* ConnectionStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61F577AFF70C53D32A99AB7B /* ConnectionStateTests.swift */; };
 		493A04F66D4FC115A856ACB8 /* CameraIOGateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0217CE88D9C38A7150F3C00E /* CameraIOGateTests.swift */; };
+		4BC52BC25953D175860BCB37 /* GeniePopupPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 721EE1E4462782AD6B669580 /* GeniePopupPanel.swift */; };
 		4E6912D45117355E97EA8583 /* CameraRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CEBFBB42C89586314B7CDF4 /* CameraRepository.swift */; };
 		4EC9985B073E184DC416ADE7 /* RemoteExposureTile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 125A2CF683765CC9A3041412 /* RemoteExposureTile.swift */; };
 		501B9EDBF24732451874BB1D /* PhotoEffectsBatchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3010D83FAA873246AAC42FCF /* PhotoEffectsBatchTests.swift */; };
@@ -50,7 +47,6 @@
 		53050A00F15AA49DE998807E /* RemoteView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2482C61B58C4A4EE95210CDA /* RemoteView.swift */; };
 		5847B86DF637C69FB7A9E604 /* Np3FilterEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = F372F3899BF36619208BF340 /* Np3FilterEngine.swift */; };
 		5AC62E28F7193D5C5D250853 /* RemoteExposureParametersTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25DA65AB7E6B869A2B7A6F7B /* RemoteExposureParametersTests.swift */; };
-		5CB1D72BEF5ABC8FDAB563A0 /* PhotoFilterComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0B6DB7E3BF3A4EC8555BE3C /* PhotoFilterComponents.swift */; };
 		5E9A339B8DCD4C1D4D876DF7 /* ThumbnailCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83180466B40E5CA9AE7D2B7E /* ThumbnailCache.swift */; };
 		5EBA0A39B2B0C20C327BC1AC /* PTPIPCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7FF25E1E6430F77DDD7AF2A7 /* PTPIPCodec.swift */; };
 		676480E34AEAD2A4C86B50B6 /* CameraSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C31C90D73DDE407941D9C78 /* CameraSession.swift */; };
@@ -61,6 +57,7 @@
 		6FE585A7A3D1D329FA35CA75 /* PTPIPDiscoveryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C8D85042F86E7CE49C16BF8 /* PTPIPDiscoveryService.swift */; };
 		73A0B84A67659AC4209F4A8F /* RemoteExposureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59F6B50FACC860CB7B9DCBE5 /* RemoteExposureTests.swift */; };
 		73C7544A106A7E21D8421C92 /* ConnectionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 538A2FD484D2734CC691DA00 /* ConnectionState.swift */; };
+		75114453FD20F2EA41BDB65D /* ZTransferHaptics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C76F0F0260760721CD58EA4 /* ZTransferHaptics.swift */; };
 		76FA040ADFD4573DBDA00991 /* bebas_neue_regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 3EE41D0AC8C757C430C5A6B5 /* bebas_neue_regular.ttf */; };
 		7769C0BF648752E475D55711 /* RemoteFrameParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D26D7C4F1E5BCB5F08606F /* RemoteFrameParser.swift */; };
 		79DF53F7FB57B0EF6D965D7C /* RemoteStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3505DCCE29F149C76595F9C3 /* RemoteStateTests.swift */; };
@@ -81,6 +78,7 @@
 		919CFB2260E67C65B27370D8 /* CameraDownloadTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A3C750EEC9F2C3167D6CEFE /* CameraDownloadTests.swift */; };
 		92B56B6C3692F4CAA4989934 /* PTPSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 615EEFA9D6159AC37C5A31C7 /* PTPSession.swift */; };
 		946D307C7E78C2701BC6151F /* RemoteRecordingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF9539324F4DB53B0B922D67 /* RemoteRecordingTests.swift */; };
+		952C9E5420A97B8788F42568 /* PhotoFilterComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5A141881A4EEBF0C3CF247A /* PhotoFilterComponents.swift */; };
 		993DCFA6B1D01106479A25F3 /* PhotoEffectsEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C73EF01969DAC563DA91DD0 /* PhotoEffectsEditorView.swift */; };
 		9BD36C93DE99E708A9E68AF5 /* GPSProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = F669891731A2784158CAB73F /* GPSProtocol.swift */; };
 		9D2FA1400CA1F9B6632FFAF8 /* STATipsOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66D3FD27372D4F017D196970 /* STATipsOverlay.swift */; };
@@ -105,6 +103,7 @@
 		BADF7CD7F32B68DCF3D97C3F /* LocalPhotoEffectsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7580B5DC6E6B426AFDCD70C /* LocalPhotoEffectsView.swift */; };
 		BD08A44BA78B8FCC84A6A283 /* AndroidThumbnailProcessorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6A4EAE118D5934657060B46 /* AndroidThumbnailProcessorTests.swift */; };
 		C127B5B73435A9434E2EEF30 /* cormorant_garamond_medium_italic.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 23F79E3B04FE343289768099 /* cormorant_garamond_medium_italic.ttf */; };
+		C2220F21D63C5E2C88F1E672 /* HapticPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77A5E77B2C0E19B2B1CD5F24 /* HapticPolicy.swift */; };
 		C2B1F15D120EECDFE3C148D6 /* PhotoExif.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FFDE9BAC912EED3139672E5 /* PhotoExif.swift */; };
 		C3B0EBF639B834E335A187A5 /* PhotoFrameTextLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = D961B6709BEFEB665F1D0932 /* PhotoFrameTextLayout.swift */; };
 		C47EE7A521C4554CB9D112FB /* AndroidThumbnailProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7014EFB81AA1037FAD74859E /* AndroidThumbnailProcessor.swift */; };
@@ -113,19 +112,21 @@
 		CBEB599B28F9477176061658 /* CameraTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94B13A99D0C74F65A242E106 /* CameraTransport.swift */; };
 		CCC3F71A5AF4D6584D1FC2EE /* PhotoFilter.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE7320E831B92FDF16C5A2A8 /* PhotoFilter.swift */; };
 		CDA839B3BA3291E7FA00F976 /* Np3FilterCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66B121CC0D58A97AD69EEF11 /* Np3FilterCatalog.swift */; };
+		CF46C74D9806A588BE116E37 /* GeniePopupMotion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D328616E8BD4A0E6052DD95 /* GeniePopupMotion.swift */; };
 		D08D5FC66C3B90DDD388F961 /* SelectedUSBPTPTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E44BD3A96C8965980DD7D9B /* SelectedUSBPTPTransport.swift */; };
+		D2159CE6778A16A97096CD84 /* DebugCameraData.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D096209BDDBA2BD1948EFA4 /* DebugCameraData.swift */; };
 		D48305D06926CD24336DAFA5 /* ConnectionPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55E5A0EF9EEE6944C08F254E /* ConnectionPage.swift */; };
 		D5AA7687642FFB42F491E7E0 /* PTPSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F9983A9D8E56D67C98AA6B4 /* PTPSessionTests.swift */; };
 		D5F4DFE0596F042BD0AA0510 /* RemoteProperty.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B2706E553E4F7C964F686B6 /* RemoteProperty.swift */; };
 		D67D286EED44004960A653F0 /* PTPDataset.swift in Sources */ = {isa = PBXBuildFile; fileRef = D40B340AC13401D86C00C2D8 /* PTPDataset.swift */; };
+		DFC4E7BF20645C6EDB939734 /* TipAttentionMotion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94872EDA00F4ABDC5BEC055D /* TipAttentionMotion.swift */; };
 		E154245855166665AD2D668E /* PhotoThumbnailStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA5A5EB2EE3C624D2C951974 /* PhotoThumbnailStore.swift */; };
 		E3EBD260373FF0B6C635611E /* PTPIPSocketTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19E7177E4804514D52C91294 /* PTPIPSocketTransport.swift */; };
 		E64F169475A3D51E7C7D15C7 /* LocalPhotoBatchViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9AE1B278336397EAB6029214 /* LocalPhotoBatchViewModel.swift */; };
 		E8FAC959B890B065FF02DED3 /* TransferQueueView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E17D81EDE19E9E8343BD531F /* TransferQueueView.swift */; };
 		EA2A5E73813646829194CCFC /* SettingsPopupOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = C03DEDD0C14571253802D484 /* SettingsPopupOverlay.swift */; };
-		EA2A5E73813646829194CCFD /* GeniePopupMotion.swift in Sources */ = {isa = PBXBuildFile; fileRef = C03DEDD0C14571253802D485 /* GeniePopupMotion.swift */; };
-		EA2A5E73813646829194CCFE /* GeniePopupPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C03DEDD0C14571253802D486 /* GeniePopupPanel.swift */; };
 		EAA5DF5FD98BD21E0A03F030 /* PhotoEffects.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66FA5BCCCA104E827B8A69A1 /* PhotoEffects.swift */; };
+		EC141CEEC0B3CC2493824E36 /* debug_sample_fhd.jpg in Resources */ = {isa = PBXBuildFile; fileRef = 328894309311582E8EECDA44 /* debug_sample_fhd.jpg */; };
 		F4543194B75979601E536063 /* Np3BitmapFilterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D89F88E0AAFA56543C73E8D2 /* Np3BitmapFilterTests.swift */; };
 		F7DD276D50F864670EB55E91 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4AA2639C7BC0B4B5E3D01734 /* SettingsView.swift */; };
 		F801A3108B643FCDE9658D68 /* ZTransferColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77FF345DD1F232661C243E4F /* ZTransferColors.swift */; };
@@ -144,16 +145,9 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		A9145A100000000000000008 /* HapticPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HapticPolicy.swift; sourceTree = "<group>"; };
-		A9145A10000000000000000A /* HapticsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HapticsTests.swift; sourceTree = "<group>"; };
-		A9145A100000000000000006 /* ZTransferHaptics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZTransferHaptics.swift; sourceTree = "<group>"; };
-		A9145A100000000000000002 /* TipLightbulbButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TipLightbulbButton.swift; sourceTree = "<group>"; };
-		A9145A100000000000000004 /* TipAttentionMotion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TipAttentionMotion.swift; sourceTree = "<group>"; };
-		D1B7A1D2E3F4456789012353 /* debug_sample_fhd.jpg */ = {isa = PBXFileReference; lastKnownFileType = image.jpeg; path = ZTransfer/Resources/debug_sample_fhd.jpg; sourceTree = "<group>"; };
-		D1B7A1D2E3F4456789012351 /* debug_sample_01.jpg */ = {isa = PBXFileReference; lastKnownFileType = image.jpeg; path = ZTransfer/Resources/debug_sample_01.jpg; sourceTree = "<group>"; };
-		D1B7A1D2E3F4456789012346 /* DebugCameraData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugCameraData.swift; sourceTree = "<group>"; };
 		0217CE88D9C38A7150F3C00E /* CameraIOGateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraIOGateTests.swift; sourceTree = "<group>"; };
 		03D3B6EEC0B03021E23E7B54 /* GPSProtocolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GPSProtocolTests.swift; sourceTree = "<group>"; };
+		08F760D1D1890D58F122FDA6 /* HapticsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HapticsTests.swift; sourceTree = "<group>"; };
 		0994973567FB60B02328A65F /* PhotoListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoListView.swift; sourceTree = "<group>"; };
 		0C2D3F7511237006742926D0 /* PhotoThumbnailFillQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoThumbnailFillQueue.swift; sourceTree = "<group>"; };
 		0E20FABF2CECBED5A93AB576 /* PTPIPDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PTPIPDiscovery.swift; sourceTree = "<group>"; };
@@ -178,11 +172,13 @@
 		2CC18517971C48594EE448E6 /* TransferQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransferQueue.swift; sourceTree = "<group>"; };
 		3010D83FAA873246AAC42FCF /* PhotoEffectsBatchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoEffectsBatchTests.swift; sourceTree = "<group>"; };
 		319C94935AB93C922D1BE545 /* PhotoFilterPopupOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoFilterPopupOverlay.swift; sourceTree = "<group>"; };
+		328894309311582E8EECDA44 /* debug_sample_fhd.jpg */ = {isa = PBXFileReference; lastKnownFileType = image.jpeg; path = debug_sample_fhd.jpg; sourceTree = "<group>"; };
 		33D6747E8BCF4B6F29315432 /* ZTransferTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = ZTransferTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		341299C34669842D43A516C0 /* PhotoThumbnailStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoThumbnailStoreTests.swift; sourceTree = "<group>"; };
 		3505DCCE29F149C76595F9C3 /* RemoteStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteStateTests.swift; sourceTree = "<group>"; };
 		37584615FF21622BEB453C72 /* GPSState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GPSState.swift; sourceTree = "<group>"; };
 		3A3C750EEC9F2C3167D6CEFE /* CameraDownloadTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraDownloadTests.swift; sourceTree = "<group>"; };
+		3C76F0F0260760721CD58EA4 /* ZTransferHaptics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZTransferHaptics.swift; sourceTree = "<group>"; };
 		3CC8C5625130C6409DD261D3 /* TransferQueueViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransferQueueViewModel.swift; sourceTree = "<group>"; };
 		3DE23631DD841D16961C9AA6 /* great_vibes_regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = great_vibes_regular.ttf; sourceTree = "<group>"; };
 		3EE41D0AC8C757C430C5A6B5 /* bebas_neue_regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = bebas_neue_regular.ttf; sourceTree = "<group>"; };
@@ -199,6 +195,7 @@
 		538A2FD484D2734CC691DA00 /* ConnectionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionState.swift; sourceTree = "<group>"; };
 		55E5A0EF9EEE6944C08F254E /* ConnectionPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionPage.swift; sourceTree = "<group>"; };
 		59F6B50FACC860CB7B9DCBE5 /* RemoteExposureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteExposureTests.swift; sourceTree = "<group>"; };
+		5D328616E8BD4A0E6052DD95 /* GeniePopupMotion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeniePopupMotion.swift; sourceTree = "<group>"; };
 		5EE7E180A63F2667D786F4D4 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		615EEFA9D6159AC37C5A31C7 /* PTPSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PTPSession.swift; sourceTree = "<group>"; };
 		61DD1A7868ADB6C35411DA6F /* PhotoEffectsRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoEffectsRenderer.swift; sourceTree = "<group>"; };
@@ -211,8 +208,10 @@
 		6CF51538A02F76ECB294979E /* RemoteState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteState.swift; sourceTree = "<group>"; };
 		6D347C0A0D7091DF932D1DBA /* CameraIOGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraIOGate.swift; sourceTree = "<group>"; };
 		7014EFB81AA1037FAD74859E /* AndroidThumbnailProcessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndroidThumbnailProcessor.swift; sourceTree = "<group>"; };
+		721EE1E4462782AD6B669580 /* GeniePopupPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeniePopupPanel.swift; sourceTree = "<group>"; };
 		72757BCC923622558D27F45D /* STAConnectionCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = STAConnectionCoordinator.swift; sourceTree = "<group>"; };
 		7530BB4953CDCB614059E626 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
+		77A5E77B2C0E19B2B1CD5F24 /* HapticPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HapticPolicy.swift; sourceTree = "<group>"; };
 		77FF345DD1F232661C243E4F /* ZTransferColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZTransferColors.swift; sourceTree = "<group>"; };
 		78B40BD5B460FA10A033F40D /* STABrowsingSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = STABrowsingSession.swift; sourceTree = "<group>"; };
 		7A212849FDB757B232CE3700 /* GPSConnectionControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GPSConnectionControl.swift; sourceTree = "<group>"; };
@@ -227,12 +226,14 @@
 		8B2706E553E4F7C964F686B6 /* RemoteProperty.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteProperty.swift; sourceTree = "<group>"; };
 		8FFDE9BAC912EED3139672E5 /* PhotoExif.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoExif.swift; sourceTree = "<group>"; };
 		9165B39E86D240D0CAB4F2F0 /* DomainModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DomainModelTests.swift; sourceTree = "<group>"; };
+		94872EDA00F4ABDC5BEC055D /* TipAttentionMotion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TipAttentionMotion.swift; sourceTree = "<group>"; };
 		94B13A99D0C74F65A242E106 /* CameraTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraTransport.swift; sourceTree = "<group>"; };
 		95AB5EA7C8D3692B4E2C4C23 /* PhotoFrameTextLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoFrameTextLayoutTests.swift; sourceTree = "<group>"; };
 		9A396309768005C03C6E4839 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/Localizable.strings"; sourceTree = "<group>"; };
 		9AE1B278336397EAB6029214 /* LocalPhotoBatchViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalPhotoBatchViewModel.swift; sourceTree = "<group>"; };
 		9C82DE7EDD874E138885C18B /* PhotoPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoPreviewView.swift; sourceTree = "<group>"; };
 		9CEBFBB42C89586314B7CDF4 /* CameraRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraRepository.swift; sourceTree = "<group>"; };
+		9D096209BDDBA2BD1948EFA4 /* DebugCameraData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugCameraData.swift; sourceTree = "<group>"; };
 		9E44BD3A96C8965980DD7D9B /* SelectedUSBPTPTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectedUSBPTPTransport.swift; sourceTree = "<group>"; };
 		A0FCBDED0111A21DB70B4D2F /* PhotoThumbnailDiskCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoThumbnailDiskCache.swift; sourceTree = "<group>"; };
 		A685D1B40DF8FD791E95CF20 /* RemoteExposureParameters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteExposureParameters.swift; sourceTree = "<group>"; };
@@ -243,21 +244,21 @@
 		B8E5F0504E1E56C59E21D761 /* ZTransferDesign.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZTransferDesign.swift; sourceTree = "<group>"; };
 		BA5A5EB2EE3C624D2C951974 /* PhotoThumbnailStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoThumbnailStore.swift; sourceTree = "<group>"; };
 		BA7454E422D1473CC4E740CD /* AsyncDeadline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsyncDeadline.swift; sourceTree = "<group>"; };
+		BC25EF6BF137048DFDF0AC15 /* TipLightbulbButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TipLightbulbButton.swift; sourceTree = "<group>"; };
 		BDD66E5D3F4314C6B66ACD88 /* STAProfileAndMetadataTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = STAProfileAndMetadataTests.swift; sourceTree = "<group>"; };
 		C03DEDD0C14571253802D484 /* SettingsPopupOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsPopupOverlay.swift; sourceTree = "<group>"; };
-		C03DEDD0C14571253802D485 /* GeniePopupMotion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeniePopupMotion.swift; sourceTree = "<group>"; };
-		C03DEDD0C14571253802D486 /* GeniePopupPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeniePopupPanel.swift; sourceTree = "<group>"; };
 		C537587F3F20DEE8C60FA711 /* GPSCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GPSCoordinator.swift; sourceTree = "<group>"; };
 		C88C5ED244217DA340A1F1E5 /* PTPCodec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PTPCodec.swift; sourceTree = "<group>"; };
 		C94CCD158034CC3AA6E8F2F0 /* ConnectionMethodCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionMethodCard.swift; sourceTree = "<group>"; };
 		CB36939BEE4031E42F768A83 /* PTPCodecTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PTPCodecTests.swift; sourceTree = "<group>"; };
 		CEC2E153F5F165AE7B762862 /* CameraDownload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraDownload.swift; sourceTree = "<group>"; };
 		CF061766E1A0B9F3060190ED /* PTPDatasetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PTPDatasetTests.swift; sourceTree = "<group>"; };
-		D0B6DB7E3BF3A4EC8555BE3C /* PhotoFilterComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoFilterComponents.swift; sourceTree = "<group>"; };
 		D2B51C2A8D807D8A9CA21F9E /* ZTransferGlassSurface.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZTransferGlassSurface.swift; sourceTree = "<group>"; };
 		D403B031ADD1B0F9C560F22D /* ClassicUSBIcon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClassicUSBIcon.swift; sourceTree = "<group>"; };
 		D40B340AC13401D86C00C2D8 /* PTPDataset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PTPDataset.swift; sourceTree = "<group>"; };
+		D5A141881A4EEBF0C3CF247A /* PhotoFilterComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoFilterComponents.swift; sourceTree = "<group>"; };
 		D6A4EAE118D5934657060B46 /* AndroidThumbnailProcessorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndroidThumbnailProcessorTests.swift; sourceTree = "<group>"; };
+		D6B1A824F148592609E317A8 /* RemoteLifecycleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteLifecycleTests.swift; sourceTree = "<group>"; };
 		D89F88E0AAFA56543C73E8D2 /* Np3BitmapFilterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Np3BitmapFilterTests.swift; sourceTree = "<group>"; };
 		D961B6709BEFEB665F1D0932 /* PhotoFrameTextLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoFrameTextLayout.swift; sourceTree = "<group>"; };
 		DD45F35C4B19629A11F32A1C /* PhotoEffectsBatch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoEffectsBatch.swift; sourceTree = "<group>"; };
@@ -269,6 +270,7 @@
 		ECDEA795752767FBE8FFC99F /* ZTransferApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZTransferApp.swift; sourceTree = "<group>"; };
 		EDE7552A6B315888DE6033D1 /* zh-Hant */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hant"; path = "zh-Hant.lproj/Localizable.strings"; sourceTree = "<group>"; };
 		F372F3899BF36619208BF340 /* Np3FilterEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Np3FilterEngine.swift; sourceTree = "<group>"; };
+		F4065A70797FFC0036A880A0 /* debug_sample_01.jpg */ = {isa = PBXFileReference; lastKnownFileType = image.jpeg; path = debug_sample_01.jpg; sourceTree = "<group>"; };
 		F669891731A2784158CAB73F /* GPSProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GPSProtocol.swift; sourceTree = "<group>"; };
 		FB4F9C50800B1AB3BC4C279E /* Np3AndroidGoldenTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Np3AndroidGoldenTests.swift; sourceTree = "<group>"; };
 		FCD67906893DA353A437E6A3 /* Np3FilterEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Np3FilterEngineTests.swift; sourceTree = "<group>"; };
@@ -316,11 +318,12 @@
 				0217CE88D9C38A7150F3C00E /* CameraIOGateTests.swift */,
 				61F577AFF70C53D32A99AB7B /* ConnectionStateTests.swift */,
 				9165B39E86D240D0CAB4F2F0 /* DomainModelTests.swift */,
+				08F760D1D1890D58F122FDA6 /* HapticsTests.swift */,
 				E5D5E41AAFFA785D2FE92689 /* ImageCaptureErrorMappingTests.swift */,
-				A9145A10000000000000000A /* HapticsTests.swift */,
 				1449968BB2DEF0E632E53EAE /* PhotoThumbnailDiskCacheTests.swift */,
 				341299C34669842D43A516C0 /* PhotoThumbnailStoreTests.swift */,
 				25DA65AB7E6B869A2B7A6F7B /* RemoteExposureParametersTests.swift */,
+				D6B1A824F148592609E317A8 /* RemoteLifecycleTests.swift */,
 			);
 			path = ZTransferTests;
 			sourceTree = "<group>";
@@ -363,8 +366,8 @@
 			isa = PBXGroup;
 			children = (
 				FDDA62402A7BB9E32721C7D4 /* DetentWheel.swift */,
-				A9145A100000000000000002 /* TipLightbulbButton.swift */,
 				125A2CF683765CC9A3041412 /* RemoteExposureTile.swift */,
+				BC25EF6BF137048DFDF0AC15 /* TipLightbulbButton.swift */,
 			);
 			path = Components;
 			sourceTree = "<group>";
@@ -387,10 +390,10 @@
 				CEC2E153F5F165AE7B762862 /* CameraDownload.swift */,
 				6D347C0A0D7091DF932D1DBA /* CameraIOGate.swift */,
 				9CEBFBB42C89586314B7CDF4 /* CameraRepository.swift */,
-				D1B7A1D2E3F4456789012346 /* DebugCameraData.swift */,
 				4C31C90D73DDE407941D9C78 /* CameraSession.swift */,
 				538A2FD484D2734CC691DA00 /* ConnectionState.swift */,
 				44ACCD4A54AA0F8443CA869B /* ConnectionViewModel.swift */,
+				9D096209BDDBA2BD1948EFA4 /* DebugCameraData.swift */,
 				7BEAA3B6FEB394BB8C05D321 /* DirectoryAccessStore.swift */,
 				C537587F3F20DEE8C60FA711 /* GPSCoordinator.swift */,
 				F669891731A2784158CAB73F /* GPSProtocol.swift */,
@@ -468,12 +471,12 @@
 			children = (
 				D403B031ADD1B0F9C560F22D /* ClassicUSBIcon.swift */,
 				1DF8FBC08956F02D0F24ACFD /* DoubleZMark.swift */,
+				77A5E77B2C0E19B2B1CD5F24 /* HapticPolicy.swift */,
+				94872EDA00F4ABDC5BEC055D /* TipAttentionMotion.swift */,
 				77FF345DD1F232661C243E4F /* ZTransferColors.swift */,
-				A9145A100000000000000004 /* TipAttentionMotion.swift */,
-				A9145A100000000000000006 /* ZTransferHaptics.swift */,
-				A9145A100000000000000008 /* HapticPolicy.swift */,
 				B8E5F0504E1E56C59E21D761 /* ZTransferDesign.swift */,
 				D2B51C2A8D807D8A9CA21F9E /* ZTransferGlassSurface.swift */,
+				3C76F0F0260760721CD58EA4 /* ZTransferHaptics.swift */,
 			);
 			path = DesignSystem;
 			sourceTree = "<group>";
@@ -483,6 +486,8 @@
 			children = (
 				1FDAFED6652BDAF104D56E54 /* Fonts */,
 				F5B0DCD9EF4268A3ACA7C197 /* Localizable.strings */,
+				F4065A70797FFC0036A880A0 /* debug_sample_01.jpg */,
+				328894309311582E8EECDA44 /* debug_sample_fhd.jpg */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -492,16 +497,16 @@
 			children = (
 				4FA1CAF4109968AFCC0043BC /* Components */,
 				3D3D1368E7A58C6452F8211F /* Connection */,
+				5D328616E8BD4A0E6052DD95 /* GeniePopupMotion.swift */,
+				721EE1E4462782AD6B669580 /* GeniePopupPanel.swift */,
 				B7580B5DC6E6B426AFDCD70C /* LocalPhotoEffectsView.swift */,
 				6C73EF01969DAC563DA91DD0 /* PhotoEffectsEditorView.swift */,
+				D5A141881A4EEBF0C3CF247A /* PhotoFilterComponents.swift */,
 				319C94935AB93C922D1BE545 /* PhotoFilterPopupOverlay.swift */,
-				D0B6DB7E3BF3A4EC8555BE3C /* PhotoFilterComponents.swift */,
 				0994973567FB60B02328A65F /* PhotoListView.swift */,
 				9C82DE7EDD874E138885C18B /* PhotoPreviewView.swift */,
 				2482C61B58C4A4EE95210CDA /* RemoteView.swift */,
 				C03DEDD0C14571253802D484 /* SettingsPopupOverlay.swift */,
-				C03DEDD0C14571253802D485 /* GeniePopupMotion.swift */,
-				C03DEDD0C14571253802D486 /* GeniePopupPanel.swift */,
 				4AA2639C7BC0B4B5E3D01734 /* SettingsView.swift */,
 				E17D81EDE19E9E8343BD531F /* TransferQueueView.swift */,
 			);
@@ -635,10 +640,10 @@
 			buildActionMask = 2147483647;
 			files = (
 				B104166B4E6A8060016636A2 /* Localizable.strings in Resources */,
-				D1B7A1D2E3F4456789012350 /* debug_sample_01.jpg in Resources */,
-				D1B7A1D2E3F4456789012352 /* debug_sample_fhd.jpg in Resources */,
 				76FA040ADFD4573DBDA00991 /* bebas_neue_regular.ttf in Resources */,
 				C127B5B73435A9434E2EEF30 /* cormorant_garamond_medium_italic.ttf in Resources */,
+				0A8544825B726D3116C5420F /* debug_sample_01.jpg in Resources */,
+				EC141CEEC0B3CC2493824E36 /* debug_sample_fhd.jpg in Resources */,
 				481FE39822F171E89584DA10 /* great_vibes_regular.ttf in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -656,8 +661,8 @@
 				48EBBB7703B0E57F6AC878EA /* ConnectionStateTests.swift in Sources */,
 				3576AE9BA7B2A502352BA26B /* DomainModelTests.swift in Sources */,
 				8FB26966AAE2721DCF13FEF9 /* GPSProtocolTests.swift in Sources */,
+				27B42A4945BF0DA7716E8C2A /* HapticsTests.swift in Sources */,
 				3E8C1CA06EBC3AB08DB250B3 /* ImageCaptureErrorMappingTests.swift in Sources */,
-				A9145A100000000000000009 /* HapticsTests.swift in Sources */,
 				6E67243D68222B05469B1AAE /* Np3AndroidGoldenTests.swift in Sources */,
 				F4543194B75979601E536063 /* Np3BitmapFilterTests.swift in Sources */,
 				2168F57038D1C9802791EAB7 /* Np3FilterEngineTests.swift in Sources */,
@@ -673,6 +678,7 @@
 				AC70D216282814AF90EDD556 /* PhotoThumbnailStoreTests.swift in Sources */,
 				5AC62E28F7193D5C5D250853 /* RemoteExposureParametersTests.swift in Sources */,
 				73A0B84A67659AC4209F4A8F /* RemoteExposureTests.swift in Sources */,
+				14F1909057D896C4625EB14E /* RemoteLifecycleTests.swift in Sources */,
 				946D307C7E78C2701BC6151F /* RemoteRecordingTests.swift in Sources */,
 				79DF53F7FB57B0EF6D965D7C /* RemoteStateTests.swift in Sources */,
 				C713BCA63E8BAA59BEB77FAB /* STABrowsingSessionTests.swift in Sources */,
@@ -692,7 +698,6 @@
 				B65D4CAFE0F7F72AFD32F179 /* CameraDownload.swift in Sources */,
 				0E49CC3D11A2B396AD9D5F4D /* CameraIOGate.swift in Sources */,
 				4E6912D45117355E97EA8583 /* CameraRepository.swift in Sources */,
-				D1B7A1D2E3F4456789012345 /* DebugCameraData.swift in Sources */,
 				676480E34AEAD2A4C86B50B6 /* CameraSession.swift in Sources */,
 				CBEB599B28F9477176061658 /* CameraTransport.swift in Sources */,
 				B2BCDA3EE87598367F1136BF /* ClassicUSBIcon.swift in Sources */,
@@ -700,17 +705,17 @@
 				D48305D06926CD24336DAFA5 /* ConnectionPage.swift in Sources */,
 				73C7544A106A7E21D8421C92 /* ConnectionState.swift in Sources */,
 				B8FB7D2547F6FFA961FEB3CE /* ConnectionViewModel.swift in Sources */,
+				D2159CE6778A16A97096CD84 /* DebugCameraData.swift in Sources */,
 				873A6B7B39D069D290ECD832 /* DetentWheel.swift in Sources */,
-				A9145A100000000000000001 /* TipLightbulbButton.swift in Sources */,
-				A9145A100000000000000003 /* TipAttentionMotion.swift in Sources */,
-				A9145A100000000000000005 /* ZTransferHaptics.swift in Sources */,
-				A9145A100000000000000007 /* HapticPolicy.swift in Sources */,
 				82C69505CC0D0D6BC02C6A80 /* DirectoryAccessStore.swift in Sources */,
 				2B14E3B205CBC8ED8289E7EC /* DoubleZMark.swift in Sources */,
 				8D6DA87271A2A18C83AAC752 /* GPSConnectionControl.swift in Sources */,
 				7CDDBA710E50C3C90D89338F /* GPSCoordinator.swift in Sources */,
 				9BD36C93DE99E708A9E68AF5 /* GPSProtocol.swift in Sources */,
 				823A11BECB918BA55D0BE52D /* GPSState.swift in Sources */,
+				CF46C74D9806A588BE116E37 /* GeniePopupMotion.swift in Sources */,
+				4BC52BC25953D175860BCB37 /* GeniePopupPanel.swift in Sources */,
+				C2220F21D63C5E2C88F1E672 /* HapticPolicy.swift in Sources */,
 				68059AEA1C896EBC6F5103E6 /* ImageCaptureUSBTransport.swift in Sources */,
 				E64F169475A3D51E7C7D15C7 /* LocalPhotoBatchViewModel.swift in Sources */,
 				BADF7CD7F32B68DCF3D97C3F /* LocalPhotoEffectsView.swift in Sources */,
@@ -733,8 +738,8 @@
 				C2B1F15D120EECDFE3C148D6 /* PhotoExif.swift in Sources */,
 				3B5B3D5F069C7122B459035C /* PhotoExifStore.swift in Sources */,
 				CCC3F71A5AF4D6584D1FC2EE /* PhotoFilter.swift in Sources */,
+				952C9E5420A97B8788F42568 /* PhotoFilterComponents.swift in Sources */,
 				CB99922E4C5C868F6F4EAA41 /* PhotoFilterPopupOverlay.swift in Sources */,
-				5CB1D72BEF5ABC8FDAB563A0 /* PhotoFilterComponents.swift in Sources */,
 				C3B0EBF639B834E335A187A5 /* PhotoFrameTextLayout.swift in Sources */,
 				9D3DFDDB82CBADF50CC379C5 /* PhotoListView.swift in Sources */,
 				AAC92E7A80B4911C1DA5126E /* PhotoListViewModel.swift in Sources */,
@@ -762,10 +767,10 @@
 				9D2FA1400CA1F9B6632FFAF8 /* STATipsOverlay.swift in Sources */,
 				D08D5FC66C3B90DDD388F961 /* SelectedUSBPTPTransport.swift in Sources */,
 				EA2A5E73813646829194CCFC /* SettingsPopupOverlay.swift in Sources */,
-				EA2A5E73813646829194CCFD /* GeniePopupMotion.swift in Sources */,
-				EA2A5E73813646829194CCFE /* GeniePopupPanel.swift in Sources */,
 				F7DD276D50F864670EB55E91 /* SettingsView.swift in Sources */,
 				5E9A339B8DCD4C1D4D876DF7 /* ThumbnailCache.swift in Sources */,
+				DFC4E7BF20645C6EDB939734 /* TipAttentionMotion.swift in Sources */,
+				3FA699D39934C67DCD4D5B47 /* TipLightbulbButton.swift in Sources */,
 				2605D49FA9859E0E41665E82 /* TransferDirectoryIndex.swift in Sources */,
 				3A016664A1796B9FA1866062 /* TransferQueue.swift in Sources */,
 				E8FAC959B890B065FF02DED3 /* TransferQueueView.swift in Sources */,
@@ -775,6 +780,7 @@
 				F801A3108B643FCDE9658D68 /* ZTransferColors.swift in Sources */,
 				3155D971BF9B55A0B0AC26A1 /* ZTransferDesign.swift in Sources */,
 				16B7898C274ABFF0A370585B /* ZTransferGlassSurface.swift in Sources */,
+				75114453FD20F2EA41BDB65D /* ZTransferHaptics.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -5,6 +5,7 @@ import Foundation
 enum RemoteProperty: UInt32, CaseIterable, Sendable {
     case batteryLevel = 0x5001
     case focusMode = 0x500A
+    case nikonAFMode = 0xD161
     case angleLevel = 0xD067
     case fNumber = 0x5007
     case exposureProgram = 0x500E
@@ -138,7 +139,11 @@ enum RemoteExposureParameters {
         case .exposureProgram:
             switch raw { case 1: return "M"; case 2: return "P"; case 3: return "A"; case 4: return "S"; case 0x8010: return "AUTO"; default: return String(format: "0x%llx", raw) }
         case .liveViewSelector: return raw == 0 ? "照片" : "录像"
-        case .focusMode: return raw == 1 ? "MF" : raw == 2 ? "AF" : String(format: "0x%llx", raw)
+        case .focusMode:
+            return [1: "MF", 2: "AF", 3: "AF Macro", 0x8010: "AF-S", 0x8011: "AF-C", 0x8012: "AF-A", 0x8013: "AF-F"][raw]
+                ?? String(format: "0x%llx", raw)
+        case .nikonAFMode:
+            return [0: "AF-S", 1: "AF-C", 2: "AF-A"][raw] ?? String(format: "0x%llx", raw)
         case .angleLevel: return String(format: "%.1f°", Double(Int64(bitPattern: raw)) / 65536)
         case .liveViewImageSize: return String(raw)
         }
