@@ -275,6 +275,9 @@ struct RemoteView: View {
                         desqueeze = RemoteDisplayOptions.nextDesqueeze(after: desqueeze)
                     }
                 }
+                remoteToolButton(active: levelVisible, label: { RemoteLevelIcon().frame(width: 18, height: 18) }) {
+                    withAnimation(ZTransferMotion.standard) { levelVisible.toggle() }
+                }
                 remoteToolButton(active: false, label: { RemoteFullscreenIcon().frame(width: 17, height: 17) }) {
                     withAnimation(ZTransferMotion.standard) { landscapeLayout = true }
                 }
@@ -320,6 +323,9 @@ struct RemoteView: View {
                 withAnimation(ZTransferMotion.standard) {
                     desqueeze = RemoteDisplayOptions.nextDesqueeze(after: desqueeze)
                 }
+            }
+            remoteToolButton(active: levelVisible, label: { RemoteLevelIcon().frame(width: 18, height: 18) }) {
+                withAnimation(ZTransferMotion.standard) { levelVisible.toggle() }
             }
             if model.movieMode {
                 remoteRecordButton
@@ -592,16 +598,21 @@ struct RemoteView: View {
 
         var body: some View {
             Canvas { context, size in
-                let rect = CGRect(x: size.width * 0.16, y: size.height * 0.16,
-                                  width: size.width * 0.68, height: size.height * 0.68)
-                context.stroke(Path(rect), with: .color(tint),
-                               style: StrokeStyle(lineWidth: 2.1))
-                var arrow = Path()
-                arrow.move(to: CGPoint(x: size.width * 0.58, y: size.height * 0.30))
-                arrow.addLine(to: CGPoint(x: size.width * 0.76, y: size.height * 0.30))
-                arrow.addLine(to: CGPoint(x: size.width * 0.76, y: size.height * 0.48))
-                context.stroke(arrow, with: .color(tint),
-                               style: StrokeStyle(lineWidth: 2.1, lineCap: .round, lineJoin: .round))
+                // Material Icons.Outlined.AspectRatio, matching Android's
+                // four-corner crop glyph rather than a generic expand arrow.
+                let sx = size.width / 24
+                let sy = size.height / 24
+                context.scaleBy(x: sx, y: sy)
+                let stroke = StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round)
+                var frame = Path()
+                frame.addRect(CGRect(x: 4, y: 4, width: 16, height: 16))
+                context.stroke(frame, with: .color(tint), style: stroke)
+                var corners = Path()
+                corners.move(to: CGPoint(x: 8, y: 8)); corners.addLine(to: CGPoint(x: 11, y: 8))
+                corners.move(to: CGPoint(x: 8, y: 8)); corners.addLine(to: CGPoint(x: 8, y: 11))
+                corners.move(to: CGPoint(x: 16, y: 16)); corners.addLine(to: CGPoint(x: 13, y: 16))
+                corners.move(to: CGPoint(x: 16, y: 16)); corners.addLine(to: CGPoint(x: 16, y: 13))
+                context.stroke(corners, with: .color(tint), style: stroke)
             }
         }
     }
@@ -612,16 +623,23 @@ struct RemoteView: View {
         var body: some View {
             Canvas { context, size in
                 let stroke = StrokeStyle(lineWidth: 1.5, lineCap: .round)
-                let segments: [(CGFloat, CGFloat, CGFloat, CGFloat)] = [
-                    (0.14, 0.32, 0.14, 0.14), (0.14, 0.14, 0.32, 0.14),
-                    (0.68, 0.14, 0.86, 0.14), (0.86, 0.14, 0.86, 0.32),
-                    (0.14, 0.68, 0.14, 0.86), (0.14, 0.86, 0.32, 0.86),
-                    (0.68, 0.86, 0.86, 0.86), (0.86, 0.86, 0.86, 0.68),
+                // Android uses a 2dp inset and 5dp arms in a 17dp mark.
+                let pad: CGFloat = 2
+                let arm: CGFloat = 5
+                let segments: [(CGPoint, CGPoint)] = [
+                    (CGPoint(x: pad, y: pad), CGPoint(x: pad + arm, y: pad)),
+                    (CGPoint(x: pad, y: pad), CGPoint(x: pad, y: pad + arm)),
+                    (CGPoint(x: size.width - pad, y: pad), CGPoint(x: size.width - pad - arm, y: pad)),
+                    (CGPoint(x: size.width - pad, y: pad), CGPoint(x: size.width - pad, y: pad + arm)),
+                    (CGPoint(x: pad, y: size.height - pad), CGPoint(x: pad + arm, y: size.height - pad)),
+                    (CGPoint(x: pad, y: size.height - pad), CGPoint(x: pad, y: size.height - pad - arm)),
+                    (CGPoint(x: size.width - pad, y: size.height - pad), CGPoint(x: size.width - pad - arm, y: size.height - pad)),
+                    (CGPoint(x: size.width - pad, y: size.height - pad), CGPoint(x: size.width - pad, y: size.height - pad - arm)),
                 ]
-                for (sx, sy, ex, ey) in segments {
+                for (start, end) in segments {
                     var path = Path()
-                    path.move(to: CGPoint(x: size.width * sx, y: size.height * sy))
-                    path.addLine(to: CGPoint(x: size.width * ex, y: size.height * ey))
+                    path.move(to: start)
+                    path.addLine(to: end)
                     context.stroke(path, with: .color(tint), style: stroke)
                 }
             }
@@ -659,9 +677,67 @@ struct RemoteView: View {
     }
 
     private struct RemoteAudioIcon: View {
+        @Environment(\.remoteToolTint) private var tint
+
         var body: some View {
-            Image(systemName: "speaker.wave.2.fill")
-                .font(.system(size: 20, weight: .medium))
+            Canvas { context, size in
+                let sx = size.width / 24
+                let sy = size.height / 24
+                context.scaleBy(x: sx, y: sy)
+                var speaker = Path()
+                speaker.move(to: CGPoint(x: 3, y: 9)); speaker.addLine(to: CGPoint(x: 7, y: 9))
+                speaker.addLine(to: CGPoint(x: 12, y: 4)); speaker.addLine(to: CGPoint(x: 12, y: 20))
+                speaker.addLine(to: CGPoint(x: 7, y: 15)); speaker.addLine(to: CGPoint(x: 3, y: 15)); speaker.closeSubpath()
+                context.fill(speaker, with: .color(tint))
+                let wave = StrokeStyle(lineWidth: 1.7, lineCap: .round)
+                var near = Path(); near.addArc(center: CGPoint(x: 12, y: 12), radius: 4,
+                                                startAngle: .degrees(-48), endAngle: .degrees(48), clockwise: false)
+                var far = Path(); far.addArc(center: CGPoint(x: 12, y: 12), radius: 7,
+                                              startAngle: .degrees(-48), endAngle: .degrees(48), clockwise: false)
+                context.stroke(near, with: .color(tint), style: wave)
+                context.stroke(far, with: .color(tint), style: wave)
+            }
+        }
+    }
+
+    private struct RemoteLevelIcon: View {
+        @Environment(\.remoteToolTint) private var tint
+
+        var body: some View {
+            Canvas { context, size in
+                let left = size.width * 0.08, right = size.width * 0.92
+                let top = size.height * 0.24, bottom = size.height * 0.78
+                let corner = min(size.width, size.height) * 0.09
+                let vialLeft = size.width * 0.34, vialRight = size.width * 0.66
+                let vialBottom = size.height * 0.49
+                var body = Path()
+                body.move(to: CGPoint(x: left + corner, y: top))
+                body.addLine(to: CGPoint(x: vialLeft, y: top))
+                body.addCurve(to: CGPoint(x: vialRight, y: top),
+                              control1: CGPoint(x: vialLeft, y: vialBottom),
+                              control2: CGPoint(x: vialRight, y: vialBottom))
+                body.addLine(to: CGPoint(x: right - corner, y: top))
+                body.addQuadCurve(to: CGPoint(x: right, y: top + corner),
+                                  control: CGPoint(x: right, y: top))
+                body.addLine(to: CGPoint(x: right, y: bottom - corner))
+                body.addQuadCurve(to: CGPoint(x: right - corner, y: bottom),
+                                  control: CGPoint(x: right, y: bottom))
+                body.addLine(to: CGPoint(x: left + corner, y: bottom))
+                body.addQuadCurve(to: CGPoint(x: left, y: bottom - corner),
+                                  control: CGPoint(x: left, y: bottom))
+                body.addLine(to: CGPoint(x: left, y: top + corner))
+                body.addQuadCurve(to: CGPoint(x: left + corner, y: top),
+                                  control: CGPoint(x: left, y: top))
+                body.closeSubpath()
+                let stroke = StrokeStyle(lineWidth: 1.65, lineCap: .round, lineJoin: .round)
+                context.stroke(body, with: .color(tint), style: stroke)
+                var dividers = Path()
+                dividers.move(to: CGPoint(x: size.width * 0.27, y: top))
+                dividers.addLine(to: CGPoint(x: size.width * 0.27, y: bottom))
+                dividers.move(to: CGPoint(x: size.width * 0.73, y: top))
+                dividers.addLine(to: CGPoint(x: size.width * 0.73, y: bottom))
+                context.stroke(dividers, with: .color(tint), style: stroke)
+            }
         }
     }
 
