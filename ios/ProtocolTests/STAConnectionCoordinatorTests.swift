@@ -139,5 +139,5 @@ actor STAAttemptScript {
 func fakeSTACamera(guid: String, onClose: @escaping @Sendable () -> Void = {}) -> STAConnectedCamera {
     STAConnectedCamera(session: PTPSession(transport: STAScriptTransport([])),
         album: STAAlbumAccess(storageIDs: [0x10001], prefetchedHandles: (0x10001, [1]), directObjectRead: false, deviceInfo: nil),
-        guid: guid, close: onClose, startEvents: { _ in })
+        guid: guid, close: { onClose() }, startEvents: { _ in })
 }

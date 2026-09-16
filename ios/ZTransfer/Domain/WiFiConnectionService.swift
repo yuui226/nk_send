@@ -4,36 +4,43 @@ import Foundation
 /// until accepted, so cancellation cannot close a later replacement session.
 actor WiFiConnectionService {
     let profiles = STAProfileStore()
-    private var closeConnection: (@Sendable () -> Void)?
+    private var closeConnection: (@Sendable () async -> Void)?
+    private var closeSocket: (@Sendable () -> Void)?
     private var repository: CameraRepository?
     private var catalogTask: Task<Void, Never>?
     private var keepaliveTask: Task<Void, Never>?
     private var generation = 0
 
-    deinit { keepaliveTask?.cancel(); catalogTask?.cancel(); closeConnection?() }
+    deinit { keepaliveTask?.cancel(); catalogTask?.cancel(); closeSocket?() }
 
     func connectAP(host: String) async throws -> CameraRepository {
         generation &+= 1
         let request = generation
         let socket = try await PTPIPSocketTransport.open(host: host)
+        let session = PTPSession(transport: socket, defaultTimeoutNanoseconds: 60_000_000_000)
+        var opened = false
         do {
             // NikonCamera.connect switches its sockets to the shared 60 s
             // response timeout. A 15 s default can retire a healthy AP
             // session during a slow metadata or live-view command.
-            let session = PTPSession(transport: socket,
-                                     defaultTimeoutNanoseconds: 60_000_000_000)
             let result = try await session.executeResponse(operation: PTPConstants.openSession, parameters: [socket.connectionNumber])
             guard result.code == PTPConstants.responseOK || result.code == PTPConstants.sessionAlreadyOpen else {
                 throw PTPSessionError.responseCode(result.code)
             }
+            opened = true
             let repo = CameraRepository(session: session)
             _ = try? await repo.loadDeviceInfo()
             try Task.checkCancellation()
             guard request == generation else { throw CancellationError() }
             socket.startEvents()
-            closeConnection = { socket.close() }; repository = repo
+            closeConnection = { await PTPIPSocketTransport.retireOpenedSession(session, socket: socket, opened: true) }
+            closeSocket = { socket.close() }
+            repository = repo
             return repo
-        } catch { socket.close(); throw error }
+        } catch {
+            await PTPIPSocketTransport.retireOpenedSession(session, socket: socket, opened: opened)
+            throw error
+        }
     }
 
     func connectSTA(discovery: PTPIPDiscoveryService,
@@ -54,10 +61,12 @@ actor WiFiConnectionService {
         if let found { camera = found }
         else if let deferred = try await selection.tryDeferred() { camera = deferred }
         else { throw await coordinator.lastFailure ?? STAConnectionFailure(cause: STAConnectionError.notFound, knownCamera: false) }
-        guard !Task.isCancelled, generation == request else { camera.close(); throw CancellationError() }
+        guard !Task.isCancelled, generation == request else { await camera.close(); throw CancellationError() }
         let repo = CameraRepository(session: camera.session, staAlbum: camera.album)
         camera.startEvents { await repo.receiveEvent($0) }
-        closeConnection = camera.close; repository = repo
+        closeConnection = camera.close
+        closeSocket = { Task { await camera.close() } }
+        repository = repo
         return repo
     }
 
@@ -88,10 +97,13 @@ actor WiFiConnectionService {
         generation &+= 1
         keepaliveTask?.cancel(); keepaliveTask = nil
         catalogTask?.cancel(); catalogTask = nil
-        closeConnection?(); closeConnection = nil
+        let close = closeConnection
+        closeConnection = nil
+        closeSocket = nil
         let previous = repository
         repository = nil
         await previous?.stopMonitoring()
+        await close?()
     }
 }
 

@@ -5,7 +5,7 @@ struct STAConnectedCamera: Sendable {
     let session: PTPSession
     let album: STAAlbumAccess
     let guid: String?
-    let close: @Sendable () -> Void
+    let close: @Sendable () async -> Void
     let startEvents: @Sendable (@escaping @Sendable (Data) async -> Void) -> Void
 }
 
@@ -56,12 +56,12 @@ actor STAConnectionCoordinator {
             if pairingStage { pairingStage = false; await onStage(.connecting) }
             do {
                 let camera = try await connect(candidate, preferred, expectedGUID, reportStage)
-                guard !Task.isCancelled else { camera.close(); throw CancellationError() }
+                guard !Task.isCancelled else { await camera.close(); throw CancellationError() }
                 reachedStorage = true
                 if let guid = camera.guid { known = profiles.isKnown(ip: candidate.ip, guid: guid) }
                 guard profiles.isPaired(camera.guid) else {
                     lastFailure = STAConnectionFailure(cause: STAConnectionError.pairingRequired, knownCamera: known)
-                    camera.close()
+                    await camera.close()
                     if preferred == .albumExplorer { break }
                     return .rejected
                 }
@@ -93,10 +93,10 @@ actor STAConnectionCoordinator {
         try Task.checkCancellation()
         do {
             let camera = try await connect(candidate, alternate, expectedGUID, reportStage)
-            guard !Task.isCancelled else { camera.close(); throw CancellationError() }
+            guard !Task.isCancelled else { await camera.close(); throw CancellationError() }
             guard profiles.isPaired(camera.guid) else {
                 lastFailure = STAConnectionFailure(cause: STAConnectionError.pairingRequired, knownCamera: known)
-                camera.close()
+                await camera.close()
                 return .rejected
             }
             remember(camera, candidate, alternate)
@@ -160,9 +160,11 @@ actor STAConnectionCoordinator {
             let album = try await browsing.open()
             try Task.checkCancellation()
             return STAConnectedCamera(session: session, album: album, guid: socket.responderGUID,
-                                      close: { socket.close() }, startEvents: { socket.startEvents(onEvent: $0) })
+                                      close: { await PTPIPSocketTransport.retireOpenedSession(session, socket: socket, opened: true) },
+                                      startEvents: { socket.startEvents(onEvent: $0) })
         } catch {
-            socket.close()
+            await PTPIPSocketTransport.retireOpenedSession(session, socket: socket,
+                                                           opened: await browsing.sessionOpened)
             throw STAAttemptFailure(cause: error, guid: socket.responderGUID, model: await browsing.deviceInfo?.model,
                                    storageProbeReached: await browsing.storageProbeReached)
         }

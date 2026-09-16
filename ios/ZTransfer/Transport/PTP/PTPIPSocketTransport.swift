@@ -101,6 +101,22 @@ final class PTPIPSocketTransport: @unchecked Sendable, PTPCommandTransport {
         command.cancel(); event.cancel()
     }
 
+    /// Android's NikonCamera.close keeps the command mutex and finishes
+    /// CloseSession even when its caller has been cancelled. Retire only a
+    /// session that reached a successful OpenSession response.
+    static func retireOpenedSession(_ session: PTPSession, socket: PTPIPSocketTransport,
+                                    opened: Bool) async {
+        let cleanup = Task.detached {
+            if opened {
+                _ = try? await session.executeResponse(operation: PTPConstants.closeSession,
+                                                       timeoutNanoseconds: PTPConstants.cameraReadTimeoutNanoseconds)
+            }
+            await session.invalidate()
+            socket.close()
+        }
+        await cleanup.value
+    }
+
     /// Only called before starting the continuous reader. Missing pacing events
     /// never undo the already-acknowledged pairing (NikonCamera.completeInitialPairing).
     func waitForPairingEvent() async {

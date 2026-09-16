@@ -32,6 +32,7 @@ actor STABrowsingSession {
     private let onStage: @Sendable (STAConnectionStage) async -> Void
     private let waitForPairingEvent: @Sendable () async -> Void
     private(set) var storageProbeReached = false
+    private(set) var sessionOpened = false
     private(set) var deviceInfo: PTPDeviceInfo?
     private var sawEmptyHandles = false
     private var sawHandles = false
@@ -50,6 +51,7 @@ actor STABrowsingSession {
         guard opened.code == PTPConstants.responseOK || opened.code == PTPConstants.sessionAlreadyOpen else {
             throw PTPSessionError.responseCode(opened.code)
         }
+        sessionOpened = true
         let compatibility = try await command(PTPConstants.nikonCompatibilityInit)
         guard compatibility.code == PTPConstants.responseOK else {
             throw STAConnectionError.initializationFailed(compatibility.code)
@@ -132,7 +134,7 @@ actor STABrowsingSession {
         try Task.checkCancellation()
         profiles.markPaired(guid)
         await waitForPairingEvent()
-        _ = try? await command(PTPConstants.closeSession)
+        if (try? await command(PTPConstants.closeSession)) != nil { sessionOpened = false }
         try Task.checkCancellation()
         throw STAConnectionError.pairingCompleted
     }
