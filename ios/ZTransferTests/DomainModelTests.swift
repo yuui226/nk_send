@@ -781,6 +781,34 @@ final class DomainModelTests: XCTestCase {
         )
     }
 
+    @MainActor
+    func testLegacyWatermarkSizeAndOpacityMigrateWithoutVisualJump() {
+        XCTAssertEqual(restoredPhotoFrameWatermarkSizePercent(nil, content: .text), 80)
+        XCTAssertEqual(restoredPhotoFrameWatermarkSizePercent("SMALL", content: .text), 9)
+        XCTAssertEqual(restoredPhotoFrameWatermarkSizePercent("MEDIUM", content: .text), 26)
+        XCTAssertEqual(restoredPhotoFrameWatermarkSizePercent("SMALL", content: .image), 1)
+        XCTAssertEqual(restoredPhotoFrameWatermarkSizePercent("MEDIUM", content: .image), 20)
+        XCTAssertEqual(restoredPhotoFrameWatermarkSizePercent("LARGE", content: .image), 51)
+        XCTAssertEqual(restoredPhotoFrameWatermarkSizePercent(200, content: .text, usesLegacyScale: true), 151)
+        XCTAssertEqual(restoredPhotoFrameWatermarkSizePercent(300, content: .text), 300)
+        XCTAssertEqual(restoredPhotoFrameWatermarkOpacityPercent("SUBTLE"), 40)
+        XCTAssertEqual(restoredPhotoFrameWatermarkOpacityPercent("STANDARD"), 72)
+        XCTAssertEqual(restoredPhotoFrameWatermarkOpacityPercent("STRONG"), 100)
+
+        let suite = "effects-watermark-scale-migration-\(UUID())"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set("ZTransfer", forKey: "photo_frame_watermark_text")
+        defaults.set("MEDIUM", forKey: "photo_frame_watermark_size")
+        defaults.set("SUBTLE", forKey: "photo_frame_watermark_opacity")
+        let restored = PhotoEffectsStore(defaults: defaults).settings
+        XCTAssertEqual(restored.watermark.sizePercent, 26)
+        XCTAssertEqual(restored.watermark.opacityPercent, 40)
+        XCTAssertEqual(defaults.integer(forKey: "photo_frame_watermark_size"), 26)
+        XCTAssertEqual(defaults.integer(forKey: "photo_frame_watermark_opacity"), 40)
+        XCTAssertEqual(defaults.integer(forKey: "photo_frame_watermark_size_scale_version"), 2)
+    }
+
     func testRemoteDesqueezeRestoresWithinAndroidRange() {
         XCTAssertEqual(RemoteDisplayOptions.normalizedDesqueeze(0.25), 1)
         XCTAssertEqual(RemoteDisplayOptions.normalizedDesqueeze(1.33), 1.33)

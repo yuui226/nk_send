@@ -65,6 +65,65 @@ struct PhotoFrameWatermark: Codable, Equatable, Sendable {
     }
 }
 
+/// Android migrated the former visual-size scale by subtracting 49 from the
+/// stored percentage. Named legacy stops first resolve to their old numeric
+/// anchors, then use the same conversion.
+func restoredPhotoFrameWatermarkSizePercent(
+    _ persisted: Any?, content: PhotoFrameWatermarkContent, usesLegacyScale: Bool = false
+) -> Int {
+    guard let persisted else { return 80 }
+    let named: Bool
+    let raw: Int
+    if persisted is Bool {
+        raw = 80
+        named = false
+    } else if let number = persisted as? NSNumber {
+        raw = number.intValue
+        named = false
+    } else if let text = persisted as? String {
+        if let value = Int(text) {
+            raw = value
+            named = false
+        } else {
+            named = true
+            switch text {
+            case "SMALL": raw = content == .image ? 47 : 58
+            case "MEDIUM": raw = content == .image ? 69 : 75
+            case "LARGE": raw = 100
+            default: raw = 75
+            }
+        }
+    } else {
+        raw = 80
+        named = false
+    }
+    let converted = usesLegacyScale || named ? raw - 49 : raw
+    return min(max(converted, PhotoFrameWatermark.sizeRange.lowerBound),
+               PhotoFrameWatermark.sizeRange.upperBound)
+}
+
+func restoredPhotoFrameWatermarkOpacityPercent(_ persisted: Any?) -> Int {
+    let raw: Int
+    if persisted is Bool {
+        raw = 72
+    } else if let number = persisted as? NSNumber {
+        raw = number.intValue
+    } else if let text = persisted as? String {
+        raw = Int(text) ?? {
+            switch text {
+            case "SUBTLE": return 40
+            case "STANDARD": return 72
+            case "STRONG": return 100
+            default: return 72
+            }
+        }()
+    } else {
+        raw = 72
+    }
+    return min(max(raw, PhotoFrameWatermark.opacityRange.lowerBound),
+               PhotoFrameWatermark.opacityRange.upperBound)
+}
+
 /// Android favorites retain presentation settings, never historical text or
 /// image identity. The legacy Codable shape is retained for existing installs.
 struct PhotoFrameFavorite: Codable, Equatable, Sendable {
@@ -629,16 +688,24 @@ final class PhotoEffectsStore: ObservableObject {
         }
         value.favoriteFilterIDs = decodeAndroidFavorites(defaults.string(forKey: "favorite_photo_filters_v1"))
         let content = PhotoFrameWatermarkContent(rawValue: defaults.string(forKey: "photo_frame_watermark_content") ?? "TEXT") ?? .text
+        let usesLegacySizeScale = defaults.object(forKey: "photo_frame_watermark_size") != nil &&
+            defaults.integer(forKey: "photo_frame_watermark_size_scale_version") < 2
         value.watermark = PhotoFrameWatermark(
             enabled: defaults.object(forKey: "photo_frame_branding_enabled") as? Bool ?? true,
             content: content,
             text: defaults.string(forKey: "photo_frame_watermark_text") ?? PhotoFrameWatermark.defaultText,
             imageHash: defaults.string(forKey: "photo_frame_watermark_image_hash"),
             font: PhotoFrameWatermarkFont(rawValue: defaults.string(forKey: "photo_frame_watermark_font") ?? "CALLIGRAPHY") ?? .calligraphy,
-            sizePercent: defaults.object(forKey: "photo_frame_watermark_size") as? Int ?? 80,
+            sizePercent: restoredPhotoFrameWatermarkSizePercent(
+                defaults.object(forKey: "photo_frame_watermark_size"),
+                content: content,
+                usesLegacyScale: usesLegacySizeScale
+            ),
             position: PhotoFrameWatermarkPosition(rawValue: defaults.string(forKey: "photo_frame_watermark_position") ?? "AUTO") ?? .auto,
             color: PhotoFrameWatermarkColor(rawValue: defaults.string(forKey: "photo_frame_watermark_color") ?? "ADAPTIVE") ?? .adaptive,
-            opacityPercent: defaults.object(forKey: "photo_frame_watermark_opacity") as? Int ?? 72,
+            opacityPercent: restoredPhotoFrameWatermarkOpacityPercent(
+                defaults.object(forKey: "photo_frame_watermark_opacity")
+            ),
             effect: PhotoFrameWatermarkEffect(rawValue: defaults.string(forKey: "photo_frame_watermark_effect") ?? "AUTO") ?? .auto)
         value.metadataByPreset = decodeAndroidMetadata(defaults.string(forKey: "photo_frame_metadata_settings_v1"))
         value.metadata = value.metadataByPreset[value.photoFramePreset.rawValue] ?? PhotoFrameMetadataSettings.defaults(for: value.photoFramePreset)
@@ -663,6 +730,7 @@ final class PhotoEffectsStore: ObservableObject {
         if let hash = value.watermark.imageHash { defaults.set(hash, forKey: "photo_frame_watermark_image_hash") } else { defaults.removeObject(forKey: "photo_frame_watermark_image_hash") }
         defaults.set(value.watermark.font.rawValue, forKey: "photo_frame_watermark_font")
         defaults.set(value.watermark.sizePercent, forKey: "photo_frame_watermark_size")
+        defaults.set(2, forKey: "photo_frame_watermark_size_scale_version")
         defaults.set(value.watermark.position.rawValue, forKey: "photo_frame_watermark_position")
         defaults.set(value.watermark.color.rawValue, forKey: "photo_frame_watermark_color")
         defaults.set(value.watermark.opacityPercent, forKey: "photo_frame_watermark_opacity")
