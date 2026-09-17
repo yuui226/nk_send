@@ -369,6 +369,15 @@ private struct LocalEffectPreview: View {
                     showComparison: comparing,
                     restoreRevision: previewRestoreRevision
                 )
+                .overlay(alignment: .bottom) {
+                    if failed { previewUnavailableBadge }
+                }
+            } else if failed, let source {
+                Image(uiImage: source)
+                    .resizable()
+                    .scaledToFill()
+                    .clipped()
+                    .overlay(alignment: .bottom) { previewUnavailableBadge }
             } else if failed {
                 Text(AppLocalized.resource("local_photo_preview_failed"))
                     .font(.system(size: 12)).foregroundStyle(ZTransferColors.secondaryText)
@@ -449,8 +458,8 @@ private struct LocalEffectPreview: View {
                     }
                 }
             } catch is CancellationError {} catch {
-                if images == nil { failed = true }
-                else { previewRestoreRevision &+= 1 }
+                failed = true
+                if images != nil { previewRestoreRevision &+= 1 }
             }
         }
         .task(id: LocalPreviewPrefetchRequest(
@@ -471,6 +480,16 @@ private struct LocalEffectPreview: View {
                 }
             }
         }
+    }
+
+    private var previewUnavailableBadge: some View {
+        Text(AppLocalized.resource("photo_frame_preview_unavailable"))
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(ZTransferColors.secondaryText)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .padding(.bottom, 6)
     }
 }
 

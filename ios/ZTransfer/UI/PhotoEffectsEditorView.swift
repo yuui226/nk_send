@@ -508,6 +508,7 @@ struct PhotoEffectsSettingsPreview: View {
     @State private var renderedCanvasKey = ""
     @State private var unfiltered: UIImage?
     @State private var previewRestoreRevision = 0
+    @State private var previewFailed = false
     @State private var showUnfiltered = false
     @State private var prefetched: [String: UIImage] = [:]
     @State private var filteredSource: UIImage?
@@ -653,6 +654,15 @@ struct PhotoEffectsSettingsPreview: View {
                     cornerRadius: 12,
                     restoreRevision: previewRestoreRevision
                 )
+                .overlay(alignment: .bottom) {
+                    if previewFailed { previewUnavailableBadge }
+                }
+            } else if previewFailed, let source {
+                Image(uiImage: source)
+                    .resizable()
+                    .scaledToFill()
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(alignment: .bottom) { previewUnavailableBadge }
             } else if source != nil {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(ZTransferColors.primaryText.opacity(0.045))
@@ -719,6 +729,7 @@ struct PhotoEffectsSettingsPreview: View {
                 guard !Task.isCancelled else { return }
             }
             lastPreviewSettings = settings
+            previewFailed = false
             if cachedContextKey != sourceContextKey {
                 // Rotation/source/EXIF changes invalidate every pixel cache;
                 // border and watermark edits deliberately do not.
@@ -749,11 +760,13 @@ struct PhotoEffectsSettingsPreview: View {
                 }.value
                 guard !Task.isCancelled else { return }
                 guard let fallbackResult else {
+                    previewFailed = true
                     previewRestoreRevision &+= 1
                     return
                 }
                 renderedCanvasKey = requestedCanvasKey
                 rendered = fallbackResult
+                previewFailed = false
                 return
             }
             showUnfiltered = false
@@ -792,11 +805,13 @@ struct PhotoEffectsSettingsPreview: View {
             }
             guard !Task.isCancelled else { return }
             guard let result else {
+                previewFailed = true
                 previewRestoreRevision &+= 1
                 return
             }
             renderedCanvasKey = requestedCanvasKey
             rendered = result
+            previewFailed = false
             guard settings.photoFilterEnabled, settings.selectedFilter != nil else { return }
 
             // Android begins neighbor warming as soon as the current image is
@@ -820,6 +835,16 @@ struct PhotoEffectsSettingsPreview: View {
                 }
             }
         }
+    }
+
+    private var previewUnavailableBadge: some View {
+        Text(AppLocalized.resource("photo_frame_preview_unavailable"))
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(ZTransferColors.secondaryText)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .padding(.bottom, 6)
     }
 }
 
@@ -1023,10 +1048,14 @@ private enum PhotoEffectsFallbackSource {
                 options: [],
             )
             context.saveGState()
-            context.translateBy(x: size.width * 0.5, y: size.height * 0.5)
+            let center = CGPoint(x: size.width * 0.5, y: size.height * 0.5)
+            context.translateBy(x: center.x, y: center.y)
             context.rotate(by: -.pi * 24 / 180)
-            context.setFillColor(UIColor(red: 47 / 255, green: 85 / 255, blue: 94 / 255, alpha: 1).cgColor)
-            context.fill(CGRect(x: -1040, y: -210, width: 1860, height: 170))
+            context.translateBy(x: -center.x, y: -center.y)
+            context.setFillColor(UIColor(
+                red: 47 / 255, green: 85 / 255, blue: 94 / 255, alpha: 1
+            ).cgColor)
+            context.fill(CGRect(x: -80, y: 215, width: 900, height: 115))
             context.restoreGState()
             context.setFillColor(UIColor(red: 244 / 255, green: 193 / 255, blue: 91 / 255, alpha: 1).cgColor)
             context.fillEllipse(in: CGRect(x: size.width * 0.72 - 42, y: size.height * 0.24 - 42, width: 84, height: 84))
