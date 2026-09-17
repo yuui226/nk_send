@@ -18,7 +18,11 @@ final class DirectoryAccessStore: ObservableObject {
 
     func setDirectory(_ url: URL) {
         directoryURL?.stopAccessingSecurityScopedResource()
-        guard url.startAccessingSecurityScopedResource() else { directoryURL = nil; return }
+        guard url.startAccessingSecurityScopedResource() else {
+            directoryURL = nil
+            defaults.removeObject(forKey: bookmarkKey)
+            return
+        }
         do {
             let bookmark = try url.bookmarkData(
                 // iOS document-provider URLs carry their security scope in the
@@ -33,6 +37,7 @@ final class DirectoryAccessStore: ObservableObject {
         } catch {
             url.stopAccessingSecurityScopedResource()
             directoryURL = nil
+            defaults.removeObject(forKey: bookmarkKey)
         }
     }
 
@@ -50,7 +55,10 @@ final class DirectoryAccessStore: ObservableObject {
             options: [],
             relativeTo: nil,
             bookmarkDataIsStale: &stale,
-        ), url.startAccessingSecurityScopedResource() else { return }
+        ), url.startAccessingSecurityScopedResource() else {
+            defaults.removeObject(forKey: bookmarkKey)
+            return
+        }
         if stale, let refreshed = try? url.bookmarkData(
             options: [],
             includingResourceValuesForKeys: nil,

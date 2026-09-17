@@ -6,6 +6,19 @@ import UniformTypeIdentifiers
 @testable import ZTransfer
 
 final class DomainModelTests: XCTestCase {
+    @MainActor
+    func testInvalidTransferDirectoryBookmarkIsRemovedDuringRestore() throws {
+        let suite = "directory-invalid-bookmark-\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(Data("not-a-bookmark".utf8), forKey: "transfer_dir")
+
+        let store = DirectoryAccessStore(defaults: defaults)
+
+        XCTAssertNil(store.directoryURL)
+        XCTAssertNil(defaults.object(forKey: "transfer_dir"))
+    }
+
     func testGPSLocationFailuresMatchAndroidWaitingPermissionAndUnavailableStates() {
         XCTAssertEqual(gpsLocationFailureAction(for: .locationUnknown), .keepWaiting)
         XCTAssertEqual(gpsLocationFailureAction(for: .denied), .permissionRequired)
