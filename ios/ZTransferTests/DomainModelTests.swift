@@ -1083,6 +1083,27 @@ extension DomainModelTests {
         XCTAssertEqual((gps[kCGImagePropertyGPSAltitudeRef] as? NSNumber)?.intValue, 1)
     }
 
+    func testPhotoEffectsLayoutUsesExifOrientedSourceDimensions() throws {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let raw = UIGraphicsImageRenderer(size: CGSize(width: 6, height: 4), format: format).image { context in
+            UIColor.red.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 6, height: 4))
+        }
+        let oriented = UIImage(cgImage: try XCTUnwrap(raw.cgImage), scale: 1, orientation: .right)
+        var settings = PhotoEffectsSettings()
+        settings.photoFrameEnabled = true
+        settings.photoFrameBorderEnabled = true
+        settings.photoFramePreset = .plaque
+        settings.watermark.enabled = false
+
+        let output = try PhotoEffectsRenderer.render(oriented, settings: settings)
+
+        XCTAssertEqual(output.imageOrientation, .up)
+        XCTAssertEqual(output.cgImage?.width, 4)
+        XCTAssertEqual(output.cgImage?.height, 7)
+    }
+
     func testFilterSelectionUsesOwnRememberedIntensityAndOffKeepsSelection() {
         let first = PhotoFilterCatalog.presets[0]
         let next = PhotoFilterCatalog.presets[1]

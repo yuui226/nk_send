@@ -52,7 +52,11 @@ enum PhotoEffectsRenderer {
 
     static func render(_ image: UIImage, settings: PhotoEffectsSettings, metadata: PhotoFrameMetadata? = nil) throws -> UIImage {
         try Task.checkCancellation()
-        var output = image
+        // UIImage keeps the JPEG EXIF transform as presentation metadata.
+        // Android applies that transform while decoding source regions and all
+        // later layout uses the oriented dimensions. Flatten it here before a
+        // filter reads cgImage pixels or a frame calculates its canvas.
+        var output = orientationNormalized(image)
         if settings.photoFilterEnabled, let filter = settings.selectedFilter {
             output = try applyFilter(output, selection: filter)
         }
@@ -66,6 +70,24 @@ enum PhotoEffectsRenderer {
         }
         try Task.checkCancellation()
         return output
+    }
+
+    private static func orientationNormalized(_ image: UIImage) -> UIImage {
+        guard image.imageOrientation != .up, let source = image.cgImage else { return image }
+        let swapsAxes: Bool
+        switch image.imageOrientation {
+        case .left, .leftMirrored, .right, .rightMirrored: swapsAxes = true
+        default: swapsAxes = false
+        }
+        let size = swapsAxes
+            ? CGSize(width: source.height, height: source.width)
+            : CGSize(width: source.width, height: source.height)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = false
+        return UIGraphicsImageRenderer(size: size, format: format).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: size))
+        }
     }
 
     private static func applyFilter(_ image: UIImage, selection: PhotoFilterSelection) throws -> UIImage {
