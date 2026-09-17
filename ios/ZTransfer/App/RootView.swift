@@ -135,13 +135,14 @@ struct RootView: View {
         .environment(\.locale, locale)
         .fullScreenCover(isPresented: $monitorPresented) {
             if let session = connectionModel.cameraSession ?? establishedSession {
+                let listModel = PhotoListViewModel.cached(session: session)
                 RemoteView(session: session,
                            recordingDirectory: directoryStore.directoryURL,
                            isSessionConnected: connectionModel.cameraSession === session,
                            onRetrySTA: { connectionModel.retrySTAConnection() },
-                           onPreparing: { await PhotoListViewModel.cached(session: session).pauseForRemote() },
+                           onPreparing: { await listModel.pauseForRemote() },
                            onStopped: { transportLost in
-                               await PhotoListViewModel.cached(session: session).resumeAfterRemote(
+                               await listModel.resumeAfterRemote(
                                    isConnected: connectionModel.cameraSession === session && !transportLost)
                            },
                            onTransportLost: {
@@ -172,9 +173,15 @@ struct RootView: View {
                 connectionCelebrationActive = true
             }
         }
-        .onChange(of: connectionModel.cameraSession != nil) { connected in
+        .onChange(of: connectionModel.cameraSession.map { ObjectIdentifier($0) }) { sessionID in
+            let connected = sessionID != nil
             gpsCoordinator.setAPModeBlocked(gpsBlockedByAPCamera)
             if connected {
+                if let previous = establishedSession,
+                   let replacement = connectionModel.cameraSession,
+                   previous !== replacement {
+                    PhotoListViewModel.evict(session: previous)
+                }
                 establishedSession = connectionModel.cameraSession
                 // The queue belongs to the workspace, not to the old camera.
                 // A recovered session must replace its download provider.
@@ -260,6 +267,19 @@ private struct HomeWorkspacePagerIOS: View {
     let directory: DirectoryAccessStore
     let celebrationStart: Date?
     @State private var page = 0
+    @State private var pagerDragGeneration = 0
+    @State private var observingEntryDrag = false
+
+    private var localWorkspaceMustRelease: Bool {
+        if connection.cameraSession != nil { return true }
+        if case .connecting = connection.state.usbPhase { return true }
+        switch connection.state.wifiPhase {
+        case .discovering, .pairing, .connecting, .reconnecting:
+            return true
+        default:
+            return false
+        }
+    }
 
     var body: some View {
         GeometryReader { proxy in
@@ -275,12 +295,18 @@ private struct HomeWorkspacePagerIOS: View {
                     .rotationEffect(.degrees(-90))
                     .frame(width: proxy.size.width, height: proxy.size.height)
                     .tag(0)
-                LocalPhotoEffectsView(onNavigateUp: {
-                    withAnimation(.interactiveSpring(response: 0.34, dampingFraction: 0.88)) { page = 0 }
-                })
-                    .rotationEffect(.degrees(-90))
-                    .frame(width: proxy.size.width, height: proxy.size.height)
-                    .tag(1)
+                Group {
+                    if localWorkspaceMustRelease {
+                        ZTransferColors.background
+                    } else {
+                        LocalPhotoEffectsView(onNavigateUp: {
+                            withAnimation(.interactiveSpring(response: 0.34, dampingFraction: 0.88)) { page = 0 }
+                        })
+                    }
+                }
+                .rotationEffect(.degrees(-90))
+                .frame(width: proxy.size.width, height: proxy.size.height)
+                .tag(1)
             }
             .rotationEffect(.degrees(90))
             .frame(width: proxy.size.height, height: proxy.size.width)
@@ -288,7 +314,42 @@ private struct HomeWorkspacePagerIOS: View {
             .background(ZTransferColors.background)
             .tabViewStyle(.page(indexDisplayMode: .never))
             .indexViewStyle(.page(backgroundDisplayMode: .never))
+            // Android pauses discovery as soon as a drag targets the local
+            // workbench, before the pager has settled. Observe the same edge
+            // gesture so a camera cannot be accepted midway through the page
+            // transition. A cancelled drag restores discovery after settling.
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 8)
+                    .onChanged { value in
+                        guard page == 0, !gpsCoordinator.state.enabled,
+                              value.translation.height < 0,
+                              abs(value.translation.height) > abs(value.translation.width),
+                              !observingEntryDrag else { return }
+                        observingEntryDrag = true
+                        pagerDragGeneration &+= 1
+                        connection.setConnectionDiscoveryPaused(true)
+                    }
+                    .onEnded { _ in
+                        guard observingEntryDrag else { return }
+                        observingEntryDrag = false
+                        let generation = pagerDragGeneration
+                        Task { @MainActor in
+                            try? await Task.sleep(for: .milliseconds(550))
+                            guard generation == pagerDragGeneration else { return }
+                            connection.setConnectionDiscoveryPaused(page != 0)
+                        }
+                    }
+            )
+            // GPS owns the camera radio. Match Android by swallowing only the
+            // page-entry drag while on the connection page; the workbench's
+            // return gesture remains available when it is already visible.
+            .highPriorityGesture(
+                DragGesture(minimumDistance: 8),
+                including: gpsCoordinator.state.enabled && page == 0 ? .all : .none
+            )
             .onChange(of: page) { currentPage in
+                pagerDragGeneration &+= 1
+                observingEntryDrag = false
                 connection.setConnectionDiscoveryPaused(currentPage != 0)
             }
         }

@@ -276,9 +276,6 @@ struct SettingsView: View {
 
     private func commitEffectsDraft() {
         watermarkTextFocused = false
-        if effectsDraft.watermark.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            effectsDraft.watermark.text = PhotoFrameWatermark.defaultText
-        }
         effectsStore.update(effectsDraft)
     }
 

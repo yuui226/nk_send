@@ -208,6 +208,8 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
     @State private var effectPreviewGeneration = 0
     @State private var effectPreviewRequested = false
     @State private var effectPreviewFileKey: String?
+    @State private var effectPreviewAttemptKey: String?
+    @State private var effectPreviewLoadingKey: String?
     @State private var topControlsVisible = true
     @State private var cellBounds: [UInt32: CGRect] = [:]
     @State private var queueTargetBounds: CGRect = .zero
@@ -890,39 +892,61 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
         effectPreviewRequested = true
         guard let file = model.latestEffectPreviewFile else { return }
         let key = "\(file.id)|\(file.fileName)|\(file.size)|\(file.captureDate ?? "")"
-        guard effectPreviewFileKey != key || (effectPreviewSource == nil && effectPreviewExif == nil) else { return }
-        effectPreviewFileKey = key
+        guard effectPreviewFileKey != key,
+              effectPreviewAttemptKey != key,
+              effectPreviewLoadingKey != key else { return }
+        effectPreviewLoadingKey = key
         effectPreviewGeneration &+= 1
         let generation = effectPreviewGeneration
         Task {
-            await session.setEffectPreviewActive(true)
-            defer {
-                Task { @MainActor in
-                    guard generation == effectPreviewGeneration else { return }
-                    await session.setEffectPreviewActive(false)
-                    // Android's fill collector is resumed by the same state
-                    // transition that releases the effect-preview channel.
-                    // Without an explicit wake, a worker that yielded while
-                    // the preview was active would remain stopped until an
-                    // unrelated filter or transfer change occurred.
-                    model.wakeThumbnailFill()
-                }
-            }
             if let data = try? await session.cachedThumbnail(file: file), let image = UIImage(data: data) {
-                guard !Task.isCancelled else { return }
+                if Task.isCancelled {
+                    await MainActor.run {
+                        guard generation == effectPreviewGeneration else { return }
+                        effectPreviewLoadingKey = nil
+                    }
+                    return
+                }
                 await MainActor.run {
                     guard generation == effectPreviewGeneration else { return }
                     effectPreviewSource = image
                 }
             }
-            // Android reads EXIF only after a valid FHD preview succeeds.
-            let previewData = try? await session.preview(handle: file.id)
-            guard let previewData, UIImage(data: previewData) != nil else { return }
-            let exif = try? await session.exif(file: file)
-            guard !Task.isCancelled else { return }
+            guard generation == effectPreviewGeneration else { return }
+            let result: (Data?, PhotoExif?)
+            do {
+                result = try await session.effectPreviewAndExif(file: file)
+            } catch {
+                await MainActor.run {
+                    guard generation == effectPreviewGeneration else { return }
+                    effectPreviewLoadingKey = nil
+                }
+                model.wakeThumbnailFill()
+                return
+            }
+            // Releasing the effect slot re-enables background filling. Wake a
+            // worker that yielded while this sample owned the channel.
+            model.wakeThumbnailFill()
+            guard let previewData = result.0 else {
+                await MainActor.run {
+                    guard generation == effectPreviewGeneration else { return }
+                    effectPreviewLoadingKey = nil
+                    effectPreviewAttemptKey = key
+                }
+                return
+            }
+            if Task.isCancelled {
+                await MainActor.run {
+                    guard generation == effectPreviewGeneration else { return }
+                    effectPreviewLoadingKey = nil
+                }
+                return
+            }
             await MainActor.run {
                 guard generation == effectPreviewGeneration else { return }
-                effectPreviewExif = exif
+                effectPreviewLoadingKey = nil
+                effectPreviewFileKey = key
+                effectPreviewExif = result.1
                 effectPreviewSource = UIImage(data: previewData)
             }
         }

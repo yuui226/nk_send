@@ -22,6 +22,13 @@ final class PhotoListViewModel: ObservableObject {
         sessionModels[key] = model
         return model
     }
+
+    /// A model survives route changes only while its CameraSession is the
+    /// workspace owner. Once reconnect or camera switching replaces that
+    /// session, release every task and the strong cache entry together.
+    static func evict(session: CameraSession) {
+        sessionModels.removeValue(forKey: ObjectIdentifier(session))?.retire()
+    }
     @Published private(set) var loadState: PhotoListLoadState = .idle
     @Published private(set) var sections: [PhotoDaySection] = []
     @Published private(set) var availableDayKeys: Set<String> = []
@@ -183,6 +190,20 @@ final class PhotoListViewModel: ObservableObject {
     }
 
     deinit { loadTask?.cancel(); fillTask?.cancel(); catalogUpdatesTask?.cancel() }
+
+    private func retire() {
+        loadGeneration &+= 1
+        transferIndexGeneration &+= 1
+        loadTask?.cancel()
+        loadTask = nil
+        fillTask?.cancel()
+        fillTask = nil
+        fillWorkerActive = false
+        catalogUpdatesTask?.cancel()
+        catalogUpdatesTask = nil
+        newMediaHandler = nil
+        isLoadingFiles = false
+    }
 
     func load() {
         guard case .idle = loadState else {

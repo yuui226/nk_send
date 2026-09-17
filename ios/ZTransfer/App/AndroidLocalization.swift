@@ -780,6 +780,7 @@ enum AndroidLocalization {
         "local_photo_replace": ["zh": "更换图片", "en": "Replace photo", "hant": "更換圖片"],
         "local_photo_reselect": ["zh": "重新选择", "en": "Choose again", "hant": "重新選擇"],
         "local_photo_same_folder_hint": ["zh": "优先保存到原目录；不可写时自动保存到 Pictures/ZTransfer", "en": "Saved beside the original, or to Pictures/ZTransfer when needed", "hant": "優先儲存到原目錄；無法寫入時自動儲存到 Pictures/ZTransfer"],
+        "local_photo_ios_save_hint": ["zh": "效果图会作为新照片保存到系统照片图库", "en": "Edited photos are saved as new items in your photo library.", "hant": "效果圖會作為新照片儲存到系統照片圖庫"],
         "local_photo_save_failed": ["zh": "生成失败，原照片未受影响", "en": "Couldn’t generate the photo. The original is unchanged.", "hant": "產生失敗，原照片未受影響"],
         "local_photo_saved": ["zh": "已保存到：%1$s", "en": "Saved to: %1$s", "hant": "已儲存至：%1$s"],
         "local_photo_select_failed": ["zh": "请选择保存在本机相册中且可写入的照片", "en": "Choose a writable photo stored on this phone", "hant": "請選擇儲存在本機相簿中且可寫入的照片"],

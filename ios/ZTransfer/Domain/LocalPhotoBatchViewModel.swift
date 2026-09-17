@@ -15,10 +15,10 @@ final class LocalPhotoBatchViewModel: ObservableObject {
     private var idleTimerGeneration: UInt64?
 
     func select(_ items: [PhotosPickerItem]) {
-        // Current iOS accepts JPEG only. Android also accepts PNG sources;
-        // keep that known input-range difference explicit until it is aligned.
-        let jpegItems = items.filter { $0.supportedContentTypes.contains(where: { $0.conforms(to: .jpeg) }) }
-        guard state.select(jpegItems) else { return }
+        // Keep the picker contract identical to Android's exporter: only
+        // JPEG and PNG enter the batch; HEIF/RAW/video remain excluded.
+        let supportedItems = items.filter { isSupportedLocalPhoto($0.supportedContentTypes) }
+        guard state.select(supportedItems) else { return }
         // A terminal result may still have its 2400 ms timer running. A fresh
         // picker selection must never be replaced by that older timer.
         generationTask?.cancel()
@@ -87,6 +87,12 @@ final class LocalPhotoBatchViewModel: ObservableObject {
     deinit { generationTask?.cancel() }
 }
 
+func isSupportedLocalPhoto(_ contentTypes: [UTType]) -> Bool {
+    contentTypes.contains { type in
+        type.conforms(to: .jpeg) || type.conforms(to: .png)
+    }
+}
+
 enum LocalPhotoOutput {
     static func generate(item: PhotosPickerItem, settings: PhotoEffectsSettings) async throws {
         guard let data = try await item.loadTransferable(type: Data.self) else {
@@ -102,7 +108,9 @@ enum LocalPhotoOutput {
                 try Task.checkCancellation()
                 // Match Android's JPEG output; retain only compressed data while
                 // waiting for the photo-library write to settle.
-                guard let encoded = output.jpegData(compressionQuality: 1) else {
+                guard let encoded = PhotoEffectsJPEGEncoder.encode(
+                    output, copyingMetadataFrom: data
+                ) else {
                     throw CocoaError(.fileWriteUnknown)
                 }
                 return encoded

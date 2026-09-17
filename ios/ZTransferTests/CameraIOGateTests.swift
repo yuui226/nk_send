@@ -20,6 +20,8 @@ private actor GateTestLatch {
             else { waiters.append(continuation) }
         }
     }
+
+    func isSignalled() -> Bool { signalled }
 }
 
 private actor GateTestOrder {
@@ -29,6 +31,43 @@ private actor GateTestOrder {
 }
 
 final class CameraIOGateTests: XCTestCase {
+    func testEffectPreviewWaitsForEveryForegroundOwnerAndReleasesFillGate() async throws {
+        let repository = CameraRepository(debugData: .shared)
+        let entered = GateTestLatch()
+        let release = GateTestLatch()
+        await repository.setTransfersBusy(true)
+        await repository.setRemoteActive(true)
+        await repository.setFHDActive(true)
+
+        let preview = Task {
+            try await repository.withEffectPreviewPriority {
+                await entered.signal()
+                await release.wait()
+            }
+        }
+        try await Task.sleep(for: .milliseconds(60))
+        var didEnter = await entered.isSignalled()
+        XCTAssertFalse(didEnter)
+
+        await repository.setTransfersBusy(false)
+        try await Task.sleep(for: .milliseconds(30))
+        didEnter = await entered.isSignalled()
+        XCTAssertFalse(didEnter)
+        await repository.setRemoteActive(false)
+        try await Task.sleep(for: .milliseconds(30))
+        didEnter = await entered.isSignalled()
+        XCTAssertFalse(didEnter)
+        await repository.setFHDActive(false)
+        await entered.wait()
+        var fillAllowed = await repository.backgroundThumbnailFillAllowed()
+        XCTAssertFalse(fillAllowed)
+
+        await release.signal()
+        try await preview.value
+        fillAllowed = await repository.backgroundThumbnailFillAllowed()
+        XCTAssertTrue(fillAllowed)
+    }
+
     func testReservationDoesNotBlockOrdinaryOrIdleCommandsBetweenFHDAndExif() async throws {
         let gate = CameraIOGate()
         let values = try await AsyncDeadline.run(nanoseconds: 1_000_000_000, timeoutError: PTPSessionError.timeout) {

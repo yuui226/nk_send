@@ -1,4 +1,5 @@
 import Foundation
+import CoreLocation
 import XCTest
 #if SWIFT_PACKAGE
 @testable import ZTransferGPS
@@ -33,5 +34,50 @@ final class GPSProtocolTests: XCTestCase {
         XCTAssertEqual(payload[13], 77)
         XCTAssertEqual(UInt16(payload[14]) | UInt16(payload[15]) << 8, 12)
         XCTAssertEqual(String(decoding: payload[25..<31], as: UTF8.self), "WGS-84")
+    }
+
+    func testAltitudePolicyReusesRecentNearbyTrustedFix() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let trusted = CLLocation(
+            coordinate: CLLocationCoordinate2D(latitude: 31.2304, longitude: 121.4737),
+            altitude: 18.5,
+            horizontalAccuracy: 8,
+            verticalAccuracy: 5,
+            timestamp: now,
+        )
+        let first = resolvedGPSAltitude(for: trusted, cached: nil, now: now)
+        XCTAssertEqual(first.0, 18.5)
+
+        let nearbyWithoutAltitude = CLLocation(
+            coordinate: CLLocationCoordinate2D(latitude: 31.2310, longitude: 121.4740),
+            altitude: 0,
+            horizontalAccuracy: 20,
+            verticalAccuracy: -1,
+            timestamp: now.addingTimeInterval(60),
+        )
+        XCTAssertEqual(
+            resolvedGPSAltitude(for: nearbyWithoutAltitude, cached: first.1,
+                                now: now.addingTimeInterval(60)).0,
+            18.5
+        )
+    }
+
+    func testAltitudePolicyRejectsStaleOrDistantFix() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let cached = GPSTrustedAltitudeFix(
+            altitudeMeters: 22, latitude: 31.2304, longitude: 121.4737,
+            timestamp: now.addingTimeInterval(-121),
+        )
+        let current = CLLocation(
+            coordinate: CLLocationCoordinate2D(latitude: 31.2305, longitude: 121.4738),
+            altitude: 0, horizontalAccuracy: 10, verticalAccuracy: -1, timestamp: now,
+        )
+        XCTAssertNil(resolvedGPSAltitude(for: current, cached: cached, now: now).0)
+
+        let freshFar = GPSTrustedAltitudeFix(
+            altitudeMeters: 22, latitude: 30, longitude: 120,
+            timestamp: now,
+        )
+        XCTAssertNil(resolvedGPSAltitude(for: current, cached: freshFar, now: now).0)
     }
 }

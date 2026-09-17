@@ -34,10 +34,7 @@ struct PhotoEffectsControls: View {
         draft.metadataByPreset[draft.photoFramePreset.rawValue] ?? PhotoFrameMetadataSettings.defaults(for: draft.photoFramePreset)
     }
     private var orderedFrameOptions: [PhotoFramePreset?] {
-        // Current iOS behavior keeps the fixed catalog order. Android moves
-        // favorites to the front in addition order; that difference is kept
-        // explicit in the alignment ledger until the shared control is fixed.
-        return [nil] + PhotoFramePreset.allCases
+        [nil] + draft.orderedFramePresets
     }
     private var photoWatermarkPositions: [PhotoFrameWatermarkPosition] {
         [.photoTopLeft, .photoTopCenter, .photoTopRight, .photoCenter,
@@ -370,6 +367,10 @@ struct PhotoEffectsSettingsPreview: View {
     @State private var unfiltered: UIImage?
     @State private var showUnfiltered = false
     @State private var prefetched: [String: UIImage] = [:]
+    @State private var filteredSource: UIImage?
+    @State private var filteredSourceKey: PhotoFilterSelection?
+    @State private var lastPreviewSettings: PhotoEffectsSettings?
+    @State private var cachedContextKey = ""
     @State private var rotationQuarterTurns = 0
     @State private var expanded = false
 
@@ -403,6 +404,70 @@ struct PhotoEffectsSettingsPreview: View {
 
     private var renderKeyWithRotation: String {
         "\(renderKey)|rotation:\(rotationQuarterTurns)"
+    }
+
+    private var sourceContextKey: String {
+        Self.makeSourceContextKey(source: source, metadata: metadata,
+                                  rotationQuarterTurns: rotationQuarterTurns)
+    }
+
+    private static func makeSourceContextKey(
+        source: UIImage?, metadata: PhotoFrameMetadata?, rotationQuarterTurns: Int
+    ) -> String {
+        let sourceKey = source.map {
+            "source:\(ObjectIdentifier($0)):\($0.size.width)x\($0.size.height)"
+        } ?? "source:none"
+        let metadataKey = metadata.map {
+            "meta:\($0.make ?? "")|\($0.model ?? "")|\($0.aperture ?? "")|\($0.shutter ?? "")|\($0.iso ?? "")|\($0.focalLength ?? "")|\($0.lensModel ?? "")|\($0.dateTime ?? "")"
+        } ?? "meta:none"
+        return "\(sourceKey)|\(metadataKey)|rotation:\(rotationQuarterTurns)"
+    }
+
+    private static func differsOnlyInWatermarkText(
+        _ previous: PhotoEffectsSettings, _ current: PhotoEffectsSettings
+    ) -> Bool {
+        guard previous.watermark.text != current.watermark.text else { return false }
+        var lhs = previous
+        var rhs = current
+        lhs.watermark.text = ""
+        rhs.watermark.text = ""
+        return lhs == rhs
+    }
+
+    private static func comparisonPreview(
+        image: UIImage, settings: PhotoEffectsSettings, metadata: PhotoFrameMetadata?
+    ) async -> UIImage? {
+        do {
+            try await Task.sleep(for: .milliseconds(500))
+            return try await LocalPhotoOutput.unfilteredPreview(
+                image: image, settings: settings, metadata: metadata
+            )
+        } catch { return nil }
+    }
+
+    private static func prefetchedPreviews(
+        image: UIImage, sourceIdentity: UIImage, settings: PhotoEffectsSettings,
+        metadata: PhotoFrameMetadata?, rotationQuarterTurns: Int
+    ) async -> [(String, UIImage)] {
+        var results: [(String, UIImage)] = []
+        do {
+            for selection in nextPhotoFilterSelections(for: settings) {
+                try Task.checkCancellation()
+                var next = settings
+                next.photoFilterEnabled = true
+                next.selectedFilter = selection
+                let nextFiltered = try await LocalPhotoOutput.filteredSource(
+                    image: image, selection: selection
+                )
+                let preview = try await LocalPhotoOutput.preview(
+                    image: image, settings: next, metadata: metadata,
+                    filteredSource: nextFiltered
+                )
+                let base = makeRenderKey(settings: next, source: sourceIdentity, metadata: metadata)
+                results.append(("\(base)|rotation:\(rotationQuarterTurns)", preview.filtered))
+            }
+        } catch {}
+        return results
     }
 
     private static func rotate(_ image: UIImage, quarterTurns: Int) -> UIImage {
@@ -476,10 +541,22 @@ struct PhotoEffectsSettingsPreview: View {
             }
         }
         .task(id: renderKeyWithRotation) {
-            // A rotated source is a different pixel canvas. Never promote a
-            // prefetch rendered for the previous orientation into the new
-            // frame, otherwise the border height briefly snaps back.
-            prefetched.removeAll(keepingCapacity: true)
+            if let previous = lastPreviewSettings,
+               Self.differsOnlyInWatermarkText(previous, settings) {
+                // Android delays only text-only edits. Each new keystroke
+                // cancels this task before any pixel work begins.
+                try? await Task.sleep(for: .milliseconds(140))
+                guard !Task.isCancelled else { return }
+            }
+            lastPreviewSettings = settings
+            if cachedContextKey != sourceContextKey {
+                // Rotation/source/EXIF changes invalidate every pixel cache;
+                // border and watermark edits deliberately do not.
+                cachedContextKey = sourceContextKey
+                prefetched.removeAll(keepingCapacity: true)
+                filteredSource = nil
+                filteredSourceKey = nil
+            }
             guard let source else {
                 onRequest()
                 // Android gives the real thumbnail/FHD request a 2200 ms
@@ -508,70 +585,55 @@ struct PhotoEffectsSettingsPreview: View {
             let rotationQuarterTurns = rotationQuarterTurns
             let rotatedSource = Self.rotate(source, quarterTurns: rotationQuarterTurns)
             let result: UIImage?
-            if let cached = prefetched.removeValue(forKey: renderKey) {
+            if let cached = prefetched.removeValue(forKey: renderKeyWithRotation) {
                 result = cached
             } else {
-                result = try? await Task.detached(priority: .userInitiated) {
-                    try Task.checkCancellation()
-                    return try await PhotoEffectsPreviewRenderGate.shared.withPermit {
-                        try autoreleasepool {
-                            try PhotoEffectsRenderer.render(rotatedSource, settings: settings, metadata: metadata)
-                        }
+                let filterKey = settings.photoFilterEnabled ? settings.selectedFilter : nil
+                let preparedSource: UIImage?
+                if let filterKey {
+                    if filteredSourceKey == filterKey, let filteredSource {
+                        preparedSource = filteredSource
+                    } else {
+                        let next = try? await LocalPhotoOutput.filteredSource(
+                            image: rotatedSource, selection: filterKey
+                        )
+                        guard !Task.isCancelled else { return }
+                        filteredSource = next
+                        filteredSourceKey = filterKey
+                        preparedSource = next
                     }
-                }.value
+                } else {
+                    filteredSource = nil
+                    filteredSourceKey = nil
+                    preparedSource = nil
+                }
+                result = try? await LocalPhotoOutput.preview(
+                    image: rotatedSource, settings: settings, metadata: metadata,
+                    filteredSource: preparedSource
+                ).filtered
             }
             guard !Task.isCancelled else { return }
             rendered = result
             guard settings.photoFilterEnabled, settings.selectedFilter != nil else { return }
-            // Android's comparison frame is deliberately delayed so the
-            // filtered frame becomes visible first and rapid wheel changes
-            // cancel obsolete comparison work.
-            try? await Task.sleep(nanoseconds: 500_000_000)
-            guard !Task.isCancelled else { return }
-            let baseline: PhotoEffectsSettings = {
-                var value = settings
-                value.photoFilterEnabled = false
-                return value
-            }()
-            let comparison = try? await Task.detached(priority: .utility) {
-                try Task.checkCancellation()
-                return try await PhotoEffectsPreviewRenderGate.shared.withPermit {
-                    try autoreleasepool {
-                        try PhotoEffectsRenderer.render(rotatedSource, settings: baseline, metadata: metadata)
-                    }
-                }
-            }.value
-            guard !Task.isCancelled else { return }
-            unfiltered = comparison
 
-            // Android warms the next two filters only after the current frame is
-            // visible. Keep the complete result keyed by the same source,
-            // metadata and decoration settings so a wheel step can promote it
-            // without another full composition.
-            for selection in nextPhotoFilterSelections(for: settings) {
-                guard !Task.isCancelled else { return }
-                let next: PhotoEffectsSettings = {
-                    var value = settings
-                    value.photoFilterEnabled = true
-                    value.selectedFilter = selection
-                    return value
-                }()
-                let key = Self.makeRenderKey(settings: next, source: source, metadata: metadata)
-                guard prefetched[key] == nil else { continue }
-                let nextResult = try? await Task.detached(priority: .utility) {
-                    try Task.checkCancellation()
-                    return try await PhotoEffectsPreviewRenderGate.shared.withPermit {
-                        try autoreleasepool {
-                            try PhotoEffectsRenderer.render(rotatedSource, settings: next, metadata: metadata)
-                        }
-                    }
-                }.value
-                guard !Task.isCancelled else { return }
-                if let nextResult {
-                    prefetched[key] = nextResult
-                    if prefetched.count > 2, let oldest = prefetched.keys.first {
-                        prefetched.removeValue(forKey: oldest)
-                    }
+            // Android begins neighbor warming as soon as the current image is
+            // visible, alongside the delayed long-press comparison.
+            async let comparison = Self.comparisonPreview(
+                image: rotatedSource, settings: settings, metadata: metadata
+            )
+            async let warmed = Self.prefetchedPreviews(
+                image: rotatedSource, sourceIdentity: source, settings: settings,
+                metadata: metadata, rotationQuarterTurns: rotationQuarterTurns
+            )
+            if let comparison = await comparison, !Task.isCancelled {
+                unfiltered = comparison
+            }
+            let warmedResults = await warmed
+            guard !Task.isCancelled else { return }
+            for (key, image) in warmedResults where prefetched[key] == nil {
+                prefetched[key] = image
+                if prefetched.count > 2, let oldest = prefetched.keys.first {
+                    prefetched.removeValue(forKey: oldest)
                 }
             }
         }

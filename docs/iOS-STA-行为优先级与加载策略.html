@@ -57,7 +57,7 @@
     <tr><td>传输</td><td>TransferQueue + CameraIOGate transfer slice</td><td>后台缩略图和空闲探测暂停；活动传输阻止监看入口。普通列表元数据和可见 GetThumb 并未整体暂停，而是在片段间共享 FIFO。</td><td>缩略图填充 worker 在 transferBusy 变为 false 后 wake。</td><td>交互预览 reservation 可阻止下一传输片段；普通命令没有同等插队权。</td></tr>
     <tr><td>监看</td><td>RemoteViewModel 前台状态 + PTP 命令流</td><td>元数据扫描和后台缩略图填充；remoteActive 不是禁止所有 ordinary 命令的独占协议锁。</td><td>页面退出回调释放前台门控，再按连接和预览状态恢复；重新核对 handle 时放弃旧扫描快照，保留已有列表和缩略图。</td><td>已有缓存仍保留；不得把“后台停止”扩大描述为“所有远程缩略图请求必然被协议层拒绝”。</td></tr>
     <tr><td>FHD/EXIF 预览</td><td>interactive reservation + ordinary command</td><td>文件扫描暂停、底层网格禁发远程 GetThumb、后台填充等待；已开始的传输 slice 先完成，后续 slice 等待。</td><td>reservation 释放后，扫描从既有游标继续，缩略图 worker wake。</td><td>reservation 只约束 transfer waiter；ordinary waiter 仍按 CameraIOGate 的可运行顺序处理。</td></tr>
-    <tr><td>照片效果像素渲染</td><td>本地效果渲染 gate</td><td>渲染 gate 本身只串行化本机像素处理；连接后入口另以 effectPreviewActive 暂停后台补图，不暂停元数据扫描。</td><td>样张请求结束后释放 effectPreviewActive 并唤醒后台填充。</td><td>样张的 FHD/EXIF 仍会使用相机 I/O；其 iOS 前置等待与 Android 不同，见新总表 D12。</td></tr>
+    <tr><td>照片效果像素渲染</td><td>本地效果渲染 gate</td><td>本地入口只用渲染 gate 串行化本机像素处理；连接后入口的相机样张会等待传输、监看、交互 FHD 和已有样张任务结束。</td><td>连接后入口在同一个 effect-preview reservation 中连续读取 FHD 与 EXIF；释放后唤醒后台缩略图填充。</td><td>与 Android 的前置等待、整段占用和释放规则一致，见新总表 D12。</td></tr>
     <tr><td>设置、传输队列页面</td><td>UI 路由，不直接占用相机 I/O</td><td>不应清除文件列表或缩略图缓存。</td><td>返回照片列表复用同一会话模型和已有缓存。</td><td>只有用户明确下拉刷新/新会话/连接恢复等边界才会触发扫描。</td></tr>
   </tbody></table>
 

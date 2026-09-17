@@ -879,7 +879,9 @@ actor TransferQueue {
                 }
                 let rendered = try PhotoEffectsRenderer.render(image, settings: settings, metadata: metadata)
                 try Task.checkCancellation()
-                guard let encoded = rendered.jpegData(compressionQuality: 1) else { throw CocoaError(.fileWriteUnknown) }
+                guard let encoded = PhotoEffectsJPEGEncoder.encode(
+                    rendered, copyingMetadataFrom: source, cameraMetadata: metadata
+                ) else { throw CocoaError(.fileWriteUnknown) }
                 let framesDirectory = directory.appendingPathComponent("ZTFrames", isDirectory: true)
                 try FileManager.default.createDirectory(at: framesDirectory, withIntermediateDirectories: true)
                 let destination = uniqueFrameURL(frameURL(source: source, settings: settings, framesDirectory: framesDirectory))

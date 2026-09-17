@@ -1,7 +1,9 @@
 import Foundation
 import Combine
 import CryptoKit
+import ImageIO
 import UIKit
+import UniformTypeIdentifiers
 
 /// Persisted names and defaults mirror PhotoFrameExporter.kt.  The renderer and
 /// settings UI both consume these values so a draft can never silently change a
@@ -40,10 +42,17 @@ struct PhotoFrameWatermark: Codable, Equatable, Sendable {
     var effect: PhotoFrameWatermarkEffect = .auto
 
     var displayText: String {
-        let normalized = text.replacingOccurrences(of: "[\\r\\n\\t]+", with: " ", options: .regularExpression)
-            .filter { !$0.isNewline && !$0.isWhitespace || $0 == " " }
-        let trimmed = String(normalized.prefix(Self.maxTextLength)).trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? Self.defaultText : trimmed
+        limitedText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Android replaces line breaks/tabs with one space, removes remaining
+    /// control scalars, then truncates by Unicode code point.
+    var limitedText: String {
+        let singleLine = text.replacingOccurrences(of: "[\\r\\n\\t]+", with: " ", options: .regularExpression)
+        let scalars = singleLine.unicodeScalars.filter {
+            !CharacterSet.controlCharacters.contains($0)
+        }
+        return String(String.UnicodeScalarView(scalars.prefix(Self.maxTextLength)))
     }
 }
 
@@ -154,6 +163,13 @@ struct PhotoEffectsSettings: Codable, Equatable, Sendable {
         var seen = Set<String>()
         let favorites = favoriteFilterIDs.filter { seen.insert($0).inserted }.compactMap { byKey[$0] }
         return favorites + presets.filter { !favoriteFilterIDs.contains(Self.filterKey($0.id)) }
+    }
+
+    var orderedFramePresets: [PhotoFramePreset] {
+        var seen = Set<PhotoFramePreset>()
+        let favorites = favoriteFrameEffects.map(\.preset)
+            .filter { seen.insert($0).inserted }
+        return favorites + PhotoFramePreset.allCases.filter { seen.insert($0).inserted }
     }
 
     mutating func selectFilter(_ id: String?) {
@@ -411,21 +427,30 @@ final class PhotoEffectsStore: ObservableObject {
     private let key: String
     private let scope: Scope
 
-    init(defaults: UserDefaults = .standard, scope: Scope = .cameraTransfer) {
+    init(defaults: UserDefaults = .standard, scope: Scope = .cameraTransfer,
+         legacyDefaults: UserDefaults? = nil) {
         // Android isolates phone-photo effects in the `local_photo_effects`
         // preference file.  UserDefaults suites provide the same isolation;
         // injected defaults are still honored for camera-transfer tests.
-        self.defaults = scope == .localPhotos && defaults === UserDefaults.standard
+        let resolvedDefaults = scope == .localPhotos && defaults === UserDefaults.standard
             ? (UserDefaults(suiteName: "local_photo_effects") ?? defaults)
             : defaults
+        self.defaults = resolvedDefaults
         self.scope = scope
         key = scope == .cameraTransfer ? "photoEffectsSettings.v1" : "localPhotoEffectsSettings.v1"
         if scope == .cameraTransfer, let value = Self.restoreAndroidTransferSettings(defaults: self.defaults) {
-            settings = Self.normalized(value)
+            settings = Self.normalized(value, scope: scope)
         } else if scope == .localPhotos, let value = Self.restoreAndroidLocalSettings(defaults: self.defaults) {
-            settings = Self.normalized(value)
+            settings = Self.normalized(value, scope: scope)
         } else if let data = self.defaults.data(forKey: key), let value = try? JSONDecoder().decode(PhotoEffectsSettings.self, from: data) {
-            settings = Self.normalized(value)
+            settings = Self.normalized(value, scope: scope)
+        } else if scope == .localPhotos,
+                  let value = Self.migrateLegacyLocalFavorites(
+                    from: legacyDefaults ?? (defaults === UserDefaults.standard ? .standard : defaults)
+                  ) {
+            settings = Self.normalized(value, scope: scope)
+            Self.persistAndroidLocalSettings(settings, defaults: self.defaults)
+            if let data = try? JSONEncoder().encode(settings) { self.defaults.set(data, forKey: key) }
         } else {
             settings = PhotoEffectsSettings()
             if let first = PhotoFilterCatalog.presets.first {
@@ -435,7 +460,7 @@ final class PhotoEffectsStore: ObservableObject {
     }
 
     func update(_ value: PhotoEffectsSettings) {
-        settings = Self.normalized(value)
+        settings = Self.normalized(value, scope: scope)
         if scope == .cameraTransfer {
             Self.persistAndroidTransferSettings(settings, defaults: self.defaults)
         } else {
@@ -471,10 +496,21 @@ final class PhotoEffectsStore: ObservableObject {
     /// Reuse the model and editor, while preserving their independent choices.
     enum Scope { case cameraTransfer, localPhotos }
 
-    private static func normalized(_ value: PhotoEffectsSettings) -> PhotoEffectsSettings {
+    private static func normalized(_ value: PhotoEffectsSettings, scope: Scope) -> PhotoEffectsSettings {
         var result = value
         var watermark = value.watermark
-        if watermark.content == .image && watermark.imageHash == nil { watermark.content = .text }
+        let candidateHash = watermark.imageHash?.lowercased()
+        let validHash: String?
+        if let candidateHash,
+           candidateHash.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil,
+           watermarkImage(hash: candidateHash) != nil {
+            validHash = candidateHash
+        } else {
+            validHash = nil
+        }
+        watermark.imageHash = validHash
+        if watermark.content == .image && validHash == nil { watermark.content = .text }
+        watermark.text = scope == .cameraTransfer ? watermark.displayText : watermark.limitedText
         watermark.sizePercent = min(max(watermark.sizePercent, PhotoFrameWatermark.sizeRange.lowerBound), PhotoFrameWatermark.sizeRange.upperBound)
         watermark.opacityPercent = min(max(watermark.opacityPercent, PhotoFrameWatermark.opacityRange.lowerBound), PhotoFrameWatermark.opacityRange.upperBound)
         result.watermark = watermark
@@ -503,7 +539,37 @@ final class PhotoEffectsStore: ObservableObject {
             result.favoriteFrameEffects.append(.init(preset: preset, watermark: result.watermark))
         }
         result.favoriteFramePresets.formUnion(result.favoriteFrameEffects.map(\.preset))
+        result.metadataByPreset = value.metadataByPreset.reduce(into: [:]) { partial, entry in
+            guard let preset = PhotoFramePreset(rawValue: entry.key) else { return }
+            var metadata = entry.value
+            metadata.datePattern = androidNormalizedDatePattern(metadata.datePattern)
+            metadata.timePattern = androidNormalizedTimePattern(metadata.timePattern)
+            if scope == .localPhotos {
+                metadata.showCoordinates = false
+                metadata.showAltitude = false
+            }
+            if metadata != PhotoFrameMetadataSettings.defaults(for: preset) {
+                partial[preset.rawValue] = metadata
+            }
+        }
+        result.metadata = result.metadataByPreset[result.photoFramePreset.rawValue]
+            ?? PhotoFrameMetadataSettings.defaults(for: result.photoFramePreset)
         return result
+    }
+
+    private static func migrateLegacyLocalFavorites(from defaults: UserDefaults) -> PhotoEffectsSettings? {
+        let filterRaw = defaults.string(forKey: "favorite_photo_filters_v1")
+        let frameRaw = defaults.string(forKey: "favorite_frame_effects_v1")
+        guard filterRaw != nil || frameRaw != nil else { return nil }
+        var value = PhotoEffectsSettings()
+        value.favoriteFilterIDs = decodeAndroidFavorites(filterRaw)
+        value.favoriteFrameEffects = decodeAndroidFrameFavorites(frameRaw, watermark: value.watermark)
+        value.favoriteFramePresets = Set(value.favoriteFrameEffects.map(\.preset))
+        if let first = PhotoFilterCatalog.presets.first {
+            value.selectedFilter = .init(preset: first,
+                                         intensityPercent: Np3FilterEngine.defaultIntensityPercent)
+        }
+        return value
     }
 
     // MARK: Android preference compatibility
@@ -683,6 +749,117 @@ private extension PhotoFrameWatermark {
     func copy(enabled: Bool, content: PhotoFrameWatermarkContent, font: PhotoFrameWatermarkFont, sizePercent: Int, position: PhotoFrameWatermarkPosition, color: PhotoFrameWatermarkColor, opacityPercent: Int, effect: PhotoFrameWatermarkEffect) -> PhotoFrameWatermark {
         var result = self
         result.enabled = enabled; result.content = content; result.font = font; result.sizePercent = sizePercent; result.position = position; result.color = color; result.opacityPercent = opacityPercent; result.effect = effect
+        return result
+    }
+}
+
+/// Encodes rendered pixels as a highest-quality JPEG while preserving the
+/// same photographic EXIF/GPS subset as Android's PhotoFrameExporter. Pixels
+/// are already orientation-normalized by the renderer, so orientation and
+/// dimensions are always rewritten for the new canvas.
+enum PhotoEffectsJPEGEncoder {
+    static func encode(
+        _ rendered: UIImage,
+        copyingMetadataFrom sourceData: Data,
+        cameraMetadata: PhotoFrameMetadata? = nil
+    ) -> Data? {
+        let source = CGImageSourceCreateWithData(sourceData as CFData, nil)
+        return encode(rendered, source: source, cameraMetadata: cameraMetadata)
+    }
+
+    static func encode(
+        _ rendered: UIImage,
+        copyingMetadataFrom sourceURL: URL,
+        cameraMetadata: PhotoFrameMetadata? = nil
+    ) -> Data? {
+        let source = CGImageSourceCreateWithURL(sourceURL as CFURL, nil)
+        return encode(rendered, source: source, cameraMetadata: cameraMetadata)
+    }
+
+    private static func encode(
+        _ rendered: UIImage,
+        source: CGImageSource?,
+        cameraMetadata: PhotoFrameMetadata?
+    ) -> Data? {
+        guard let image = rendered.cgImage else { return nil }
+        let sourceProperties = source.flatMap {
+            CGImageSourceCopyPropertiesAtIndex($0, 0, nil) as NSDictionary?
+        }
+        var properties: [CFString: Any] = [
+            kCGImageDestinationLossyCompressionQuality: 1.0,
+            kCGImagePropertyOrientation: 1,
+            kCGImagePropertyPixelWidth: image.width,
+            kCGImagePropertyPixelHeight: image.height,
+        ]
+
+        let tiffSource = sourceProperties?[kCGImagePropertyTIFFDictionary] as? NSDictionary
+        let tiffKeys: [CFString] = [
+            kCGImagePropertyTIFFMake, kCGImagePropertyTIFFModel,
+            kCGImagePropertyTIFFSoftware, kCGImagePropertyTIFFDateTime,
+        ]
+        let tiff = copiedValues(from: tiffSource, keys: tiffKeys)
+        if !tiff.isEmpty { properties[kCGImagePropertyTIFFDictionary] = tiff }
+
+        let exifSource = sourceProperties?[kCGImagePropertyExifDictionary] as? NSDictionary
+        let exifKeys: [CFString] = [
+            kCGImagePropertyExifDateTimeOriginal, kCGImagePropertyExifDateTimeDigitized,
+            kCGImagePropertyExifExposureTime, kCGImagePropertyExifFNumber,
+            kCGImagePropertyExifISOSpeedRatings, kCGImagePropertyExifFocalLength,
+            kCGImagePropertyExifFocalLenIn35mmFilm, kCGImagePropertyExifLensMake,
+            kCGImagePropertyExifLensModel, kCGImagePropertyExifExposureProgram,
+            kCGImagePropertyExifExposureBiasValue, kCGImagePropertyExifMeteringMode,
+            kCGImagePropertyExifFlash, kCGImagePropertyExifWhiteBalance,
+            kCGImagePropertyExifColorSpace,
+        ]
+        var exif = copiedValues(from: exifSource, keys: exifKeys)
+        exif[kCGImagePropertyExifPixelXDimension] = image.width
+        exif[kCGImagePropertyExifPixelYDimension] = image.height
+        properties[kCGImagePropertyExifDictionary] = exif
+
+        let gpsSource = sourceProperties?[kCGImagePropertyGPSDictionary] as? NSDictionary
+        let gpsKeys: [CFString] = [
+            kCGImagePropertyGPSVersion, kCGImagePropertyGPSLatitudeRef,
+            kCGImagePropertyGPSLatitude, kCGImagePropertyGPSLongitudeRef,
+            kCGImagePropertyGPSLongitude, kCGImagePropertyGPSAltitudeRef,
+            kCGImagePropertyGPSAltitude, kCGImagePropertyGPSTimeStamp,
+            kCGImagePropertyGPSDateStamp, kCGImagePropertyGPSProcessingMethod,
+            kCGImagePropertyGPSSpeedRef, kCGImagePropertyGPSSpeed,
+            kCGImagePropertyGPSTrackRef, kCGImagePropertyGPSTrack,
+        ]
+        var gps = copiedValues(from: gpsSource, keys: gpsKeys)
+        if let latitude = cameraMetadata?.latitude,
+           let longitude = cameraMetadata?.longitude,
+           latitude.isFinite, longitude.isFinite,
+           latitude != 0, longitude != 0,
+           abs(latitude) <= 90, abs(longitude) <= 180 {
+            gps[kCGImagePropertyGPSLatitude] = abs(latitude)
+            gps[kCGImagePropertyGPSLatitudeRef] = latitude < 0 ? "S" : "N"
+            gps[kCGImagePropertyGPSLongitude] = abs(longitude)
+            gps[kCGImagePropertyGPSLongitudeRef] = longitude < 0 ? "W" : "E"
+        }
+        if let altitude = cameraMetadata?.altitude,
+           altitude.isFinite, altitude != 0 {
+            gps[kCGImagePropertyGPSAltitude] = abs(altitude)
+            gps[kCGImagePropertyGPSAltitudeRef] = altitude < 0 ? 1 : 0
+        }
+        if !gps.isEmpty { properties[kCGImagePropertyGPSDictionary] = gps }
+
+        let data = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            data, UTType.jpeg.identifier as CFString, 1, nil
+        ) else { return nil }
+        CGImageDestinationAddImage(destination, image, properties as CFDictionary)
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return data as Data
+    }
+
+    private static func copiedValues(
+        from source: NSDictionary?, keys: [CFString]
+    ) -> [CFString: Any] {
+        var result: [CFString: Any] = [:]
+        for key in keys {
+            if let value = source?[key] { result[key] = value }
+        }
         return result
     }
 }

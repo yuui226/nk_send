@@ -156,7 +156,7 @@ struct LocalPhotoEffectsView: View {
                         AppLocalized.resource("local_photo_effects_info_description"),
                         AppLocalized.resource("local_photo_effects_gesture_hint"),
                         AppLocalized.resource("local_photo_effects_exif_hint"),
-                        AppLocalized.resource("local_photo_same_folder_hint")
+                        AppLocalized.resource("local_photo_ios_save_hint")
                     ].joined(separator: "\n"))
                     .font(.system(size: 13))
                 }
@@ -288,6 +288,55 @@ private struct LocalEffectPreview: View {
     @State private var failed = false
     @GestureState private var comparing = false
 
+    private static func settingsKey(_ settings: PhotoEffectsSettings) -> String {
+        String(data: (try? JSONEncoder().encode(settings)) ?? Data(), encoding: .utf8) ?? ""
+    }
+
+    private static func differsOnlyInWatermarkText(
+        _ previous: PhotoEffectsSettings, _ current: PhotoEffectsSettings
+    ) -> Bool {
+        guard previous.watermark.text != current.watermark.text else { return false }
+        var lhs = previous
+        var rhs = current
+        lhs.watermark.text = ""
+        rhs.watermark.text = ""
+        return lhs == rhs
+    }
+
+    private static func comparisonPreview(
+        image: UIImage, settings: PhotoEffectsSettings, metadata: PhotoFrameMetadata?
+    ) async -> UIImage? {
+        do {
+            try await Task.sleep(for: .milliseconds(500))
+            return try await LocalPhotoOutput.unfilteredPreview(
+                image: image, settings: settings, metadata: metadata
+            )
+        } catch { return nil }
+    }
+
+    private static func prefetchedPreviews(
+        image: UIImage, settings: PhotoEffectsSettings, metadata: PhotoFrameMetadata?
+    ) async -> [(String, LocalPhotoPreviewImages)] {
+        var results: [(String, LocalPhotoPreviewImages)] = []
+        do {
+            for selection in nextPhotoFilterSelections(for: settings) {
+                try Task.checkCancellation()
+                var next = settings
+                next.photoFilterEnabled = true
+                next.selectedFilter = selection
+                let filtered = try await LocalPhotoOutput.filteredSource(
+                    image: image, selection: selection
+                )
+                let preview = try await LocalPhotoOutput.preview(
+                    image: image, settings: next, metadata: metadata,
+                    filteredSource: filtered
+                )
+                results.append((settingsKey(next), preview))
+            }
+        } catch {}
+        return results
+    }
+
     var body: some View {
         Group {
             if let images {
@@ -313,18 +362,13 @@ private struct LocalEffectPreview: View {
         .task(id: PreviewRequest(item: item, settings: settings)) {
             do {
                 if let previous = lastPreviewSettings,
-                   previous.watermark.text != settings.watermark.text,
-                   previous.watermark.withoutText() == settings.watermark.withoutText() {
+                   Self.differsOnlyInWatermarkText(previous, settings) {
                     // Match Android's 140 ms text-only preview debounce. A
                     // fast typing sequence cancels this task before any
                     // expensive filter/frame render starts.
                     try await Task.sleep(for: .milliseconds(140))
                 }
                 lastPreviewSettings = settings
-                // A changed wheel selection starts a new render. Clear the
-                // previous image immediately so a stale frame/filter cannot
-                // look like the setting had no effect while rendering.
-                images = nil
                 failed = false
                 let image: UIImage
                 if let source { image = source }
@@ -336,10 +380,7 @@ private struct LocalEffectPreview: View {
                     source = image
                 }
                 let filterKey = settings.photoFilterEnabled ? settings.selectedFilter : nil
-                let settingsKey = String(
-                    data: (try? JSONEncoder().encode(settings)) ?? Data(),
-                    encoding: .utf8,
-                ) ?? ""
+                let settingsKey = Self.settingsKey(settings)
                 let preparedSource: UIImage?
                 if let filterKey {
                     if filteredSourceKey == filterKey, let filteredSource {
@@ -367,55 +408,34 @@ private struct LocalEffectPreview: View {
                 images = next
                 failed = false
                 if settings.photoFilterEnabled {
-                    // Android renders the selected effect first and only
-                    // prepares the long-press comparison after a short idle
-                    // window. Do the same so the first frame is interactive
-                    // without waiting for a second full composition.
-                    try await Task.sleep(for: .milliseconds(140))
-                    let comparison = try await LocalPhotoOutput.unfilteredPreview(
-                        image: image, settings: settings, metadata: metadata,
+                    // Android starts both jobs after publishing the current
+                    // result: a 500 ms delayed comparison and the next two
+                    // filter previews. The prior completed image stays visible
+                    // until the replacement is ready.
+                    async let comparison = Self.comparisonPreview(
+                        image: image, settings: settings, metadata: metadata
                     )
-                    try Task.checkCancellation()
-                    images = LocalPhotoPreviewImages(filtered: next.filtered, unfiltered: comparison)
-                }
-                if settings.photoFilterEnabled {
-                    for selection in nextPhotoFilterSelections(for: settings) {
-                        guard !Task.isCancelled else { return }
-                        let nextSettings: PhotoEffectsSettings = {
-                            var value = settings
-                            value.photoFilterEnabled = true
-                            value.selectedFilter = selection
-                            return value
-                        }()
-                        let key = String(
-                            data: (try? JSONEncoder().encode(nextSettings)) ?? Data(),
-                            encoding: .utf8,
-                        ) ?? ""
-                        guard prefetched[key] == nil else { continue }
-                        let nextFiltered = try await LocalPhotoOutput.filteredSource(
-                            image: image, selection: selection,
+                    async let warmed = Self.prefetchedPreviews(
+                        image: image, settings: settings, metadata: metadata
+                    )
+                    if let comparison = await comparison, !Task.isCancelled {
+                        images = LocalPhotoPreviewImages(
+                            filtered: next.filtered, unfiltered: comparison
                         )
-                        let preview = try await LocalPhotoOutput.preview(
-                            image: image, settings: nextSettings, metadata: metadata,
-                            filteredSource: nextFiltered,
-                        )
-                        guard !Task.isCancelled else { return }
+                    }
+                    let warmedResults = await warmed
+                    guard !Task.isCancelled else { return }
+                    for (key, preview) in warmedResults where prefetched[key] == nil {
                         prefetched[key] = preview
                         if prefetched.count > 2, let oldest = prefetched.keys.first {
                             prefetched.removeValue(forKey: oldest)
                         }
                     }
                 }
-            } catch is CancellationError {} catch { failed = true }
+            } catch is CancellationError {} catch {
+                if images == nil { failed = true }
+            }
         }
-    }
-}
-
-private extension PhotoFrameWatermark {
-    func withoutText() -> Self {
-        var copy = self
-        copy.text = ""
-        return copy
     }
 }
 

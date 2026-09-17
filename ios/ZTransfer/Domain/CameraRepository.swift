@@ -808,10 +808,23 @@ actor CameraRepository {
     ) async throws -> T {
         try await ioGate.withInteractivePriority(operation)
     }
-    /// Effects preview blocks only background thumbnail filling; metadata
-    /// enumeration itself continues, matching Android's separate gate.
-    func setEffectPreviewActive(_ active: Bool) { effectPreviewActive = active }
-
+    /// Android starts the connected-settings effects sample only after every
+    /// foreground camera owner is idle. Claim the effects slot atomically, then
+    /// keep one interactive reservation across the FHD and EXIF commands.
+    func withEffectPreviewPriority<T: Sendable>(
+        _ operation: @Sendable () async throws -> T
+    ) async throws -> T {
+        while transfersBusy || remoteActive || fhdActive || effectPreviewActive {
+            try Task.checkCancellation()
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        effectPreviewActive = true
+        defer {
+            effectPreviewActive = false
+            scheduleObjectResolver()
+        }
+        return try await ioGate.withInteractivePriority(operation)
+    }
     /// Foreground FHD preview has priority over catalog metadata reads.  The
     /// scan keeps its handle snapshot and resumes at the same cursor when the
     /// preview releases the channel.

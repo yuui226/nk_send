@@ -12,6 +12,10 @@ enum NikonGPSBluetoothState: Equatable, Sendable {
     case failed(String)
 }
 
+private struct RestoredBluetoothPeripheral: @unchecked Sendable {
+    let value: CBPeripheral?
+}
+
 /// CoreBluetooth counterpart of Android's NikonGpsBleClient.  All GATT writes
 /// are serialized through CoreBluetooth's callback order; no parallel writes
 /// are issued to the camera characteristics.
@@ -32,8 +36,12 @@ final class NikonGPSBluetoothClient: NSObject, ObservableObject {
     private var savedNonce: UInt32?
     private var savedPeripheralIdentifier: UUID?
     private var controllerName = "ZTransfer"
-    private var pendingGeo: Data?
-    private var writeQueue: [(CBCharacteristic, Data)] = []
+    private struct QueuedWrite {
+        let characteristic: CBCharacteristic
+        let data: Data
+        let completion: ((Bool) -> Void)?
+    }
+    private var writeQueue: [QueuedWrite] = []
     private var writeInFlight = false
     private var notificationsReady = Set<CBUUID>()
     private var pairingTimeout: Task<Void, Never>?
@@ -67,7 +75,16 @@ final class NikonGPSBluetoothClient: NSObject, ObservableObject {
         self.savedNonce = savedNonce ?? ((storedDevice != nil && storedNonce != nil) ? storedNonce : nil)
         self.savedPeripheralIdentifier = storage.string(forKey: GPSPreferences.bleAddress)
             .flatMap(UUID.init(uuidString:))
+        #if targetEnvironment(simulator)
+        // CoreBluetooth rejects restoration identifiers in the simulator.
         central = CBCentralManager(delegate: nil, queue: .main)
+        #else
+        central = CBCentralManager(
+            delegate: nil,
+            queue: .main,
+            options: [CBCentralManagerOptionRestoreIdentifierKey: "com.ztransfer.nikon-gps"],
+        )
+        #endif
         super.init()
         central.delegate = self
     }
@@ -127,9 +144,14 @@ final class NikonGPSBluetoothClient: NSObject, ObservableObject {
         state = .disconnected
     }
 
-    func writeGeo(_ data: Data) {
-        guard let peripheral, let characteristic = geoCharacteristic else { pendingGeo = data; return }
-        enqueueWrite(peripheral: peripheral, characteristic: characteristic, data: data)
+    func writeGeo(_ data: Data, completion: @escaping (Bool) -> Void) {
+        guard let peripheral, let characteristic = geoCharacteristic,
+              case .ready = state else {
+            completion(false)
+            return
+        }
+        enqueueWrite(peripheral: peripheral, characteristic: characteristic,
+                     data: data, completion: completion)
     }
 
     var hasSavedPairing: Bool { savedDevice != nil && savedNonce != nil }
@@ -148,36 +170,46 @@ final class NikonGPSBluetoothClient: NSObject, ObservableObject {
 
     private func clearConnectionState() {
         peripheral = nil; pairCharacteristic = nil; idCharacteristic = nil; geoCharacteristic = nil
-        stage1 = nil; stage3Sent = false; idQueued = false; pendingGeo = nil
+        stage1 = nil; stage3Sent = false; idQueued = false
+        let abandoned = writeQueue
         writeQueue.removeAll(); writeInFlight = false
+        abandoned.forEach { $0.completion?(false) }
         notificationsReady.removeAll()
     }
 
-    private func enqueueWrite(peripheral: CBPeripheral, characteristic: CBCharacteristic, data: Data) {
-        writeQueue.append((characteristic, data)); drainWrites(peripheral)
+    private func enqueueWrite(peripheral: CBPeripheral, characteristic: CBCharacteristic,
+                              data: Data, completion: ((Bool) -> Void)? = nil) {
+        writeQueue.append(.init(characteristic: characteristic, data: data, completion: completion))
+        drainWrites(peripheral)
     }
 
     private func drainWrites(_ peripheral: CBPeripheral) {
         guard !writeInFlight, let next = writeQueue.first else { return }
         writeInFlight = true
-        peripheral.writeValue(next.1, for: next.0, type: .withResponse)
+        peripheral.writeValue(next.data, for: next.characteristic, type: .withResponse)
     }
 
     private func beginPairing(_ peripheral: CBPeripheral) {
         guard let pairCharacteristic else { return }
+        let restoringIdentity = savedDevice != nil && savedNonce != nil
         stage1 = NikonGPSPairingProtocol().newStage1(deviceOverride: savedDevice, nonceOverride: savedNonce)
         if let stage1 {
+            // A newly generated identity becomes the active identity in this
+            // same handshake. Keeping it only in UserDefaults made the first
+            // ID acknowledgement look unpaired until the app was restarted.
+            savedDevice = stage1.device
+            savedNonce = stage1.nonce
             defaults.set(stage1.device, forKey: GPSPreferences.deviceID)
             defaults.set(stage1.nonce, forKey: GPSPreferences.nonce)
         }
         stage3Sent = false; idQueued = false
         GPSDiagnostics.record("BLE pairing handshake")
-        if savedDevice == nil { state = .pairing }
+        if !restoringIdentity { state = .pairing }
         pairingTimeout?.cancel()
         pairingTimeout = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 7_000_000_000)
             guard let self, !Task.isCancelled, !self.idQueued else { return }
-            self.state = .failed(savedDevice == nil ? "Camera pairing handshake timeout" : "Camera pairing identity expired")
+            self.state = .failed(restoringIdentity ? "Camera pairing identity expired" : "Camera pairing handshake timeout")
         }
         enqueueWrite(peripheral: peripheral, characteristic: pairCharacteristic, data: stage1!.encode())
     }
@@ -227,6 +259,25 @@ final class NikonGPSBluetoothClient: NSObject, ObservableObject {
 }
 
 extension NikonGPSBluetoothClient: CBCentralManagerDelegate {
+    nonisolated func centralManager(_ central: CBCentralManager,
+                                    willRestoreState dict: [String: Any]) {
+        let restoredBox = RestoredBluetoothPeripheral(
+            value: (dict[CBCentralManagerRestoredStatePeripheralsKey] as? [CBPeripheral])?.first
+        )
+        MainActor.assumeIsolated { [weak self] in
+            guard let self, let restored = restoredBox.value else { return }
+            self.peripheral = restored
+            self.peripheralIdentifier = restored.identifier
+            self.savedPeripheralIdentifier = restored.identifier
+            self.defaults.set(restored.identifier.uuidString, forKey: GPSPreferences.bleAddress)
+            restored.delegate = self
+            self.state = .connecting(restored.name ?? "Nikon")
+            if restored.state == .connected {
+                restored.discoverServices([Self.serviceUUID])
+            }
+        }
+    }
+
     nonisolated func centralManagerDidUpdateState(_ central: CBCentralManager) {
         MainActor.assumeIsolated { [weak self] in
             guard let self else { return }
@@ -319,17 +370,24 @@ extension NikonGPSBluetoothClient: CBPeripheralDelegate {
         MainActor.assumeIsolated { [weak self] in
             guard let self else { return }
             self.writeInFlight = false
-            if !self.writeQueue.isEmpty { self.writeQueue.removeFirst() }
-            if let error { self.state = .failed(error.localizedDescription); return }
+            let finished = self.writeQueue.isEmpty ? nil : self.writeQueue.removeFirst()
+            finished?.completion?(error == nil)
+            if let error {
+                // Android reports a rejected GEO write through onGeoWritten(false)
+                // without tearing down an otherwise ready BLE session. Pairing and
+                // controller-ID failures still invalidate the connection attempt.
+                if characteristic.uuid != Self.geoUUID {
+                    self.state = .failed(error.localizedDescription)
+                    return
+                }
+                self.drainWrites(peripheral)
+                return
+            }
             if characteristic.uuid == Self.idUUID {
                 self.pairingTimeout?.cancel()
                 if self.savedDevice == nil { self.state = .failed("需要完成蓝牙配对") }
                 else {
                     self.state = .ready(peripheral.name ?? "Nikon")
-                    if let pending = self.pendingGeo, let geo = self.geoCharacteristic {
-                        self.pendingGeo = nil
-                        self.enqueueWrite(peripheral: peripheral, characteristic: geo, data: pending)
-                    }
                 }
             }
             self.drainWrites(peripheral)

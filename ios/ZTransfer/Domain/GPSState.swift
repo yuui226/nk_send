@@ -1,4 +1,5 @@
 import Foundation
+import CoreLocation
 
 /// Android's GpsDiagnostics ring buffer used by the long-press troubleshooting
 /// action. It is intentionally in-memory and capped at the same 80 entries.
@@ -79,4 +80,42 @@ enum GPSUpdateFrequency: Int, CaseIterable, Codable, Sendable {
         }
     }
     static let defaultValue: Self = .oneMinute
+
+    /// CoreLocation has no provider-specific minimum-time API. These accuracy
+    /// tiers are the closest iOS energy policy to Android's four sampling
+    /// cadences; GEO transmission still follows the exact selected interval.
+    var desiredAccuracy: Double {
+        switch self {
+        case .thirtySeconds, .oneMinute: return kCLLocationAccuracyNearestTenMeters
+        case .twoMinutes, .fiveMinutes: return kCLLocationAccuracyHundredMeters
+        }
+    }
+}
+
+struct GPSTrustedAltitudeFix: Equatable, Sendable {
+    let altitudeMeters: Double
+    let latitude: Double
+    let longitude: Double
+    let timestamp: Date
+}
+
+func resolvedGPSAltitude(for location: CLLocation,
+                         cached: GPSTrustedAltitudeFix?,
+                         now: Date = Date()) -> (Double?, GPSTrustedAltitudeFix?) {
+    let age = abs(now.timeIntervalSince(location.timestamp))
+    if location.verticalAccuracy >= 0, location.altitude.isFinite, age <= 120 {
+        let fix = GPSTrustedAltitudeFix(
+            altitudeMeters: location.altitude,
+            latitude: location.coordinate.latitude,
+            longitude: location.coordinate.longitude,
+            timestamp: location.timestamp,
+        )
+        return (location.altitude, fix)
+    }
+    guard let cached,
+          abs(now.timeIntervalSince(cached.timestamp)) <= 120 else { return (nil, cached) }
+    let cachedLocation = CLLocation(latitude: cached.latitude, longitude: cached.longitude)
+    let distance = cachedLocation.distance(from: location)
+    guard distance.isFinite, distance <= 1_000 else { return (nil, cached) }
+    return (cached.altitudeMeters, cached)
 }

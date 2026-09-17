@@ -1,8 +1,19 @@
 import XCTest
 import UIKit
+import ImageIO
+import UniformTypeIdentifiers
 @testable import ZTransfer
 
 final class DomainModelTests: XCTestCase {
+    func testLocalPhotoSelectionMatchesAndroidJPEGAndPNGInputRange() {
+        XCTAssertTrue(isSupportedLocalPhoto([.jpeg]))
+        XCTAssertTrue(isSupportedLocalPhoto([.png]))
+        XCTAssertTrue(isSupportedLocalPhoto([.image, .png]))
+        XCTAssertFalse(isSupportedLocalPhoto([.heic]))
+        XCTAssertFalse(isSupportedLocalPhoto([.rawImage]))
+        XCTAssertFalse(isSupportedLocalPhoto([.movie]))
+    }
+
     func testTransferSpeedMatchesAndroidInvalidAndRetainedSampleRules() {
         XCTAssertEqual(endToEndBytesPerSecond(transferredBytes: 0, elapsedMs: 100), 0)
         XCTAssertEqual(endToEndBytesPerSecond(transferredBytes: 1_048_576, elapsedMs: 1_000), 1_048_576)
@@ -708,6 +719,8 @@ final class DomainModelTests: XCTestCase {
         XCTAssertTrue(PhotoFrameMetadataSettings.defaults(for: .plaque).showDate)
         var watermark = PhotoFrameWatermark(text: "  a\nb\t")
         XCTAssertEqual(watermark.displayText, "a b")
+        watermark.text = " \n\t "
+        XCTAssertEqual(watermark.displayText, "")
         watermark.text = String(repeating: "x", count: 30)
         XCTAssertEqual(watermark.displayText.count, PhotoFrameWatermark.maxTextLength)
     }
@@ -800,6 +813,76 @@ private func waitForRemoteLifecycle(
 }
 
 extension DomainModelTests {
+    func testRenderedJPEGPreservesExifAndRewritesOrientationDimensionsAndCameraGPS() throws {
+        func image(width: Int, height: Int, color: UIColor) -> UIImage {
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = 1
+            return UIGraphicsImageRenderer(
+                size: CGSize(width: width, height: height), format: format
+            ).image { context in
+                color.setFill()
+                context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+            }
+        }
+        let sourceImage = image(width: 6, height: 4, color: .red)
+        let sourceData = NSMutableData()
+        let sourceDestination = try XCTUnwrap(CGImageDestinationCreateWithData(
+            sourceData, UTType.jpeg.identifier as CFString, 1, nil
+        ))
+        let sourceProperties: [CFString: Any] = [
+            kCGImagePropertyOrientation: 6,
+            kCGImagePropertyTIFFDictionary: [
+                kCGImagePropertyTIFFMake: "NIKON CORPORATION",
+                kCGImagePropertyTIFFModel: "Z 30",
+            ],
+            kCGImagePropertyExifDictionary: [
+                kCGImagePropertyExifDateTimeOriginal: "2026:09:17 12:34:56",
+                kCGImagePropertyExifFNumber: 1.7,
+            ],
+            kCGImagePropertyGPSDictionary: [
+                kCGImagePropertyGPSLatitude: 1.0,
+                kCGImagePropertyGPSLatitudeRef: "N",
+                kCGImagePropertyGPSLongitude: 2.0,
+                kCGImagePropertyGPSLongitudeRef: "E",
+            ],
+        ]
+        CGImageDestinationAddImage(sourceDestination, try XCTUnwrap(sourceImage.cgImage),
+                                   sourceProperties as CFDictionary)
+        XCTAssertTrue(CGImageDestinationFinalize(sourceDestination))
+
+        let rendered = image(width: 20, height: 30, color: .blue)
+        let camera = PhotoFrameMetadata(
+            make: nil, model: nil, lensModel: nil, focalLength: nil,
+            aperture: nil, shutter: nil, iso: nil, exposureCompensation: nil,
+            dateTime: nil, latitude: -31.5, longitude: 121.25, altitude: -12
+        )
+        let output = try XCTUnwrap(PhotoEffectsJPEGEncoder.encode(
+            rendered, copyingMetadataFrom: sourceData as Data, cameraMetadata: camera
+        ))
+        let outputSource = try XCTUnwrap(CGImageSourceCreateWithData(output as CFData, nil))
+        let properties = try XCTUnwrap(
+            CGImageSourceCopyPropertiesAtIndex(outputSource, 0, nil) as NSDictionary?
+        )
+        XCTAssertEqual((properties[kCGImagePropertyOrientation] as? NSNumber)?.intValue, 1)
+        XCTAssertEqual((properties[kCGImagePropertyPixelWidth] as? NSNumber)?.intValue, 20)
+        XCTAssertEqual((properties[kCGImagePropertyPixelHeight] as? NSNumber)?.intValue, 30)
+        let tiff = try XCTUnwrap(properties[kCGImagePropertyTIFFDictionary] as? NSDictionary)
+        XCTAssertEqual(tiff[kCGImagePropertyTIFFMake] as? String, "NIKON CORPORATION")
+        XCTAssertEqual(tiff[kCGImagePropertyTIFFModel] as? String, "Z 30")
+        let exif = try XCTUnwrap(properties[kCGImagePropertyExifDictionary] as? NSDictionary)
+        XCTAssertEqual(exif[kCGImagePropertyExifDateTimeOriginal] as? String,
+                       "2026:09:17 12:34:56")
+        XCTAssertEqual((exif[kCGImagePropertyExifPixelXDimension] as? NSNumber)?.intValue, 20)
+        XCTAssertEqual((exif[kCGImagePropertyExifPixelYDimension] as? NSNumber)?.intValue, 30)
+        let gps = try XCTUnwrap(properties[kCGImagePropertyGPSDictionary] as? NSDictionary)
+        XCTAssertEqual((gps[kCGImagePropertyGPSLatitude] as? NSNumber)?.doubleValue, 31.5)
+        XCTAssertEqual(gps[kCGImagePropertyGPSLatitudeRef] as? String, "S")
+        XCTAssertEqual((gps[kCGImagePropertyGPSLongitude] as? NSNumber)?.doubleValue, 121.25)
+        XCTAssertEqual(gps[kCGImagePropertyGPSLongitudeRef] as? String, "E")
+        XCTAssertEqual((gps[kCGImagePropertyGPSAltitude] as? NSNumber)?.doubleValue, 12)
+        XCTAssertEqual((gps[kCGImagePropertyGPSAltitudeRef] as? NSNumber)?.intValue, 1)
+    }
+
     func testFilterSelectionUsesOwnRememberedIntensityAndOffKeepsSelection() {
         let first = PhotoFilterCatalog.presets[0]
         let next = PhotoFilterCatalog.presets[1]
@@ -832,10 +915,89 @@ extension DomainModelTests {
         var restored = PhotoEffectsStore(defaults: defaults).settings
         XCTAssertEqual(Array(restored.orderedFilters.prefix(2)).map(\.id), [c.id, a.id])
         XCTAssertEqual(restored.favoriteFrameEffects.map(\.preset), [.cinema, .mist])
+        XCTAssertEqual(Array(restored.orderedFramePresets.prefix(3)), [.cinema, .mist, .minimal])
         XCTAssertEqual(restored.selectedFilter, settings.selectedFilter)
         restored.toggleFilterFavorite(c.id)
         restored.toggleFilterFavorite(c.id)
         XCTAssertEqual(Array(restored.orderedFilters.prefix(2)).map(\.id), [a.id, c.id])
+    }
+
+    @MainActor
+    func testEffectsRestoreNormalizesWatermarkAndLocalMetadata() {
+        let cameraSuite = "effects-normalize-camera-\(UUID())"
+        let localSuite = "effects-normalize-local-\(UUID())"
+        let cameraDefaults = UserDefaults(suiteName: cameraSuite)!
+        let localDefaults = UserDefaults(suiteName: localSuite)!
+        defer {
+            cameraDefaults.removePersistentDomain(forName: cameraSuite)
+            localDefaults.removePersistentDomain(forName: localSuite)
+        }
+
+        var camera = PhotoEffectsSettings()
+        camera.watermark.content = .image
+        camera.watermark.imageHash = String(repeating: "z", count: 64)
+        camera.watermark.text = "  abc\n\tdef  "
+        camera.watermark.sizePercent = 999
+        camera.watermark.opacityPercent = -2
+        camera.metadataByPreset[PhotoFramePreset.mist.rawValue] = .init(
+            showCoordinates: true, showAltitude: true,
+            datePattern: " invalid ", timePattern: " invalid "
+        )
+        let cameraStore = PhotoEffectsStore(defaults: cameraDefaults)
+        cameraStore.update(camera)
+        let restoredCamera = PhotoEffectsStore(defaults: cameraDefaults).settings
+        XCTAssertEqual(restoredCamera.watermark.content, .text)
+        XCTAssertNil(restoredCamera.watermark.imageHash)
+        XCTAssertEqual(restoredCamera.watermark.text, "abc def")
+        XCTAssertEqual(restoredCamera.watermark.sizePercent, 300)
+        XCTAssertEqual(restoredCamera.watermark.opacityPercent, 1)
+        XCTAssertEqual(restoredCamera.metadataByPreset[PhotoFramePreset.mist.rawValue]?.datePattern, "yyyy-MM-dd")
+        XCTAssertEqual(restoredCamera.metadataByPreset[PhotoFramePreset.mist.rawValue]?.timePattern, "HH:mm:ss")
+        XCTAssertEqual(restoredCamera.metadataByPreset[PhotoFramePreset.mist.rawValue]?.showCoordinates, true)
+
+        var local = camera
+        local.watermark.text = "  abc\n\tdef  "
+        let localStore = PhotoEffectsStore(defaults: localDefaults, scope: .localPhotos)
+        localStore.update(local)
+        let restoredLocal = PhotoEffectsStore(defaults: localDefaults, scope: .localPhotos).settings
+        XCTAssertEqual(restoredLocal.watermark.text, "  abc def  ")
+        XCTAssertEqual(restoredLocal.metadataByPreset[PhotoFramePreset.mist.rawValue]?.showCoordinates, false)
+        XCTAssertEqual(restoredLocal.metadataByPreset[PhotoFramePreset.mist.rawValue]?.showAltitude, false)
+    }
+
+    @MainActor
+    func testLocalEffectsFirstRunMigratesOnlyLegacyFavoritesOnce() {
+        let legacySuite = "effects-legacy-\(UUID())"
+        let localSuite = "effects-local-migration-\(UUID())"
+        let legacy = UserDefaults(suiteName: legacySuite)!
+        let local = UserDefaults(suiteName: localSuite)!
+        defer {
+            legacy.removePersistentDomain(forName: legacySuite)
+            local.removePersistentDomain(forName: localSuite)
+        }
+        let a = PhotoFilterCatalog.presets[0]
+        var old = PhotoEffectsSettings()
+        old.selectFilter(a.id)
+        old.toggleFilterFavorite(a.id)
+        old.favoriteFrameEffects = [.init(preset: .cinema, watermark: .init())]
+        old.favoriteFramePresets = [.cinema]
+        old.photoFrameEnabled = true
+        old.photoFramePreset = .filmEdge
+        PhotoEffectsStore(defaults: legacy).update(old)
+
+        let migrated = PhotoEffectsStore(defaults: local, scope: .localPhotos,
+                                         legacyDefaults: legacy).settings
+        XCTAssertEqual(migrated.favoriteFilterIDs, [PhotoEffectsSettings.filterKey(a.id)])
+        XCTAssertEqual(migrated.favoriteFrameEffects.map(\.preset), [.cinema])
+        XCTAssertFalse(migrated.photoFrameEnabled)
+        XCTAssertEqual(migrated.photoFramePreset, .mist)
+
+        legacy.set("", forKey: "favorite_photo_filters_v1")
+        legacy.set("", forKey: "favorite_frame_effects_v1")
+        let reopened = PhotoEffectsStore(defaults: local, scope: .localPhotos,
+                                         legacyDefaults: legacy).settings
+        XCTAssertEqual(reopened.favoriteFilterIDs, migrated.favoriteFilterIDs)
+        XCTAssertEqual(reopened.favoriteFrameEffects.map(\.preset), [.cinema])
     }
 
     @MainActor

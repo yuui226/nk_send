@@ -193,7 +193,6 @@ actor CameraSession {
     ) async throws -> T {
         try await repository.withInteractivePreviewPriority(operation)
     }
-    func setEffectPreviewActive(_ active: Bool) async { await repository.setEffectPreviewActive(active) }
     func backgroundThumbnailFillAllowed() async -> Bool {
         await repository.backgroundThumbnailFillAllowed()
     }
@@ -218,6 +217,20 @@ actor CameraSession {
             }
             return (image, metadata)
         }) ?? (nil, nil)
+    }
+
+    /// Connected-settings sample load. Unlike an interactive photo preview,
+    /// this request waits for transfer/monitor/FHD owners before it starts and
+    /// reads EXIF only after a decodable FHD image succeeds.
+    func effectPreviewAndExif(file: CameraFile) async throws -> (Data?, PhotoExif?) {
+        try await repository.withEffectPreviewPriority {
+            let image = try await self.repository.preview(handle: file.id)
+            guard UIImage(data: image) != nil else { return (nil, nil) }
+            let metadata = try? await self.exifStore.load(file: file) { length in
+                try await self.repository.readPrefix(handle: file.id, length: length)
+            }
+            return (image, metadata)
+        }
     }
 
     func readPrefix(file: CameraFile, length: Int64) async throws -> Data {
