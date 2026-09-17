@@ -525,7 +525,9 @@ struct PhotoPreviewView: View {
         exif = exifByFile[file.id]
         exifLoading = !exifFinished.contains(file.id)
 
-        let loadedLocally = await loadHighResolution(at: index, allowCameraRequest: false)
+        let loadedLocally = await loadHighResolution(
+            at: index, awaitExisting: true, allowCameraRequest: false
+        )
         guard !Task.isCancelled else { return }
         if loadedLocally { ZTransferHaptics.shared.tick() }
 
@@ -547,7 +549,11 @@ struct PhotoPreviewView: View {
     }
 
     @MainActor
-    private func loadHighResolution(at page: Int, allowCameraRequest: Bool) async -> Bool {
+    private func loadHighResolution(
+        at page: Int,
+        awaitExisting: Bool = false,
+        allowCameraRequest: Bool
+    ) async -> Bool {
         guard previewEntries.indices.contains(page), let file = previewEntries[page].file else { return false }
         let id = file.id
         if isVideo(file) {
@@ -565,7 +571,17 @@ struct PhotoPreviewView: View {
                 return false
             }
         }
-        guard !highResolutionLoading.contains(id) else { return false }
+        if highResolutionLoading.contains(id) {
+            guard awaitExisting else { return false }
+            // Android waits when a former neighbor becomes the current page.
+            // The old task may be finishing or unwinding cancellation; do not
+            // start a duplicate FHD request or clear its loading ownership.
+            while highResolutionLoading.contains(id), highResolutionImages[id] == nil {
+                do { try await Task.sleep(nanoseconds: 16_000_000) }
+                catch { return false }
+            }
+            if highResolutionImages[id] != nil { return false }
+        }
         highResolutionLoading.insert(id)
         defer { highResolutionLoading.remove(id) }
 
