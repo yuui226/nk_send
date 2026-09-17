@@ -37,6 +37,13 @@ actor PhotoEffectsPreviewRenderGate {
     }
 }
 
+/// Same four-million-pixel region budget as Android's
+/// `photoFrameRegionRows`; one RGBA tile stays near 16 MiB.
+func photoEffectsFilterTileRows(sourceWidth: Int) -> Int {
+    precondition(sourceWidth > 0)
+    return max(1, (4 * 1024 * 1024) / sourceWidth)
+}
+
 /// Native renderer following PhotoFrameExporter.kt's ordered pipeline.
 /// Source -> NP3 filter -> frame backdrop/photo -> metadata/watermark.
 enum PhotoEffectsRenderer {
@@ -62,7 +69,12 @@ enum PhotoEffectsRenderer {
         let orientedSource = orientationNormalized(image)
         let orientedBackdrop = backdropSource.map(orientationNormalized) ?? orientedSource
         var output = orientedSource
-        if settings.photoFilterEnabled, let filter = settings.selectedFilter {
+        let tiledFrameFilter: PhotoFilterSelection? =
+            settings.photoFrameEnabled && settings.photoFrameBorderEnabled &&
+            settings.photoFramePreset != .immersive && settings.photoFilterEnabled
+                ? settings.selectedFilter : nil
+        if settings.photoFilterEnabled, let filter = settings.selectedFilter,
+           tiledFrameFilter == nil {
             output = try applyFilter(output, selection: filter)
         }
         if settings.photoFrameEnabled {
@@ -74,9 +86,10 @@ enum PhotoEffectsRenderer {
             // Android builds the frame backdrop from the original photo, then
             // applies the selected filter only to the photo layer. Keep both
             // inputs so a filter never recolors the surrounding blur/gradient.
-            output = drawDecoration(output, backdropImage: orientedBackdrop,
-                                    settings: settings, metadata: metadata,
-                                    previewPlaceholders: previewPlaceholders)
+            output = try drawDecoration(output, backdropImage: orientedBackdrop,
+                                        settings: settings, metadata: metadata,
+                                        previewPlaceholders: previewPlaceholders,
+                                        tiledFilter: tiledFrameFilter)
         }
         try Task.checkCancellation()
         return output
@@ -113,14 +126,18 @@ enum PhotoEffectsRenderer {
     private static func drawDecoration(_ image: UIImage, backdropImage: UIImage,
                                        settings: PhotoEffectsSettings,
                                        metadata: PhotoFrameMetadata?,
-                                       previewPlaceholders: Bool) -> UIImage {
+                                       previewPlaceholders: Bool,
+                                       tiledFilter: PhotoFilterSelection?) throws -> UIImage {
         let sourceSize = CGSize(width: image.cgImage?.width ?? Int(image.size.width),
                                 height: image.cgImage?.height ?? Int(image.size.height))
         let layout = makeLayout(sourceSize, preset: settings.photoFramePreset)
+        let decorationImage = try settings.photoFramePreset == .colorArchive
+            ? filteredPalettePreview(image, selection: tiledFilter) : image
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
         format.opaque = true
-        return UIGraphicsImageRenderer(size: layout.canvas, format: format).image { renderer in
+        var renderError: Error?
+        let rendered = UIGraphicsImageRenderer(size: layout.canvas, format: format).image { renderer in
             let cg = renderer.cgContext
             drawBackdrop(cg, image: backdropImage, layout: layout, preset: settings.photoFramePreset)
             if settings.photoFramePreset == .galleryMat || settings.photoFramePreset == .filmGallery {
@@ -140,21 +157,29 @@ enum PhotoEffectsRenderer {
                 cg.fill(outer)
             }
             if settings.photoFrameBorderEnabled {
-                drawPhoto(cg, image: image, rect: layout.photo, preset: settings.photoFramePreset,
-                          metadataBandHeight: layout.canvas.height - layout.metadataTop,
-                          canvasSize: layout.canvas)
+                do {
+                    try drawPhoto(cg, image: image, rect: layout.photo,
+                                  preset: settings.photoFramePreset,
+                                  metadataBandHeight: layout.canvas.height - layout.metadataTop,
+                                  canvasSize: layout.canvas, filter: tiledFilter)
+                } catch {
+                    renderError = error
+                    return
+                }
             } else {
                 image.draw(in: layout.photo)
             }
             let visibleMetadata = presentedPhotoFrameMetadata(
                 metadata, settings: settings.metadata, preview: previewPlaceholders
             )
-            drawPresetDecoration(cg, image: image, layout: layout,
+            drawPresetDecoration(cg, image: decorationImage, layout: layout,
                                  preset: settings.photoFramePreset,
                                  metadata: visibleMetadata,
                                  watermark: settings.watermark,
                                  metadataSettings: settings.metadata)
         }
+        if let renderError { throw renderError }
+        return rendered
     }
 
     /// Android's watermark-only path preserves the source dimensions and does
@@ -287,7 +312,10 @@ enum PhotoEffectsRenderer {
         }
     }
 
-    private static func drawPhoto(_ cg: CGContext, image: UIImage, rect: CGRect, preset: PhotoFramePreset, metadataBandHeight: CGFloat, canvasSize: CGSize) {
+    private static func drawPhoto(_ cg: CGContext, image: UIImage, rect: CGRect,
+                                  preset: PhotoFramePreset, metadataBandHeight: CGFloat,
+                                  canvasSize: CGSize,
+                                  filter: PhotoFilterSelection?) throws {
         let radius: CGFloat = switch preset {
         case .colorArchive: rect.width * 0.012
         case .brandInset, .brandGallery: rect.width * 0.014
@@ -300,7 +328,15 @@ enum PhotoEffectsRenderer {
         } else if ![.plaque, .immersive, .filmEdge, .classicSignature, .filmGallery].contains(preset) {
             drawPhotoElevation(cg, rect: rect, radius: radius, preset: preset, canvasSize: canvasSize)
         }
-        cg.saveGState(); cg.addPath(path); cg.clip(); image.draw(in: rect); cg.restoreGState()
+        cg.saveGState()
+        cg.addPath(path)
+        cg.clip()
+        if let filter {
+            try drawFilteredPhotoTiles(cg, image: image, rect: rect, selection: filter)
+        } else {
+            image.draw(in: rect)
+        }
+        cg.restoreGState()
         if preset == .classicSignature {
             cg.setStrokeColor(UIColor(white: 0, alpha: 0.14).cgColor)
             cg.setLineWidth(max(1, rect.width * 0.0008))
@@ -315,6 +351,63 @@ enum PhotoEffectsRenderer {
             }
             cg.setStrokeColor(stroke.cgColor); cg.setLineWidth(max(1, rect.width * 0.0012)); cg.addPath(path); cg.strokePath()
         }
+    }
+
+    /// Android decodes and filters roughly four million source pixels at a
+    /// time for every bordered full-resolution export. A CGImage can retain a
+    /// compressed provider, so crop each horizontal band and release its
+    /// mutable filter buffer before moving to the next band instead of holding
+    /// a second full-resolution filtered bitmap beside the output canvas.
+    private static func drawFilteredPhotoTiles(
+        _ context: CGContext, image: UIImage, rect: CGRect,
+        selection: PhotoFilterSelection
+    ) throws {
+        guard let source = image.cgImage, source.width > 0, source.height > 0 else {
+            throw PhotoEffectsRenderError.invalidBitmap
+        }
+        let rowsPerTile = photoEffectsFilterTileRows(sourceWidth: source.width)
+        context.interpolationQuality = .none
+        var top = 0
+        while top < source.height {
+            try Task.checkCancellation()
+            let bottom = min(source.height, top + rowsPerTile)
+            guard let region = source.cropping(to: CGRect(
+                x: 0, y: top, width: source.width, height: bottom - top
+            )) else { throw PhotoEffectsRenderError.invalidBitmap }
+            let filtered = try applyFilter(
+                UIImage(cgImage: region, scale: 1, orientation: .up),
+                selection: selection
+            )
+            let scaleY = rect.height / CGFloat(source.height)
+            let destination = CGRect(
+                x: rect.minX,
+                y: rect.minY + CGFloat(top) * scaleY,
+                width: rect.width,
+                height: CGFloat(bottom - top) * scaleY
+            )
+            filtered.draw(in: destination)
+            top = bottom
+        }
+    }
+
+    /// COLOR_ARCHIVE derives its palette from the filtered photo. Android
+    /// samples a region-decoder preview whose longest edge is at most 192 px,
+    /// rather than retaining the full filtered source solely for four colors.
+    private static func filteredPalettePreview(
+        _ image: UIImage, selection: PhotoFilterSelection?
+    ) throws -> UIImage {
+        guard let selection, let source = image.cgImage else { return image }
+        var sample = 1
+        while max(source.width / sample, source.height / sample) > 192 { sample *= 2 }
+        let target = CGSize(width: max(1, source.width / sample),
+                            height: max(1, source.height / sample))
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        let preview = UIGraphicsImageRenderer(size: target, format: format).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: target))
+        }
+        return try applyFilter(preview, selection: selection)
     }
 
     /// 安卓标准四种照片边框都只有贴边的接触阴影。CoreGraphics 的大半径代理

@@ -1157,6 +1157,7 @@ extension DomainModelTests {
         let filteredOutput = try PhotoEffectsRenderer.render(
             preparedFilter, settings: decorationOnly, backdropSource: source
         )
+        let exportFilteredOutput = try PhotoEffectsRenderer.render(source, settings: filtered)
 
         func bytes(_ image: UIImage) throws -> [UInt8] {
             let cgImage = try XCTUnwrap(image.cgImage)
@@ -1174,6 +1175,7 @@ extension DomainModelTests {
         }
         let plainBytes = try bytes(plainOutput)
         let filteredBytes = try bytes(filteredOutput)
+        let exportFilteredBytes = try bytes(exportFilteredOutput)
         let width = try XCTUnwrap(plainOutput.cgImage).width
         let height = try XCTUnwrap(plainOutput.cgImage).height
         func pixel(_ data: [UInt8], x: Int, y: Int) -> ArraySlice<UInt8> {
@@ -1183,8 +1185,18 @@ extension DomainModelTests {
 
         XCTAssertEqual(pixel(plainBytes, x: 0, y: 0),
                        pixel(filteredBytes, x: 0, y: 0))
+        XCTAssertEqual(pixel(plainBytes, x: 0, y: 0),
+                       pixel(exportFilteredBytes, x: 0, y: 0))
         XCTAssertNotEqual(pixel(plainBytes, x: width / 2, y: height / 2),
                           pixel(filteredBytes, x: width / 2, y: height / 2))
+        XCTAssertEqual(pixel(filteredBytes, x: width / 2, y: height / 2),
+                       pixel(exportFilteredBytes, x: width / 2, y: height / 2))
+    }
+
+    func testPhotoEffectsFilterTilesUseAndroidPixelBudget() {
+        XCTAssertEqual(photoEffectsFilterTileRows(sourceWidth: 4_096), 1_024)
+        XCTAssertEqual(photoEffectsFilterTileRows(sourceWidth: 6_000), 699)
+        XCTAssertEqual(photoEffectsFilterTileRows(sourceWidth: 5_000_000), 1)
     }
 
     func testPhotoEffectsPreviewUsesAndroidMetadataPlaceholdersFieldByField() throws {
