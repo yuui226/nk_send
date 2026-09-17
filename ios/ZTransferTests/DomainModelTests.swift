@@ -644,6 +644,39 @@ final class DomainModelTests: XCTestCase {
         )
     }
 
+    func testImageWatermarkOutputIdentityUsesItsRenderedPhotoPosition() {
+        var settings = PhotoEffectsSettings()
+        settings.photoFrameEnabled = true
+        settings.photoFrameBorderEnabled = true
+        settings.watermark.enabled = true
+        settings.watermark.content = .image
+        settings.watermark.imageHash = String(repeating: "a", count: 64)
+        settings.watermark.position = .left
+        let constrained = androidPhotoFrameOutputName(sourceName: "DSC_0001.JPG", settings: settings)
+
+        settings.watermark.position = .photoBottomCenter
+        let explicit = androidPhotoFrameOutputName(sourceName: "DSC_0001.JPG", settings: settings)
+
+        XCTAssertEqual(constrained, explicit)
+    }
+
+    func testWatermarkOnlyOutputIdentityIgnoresHiddenFrameMetadata() {
+        var settings = PhotoEffectsSettings()
+        settings.photoFrameEnabled = true
+        settings.photoFrameBorderEnabled = false
+        settings.watermark.enabled = true
+        let baseline = androidPhotoFrameOutputName(sourceName: "DSC_0001.JPG", settings: settings)
+
+        settings.metadataByPreset[PhotoFramePreset.mist.rawValue] = .init(
+            showDate: true, showTime: true, showCoordinates: true, showAltitude: true
+        )
+
+        XCTAssertEqual(
+            baseline,
+            androidPhotoFrameOutputName(sourceName: "DSC_0001.JPG", settings: settings)
+        )
+    }
+
     func testTransferDateFolderMatchesAndroidAndFallsBackForInvalidDate() {
         let fallback = Calendar(identifier: .gregorian).date(from: DateComponents(year: 2026, month: 3, day: 21))!
         XCTAssertEqual(transferDateFolderName("20260817T142530", fallback: fallback), "ZT2026-08-17")

@@ -310,8 +310,10 @@ func androidPhotoFrameOutputName(sourceName: String, settings: PhotoEffectsSetti
         ? settings.watermark
         : PhotoFrameWatermark(enabled: false)
     let renderedWatermark = androidWatermarkForBorderMode(watermarkPreference, borderEnabled: borderEnabled)
-    let metadata = settings.metadataByPreset[preset.rawValue]
-        ?? PhotoFrameMetadataSettings.defaults(for: preset)
+    let metadata = borderEnabled
+        ? (settings.metadataByPreset[preset.rawValue]
+            ?? PhotoFrameMetadataSettings.defaults(for: preset))
+        : PhotoFrameMetadataSettings.defaults(for: preset)
     let filter = settings.photoFilterEnabled ? settings.selectedFilter : nil
     let watermarkSuffix: String
     if borderEnabled || renderedWatermark.enabled {
@@ -337,7 +339,7 @@ func androidPhotoFrameOutputName(sourceName: String, settings: PhotoEffectsSetti
 }
 
 private func androidWatermarkForBorderMode(_ watermark: PhotoFrameWatermark, borderEnabled: Bool) -> PhotoFrameWatermark {
-    guard !borderEnabled,
+    guard (!borderEnabled || watermark.content == .image),
           !androidPhotoPlacement(watermark.position) else { return watermark }
     var result = watermark
     result.position = .photoBottomCenter
