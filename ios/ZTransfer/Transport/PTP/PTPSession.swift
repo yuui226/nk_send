@@ -1,6 +1,10 @@
 import Foundation
 
 protocol PTPCommandTransport: Sendable {
+    /// Raw socket/USB transports need the session watchdog. Framework-owned
+    /// transports can suspend communication independently of Swift tasks and
+    /// must rely on their own terminal callback/error instead.
+    var managesCommandTimeouts: Bool { get }
     func sendPTP(command: Data, data: Data?) async throws -> (response: Data, payload: Data)
     func receivePTP(command: Data, sink: PTPDataSink) async throws -> PTPDataTransfer
     /// Requests cancellation of an active data phase. Transports that can drain
@@ -21,6 +25,7 @@ struct PTPDataTransfer: Sendable {
 }
 
 extension PTPCommandTransport {
+    var managesCommandTimeouts: Bool { false }
     func cancelPTP(transactionID: UInt32) async -> Bool { false }
 
     /// ImageCaptureCore delivers one completed data phase. Socket transports
@@ -175,11 +180,26 @@ actor PTPSession {
                 )
                 let receiveTask = Task { try await transport.receivePTP(command: command, sink: timedSink) }
                 do {
-                    let transfer = try await AsyncDeadline.run(
-                        timeout: { try await activity.waitForTimeout() }
-                    ) { try await receiveTask.value }
+                    let transfer: PTPDataTransfer
+                    if transport.managesCommandTimeouts {
+                        // A framework request cannot be cancelled independently.
+                        // Wait for its terminal callback so leaving a page never
+                        // requires closing the camera connection to resync PTP.
+                        transfer = try await receiveTask.value
+                    } else {
+                        transfer = try await AsyncDeadline.run(
+                            timeout: { try await activity.waitForTimeout() }
+                        ) { try await receiveTask.value }
+                    }
                     result = (transfer.response, Data(), transfer.receivedByteCount, transfer.declaredByteCount)
                 } catch {
+                    if transport.managesCommandTimeouts, error is CancellationError {
+                        // Cancellation before dispatch (for example while the
+                        // browser is suspended) consumed no wire transaction.
+                        drainedAfterAbort = true
+                        receiveTask.cancel()
+                        throw error
+                    }
                     // Android transferTransaction performs the same cleanup
                     // for every data-phase exception, including write errors.
                     // Cleanup must not inherit the caller's cancellation.
@@ -195,11 +215,35 @@ actor PTPSession {
                     throw error
                 }
             } else {
-                result = try await AsyncDeadline.run(
-                    nanoseconds: timeoutNanoseconds, timeoutError: PTPSessionError.timeout
-                ) {
+                let operation: @Sendable () async throws -> (response: Data, payload: Data, received: UInt64, declared: UInt64?) = {
                     let reply = try await transport.sendPTP(command: command, data: data)
                     return (reply.response, reply.payload, UInt64(reply.payload.count), nil)
+                }
+                do {
+                    if transport.managesCommandTimeouts {
+                        // ImageCaptureCore owns timeout and suspension. Await its
+                        // callback cooperatively; prompt Swift cancellation would
+                        // abandon a live PTP transaction with no legal Cancel API.
+                        result = try await operation()
+                    } else {
+                        result = try await AsyncDeadline.run(
+                            nanoseconds: timeoutNanoseconds, timeoutError: PTPSessionError.timeout,
+                            operation: operation
+                        )
+                    }
+                } catch {
+                    if transport.managesCommandTimeouts, error is CancellationError {
+                        // ImageCapture requests already on the wire are awaited
+                        // above. A cancellation reaching here occurred before
+                        // dispatch, so the existing session remains reusable.
+                        drainedAfterAbort = true
+                        throw error
+                    }
+                    let recovery = Task.detached {
+                        await transport.cancelPTP(transactionID: transactionID)
+                    }
+                    drainedAfterAbort = await recovery.value
+                    throw error
                 }
             }
             guard !invalidated else { throw PTPSessionError.invalidated }

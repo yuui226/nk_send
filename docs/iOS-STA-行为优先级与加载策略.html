@@ -71,7 +71,7 @@
   <h2 id="remote-audit">五、监看对齐台账：复核结论与范围</h2>
   <p><strong>结论：之前列出的差异不完整，也存在判断过早的地方。</strong>本轮重新检查页面、ViewModel、相机协议调用和相关安卓测试，将原有 11 个对照点固定为 M01–M11，并持续补充 M12–M35。跟踪项数量不是“全部缺陷总数”，也不表示已完成对齐。</p>
   <p class="note">更新日期：2026-09-17。以当前工作区为准。完成标准是安卓/iOS 源码规则一致，并用有意义的协议回放和状态测试核对；按用户要求，不以真机测试作为本次完成条件。</p>
-  <p id="audit-counts">35 项台账当前状态：已有修改，待边界复核 0 项；已对齐（源码与专项测试） 29 项；已确认差异，待对齐 1 项；部分对齐，仍有差异 0 项；已对齐（源码依据） 5 项。以下“已对齐”只覆盖对应行列出的规则。</p>
+  <p id="audit-counts">35 项台账当前状态：已有修改，待边界复核 0 项；已对齐（源码与专项测试） 29 项；已确认差异，待对齐 0 项；部分对齐，仍有差异 0 项；已对齐（源码或产品范围依据） 6 项。以下“已对齐”只覆盖对应行列出的规则。</p>
   <p>范围：STA 监看的进入、扫描/缓存让路、初始参数、取帧、事件、拍照、机身录像、调参、AF、工具栏和退出；共用 AP/USB 路径一并阅读，USB 特有流程单独标明。每项修复后保留编号、记录测试证据，再变更状态。</p>
   <p><strong>纠正旧表：</strong>安卓初始对焦读取是一次，不是两次；电量初读发生在启动 Live View 前；取帧异常不是笼统的短暂等待重试；安卓页面门控释放与 LV 清理属于不同生命周期回调，不能写成必然等待全部清理后才恢复列表。</p>
   <h2>六、原有对照点的当前状态（M01–M11）</h2>
@@ -113,7 +113,7 @@
 <tr id="M32"><td><strong>M32</strong><br><span class="status">已对齐（源码依据）</span></td><td>全屏监看的行为</td><td>进入独立沉浸状态，同一取景器扩展，只留返回；从竖屏进入先横屏，退出全屏仍留横屏普通布局。</td><td>全屏拥有独立 immersiveFullscreen 状态；竖屏入口先请求横屏，沉浸布局只渲染扩展取景器和右上返回。退出只关闭沉浸状态，不改横屏方向。</td><td>横竖屏切换与全屏状态已分离；无需等待真机验证。</td><td class="sources"><a href="../app/src/main/java/com/ztransfer/ui/screen/RemoteScreen.kt" title="app/src/main/java/com/ztransfer/ui/screen/RemoteScreen.kt">RemoteScreen.kt</a><br><a href="../ios/ZTransfer/UI/RemoteView.swift" title="ios/ZTransfer/UI/RemoteView.swift">RemoteView.swift</a></td></tr>
 <tr id="M33"><td><strong>M33</strong><br><span class="status">已对齐（源码依据）</span></td><td>自动旋转、手动旋转与动画</td><td>方向稳定 260ms 后切换；80ms 淡出 → 切布局 → 140ms 淡入；手动旋转后抑制当前传感器方向，切换中不重复响应。</td><td>方向候选保持 260ms 才提交；按 FastOutSlowIn 曲线 80ms 淡出、切换布局并让出一帧、140ms 淡入。手动旋转取消当前稳定任务并抑制当前物理方向；切换期间拒绝重复请求；倒置竖屏不映射。</td><td>时长、顺序与手动抑制规则均按安卓常量和状态机实现。</td><td class="sources"><a href="../app/src/main/java/com/ztransfer/ui/screen/RemoteScreen.kt" title="app/src/main/java/com/ztransfer/ui/screen/RemoteScreen.kt">RemoteScreen.kt</a><br><a href="../ios/ZTransfer/UI/RemoteView.swift" title="ios/ZTransfer/UI/RemoteView.swift">RemoteView.swift</a></td></tr>
 <tr id="M34"><td><strong>M34</strong><br><span class="status">已对齐（源码依据）</span></td><td>工具栏窄屏和大字体布局</td><td>AdaptiveRemoteToolBar 按控件固有宽度自动换行，并为全屏/旋转预留首行末端位置。</td><td>竖屏和横屏共用 RemoteAdaptiveToolLayout；逐个测量控件固有宽度，首行先扣除末尾两项的真实宽度，普通工具放不下才换到后续行。视频音频按钮、录制胶囊和反挤压倍率宽度变化都会参与重新排布。</td><td>窄屏、动态字体和工具宽度变化不会把全屏/旋转入口挤到后续行。</td><td class="sources"><a href="../app/src/main/java/com/ztransfer/ui/screen/RemoteScreen.kt" title="app/src/main/java/com/ztransfer/ui/screen/RemoteScreen.kt">RemoteScreen.kt</a><br><a href="../ios/ZTransfer/UI/RemoteView.swift" title="ios/ZTransfer/UI/RemoteView.swift">RemoteView.swift</a></td></tr>
-<tr id="M35"><td><strong>M35</strong><br><span class="status diff">已确认差异，待对齐</span></td><td>隐藏开发者入口与完整能力探测</td><td>每次进入监看页后，1.5 秒内连续点击 FPS 四次会解锁仅本次页面会话有效的虫子按钮；四次切换恰好恢复 FPS 原状态。面板可停止当前 Live View、执行完整能力探测、最多保留 5000 行日志、复制日志并关闭，探测结束后恢复原清晰度的监看。</td><td>FPS 按钮目前只有显示开关；没有四击会话解锁、虫子入口、日志面板或完整探测协议。常规监看功能不受影响，但诊断后门尚未复刻。</td><td>这是开发者诊断功能的真实缺口，不属于 App Store 高级版差异，也不是平台 API 限制；后续需要同时补协议探测、日志生命周期和面板交互。</td><td class="sources"><a href="../app/src/main/java/com/ztransfer/ui/screen/RemoteScreen.kt">RemoteScreen.kt</a><br><a href="../app/src/main/java/com/ztransfer/protocol/RemoteLab.kt">RemoteLab.kt</a><br><a href="../ios/ZTransfer/UI/RemoteView.swift">RemoteView.swift</a><br><a href="../ios/ZTransfer/Domain/RemoteViewModel.swift">RemoteViewModel.swift</a></td></tr>
+<tr id="M35"><td><strong>M35</strong><br><span class="status">已对齐（产品范围确认与源码）</span></td><td>隐藏开发者日志入口</td><td>每次进入监看页后，连续点击 FPS 四次（相邻点击间隔小于 1.5 秒）会解锁仅本次页面会话有效的虫子按钮；四次切换恰好恢复 FPS 原状态。虫子按钮呼出可复制、关闭的日志窗。安卓面板另含“完整能力探测”，该部分是实验性探索。</td><td>iOS 现使用同一四击节奏、会话级解锁和虫子入口；面板保留标题、日志区、复制、点遮罩关闭及关闭按钮。按产品确认，实验性的完整能力探测、属性扫描、追踪矩阵和临时相机属性写入不在 iOS 复刻范围。</td><td>常规监看不会因开发者入口增加额外协议命令；退出监看页即销毁解锁和窗口状态。源码已完成；按项目约定本轮未自动构建或真机验证。</td><td class="sources"><a href="../app/src/main/java/com/ztransfer/ui/screen/RemoteScreen.kt">RemoteScreen.kt</a><br><a href="../ios/ZTransfer/UI/RemoteView.swift">RemoteView.swift</a></td></tr>
 </tbody></table></div>
   <h2>八、尚不能作出“完整对齐”结论的边界</h2>
   <ul>
@@ -124,7 +124,7 @@
     <li><strong>验证依据：</strong>已阅读安卓 RemoteLiveViewSchedulingTest、RemoteBatteryTest、RemoteAutoIsoTest 的对应规则；测试源码是行为依据，不是本轮运行通过的记录。本次新增并执行的 iOS 测试结果见第十节，覆盖范围按对应条目列明。</li>
   </ul>
 <h2 id="photo-audit">九、照片列表行为对齐台账</h2>
-<p>监看 M01–M34 已完成源码规则对齐，M35 的隐藏开发者探测仍待处理；同时继续按安卓实现和安卓专项测试逐项审查照片列表。当前固定 P01–P27，已全部完成源码规则对齐。状态只代表本行范围，不把编译通过当作功能完成。</p>
+<p>监看 M01–M35 已完成当前产品范围内的源码规则对齐，其中 M35 的实验性完整能力探测按产品确认不纳入 iOS；同时继续按安卓实现和安卓专项测试逐项审查照片列表。当前固定 P01–P27，已全部完成源码规则对齐。状态只代表本行范围，不把编译通过当作功能完成。</p>
 <p class="note">更新日期：2026-09-17。按用户要求，本阶段只以 Android/iOS 源码规则与有意义的 iOS 测试作为完成依据，不把真机验证列入完成条件。</p>
 <div class="table-scroll"><table class="audit"><thead><tr><th>编号/状态</th><th>对照点</th><th>安卓实际处理</th><th>iOS 当前处理</th><th>结论</th><th>代码依据</th></tr></thead><tbody>
 <tr id="P01"><td><strong>P01</strong><br><span class="status">已对齐（源码依据）</span></td><td>同会话进入与返回</td><td>队列页、设置页不重建连接级文件状态；同会话返回不重新枚举。</td><td>PhotoListViewModel 按 CameraSession 复用，loaded 状态的 load 不启动第二次扫描。</td><td>列表与缩略图工作状态保留。</td><td class="sources">CameraViewModel.loadFiles / PhotoListViewModel.load</td></tr>
@@ -157,6 +157,6 @@
 </tbody></table></div>
 <p class="note">当前结论：普通扫描为 12 个一批，STA 直读首屏为 1/3/12；文件列表每轮重新核对最新 handles，缩略图按相机身份和稳定 key 复用。数据、缓存、筛选、大图让路、列表动效和预览开合返回规则已完成本轮修正。</p><h2 id="remote-verification">十、已执行的规则验证</h2>
 <p>2026-09-17：iOS RemoteExposureParametersTests、RemoteFrameProtocolTests 与 RemoteLifecycleTests 覆盖电量、水平仪、曝光候选、事件、拍摄确认、增强帧回退、Auto ISO、尾值合并和写后确认。协议测试发送到可控回放传输层；生命周期测试使用模拟相机。其中 AF 协议覆盖追踪不支持后的记忆、失败收尾、不合焦、半按先结束追踪及 80ms 原子段不被取帧穿插。离页时半按/点按 AF 在途的状态测试也已通过。完成 P01–P27 后运行现有 iOS 全部测试：299 项通过、0 失败（Xcode 测试结果：/Users/orys/Library/Developer/Xcode/DerivedData/ZTransfer-bzqwtizkygedwxfksanrnchxrvtd/Logs/Test/Test-ZTransfer-2026.09.17_11-25-58-+0800.xcresult）。</p>
-<p>原先明确缺少的手机端监看录制、沉浸全屏、旋转时序和自适应工具栏已补齐；USB 录像控制/应用模式生命周期、Wi-Fi 开录兼容恢复、后台解码流水线、全局断线出口与非当前曝光组事件缓存也已按源码和专项测试对齐。M01–M05 的列表抢占边界新增 4 项状态测试，覆盖首批前、半途、断线和预览占用恢复；监看台账 M01–M34 已完成源码规则对齐，M35 明确保留为待对齐项。</p>
+<p>原先明确缺少的手机端监看录制、沉浸全屏、旋转时序和自适应工具栏已补齐；USB 录像控制/应用模式生命周期、Wi-Fi 开录兼容恢复、后台解码流水线、全局断线出口与非当前曝光组事件缓存也已按源码和专项测试对齐。M01–M05 的列表抢占边界新增 4 项状态测试，覆盖首批前、半途、断线和预览占用恢复；监看台账 M01–M35 已完成当前产品范围内的源码规则对齐，M35 的实验性完整能力探测按产品确认排除。</p>
   <footer>行为证据来自本地 Android 与 iOS 源码；来源链接指向文件，具体处理以函数名和固定台账编号为准。新增发现继续追加，不将未核对项写成“已一致”。</footer>
 </main></body></html>

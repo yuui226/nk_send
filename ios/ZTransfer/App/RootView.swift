@@ -36,7 +36,11 @@ enum AppLocalized {
         } else {
             language = "zh"
         }
-        return decodeAndroidEscapes(AndroidLocalization.byResource[name]?[language] ?? name)
+        return decodeAndroidEscapes(
+            IOSLocalization.byResource[name]?[language]
+                ?? AndroidLocalization.byResource[name]?[language]
+                ?? name
+        )
     }
 
     static func versionText(_ version: String) -> String {
@@ -238,6 +242,10 @@ struct RootView: View {
         }
         .onChange(of: scenePhase) { phase in
             UIApplication.shared.isIdleTimerDisabled = keepScreenOn && phase == .active
+            connectionModel.setUSBForegroundActive(phase == .active)
+            if phase == .active {
+                connectionModel.refreshUSBAuthorization()
+            }
         }
         .task(id: connectionModel.cameraSession != nil) {
             guard connectionModel.cameraSession != nil, connectionCelebrationActive else { return }

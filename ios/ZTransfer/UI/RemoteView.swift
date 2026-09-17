@@ -52,6 +52,15 @@ struct RemoteView: View {
     @State private var histogramVisible = false
     // Android RemoteScreen defaults the FPS overlay to visible for every session.
     @State private var showFps = true
+    // The developer entry is deliberately scoped to this RemoteView instance.
+    // Four consecutive FPS taps (each gap < 1.5 s) reveal it; four toggles also
+    // leave the FPS overlay in its original state.
+    @State private var developerUnlocked = false
+    @State private var fpsTapCount = 0
+    @State private var lastFpsTapAt: TimeInterval = 0
+    @State private var developerPanelPresented = false
+    @State private var developerLogLines: [String] = []
+    @State private var signalExpanded = false
     @State private var framingGrid: IOSViewfinderGrid = .off
     @State private var zebraVisible = false
     @State private var batteryExpanded = false
@@ -110,9 +119,15 @@ struct RemoteView: View {
                 }
             }
             .opacity(rotationOpacity)
+
+            if developerPanelPresented {
+                developerPanel
+                    .transition(.opacity)
+                    .zIndex(10)
+            }
         }
         .overlay(alignment: .top) {
-            if !immersiveFullscreen,
+            if !immersiveFullscreen, !developerPanelPresented,
                let hint = model.interactionHint ?? model.recordingHint ?? model.localRecordingHint {
                 Text(hint)
                     .font(.system(size: 14, weight: .medium))
@@ -306,21 +321,40 @@ struct RemoteView: View {
 
     private var remoteSignalButton: some View {
         Button {
-            if wirelessMode == .sta && !isSessionConnected { onRetrySTA() }
+            if isUSBSession {
+                if isSessionConnected {
+                    withAnimation(signalExpanded
+                                  ? .timingCurve(0.4, 0, 0.2, 1, duration: 0.22)
+                                  : .spring(response: 0.42, dampingFraction: 0.72)) {
+                        signalExpanded.toggle()
+                    }
+                }
+            } else if wirelessMode == .sta && !isSessionConnected {
+                onRetrySTA()
+            }
         } label: {
-            HStack {
+            HStack(spacing: signalExpanded && isUSBSession ? 5 : 0) {
                 PhotoListSignalIcon(isUSB: isUSBSession, wirelessMode: wirelessMode,
                                     connected: isSessionConnected)
                     .frame(width: 19, height: 19)
+                if signalExpanded && isUSBSession && isSessionConnected {
+                    Text(AppLocalized.resource("connection_usb"))
+                        .zTransferTypography(.labelSmall, weight: .medium)
+                        .foregroundStyle(ZTransferColors.accentBlue)
+                }
             }
-            .frame(width: 40, height: 36)
+            .padding(.horizontal, 10)
+            .frame(minWidth: 40, minHeight: 36, maxHeight: 36)
             .background(Color.white.opacity(0.86), in: Capsule())
             .overlay(Capsule().stroke(Color.white.opacity(0.95), lineWidth: 1))
             .shadow(color: .black.opacity(0.06), radius: 2, y: 1)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(AppLocalized.resource(wirelessMode == .sta && !isSessionConnected
-                                                  ? "sta_signal_disconnected_reconnect" : "sta_signal_connected"))
+        .accessibilityLabel(AppLocalized.resource(
+            isUSBSession ? "connection_usb" :
+                (wirelessMode == .sta && !isSessionConnected
+                    ? "sta_signal_disconnected_reconnect" : "sta_signal_connected")
+        ))
     }
 
     private var remoteBatteryButton: some View {
@@ -363,11 +397,21 @@ struct RemoteView: View {
 
     private var adaptiveRemoteToolbar: some View {
         RemoteAdaptiveToolLayout(horizontalSpacing: 7, verticalSpacing: 8, pinnedEndCount: 2) {
+            if developerUnlocked {
+                remoteToolButton(active: false,
+                                 accessibilityLabel: AppLocalized.resource("cd_dev_panel"),
+                                 label: {
+                    Image(systemName: "ladybug.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                }) {
+                    withAnimation(ZTransferMotion.standard) { developerPanelPresented = true }
+                }
+            }
             remoteToolButton(active: model.hdLiveView, accessibilityLabel: AppLocalized.resource("dev_hd_liveview"), label: { Text("HD").font(.system(size: 13, weight: .bold)).fixedSize() }) {
                 withAnimation(ZTransferMotion.standard) { model.setHDLiveView(!model.hdLiveView) }
             }
             remoteToolButton(active: showFps, accessibilityLabel: AppLocalized.resource("dev_fps_overlay"), label: { Text("FPS").font(.system(size: 10.5, weight: .bold)).fixedSize() }) {
-                withAnimation(ZTransferMotion.standard) { showFps.toggle() }
+                registerFpsTap()
             }
             remoteToolButton(active: histogramVisible, accessibilityLabel: AppLocalized.resource("cd_remote_histogram"), label: { RemoteHistogramIcon().frame(width: 19, height: 19) }) {
                 withAnimation(ZTransferMotion.standard) { histogramVisible.toggle() }
@@ -418,6 +462,95 @@ struct RemoteView: View {
             }
         }
         .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.22), value: model.movieMode)
+    }
+
+    private func registerFpsTap() {
+        withAnimation(ZTransferMotion.standard) { showFps.toggle() }
+        let now = ProcessInfo.processInfo.systemUptime
+        fpsTapCount = now - lastFpsTapAt < 1.5 ? fpsTapCount + 1 : 1
+        lastFpsTapAt = now
+        if fpsTapCount >= 4 { developerUnlocked = true }
+    }
+
+    /// The Android panel also hosts an experimental full camera-capability
+    /// probe. Product direction keeps only the hidden entry and log window on
+    /// iOS; no probing commands or temporary camera-property writes originate here.
+    private var developerPanel: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .bottom) {
+                Color.black.opacity(0.32)
+                    .ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        withAnimation(ZTransferMotion.standard) { developerPanelPresented = false }
+                    }
+
+                VStack(spacing: 8) {
+                    HStack {
+                        Text(AppLocalized.resource("dev_panel_title"))
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(ZTransferColors.primaryText)
+                        Spacer()
+                        developerPanelButton(systemName: "doc.on.doc",
+                                             accessibilityLabel: AppLocalized.resource("lab_copy_log")) {
+                            UIPasteboard.general.string = developerLogLines.joined(separator: "\n")
+                        }
+                        developerPanelButton(systemName: "xmark",
+                                             accessibilityLabel: AppLocalized.resource("cd_close")) {
+                            withAnimation(ZTransferMotion.standard) { developerPanelPresented = false }
+                        }
+                    }
+
+                    ScrollViewReader { reader in
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 2) {
+                                ForEach(Array(developerLogLines.enumerated()), id: \.offset) { index, line in
+                                    Text(line)
+                                        .font(.system(size: 10, design: .monospaced))
+                                        .foregroundStyle(line.hasPrefix("!!")
+                                                         ? ZTransferColors.accentOrange
+                                                         : Color.white.opacity(0.76))
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .id(index)
+                                }
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 6)
+                        }
+                        .frame(height: 170)
+                        .background(Color.black.opacity(0.35), in: RoundedRectangle(cornerRadius: 10))
+                        .onChange(of: developerLogLines.count) { count in
+                            guard count > 0 else { return }
+                            reader.scrollTo(count - 1, anchor: .bottom)
+                        }
+                    }
+                }
+                .padding(14)
+                .padding(.bottom, proxy.safeAreaInsets.bottom)
+                .background {
+                    ZTransferGlassSurface(cornerRadius: 20, kind: .panel)
+                }
+                .clipShape(UnevenRoundedRectangle(topLeadingRadius: 20, topTrailingRadius: 20))
+                .shadow(color: .black.opacity(0.18), radius: 6, y: -1)
+                .contentShape(Rectangle())
+                .onTapGesture { }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .ignoresSafeArea()
+    }
+
+    private func developerPanelButton(systemName: String, accessibilityLabel: String,
+                                      action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(ZTransferColors.secondaryText)
+                .frame(width: 32, height: 32)
+                .background(ZTransferGlassSurface(cornerRadius: 16, kind: .button))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel)
     }
 
     private var remoteRecordButton: some View {

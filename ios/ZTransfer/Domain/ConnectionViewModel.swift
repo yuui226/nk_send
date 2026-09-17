@@ -24,6 +24,7 @@ final class ConnectionViewModel: ObservableObject {
     private var connectionDiscoveryPaused = false
     private var staWorkspaceEstablished = false
     private var usbWorkspaceEstablished = false
+    private var usbForegroundActive = true
     private var gpsConnectionPaused = UserDefaults(suiteName: GPSPreferences.suiteName)?
         .bool(forKey: GPSPreferences.enabled) ?? false
     private let wirelessPreferences = UserDefaults(suiteName: "sta_connection")!
@@ -72,6 +73,35 @@ final class ConnectionViewModel: ObservableObject {
             }
         }
         usbTransport.start()
+    }
+
+    /// Camera authorization is app-scoped on iOS. Re-read it when the app
+    /// becomes active so a grant changed in Settings takes effect without a
+    /// force-quit or cable replug.
+    func refreshUSBAuthorization() {
+        guard usbEventsTask != nil else { return }
+        apply(.authorization(usbTransport.currentAuthorization()))
+        usbTransport.refreshAuthorization()
+    }
+
+    /// ImageCaptureCore suspends all device communication when iOS backgrounds
+    /// the app. Keep the accepted session mounted, but stop periodic commands;
+    /// they are restarted after the framework resumes in the foreground.
+    func setUSBForegroundActive(_ active: Bool) {
+        usbForegroundActive = active
+        guard let session = cameraSession, session.isUSB,
+              let deviceID = session.transportDeviceID else { return }
+        // Do not cancel a loop merely because the scene backgrounds: it may be
+        // awaiting an ImageCaptureCore command, which must drain its framework
+        // callback because iOS has no per-command PTP Cancel API.
+        guard active else { return }
+        let generation = connectionGeneration
+        if usbKeepaliveTask == nil {
+            startUSBKeepalive(for: session, deviceID: deviceID, generation: generation)
+        }
+        if usbCatalogTask == nil {
+            startUSBCatalogMonitoring(for: session, generation: generation)
+        }
     }
 
     /// Starts the AP watcher used by Android: while the app is on Wi-Fi and AP
@@ -153,33 +183,6 @@ final class ConnectionViewModel: ObservableObject {
                 do { try await Task.sleep(nanoseconds: delay) } catch { break }
             }
             if !Task.isCancelled { self.wifiWatcherTask = nil }
-        }
-    }
-
-    func stopUSBDiscovery() {
-        // RootView may temporarily disappear during presentation changes.
-        // An accepted wired session owns this browser until physical loss or
-        // model teardown; stopping it here would close a healthy PTP session.
-        guard cameraSession?.isUSB != true else { return }
-        connectionGeneration &+= 1
-        let stopGeneration = connectionGeneration
-        usbEventsTask?.cancel()
-        usbEventsTask = nil
-        usbConnectTask?.cancel()
-        usbConnectTask = nil
-        usbKeepaliveTask?.cancel()
-        usbKeepaliveTask = nil
-        usbCatalogTask?.cancel()
-        usbCatalogTask = nil
-        // stop() can race an OpenSession callback.  Close the service first and
-        // only then stop ImageCaptureCore, so it still owns the camera reference
-        // while the non-cancellable close request is in flight.  Android keeps
-        // the same ordering when its USB monitor is torn down.
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            await self.connectionService.disconnect()
-            guard self.connectionGeneration == stopGeneration else { return }
-            self.usbTransport.stop()
         }
     }
 
@@ -463,7 +466,7 @@ final class ConnectionViewModel: ObservableObject {
             guard generation == connectionGeneration,
                   state.selectedDeviceID == id,
                   state.discoveredDevices.contains(where: { $0.id == id }) else {
-                await connectionService.disconnect()
+                await connectionService.reset()
                 usbConnectTask = nil
                 return
             }
@@ -480,16 +483,17 @@ final class ConnectionViewModel: ObservableObject {
             }
             guard cameraSession != nil else {
                 cameraRepository = nil
-                await connectionService.disconnect()
+                await connectionService.reset()
                 usbConnectTask = nil
                 return
             }
             state.usbPhase = .connected
         } catch is CancellationError {
             // CameraConnectionService may have completed OpenSession just
-            // before cancellation was observed.  Always run its non-cancel-
-            // lable close path so a cancelled USB connect cannot retain PTP.
-            await connectionService.disconnect()
+            // before cancellation was observed. The open callback is drained
+            // before app-side ownership is reset;
+            // cancellation never asks ImageCaptureCore to close the camera.
+            await connectionService.reset()
             usbConnectTask = nil
             return
         } catch {
@@ -522,12 +526,14 @@ final class ConnectionViewModel: ObservableObject {
     /// skipped because a download owns the PTP channel counts as alive.
     private func startUSBKeepalive(for expectedSession: CameraSession, deviceID: String, generation: Int) {
         usbKeepaliveTask?.cancel()
+        guard usbForegroundActive else { usbKeepaliveTask = nil; return }
         usbKeepaliveTask = Task { [weak self] in
             guard let self else { return }
             while !Task.isCancelled {
                 do { try await Task.sleep(nanoseconds: 10_000_000_000) } catch { return }
                 guard !Task.isCancelled, self.connectionGeneration == generation,
                       self.cameraSession === expectedSession else { return }
+                guard self.usbForegroundActive else { continue }
                 if !(await expectedSession.keepalive()) {
                     guard !Task.isCancelled else { return }
                     await self.usbTransportLost(expectedSession, deviceID: deviceID, generation: generation)
@@ -539,12 +545,14 @@ final class ConnectionViewModel: ObservableObject {
 
     private func startUSBCatalogMonitoring(for expectedSession: CameraSession, generation: Int) {
         usbCatalogTask?.cancel()
+        guard usbForegroundActive else { usbCatalogTask = nil; return }
         usbCatalogTask = Task { [weak self] in
             guard let self else { return }
             while !Task.isCancelled {
                 do { try await Task.sleep(nanoseconds: 2_000_000_000) } catch { return }
                 guard !Task.isCancelled, self.connectionGeneration == generation,
                       self.cameraSession === expectedSession else { return }
+                guard self.usbForegroundActive else { continue }
                 await expectedSession.maintainCatalogIfIdle()
             }
         }
@@ -566,13 +574,13 @@ final class ConnectionViewModel: ObservableObject {
         guard state.selectedDeviceID == deviceID,
               state.usbAuthorization == .authorized,
               state.discoveredDevices.contains(where: { $0.id == deviceID }) else {
-            await connectionService.disconnect()
+            await connectionService.reset()
             return
         }
         state.usbPhase = .connecting
         usbConnectTask = Task { [weak self] in
             guard let self else { return }
-            await self.connectionService.disconnect()
+            await self.connectionService.reset()
             guard self.connectionGeneration == reconnectGeneration, !Task.isCancelled else {
                 self.usbConnectTask = nil
                 return
@@ -583,6 +591,7 @@ final class ConnectionViewModel: ObservableObject {
 
     func selectDevice(id: String) {
         guard state.discoveredDevices.contains(where: { $0.id == id }) else { return }
+        guard cameraSession == nil, state.usbPhase != .connecting else { return }
         guard state.selectedDeviceID != id else { return }
         connectionGeneration &+= 1
         usbConnectTask?.cancel()
@@ -591,7 +600,7 @@ final class ConnectionViewModel: ObservableObject {
         usbKeepaliveTask = nil
         usbCatalogTask?.cancel()
         usbCatalogTask = nil
-        Task { [weak self] in await self?.connectionService.disconnect() }
+        Task { [weak self] in await self?.connectionService.reset() }
         state.selectedDeviceID = id
         lastEstablishedUSBDeviceID = nil
         state.usbPhase = .waitingForCamera
@@ -632,7 +641,7 @@ final class ConnectionViewModel: ObservableObject {
                 usbCleanupTask = Task {
                     await previousCleanup?.value
                     await cancelledUSB?.value
-                    await service.disconnect()
+                    await service.reset()
                 }
                 // Pausing an in-flight open does not consume a retry; a
                 // three-attempt failure stays paused until a real reattach.
@@ -642,6 +651,7 @@ final class ConnectionViewModel: ObservableObject {
         }
         guard cameraSession == nil else { return }
         apply(.authorization(usbTransport.currentAuthorization()))
+        usbTransport.refreshAuthorization()
         for device in usbTransport.attachedDevices() {
             if !state.discoveredDevices.contains(where: { $0.id == device.id }) {
                 apply(.deviceAdded(device))
@@ -699,7 +709,6 @@ final class ConnectionViewModel: ObservableObject {
             // already accepted session back to the connecting card.
             return
         case let .sessionClosed(id, token):
-            if cameraSession?.usbSessionRotationActive == true { return }
             if let cameraSession, cameraSession.usbSessionToken != token { return }
             if let current = usbTransport.openedSessionToken(for: id), current != token { return }
         default:
@@ -746,7 +755,7 @@ final class ConnectionViewModel: ObservableObject {
                 cameraSession = nil
                 Task { [weak self] in
                     guard let self else { return }
-                    await connectionService.disconnect()
+                    await connectionService.reset()
                 }
                 // A cable removed before the first accepted USB session only
                 // borrowed the connection slot. Restore AP automatic discovery
@@ -797,11 +806,11 @@ final class ConnectionViewModel: ObservableObject {
 
     private func usbErrorMessage(_ error: Error) -> String {
         switch error {
-        case CameraConnectionServiceError.timeout, CameraTransportError.timeout, PTPSessionError.timeout:
+        case CameraTransportError.timeout, PTPSessionError.timeout:
             return "连接超时，请检查相机电源和 USB 数据线"
         case CameraTransportError.permissionDenied:
             return AppLocalized.resource("usb_permission_required")
-        case CameraTransportError.disconnected:
+        case CameraTransportError.disconnected, CameraTransportError.unavailable:
             return AppLocalized.resource("usb_connection_lost")
         case PTPSessionError.invalidated:
             return AppLocalized.resource("usb_connection_lost")

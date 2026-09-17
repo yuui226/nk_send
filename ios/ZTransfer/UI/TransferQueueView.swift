@@ -22,6 +22,7 @@ struct TransferQueueView: View {
     @State private var pendingConfirmation: QueueConfirmation?
     @State private var removingItemIDs: Set<UUID> = []
     @State private var clearAllInProgress = false
+    @State private var signalExpanded = false
 
     fileprivate enum QueueConfirmation: Identifiable {
         case clear, retry
@@ -98,11 +99,29 @@ struct TransferQueueView: View {
             .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
             if let session {
                 Button {
-                    if session.wirelessMode == .sta && !isSessionConnected { onRetrySTA() }
+                    if session.isUSB {
+                        if isSessionConnected {
+                            withAnimation(signalExpanded
+                                          ? .timingCurve(0.4, 0, 0.2, 1, duration: 0.22)
+                                          : .spring(response: 0.42, dampingFraction: 0.72)) {
+                                signalExpanded.toggle()
+                            }
+                        }
+                    } else if session.wirelessMode == .sta && !isSessionConnected {
+                        onRetrySTA()
+                    }
                 } label: {
-                    PhotoListSignalIcon(isUSB: session.isUSB, wirelessMode: session.wirelessMode,
-                                        connected: isSessionConnected)
-                        .frame(width: 36, height: 36)
+                    HStack(spacing: signalExpanded && session.isUSB ? 5 : 0) {
+                        PhotoListSignalIcon(isUSB: session.isUSB, wirelessMode: session.wirelessMode,
+                                            connected: isSessionConnected)
+                        if signalExpanded && session.isUSB && isSessionConnected {
+                            Text(AppLocalized.resource("connection_usb"))
+                                .zTransferTypography(.labelSmall, weight: .medium)
+                                .foregroundStyle(ZTransferColors.accentBlue)
+                        }
+                    }
+                        .padding(.horizontal, 10)
+                        .frame(minWidth: 40, minHeight: 36, maxHeight: 36)
                         .background(.thinMaterial, in: Capsule())
                         .overlay(Capsule().stroke(.white.opacity(0.45), lineWidth: 1))
                 }

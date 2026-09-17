@@ -747,7 +747,7 @@ final class DomainModelTests: XCTestCase {
         )
     }
 
-    func testTransferChunkStrategyMatchesAndroidThresholds() {
+    func testTransferChunkStrategyPreservesWirelessThresholdsAndBoundsImageCaptureUSB() {
         XCTAssertTrue(shouldUsePartialObjectDownload(partialObjectSupported: nil, effectiveSize: 1))
         XCTAssertFalse(shouldUsePartialObjectDownload(
             partialObjectSupported: nil,
@@ -770,7 +770,10 @@ final class DomainModelTests: XCTestCase {
         ))
         XCTAssertEqual(transferDownloadChunkSize(effectiveSize: 1), 4 * 1024 * 1024)
         XCTAssertEqual(transferDownloadChunkSize(effectiveSize: 600 * 1024 * 1024), 32 * 1024 * 1024)
-        XCTAssertEqual(transferDownloadChunkSize(effectiveSize: 600 * 1024 * 1024, isUSBConnection: true), 64 * 1024 * 1024)
+        // ImageCaptureCore completes pass-through requests with one in-memory
+        // Data value; iOS USB deliberately does not copy Android's 64 MiB raw
+        // bulk-endpoint chunk.
+        XCTAssertEqual(transferDownloadChunkSize(effectiveSize: 600 * 1024 * 1024, isUSBConnection: true), 4 * 1024 * 1024)
     }
 
     func testTransferOutputNeverOverwritesAnExistingSameNameFile() throws {

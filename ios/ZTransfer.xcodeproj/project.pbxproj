@@ -91,6 +91,7 @@
 		AAC92E7A80B4911C1DA5126E /* PhotoListViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21FE65A239E26AF1D7198CF5 /* PhotoListViewModel.swift */; };
 		AB5AB5C57E111B1DC07279F2 /* PTPIPTransferRecoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F8A1710B51E9B245AE82470 /* PTPIPTransferRecoveryTests.swift */; };
 		ABD477B9A99ED0F581232D3F /* AndroidLocalization.swift in Sources */ = {isa = PBXBuildFile; fileRef = E765A10B0340558B3B98D1E1 /* AndroidLocalization.swift */; };
+		F0A1B2C3D4E5F60718293A4B /* IOSLocalization.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0A1B2C3D4E5F60718293A4C /* IOSLocalization.swift */; };
 		AC70D216282814AF90EDD556 /* PhotoThumbnailStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 341299C34669842D43A516C0 /* PhotoThumbnailStoreTests.swift */; };
 		AE7CD25C554B94537BE4BE8F /* PhotoEffectsRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61DD1A7868ADB6C35411DA6F /* PhotoEffectsRenderer.swift */; };
 		B104166B4E6A8060016636A2 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = F5B0DCD9EF4268A3ACA7C197 /* Localizable.strings */; };
@@ -267,6 +268,7 @@
 		E17D81EDE19E9E8343BD531F /* TransferQueueView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransferQueueView.swift; sourceTree = "<group>"; };
 		E5D5E41AAFFA785D2FE92689 /* ImageCaptureErrorMappingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageCaptureErrorMappingTests.swift; sourceTree = "<group>"; };
 		E765A10B0340558B3B98D1E1 /* AndroidLocalization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndroidLocalization.swift; sourceTree = "<group>"; };
+		F0A1B2C3D4E5F60718293A4C /* IOSLocalization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSLocalization.swift; sourceTree = "<group>"; };
 		ECDEA795752767FBE8FFC99F /* ZTransferApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZTransferApp.swift; sourceTree = "<group>"; };
 		EDE7552A6B315888DE6033D1 /* zh-Hant */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hant"; path = "zh-Hant.lproj/Localizable.strings"; sourceTree = "<group>"; };
 		F372F3899BF36619208BF340 /* Np3FilterEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Np3FilterEngine.swift; sourceTree = "<group>"; };
@@ -517,6 +519,7 @@
 			isa = PBXGroup;
 			children = (
 				E765A10B0340558B3B98D1E1 /* AndroidLocalization.swift */,
+				F0A1B2C3D4E5F60718293A4C /* IOSLocalization.swift */,
 				11F6F2458B24ED1BDFC716A4 /* RootView.swift */,
 				ECDEA795752767FBE8FFC99F /* ZTransferApp.swift */,
 			);
@@ -692,6 +695,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				ABD477B9A99ED0F581232D3F /* AndroidLocalization.swift in Sources */,
+				F0A1B2C3D4E5F60718293A4B /* IOSLocalization.swift in Sources */,
 				C47EE7A521C4554CB9D112FB /* AndroidThumbnailProcessor.swift in Sources */,
 				B7E26AA94FF197578A633BE6 /* AsyncDeadline.swift in Sources */,
 				171B3B7D9317366D04867322 /* CameraConnectionService.swift in Sources */,
@@ -852,6 +856,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = "Z传";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.photography";
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "用于连接 Nikon GPS 设备";
+				INFOPLIST_KEY_NSCameraUsageDescription = "用于通过 USB 连接相机、浏览和传输照片并控制拍摄";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "用于连接相机";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "用于向相机写入拍摄位置";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "用于保存工作台生成的效果图";
@@ -880,6 +885,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = "Z传";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.photography";
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "用于连接 Nikon GPS 设备";
+				INFOPLIST_KEY_NSCameraUsageDescription = "用于通过 USB 连接相机、浏览和传输照片并控制拍摄";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "用于连接相机";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "用于向相机写入拍摄位置";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "用于保存工作台生成的效果图";

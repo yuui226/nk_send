@@ -76,8 +76,8 @@ extension ConnectionState {
         case let .authorization(status):
             next.usbAuthorization = status
             if status == .denied || status == .restricted {
-                // Android keeps the USB card selected and exposes the same
-                // actionable permission error until the cable is reattached.
+                // iOS authorization is app-scoped rather than cable-scoped;
+                // keep an actionable error until Settings grants access.
                 let message = AppLocalized.resource("usb_permission_required")
                 next.usbPhase = .failed(message)
                 next.errorMessage = message
@@ -95,9 +95,13 @@ extension ConnectionState {
             }
             if next.selectedDeviceID == nil || next.selectedDeviceID == device.id {
                 next.selectedDeviceID = device.id
-                // A fresh attach is the Android retry boundary: clear the
-                // previous permission/open error and wait for a new attempt.
-                if next.usbPhase != .connected {
+                // A fresh attach retries transient open failures, but iOS
+                // camera authorization is app-scoped and survives a replug.
+                // Keep its actionable error until Settings grants both
+                // ImageCaptureCore contents and control access.
+                if next.usbPhase != .connected,
+                   next.usbAuthorization != .denied,
+                   next.usbAuthorization != .restricted {
                     next.usbPhase = .waitingForCamera
                     next.errorMessage = nil
                 }
@@ -106,8 +110,14 @@ extension ConnectionState {
             next.discoveredDevices.removeAll { $0.id == id }
             if next.selectedDeviceID == id {
                 next.selectedDeviceID = nil
-                next.usbPhase = .waitingForCamera
-                next.errorMessage = nil
+                if next.usbAuthorization == .denied || next.usbAuthorization == .restricted {
+                    let message = AppLocalized.resource("usb_permission_required")
+                    next.usbPhase = .failed(message)
+                    next.errorMessage = message
+                } else {
+                    next.usbPhase = .waitingForCamera
+                    next.errorMessage = nil
+                }
             }
         case let .ready(id):
             if next.selectedDeviceID == nil { next.selectedDeviceID = id }
@@ -115,11 +125,33 @@ extension ConnectionState {
             // ImageCaptureCore's session-open callback precedes DeviceInfo and
             // catalog loading. The user-visible connected state is committed by
             // ConnectionViewModel only after that handshake succeeds.
-            next.selectedDeviceID = id; next.usbPhase = .connecting; next.errorMessage = nil
+            next.selectedDeviceID = id
+            if next.usbAuthorization == .denied || next.usbAuthorization == .restricted {
+                let message = AppLocalized.resource("usb_permission_required")
+                next.usbPhase = .failed(message)
+                next.errorMessage = message
+            } else {
+                next.usbPhase = .connecting
+                next.errorMessage = nil
+            }
         case let .sessionClosed(id, _):
-            if next.selectedDeviceID == id { next.usbPhase = .waitingForCamera }
+            if next.selectedDeviceID == id {
+                if next.usbAuthorization == .denied || next.usbAuthorization == .restricted {
+                    let message = AppLocalized.resource("usb_permission_required")
+                    next.usbPhase = .failed(message)
+                    next.errorMessage = message
+                } else {
+                    next.usbPhase = .waitingForCamera
+                }
+            }
         case let .failed(id, message):
-            if id == nil || id == next.selectedDeviceID { next.usbPhase = .failed(message); next.errorMessage = message }
+            if id == nil || id == next.selectedDeviceID {
+                let resolved = (next.usbAuthorization == .denied || next.usbAuthorization == .restricted)
+                    ? AppLocalized.resource("usb_permission_required")
+                    : (message.isEmpty ? AppLocalized.resource("usb_unknown_error") : message)
+                next.usbPhase = .failed(resolved)
+                next.errorMessage = resolved
+            }
         }
         return next
     }

@@ -30,6 +30,21 @@ final class CameraDownloadTests: XCTestCase {
         }
     }
 
+    func testImageCaptureUSBUsesBoundedPartialRequestsAboveOneCallbackChunk() async throws {
+        let tail = Data([3, 4])
+        let wire = DownloadReplay([
+            .init(0x9431, [7, 0, 0, UInt32(transferChunkSize), 0],
+                  chunks: [Data(repeating: 1, count: Int(transferChunkSize))], declared: transferChunkSize),
+            .init(0x9431, [7, UInt32(transferChunkSize), 0, 2, 0], chunks: [tail], declared: 2),
+        ])
+        let repository = CameraRepository(session: PTPSession(transport: wire), isUSBConnection: true)
+        let result = try await repository.downloadResult(handle: 7, size: transferChunkSize + 2,
+                                                         fileName: "a.JPG", to: directory())
+        XCTAssertEqual(result.bytes, transferChunkSize + 2)
+        let commands = await wire.commands
+        XCTAssertEqual(commands.map(\.code), [0x9431, 0x9431])
+    }
+
     func testBusyAloneDoesNotEnableHighThroughput() async throws {
         let wire = DownloadReplay([.init(0x9431, [7, 0, 0, 6, 0], chunks: [Data(repeating: 1, count: 6)], declared: 6)])
         let repository = CameraRepository(session: PTPSession(transport: wire))
@@ -49,6 +64,37 @@ final class CameraDownloadTests: XCTestCase {
             let result = try await repository.downloadResult(handle: 7, size: size, fileName: "a.JPG", to: directory())
             XCTAssertEqual(result.bytes, 3)
         }
+    }
+
+    func testImageCaptureUSBUnknownSizeUsesBoundedPartialUntilShortReply() async throws {
+        let wire = DownloadReplay([
+            .init(0x9421, [7], code: 0x2005),
+            .init(0x9431, [7, 0, 0, UInt32(transferChunkSize), 0],
+                  chunks: [Data([9, 8, 7])], declared: 3),
+        ])
+        let repository = CameraRepository(session: PTPSession(transport: wire), isUSBConnection: true)
+        let result = try await repository.downloadResult(handle: 7, size: UInt64(UInt32.max),
+                                                         fileName: "a.JPG", to: directory())
+        XCTAssertEqual(result.bytes, 3)
+        let commands = await wire.commands
+        XCTAssertEqual(commands.map(\.code), [0x9421, 0x9431])
+    }
+
+    func testImageCaptureUSBUnknownSizeNeverFallsBackToUnboundedFullObject() async throws {
+        let wire = DownloadReplay([
+            .init(0x9421, [7], code: 0x2005),
+            .init(0x9431, [7, 0, 0, UInt32(transferChunkSize), 0], code: 0x2005),
+        ])
+        let repository = CameraRepository(session: PTPSession(transport: wire), isUSBConnection: true)
+        do {
+            _ = try await repository.downloadResult(handle: 7, size: 0,
+                                                    fileName: "a.JPG", to: directory())
+            XCTFail("Unknown ImageCapture object must not use an unbounded GetObject callback")
+        } catch {
+            XCTAssertEqual(error as? CameraRepositoryError, .resumeUnavailable)
+        }
+        let commands = await wire.commands
+        XCTAssertEqual(commands.map(\.code), [0x9421, 0x9431])
     }
 
     func testUnknownSizeResolvedUsesPartialWithResolvedSize() async throws {

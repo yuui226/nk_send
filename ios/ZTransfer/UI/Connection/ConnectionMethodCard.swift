@@ -32,7 +32,13 @@ struct ConnectionMethodCard: View {
     private var accent: Color { mode == .usb ? ZTransferColors.accentOrange : ZTransferColors.accentBlue }
     private var isSTA: Bool { state.wirelessMode == .sta }
     private var steps: [String] {
-        if mode == .usb { return [AppLocalized.resource("usb_step_power"), AppLocalized.resource("usb_step_cable")] }
+        if mode == .usb {
+            return [
+                AppLocalized.resource("usb_step_mode"),
+                AppLocalized.resource("usb_step_power"),
+                AppLocalized.resource("usb_step_cable"),
+            ]
+        }
         if isSTA { return [AppLocalized.resource("sta_step_phone_hotspot"), AppLocalized.resource("sta_step_connect_camera")] }
         return [AppLocalized.resource("step_camera_wifi"), AppLocalized.resource("step_phone_wifi")]
     }

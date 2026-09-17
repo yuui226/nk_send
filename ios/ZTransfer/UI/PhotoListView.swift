@@ -427,17 +427,24 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
                                 }
                             }
                     } else {
-                        switch model.loadState {
-                        case .idle, .loading:
-                            ProgressView().frame(maxWidth: .infinity).padding(.top, 48)
-                        case let .failed(message):
-                            Text(message).zTransferText(size: ZTransferMetrics.body).padding()
-                        case .loaded:
-                            PhotoListEmptyState(filterActive: model.filter.isActive,
-                                                usb: session.isUSB,
-                                                onClearFilter: model.clearFilter)
+                        if session.isUSB && !isSessionConnected {
+                            PhotoListUSBDisconnectedState()
                                 .frame(maxWidth: .infinity)
+                                .padding(.horizontal, 32)
                                 .padding(.top, 150)
+                        } else {
+                            switch model.loadState {
+                            case .idle, .loading:
+                                ProgressView().frame(maxWidth: .infinity).padding(.top, 48)
+                            case let .failed(message):
+                                Text(message).zTransferText(size: ZTransferMetrics.body).padding()
+                            case .loaded:
+                                PhotoListEmptyState(filterActive: model.filter.isActive,
+                                                    usb: session.isUSB,
+                                                    onClearFilter: model.clearFilter)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.top, 150)
+                            }
                         }
                     }
                     // Match Android's 12dp list inset so thumbnails align with
@@ -780,7 +787,15 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
                     }
 
                     Button {
-                        if session.wirelessMode == .sta {
+                        if session.isUSB {
+                            if isSessionConnected {
+                                withAnimation(signalExpanded
+                                              ? .timingCurve(0.4, 0, 0.2, 1, duration: 0.22)
+                                              : .spring(response: 0.42, dampingFraction: 0.72)) {
+                                    signalExpanded.toggle()
+                                }
+                            }
+                        } else if session.wirelessMode == .sta {
                             if !isSessionConnected { onRetrySTA() }
                         } else { signalExpanded.toggle() }
                     } label: {
@@ -788,7 +803,11 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
                             PhotoListSignalIcon(isUSB: session.isUSB,
                                                 wirelessMode: session.wirelessMode,
                                                 connected: isSessionConnected)
-                            if signalExpanded && session.wirelessMode != .sta {
+                            if signalExpanded && session.isUSB && isSessionConnected {
+                                Text(AppLocalized.resource("connection_usb"))
+                                    .zTransferTypography(.labelSmall, weight: .medium)
+                                    .foregroundStyle(ZTransferColors.accentBlue)
+                            } else if signalExpanded && session.wirelessMode != .sta {
                                 Image(systemName: "chevron.down")
                                     .font(.system(size: 10, weight: .bold))
                             }
@@ -1562,6 +1581,28 @@ private struct PhotoListEmptyState: View {
                 Button(AppLocalized.resource("clear_filters"), action: onClearFilter)
                     .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 18))
             }
+        }
+    }
+}
+
+/// Android keeps an established USB workspace mounted after cable/power loss.
+/// When no catalog was ever loaded, show the wired recovery guidance instead
+/// of an endless spinner or a generic protocol error. There is intentionally
+/// no disconnect/reconnect action: recovery remains physical reattach/power-on.
+private struct PhotoListUSBDisconnectedState: View {
+    var body: some View {
+        VStack(spacing: 0) {
+            ClassicUSBIcon(tint: ZTransferColors.accentOrange)
+                .frame(width: 64, height: 64)
+            Spacer().frame(height: 16)
+            Text(AppLocalized.resource("usb_connection_lost"))
+                .zTransferTypography(.titleMedium, weight: .medium)
+                .foregroundStyle(ZTransferColors.primaryText)
+            Spacer().frame(height: 6)
+            Text(AppLocalized.resource("reconnect_camera_usb"))
+                .zTransferTypography(.bodySmall)
+                .foregroundStyle(ZTransferColors.secondaryText)
+                .multilineTextAlignment(.center)
         }
     }
 }

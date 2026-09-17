@@ -26,6 +26,7 @@ targets:
         LSApplicationCategoryType: public.app-category.photography
         NSLocationWhenInUseUsageDescription: 用于向相机写入拍摄位置
         NSBluetoothAlwaysUsageDescription: 用于连接 Nikon GPS 设备
+        NSCameraUsageDescription: 用于通过 USB 连接相机、浏览和传输照片并控制拍摄
         NSPhotoLibraryUsageDescription: 用于读取工作台照片
         NSPhotoLibraryAddUsageDescription: 用于保存工作台生成的效果图
         NSLocalNetworkUsageDescription: 用于连接相机
@@ -58,6 +59,7 @@ targets:
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.photography
         INFOPLIST_KEY_NSLocationWhenInUseUsageDescription: "用于向相机写入拍摄位置"
         INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription: "用于连接 Nikon GPS 设备"
+        INFOPLIST_KEY_NSCameraUsageDescription: "用于通过 USB 连接相机、浏览和传输照片并控制拍摄"
         INFOPLIST_KEY_NSPhotoLibraryUsageDescription: "用于读取工作台照片"
         INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription: "用于保存工作台生成的效果图"
         INFOPLIST_KEY_NSLocalNetworkUsageDescription: "用于连接相机"

@@ -41,7 +41,12 @@ func transferDownloadChunkSize(
     isUSBConnection: Bool = false,
     preferHighThroughput: Bool = false,
 ) -> UInt64 {
-    if isUSBConnection || preferHighThroughput { return transferHighThroughputChunkSize }
+    // ImageCaptureCore's PTP pass-through callback materializes the complete
+    // data phase as one Data value; unlike Android's raw bulk endpoint it
+    // cannot stream a 64 MiB request directly into the destination file.
+    // Keep USB chunks bounded to avoid a callback-sized memory spike.
+    if isUSBConnection { return transferChunkSize }
+    if preferHighThroughput { return transferHighThroughputChunkSize }
     return effectiveSize > transferLargeFileThreshold ? transferLargeFileChunkSize : transferChunkSize
 }
 
@@ -239,8 +244,6 @@ actor CameraRepository {
     private let ioGate = CameraIOGate()
     private let isUSBConnection: Bool
     nonisolated let usbSessionIdentity: USBSessionIdentity?
-    private let usbTransport: ImageCaptureUSBTransport?
-    private let usbDeviceID: String?
     private var remoteControlModeSet = false
     private var movieApplicationPropertySet = false
     private var movieApplicationOperationSet = false
@@ -279,14 +282,12 @@ actor CameraRepository {
     private var catalogContinuations: [UUID: AsyncStream<[CameraFile]>.Continuation] = [:]
 
     init(session: PTPSession, staAlbum: STAAlbumAccess? = nil, isUSBConnection: Bool = false,
-         deviceInfo: PTPDeviceInfo? = nil, usbTransport: ImageCaptureUSBTransport? = nil,
-         usbDeviceID: String? = nil, usbSessionIdentity: USBSessionIdentity? = nil) {
+         deviceInfo: PTPDeviceInfo? = nil, usbSessionIdentity: USBSessionIdentity? = nil) {
         self.session = session
         #if DEBUG
         self.debugData = nil
         #endif
         self.staAlbum = staAlbum; self.isUSBConnection = isUSBConnection
-        self.usbTransport = usbTransport; self.usbDeviceID = usbDeviceID
         self.usbSessionIdentity = usbSessionIdentity
         self.cachedDeviceInfo = deviceInfo ?? staAlbum?.deviceInfo
         self.prefetchedStorageIDs = staAlbum?.storageIDs
@@ -299,7 +300,7 @@ actor CameraRepository {
         self.session = PTPSession(transport: DebugNullTransport())
         self.debugData = debugData
         self.staAlbum = nil; self.isUSBConnection = false
-        self.usbTransport = nil; self.usbDeviceID = nil; self.usbSessionIdentity = nil
+        self.usbSessionIdentity = nil
         self.prefetchedStorageIDs = [0x00010001, 0x00020001]
         self.prefetchedHandles = nil; self.directReader = nil
     }
@@ -591,57 +592,22 @@ actor CameraRepository {
         guard response == PTPConstants.responseOK else { throw PTPSessionError.responseCode(response) }
     }
 
-    /// Nikon USB movie control requires a genuinely fresh ImageCapture/PTP
-    /// session. DeviceInfo stays cached; the new session only drains stale
-    /// Nikon events before entering control mode, matching Android.
+    /// Prepare USB movie control without cycling the ImageCaptureCore session.
+    /// Android can reopen its raw USB handle, but ZTransfer has no proactive
+    /// disconnect action on iOS; draining Nikon's compatibility event on the
+    /// existing serialized channel preserves both protocol order and the
+    /// accepted wired connection.
     func refreshUSBRemoteSession() async throws -> String {
-        guard isUSBConnection, let transport = usbTransport, let deviceID = usbDeviceID,
-              let identity = usbSessionIdentity else { throw CameraRepositoryError.invalidDataset }
-        let oldSession = session
-        let oldToken = identity.snapshot().token
-        identity.beginRotation()
-        do {
-            let (newSession, newToken, drainCode) = try await oldSession.withCommandSequence { _ in
-                await transport.closeSession(for: deviceID, expectedSessionToken: oldToken)
-                try await Task.sleep(for: .milliseconds(100))
-                var finalError: Error = CameraTransportError.disconnected
-                for attempt in 0..<2 {
-                    do {
-                        try await AsyncDeadline.run(nanoseconds: 5_000_000_000,
-                                                    timeoutError: CameraTransportError.timeout) {
-                            try await transport.openSession(for: deviceID)
-                        }
-                        guard let token = transport.openedSessionToken(for: deviceID) else {
-                            throw CameraTransportError.disconnected
-                        }
-                        let next = PTPSession(transport: SelectedUSBPTPTransport(transport: transport,
-                                                                                 deviceID: deviceID,
-                                                                                 sessionToken: token),
-                                              defaultTimeoutNanoseconds: 60_000_000_000)
-                        let drain = try await next.executeResponse(operation: PTPConstants.nikonCompatibilityInit)
-                        return (next, token, drain.code)
-                    } catch {
-                        finalError = error
-                        if attempt == 0 { try await Task.sleep(for: .milliseconds(100)) }
-                    }
-                }
-                throw finalError
-            }
-            session = newSession
-            identity.finishRotation(token: newToken)
-            subjectTrackingActive = false
-            remoteControlModeSet = false
-            movieApplicationPropertySet = false
-            movieApplicationOperationSet = false
-            liveViewEnhancedFailures = 0
-            liveViewImageOperation = cachedDeviceInfo?.operations.contains(PTPConstants.getLiveViewImageEx) == true
-                ? PTPConstants.getLiveViewImageEx : PTPConstants.getLiveViewImage
-            return String(format: "session=0x%04X drain=0x%04X info=cached settle=100ms",
-                          PTPConstants.responseOK, drainCode)
-        } catch {
-            identity.cancelRotation()
-            throw error
-        }
+        guard isUSBConnection else { throw CameraRepositoryError.invalidDataset }
+        let drain = try await session.executeResponse(operation: PTPConstants.nikonCompatibilityInit)
+        subjectTrackingActive = false
+        remoteControlModeSet = false
+        movieApplicationPropertySet = false
+        movieApplicationOperationSet = false
+        liveViewEnhancedFailures = 0
+        liveViewImageOperation = cachedDeviceInfo?.operations.contains(PTPConstants.getLiveViewImageEx) == true
+            ? PTPConstants.getLiveViewImageEx : PTPConstants.getLiveViewImage
+        return String(format: "session=kept drain=0x%04X info=cached settle=ImageCaptureCore", drain.code)
     }
 
     func setRemoteControlMode(_ enabled: Bool) async throws -> UInt16 {
@@ -1083,7 +1049,7 @@ actor CameraRepository {
                 if resolved > 0, resolved <= UInt64(Int64.max) { effectiveSize = resolved }
             }
         }
-        let sizeKnown = effectiveSize > 0 && effectiveSize != UInt64(UInt32.max)
+        var sizeKnown = effectiveSize > 0 && effectiveSize != UInt64(UInt32.max)
         let existingSize = (try? temporary.resourceValues(forKeys: [.fileSizeKey]).fileSize)
             .map { UInt64(max(0, $0)) } ?? 0
         let resumeOffset = transferResumeOffset(existingSize: existingSize, totalSize: effectiveSize, reportedSize: size) ?? 0
@@ -1101,10 +1067,15 @@ actor CameraRepository {
         // Snapshot after size resolution, immediately before the first file
         // data command. Page changes must not switch strategy midway through.
         let highThroughput = preferHighThroughputTransfers
-        let usePartial = shouldUsePartialObjectDownload(
+        let boundedUnknownUSB = isUSBConnection && !sizeKnown && partialObjectSupported != false
+        let usePartial = boundedUnknownUSB || shouldUsePartialObjectDownload(
             partialObjectSupported: partialObjectSupported, effectiveSize: effectiveSize,
             resumeOffset: resumeOffset, isUSBConnection: isUSBConnection,
-            preferHighThroughput: highThroughput, forcePartial: directReader != nil
+            preferHighThroughput: highThroughput,
+            // Android raw USB can stream GetObject directly. ImageCaptureCore
+            // returns the entire pass-through data phase in memory, so iOS USB
+            // switches to bounded partial requests above one callback chunk.
+            forcePartial: directReader != nil || (isUSBConnection && effectiveSize > transferChunkSize)
         )
         if resumeOffset > 0 && !usePartial { throw CameraRepositoryError.resumeUnavailable }
         if !FileManager.default.fileExists(atPath: temporary.path) {
@@ -1122,10 +1093,10 @@ actor CameraRepository {
                                                   isUSBConnection: isUSBConnection, preferHighThroughput: highThroughput)
         var firstPartial = true
         var useFull = !usePartial
-        while usePartial && writer.bytes < effectiveSize {
+        while usePartial && (!sizeKnown || writer.bytes < effectiveSize) {
             try Task.checkCancellation()
             let offset = writer.bytes
-            let request = min(chunkSize, effectiveSize - offset)
+            let request = sizeKnown ? min(chunkSize, effectiveSize - offset) : chunkSize
             let response = try await ioGate.withTransferSlice {
                 try await session.executeReceiving(
                     operation: PTPConstants.getPartialObjectEx,
@@ -1140,6 +1111,13 @@ actor CameraRepository {
                 if firstPartial && response.receivedByteCount == 0 && resumeOffset == 0 &&
                     response.code == PTPConstants.operationNotSupported {
                     partialObjectSupported = false
+                    // ImageCaptureCore cannot stream GetObject into the file;
+                    // an unknown object could be arbitrarily large. Refuse the
+                    // unbounded in-memory fallback and let a later metadata
+                    // refresh retry with a known size.
+                    if isUSBConnection && !sizeKnown {
+                        throw CameraRepositoryError.resumeUnavailable
+                    }
                     useFull = true
                     break
                 }
@@ -1149,8 +1127,18 @@ actor CameraRepository {
             if let expected = response.declaredByteCount, expected > 0, expected != response.receivedByteCount {
                 throw CameraDownloadError.incomplete(received: response.receivedByteCount, expected: expected)
             }
+            if !sizeKnown && response.receivedByteCount == 0 {
+                effectiveSize = writer.bytes
+                sizeKnown = true
+                break
+            }
             guard response.receivedByteCount > 0 else {
                 throw CameraDownloadError.incomplete(received: writer.bytes, expected: effectiveSize)
+            }
+            if !sizeKnown && response.receivedByteCount < request {
+                effectiveSize = writer.bytes
+                sizeKnown = true
+                break
             }
             // Like Android, advance by actual bytes. A shorter complete data
             // phase is valid; the following command reads the missing interval.
@@ -1166,7 +1154,7 @@ actor CameraRepository {
             if let expected = response.declaredByteCount, expected > 0, expected != UInt64(UInt32.max), writer.bytes != expected {
                 throw CameraDownloadError.incomplete(received: writer.bytes, expected: expected)
             }
-        } else if writer.bytes != effectiveSize {
+        } else if sizeKnown && writer.bytes != effectiveSize {
             throw CameraDownloadError.incomplete(received: writer.bytes, expected: effectiveSize)
         }
         try writer.close()

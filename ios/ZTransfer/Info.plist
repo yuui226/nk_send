@@ -24,6 +24,8 @@
 	<string>public.app-category.photography</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>用于连接 Nikon GPS 设备</string>
+	<key>NSCameraUsageDescription</key>
+	<string>用于通过 USB 连接相机、浏览和传输照片并控制拍摄</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>用于连接相机</string>
 	<key>NSLocationWhenInUseUsageDescription</key>

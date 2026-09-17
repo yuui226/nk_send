@@ -1,23 +1,17 @@
 import Foundation
 import UIKit
 
-/// The ImageCaptureCore session token changes during Nikon's deliberate USB
-/// remote-control reopen. ConnectionViewModel reads this box without crossing
-/// actor isolation so the expected close/open pair is not mistaken for a cable
-/// disconnect.
+/// Stable ImageCaptureCore session identity shared across actor boundaries.
+/// USB remote control keeps this accepted session instead of cycling it.
 final class USBSessionIdentity: @unchecked Sendable {
     private let lock = NSLock()
     private var token: UUID
-    private var rotating = false
 
     init(token: UUID) { self.token = token }
-    func snapshot() -> (token: UUID, rotating: Bool) {
+    func snapshot() -> UUID {
         lock.lock(); defer { lock.unlock() }
-        return (token, rotating)
+        return token
     }
-    func beginRotation() { lock.lock(); rotating = true; lock.unlock() }
-    func finishRotation(token: UUID) { lock.lock(); self.token = token; rotating = false; lock.unlock() }
-    func cancelRotation() { lock.lock(); rotating = false; lock.unlock() }
 }
 
 /// A connected camera's single owner. USB uses ImageCaptureCore for media;
@@ -31,11 +25,14 @@ actor CameraSession {
     /// isolation. It is immutable for the lifetime of a camera session.
     nonisolated let transportDeviceID: String?
     private nonisolated let usbIdentity: USBSessionIdentity?
-    nonisolated var usbSessionToken: UUID? { usbIdentity?.snapshot().token }
-    nonisolated var usbSessionRotationActive: Bool { usbIdentity?.snapshot().rotating ?? false }
+    nonisolated var usbSessionToken: UUID? { usbIdentity?.snapshot() }
     /// The connection pill uses the transport kind just like Android's
     /// SignalPill (USB icon for wired sessions, Wi‑Fi icon otherwise).
     nonisolated let isUSB: Bool
+    /// iOS suspends ImageCaptureCore device communication after backgrounding;
+    /// a UIKit background assertion cannot turn USB into Android's foreground
+    /// service. The transfer queue therefore only extends wireless work.
+    nonisolated var allowsBackgroundTransferContinuation: Bool { !isUSB }
     /// Keep the selected wireless route with the session so the photo-list
     /// signal pill can render Android's STA-specific state instead of
     /// collapsing every PTP/IP connection into a generic Wi‑Fi glyph.

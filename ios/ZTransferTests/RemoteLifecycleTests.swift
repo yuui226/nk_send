@@ -312,7 +312,7 @@ final class RemoteLifecycleTests: XCTestCase {
                           try XCTUnwrap(stopped.firstIndex(of: "app:off:true")))
     }
 
-    func testUSBMovieUsesFreshSessionAndReturnsToOrdinaryLiveViewAfterStop() async throws {
+    func testUSBMoviePreparesExistingSessionAndReturnsToOrdinaryLiveViewAfterStop() async throws {
         let camera = RemoteLifecycleCamera(movie: true, isUSB: true)
         let model = RemoteViewModel(camera: camera)
         addTeardownBlock { await model.stopAndWait() }
@@ -338,6 +338,23 @@ final class RemoteLifecycleTests: XCTestCase {
                           try XCTUnwrap(stopped.firstIndex(of: "control:off")))
         XCTAssertLessThan(try XCTUnwrap(stopped.firstIndex(of: "control:off")),
                           try XCTUnwrap(stopped.lastIndex(of: "start")))
+    }
+
+    func testLeavingDuringUSBMovieStartStopsLateCameraRecordingWithoutDisconnecting() async throws {
+        let camera = RemoteLifecycleCamera(movie: true, isUSB: true)
+        await camera.delayPreparedMovieStart(milliseconds: 250)
+        let model = RemoteViewModel(camera: camera)
+        model.start()
+        try await waitFor(timeout: 5) { model.state.session == .ready }
+
+        model.toggleRecording()
+        try await waitFor { await camera.log.contains("movie:prepared") }
+        await model.stopAndWait()
+
+        let calls = await camera.log
+        XCTAssertLessThan(try XCTUnwrap(calls.firstIndex(of: "movie:prepared")),
+                          try XCTUnwrap(calls.firstIndex(of: "movie:end")))
+        XCTAssertEqual(calls.last, "gate:false")
     }
 
     func testExposureWritesCoalesceAndOldInFlightResultCannotReplaceNewValue() async throws {
@@ -617,6 +634,7 @@ private actor RemoteLifecycleCamera: RemoteCameraControlling {
     private var focusDelay = 0
     private var focusResults: [RemoteFocusResult] = []
     private var movieStarts: [RemoteMovieStartResult] = []
+    private var preparedMovieStartDelay = 0
     private var remoteControlMode = false
     private var applicationMode = false
     private let frame: Data
@@ -673,6 +691,7 @@ private actor RemoteLifecycleCamera: RemoteCameraControlling {
     func delayFocus(milliseconds: Int) { focusDelay = milliseconds }
     func queueFocusResults(_ results: [RemoteFocusResult]) { focusResults += results }
     func delayWrites(milliseconds: Int) { writeDelay = milliseconds }
+    func delayPreparedMovieStart(milliseconds: Int) { preparedMovieStartDelay = milliseconds }
     func current(_ property: RemoteProperty) -> UInt64? { overrides[property]?.current }
     func remoteEvents() -> [STAEvent] {
         log.append("events")
@@ -734,8 +753,11 @@ private actor RemoteLifecycleCamera: RemoteCameraControlling {
         log.append("app:off:\(force)")
         applicationMode = false
     }
-    func startPreparedUSBMovieRecording() -> RemoteMovieStartResult {
+    func startPreparedUSBMovieRecording() async -> RemoteMovieStartResult {
         log.append("movie:prepared")
+        if preparedMovieStartDelay > 0 {
+            try? await Task.sleep(for: .milliseconds(preparedMovieStartDelay))
+        }
         applicationMode = true
         return .init(responseCode: PTPConstants.responseOK, prohibitCondition: nil)
     }

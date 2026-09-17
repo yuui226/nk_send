@@ -69,6 +69,7 @@ final class RemoteViewModel: ObservableObject {
     private var confirmedFocusNonce: UInt64 = 0
     private var recordingTimerTask: Task<Void, Never>?
     private var recordingCommandTask: Task<Void, Never>?
+    private var recordingCommandInFlight: RemoteRecordingCommand?
     private var captureTask: Task<Void, Never>?
     private var captureObjectAdded = false
     private var lastStopCommandAt: ContinuousClock.Instant?
@@ -731,7 +732,11 @@ final class RemoteViewModel: ObservableObject {
     func stop() {
         disposed = true
         stopRequested = true
-        stopMovieOnExit = state.capture == .recording || state.capture == .stopping
+        // A USB start response can arrive after the page has begun leaving but
+        // before local state changes to `.recording`. Remember the wire command
+        // so teardown cannot leave the camera recording invisibly.
+        stopMovieOnExit = state.capture == .recording || state.capture == .stopping ||
+            recordingCommandInFlight == .start
         effectiveISOGeneration &+= 1
         halfPressHeld = false
         halfPressVisualActive = false
@@ -883,10 +888,12 @@ final class RemoteViewModel: ObservableObject {
         else if state.capture == .idle { command = .start }
         else { return }
         guard let token = recordingOperations.begin(command) else { return }
+        recordingCommandInFlight = command
 
         recordingCommandTask = Task { [weak self] in
             guard let self else { return }
             defer {
+                if recordingCommandInFlight == command { recordingCommandInFlight = nil }
                 // An old command must not release a newer page's busy owner.
                 if recordingOperations.complete(token) { recordingCommandTask = nil }
             }
@@ -1220,7 +1227,8 @@ final class RemoteViewModel: ObservableObject {
     private static func isTransportFailure(_ error: Error) -> Bool {
         switch error {
         case PTPSessionError.timeout, PTPSessionError.invalidated,
-             CameraTransportError.disconnected, CameraTransportError.timeout:
+             CameraTransportError.disconnected, CameraTransportError.timeout,
+             CameraTransportError.unavailable:
             return true
         case let url as URLError:
             return [.timedOut, .networkConnectionLost, .cannotConnectToHost,

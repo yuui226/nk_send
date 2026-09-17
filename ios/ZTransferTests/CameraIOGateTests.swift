@@ -30,7 +30,48 @@ private actor GateTestOrder {
     func snapshot() -> [String] { values }
 }
 
+private actor FrameworkManagedPTPReplay: PTPCommandTransport {
+    var managesCommandTimeouts: Bool { true }
+    private let started: GateTestLatch
+    private let release = GateTestLatch()
+    private(set) var cancellationRequested = false
+
+    init(started: GateTestLatch) { self.started = started }
+
+    func sendPTP(command: Data, data: Data?) async throws -> (response: Data, payload: Data) {
+        await started.signal()
+        await release.wait()
+        let request = try PTPCodec.decode(command)
+        return (PTPCodec.encode(type: .response, code: PTPConstants.responseOK,
+                                transactionID: request.transactionID), Data())
+    }
+
+    func finish() async { await release.signal() }
+
+    func cancelPTP(transactionID: UInt32) async -> Bool {
+        cancellationRequested = true
+        await release.signal()
+        return false
+    }
+}
+
 final class CameraIOGateTests: XCTestCase {
+    func testCancellingFrameworkManagedCommandDrainsWithoutDisconnecting() async throws {
+        let started = GateTestLatch()
+        let transport = FrameworkManagedPTPReplay(started: started)
+        let session = PTPSession(transport: transport)
+        let command = Task { try await session.executeResponse(operation: PTPConstants.getDeviceInfo) }
+        await started.wait()
+        command.cancel()
+        await transport.finish()
+        let response = try await command.value
+        let cancellationRequested = await transport.cancellationRequested
+        let invalidated = await session.isInvalidated
+        XCTAssertEqual(response.code, PTPConstants.responseOK)
+        XCTAssertFalse(cancellationRequested)
+        XCTAssertFalse(invalidated)
+    }
+
     func testEffectPreviewWaitsForEveryForegroundOwnerAndReleasesFillGate() async throws {
         let repository = CameraRepository(debugData: .shared)
         let entered = GateTestLatch()

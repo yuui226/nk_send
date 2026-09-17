@@ -118,6 +118,7 @@ struct TransferDownloadProgress: Equatable, Sendable {
 /// The queue only needs the existing camera download operation. Keeping this
 /// boundary explicit also lets state-transition tests hold a real task in flight.
 protocol TransferDownloading: Sendable {
+    var allowsBackgroundTransferContinuation: Bool { get }
     func download(file: CameraFile, to directory: URL,
                   progress: (@Sendable (Double) -> Void)?) async throws -> URL
 
@@ -131,6 +132,7 @@ protocol TransferDownloading: Sendable {
 extension CameraSession: TransferDownloading {}
 
 extension TransferDownloading {
+    var allowsBackgroundTransferContinuation: Bool { true }
     func frameMetadataHeader(file: CameraFile) async throws -> Data? { nil }
 
     func downloadResult(file: CameraFile, to directory: URL, captureHeader: Bool,
@@ -229,9 +231,10 @@ actor TransferQueue {
     private(set) var isTransferring = false
     private(set) var pauseAfterCurrent = false
     private var worker: Task<Void, Never>?
-    /// iOS has no Android-style foreground service. Keep a bounded system
-    /// background assertion while the queue is active so short background
-    /// transitions can finish the current file and flush its part file.
+    /// iOS has no Android-style foreground service. Wireless work may use one
+    /// bounded background assertion to finish a short transition. USB opts out
+    /// because ImageCaptureCore itself suspends device communication as soon as
+    /// the app backgrounds; the assertion cannot override that platform rule.
     private var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
     private var backgroundTaskToken: UUID?
     private var pending = PendingTransferQueue()
@@ -526,11 +529,12 @@ actor TransferQueue {
     }
 
     private func run() async {
-        await beginBackgroundTransferActivity()
+        let holdsBackgroundActivity = session?.allowsBackgroundTransferContinuation ?? true
+        if holdsBackgroundActivity { await beginBackgroundTransferActivity() }
         frameMetadataCache.removeAll(keepingCapacity: true)
         var stoppedAfterCurrent = false
         defer {
-            endBackgroundTransferActivity()
+            if holdsBackgroundActivity { endBackgroundTransferActivity() }
             activeProgress = nil
             lastValidTransferSpeed = 0
             publishProgress()
@@ -986,7 +990,7 @@ actor TransferQueue {
 
     private func transferErrorMessage(_ error: Error) -> String {
         switch error {
-        case CameraTransportError.disconnected:
+        case CameraTransportError.disconnected, CameraTransportError.unavailable:
             return AppLocalized.resource("error_camera_connection_lost")
         case CameraTransportError.timeout:
             // Android normalizes socket timeouts to the same reconnect/resume guidance.

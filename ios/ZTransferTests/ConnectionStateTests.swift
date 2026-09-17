@@ -34,17 +34,44 @@ final class ConnectionStateTests: XCTestCase {
     func testUSBPermissionDenialKeepsActionableErrorOnCard() {
         let state = ConnectionState().applying(.authorization(.denied))
         XCTAssertEqual(state.usbAuthorization, .denied)
-        XCTAssertEqual(state.usbPhase, .failed("未获得 USB 权限，请重新插线并允许访问"))
-        XCTAssertEqual(state.errorMessage, "未获得 USB 权限，请重新插线并允许访问")
+        XCTAssertEqual(state.usbPhase, .failed("未获得相机访问权限，请到系统设置允许访问"))
+        XCTAssertEqual(state.errorMessage, "未获得相机访问权限，请到系统设置允许访问")
     }
 
-    func testUSBReattachClearsPreviousErrorAndWaitsForConnection() {
+    func testUSBReattachDoesNotClearPersistentIOSPermissionDenial() {
         var state = ConnectionState().applying(.authorization(.denied))
         let device = USBDeviceDescriptor(id: "camera", name: "Nikon", productKind: nil, transportType: "USB")
         state = state.applying(.deviceAdded(device))
+        XCTAssertEqual(state.usbPhase, .failed("未获得相机访问权限，请到系统设置允许访问"))
+        XCTAssertEqual(state.errorMessage, "未获得相机访问权限，请到系统设置允许访问")
+        XCTAssertEqual(state.selectedDeviceID, device.id)
+    }
+
+    func testUSBDetachDoesNotClearPersistentIOSPermissionDenial() {
+        let device = USBDeviceDescriptor(id: "camera", name: "Nikon", productKind: nil, transportType: "USB")
+        var state = ConnectionState().applying(.deviceAdded(device))
+        state = state.applying(.authorization(.denied))
+        state = state.applying(.deviceRemoved(id: device.id))
+        XCTAssertEqual(state.usbPhase, .failed("未获得相机访问权限，请到系统设置允许访问"))
+        XCTAssertEqual(state.errorMessage, "未获得相机访问权限，请到系统设置允许访问")
+        XCTAssertNil(state.selectedDeviceID)
+    }
+
+    func testGrantingUSBAuthorizationAfterDenialRestoresWaitingState() {
+        var state = ConnectionState().applying(.authorization(.denied))
+        state = state.applying(.authorization(.authorized))
+        XCTAssertEqual(state.usbAuthorization, .authorized)
         XCTAssertEqual(state.usbPhase, .waitingForCamera)
         XCTAssertNil(state.errorMessage)
-        XCTAssertEqual(state.selectedDeviceID, device.id)
+    }
+
+    func testUSBFrameworkFailureWithoutDescriptionUsesLocalizedFallback() {
+        var state = ConnectionState()
+        let device = USBDeviceDescriptor(id: "camera", name: "Nikon", productKind: nil, transportType: "USB")
+        state = state.applying(.deviceAdded(device))
+        state = state.applying(.failed(id: device.id, message: ""))
+        XCTAssertEqual(state.usbPhase, .failed(AppLocalized.resource("usb_unknown_error")))
+        XCTAssertEqual(state.errorMessage, AppLocalized.resource("usb_unknown_error"))
     }
 
     func testConnectionCelebrationUsesAndroidTiming() {
