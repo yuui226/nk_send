@@ -883,10 +883,37 @@ final class PhotoEffectsStore: ObservableObject {
         var result: [String: PhotoFrameMetadataSettings] = [:]
         for entry in (raw ?? "").split(separator: ";") {
             let f = entry.split(separator: "|", omittingEmptySubsequences: false)
-            guard f.count == 12, let preset = PhotoFramePreset(rawValue: String(f[0])) else { continue }
-            let bools = f[1...9].map { Bool(String($0)) }
+            guard [9, 10, 12, 13].contains(f.count),
+                  let preset = PhotoFramePreset(rawValue: String(f[0])),
+                  result[preset.rawValue] == nil else { continue }
+            let hasLensModel = f.count >= 10
+            let hasLocation = f.count == 12 || f.count == 13
+            let hasLegacyAddressSlot = f.count == 13
+            let booleanEnd: Int
+            switch f.count {
+            case 13: booleanEnd = 11
+            case 12: booleanEnd = 10
+            case 10: booleanEnd = 8
+            default: booleanEnd = 7
+            }
+            // Android's former 13-field form stored address at index 8. The
+            // feature was removed, so skip that token while retaining the
+            // following coordinate and altitude flags forever.
+            let booleanIndices = hasLegacyAddressSlot
+                ? [1, 2, 3, 4, 5, 6, 7, 9, 10]
+                : Array(1..<booleanEnd)
+            let bools = booleanIndices.map { Bool(String(f[$0])) }
             guard bools.allSatisfy({ $0 != nil }) else { continue }
-            result[preset.rawValue] = PhotoFrameMetadataSettings(showDate: bools[0]!, showTime: bools[1]!, showFocalLength: bools[2]!, showExposure: bools[3]!, showBrand: bools[4]!, showModel: bools[5]!, showLensModel: bools[6]!, showCoordinates: bools[7]!, showAltitude: bools[8]!, datePattern: String(f[10]), timePattern: String(f[11]))
+            result[preset.rawValue] = PhotoFrameMetadataSettings(
+                showDate: bools[0]!, showTime: bools[1]!,
+                showFocalLength: bools[2]!, showExposure: bools[3]!,
+                showBrand: bools[4]!, showModel: bools[5]!,
+                showLensModel: hasLensModel ? bools[6]! : false,
+                showCoordinates: hasLocation ? bools[7]! : false,
+                showAltitude: hasLocation ? bools[8]! : false,
+                datePattern: String(f[booleanEnd]),
+                timePattern: String(f[booleanEnd + 1])
+            )
         }
         return result
     }

@@ -1133,6 +1133,31 @@ extension DomainModelTests {
     }
 
     @MainActor
+    func testEffectsRestoreEveryAndroidMetadataPreferenceGeneration() {
+        let suite = "effects-metadata-legacy-\(UUID())"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set([
+            // Original six flags + two patterns.
+            "MIST|true|false|true|true|true|true|yyyy/MM/dd|HH:mm",
+            // Lens-model generation.
+            "CINEMA|false|false|true|true|true|true|true|yyyy.MM.dd|HH.mm",
+            // Former location generation with the now-removed address slot.
+            "PLAQUE|true|true|true|true|true|true|false|true|true|true|MM-dd-yyyy|HH.mm.ss",
+        ].joined(separator: ";"), forKey: "photo_frame_metadata_settings_v1")
+
+        let restored = PhotoEffectsStore(defaults: defaults).settings.metadataByPreset
+
+        XCTAssertEqual(restored[PhotoFramePreset.mist.rawValue]?.showLensModel, false)
+        XCTAssertEqual(restored[PhotoFramePreset.mist.rawValue]?.datePattern, "yyyy/MM/dd")
+        XCTAssertEqual(restored[PhotoFramePreset.cinema.rawValue]?.showLensModel, true)
+        XCTAssertEqual(restored[PhotoFramePreset.cinema.rawValue]?.timePattern, "HH.mm")
+        XCTAssertEqual(restored[PhotoFramePreset.plaque.rawValue]?.showCoordinates, true)
+        XCTAssertEqual(restored[PhotoFramePreset.plaque.rawValue]?.showAltitude, true)
+        XCTAssertEqual(restored[PhotoFramePreset.plaque.rawValue]?.datePattern, "MM-dd-yyyy")
+    }
+
+    @MainActor
     func testLocalEffectsFirstRunMigratesOnlyLegacyFavoritesOnce() {
         let legacySuite = "effects-legacy-\(UUID())"
         let localSuite = "effects-local-migration-\(UUID())"
