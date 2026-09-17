@@ -677,6 +677,26 @@ final class DomainModelTests: XCTestCase {
         )
     }
 
+    func testGeneratedPhotoFrameNameTreatsOccupiedNamesCaseInsensitively() {
+        XCTAssertEqual(
+            uniquePhotoFrameName(
+                "DSC_0123_frame_mist.jpg",
+                occupied: ["dsc_0123_FRAME_MIST.JPG", "DSC_0123_frame_mist (1).jpg"]
+            ),
+            "DSC_0123_frame_mist (2).jpg"
+        )
+        let occupied = Set(
+            ["DSC_0123_frame_mist.jpg"] +
+            (1...999).map { "DSC_0123_frame_mist (\($0)).jpg" }
+        )
+        XCTAssertEqual(
+            uniquePhotoFrameName(
+                "DSC_0123_frame_mist.jpg", occupied: occupied, fallbackMillis: 12345
+            ),
+            "DSC_0123_frame_mist_12345.jpg"
+        )
+    }
+
     func testTransferDateFolderMatchesAndroidAndFallsBackForInvalidDate() {
         let fallback = Calendar(identifier: .gregorian).date(from: DateComponents(year: 2026, month: 3, day: 21))!
         XCTAssertEqual(transferDateFolderName("20260817T142530", fallback: fallback), "ZT2026-08-17")

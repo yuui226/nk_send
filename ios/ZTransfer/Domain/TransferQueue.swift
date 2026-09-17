@@ -26,6 +26,23 @@ func transferDateFolderName(_ captureDate: String?, fallback: Date = Date()) -> 
     return String(format: "ZT%04d-%02d-%02d", year, month, day)
 }
 
+/// Android's SAF providers are not assumed to have one filesystem's case
+/// rules. Derived output names therefore compare case-insensitively and use
+/// the first free ` (n)` suffix from the visible directory snapshot.
+func uniquePhotoFrameName(_ preferred: String, occupied: Set<String>, fallbackMillis: Int64? = nil) -> String {
+    let normalized = Set(occupied.map { $0.lowercased() })
+    guard normalized.contains(preferred.lowercased()) else { return preferred }
+    let url = URL(fileURLWithPath: preferred)
+    let ext = url.pathExtension
+    let stem = url.deletingPathExtension().lastPathComponent
+    for index in 1...999 {
+        let candidate = ext.isEmpty ? "\(stem) (\(index))" : "\(stem) (\(index)).\(ext)"
+        if !normalized.contains(candidate.lowercased()) { return candidate }
+    }
+    let millis = fallbackMillis ?? Int64((Date().timeIntervalSince1970 * 1_000).rounded(.down))
+    return ext.isEmpty ? "\(stem)_\(millis)" : "\(stem)_\(millis).\(ext)"
+}
+
 enum TransferStatus: String, Codable, Sendable { case waiting, transferring, completed, failed, cancelled }
 
 struct TransferQueueItem: Identifiable, Equatable, Sendable {
@@ -929,14 +946,11 @@ actor TransferQueue {
     }
 
     private nonisolated static func uniqueFrameURL(_ preferred: URL) -> URL {
-        guard FileManager.default.fileExists(atPath: preferred.path) else { return preferred }
-        let stem = preferred.deletingPathExtension().lastPathComponent
-        let ext = preferred.pathExtension
-        for i in 1...999 {
-            let candidate = preferred.deletingLastPathComponent().appendingPathComponent("\(stem) (\(i)).\(ext)")
-            if !FileManager.default.fileExists(atPath: candidate.path) { return candidate }
-        }
-        return preferred.deletingLastPathComponent().appendingPathComponent("\(stem)_\(Date().timeIntervalSince1970).\(ext)")
+        let directory = preferred.deletingLastPathComponent()
+        let occupied = Set((try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? [])
+        return directory.appendingPathComponent(
+            uniquePhotoFrameName(preferred.lastPathComponent, occupied: occupied)
+        )
     }
 
     private func updateProgress(id: UUID, progress: TransferDownloadProgress) {
