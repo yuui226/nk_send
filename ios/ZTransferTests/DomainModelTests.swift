@@ -1229,6 +1229,40 @@ extension DomainModelTests {
     }
 
     @MainActor
+    func testLocalEffectsKeepValidIntensityMapWhenSelectedFilterWasRemoved() {
+        let suite = "local-effects-removed-filter-\(UUID())"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let first = Np3FilterCatalog.presets[0]
+
+        defaults.set(3, forKey: "settings_version")
+        defaults.set("removed-filter", forKey: "filter_id")
+        defaults.set(true, forKey: "filter_enabled")
+        defaults.set("\(first.catalogKey),63;removed-key,42", forKey: "filter_intensities_v1")
+
+        let restored = PhotoEffectsStore(defaults: defaults, scope: .localPhotos).settings
+        XCTAssertNil(restored.selectedFilter)
+        XCTAssertFalse(restored.photoFilterEnabled)
+        XCTAssertEqual(restored.filterIntensities, [first.catalogKey: 64])
+        XCTAssertEqual(defaults.string(forKey: "filter_intensities_v1"), "\(first.catalogKey),64")
+    }
+
+    @MainActor
+    func testLegacyEffectsJSONDropsRemovedFilterIntensityKeys() throws {
+        let suite = "effects-json-intensity-normalization-\(UUID())"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let first = PhotoFilterCatalog.presets[0]
+        let validKey = PhotoEffectsSettings.filterKey(first.id)
+        var legacy = PhotoEffectsSettings()
+        legacy.filterIntensities = [validKey: 63, "removed-key": 42]
+        defaults.set(try JSONEncoder().encode(legacy), forKey: "photoEffectsSettings.v1")
+
+        let restored = PhotoEffectsStore(defaults: defaults).settings
+        XCTAssertEqual(restored.filterIntensities, [validKey: 64])
+    }
+
+    @MainActor
     func testLegacyCurrentFilterIntensityMigratesIntoPerFilterMap() {
         let transferSuite = "effects-transfer-intensity-migration-\(UUID())"
         let localSuite = "effects-local-intensity-migration-\(UUID())"

@@ -605,12 +605,13 @@ final class PhotoEffectsStore: ObservableObject {
         watermark.sizePercent = min(max(watermark.sizePercent, PhotoFrameWatermark.sizeRange.lowerBound), PhotoFrameWatermark.sizeRange.upperBound)
         watermark.opacityPercent = min(max(watermark.opacityPercent, PhotoFrameWatermark.opacityRange.lowerBound), PhotoFrameWatermark.opacityRange.upperBound)
         result.watermark = watermark
+        let validFilterKeys = Set(Np3FilterCatalog.presets.map(\.catalogKey))
         result.filterIntensities = value.filterIntensities.reduce(into: [:]) { partial, item in
             let key = Np3FilterCatalog.preset(id: item.key)?.catalogKey ?? item.key
+            guard validFilterKeys.contains(key), partial[key] == nil else { return }
             partial[key] = Np3FilterEngine.normalizeIntensity(item.value)
         }
         var seenFilters = Set<String>()
-        let validFilterKeys = Set(Np3FilterCatalog.presets.map(\.catalogKey))
         result.favoriteFilterIDs = value.favoriteFilterIDs.map(PhotoEffectsSettings.filterKey)
             .filter { validFilterKeys.contains($0) && seenFilters.insert($0).inserted }
         if let selected = value.selectedFilter {
@@ -626,6 +627,7 @@ final class PhotoEffectsStore: ObservableObject {
                 result.photoFilterEnabled = false
             }
         }
+        result.photoFilterEnabled = result.photoFilterEnabled && result.selectedFilter != nil
         // Keep the old set field in sync for preferences written by the first
         // iOS workbench build, while the effect list remains the source of truth.
         var seenFrames = Set<PhotoFramePreset>()
@@ -789,11 +791,11 @@ final class PhotoEffectsStore: ObservableObject {
         value.metadataByPreset = decodeAndroidMetadata(defaults.string(forKey: "frame_metadata_settings_v1"))
         value.metadata = value.metadataByPreset[value.photoFramePreset.rawValue] ?? PhotoFrameMetadataSettings.defaults(for: value.photoFramePreset)
         value.photoFilterEnabled = defaults.object(forKey: "filter_enabled") as? Bool ?? false
+        let intensities = decodeAndroidIntensities(defaults.string(forKey: "filter_intensities_v1"))
+        value.filterIntensities = intensities
         if let id = defaults.string(forKey: "filter_id"), let preset = PhotoFilterCatalog.resolve(id) {
             let key = Np3FilterCatalog.preset(id: id)?.catalogKey ?? id
-            let intensities = decodeAndroidIntensities(defaults.string(forKey: "filter_intensities_v1"))
             value.selectedFilter = PhotoFilterSelection(preset: preset, intensityPercent: intensities[key] ?? (defaults.object(forKey: "filter_intensity") as? Int ?? Np3FilterEngine.defaultIntensityPercent))
-            value.filterIntensities = intensities
         }
         value.favoriteFilterIDs = decodeAndroidFavorites(defaults.string(forKey: "favorite_photo_filters_v1"))
         value.watermark = PhotoFrameWatermark(
