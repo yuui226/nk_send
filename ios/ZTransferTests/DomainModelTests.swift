@@ -809,6 +809,24 @@ final class DomainModelTests: XCTestCase {
         XCTAssertEqual(defaults.integer(forKey: "photo_frame_watermark_size_scale_version"), 2)
     }
 
+    @MainActor
+    func testFavoriteFrameWatermarkRestoreNormalizesSizeAndOpacity() {
+        let suite = "effects-frame-favorite-normalization-\(UUID())"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(false, forKey: "photo_frame_enabled")
+        defaults.set("MIST,true,TEXT,CALLIGRAPHY,999,AUTO,ADAPTIVE,-2,AUTO", forKey: "favorite_frame_effects_v1")
+
+        let restored = PhotoEffectsStore(defaults: defaults).settings
+        XCTAssertEqual(restored.favoriteFrameEffects.count, 1)
+        XCTAssertEqual(restored.favoriteFrameEffects[0].watermark.sizePercent, 300)
+        XCTAssertEqual(restored.favoriteFrameEffects[0].watermark.opacityPercent, 1)
+        XCTAssertEqual(
+            defaults.string(forKey: "favorite_frame_effects_v1"),
+            "MIST,true,TEXT,CALLIGRAPHY,300,AUTO,ADAPTIVE,1,AUTO"
+        )
+    }
+
     func testRemoteDesqueezeRestoresWithinAndroidRange() {
         XCTAssertEqual(RemoteDisplayOptions.normalizedDesqueeze(0.25), 1)
         XCTAssertEqual(RemoteDisplayOptions.normalizedDesqueeze(1.33), 1.33)

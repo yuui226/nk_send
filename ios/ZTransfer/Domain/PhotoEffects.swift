@@ -623,7 +623,17 @@ final class PhotoEffectsStore: ObservableObject {
         // Keep the old set field in sync for preferences written by the first
         // iOS workbench build, while the effect list remains the source of truth.
         var seenFrames = Set<PhotoFramePreset>()
-        result.favoriteFrameEffects = result.favoriteFrameEffects.filter { seenFrames.insert($0.preset).inserted }
+        result.favoriteFrameEffects = result.favoriteFrameEffects.compactMap { favorite in
+            guard seenFrames.insert(favorite.preset).inserted else { return nil }
+            var normalized = favorite
+            normalized.watermark.sizePercent = min(max(
+                normalized.watermark.sizePercent, PhotoFrameWatermark.sizeRange.lowerBound
+            ), PhotoFrameWatermark.sizeRange.upperBound)
+            normalized.watermark.opacityPercent = min(max(
+                normalized.watermark.opacityPercent, PhotoFrameWatermark.opacityRange.lowerBound
+            ), PhotoFrameWatermark.opacityRange.upperBound)
+            return normalized
+        }
         let knownPresets = Set(result.favoriteFrameEffects.map(\.preset))
         for preset in PhotoFramePreset.allCases where result.favoriteFramePresets.contains(preset) && !knownPresets.contains(preset) {
             result.favoriteFrameEffects.append(.init(preset: preset, watermark: result.watermark))
@@ -825,7 +835,16 @@ final class PhotoEffectsStore: ObservableObject {
         }
     }
     private static func encodeAndroidFrameFavorites(_ values: [PhotoFrameFavorite]) -> String {
-        values.map { f in [f.preset.rawValue, String(f.watermark.enabled), f.watermark.content.rawValue, f.watermark.font.rawValue, String(f.watermark.sizePercent), f.watermark.position.rawValue, f.watermark.color.rawValue, String(f.watermark.opacityPercent), f.watermark.effect.rawValue].joined(separator: ",") }.joined(separator: ";")
+        values.map { f in
+            let size = min(max(f.watermark.sizePercent, PhotoFrameWatermark.sizeRange.lowerBound),
+                           PhotoFrameWatermark.sizeRange.upperBound)
+            let opacity = min(max(f.watermark.opacityPercent, PhotoFrameWatermark.opacityRange.lowerBound),
+                              PhotoFrameWatermark.opacityRange.upperBound)
+            return [f.preset.rawValue, String(f.watermark.enabled), f.watermark.content.rawValue,
+                    f.watermark.font.rawValue, String(size), f.watermark.position.rawValue,
+                    f.watermark.color.rawValue, String(opacity), f.watermark.effect.rawValue]
+                .joined(separator: ",")
+        }.joined(separator: ";")
     }
     private static func decodeAndroidMetadata(_ raw: String?) -> [String: PhotoFrameMetadataSettings] {
         var result: [String: PhotoFrameMetadataSettings] = [:]
