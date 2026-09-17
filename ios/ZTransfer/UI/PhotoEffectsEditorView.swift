@@ -505,6 +505,7 @@ struct PhotoEffectsSettingsPreview: View {
     let settings: PhotoEffectsSettings
     let onRequest: () -> Void
     @State private var rendered: UIImage?
+    @State private var renderedRequestKey = ""
     @State private var renderedCanvasKey = ""
     @State private var unfiltered: UIImage?
     @State private var previewRestoreRevision = 0
@@ -533,7 +534,7 @@ struct PhotoEffectsSettingsPreview: View {
         source: UIImage?,
         metadata: PhotoFrameMetadata?,
     ) -> String {
-        let data = try? JSONEncoder().encode(settings)
+        let data = try? JSONEncoder().encode(photoEffectsPreviewPixelSettings(settings))
         let settingsKey = String(data: data ?? Data(), encoding: .utf8) ?? ""
         let sourceKey: String
         if let source {
@@ -541,10 +542,21 @@ struct PhotoEffectsSettingsPreview: View {
         } else {
             sourceKey = "source:none"
         }
-        let metadataKey = metadata.map {
-            "meta:\($0.make ?? "")|\($0.model ?? "")|\($0.aperture ?? "")|\($0.shutter ?? "")|\($0.iso ?? "")|\($0.focalLength ?? "")|\($0.lensModel ?? "")|\($0.dateTime ?? "")"
-        } ?? "meta:none"
+        let metadataKey = Self.metadataKey(metadata)
         return settingsKey + "|" + sourceKey + "|" + metadataKey
+    }
+
+    private static func metadataKey(_ metadata: PhotoFrameMetadata?) -> String {
+        guard let metadata else { return "meta:none" }
+        let fields = [
+            metadata.make ?? "", metadata.model ?? "", metadata.aperture ?? "",
+            metadata.shutter ?? "", metadata.iso ?? "", metadata.focalLength ?? "",
+            metadata.lensModel ?? "", metadata.dateTime ?? "",
+            metadata.latitude.map { String($0) } ?? "",
+            metadata.longitude.map { String($0) } ?? "",
+            metadata.altitude.map { String($0) } ?? "",
+        ]
+        return "meta:" + fields.joined(separator: "|")
     }
 
     private var renderKeyWithRotation: String {
@@ -566,10 +578,19 @@ struct PhotoEffectsSettingsPreview: View {
         let sourceKey = source.map {
             "source:\(ObjectIdentifier($0)):\($0.size.width)x\($0.size.height)"
         } ?? "source:none"
-        let metadataKey = metadata.map {
-            "meta:\($0.make ?? "")|\($0.model ?? "")|\($0.aperture ?? "")|\($0.shutter ?? "")|\($0.iso ?? "")|\($0.focalLength ?? "")|\($0.lensModel ?? "")|\($0.dateTime ?? "")"
-        } ?? "meta:none"
+        let metadataKey = Self.metadataKey(metadata)
         return "\(sourceKey)|\(metadataKey)|rotation:\(rotationQuarterTurns)"
+    }
+
+    private var prefetchRequest: ConnectedPhotoEffectsPrefetchRequest {
+        let selections = nextPhotoFilterSelections(for: settings)
+        let keys = selections.map { "\($0.preset.id):\($0.normalizedIntensityPercent)" }
+        return ConnectedPhotoEffectsPrefetchRequest(
+            renderKey: renderKeyWithRotation,
+            orderedSelections: keys,
+            enabled: renderedRequestKey == renderKeyWithRotation && source != nil &&
+                settings.photoFilterEnabled && settings.selectedFilter != nil
+        )
     }
 
     private static func differsOnlyInWatermarkText(
@@ -727,14 +748,15 @@ struct PhotoEffectsSettingsPreview: View {
             }
         }
         .task(id: renderKeyWithRotation) {
+            let pixelSettings = photoEffectsPreviewPixelSettings(settings)
             if let previous = lastPreviewSettings,
-               Self.differsOnlyInWatermarkText(previous, settings) {
+               Self.differsOnlyInWatermarkText(previous, pixelSettings) {
                 // Android delays only text-only edits. Each new keystroke
                 // cancels this task before any pixel work begins.
                 try? await Task.sleep(for: .milliseconds(140))
                 guard !Task.isCancelled else { return }
             }
-            lastPreviewSettings = settings
+            lastPreviewSettings = pixelSettings
             previewFailed = false
             if cachedContextKey != sourceContextKey {
                 // Rotation/source/EXIF changes invalidate every pixel cache;
@@ -772,6 +794,7 @@ struct PhotoEffectsSettingsPreview: View {
                 }
                 renderedCanvasKey = requestedCanvasKey
                 rendered = fallbackResult
+                renderedRequestKey = renderKeyWithRotation
                 previewFailed = false
                 return
             }
@@ -817,22 +840,28 @@ struct PhotoEffectsSettingsPreview: View {
             }
             renderedCanvasKey = requestedCanvasKey
             rendered = result
+            renderedRequestKey = renderKeyWithRotation
             previewFailed = false
             guard settings.photoFilterEnabled, settings.selectedFilter != nil else { return }
 
-            // Android begins neighbor warming as soon as the current image is
-            // visible, alongside the delayed long-press comparison.
-            async let comparison = Self.comparisonPreview(
+            // The comparison starts as soon as the current image is visible.
+            // Neighbor warming is a separate task below so a favorite-order
+            // change does not rebuild or animate the current frame.
+            let comparison = await Self.comparisonPreview(
                 image: rotatedSource, settings: settings, metadata: metadata
             )
-            async let warmed = Self.prefetchedPreviews(
-                image: rotatedSource, sourceIdentity: source, settings: settings,
-                metadata: metadata, rotationQuarterTurns: rotationQuarterTurns
-            )
-            if let comparison = await comparison, !Task.isCancelled {
+            if let comparison, !Task.isCancelled {
                 unfiltered = comparison
             }
-            let warmedResults = await warmed
+        }
+        .task(id: prefetchRequest) {
+            guard prefetchRequest.enabled, let source else { return }
+            let rotation = rotationQuarterTurns
+            let rotatedSource = Self.rotate(source, quarterTurns: rotation)
+            let warmedResults = await Self.prefetchedPreviews(
+                image: rotatedSource, sourceIdentity: source, settings: settings,
+                metadata: metadata, rotationQuarterTurns: rotation
+            )
             guard !Task.isCancelled else { return }
             for (key, image) in warmedResults where prefetched[key] == nil {
                 prefetched[key] = image
@@ -852,6 +881,12 @@ struct PhotoEffectsSettingsPreview: View {
             .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             .padding(.bottom, 6)
     }
+}
+
+private struct ConnectedPhotoEffectsPrefetchRequest: Equatable {
+    let renderKey: String
+    let orderedSelections: [String]
+    let enabled: Bool
 }
 
 /// Android's expanded effects preview uses the same fitted image surface as

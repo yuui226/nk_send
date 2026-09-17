@@ -1230,6 +1230,33 @@ extension DomainModelTests {
         XCTAssertEqual(try renderedSize(.immersive), CGSize(width: 400, height: 300))
     }
 
+    func testPhotoEffectsPreviewIdentityIgnoresNonPixelEditorPreferences() {
+        var current = PhotoEffectsSettings()
+        current.photoFrameEnabled = true
+        current.photoFrameBorderEnabled = true
+        current.photoFramePreset = .mist
+        current.photoFilterEnabled = true
+        current.selectedFilter = PhotoFilterSelection(
+            preset: PhotoFilterCatalog.presets[0], intensityPercent: 80
+        )
+        var preferences = current
+        preferences.favoriteFilterIDs = [
+            PhotoEffectsSettings.filterKey(PhotoFilterCatalog.presets[1].id)
+        ]
+        preferences.filterIntensities[
+            PhotoEffectsSettings.filterKey(PhotoFilterCatalog.presets[2].id)
+        ] = 42
+        preferences.favoriteFramePresets = [.cinema]
+        preferences.metadataByPreset[PhotoFramePreset.cinema.rawValue] = .defaults(for: .cinema)
+
+        XCTAssertEqual(photoEffectsPreviewPixelSettings(current),
+                       photoEffectsPreviewPixelSettings(preferences))
+
+        preferences.metadata.showModel.toggle()
+        XCTAssertNotEqual(photoEffectsPreviewPixelSettings(current),
+                          photoEffectsPreviewPixelSettings(preferences))
+    }
+
     func testPhotoEffectsPreviewUsesAndroidMetadataPlaceholdersFieldByField() throws {
         var settings = PhotoFrameMetadataSettings()
         settings.showDate = true

@@ -308,7 +308,8 @@ private struct LocalEffectPreview: View {
     @GestureState private var comparing = false
 
     private static func settingsKey(_ settings: PhotoEffectsSettings) -> String {
-        String(data: (try? JSONEncoder().encode(settings)) ?? Data(), encoding: .utf8) ?? ""
+        let pixels = photoEffectsPreviewPixelSettings(settings)
+        return String(data: (try? JSONEncoder().encode(pixels)) ?? Data(), encoding: .utf8) ?? ""
     }
 
     private static func differsOnlyInWatermarkText(
@@ -396,16 +397,19 @@ private struct LocalEffectPreview: View {
                 default: break
                 }
             })
-        .task(id: PreviewRequest(item: item, settings: settings)) {
+        .task(id: PreviewRequest(
+            item: item, settings: photoEffectsPreviewPixelSettings(settings)
+        )) {
             do {
+                let pixelSettings = photoEffectsPreviewPixelSettings(settings)
                 if let previous = lastPreviewSettings,
-                   Self.differsOnlyInWatermarkText(previous, settings) {
+                   Self.differsOnlyInWatermarkText(previous, pixelSettings) {
                     // Match Android's 140 ms text-only preview debounce. A
                     // fast typing sequence cancels this task before any
                     // expensive filter/frame render starts.
                     try await Task.sleep(for: .milliseconds(140))
                 }
-                lastPreviewSettings = settings
+                lastPreviewSettings = pixelSettings
                 failed = false
                 let image: UIImage
                 if let source { image = source }

@@ -295,6 +295,33 @@ struct PhotoEffectsSettings: Codable, Equatable, Sendable {
     }
 }
 
+/// Pixel identity used by both interactive preview entries. Android passes
+/// only the active filter/frame/watermark arguments to its renderer; editor
+/// preferences such as favorites and inactive presets must not restart the
+/// current preview or replay its frame transition.
+func photoEffectsPreviewPixelSettings(_ settings: PhotoEffectsSettings) -> PhotoEffectsSettings {
+    var result = settings
+    result.filterIntensities = [:]
+    result.favoriteFilterIDs = []
+    result.favoriteFramePresets = []
+    result.favoriteFrameEffects = []
+    result.metadataByPreset = [:]
+    if !result.photoFilterEnabled { result.selectedFilter = nil }
+    if !result.photoFrameEnabled {
+        result.photoFrameBorderEnabled = false
+        result.photoFramePreset = .mist
+        result.watermark = PhotoFrameWatermark(enabled: false)
+        result.metadata = .defaults(for: .mist)
+    } else if !result.photoFrameBorderEnabled {
+        result.photoFramePreset = .mist
+        result.metadata = .defaults(for: .mist)
+        if !result.watermark.enabled { result.watermark = PhotoFrameWatermark(enabled: false) }
+    } else if !result.watermark.enabled {
+        result.watermark = PhotoFrameWatermark(enabled: false)
+    }
+    return result
+}
+
 // MARK: Android-compatible rendered-output identity
 
 /// Returns the exact derived-image filename used by PhotoFrameExporter.kt.
