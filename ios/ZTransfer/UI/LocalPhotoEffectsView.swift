@@ -207,7 +207,10 @@ struct LocalPhotoEffectsView: View {
             if batch.state.photos.isEmpty { showingPicker = true }
             else { batch.generate(settings: previewSettings) }
         } label: {
-            LocalPhotoBatchLabel(state: batch.state)
+            LocalPhotoBatchLabel(
+                state: batch.state,
+                pageLabel: batch.state.photos.isEmpty ? nil : "\(previewPage + 1) / \(batch.state.photos.count)"
+            )
                 .frame(maxWidth: .infinity).frame(height: 50).clipped()
         }
         .buttonStyle(WorkbenchGlassButtonStyle())
@@ -231,6 +234,7 @@ private struct WorkbenchScrollTracker: View {
 
 private struct LocalPhotoBatchLabel: View {
     let state: LocalPhotoBatchState<PhotosPickerItem>
+    let pageLabel: String?
     @State private var previousPhase: LocalPhotoBatchPhase = .ready
 
     var body: some View {
@@ -246,7 +250,15 @@ private struct LocalPhotoBatchLabel: View {
                                 removal: .offset(y: 8).combined(with: .opacity).animation(.easeOut(duration: 0.12))))
                         Text("/\(state.progress.total)").fontWeight(.bold).monospacedDigit()
                     }
-                } else { Text(text) }
+                } else {
+                    if let pageLabel, !state.photos.isEmpty, state.phase == .ready {
+                        Text(pageLabel)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(ZTransferColors.secondaryText)
+                            .monospacedDigit()
+                    }
+                    Text(text)
+                }
             }
             .font(.system(size: 14, weight: .semibold)).foregroundStyle(ZTransferColors.primaryText)
             .id(state.phase)

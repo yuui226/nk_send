@@ -63,6 +63,7 @@ struct RootView: View {
     @AppStorage("theme_mode") private var themeMode = "SYSTEM"
     @AppStorage("app_language") private var appLanguage = "system"
     @AppStorage("keep_screen_on") private var keepScreenOn = true
+    @AppStorage("skin_preset") private var skinPreset = "FROSTED_GLASS"
     @Environment(\.scenePhase) private var scenePhase
     // Keep HomeScreen alive for the connection-success celebration before
     // handing off to the file list. The final hand-off is a short cross-fade,
@@ -163,6 +164,8 @@ struct RootView: View {
             UIApplication.shared.isIdleTimerDisabled = false
         }
         .onAppear {
+            let restoredSkin = normalizedSkinPreset(UserDefaults.standard.string(forKey: "skin_preset"))
+            if skinPreset != restoredSkin { skinPreset = restoredSkin }
             UIApplication.shared.isIdleTimerDisabled = keepScreenOn
             gpsCoordinator.setAPModeBlocked(gpsBlockedByAPCamera)
             if connectionModel.cameraSession != nil, !connectionCelebrationConsumed {
@@ -252,6 +255,16 @@ struct RootView: View {
             }
         }
     }
+}
+
+/// Android keeps a missing value on the current frosted-glass default, while
+/// retired or corrupt persisted values migrate to titanium and are written
+/// back immediately.
+func normalizedSkinPreset(_ stored: String?) -> String {
+    guard let stored else { return "FROSTED_GLASS" }
+    return ["FROSTED_GLASS", "WOOD", "CAMERA_CONTROLS", "TITANIUM"].contains(stored)
+        ? stored
+        : "TITANIUM"
 }
 
 private let CONNECTION_HANDOFF_FADE_START_MS = 1_380.0

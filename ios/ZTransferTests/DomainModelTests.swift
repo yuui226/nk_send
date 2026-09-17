@@ -64,6 +64,12 @@ final class DomainModelTests: XCTestCase {
         XCTAssertFalse(transferCardWaveEligible(status: .failed))
     }
 
+    func testSkinPreferenceRestorationMatchesAndroidMigration() {
+        XCTAssertEqual(normalizedSkinPreset(nil), "FROSTED_GLASS")
+        XCTAssertEqual(normalizedSkinPreset("WOOD"), "WOOD")
+        XCTAssertEqual(normalizedSkinPreset("retired_skin"), "TITANIUM")
+    }
+
     @MainActor
     func testEffectPreviewCandidateSkipsVideoAndUsesNewestCaptureDateThenHandle() {
         let files = [
