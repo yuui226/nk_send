@@ -469,6 +469,7 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
             manager.requestAlwaysAuthorization()
             beginRunning()
         case .denied, .restricted:
+            locationManager.stopUpdatingLocation()
             state.status = .error
             state.message = AppLocalized.resource("gps_permission_required")
         default: break
@@ -491,7 +492,7 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
         state.accuracyMeters = location.horizontalAccuracy
         GPSDiagnostics.record("location fix accuracy=\(location.horizontalAccuracy)")
         if case .ready = bluetooth.state {
-            if state.status != .ready && state.status != .writing { state.status = .connected }
+            state.status = gpsStatusAfterLocationFix(state.status)
             scheduleWriteIfDue(force: previousAltitude == nil && altitude.0 != nil)
         } else if state.status == .searching || state.status == .starting {
             state.status = .waitingFix
@@ -512,9 +513,11 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
         case .keepWaiting:
             GPSDiagnostics.record("location fix temporarily unavailable")
         case .permissionRequired:
+            locationManager.stopUpdatingLocation()
             state.status = .error
             state.message = AppLocalized.resource("gps_permission_required")
         case .locationUnavailable:
+            locationManager.stopUpdatingLocation()
             state.status = .error
             state.message = AppLocalized.text("无法获取定位")
         }

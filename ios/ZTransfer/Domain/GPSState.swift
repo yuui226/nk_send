@@ -79,6 +79,15 @@ func isReusableGPSLocation(_ location: CLLocation, now: Date = Date()) -> Bool {
         abs(now.timeIntervalSince(location.timestamp)) <= 120
 }
 
+func gpsStatusAfterLocationFix(_ status: GPSStatus) -> GPSStatus {
+    switch status {
+    case .ready, .writing, .connected, .connecting, .pairingSuccess, .error:
+        return status
+    default:
+        return .connected
+    }
+}
+
 /// One-shot coordinate lookup state copied from Android's GpsPlaceLookupState.
 /// The coordinates stay attached to the result so a late geocoder callback
 /// cannot be mistaken for the current location.

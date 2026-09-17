@@ -29,6 +29,15 @@ final class DomainModelTests: XCTestCase {
         ), now: now))
     }
 
+    func testGPSLocationFixDoesNotHideAndroidErrorOrStableSessionStates() {
+        XCTAssertEqual(gpsStatusAfterLocationFix(.error), .error)
+        XCTAssertEqual(gpsStatusAfterLocationFix(.ready), .ready)
+        XCTAssertEqual(gpsStatusAfterLocationFix(.writing), .writing)
+        XCTAssertEqual(gpsStatusAfterLocationFix(.connected), .connected)
+        XCTAssertEqual(gpsStatusAfterLocationFix(.waitingFix), .connected)
+        XCTAssertEqual(gpsStatusAfterLocationFix(.searching), .connected)
+    }
+
     func testLocalPhotoSelectionMatchesAndroidJPEGAndPNGInputRange() {
         XCTAssertTrue(isSupportedLocalPhoto([.jpeg]))
         XCTAssertTrue(isSupportedLocalPhoto([.png]))
