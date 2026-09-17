@@ -512,6 +512,7 @@ struct PhotoEffectsSettingsPreview: View {
     @State private var cachedContextKey = ""
     @State private var rotationQuarterTurns = 0
     @State private var expanded = false
+    @State private var previewAnchor: CGRect = .zero
 
     private var sourceIsPortrait: Bool {
         let portrait = source.map { $0.size.height > $0.size.width } ?? false
@@ -671,6 +672,15 @@ struct PhotoEffectsSettingsPreview: View {
                      contentMode: .fit)
         .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.34), value: sourceIsPortrait)
         .contentShape(Rectangle())
+        .background {
+            GeometryReader { proxy in
+                Color.clear.preference(
+                    key: PhotoEffectsPreviewAnchorPreferenceKey.self,
+                    value: proxy.frame(in: .global)
+                )
+            }
+        }
+        .onPreferenceChange(PhotoEffectsPreviewAnchorPreferenceKey.self) { previewAnchor = $0 }
         .onLongPressGesture(minimumDuration: 0.5, pressing: { pressing in
             if !pressing { showUnfiltered = false }
         }, perform: {
@@ -683,12 +693,16 @@ struct PhotoEffectsSettingsPreview: View {
         }
         .onTapGesture {
             guard expandedImage != nil else { return }
-            expanded = true
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) { expanded = true }
         }
         .fullScreenCover(isPresented: $expanded) {
             if let expandedImage {
-                PhotoEffectsExpandedPreview(image: expandedImage) {
-                    expanded = false
+                PhotoEffectsExpandedPreview(image: expandedImage, initialAnchor: previewAnchor) {
+                    var transaction = Transaction()
+                    transaction.disablesAnimations = true
+                    withTransaction(transaction) { expanded = false }
                 }
             }
         }
@@ -807,79 +821,144 @@ struct PhotoEffectsSettingsPreview: View {
 /// pinch/drag pair keeps the image inside the viewport while zoomed.
 private struct PhotoEffectsExpandedPreview: View {
     let image: UIImage
+    let initialAnchor: CGRect
     let onDismiss: () -> Void
     @State private var scale: CGFloat = 1
     @State private var offset: CGSize = .zero
     @State private var gestureStartScale: CGFloat = 1
     @State private var gestureStartOffset: CGSize = .zero
+    @State private var rotationDegrees: Double = 0
+    @State private var presentationProgress: CGFloat = 0
+    @State private var closing = false
 
     private let maximumScale: CGFloat = 4
 
     var body: some View {
         GeometryReader { proxy in
             ZStack {
-                Color.black.ignoresSafeArea()
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFit()
-                    .scaleEffect(scale)
-                    .offset(offset)
-                    .contentShape(Rectangle())
-                    .gesture(
-                        MagnificationGesture()
-                            .onChanged { value in
-                                let next = min(max(gestureStartScale * value, 1), maximumScale)
-                                scale = next
-                                offset = clamped(offset, scale: next, viewport: proxy.size)
-                            }
-                            .onEnded { _ in
-                                gestureStartScale = scale
-                                gestureStartOffset = offset
-                                if scale <= 1.01 {
-                                    scale = 1
-                                    offset = .zero
-                                    gestureStartOffset = .zero
+                Color.black.opacity(0.74 * presentationProgress).ignoresSafeArea()
+                ZStack {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .scaleEffect(scale)
+                        .offset(offset)
+                        .rotationEffect(.degrees(rotationDegrees))
+                        .contentShape(Rectangle())
+                        .gesture(
+                            MagnificationGesture()
+                                .onChanged { value in
+                                    let next = min(max(gestureStartScale * value, 1), maximumScale)
+                                    scale = next
+                                    offset = clamped(offset, scale: next, viewport: proxy.size)
                                 }
+                                .onEnded { _ in
+                                    gestureStartScale = scale
+                                    gestureStartOffset = offset
+                                    if scale <= 1.01 { resetZoom() }
+                                }
+                        )
+                        .simultaneousGesture(
+                            DragGesture(minimumDistance: 0)
+                                .onChanged { value in
+                                    guard scale > 1.01 else { return }
+                                    offset = clamped(
+                                        CGSize(width: gestureStartOffset.width + value.translation.width,
+                                               height: gestureStartOffset.height + value.translation.height),
+                                        scale: scale,
+                                        viewport: proxy.size
+                                    )
+                                }
+                                .onEnded { _ in gestureStartOffset = offset }
+                        )
+                        .onTapGesture(count: 2) {
+                            let target: CGFloat = scale > 1.01 ? 1 : 2.5
+                            withAnimation(.easeInOut(duration: 0.24)) {
+                                scale = target
+                                offset = .zero
                             }
-                    )
-                    .simultaneousGesture(
-                        DragGesture(minimumDistance: 0)
-                            .onChanged { value in
-                                guard scale > 1.01 else { return }
-                                offset = clamped(
-                                    CGSize(width: gestureStartOffset.width + value.translation.width,
-                                           height: gestureStartOffset.height + value.translation.height),
-                                    scale: scale,
-                                    viewport: proxy.size,
-                                )
-                            }
-                            .onEnded { _ in
-                                gestureStartOffset = offset
-                            }
-                    )
-                    .onTapGesture(count: 2) {
-                        let target: CGFloat = scale > 1.01 ? 1 : 2.5
-                        withAnimation(.easeInOut(duration: 0.24)) {
-                            scale = target
-                            offset = target > 1 ? .zero : .zero
+                            gestureStartScale = target
+                            gestureStartOffset = .zero
                         }
-                        gestureStartScale = target
-                        gestureStartOffset = offset
-                    }
-                    .onTapGesture {
-                        if scale <= 1.01 { onDismiss() }
-                    }
+                        .onTapGesture {
+                            if scale <= 1.01 { startClose() }
+                        }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .modifier(PhotoPreviewAnchorTransform(
+                    progress: presentationProgress,
+                    anchor: initialAnchor == .zero ? nil : initialAnchor,
+                    enabled: true,
+                    closing: closing
+                ))
+
+                Text(AppLocalized.resource("photo_effects"))
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.85 * presentationProgress))
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 52)
+                    .padding(.top, proxy.safeAreaInsets.top + 12)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+
+                Button {
+                    rotationDegrees -= 90
+                    resetZoom()
+                } label: {
+                    Image(systemName: "rotate.left")
+                        .font(.system(size: 19, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 48, height: 48)
+                        .background(.black.opacity(0.45), in: Circle())
+                        .overlay(Circle().stroke(.white.opacity(0.22), lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(AppLocalized.resource("cd_rotate_photo"))
+                .opacity(presentationProgress)
+                .padding(.trailing, 20)
+                .padding(.bottom, proxy.safeAreaInsets.bottom + 32)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .allowsHitTesting(!closing)
         }
         .statusBarHidden(true)
+        .onAppear {
+            withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.34)) {
+                presentationProgress = 1
+            }
+        }
+    }
+
+    private func resetZoom() {
+        scale = 1
+        offset = .zero
+        gestureStartScale = 1
+        gestureStartOffset = .zero
+    }
+
+    private func startClose() {
+        guard !closing else { return }
+        closing = true
+        Task { @MainActor in
+            withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.26)) {
+                presentationProgress = 0
+            }
+            try? await Task.sleep(for: .milliseconds(260))
+            onDismiss()
+        }
     }
 
     private func clamped(_ proposed: CGSize, scale: CGFloat, viewport: CGSize) -> CGSize {
         // Match Android's fitted-image bounds: only the part that grows past
         // the viewport can be panned, so a portrait image does not acquire a
         // loose horizontal drift when it is enlarged.
-        let imageAspect = max(image.size.width, 1) / max(image.size.height, 1)
+        let turns = ((Int(-rotationDegrees / 90) % 4) + 4) % 4
+        let size = turns.isMultiple(of: 2)
+            ? image.size
+            : CGSize(width: image.size.height, height: image.size.width)
+        let imageAspect = max(size.width, 1) / max(size.height, 1)
         let viewportAspect = max(viewport.width, 1) / max(viewport.height, 1)
         let fittedWidth = imageAspect > viewportAspect
             ? viewport.width
@@ -892,6 +971,11 @@ private struct PhotoEffectsExpandedPreview: View {
         return CGSize(width: min(max(proposed.width, -maxX), maxX),
                       height: min(max(proposed.height, -maxY), maxY))
     }
+}
+
+private struct PhotoEffectsPreviewAnchorPreferenceKey: PreferenceKey {
+    static let defaultValue = CGRect.zero
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
 }
 
 /// Android's `nextPhotoFilterSelections`: preserve the catalog's favorite-first

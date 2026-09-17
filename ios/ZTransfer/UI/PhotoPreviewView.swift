@@ -2,7 +2,7 @@ import SwiftUI
 import UIKit
 
 @preconcurrency
-private struct PhotoPreviewAnchorTransform: AnimatableModifier {
+struct PhotoPreviewAnchorTransform: AnimatableModifier {
     var progress: CGFloat
     let anchor: CGRect?
     let enabled: Bool
