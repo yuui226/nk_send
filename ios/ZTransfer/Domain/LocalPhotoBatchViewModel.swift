@@ -84,7 +84,15 @@ final class LocalPhotoBatchViewModel: ObservableObject {
         idleTimerGeneration = nil
     }
 
-    deinit { generationTask?.cancel() }
+    deinit {
+        let idleTimerValue = previousIdleTimerDisabled
+        generationTask?.cancel()
+        if let idleTimerValue {
+            Task { @MainActor in
+                UIApplication.shared.isIdleTimerDisabled = idleTimerValue
+            }
+        }
+    }
 }
 
 func isSupportedLocalPhoto(_ contentTypes: [UTType]) -> Bool {

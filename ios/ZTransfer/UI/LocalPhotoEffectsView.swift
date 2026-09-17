@@ -65,6 +65,7 @@ struct LocalPhotoEffectsView: View {
             }
         }
         .photoEffectsHint($effectsHint, duration: 2)
+        .onDisappear { batch.dispose() }
         .photosPicker(isPresented: $showingPicker, selection: $pickerItems,
                       matching: .images, preferredItemEncoding: .current)
         .photosPicker(isPresented: $showingWatermarkPicker, selection: $watermarkPickerItems,
