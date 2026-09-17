@@ -1195,6 +1195,27 @@ extension DomainModelTests {
     }
 
     @MainActor
+    func testTransferEffectsRestoreImmediateEditorPreferencesWithoutCommittedDraft() {
+        let suite = "effects-partial-editor-persistence-\(UUID())"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let first = Np3FilterCatalog.presets[0]
+        defaults.set("\(first.catalogKey),63", forKey: "photo_filter_intensities_v1")
+        defaults.set(
+            "CINEMA,true,TEXT,CALLIGRAPHY,80,AUTO,ADAPTIVE,72,AUTO",
+            forKey: "favorite_frame_effects_v1"
+        )
+
+        let restored = PhotoEffectsStore(defaults: defaults).settings
+
+        XCTAssertEqual(restored.selectedFilter?.preset.id, first.id)
+        XCTAssertEqual(restored.selectedFilter?.intensityPercent, 64)
+        XCTAssertEqual(restored.filterIntensities[first.catalogKey], 64)
+        XCTAssertFalse(restored.photoFilterEnabled)
+        XCTAssertEqual(restored.favoriteFrameEffects.map(\.preset), [.cinema])
+    }
+
+    @MainActor
     func testLegacyCurrentFilterIntensityMigratesIntoPerFilterMap() {
         let transferSuite = "effects-transfer-intensity-migration-\(UUID())"
         let localSuite = "effects-local-intensity-migration-\(UUID())"

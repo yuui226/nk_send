@@ -686,22 +686,47 @@ final class PhotoEffectsStore: ObservableObject {
     /// lost after switching platforms.  Read and write the Android keys
     /// directly; the old blob remains as a one-way fallback for upgrades.
     private static func restoreAndroidTransferSettings(defaults: UserDefaults) -> PhotoEffectsSettings? {
-        let markerKeys = ["photo_frame_enabled", "photo_filter_selected_id", "photo_frame_preset",
-                          "photo_frame_watermark_text", "favorite_photo_filters_v1"]
+        // Favorites, per-filter intensities and metadata are committed while
+        // the secondary editor is still open on Android. Treat every effect
+        // preference as a valid restore marker so an app termination before
+        // the draft itself is committed cannot hide those durable edits.
+        let markerKeys = [
+            "photo_frame_enabled", "photo_frame_border_enabled", "photo_frame_preset",
+            "photo_frame_metadata_settings_v1", "photo_frame_branding_enabled",
+            "photo_frame_watermark_content", "photo_frame_watermark_text",
+            "photo_frame_watermark_image_hash", "photo_frame_watermark_font",
+            "photo_frame_watermark_size", "photo_frame_watermark_size_scale_version",
+            "photo_frame_watermark_position", "photo_frame_watermark_color",
+            "photo_frame_watermark_opacity", "photo_frame_watermark_effect",
+            "photo_filter_enabled", "photo_filter_selected_id", "photo_filter_intensity",
+            "photo_filter_intensities_v1", "favorite_photo_filters_v1",
+            "favorite_frame_effects_v1",
+        ]
         guard markerKeys.contains(where: { defaults.object(forKey: $0) != nil }) else { return nil }
         var value = PhotoEffectsSettings()
         value.photoFrameEnabled = defaults.object(forKey: "photo_frame_enabled") as? Bool ?? false
         value.photoFrameBorderEnabled = defaults.object(forKey: "photo_frame_border_enabled") as? Bool ?? true
         value.photoFramePreset = PhotoFramePreset(rawValue: defaults.string(forKey: "photo_frame_preset") ?? "MIST") ?? .mist
-        value.photoFilterEnabled = defaults.object(forKey: "photo_filter_enabled") as? Bool ?? false
-        let filterID = defaults.string(forKey: "photo_filter_selected_id")
-        if let filterID, let preset = PhotoFilterCatalog.resolve(filterID) {
-            let key = Np3FilterCatalog.preset(id: filterID)?.catalogKey ?? filterID
-            let intensities = decodeAndroidIntensities(defaults.string(forKey: "photo_filter_intensities_v1"))
-            value.selectedFilter = PhotoFilterSelection(preset: preset,
-                intensityPercent: intensities[key] ?? (defaults.object(forKey: "photo_filter_intensity") as? Int ?? Np3FilterEngine.defaultIntensityPercent))
-            value.filterIntensities = intensities
+        let storedFilterID = defaults.string(forKey: "photo_filter_selected_id")
+        let restoredPreset = storedFilterID.flatMap(PhotoFilterCatalog.resolve)
+            ?? PhotoFilterCatalog.presets.first
+        var intensities = decodeAndroidIntensities(
+            defaults.string(forKey: "photo_filter_intensities_v1")
+        )
+        if let restoredPreset {
+            let key = PhotoEffectsSettings.filterKey(restoredPreset.id)
+            let legacy = defaults.object(forKey: "photo_filter_intensity") as? Int
+            let intensity = intensities[key]
+                ?? legacy.map(Np3FilterEngine.normalizeIntensity)
+                ?? Np3FilterEngine.defaultIntensityPercent
+            intensities[key] = intensity
+            value.selectedFilter = PhotoFilterSelection(
+                preset: restoredPreset, intensityPercent: intensity
+            )
         }
+        value.filterIntensities = intensities
+        value.photoFilterEnabled = storedFilterID == restoredPreset?.id &&
+            (defaults.object(forKey: "photo_filter_enabled") as? Bool ?? false)
         value.favoriteFilterIDs = decodeAndroidFavorites(defaults.string(forKey: "favorite_photo_filters_v1"))
         let content = PhotoFrameWatermarkContent(rawValue: defaults.string(forKey: "photo_frame_watermark_content") ?? "TEXT") ?? .text
         let usesLegacySizeScale = defaults.object(forKey: "photo_frame_watermark_size") != nil &&
