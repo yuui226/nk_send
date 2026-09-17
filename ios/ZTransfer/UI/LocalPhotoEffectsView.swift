@@ -187,7 +187,11 @@ struct LocalPhotoEffectsView: View {
                             // Only the visible page and immediate neighbours
                             // retain bounded 1280-pixel previews.
                             if abs(index - previewPage) <= 1 {
-                                LocalEffectPreview(item: batch.state.photos[index], settings: previewSettings)
+                                LocalEffectPreview(
+                                    item: batch.state.photos[index],
+                                    settings: previewSettings,
+                                    allowsFilterPrefetch: index == previewPage && !batch.state.generating
+                                )
                             } else { Color.clear }
                         }.tag(index)
                     }
@@ -291,6 +295,7 @@ private struct LocalPhotoBatchLabel: View {
 private struct LocalEffectPreview: View {
     let item: PhotosPickerItem
     let settings: PhotoEffectsSettings
+    let allowsFilterPrefetch: Bool
     @State private var source: UIImage?
     @State private var metadata: PhotoFrameMetadata?
     @State private var images: LocalPhotoPreviewImages?
@@ -433,33 +438,38 @@ private struct LocalEffectPreview: View {
                 images = next
                 failed = false
                 if settings.photoFilterEnabled {
-                    // Android starts both jobs after publishing the current
-                    // result: a 500 ms delayed comparison and the next two
-                    // filter previews. The prior completed image stays visible
-                    // until the replacement is ready.
-                    async let comparison = Self.comparisonPreview(
+                    // The comparison belongs to each composed page. Filter
+                    // prefetch is a separate task below because Android only
+                    // warms the currently settled page while not generating.
+                    if let comparison = await Self.comparisonPreview(
                         image: image, settings: settings, metadata: metadata
-                    )
-                    async let warmed = Self.prefetchedPreviews(
-                        image: image, settings: settings, metadata: metadata
-                    )
-                    if let comparison = await comparison, !Task.isCancelled {
+                    ), !Task.isCancelled {
                         images = LocalPhotoPreviewImages(
                             filtered: next.filtered, unfiltered: comparison
                         )
-                    }
-                    let warmedResults = await warmed
-                    guard !Task.isCancelled else { return }
-                    for (key, preview) in warmedResults where prefetched[key] == nil {
-                        prefetched[key] = preview
-                        if prefetched.count > 2, let oldest = prefetched.keys.first {
-                            prefetched.removeValue(forKey: oldest)
-                        }
                     }
                 }
             } catch is CancellationError {} catch {
                 if images == nil { failed = true }
                 else { previewRestoreRevision &+= 1 }
+            }
+        }
+        .task(id: LocalPreviewPrefetchRequest(
+            item: item,
+            settings: settings,
+            enabled: allowsFilterPrefetch && images != nil && source != nil
+        )) {
+            guard allowsFilterPrefetch, settings.photoFilterEnabled, images != nil,
+                  let source else { return }
+            let warmedResults = await Self.prefetchedPreviews(
+                image: source, settings: settings, metadata: metadata
+            )
+            guard !Task.isCancelled, allowsFilterPrefetch else { return }
+            for (key, preview) in warmedResults where prefetched[key] == nil {
+                prefetched[key] = preview
+                if prefetched.count > 2, let oldest = prefetched.keys.first {
+                    prefetched.removeValue(forKey: oldest)
+                }
             }
         }
     }
@@ -468,6 +478,12 @@ private struct LocalEffectPreview: View {
 private struct PreviewRequest: Equatable {
     let item: PhotosPickerItem
     let settings: PhotoEffectsSettings
+}
+
+private struct LocalPreviewPrefetchRequest: Equatable {
+    let item: PhotosPickerItem
+    let settings: PhotoEffectsSettings
+    let enabled: Bool
 }
 
 private struct WorkbenchGlassButtonStyle: ButtonStyle {
