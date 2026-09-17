@@ -42,6 +42,95 @@ private struct PhotoListWorkspaceTransition: AnimatableModifier {
 private let photoQueueWorkspaceAnimation =
     Animation.timingCurve(0.22, 0.84, 0.24, 1.0, duration: 0.34)
 
+private struct PhotoReturnFocusPulse: ViewModifier {
+    let trigger: Int
+    @State private var scale: CGFloat = 1
+
+    func body(content: Content) -> some View {
+        content
+            .scaleEffect(scale)
+            .task(id: trigger) {
+                guard trigger > 0 else { return }
+                for _ in 0..<2 {
+                    withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.11)) { scale = 1.055 }
+                    try? await Task.sleep(nanoseconds: 110_000_000)
+                    withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.155)) { scale = 1 }
+                    try? await Task.sleep(nanoseconds: 190_000_000)
+                }
+            }
+    }
+}
+
+private struct PhotoTransferExit: ViewModifier {
+    let exiting: Bool
+    let onFinished: () -> Void
+    @State private var progress: CGFloat = 1
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(progress)
+            .scaleEffect(0.82 + 0.18 * progress)
+            .allowsHitTesting(!exiting)
+            .task(id: exiting) {
+                guard exiting else {
+                    progress = 1
+                    return
+                }
+                progress = 1
+                withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.2)) { progress = 0 }
+                try? await Task.sleep(nanoseconds: 200_000_000)
+                guard !Task.isCancelled else { return }
+                onFinished()
+            }
+    }
+}
+
+private struct PhotoCellReveal: ViewModifier {
+    let active: Bool
+    let trigger: Int
+    let delay: UInt64
+    @State private var progress: CGFloat = 1
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(active ? progress : 1)
+            .scaleEffect(active ? 0.94 + 0.06 * progress : 1)
+            .task(id: "\(trigger)|\(active)") {
+                guard active else { progress = 1; return }
+                let transaction = Transaction(animation: nil)
+                withTransaction(transaction) { progress = 0 }
+                try? await Task.sleep(nanoseconds: delay)
+                guard !Task.isCancelled else { return }
+                withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.22)) { progress = 1 }
+            }
+    }
+}
+
+private struct PhotoDateGridHeightPreferenceKey: PreferenceKey {
+    static let defaultValue: [String: CGFloat] = [:]
+    static func reduce(value: inout [String: CGFloat], nextValue: () -> [String: CGFloat]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
+    }
+}
+
+private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> AnyTransition {
+    if burstMember {
+        return .asymmetric(
+            insertion: .opacity.animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.18)),
+            removal: .opacity.animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.15))
+        )
+    }
+    if cameraRemoval {
+        return .asymmetric(
+            insertion: .opacity.combined(with: .scale(scale: 0.96))
+                .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.18)),
+            removal: .opacity.combined(with: .scale(scale: 0.96))
+                .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.16))
+        )
+    }
+    return .identity
+}
+
 /// Android's FileListScreen shows the remote entry introduction across the
 /// first six app starts, incrementing only when the expansion actually begins.
 let remoteEntryIntroMaxPlays = 6
@@ -63,6 +152,10 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
     private let session: CameraSession
     @AppStorage("tap_to_preview") private var tapToPreview = false
     @State private var selectedFile: CameraFile?
+    @State private var previewAnchor: CGRect?
+    @State private var photoListScrollProxy: ScrollViewProxy?
+    @State private var previewReturnFileID: UInt32?
+    @State private var previewReturnNonce = 0
     @State private var showingFilter = false
     @State private var filterAnchor: CGRect = .zero
     @State private var showingQueue = false
@@ -71,7 +164,25 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
     @AppStorage("collapse_burst_photos") private var collapseBurstPhotos = true
     @AppStorage("thumbnail_columns") private var thumbnailColumns = 3
     @State private var expandedBurstIDs: Set<String> = []
+    @State private var previousBurstGroups: [BurstPhotoGroup] = []
     @State private var collapsedDays: Set<String> = []
+    @State private var presentedSections: [PhotoDaySection] = []
+    @State private var presentedCameraFiles: [CameraFile] = []
+    @State private var cameraRemovalAffectedDays: Set<String> = []
+    @State private var cameraRemovalTask: Task<Void, Never>?
+    @State private var collapsingDay: String?
+    @State private var collapsingDayKeepCount = 0
+    @State private var dateCollapseProgress: CGFloat = 1
+    @State private var dateGridHeights: [String: CGFloat] = [:]
+    @State private var dateAnimationTask: Task<Void, Never>?
+    @State private var recentlyExpandedDay: String?
+    @State private var revealTick = 0
+    @State private var filterRevealWindow = false
+    @State private var revealWindowTask: Task<Void, Never>?
+    @State private var burstAnimationBusy = false
+    @State private var burstReflowActive = false
+    @State private var activeBurstReflowID: String?
+    @State private var burstAnimationTask: Task<Void, Never>?
     @State private var showTopButton = false
     @State private var photoListScrollOffset: CGFloat = 0
     @State private var internalShowingRemote = false
@@ -156,15 +267,22 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
                     // rows immediately, even while the remaining catalog is
                     // loading; otherwise the first 12 stay hidden until the
                     // entire camera scan completes.
-                    if !model.sections.isEmpty {
-                            ForEach(model.sections) { section in
+                    if !presentedSections.isEmpty {
+                            ForEach(presentedSections) { section in
+                                let allEntries = photoGridEntries(
+                                    section.files,
+                                    burstIDByFile: model.burstIDByFile,
+                                    collapse: collapseBurstPhotos,
+                                    expandedIDs: expandedBurstIDs
+                                )
+                                let collapsingThis = collapsingDay == section.day
+                                let displayedEntries = collapsingThis
+                                    ? Array(allEntries.prefix(collapsingDayKeepCount))
+                                    : allEntries
                                 VStack(alignment: .leading, spacing: 8) {
                                 HStack(spacing: 8) {
                                 Button {
-                                    withAnimation(ZTransferMotion.standard) {
-                                        if collapsedDays.contains(section.day) { collapsedDays.remove(section.day) }
-                                        else { collapsedDays.insert(section.day) }
-                                    }
+                                    toggleDateSection(section, entries: allEntries)
                                 } label: {
                                     HStack(spacing: 6) {
                                         Text(section.day == PhotoCatalogGrouping.unknownDay
@@ -174,7 +292,9 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
                                         Image(systemName: "chevron.down")
                                             .font(.system(size: 13, weight: .bold))
                                             .foregroundStyle(ZTransferColors.accentBlue)
-                                            .rotationEffect(.degrees(collapsedDays.contains(section.day) ? 0 : 180))
+                                            .rotationEffect(.degrees(
+                                                collapsedDays.contains(section.day) || collapsingThis ? 0 : 180
+                                            ))
                                         Text("\(section.files.count)")
                                             .zTransferText(size: ZTransferMetrics.caption)
                                             .monospacedDigit()
@@ -203,19 +323,25 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
                                         .overlay(Capsule().stroke(Color.white.opacity(0.95), lineWidth: 1))
                                 }.buttonStyle(.plain)
                                 }
-                                if !collapsedDays.contains(section.day) { LazyVGrid(columns: columns, spacing: 6) {
-                                        ForEach(photoGridEntries(section.files, burstIDByFile: model.burstIDByFile,
-                                                                 collapse: collapseBurstPhotos, expandedIDs: expandedBurstIDs)) { entry in
+                                if !collapsedDays.contains(section.day) || collapsingThis {
+                                    LazyVGrid(columns: columns, spacing: 6) {
+                                        ForEach(Array(displayedEntries.enumerated()), id: \.element.id) { cellIndex, entry in
                                         let file = entry.firstFile
+                                        let transferExiting = entry.isPhoto &&
+                                            model.exitingTransferredFileIDs.contains(file.id)
+                                        let activeBurstMember = burstReflowActive && entry.isPhoto &&
+                                            model.burstIDByFile[file.id] == activeBurstReflowID
                                         VStack(alignment: .leading, spacing: 0) {
                                             if case let .burst(group) = entry {
                                                 BurstThumbnailView(session: session, group: group,
+                                                                   allowRemoteThumbnails: selectedFile == nil,
                                                                    transferred: group.files.allSatisfy { model.transferredFileIDs.contains($0.id) },
                                                                    expanded: expandedBurstIDs.contains(group.id),
                                                                    onExpand: { toggleBurst(group.id) },
                                                                    onEnqueue: { enqueueSection(group.files) })
                                             } else {
                                                 CameraThumbnailView(session: session, handle: file.id, file: file,
+                                                                    allowRemoteThumbnail: selectedFile == nil,
                                                                     transferred: model.transferredFileIDs.contains(file.id),
                                                                     inBurst: model.burstIDByFile[file.id] != nil,
                                                                     queueTask: queueModel.task(for: file.id), liveProgress: queueModel.activeProgress)
@@ -228,6 +354,7 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
                                         .aspectRatio(1, contentMode: .fill)
                                         .frame(maxWidth: .infinity, minHeight: 0)
                                         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                        .id(entry.id)
                                         .contentShape(Rectangle())
                                         .background {
                                             GeometryReader { proxy in
@@ -237,17 +364,58 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
                                                 )
                                             }
                                         }
+                                        .modifier(PhotoReturnFocusPulse(
+                                            trigger: previewReturnFileID == file.id ? previewReturnNonce : 0
+                                        ))
+                                        .modifier(PhotoTransferExit(exiting: transferExiting) {
+                                            finishTransferredExit(file.id)
+                                        })
+                                        .modifier(PhotoCellReveal(
+                                            active: recentlyExpandedDay == section.day || filterRevealWindow,
+                                            trigger: revealTick,
+                                            delay: UInt64(min(cellIndex, 18)) * 15_000_000
+                                        ))
+                                        .transition(photoGridCellTransition(
+                                            burstMember: activeBurstMember,
+                                            cameraRemoval: cameraRemovalAffectedDays.contains(section.day)
+                                        ))
                                         .onTapGesture { handleTap(entry, file: file) }
                                         .onLongPressGesture {
+                                            guard !burstAnimationBusy, collapsingDay == nil,
+                                                  cameraRemovalAffectedDays.isEmpty else { return }
                                             ZTransferHaptics.shared.longPress()
                                             if case let .burst(group) = entry {
-                                                withAnimation(ZTransferMotion.standard) { _ = expandedBurstIDs.insert(group.id) }
-                                                selectedFile = group.files[0]
-                                            } else { selectedFile = file }
+                                                expandedBurstIDs.insert(group.id)
+                                                openPreview(group.files[0], anchorFileID: file.id)
+                                            } else { openPreview(file, anchorFileID: file.id) }
                                         }
 
                                     }
-                                } }
+                                }
+                                .background {
+                                    GeometryReader { proxy in
+                                        Color.clear.preference(
+                                            key: PhotoDateGridHeightPreferenceKey.self,
+                                            value: [section.day: proxy.size.height]
+                                        )
+                                    }
+                                }
+                                .frame(
+                                    height: collapsingThis
+                                        ? max(0, (dateGridHeights[section.day] ?? 0) * dateCollapseProgress)
+                                        : nil,
+                                    alignment: .top
+                                )
+                                .opacity(collapsingThis ? dateCollapseProgress : 1)
+                                .clipped()
+                                }
+                                }
+                                .transaction { transaction in
+                                    if !cameraRemovalAffectedDays.isEmpty &&
+                                        !cameraRemovalAffectedDays.contains(section.day) &&
+                                        !burstReflowActive {
+                                        transaction.animation = nil
+                                    }
                                 }
                             }
                     } else {
@@ -269,8 +437,15 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
                     }.padding(.horizontal, 12).padding(.top, 8)
                 }
                 .coordinateSpace(name: "photo-list-scroll")
+                .onAppear { photoListScrollProxy = reader }
                 .onPreferenceChange(PhotoListCellBoundsPreferenceKey.self) { bounds in
-                    cellBounds.merge(bounds) { _, latest in latest }
+                    // Lazy-grid cells unregister when they leave composition.
+                    // Keep only the current preference snapshot so preview
+                    // dismissal never flies toward a stale off-screen frame.
+                    cellBounds = bounds
+                }
+                .onPreferenceChange(PhotoDateGridHeightPreferenceKey.self) { heights in
+                    for (day, height) in heights where height > 0 { dateGridHeights[day] = height }
                 }
                 .onPreferenceChange(PhotoListScrollOffsetKey.self) { value in
                     photoListScrollOffset = value
@@ -329,6 +504,10 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
             queueFlightOverlay
         }
         .task {
+            if presentedSections.isEmpty {
+                presentedSections = model.sections
+                presentedCameraFiles = model.availableFiles
+            }
             await session.setPreferHighThroughputTransfers(!showingRemote)
             queueModel.attach(session: session, directory: directoryStore.directoryURL)
             model.setNewMediaHandler { files in
@@ -367,14 +546,44 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
             Task { await session.setPreferHighThroughputTransfers(!remote) }
         }
         .onDisappear {
+            cameraRemovalTask?.cancel()
+            dateAnimationTask?.cancel()
+            revealWindowTask?.cancel()
+            burstAnimationTask?.cancel()
             Task { await session.setPreferHighThroughputTransfers(false) }
         }
         .onChange(of: collapseBurstPhotos) { enabled in
+            burstAnimationTask?.cancel()
+            burstAnimationTask = nil
+            burstAnimationBusy = false
+            burstReflowActive = false
+            activeBurstReflowID = nil
             if !enabled { expandedBurstIDs.removeAll() }
         }
-        .onChange(of: model.sections) { sections in
-            let valid = Set(sections.map(\.day))
+        .onChange(of: model.sections) { updatePresentedSections($0) }
+        .onChange(of: model.availableDayKeys) { valid in
+            // Filters can temporarily hide complete date groups. Only an
+            // authoritative catalog change may retire a remembered choice.
             collapsedDays = collapsedDays.intersection(valid)
+        }
+        .onChange(of: model.burstGroups) { current in
+            expandedBurstIDs = reconciledExpandedBurstIDs(previousGroups: previousBurstGroups,
+                                                           currentGroups: current,
+                                                           expandedIDs: expandedBurstIDs)
+            previousBurstGroups = current
+        }
+        .onChange(of: model.exitingTransferredFileIDs) { exiting in
+            guard !exiting.isEmpty else { return }
+            let composedPhotoIDs = Set(model.sections.flatMap { section -> [UInt32] in
+                guard !collapsedDays.contains(section.day) else { return [] }
+                return photoGridEntries(section.files, burstIDByFile: model.burstIDByFile,
+                                        collapse: collapseBurstPhotos,
+                                        expandedIDs: expandedBurstIDs).compactMap { entry in
+                    guard case let .photo(file) = entry else { return nil }
+                    return file.id
+                }
+            })
+            for id in exiting.subtracting(composedPhotoIDs) { model.finishTransferredExit(id) }
         }
         .onChange(of: model.availableFiles.count) { _ in
             // Android retains this demand when Settings opens before the
@@ -422,6 +631,7 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
         }
         .fullScreenCover(isPresented: $internalShowingRemote) {
             RemoteView(session: session,
+                       recordingDirectory: directoryStore.directoryURL,
                        isSessionConnected: isSessionConnected,
                        onRetrySTA: onRetrySTA,
                        onPreparing: { await model.pauseForRemote() },
@@ -430,7 +640,7 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
                            // session and reconnects in place. Do not
                            // start a second scan against the invalid PTP
                            // channel while the replacement is opening.
-                           model.resumeAfterRemote(isConnected: isSessionConnected && !transportLost)
+                           await model.resumeAfterRemote(isConnected: isSessionConnected && !transportLost)
                        },
                        onTransportLost: {
                            // Android keeps monitor navigation mounted
@@ -462,9 +672,10 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
                     availableExtensions: Array(Set(files.map(\.fileExtension))).sorted().isEmpty
                         ? [".jpg", ".nef", ".mp4"]
                         : Array(Set(files.map(\.fileExtension))).sorted(),
-                    availableStorageSlots: Array(Set(files.flatMap { $0.storageIDs })).sorted(),
-                    suggestedDate: model.latestEffectPreviewFile?.captureDate,
-                    onChange: model.setFilter,
+                    availableStorageSlots: model.availableStorageSlots.count > 1
+                        ? model.availableStorageSlots : [],
+                    suggestedDate: model.latestKnownCaptureDay,
+                    onChange: applyFilter,
                 )
                 .ignoresSafeArea()
             }
@@ -479,6 +690,7 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
                          directory: directoryStore.directoryURL,
                          organizeByDate: organizeByDate,
                          queueTarget: queueTargetBounds == .zero ? nil : queueTargetBounds,
+                         initialAnchor: previewAnchor,
                          initialExpandedBurstIDs: expandedBurstIDs,
                          collapseBursts: collapseBurstPhotos,
                          onBurstChanged: { id, expanded in
@@ -513,6 +725,19 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
             heldFlightCount += count
         } onQueueFlightFinished: { count in
             heldFlightCount = max(0, heldFlightCount - count)
+        } prepareDismissTarget: { file in
+            await preparePreviewDismissTarget(file)
+        } onDismiss: { returnFile in
+            selectedFile = nil
+            previewAnchor = nil
+            guard let returnFile else { return }
+            previewReturnNonce &+= 1
+            let nonce = previewReturnNonce
+            previewReturnFileID = returnFile.id
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 760_000_000)
+                if previewReturnNonce == nonce { previewReturnFileID = nil }
+            }
         }
         .onAppear { model.pauseForPreview() }
         .onDisappear {
@@ -782,9 +1007,132 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
     }
 
     private func toggleBurst(_ id: String) {
-        withAnimation(ZTransferMotion.standard) {
-            if expandedBurstIDs.contains(id) { expandedBurstIDs.remove(id) }
-            else { expandedBurstIDs.insert(id) }
+        guard !burstAnimationBusy, collapsingDay == nil,
+              cameraRemovalAffectedDays.isEmpty else { return }
+        burstAnimationTask?.cancel()
+        burstAnimationBusy = true
+        burstReflowActive = true
+        activeBurstReflowID = id
+        burstAnimationTask = Task { @MainActor in
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.3)) {
+                if expandedBurstIDs.contains(id) { expandedBurstIDs.remove(id) }
+                else { expandedBurstIDs.insert(id) }
+            }
+            try? await Task.sleep(nanoseconds: 348_000_000)
+            guard !Task.isCancelled else { return }
+            burstReflowActive = false
+            activeBurstReflowID = nil
+            burstAnimationBusy = false
+            burstAnimationTask = nil
+        }
+    }
+
+    private func updatePresentedSections(_ target: [PhotoDaySection]) {
+        let currentCameraFiles = model.availableFiles
+        let canAnimateRemoval = isSessionConnected && model.hasCompletedFileScan && !model.isLoadingFiles
+        let removedDays = canAnimateRemoval
+            ? publishedCameraRemovalDays(previous: presentedCameraFiles, current: currentCameraFiles)
+            : []
+        presentedCameraFiles = currentCameraFiles
+
+        guard !removedDays.isEmpty else {
+            presentedSections = target
+            if !canAnimateRemoval {
+                cameraRemovalTask?.cancel()
+                cameraRemovalTask = nil
+                cameraRemovalAffectedDays.removeAll()
+            }
+            return
+        }
+
+        cameraRemovalAffectedDays.formUnion(removedDays)
+        cameraRemovalTask?.cancel()
+        cameraRemovalTask = Task { @MainActor in
+            // Arm the existing cells first so their exit and placement nodes
+            // observe the same starting frame as Android's LazyGrid.
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.28)) {
+                presentedSections = target
+            }
+            try? await Task.sleep(nanoseconds: 328_000_000)
+            guard !Task.isCancelled else { return }
+            cameraRemovalAffectedDays.removeAll()
+            cameraRemovalTask = nil
+        }
+    }
+
+    private func finishTransferredExit(_ fileID: UInt32) {
+        withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.28)) {
+            model.finishTransferredExit(fileID)
+        }
+    }
+
+    private func applyFilter(_ filter: PhotoFilterState) {
+        revealTick &+= 1
+        recentlyExpandedDay = nil
+        filterRevealWindow = true
+        revealWindowTask?.cancel()
+        let tick = revealTick
+        revealWindowTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 600_000_000)
+            guard !Task.isCancelled, revealTick == tick else { return }
+            filterRevealWindow = false
+            revealWindowTask = nil
+        }
+        model.setFilter(filter)
+    }
+
+    private func toggleDateSection(_ section: PhotoDaySection, entries: [PhotoGridEntry]) {
+        guard collapsingDay == nil, !burstAnimationBusy,
+              cameraRemovalAffectedDays.isEmpty else { return }
+        if collapsedDays.contains(section.day) {
+            filterRevealWindow = false
+            collapsedDays.remove(section.day)
+            recentlyExpandedDay = section.day
+            revealTick &+= 1
+            revealWindowTask?.cancel()
+            let day = section.day
+            let tick = revealTick
+            revealWindowTask = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 600_000_000)
+                guard !Task.isCancelled, revealTick == tick,
+                      recentlyExpandedDay == day else { return }
+                recentlyExpandedDay = nil
+                revealWindowTask = nil
+            }
+            return
+        }
+
+        let viewport = UIScreen.main.bounds
+        let lastVisible = entries.indices.last { index in
+            guard let bounds = cellBounds[entries[index].firstFile.id] else { return false }
+            return bounds.intersects(viewport)
+        }
+        guard let lastVisible else {
+            collapsedDays.insert(section.day)
+            return
+        }
+        dateAnimationTask?.cancel()
+        recentlyExpandedDay = nil
+        collapsingDay = section.day
+        collapsingDayKeepCount = min(entries.count, lastVisible + 1 + columns.count)
+        dateCollapseProgress = 1
+        dateAnimationTask = Task { @MainActor in
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.3)) {
+                dateCollapseProgress = 0
+            }
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            guard !Task.isCancelled else { return }
+            collapsedDays.insert(section.day)
+            collapsingDay = nil
+            collapsingDayKeepCount = 0
+            dateCollapseProgress = 1
+            dateAnimationTask = nil
         }
     }
 
@@ -804,7 +1152,7 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
         }
         if tapToPreview {
             ZTransferHaptics.shared.longPress()
-            selectedFile = file
+            openPreview(file, anchorFileID: file.id)
         } else if directoryStore.directoryURL == nil {
             // Android routes a transfer attempt with no valid destination to the
             // existing settings overlay; it does not enqueue an unusable task.
@@ -818,6 +1166,64 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
             queueModel.enqueue(file, organizeByDate: organizeByDate, effects: effectsStore.settings)
             startListQueueFlight(for: file)
         }
+    }
+
+    private func openPreview(_ file: CameraFile, anchorFileID: UInt32) {
+        previewAnchor = cellBounds[anchorFileID]
+        selectedFile = file
+    }
+
+    @MainActor
+    private func preparePreviewDismissTarget(_ file: CameraFile) async -> CGRect? {
+        guard let targetSection = model.sections.first(where: { section in
+            section.files.contains(where: { $0.id == file.id })
+        }) else { return nil }
+        guard !collapsedDays.contains(targetSection.day) else { return nil }
+
+        if collapseBurstPhotos,
+           let burstID = model.burstIDByFile[file.id],
+           !expandedBurstIDs.contains(burstID) {
+            expandedBurstIDs.insert(burstID)
+            await Task.yield()
+        }
+
+        let viewport = UIScreen.main.bounds
+        if let frame = cellBounds[file.id], frame.width > 0, frame.height > 0,
+           frame.intersects(viewport) {
+            return frame
+        }
+        guard let reader = photoListScrollProxy else { return nil }
+
+        let visibleEntries = model.sections.flatMap { section -> [(scrollID: String, fileID: UInt32)] in
+            guard !collapsedDays.contains(section.day) else { return [] }
+            return photoGridEntries(section.files, burstIDByFile: model.burstIDByFile,
+                                    collapse: collapseBurstPhotos,
+                                    expandedIDs: expandedBurstIDs).map { entry in
+                (entry.id, entry.firstFile.id)
+            }
+        }
+        guard let targetIndex = visibleEntries.firstIndex(where: { entry in
+            entry.scrollID == "photo_\(file.id)"
+        }) else { return nil }
+        let visibleIndex = visibleEntries.firstIndex { entry in
+            cellBounds[entry.fileID]?.intersects(viewport) == true
+        } ?? targetIndex
+        let runway = min(max(thumbnailColumns, 1), 4) * 3
+        if abs(targetIndex - visibleIndex) > runway * 2 {
+            let nearbyIndex = targetIndex > visibleIndex
+                ? max(0, targetIndex - runway)
+                : min(visibleEntries.count - 1, targetIndex + runway)
+            reader.scrollTo(visibleEntries[nearbyIndex].scrollID, anchor: .center)
+            await Task.yield()
+        }
+        withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.26)) {
+            reader.scrollTo("photo_\(file.id)", anchor: .top)
+        }
+        try? await Task.sleep(nanoseconds: 280_000_000)
+        await Task.yield()
+        guard let frame = cellBounds[file.id], frame.width > 0, frame.height > 0,
+              frame.intersects(viewport) else { return nil }
+        return frame
     }
 
     @ViewBuilder
@@ -1115,6 +1521,10 @@ private enum PhotoGridEntry: Identifiable {
     var firstFile: CameraFile {
         switch self { case let .photo(file): return file; case let .burst(group): return group.files[0] }
     }
+    var isPhoto: Bool {
+        if case .photo = self { return true }
+        return false
+    }
 }
 
 private func photoGridEntries(_ files: [CameraFile], burstIDByFile: [UInt32: String], collapse: Bool = true,
@@ -1326,6 +1736,7 @@ private struct CameraThumbnailView: View {
     let session: CameraSession
     let handle: UInt32
     var file: CameraFile?
+    var allowRemoteThumbnail = true
     var transferred: Bool = false
     var inBurst: Bool = false
     var queueTask: TransferQueueItem? = nil
@@ -1382,9 +1793,11 @@ private struct CameraThumbnailView: View {
         .frame(maxWidth: .infinity, minHeight: 0)
         .clipped()
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .task {
+        .task(id: allowRemoteThumbnail) {
             guard image == nil else { return }
-            if let file, let data = try? await session.thumbnail(file: file), let image = UIImage(data: data) {
+            if let file,
+               let data = try? await session.thumbnail(file: file, allowRemote: allowRemoteThumbnail),
+               let image = UIImage(data: data) {
                 self.image = image
             } else if file == nil, let data = try? await session.thumbnail(handle: handle), let image = UIImage(data: data) {
                 self.image = image
@@ -1405,6 +1818,7 @@ private struct CameraThumbnailView: View {
 private struct BurstThumbnailView: View {
     let session: CameraSession
     let group: BurstPhotoGroup
+    var allowRemoteThumbnails = true
     var transferred: Bool = false
     var expanded = false
     var onExpand: () -> Void = {}
@@ -1415,7 +1829,8 @@ private struct BurstThumbnailView: View {
             let cardSide = side * 0.86
             ZStack {
                 ForEach(Array(group.files.prefix(3).enumerated().reversed()), id: \.element.id) { item in
-                    CameraThumbnailView(session: session, handle: item.element.id, file: item.element)
+                    CameraThumbnailView(session: session, handle: item.element.id, file: item.element,
+                                        allowRemoteThumbnail: allowRemoteThumbnails)
                         .frame(width: cardSide, height: cardSide)
                         .clipped()
                         .clipShape(RoundedRectangle(cornerRadius: 10))

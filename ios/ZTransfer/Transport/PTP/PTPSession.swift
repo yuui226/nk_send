@@ -53,6 +53,17 @@ enum PTPSessionError: Error, Equatable, Sendable {
     case invalidated
 }
 
+/// A short sequence may retain the command mutex across several responses and
+/// camera settling delays. The capability expires when its owning body returns.
+struct PTPCommandSequence: Sendable {
+    fileprivate let send: @Sendable (UInt16, [UInt32], Data?, UInt64?) async throws -> PTPResponse
+
+    func executeResponse(operation: UInt16, parameters: [UInt32] = [], data: Data? = nil,
+                         timeoutNanoseconds: UInt64? = nil) async throws -> PTPResponse {
+        try await send(operation, parameters, data, timeoutNanoseconds)
+    }
+}
+
 /// Android's I/O mutex stays held through the entire transaction. Actor isolation
 /// alone cannot provide that guarantee because `await` permits reentrancy.
 actor PTPSession {
@@ -61,6 +72,7 @@ actor PTPSession {
     private var nextTransactionID: UInt32
     private var executing = false
     private var invalidated = false
+    private var sequenceOwner: UUID?
     private var waiters: [(id: UUID, continuation: CheckedContinuation<Void, any Error>)] = []
 
     init(transport: PTPCommandTransport, firstTransactionID: UInt32 = 1, defaultTimeoutNanoseconds: UInt64 = 15_000_000_000) {
@@ -83,6 +95,27 @@ actor PTPSession {
         try await acquire()
         defer { release() }
         return try await perform(operation: operation, parameters: parameters, data: data, timeoutNanoseconds: timeoutNanoseconds ?? defaultTimeoutNanoseconds)
+    }
+
+    func withCommandSequence<T: Sendable>(
+        _ body: @Sendable (PTPCommandSequence) async throws -> T
+    ) async throws -> T {
+        try await acquire()
+        let owner = UUID()
+        sequenceOwner = owner
+        defer { sequenceOwner = nil; release() }
+        let commands = PTPCommandSequence { [self] operation, parameters, data, timeout in
+            try await performSequence(owner: owner, operation: operation, parameters: parameters,
+                                      data: data, timeoutNanoseconds: timeout)
+        }
+        return try await body(commands)
+    }
+
+    private func performSequence(owner: UUID, operation: UInt16, parameters: [UInt32], data: Data?,
+                                 timeoutNanoseconds: UInt64?) async throws -> PTPResponse {
+        guard sequenceOwner == owner else { throw PTPSessionError.invalidated }
+        return try await perform(operation: operation, parameters: parameters, data: data,
+                                 timeoutNanoseconds: timeoutNanoseconds ?? defaultTimeoutNanoseconds)
     }
 
     func executeReceiving(operation: UInt16, parameters: [UInt32], sink: PTPDataSink,
@@ -286,6 +319,8 @@ enum PTPConstants {
     static let captureInSdram: UInt16 = 0x90C0
     static let startMovieRecording: UInt16 = 0x920A
     static let endMovieRecording: UInt16 = 0x920B
+    static let setControlMode: UInt16 = 0x90C2
+    static let getDevicePropValueEx: UInt16 = 0x943B
 
     // Nikon remote focus operations (Android RemoteLab).
     static let mfDrive: UInt16 = 0x9204

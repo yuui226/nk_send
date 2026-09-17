@@ -121,6 +121,8 @@ struct PhotoScanSnapshot: Sendable {
     let handleOrders: [(storageID: UInt32, handles: [UInt32])]
     var processedHandles: Set<UInt32>
     let handleQueriesSucceeded: Bool
+    var filterStorageIDs: [UInt32] = []
+    var directStorageIDsByHandle: [UInt32: Set<UInt32>] = [:]
 
     var remainingHandles: [(storageID: UInt32, handles: [UInt32])] {
         handleOrders.map { ($0.storageID, $0.handles.filter { !processedHandles.contains($0) }) }
@@ -133,6 +135,63 @@ struct PhotoScanResult: Sendable {
     let addedHandles: Set<UInt32>
     let handleQueriesSucceeded: Bool
     let metadataComplete: Bool
+    var filterStorageIDs: [UInt32] = []
+}
+
+struct STADirectStorageLayout: Equatable, Sendable {
+    let storageIDsByHandle: [UInt32: Set<UInt32>]
+    let filterStorageIDs: [UInt32]
+    let crossSlotOverlapCount: Int
+}
+
+func analyzeSTADirectStorageLayout(_ groups: [(storageID: UInt32, handles: [UInt32])]) -> STADirectStorageLayout {
+    let storageIDs = Array(Set(groups.map(\.storageID))).sorted()
+    let slots = photoStorageIDsBySlot(storageIDs)
+    let slotByStorageID = slots.reduce(into: [UInt32: UInt32]()) { result, entry in
+        for storageID in entry.value { result[storageID] = entry.key }
+    }
+    var observed: [UInt32: Set<UInt32>] = [:]
+    for group in groups {
+        for handle in group.handles { observed[handle, default: []].insert(group.storageID) }
+    }
+    let overlaps = observed.values.filter { memberships in
+        Set(memberships.compactMap { slotByStorageID[$0] }).count > 1
+    }.count
+    let reliable = overlaps == 0
+    return STADirectStorageLayout(storageIDsByHandle: reliable ? observed : [:],
+                                  filterStorageIDs: reliable ? storageIDs : [],
+                                  crossSlotOverlapCount: overlaps)
+}
+
+private func replacingStorageIDs(_ file: CameraFile, with storageIDs: Set<UInt32>) -> CameraFile {
+    guard !storageIDs.isEmpty, storageIDs != file.storageIDs else { return file }
+    return CameraFile(id: file.id, storageID: file.storageID, format: file.format,
+                      size: file.size, fileName: file.fileName,
+                      captureDate: file.captureDate, isProtected: file.isProtected,
+                      storageIDs: storageIDs)
+}
+
+private func catalogLogicalIdentity(_ file: CameraFile) -> String {
+    "\(file.fileName)|\(file.size)|\(file.captureDate ?? "")"
+}
+
+/// Keep a published logical row when one half of a dual-card backup disappears.
+/// If its primary handle vanished, switch the row to a surviving alias while
+/// preserving display order and combining all surviving card memberships.
+func reconcilePublishedCameraFiles(_ published: [CameraFile], currentHandles: Set<UInt32>,
+                                   indexedByHandle: [UInt32: CameraFile]) -> [CameraFile] {
+    var aliases: [String: [CameraFile]] = [:]
+    for (handle, file) in indexedByHandle where currentHandles.contains(handle) {
+        aliases[catalogLogicalIdentity(file), default: []].append(file)
+    }
+    return published.compactMap { existing in
+        guard let candidates = aliases[catalogLogicalIdentity(existing)], !candidates.isEmpty else {
+            return currentHandles.contains(existing.id) ? existing : nil
+        }
+        let primary = candidates.first(where: { $0.id == existing.id }) ?? candidates[0]
+        let memberships = candidates.reduce(into: Set<UInt32>()) { $0.formUnion($1.storageIDs) }
+        return replacingStorageIDs(primary, with: memberships)
+    }
 }
 
 private struct CatalogMetadataResult: Sendable {
@@ -170,7 +229,7 @@ func selectNewestPhotoHeadIndex(_ heads: [CameraFile?]) -> Int? {
 /// Protocol-level camera catalog. It deliberately exposes only operations already used by
 /// the Android NikonCamera path; UI state and transfer policy stay in higher layers.
 actor CameraRepository {
-    private let session: PTPSession
+    private var session: PTPSession
     #if DEBUG
     private let debugData: DebugCameraData?
     #endif
@@ -179,10 +238,21 @@ actor CameraRepository {
     /// download chunks and suppresses idle probes for the whole download.
     private let ioGate = CameraIOGate()
     private let isUSBConnection: Bool
+    nonisolated let usbSessionIdentity: USBSessionIdentity?
+    private let usbTransport: ImageCaptureUSBTransport?
+    private let usbDeviceID: String?
+    private var remoteControlModeSet = false
+    private var movieApplicationPropertySet = false
+    private var movieApplicationOperationSet = false
     /// Android learns this capability once and remembers an unsupported
     /// partial-object operation for the rest of the session.
     private var partialObjectSupported: Bool?
     private var subjectTrackingActive = false
+    private var subjectTrackingSupported: Bool?
+    private let focusGate = CameraIOGate()
+    private var cachedDeviceInfo: PTPDeviceInfo?
+    private var liveViewImageOperation: UInt16?
+    private var liveViewEnhancedFailures = 0
     private let staAlbum: STAAlbumAccess?
     private let directReader: STAObjectReader?
     private var prefetchedStorageIDs: [UInt32]?
@@ -208,12 +278,17 @@ actor CameraRepository {
     private var eventResolveTask: Task<Void, Never>?
     private var catalogContinuations: [UUID: AsyncStream<[CameraFile]>.Continuation] = [:]
 
-    init(session: PTPSession, staAlbum: STAAlbumAccess? = nil, isUSBConnection: Bool = false) {
+    init(session: PTPSession, staAlbum: STAAlbumAccess? = nil, isUSBConnection: Bool = false,
+         deviceInfo: PTPDeviceInfo? = nil, usbTransport: ImageCaptureUSBTransport? = nil,
+         usbDeviceID: String? = nil, usbSessionIdentity: USBSessionIdentity? = nil) {
         self.session = session
         #if DEBUG
         self.debugData = nil
         #endif
         self.staAlbum = staAlbum; self.isUSBConnection = isUSBConnection
+        self.usbTransport = usbTransport; self.usbDeviceID = usbDeviceID
+        self.usbSessionIdentity = usbSessionIdentity
+        self.cachedDeviceInfo = deviceInfo ?? staAlbum?.deviceInfo
         self.prefetchedStorageIDs = staAlbum?.storageIDs
         self.prefetchedHandles = staAlbum?.prefetchedHandles
         self.directReader = staAlbum?.directObjectRead == true ? STAObjectReader(session: session, operations: staAlbum?.deviceInfo?.operations ?? []) : nil
@@ -224,6 +299,7 @@ actor CameraRepository {
         self.session = PTPSession(transport: DebugNullTransport())
         self.debugData = debugData
         self.staAlbum = nil; self.isUSBConnection = false
+        self.usbTransport = nil; self.usbDeviceID = nil; self.usbSessionIdentity = nil
         self.prefetchedStorageIDs = [0x00010001, 0x00020001]
         self.prefetchedHandles = nil; self.directReader = nil
     }
@@ -238,64 +314,130 @@ actor CameraRepository {
         }) ?? false
     }
 
-    /// Executes Android's tap-focus transaction. Nikon cameras that support
-    /// StartTracking receive the tracking coordinates and then one AfDrive;
-    /// unsupported bodies fall back to ChangeAfArea followed by AfDrive.
+    /// RemoteLab.rcFocusAt: serialize whole AF lifetimes, retaining the PTP
+    /// mutex only for end-tracking -> target -> 80 ms -> AF-start. Frame/event
+    /// commands may run between subsequent DeviceReady polls.
     func focusAt(trackingX: UInt32, trackingY: UInt32,
                  focusX: UInt32, focusY: UInt32) async throws -> RemoteFocusResult {
-        if subjectTrackingActive {
-            _ = try? await session.execute(operation: PTPConstants.endTracking)
-            subjectTrackingActive = false
-        }
-        do {
-            _ = try await session.execute(operation: PTPConstants.startTracking,
-                                          parameters: [trackingX, trackingY])
-            subjectTrackingActive = true
-            try await Task.sleep(nanoseconds: 80_000_000)
-            let af = try await afDriveAndWait()
-            return RemoteFocusResult(trackingStarted: true, polls: af.polls,
-                                     timedOut: af.timedOut)
-        } catch PTPSessionError.responseCode(PTPConstants.operationNotSupported) {
-            _ = try await session.execute(operation: PTPConstants.changeAFArea,
-                                          parameters: [focusX, focusY])
-            try await Task.sleep(nanoseconds: 80_000_000)
-            let af = try await afDriveAndWait()
-            return RemoteFocusResult(trackingStarted: false, polls: af.polls,
-                                     timedOut: af.timedOut)
+        try await focusGate.withCommand { [self] in
+            try await tapFocusLocked(trackingX: trackingX, trackingY: trackingY, focusX: focusX, focusY: focusY)
         }
     }
 
-    /// Android's shutter half-press runs AF at the already selected focus area
-    /// without starting subject tracking or changing the area first.
+    private func tapFocusLocked(trackingX: UInt32, trackingY: UInt32,
+                                focusX: UInt32, focusY: UInt32) async throws -> RemoteFocusResult {
+        let deadline = ContinuousClock.now + .seconds(6)
+        let initial = try await session.withCommandSequence { [self] commands in
+            try await beginTapFocus(commands, deadline: deadline, trackingX: trackingX, trackingY: trackingY,
+                                    focusX: focusX, focusY: focusY)
+        }
+        guard initial.responseCode == PTPConstants.responseOK, !initial.timedOut else { return initial }
+        var result = try await waitForAutofocus(deadline: deadline, tracking: initial.trackingStarted)
+        result.trackingResponseCode = initial.trackingResponseCode
+        return result
+    }
+
+    private func beginTapFocus(_ commands: PTPCommandSequence, deadline: ContinuousClock.Instant,
+                                trackingX: UInt32, trackingY: UInt32,
+                                focusX: UInt32, focusY: UInt32) async throws -> RemoteFocusResult {
+        let end = try await endTrackingLocked(commands, deadline: deadline)
+        if subjectTrackingActive {
+            return .init(trackingStarted: false, polls: 0, timedOut: false,
+                         responseCode: end ?? PTPConstants.deviceBusy)
+        }
+        var trackingCode: UInt16?
+        if subjectTrackingSupported != false {
+            trackingCode = try await focusCommand(commands, operation: PTPConstants.startTracking,
+                parameters: [trackingX, trackingY], deadline: deadline)?.code
+            if trackingCode == PTPConstants.responseOK {
+                subjectTrackingSupported = true
+                subjectTrackingActive = true
+            } else if trackingCode == PTPConstants.operationNotSupported {
+                subjectTrackingSupported = false
+            } else {
+                return .init(trackingStarted: false, polls: 0, timedOut: trackingCode == nil,
+                             responseCode: trackingCode ?? PTPConstants.deviceBusy, trackingResponseCode: trackingCode)
+            }
+        }
+        if !subjectTrackingActive {
+            let moved = try await focusCommand(commands, operation: PTPConstants.changeAFArea,
+                parameters: [focusX, focusY], deadline: deadline)?.code
+            if moved != PTPConstants.responseOK {
+                return .init(trackingStarted: false, polls: 0, timedOut: moved == nil,
+                             responseCode: moved ?? PTPConstants.deviceBusy, trackingResponseCode: trackingCode)
+            }
+        }
+        try await Task.sleep(for: .milliseconds(80))
+        let af = try await focusCommand(commands, operation: PTPConstants.afDrive, deadline: deadline)?.code
+        return .init(trackingStarted: subjectTrackingActive, polls: 0, timedOut: af == nil,
+                     responseCode: af ?? PTPConstants.deviceBusy, trackingResponseCode: trackingCode)
+    }
+
     func halfPressFocus() async throws -> RemoteFocusResult {
-        let af = try await afDriveAndWait()
-        return RemoteFocusResult(trackingStarted: false, polls: af.polls,
-                                 timedOut: af.timedOut)
+        try await focusGate.withCommand { [self] in try await halfPressFocusLocked() }
+    }
+
+    private func halfPressFocusLocked() async throws -> RemoteFocusResult {
+        let deadline = ContinuousClock.now + .seconds(6)
+        let end = try await session.withCommandSequence { [self] commands in
+            try await endTrackingLocked(commands, deadline: deadline)
+        }
+        if subjectTrackingActive {
+            return .init(trackingStarted: false, polls: 0, timedOut: false,
+                         responseCode: end ?? PTPConstants.deviceBusy)
+        }
+        let af = try await session.withCommandSequence { [self] commands in
+            try await focusCommand(commands, operation: PTPConstants.afDrive, deadline: deadline)?.code
+        }
+        guard af == PTPConstants.responseOK else {
+            return .init(trackingStarted: false, polls: 0, timedOut: af == nil,
+                         responseCode: af ?? PTPConstants.deviceBusy)
+        }
+        return try await waitForAutofocus(deadline: deadline, tracking: false)
     }
 
     func endSubjectTracking() async throws {
-        guard subjectTrackingActive else { return }
-        do { _ = try await session.execute(operation: PTPConstants.endTracking) }
-        catch PTPSessionError.responseCode(PTPConstants.operationNotSupported) {}
-        catch PTPSessionError.responseCode(0xA002) {}
-        subjectTrackingActive = false
-    }
-
-    private func afDriveAndWait() async throws -> (polls: Int, timedOut: Bool) {
-        _ = try await session.execute(operation: PTPConstants.afDrive)
-        let deadline = ContinuousClock.now + .seconds(6)
-        var polls = 0
-        while ContinuousClock.now < deadline {
-            do {
-                _ = try await session.execute(operation: PTPConstants.deviceReady,
-                                              timeoutNanoseconds: 1_000_000_000)
-                return (polls, false)
-            } catch PTPSessionError.responseCode(PTPConstants.deviceBusy) {
-                polls += 1
-                try await Task.sleep(nanoseconds: 150_000_000)
+        try await focusGate.withCommand { [self] in
+            let deadline = ContinuousClock.now + .seconds(6)
+            _ = try await session.withCommandSequence { [self] commands in
+                try await endTrackingLocked(commands, deadline: deadline)
             }
         }
-        return (polls, true)
+    }
+
+    private func endTrackingLocked(_ commands: PTPCommandSequence, deadline: ContinuousClock.Instant) async throws -> UInt16? {
+        guard subjectTrackingActive else { return nil }
+        let code = try await focusCommand(commands, operation: PTPConstants.endTracking, deadline: deadline)?.code
+        if let code, [PTPConstants.responseOK, PTPConstants.operationNotSupported, 0xA004].contains(code) {
+            subjectTrackingActive = false
+        }
+        return code
+    }
+
+    private func focusCommand(_ commands: PTPCommandSequence, operation: UInt16, parameters: [UInt32] = [],
+                              deadline: ContinuousClock.Instant) async throws -> PTPResponse? {
+        let remaining = ContinuousClock.now.duration(to: deadline)
+        guard remaining > .zero else { return nil }
+        let nanoseconds = UInt64(remaining.components.seconds) * 1_000_000_000 +
+            UInt64(remaining.components.attoseconds / 1_000_000_000)
+        return try await commands.executeResponse(operation: operation, parameters: parameters,
+                                                   timeoutNanoseconds: nanoseconds)
+    }
+
+    private func waitForAutofocus(deadline: ContinuousClock.Instant, tracking: Bool) async throws -> RemoteFocusResult {
+        var polls = 0
+        while ContinuousClock.now < deadline {
+            let ready = try await session.withCommandSequence { [self] commands in
+                try await focusCommand(commands, operation: PTPConstants.deviceReady, deadline: deadline)?.code
+            }
+            guard let ready else { break }
+            polls += 1
+            if ready != PTPConstants.deviceBusy {
+                return .init(trackingStarted: tracking, polls: polls, timedOut: false, responseCode: ready)
+            }
+            if ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(150)) }
+        }
+        return .init(trackingStarted: tracking, polls: polls, timedOut: true, responseCode: PTPConstants.deviceBusy)
     }
 
     func remoteProperty(_ property: RemoteProperty) async throws -> RemotePropertyDescriptor? {
@@ -338,6 +480,13 @@ actor CameraRepository {
         return nil
     }
 
+    func remoteMovieMode() async throws -> Bool? {
+        let response = try await session.executeResponse(operation: PTPConstants.getDevicePropValue,
+                                                         parameters: [RemoteProperty.liveViewSelector.rawValue])
+        guard response.code == PTPConstants.responseOK, let value = response.data.first else { return nil }
+        return value != 0
+    }
+
     func remoteEvents() async throws -> [STAEvent] {
         if staAlbum != nil {
             let response = try await session.executeResponse(operation: PTPConstants.nikonCompatibilityInit)
@@ -352,6 +501,10 @@ actor CameraRepository {
     /// poll as Android RemoteLab. A successful call means the camera is ready
     /// to accept frame requests; callers still wait for the first frame.
     func startLiveView() async throws {
+        if liveViewImageOperation == nil {
+            liveViewImageOperation = cachedDeviceInfo?.operations.contains(PTPConstants.getLiveViewImageEx) == true
+                ? PTPConstants.getLiveViewImageEx : PTPConstants.getLiveViewImage
+        }
         var attempts = 0
         while true {
             do {
@@ -369,7 +522,8 @@ actor CameraRepository {
                 _ = try await session.execute(operation: PTPConstants.deviceReady,
                                               timeoutNanoseconds: 1_000_000_000)
                 return
-            } catch PTPSessionError.responseCode(let code) where code == PTPConstants.deviceBusy {
+            } catch PTPSessionError.responseCode(let code) {
+                if code != PTPConstants.deviceBusy { return }
                 try await Task.sleep(nanoseconds: 20_000_000)
             }
         }
@@ -378,26 +532,210 @@ actor CameraRepository {
     }
 
     func endLiveView() async {
-        _ = try? await session.execute(operation: PTPConstants.endLiveView)
+        try? await focusGate.withCommand { [self] in await endLiveViewLocked() }
     }
 
-    /// Requests one JPEG frame. Enhanced metadata frames are preferred and
-    /// fall back to the standard Nikon operation when unsupported.
-    func liveViewFrame(preferEnhanced: Bool = true) async throws -> Data {
-        if preferEnhanced {
-            do {
-                let data = try await session.execute(operation: PTPConstants.getLiveViewImageEx).data
-                if !data.isEmpty { return data }
-            } catch PTPSessionError.responseCode(let code)
-                where code == PTPConstants.operationNotSupported || code == 0xA00B {
-                // Fall through to the standard frame operation.
+    private func endLiveViewLocked() async {
+        let deadline = ContinuousClock.now + .seconds(6)
+        do {
+            try await session.withCommandSequence { [self] commands in
+                _ = try await endTrackingLocked(commands, deadline: deadline)
+                await clearSubjectTrackingState()
+                _ = try await focusCommand(commands, operation: PTPConstants.endLiveView, deadline: deadline)
+            }
+        } catch { subjectTrackingActive = false }
+    }
+
+    private func clearSubjectTrackingState() { subjectTrackingActive = false }
+
+    /// RemoteLab.labGrabFrame: advertised operation, sticky downgrade, and SOI
+    /// validation. Busy/not-in-LV do not count as enhanced capability failures.
+    func liveViewFrame() async throws -> RemoteLiveViewPacket {
+        try await session.withCommandSequence { [self] commands in
+            try await receiveLiveViewFrame(commands)
+        }
+    }
+
+    private func receiveLiveViewFrame(_ commands: PTPCommandSequence) async throws -> RemoteLiveViewPacket {
+        var operation = liveViewImageOperation ?? PTPConstants.getLiveViewImage
+        liveViewImageOperation = operation
+        var response = try await commands.executeResponse(operation: operation)
+        var offset = RemoteFrameParser.jpegStart(in: response.data)
+        if operation == PTPConstants.getLiveViewImageEx {
+            let enhancedFailure = (response.code != PTPConstants.responseOK &&
+                response.code != PTPConstants.deviceBusy && response.code != 0xA00B) ||
+                (response.code == PTPConstants.responseOK && offset == nil)
+            if response.code == PTPConstants.responseOK && offset != nil { liveViewEnhancedFailures = 0 }
+            else if enhancedFailure {
+                liveViewEnhancedFailures = response.code == PTPConstants.operationNotSupported ? 2 : liveViewEnhancedFailures + 1
+            }
+            if enhancedFailure && liveViewEnhancedFailures >= 2 {
+                operation = PTPConstants.getLiveViewImage
+                liveViewImageOperation = operation
+                liveViewEnhancedFailures = 0
+                response = try await commands.executeResponse(operation: operation)
+                offset = RemoteFrameParser.jpegStart(in: response.data)
             }
         }
-        return try await session.execute(operation: PTPConstants.getLiveViewImage).data
+        guard response.code == PTPConstants.responseOK else { throw PTPSessionError.responseCode(response.code) }
+        guard let offset else { throw CameraRepositoryError.invalidDataset }
+        return .init(bytes: response.data, jpegOffset: offset, operation: operation)
     }
 
     func capturePhoto() async throws {
-        _ = try await session.execute(operation: PTPConstants.captureInMedia)
+        let session = self.session
+        let response = try await RemoteMovieCommandRetry.execute {
+            try await session.executeResponse(operation: PTPConstants.captureInMedia,
+                                               parameters: [.max, 0]).code
+        }
+        guard response == PTPConstants.responseOK else { throw PTPSessionError.responseCode(response) }
+    }
+
+    /// Nikon USB movie control requires a genuinely fresh ImageCapture/PTP
+    /// session. DeviceInfo stays cached; the new session only drains stale
+    /// Nikon events before entering control mode, matching Android.
+    func refreshUSBRemoteSession() async throws -> String {
+        guard isUSBConnection, let transport = usbTransport, let deviceID = usbDeviceID,
+              let identity = usbSessionIdentity else { throw CameraRepositoryError.invalidDataset }
+        let oldSession = session
+        let oldToken = identity.snapshot().token
+        identity.beginRotation()
+        do {
+            let (newSession, newToken, drainCode) = try await oldSession.withCommandSequence { _ in
+                await transport.closeSession(for: deviceID, expectedSessionToken: oldToken)
+                try await Task.sleep(for: .milliseconds(100))
+                var finalError: Error = CameraTransportError.disconnected
+                for attempt in 0..<2 {
+                    do {
+                        try await AsyncDeadline.run(nanoseconds: 5_000_000_000,
+                                                    timeoutError: CameraTransportError.timeout) {
+                            try await transport.openSession(for: deviceID)
+                        }
+                        guard let token = transport.openedSessionToken(for: deviceID) else {
+                            throw CameraTransportError.disconnected
+                        }
+                        let next = PTPSession(transport: SelectedUSBPTPTransport(transport: transport,
+                                                                                 deviceID: deviceID,
+                                                                                 sessionToken: token),
+                                              defaultTimeoutNanoseconds: 60_000_000_000)
+                        let drain = try await next.executeResponse(operation: PTPConstants.nikonCompatibilityInit)
+                        return (next, token, drain.code)
+                    } catch {
+                        finalError = error
+                        if attempt == 0 { try await Task.sleep(for: .milliseconds(100)) }
+                    }
+                }
+                throw finalError
+            }
+            session = newSession
+            identity.finishRotation(token: newToken)
+            subjectTrackingActive = false
+            remoteControlModeSet = false
+            movieApplicationPropertySet = false
+            movieApplicationOperationSet = false
+            liveViewEnhancedFailures = 0
+            liveViewImageOperation = cachedDeviceInfo?.operations.contains(PTPConstants.getLiveViewImageEx) == true
+                ? PTPConstants.getLiveViewImageEx : PTPConstants.getLiveViewImage
+            return String(format: "session=0x%04X drain=0x%04X info=cached settle=100ms",
+                          PTPConstants.responseOK, drainCode)
+        } catch {
+            identity.cancelRotation()
+            throw error
+        }
+    }
+
+    func setRemoteControlMode(_ enabled: Bool) async throws -> UInt16 {
+        if enabled == remoteControlModeSet { return PTPConstants.responseOK }
+        let response = try await movieCommandWithBusyRetry(PTPConstants.setControlMode,
+                                                            parameters: [enabled ? 1 : 0])
+        if response == PTPConstants.responseOK { remoteControlModeSet = enabled }
+        return response
+    }
+
+    func hasRemoteControlMode() -> Bool { remoteControlModeSet }
+    func hasMovieApplicationMode() -> Bool {
+        movieApplicationPropertySet || movieApplicationOperationSet
+    }
+
+    func ensureMovieApplicationMode() async throws {
+        if !movieApplicationPropertySet {
+            let response = try await session.executeResponse(operation: PTPConstants.setDevicePropValue,
+                                                             parameters: [RemoteProperty.applicationMode.rawValue],
+                                                             data: Data([1])).code
+            if response == PTPConstants.responseOK { movieApplicationPropertySet = true }
+        }
+        if !movieApplicationOperationSet {
+            let response = try await session.executeResponse(operation: PTPConstants.nikonChangeApplicationMode,
+                                                             parameters: [1]).code
+            if response == PTPConstants.responseOK { movieApplicationOperationSet = true }
+        }
+    }
+
+    func clearMovieApplicationMode(force: Bool = false) async {
+        if isUSBConnection && remoteControlModeSet && !force { return }
+        if movieApplicationOperationSet {
+            let response = try? await session.executeResponse(operation: PTPConstants.nikonChangeApplicationMode,
+                                                              parameters: [0]).code
+            if response == PTPConstants.responseOK { movieApplicationOperationSet = false }
+        }
+        if movieApplicationPropertySet {
+            let response = try? await session.executeResponse(operation: PTPConstants.setDevicePropValue,
+                                                              parameters: [RemoteProperty.applicationMode.rawValue],
+                                                              data: Data([0])).code
+            if response == PTPConstants.responseOK { movieApplicationPropertySet = false }
+        }
+    }
+
+    /// USB preflight/application/start is one uninterrupted command sequence.
+    func startPreparedUSBMovieRecording() async throws -> RemoteMovieStartResult {
+        let operationWasSet = movieApplicationOperationSet
+        let propertyWasSet = movieApplicationPropertySet
+        let completed = try await session.withCommandSequence { commands in
+            var operationSet = operationWasSet
+            var propertySet = propertyWasSet
+            let extended = try await commands.executeResponse(operation: PTPConstants.getDevicePropValueEx,
+                                                              parameters: [0xD0A4]).code
+            func readProhibit() async throws -> UInt32? {
+                let response = try await commands.executeResponse(operation: PTPConstants.getDevicePropValue,
+                                                                 parameters: [0xD0A4])
+                guard response.code == PTPConstants.responseOK, response.data.count >= 4 else { return nil }
+                return response.data.withUnsafeBytes { $0.loadUnaligned(as: UInt32.self).littleEndian }
+            }
+            let preflight = try await readProhibit()
+            let needsApplication = preflight.map { $0 & (1 << 14) != 0 } ?? false
+            var appOperation: UInt16?
+            var appProperty: UInt16?
+            if needsApplication && !operationSet && !propertySet {
+                let response = try await commands.executeResponse(operation: PTPConstants.nikonChangeApplicationMode,
+                                                                 parameters: [1]).code
+                appOperation = response
+                if response == PTPConstants.responseOK { operationSet = true }
+                if response == PTPConstants.operationNotSupported {
+                    let property = try await commands.executeResponse(operation: PTPConstants.setDevicePropValue,
+                                                                     parameters: [RemoteProperty.applicationMode.rawValue],
+                                                                     data: Data([1])).code
+                    appProperty = property
+                    if property == PTPConstants.responseOK {
+                        propertySet = true
+                        _ = try await readProhibit()
+                    }
+                }
+            }
+            let ready = !needsApplication || operationSet || propertySet
+            let start = ready
+                ? try await commands.executeResponse(operation: PTPConstants.startMovieRecording).code
+                : (appProperty ?? appOperation ?? 0x200F)
+            let finalProhibit = start == PTPConstants.responseOK ? nil : (try await readProhibit() ?? preflight)
+            return (RemoteMovieStartResult(responseCode: start, prohibitCondition: finalProhibit,
+                                           prohibitExtendedResponse: extended,
+                                           applicationModeResponse: appOperation,
+                                           applicationModePropertyResponse: appProperty,
+                                           startCommandResponse: ready ? start : nil),
+                    operationSet, propertySet)
+        }
+        movieApplicationOperationSet = completed.1
+        movieApplicationPropertySet = completed.2
+        return completed.0
     }
 
     func startMovieRecording() async throws -> RemoteMovieStartResult {
@@ -425,18 +763,19 @@ actor CameraRepository {
         try await movieCommandWithBusyRetry(PTPConstants.endMovieRecording)
     }
 
-    private func movieCommandWithBusyRetry(_ operation: UInt16) async throws -> UInt16 {
+    private func movieCommandWithBusyRetry(_ operation: UInt16, parameters: [UInt32] = []) async throws -> UInt16 {
         let session = self.session
         return try await RemoteMovieCommandRetry.execute {
-            do { return try await session.execute(operation: operation).code }
+            do { return try await session.execute(operation: operation, parameters: parameters).code }
             catch PTPSessionError.responseCode(let response) { return response }
         }
     }
 
     func loadDeviceInfo() async throws -> PTPDeviceInfo {
-        if let info = staAlbum?.deviceInfo { return info }
+        if let info = cachedDeviceInfo { return info }
         let result = try await session.execute(operation: PTPConstants.getDeviceInfo)
         guard let info = PTPDatasetParser.parseDeviceInfo(result.data) else { throw CameraRepositoryError.invalidDataset }
+        cachedDeviceInfo = info
         return info
     }
 
@@ -862,7 +1201,8 @@ actor CameraRepository {
             }
             return PhotoScanResult(files: files, removedHandles: [],
                                    addedHandles: Set(files.map(\.id)),
-                                   handleQueriesSucceeded: true, metadataComplete: true)
+                                   handleQueriesSucceeded: true, metadataComplete: true,
+                                   filterStorageIDs: Array(Set(files.flatMap(\.storageIDs))).sorted())
         }
         #endif
 
@@ -893,11 +1233,15 @@ actor CameraRepository {
 
         let storageIDs: [UInt32]
         var groups: [(storage: UInt32, handles: [UInt32])]
+        var filterStorageIDs: [UInt32]
+        var directStorageIDsByHandle: [UInt32: Set<UInt32>] = [:]
         var handleQueriesSucceeded = true
         if let reusable {
             storageIDs = reusable.storageIDs
             groups = reusable.remainingHandles.map { ($0.storageID, $0.handles) }
             handleQueriesSucceeded = reusable.handleQueriesSucceeded
+            filterStorageIDs = reusable.filterStorageIDs
+            directStorageIDsByHandle = reusable.directStorageIDsByHandle
             scanSnapshot = reusable
         } else {
             let raw: [UInt32]
@@ -947,10 +1291,10 @@ actor CameraRepository {
                 publishCatalog()
                 return PhotoScanResult(files: existingFiles, removedHandles: removedHandles,
                                        addedHandles: [], handleQueriesSucceeded: false,
-                                       metadataComplete: true)
+                                       metadataComplete: true, filterStorageIDs: [])
             }
             let queries = storageIDs
-            groups = []
+            var rawGroups: [(storage: UInt32, handles: [UInt32])] = []
             for storage in queries {
                 let query = queryStorageID(storage)
                 var attempts = 1
@@ -966,27 +1310,38 @@ actor CameraRepository {
                     if staAlbum != nil { throw CameraRepositoryError.transportLost }
                     // Android keeps the partial list for a non-STA response
                     // failure and skips authoritative cache reconciliation.
-                    groups.append((storage, []))
+                    rawGroups.append((storage, []))
                     continue
                 }
                 // Nikon returns handles old→new; Android reverses every
                 // storage (USB, STA and aggregate queries) to read newest first.
-                // Keep duplicate handles across cards. Android's merged
-                // metadata stream reads both memberships and combines them by
-                // logical identity; a global handle set here would discard
-                // the second card before that merge can happen.
+                // Android's merged catalog keeps the first occurrence of an identical handle;
+                // direct STA derives all card memberships from raw groups.
                 let ordered = Array(result.handles.reversed())
-                groups.append((storage, ordered))
+                rawGroups.append((storage, ordered))
             }
-            let currentHandles = Set(groups.flatMap(\.handles))
+            if directReader != nil {
+                let layout = analyzeSTADirectStorageLayout(rawGroups.map { ($0.storage, $0.handles) })
+                directStorageIDsByHandle = layout.storageIDsByHandle
+                filterStorageIDs = layout.filterStorageIDs
+            } else {
+                filterStorageIDs = storageIDs
+            }
+            var seenHandles = Set<UInt32>()
+            groups = rawGroups.map { group in
+                (group.storage, group.handles.filter { seenHandles.insert($0).inserted })
+            }
+            let currentHandles = Set(rawGroups.flatMap(\.handles))
             if handleQueriesSucceeded {
                 if preserveExisting { removedHandles = knownHandles.subtracting(currentHandles) }
                 if detectNewHandles { addedHandles = currentHandles.subtracting(knownHandles) }
-                for handle in removedHandles { catalogFiles.removeValue(forKey: handle) }
                 for handle in removedHandles { indexedCatalogFiles.removeValue(forKey: handle) }
-                catalogOrder.removeAll { removedHandles.contains($0) }
-                existingFiles.removeAll { removedHandles.contains($0.id) }
-                existingHandles.subtract(removedHandles)
+                existingFiles = reconcilePublishedCameraFiles(existingFiles,
+                                                               currentHandles: currentHandles,
+                                                               indexedByHandle: indexedCatalogFiles)
+                catalogFiles = Dictionary(existingFiles.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+                catalogOrder = existingFiles.map(\.id)
+                existingHandles = Set(existingFiles.map(\.id))
                 knownHandles = currentHandles
                 catalogStorageIDs = storageIDs
             }
@@ -994,7 +1349,9 @@ actor CameraRepository {
                 storageIDs: storageIDs,
                 handleOrders: groups.map { ($0.storage, $0.handles) },
                 processedHandles: Set(existingHandles),
-                handleQueriesSucceeded: handleQueriesSucceeded
+                handleQueriesSucceeded: handleQueriesSucceeded,
+                filterStorageIDs: filterStorageIDs,
+                directStorageIDsByHandle: directStorageIDsByHandle
             )
             // Preserve the Android refresh contract: metadata is requested only
             // for handles not already published in this camera session.
@@ -1107,7 +1464,8 @@ actor CameraRepository {
                 if requests.isEmpty { break }
                 continue
             }
-            for file in output {
+            for rawFile in output {
+                let file = replacingStorageIDs(rawFile, with: directStorageIDsByHandle[rawFile.id] ?? [])
                 let key = logicalIdentity(file)
                 indexed[file.id] = file
                 if let old = byIdentity[key] {
@@ -1162,7 +1520,8 @@ actor CameraRepository {
         return PhotoScanResult(files: files, removedHandles: removedHandles,
                                addedHandles: addedHandles,
                                handleQueriesSucceeded: handleQueriesSucceeded,
-                               metadataComplete: metadataComplete)
+                               metadataComplete: metadataComplete,
+                               filterStorageIDs: filterStorageIDs)
     }
 
     private func logicalIdentity(_ file: CameraFile) -> String {
@@ -1273,9 +1632,17 @@ actor CameraRepository {
         guard backgroundReadsAllowed, !Task.isCancelled else { catalogSyncRequested = true; return }
         let removed = knownHandles.subtracting(current)
         for handle in removed {
-            catalogFiles.removeValue(forKey: handle); pendingObjects.removeValue(forKey: handle)
-            catalogOrder.removeAll { $0 == handle }
+            indexedCatalogFiles.removeValue(forKey: handle)
+            pendingObjects.removeValue(forKey: handle)
             await directReader?.invalidate(handle: handle)
+        }
+        if !removed.isEmpty {
+            let published = catalogOrder.compactMap { catalogFiles[$0] }
+            let reconciled = reconcilePublishedCameraFiles(published,
+                                                           currentHandles: current,
+                                                           indexedByHandle: indexedCatalogFiles)
+            catalogFiles = Dictionary(reconciled.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            catalogOrder = reconciled.map(\.id)
         }
         knownHandles.subtract(removed)
         if !removed.isEmpty { publishCatalog() }
@@ -1304,19 +1671,35 @@ actor CameraRepository {
             do {
                 let file: CameraFile
                 if let directReader {
-                    var storage = catalogStorageIDs.count == 1 ? catalogStorageIDs[0] : UInt32.max
-                    if catalogStorageIDs.count > 1 {
-                        for id in catalogStorageIDs {
-                            if try await loadObjectHandles(storageID: queryStorageID(id)).contains(handle) { storage = id; break }
-                        }
+                    var membershipGroups: [(storageID: UInt32, handles: [UInt32])] = []
+                    for id in catalogStorageIDs {
+                        let handles = try await loadObjectHandles(storageID: queryStorageID(id))
+                        membershipGroups.append((id, handles))
                     }
+                    let memberships = analyzeSTADirectStorageLayout(membershipGroups)
+                        .storageIDsByHandle[handle] ?? []
+                    let storage = memberships.count == 1 ? memberships.first! : UInt32.max
                     let resolvedStorage = storage
-                    file = try await ioGate.withCommand { try await directReader.file(handle: handle, storage: resolvedStorage) }
+                    let resolved = try await ioGate.withCommand {
+                        try await directReader.file(handle: handle, storage: resolvedStorage)
+                    }
+                    file = replacingStorageIDs(resolved, with: memberships)
                 } else { file = try await loadObjectInfo(handle: handle) }
                 guard backgroundReadsAllowed, !Task.isCancelled else { return }
                 if pendingObjects.removeValue(forKey: handle) != nil {
-                    knownHandles.insert(handle); catalogFiles[handle] = file
-                    catalogOrder.append(handle)
+                    knownHandles.insert(handle)
+                    indexedCatalogFiles[handle] = file
+                    if let existingIndex = catalogOrder.firstIndex(where: {
+                        guard let existing = catalogFiles[$0] else { return false }
+                        return catalogLogicalIdentity(existing) == catalogLogicalIdentity(file)
+                    }), let existing = catalogFiles[catalogOrder[existingIndex]] {
+                        let memberships = existing.storageIDs.union(file.storageIDs)
+                        catalogFiles[existing.id] = replacingStorageIDs(existing, with: memberships)
+                    } else {
+                        catalogFiles[handle] = file
+                        // Android publishes new camera objects at the front.
+                        catalogOrder.insert(handle, at: 0)
+                    }
                     publishCatalog()
                 }
             } catch {

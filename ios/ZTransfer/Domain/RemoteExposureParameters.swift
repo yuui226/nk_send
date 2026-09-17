@@ -25,6 +25,7 @@ enum RemoteProperty: UInt32, CaseIterable, Sendable {
     case movieExposureCompensation = 0xD1AB
     case liveViewSelector = 0xD1A6
     case liveViewImageSize = 0xD1AC
+    case applicationMode = 0xD1F0
 }
 
 enum RemoteExposureField: Hashable, Identifiable, Sendable {
@@ -38,6 +39,32 @@ struct RemotePropertyDescriptor: Equatable, Sendable {
     let writable: Bool
     var current: UInt64
     let values: [UInt64]
+
+    /// RemoteLab.rcIsBinaryToggle: Nikon may omit the enum for a writable byte switch.
+    var isBinaryToggle: Bool {
+        writable && ((values.contains(0) && values.contains { $0 != 0 }) ||
+            (values.isEmpty && [0x0001, 0x0002].contains(dataType) && current <= 1))
+    }
+
+    /// Invalid/unknown values are not percentages (RemoteLab.rcBatteryPercentage).
+    var batteryPercentage: Int? {
+        guard property == .batteryLevel, dataType == 0x0002, current <= 100 else { return nil }
+        return Int(current)
+    }
+
+    /// RemoteLab.rcAngleLevelRoll, including integer-degree legacy cameras and wraparound.
+    var angleLevelRoll: Double? {
+        let degrees: Double
+        switch dataType {
+        case 0x0005, 0x0006: degrees = Double(Int64(bitPattern: current)) / 65536
+        case 0x0001...0x0004: degrees = Double(Int64(bitPattern: current))
+        default: return nil
+        }
+        var roll = degrees.truncatingRemainder(dividingBy: 360)
+        if roll > 180 { roll -= 360 }
+        if roll <= -180 { roll += 360 }
+        return roll
+    }
 
     init(property: RemoteProperty, dataType: UInt16 = 0x0006, writable: Bool,
          current: UInt64, values: [UInt64]) {
@@ -145,7 +172,62 @@ enum RemoteExposureParameters {
         case .nikonAFMode:
             return [0: "AF-S", 1: "AF-C", 2: "AF-A"][raw] ?? String(format: "0x%llx", raw)
         case .angleLevel: return String(format: "%.1f°", Double(Int64(bitPattern: raw)) / 65536)
-        case .liveViewImageSize: return String(raw)
+        case .liveViewImageSize, .applicationMode: return String(raw)
         }
+    }
+}
+
+struct RemotePropertySetResult: Sendable {
+    let responseCode: UInt16
+    let actual: RemotePropertyDescriptor?
+    let confirmed: Bool
+}
+
+extension RemoteCameraControlling {
+    /// RemoteLab.rcSetValueVerified. Superseding a value stops at transaction
+    /// boundaries so cancelling a UI edit cannot corrupt the shared PTP stream.
+    func setRemotePropertyVerified(_ descriptor: RemotePropertyDescriptor, value: UInt64,
+                                  isCurrent: @Sendable () async -> Bool = { true }) async throws -> RemotePropertySetResult {
+        func checkCurrent() async throws {
+            guard await isCurrent() else { throw CancellationError() }
+        }
+        func write() async throws -> UInt16 {
+            try await checkCurrent()
+            do { try await setRemoteProperty(descriptor, value: value); return PTPConstants.responseOK }
+            catch PTPSessionError.responseCode(let code) { return code }
+        }
+        var response = try await write()
+        for wait in [120, 240] where response == PTPConstants.deviceBusy {
+            try await Task.sleep(for: .milliseconds(wait))
+            response = try await write()
+        }
+        guard response == PTPConstants.responseOK else {
+            return .init(responseCode: response, actual: nil, confirmed: false)
+        }
+        var actual: RemotePropertyDescriptor?
+        func readBack(_ waits: [Int]) async throws -> Bool {
+            for wait in waits {
+                try await Task.sleep(for: .milliseconds(wait))
+                try await checkCurrent()
+                do {
+                    if let next = try await refreshRemoteProperty(descriptor) {
+                        actual = next
+                        if next.current == value { return true }
+                    }
+                } catch PTPSessionError.responseCode(_) { }
+            }
+            return false
+        }
+        if try await readBack([40, 90, 160]) {
+            return .init(responseCode: response, actual: actual, confirmed: true)
+        }
+        if actual != nil {
+            try await Task.sleep(for: .milliseconds(100))
+            response = try await write()
+            if response == PTPConstants.responseOK, try await readBack([70, 150]) {
+                return .init(responseCode: response, actual: actual, confirmed: true)
+            }
+        }
+        return .init(responseCode: response, actual: actual, confirmed: false)
     }
 }

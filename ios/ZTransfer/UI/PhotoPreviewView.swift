@@ -1,6 +1,38 @@
 import SwiftUI
 import UIKit
 
+@preconcurrency
+private struct PhotoPreviewAnchorTransform: AnimatableModifier {
+    var progress: CGFloat
+    let anchor: CGRect?
+    let enabled: Bool
+    let closing: Bool
+
+    nonisolated var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    func body(content: Content) -> some View {
+        let viewport = UIScreen.main.bounds
+        let validAnchor = anchor.flatMap { rect in
+            rect.width > 0 && rect.height > 0 && viewport.width > 0 && viewport.height > 0 ? rect : nil
+        }
+        let shouldAnchor = enabled && validAnchor != nil
+        let startScale = validAnchor.map { min(max($0.width / viewport.width, 0.05), 1) } ?? 1
+        let scale = shouldAnchor ? startScale + (1 - startScale) * progress : 1
+        let origin = validAnchor.map {
+            UnitPoint(
+                x: min(max(($0.midX - viewport.minX) / viewport.width, 0), 1),
+                y: min(max(($0.midY - viewport.minY) / viewport.height, 0), 1)
+            )
+        } ?? .center
+        content
+            .scaleEffect(scale, anchor: origin)
+            .opacity(shouldAnchor ? (closing ? min(progress * 1.6, 1) : 1) : progress)
+    }
+}
+
 enum LocalOriginalPreviewRoute: Equatable {
     case directBitmap
     case rawEmbeddedJPEG
@@ -8,6 +40,30 @@ enum LocalOriginalPreviewRoute: Equatable {
 }
 
 private let videoFourGiB = UInt64(4) * 1024 * 1024 * 1024
+
+func formatPreviewCaptureDate(_ raw: String?) -> String? {
+    guard let raw, raw.count >= 8, raw.prefix(8).allSatisfy(\.isNumber),
+          let year = Int(raw.prefix(4)),
+          let month = Int(raw.dropFirst(4).prefix(2)),
+          let day = Int(raw.dropFirst(6).prefix(2)) else { return nil }
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+    guard let dateValue = calendar.date(from: DateComponents(year: year, month: month, day: day)) else {
+        return nil
+    }
+    let resolved = calendar.dateComponents([.year, .month, .day], from: dateValue)
+    guard resolved.year == year, resolved.month == month, resolved.day == day else { return nil }
+    let date = String(format: "%04d-%02d-%02d", year, month, day)
+    guard raw.count >= 15, raw.dropFirst(8).first == "T",
+          raw.dropFirst(9).prefix(6).allSatisfy(\.isNumber),
+          let hour = Int(raw.dropFirst(9).prefix(2)),
+          let minute = Int(raw.dropFirst(11).prefix(2)),
+          let second = Int(raw.dropFirst(13).prefix(2)),
+          (0...23).contains(hour), (0...59).contains(minute), (0...59).contains(second) else {
+        return date
+    }
+    return date + String(format: " %02d:%02d:%02d", hour, minute, second)
+}
 
 private func videoPreviewMetadata(file: CameraFile) -> String {
     var values: [String] = []
@@ -23,20 +79,7 @@ private func videoPreviewMetadata(file: CameraFile) -> String {
             values.append(String(format: "%.2f GB", Double(bytes) / (1024 * 1024 * 1024)))
         }
     }
-    if let raw = file.captureDate, raw.count >= 8,
-       let year = Int(raw.prefix(4)), let month = Int(raw.dropFirst(4).prefix(2)),
-       let day = Int(raw.dropFirst(6).prefix(2)),
-       (1...12).contains(month), (1...31).contains(day) {
-        var date = String(format: "%04d-%02d-%02d", year, month, day)
-        if raw.count >= 15, raw.dropFirst(8).first == "T",
-           let hour = Int(raw.dropFirst(9).prefix(2)),
-           let minute = Int(raw.dropFirst(11).prefix(2)),
-           let second = Int(raw.dropFirst(13).prefix(2)),
-           (0...23).contains(hour), (0...59).contains(minute), (0...59).contains(second) {
-            date += String(format: " %02d:%02d:%02d", hour, minute, second)
-        }
-        values.append(date)
-    }
+    if let date = formatPreviewCaptureDate(file.captureDate) { values.append(date) }
     return values.joined(separator: "  ·  ")
 }
 
@@ -85,6 +128,10 @@ struct PhotoPreviewView: View {
     let onBurstChanged: (String, Bool) -> Void
     let onQueueFlightStarted: (Int) -> Void
     let onQueueFlightFinished: (Int) -> Void
+    let initialAnchor: CGRect?
+    let prepareDismissTarget: (CameraFile) async -> CGRect?
+    let onDismiss: (CameraFile?) -> Void
+    private let initialIndex: Int
     @State private var index: Int
     @State private var previewEntries: [PhotoPreviewEntry]
     @State private var rotationDegrees: Double = 0
@@ -99,8 +146,16 @@ struct PhotoPreviewView: View {
     // that reference so enabling the histogram never starts another camera
     // read or decodes the same image a second time.
     @State private var displayedImages: [UInt32: UIImage] = [:]
+    @State private var highResolutionImages: [UInt32: UIImage] = [:]
+    @State private var highResolutionLoading: Set<UInt32> = []
+    @State private var localHighResolutionSources: [UInt32: URL] = [:]
+    @State private var localDecodeFailures: [UInt32: URL] = [:]
     @State private var fhdUnavailable: Set<UInt32> = []
+    @State private var exifByFile: [UInt32: PhotoExif] = [:]
     @State private var exifFinished: Set<UInt32> = []
+    @State private var deferredLoadsEnabled = false
+    @State private var previousTransfersBusy = false
+    @State private var neighborPrefetchTask: Task<Void, Never>?
     @State private var queueDragOffset: CGFloat = 0
     @State private var currentZoomed = false
     @State private var queueFlightTask: Task<Void, Never>?
@@ -110,6 +165,16 @@ struct PhotoPreviewView: View {
     @State private var queueFlightImages: [UIImage?] = []
     @State private var queueFlightCount = 0
     @State private var expandedBurstIDs: Set<String> = []
+    @State private var presentationProgress: CGFloat = 0
+    @State private var closing = false
+    @State private var collapseAnchor: CGRect?
+    @State private var burstTransitionBusy = false
+    @State private var burstTransitionTask: Task<Void, Never>?
+    @State private var animatedBurstID: String?
+    @State private var burstStackMotion: CGFloat = 0
+    @State private var burstPagerScale: CGFloat = 1
+    @State private var burstPagerAlpha: CGFloat = 1
+    @State private var burstPagerSlide: CGFloat = 0
     /// Android snapshots already-exported originals when the preview overlay
     /// opens; a transfer completing underneath must not replace the source of
     /// the current page halfway through its load.
@@ -120,24 +185,30 @@ struct PhotoPreviewView: View {
          selectedFile: Binding<CameraFile?>,
          directory: URL? = nil, organizeByDate: Bool = false,
          queueTarget: CGRect? = nil,
+         initialAnchor: CGRect? = nil,
          initialExpandedBurstIDs: Set<String> = [],
          collapseBursts: Bool = true,
          onBurstChanged: @escaping (String, Bool) -> Void = { _, _ in },
          onEnqueue: @escaping (CameraFile) -> Bool = { _ in false },
          onEnqueueBurst: @escaping ([CameraFile]) -> Bool = { _ in false },
          onQueueFlightStarted: @escaping (Int) -> Void = { _ in },
-         onQueueFlightFinished: @escaping (Int) -> Void = { _ in }) {
+         onQueueFlightFinished: @escaping (Int) -> Void = { _ in },
+         prepareDismissTarget: @escaping (CameraFile) async -> CGRect? = { _ in nil },
+         onDismiss: @escaping (CameraFile?) -> Void = { _ in }) {
         self.queueModel = queueModel
         self.session = session; self.files = files; self.directory = directory
         self.burstGroups = PhotoCatalogGrouping.bursts(in: files)
         self.burstIDByFile = burstIDByFile
         self.transferredFileIDs = transferredFileIDs
         self.queueTarget = queueTarget
+        self.initialAnchor = initialAnchor
         self.organizeByDate = organizeByDate; _selectedFile = selectedFile
         self.onEnqueue = onEnqueue; self.onEnqueueBurst = onEnqueueBurst
         self.onQueueFlightStarted = onQueueFlightStarted
         self.onQueueFlightFinished = onQueueFlightFinished
         self.onBurstChanged = onBurstChanged
+        self.prepareDismissTarget = prepareDismissTarget
+        self.onDismiss = onDismiss
         var entries = collapseBursts ? collapsedPhotoPreviewEntries(files: files, burstIDByFile: burstIDByFile)
                                      : files.map { PhotoPreviewEntry.photo($0, burstID: burstIDByFile[$0.id]) }
         for position in entries.indices.reversed() {
@@ -155,8 +226,10 @@ struct PhotoPreviewView: View {
                 }
             }
         } ?? 0
+        self.initialIndex = initialIndex
         _previewEntries = State(initialValue: entries)
         _index = State(initialValue: initialIndex)
+        _collapseAnchor = State(initialValue: initialAnchor)
         var sources: [UInt32: URL] = [:]
         if let directory {
             for file in files {
@@ -175,47 +248,53 @@ struct PhotoPreviewView: View {
 
     var body: some View {
         ZStack {
-            Color.black.opacity(0.74).ignoresSafeArea()
+            Color.black.opacity(0.74 * presentationProgress).ignoresSafeArea()
             TabView(selection: $index) {
                 ForEach(Array(previewEntries.enumerated()), id: \.element.id) { itemIndex, entry in
                     Group {
                         switch entry {
                         case .photo(let file, _):
                             PreviewImage(session: session, file: file,
-                                         localOriginalURL: localOriginalURLs[file.id],
+                                         highResolutionImage: highResolutionImages[file.id],
                                          rotationDegrees: rotationDegrees,
                                          zoomEnabled: !file.fileExtension.lowercased().hasSuffix(".mov") &&
                                             !file.fileExtension.lowercased().hasSuffix(".mp4"),
                                          allowRemoteThumbnailFallback: fhdUnavailable.contains(file.id) &&
                                             exifFinished.contains(file.id),
-                                         onFHDUnavailable: { unavailable in
-                                             if unavailable { fhdUnavailable.insert(file.id) }
-                                             else { fhdUnavailable.remove(file.id) }
-                                         },
-                                         onRemoteExif: { metadata in
-                                             guard currentPhoto?.id == file.id else { return }
-                                             exif = metadata
-                                             exifFinished.insert(file.id)
-                                         },
                                          onDisplayImage: { image in
-                                             displayedImages[file.id] = image
+                                             let retained = retainedPhotoPreviewIDs(
+                                                entries: previewEntries, currentIndex: index
+                                             )
+                                             if retained.contains(file.id) { displayedImages[file.id] = image }
                                              guard histogramVisible, currentPhoto?.id == file.id else { return }
                                              histogramBars = image.map(luminanceHistogram) ?? []
-                                         }, onHighResolutionLoaded: {
-                                             if currentPhoto?.id == file.id { ZTransferHaptics.shared.tick() }
-                                         }, onTap: { selectedFile = nil },
+                                         }, onTap: startClose,
                                          onZoomedChange: { zoomed in if index == itemIndex { currentZoomed = zoomed } },
                                          isCurrent: index == itemIndex)
                         case .burst(let group):
-                            BurstCollectionPreview(session: session, group: group, onTap: { selectedFile = nil })
+                            BurstCollectionPreview(
+                                session: session,
+                                group: group,
+                                stackMotion: animatedBurstID == group.id ? burstStackMotion : 0,
+                                onTap: startClose
+                            )
                         }
                     }
                         .tag(itemIndex)
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
+            .modifier(PhotoPreviewAnchorTransform(
+                progress: presentationProgress,
+                anchor: closing ? collapseAnchor : initialAnchor,
+                enabled: closing ? collapseAnchor != nil : index == initialIndex,
+                closing: closing
+            ))
+            .scaleEffect(burstPagerScale)
+            .opacity(burstPagerAlpha)
+            .offset(x: UIScreen.main.bounds.width * burstPagerSlide)
             .offset(y: queueDragOffset)
-            .allowsHitTesting(!queueFlightActive)
+            .allowsHitTesting(!queueFlightActive && !closing && !burstTransitionBusy)
             .simultaneousGesture(
                 DragGesture(minimumDistance: 8)
                     .onChanged { value in
@@ -341,11 +420,20 @@ struct PhotoPreviewView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
             }
         }
+        .allowsHitTesting(!burstTransitionBusy && !closing)
         .onAppear {
             rotationQuarterTurns = ((rotationQuarterTurns % 4) + 4) % 4
             rotationDegrees = -90 * Double(rotationQuarterTurns)
+            previousTransfersBusy = queueModel.snapshot.isTransferring
+            withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.34)) {
+                presentationProgress = 1
+            }
         }
         .onDisappear {
+            burstTransitionTask?.cancel()
+            burstTransitionTask = nil
+            neighborPrefetchTask?.cancel()
+            neighborPrefetchTask = nil
             queueFlightTask?.cancel()
             queueFlightTask = nil
             if queueFlightCount > 0 { onQueueFlightFinished(queueFlightCount) }
@@ -363,38 +451,215 @@ struct PhotoPreviewView: View {
                 exif = nil
                 exifLoading = false
                 currentZoomed = false
+                trimPreviewState()
             }
+        }
+        .onChange(of: queueModel.snapshot.isTransferring) { busy in
+            let shouldResumePrefetch = previousTransfersBusy && !busy
+            previousTransfersBusy = busy
+            guard shouldResumePrefetch, deferredLoadsEnabled else { return }
+            neighborPrefetchTask?.cancel()
+            let currentIndex = index
+            neighborPrefetchTask = Task { await prefetchNeighbors(around: currentIndex, allowCameraRequest: true) }
         }
         .onChange(of: histogramVisible) { visible in
             guard visible, let file = currentPhoto,
                   let image = displayedImages[file.id] else { return }
             histogramBars = luminanceHistogram(image)
         }
-        .task(id: previewEntries.indices.contains(index) ? previewEntries[index].id : "none") {
-            guard let file = currentPhoto, !exifLoading else { return }
-            histogramBars = []
-            exifLoading = true
-            if let localURL = localOriginalURLs[file.id] {
-                if let data = try? Data(contentsOf: localURL) {
-                    exif = PhotoExifParser.parse(data)
-                }
-                exifFinished.insert(file.id)
-                exifLoading = false
-                return
-            }
-            // Remote EXIF is loaded by PreviewImage in the same interactive
-            // reservation as FHD. Local originals remain on this path above.
-            guard localOriginalURLs[file.id] != nil else {
-                exifLoading = false
-                return
-            }
-            exifLoading = false
+        .task {
+            await session.setFHDActive(true)
+            do {
+                try await Task.sleep(nanoseconds: 340_000_000)
+                guard !Task.isCancelled else { throw CancellationError() }
+                deferredLoadsEnabled = true
+                try await Task.sleep(nanoseconds: .max)
+            } catch {}
+            await session.setFHDActive(false)
+        }
+        .task(id: previewLoadIdentity) {
+            guard deferredLoadsEnabled else { return }
+            await loadCurrentThenNeighbors()
         }
     }
 
     private var currentPhoto: CameraFile? {
         guard previewEntries.indices.contains(index) else { return nil }
         return previewEntries[index].file
+    }
+
+    private func startClose() {
+        guard !closing, !burstTransitionBusy else { return }
+        closing = true
+        queueFlightTask?.cancel()
+        queueFlightTask = nil
+        let returnFile = currentPhoto
+        Task { @MainActor in
+            collapseAnchor = if let returnFile {
+                await prepareDismissTarget(returnFile)
+            } else {
+                nil
+            }
+            withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.26)) {
+                presentationProgress = 0
+            }
+            try? await Task.sleep(nanoseconds: 260_000_000)
+            onDismiss(collapseAnchor == nil ? nil : returnFile)
+        }
+    }
+
+    private var previewLoadIdentity: String {
+        let entryID = previewEntries.indices.contains(index) ? previewEntries[index].id : "none"
+        return "\(entryID)|\(deferredLoadsEnabled)"
+    }
+
+    @MainActor
+    private func loadCurrentThenNeighbors() async {
+        trimPreviewState()
+        guard let file = currentPhoto else {
+            exif = nil
+            histogramBars = []
+            return
+        }
+        histogramBars = []
+        exif = exifByFile[file.id]
+        exifLoading = !exifFinished.contains(file.id)
+
+        let loadedLocally = await loadHighResolution(at: index, allowCameraRequest: false)
+        guard !Task.isCancelled else { return }
+        if loadedLocally { ZTransferHaptics.shared.tick() }
+
+        let localResolved = localOriginalURLs[file.id].map {
+            localHighResolutionSources[file.id] == $0
+        } ?? false
+        if localResolved {
+            await loadLocalExif(file: file)
+        } else {
+            let needsPreview = !isVideo(file) && highResolutionImages[file.id] == nil
+            highResolutionLoading.insert(file.id)
+            defer { highResolutionLoading.remove(file.id) }
+            let (data, metadata) = await session.previewAndExif(file: file, loadPreview: needsPreview)
+            guard !Task.isCancelled else { return }
+            finishRemoteCurrentLoad(file: file, data: data, metadata: metadata)
+        }
+        guard !Task.isCancelled else { return }
+        await prefetchNeighbors(around: index, allowCameraRequest: !queueModel.snapshot.isTransferring)
+    }
+
+    @MainActor
+    private func loadHighResolution(at page: Int, allowCameraRequest: Bool) async -> Bool {
+        guard previewEntries.indices.contains(page), let file = previewEntries[page].file else { return false }
+        let id = file.id
+        if isVideo(file) {
+            fhdUnavailable.insert(id)
+            return false
+        }
+        if let existing = highResolutionImages[id] {
+            if let source = localHighResolutionSources[id], source != localOriginalURLs[id] {
+                highResolutionImages.removeValue(forKey: id)
+                displayedImages.removeValue(forKey: id)
+                localHighResolutionSources.removeValue(forKey: id)
+            } else {
+                _ = existing
+                fhdUnavailable.remove(id)
+                return false
+            }
+        }
+        guard !highResolutionLoading.contains(id) else { return false }
+        highResolutionLoading.insert(id)
+        defer { highResolutionLoading.remove(id) }
+
+        if let source = localOriginalURLs[id],
+           localOriginalPreviewRoute(for: file.fileExtension) != .cameraFHD,
+           localDecodeFailures[id] != source {
+            let route = localOriginalPreviewRoute(for: file.fileExtension)
+            let localImage = await Task.detached(priority: .userInitiated) {
+                decodeLocalOriginalPreview(at: source, route: route)
+            }.value
+            guard !Task.isCancelled else { return false }
+            if let localImage {
+                highResolutionImages[id] = localImage
+                displayedImages[id] = localImage
+                localHighResolutionSources[id] = source
+                localDecodeFailures.removeValue(forKey: id)
+                fhdUnavailable.remove(id)
+                return true
+            }
+            localDecodeFailures[id] = source
+        }
+        guard allowCameraRequest, !Task.isCancelled else { return false }
+        guard let data = try? await session.preview(handle: id),
+              !Task.isCancelled,
+              let image = UIImage(data: data) else {
+            if !Task.isCancelled { fhdUnavailable.insert(id) }
+            return false
+        }
+        highResolutionImages[id] = image
+        displayedImages[id] = image
+        localHighResolutionSources.removeValue(forKey: id)
+        fhdUnavailable.remove(id)
+        return true
+    }
+
+    @MainActor
+    private func loadLocalExif(file: CameraFile) async {
+        guard !exifFinished.contains(file.id) else {
+            exif = exifByFile[file.id]
+            exifLoading = false
+            return
+        }
+        let metadata: PhotoExif?
+        if let source = localOriginalURLs[file.id], let data = try? Data(contentsOf: source) {
+            metadata = PhotoExifParser.parse(data)
+        } else {
+            metadata = nil
+        }
+        guard !Task.isCancelled else { return }
+        if let metadata { exifByFile[file.id] = metadata }
+        exifFinished.insert(file.id)
+        if currentPhoto?.id == file.id {
+            exif = metadata
+            exifLoading = false
+        }
+    }
+
+    @MainActor
+    private func finishRemoteCurrentLoad(file: CameraFile, data: Data?, metadata: PhotoExif?) {
+        if let data, let image = UIImage(data: data) {
+            highResolutionImages[file.id] = image
+            displayedImages[file.id] = image
+            localHighResolutionSources.removeValue(forKey: file.id)
+            fhdUnavailable.remove(file.id)
+            ZTransferHaptics.shared.tick()
+        } else {
+            fhdUnavailable.insert(file.id)
+        }
+        if let metadata { exifByFile[file.id] = metadata }
+        exifFinished.insert(file.id)
+        if currentPhoto?.id == file.id {
+            exif = metadata
+            exifLoading = false
+        }
+    }
+
+    @MainActor
+    private func prefetchNeighbors(around page: Int, allowCameraRequest: Bool) async {
+        for neighbor in neighboringPhotoPreviewIndices(entries: previewEntries, currentIndex: page) {
+            guard !Task.isCancelled, index == page else { return }
+            _ = await loadHighResolution(at: neighbor, allowCameraRequest: allowCameraRequest)
+        }
+    }
+
+    @MainActor
+    private func trimPreviewState() {
+        let keep = retainedPhotoPreviewIDs(entries: previewEntries, currentIndex: index)
+        highResolutionImages = highResolutionImages.filter { keep.contains($0.key) }
+        localHighResolutionSources = localHighResolutionSources.filter { keep.contains($0.key) }
+        displayedImages = displayedImages.filter { keep.contains($0.key) }
+        fhdUnavailable.formIntersection(keep)
+        localDecodeFailures = localDecodeFailures.filter { keep.contains($0.key) }
+        exifByFile = exifByFile.filter { keep.contains($0.key) }
+        exifFinished.formIntersection(keep)
     }
 
     private func isVideo(_ file: CameraFile) -> Bool {
@@ -407,34 +672,100 @@ struct PhotoPreviewView: View {
     }
 
     private func collapseCurrentBurst() {
+        guard !closing, !burstTransitionBusy, !queueFlightActive,
+              abs(queueDragOffset) < 0.5 else { return }
         guard let collectionIndex = photoPreviewCollectionIndex(previewEntries, memberIndex: index),
               case let .burst(group) = previewEntries[collectionIndex] else { return }
+        burstTransitionBusy = true
+        animatedBurstID = group.id
         ZTransferHaptics.shared.tick()
-        withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.26)) {
-            previewEntries = collapsePhotoPreviewBurst(previewEntries, burstID: group.id)
-            expandedBurstIDs.remove(group.id)
+        burstTransitionTask?.cancel()
+        burstTransitionTask = Task { @MainActor in
+            burstStackMotion = 1
+            withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.12)) {
+                burstPagerScale = 0.985
+                burstPagerAlpha = 0
+                burstPagerSlide = 0.22
+            }
+            try? await Task.sleep(nanoseconds: 120_000_000)
+            guard !Task.isCancelled else { return }
+            let transaction = Transaction(animation: nil)
+            withTransaction(transaction) {
+                index = collectionIndex
+                previewEntries = collapsePhotoPreviewBurst(previewEntries, burstID: group.id)
+                expandedBurstIDs.remove(group.id)
+                selectedFile = group.files.first
+                burstPagerSlide = -0.22
+            }
             onBurstChanged(group.id, false)
-            index = collectionIndex
-            selectedFile = group.files.first
+            await Task.yield()
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.7)) {
+                burstStackMotion = 0
+                burstPagerScale = 1
+            }
+            withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.15)) {
+                burstPagerAlpha = 1
+            }
+            withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.165)) {
+                burstPagerSlide = 0
+            }
+            try? await Task.sleep(nanoseconds: 260_000_000)
+            guard !Task.isCancelled else { return }
+            resetBurstTransition()
         }
     }
 
     private func expandBurst(_ group: BurstPhotoGroup) {
+        guard !closing, !burstTransitionBusy, !group.files.isEmpty else { return }
         guard let collectionIndex = previewEntries.firstIndex(where: { entry in
             if case .burst(let value) = entry { return value.id == group.id }
             return false
-        }) else { return }
+        }), index == collectionIndex else { return }
+        burstTransitionBusy = true
+        animatedBurstID = group.id
         ZTransferHaptics.shared.tick()
-        withAnimation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.28)) {
-            if !expandedBurstIDs.contains(group.id) { previewEntries = expandPhotoPreviewBurst(previewEntries, at: collectionIndex) }
-            expandedBurstIDs.insert(group.id)
-            onBurstChanged(group.id, true)
-            index = collectionIndex + 1
+        burstTransitionTask?.cancel()
+        burstTransitionTask = Task { @MainActor in
+            burstStackMotion = 0
+            if !expandedBurstIDs.contains(group.id) {
+                let transaction = Transaction(animation: nil)
+                withTransaction(transaction) {
+                    previewEntries = expandPhotoPreviewBurst(previewEntries, at: collectionIndex)
+                    expandedBurstIDs.insert(group.id)
+                }
+                onBurstChanged(group.id, true)
+                await Task.yield()
+            }
+            withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.165)) {
+                burstStackMotion = 1
+            }
+            try? await Task.sleep(nanoseconds: 24_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.205)) {
+                index = collectionIndex + 1
+            }
             selectedFile = group.files.first
+            try? await Task.sleep(nanoseconds: 205_000_000)
+            guard !Task.isCancelled else { return }
+            resetBurstTransition()
+        }
+    }
+
+    private func resetBurstTransition() {
+        let transaction = Transaction(animation: nil)
+        withTransaction(transaction) {
+            burstStackMotion = 0
+            burstPagerScale = 1
+            burstPagerAlpha = 1
+            burstPagerSlide = 0
+            animatedBurstID = nil
+            burstTransitionBusy = false
+            burstTransitionTask = nil
         }
     }
 
     private func startQueueFlight(for file: CameraFile, burstFiles: [CameraFile]? = nil) {
+        guard !closing, !burstTransitionBusy, !queueFlightActive else { return }
         guard burstFiles.map(onEnqueueBurst) ?? onEnqueue(file) else { return }
         ZTransferHaptics.shared.tick()
         let flightCount = burstFiles?.count ?? 1
@@ -571,6 +902,7 @@ private struct PreviewCircleButton: View {
 private struct BurstCollectionPreview: View {
     let session: CameraSession
     let group: BurstPhotoGroup
+    let stackMotion: CGFloat
     let onTap: () -> Void
 
     var body: some View {
@@ -578,11 +910,15 @@ private struct BurstCollectionPreview: View {
             let side = min(proxy.size.width * 0.72, proxy.size.height * 0.46)
             ZStack {
                 ForEach(Array(group.files.prefix(3).reversed().enumerated()), id: \.element.id) { index, file in
+                    let last = min(2, group.files.count - 1)
+                    let spread: CGFloat = index == last ? 0 : (index.isMultiple(of: 2) ? -1 : 1)
                     CachedBurstThumbnail(session: session, file: file)
                         .frame(width: side * 0.86, height: side * 0.86)
                         .rotationEffect(.degrees(index == 0 ? -6 : index == 1 ? 5 : 0))
                         .offset(x: index == 0 ? -12 : index == 1 ? 12 : 0,
                                 y: index == 2 ? 2 : 5)
+                        .offset(x: spread * 6 * stackMotion)
+                        .scaleEffect(1 + 0.012 * stackMotion)
                 }
                 HStack(spacing: 4) {
                     BurstGlyph().frame(width: 23, height: 13)
@@ -630,19 +966,15 @@ private struct CachedBurstThumbnail: View {
 private struct PreviewImage: View {
     let session: CameraSession
     let file: CameraFile
-    let localOriginalURL: URL?
+    let highResolutionImage: UIImage?
     let rotationDegrees: Double
     let zoomEnabled: Bool
     let allowRemoteThumbnailFallback: Bool
-    let onFHDUnavailable: (Bool) -> Void
-    let onRemoteExif: (PhotoExif?) -> Void
     let onDisplayImage: (UIImage?) -> Void
-    let onHighResolutionLoaded: () -> Void
     let onTap: () -> Void
     let onZoomedChange: (Bool) -> Void
     let isCurrent: Bool
     @State private var thumbnail: UIImage?
-    @State private var image: UIImage?
     @State private var remoteThumbnailUnavailable = false
     @State private var highResolutionAlpha: CGFloat = 0
     @State private var scale: CGFloat = 1
@@ -656,15 +988,15 @@ private struct PreviewImage: View {
                 Image(uiImage: thumbnail)
                     .resizable().scaledToFit()
                     .opacity(zoomEnabled
-                             ? (image == nil ? 1 : 1 - highResolutionAlpha)
+                             ? (highResolutionImage == nil ? 1 : 1 - highResolutionAlpha)
                              : 0.56)
             }
-            if let image {
-                Image(uiImage: image)
+            if let highResolutionImage {
+                Image(uiImage: highResolutionImage)
                     .resizable().scaledToFit()
                     .opacity(thumbnail == nil ? 1 : highResolutionAlpha)
             }
-            if thumbnail == nil && image == nil {
+            if thumbnail == nil && highResolutionImage == nil {
                 if remoteThumbnailUnavailable {
                     Text(AppLocalized.resource("no_preview"))
                         .foregroundStyle(.white.opacity(0.8))
@@ -728,9 +1060,20 @@ private struct PreviewImage: View {
             scale = 1; offset = .zero; gestureStartScale = 1; gestureStartOffset = .zero
             onZoomedChange(false)
         }
+        .onChange(of: highResolutionImage) { image in
+            guard let image else {
+                highResolutionAlpha = 0
+                return
+            }
+            onDisplayImage(image)
+            if thumbnail == nil {
+                highResolutionAlpha = 1
+            } else {
+                withAnimation(.easeInOut(duration: 0.18)) { highResolutionAlpha = 1 }
+            }
+        }
         .task(id: file.id) {
             thumbnail = nil
-            image = nil
             highResolutionAlpha = 0
             remoteThumbnailUnavailable = false
             // Android publishes a cached thumbnail immediately, then waits
@@ -741,44 +1084,15 @@ private struct PreviewImage: View {
                 thumbnail = thumb
                 onDisplayImage(thumb)
             }
-            try? await Task.sleep(nanoseconds: 340_000_000)
-            guard !Task.isCancelled else { return }
-            if let localOriginalURL,
-               let localImage = decodeLocalOriginalPreview(
-                at: localOriginalURL,
-                route: localOriginalPreviewRoute(for: file.fileExtension)
-               ) {
-                image = localImage
-                highResolutionAlpha = 1
-                onDisplayImage(localImage)
-                onHighResolutionLoaded()
-                return
-            }
-            if !zoomEnabled {
-                onFHDUnavailable(true)
-                return
-            }
-            await session.setFHDActive(true)
-            defer { Task { await session.setFHDActive(false) } }
-            let (previewData, metadata) = await session.previewAndExif(file: file)
-            guard !Task.isCancelled else { return }
-            onRemoteExif(metadata)
-            if let data = previewData, let highResolution = UIImage(data: data) {
-                image = highResolution
-                onFHDUnavailable(false)
-                onDisplayImage(highResolution)
-                onHighResolutionLoaded()
-                if thumbnail == nil {
-                    highResolutionAlpha = 1
-                } else {
+            if highResolutionImage != nil {
+                highResolutionAlpha = thumbnail == nil ? 1 : 0
+                if thumbnail != nil {
                     withAnimation(.easeInOut(duration: 0.18)) { highResolutionAlpha = 1 }
                 }
-            } else if !Task.isCancelled {
-                onFHDUnavailable(true)
             }
         }
         .task(id: allowRemoteThumbnailFallback) {
-            guard allowRemoteThumbnailFallback, thumbnail == nil, image == nil else { return }
+            guard allowRemoteThumbnailFallback, thumbnail == nil, highResolutionImage == nil else { return }
             guard let data = try? await session.thumbnail(file: file),
                   let thumb = UIImage(data: data) else {
                 if !Task.isCancelled { remoteThumbnailUnavailable = true }

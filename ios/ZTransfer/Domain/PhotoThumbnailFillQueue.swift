@@ -100,6 +100,7 @@ actor PhotoThumbnailFillQueue {
     }
 
     func markFailed(_ id: UInt32) {
+        guard !settled.contains(id) else { return }
         pending.remove(id); priority.removeAll { $0 == id }; regular.removeAll { $0 == id }
         if failed.insert(id).inserted { failedOrder.append(id) }
     }

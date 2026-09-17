@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Android ParamTile equivalent: drag vertically one camera enum detent at a
-/// time, commit only on release, and keep read-only descriptors visibly dimmed.
+/// time, coalesce each crossed detent in the model, and dim read-only values.
 struct RemoteExposureTile: View {
     let field: RemoteExposureField
     let descriptor: RemotePropertyDescriptor?
@@ -10,6 +10,8 @@ struct RemoteExposureTile: View {
     var onDetent: (() -> Void)? = nil
     var autoEnabled: Bool? = nil
     var autoToggle: (() -> Void)? = nil
+    var autoBusy = false
+    var effectiveISO: UInt64? = nil
     var rowHeight: CGFloat = 18
 
     @State private var position: CGFloat = 0
@@ -22,7 +24,7 @@ struct RemoteExposureTile: View {
         guard let current = descriptor?.current, let exact = values.firstIndex(of: current) else { return 0 }
         return exact
     }
-    private var writable: Bool { descriptor?.writable == true && !values.isEmpty }
+    private var writable: Bool { descriptor?.writable == true && !values.isEmpty && autoEnabled != true }
     private var downSign: CGFloat {
         guard let descriptor else { return -1 }
         return CGFloat(RemoteExposureParameters.downStepSign(for: descriptor.property, values: values))
@@ -38,9 +40,13 @@ struct RemoteExposureTile: View {
                 GeometryReader { proxy in
                     let center = proxy.size.height / 2
                     ZStack {
-                        if let descriptor {
+                        if autoEnabled == true {
+                            Text(effectiveISO.map(String.init) ?? "—")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundStyle(ZTransferColors.primaryText)
+                        } else if let descriptor {
                             let index = min(max(Int(position.rounded()), 0), max(values.count - 1, 0))
-                            Text(displayValue(descriptor, raw: values.isEmpty ? descriptor.current : values[index]))
+                            Text(displayValue(descriptor, raw: !dragging || values.isEmpty ? descriptor.current : values[index]))
                                 .font(.system(size: 18, weight: .semibold))
                                 .foregroundStyle(ZTransferColors.primaryText)
                                 .lineLimit(1)
@@ -54,7 +60,7 @@ struct RemoteExposureTile: View {
                     }
                     .contentShape(Rectangle())
                     .gesture(dragGesture)
-                    .onTapGesture { if descriptor != nil { onOpenList() } }
+                    .onTapGesture { if writable { onOpenList() } }
                     .frame(height: 32)
                     .position(x: proxy.size.width / 2, y: center)
                 }
@@ -67,7 +73,7 @@ struct RemoteExposureTile: View {
                     .padding(.horizontal, 5).frame(height: 17)
                     .background(autoEnabled ? ZTransferColors.accentYellow.opacity(0.24) : Color.white.opacity(0.86), in: RoundedRectangle(cornerRadius: 5))
                     .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.white.opacity(0.9), lineWidth: 1))
-                    .disabled(!writable)
+                    .disabled(autoBusy)
                     .padding(4)
             }
         }
@@ -76,7 +82,7 @@ struct RemoteExposureTile: View {
         .background(Color.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Color.white.opacity(0.96), lineWidth: 1))
         .shadow(color: .black.opacity(0.04), radius: 2, y: 1)
-        .opacity(writable || descriptor == nil ? 1 : 0.48)
+        .opacity(writable || autoToggle != nil || descriptor == nil ? 1 : 0.48)
         .onAppear { position = CGFloat(selectedIndex) }
         .onChange(of: descriptor?.current) { _ in
             guard !dragging else { return }
@@ -99,6 +105,7 @@ struct RemoteExposureTile: View {
                 if index != lastFeedbackIndex, values.indices.contains(index) {
                     lastFeedbackIndex = index
                     onDetent?()
+                    onCommit(values[index])
                 }
             }
             .onEnded { value in
@@ -108,7 +115,6 @@ struct RemoteExposureTile: View {
                 dragging = false
                 lastFeedbackIndex = nil
                 withAnimation(ZTransferMotion.standard) { position = CGFloat(target) }
-                if values.indices.contains(target), values[target] != descriptor?.current { onCommit(values[target]) }
             }
     }
 

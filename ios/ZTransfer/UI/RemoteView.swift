@@ -1,6 +1,5 @@
 import SwiftUI
 import UIKit
-import QuartzCore
 
 private enum RemoteLayoutOrientation: Equatable {
     case portrait
@@ -36,7 +35,7 @@ private extension EnvironmentValues {
 /// that are already present in Android's RemoteScreen.
 struct RemoteView: View {
     @Environment(\.dismiss) private var dismiss
-    private let onStopped: ((Bool) -> Void)?
+    private let onStopped: ((Bool) async -> Void)?
     private let onPreparing: (() async -> Void)?
     private let onTransportLost: (() -> Void)?
     private let isSessionConnected: Bool
@@ -53,19 +52,23 @@ struct RemoteView: View {
     @State private var histogramVisible = false
     // Android RemoteScreen defaults the FPS overlay to visible for every session.
     @State private var showFps = true
-    @State private var levelVisible = false
     @State private var framingGrid: IOSViewfinderGrid = .off
     @State private var zebraVisible = false
-    @State private var zebraMask: IOSZebraMask?
-    @State private var lastZebraUpdate = 0.0
-    @State private var recordingDotDimmed = false
     @State private var layoutOrientation: RemoteLayoutOrientation = .portrait
+    @State private var immersiveFullscreen = false
+    @State private var orientationCandidate: RemoteLayoutOrientation?
+    @State private var manuallySuppressedOrientation: RemoteLayoutOrientation?
+    @State private var orientationStabilityTask: Task<Void, Never>?
+    @State private var rotationTransitionTask: Task<Void, Never>?
+    @State private var switchingRotation = false
+    @State private var rotationOpacity = 1.0
     @State private var orientationNotificationsActive = false
     @State private var stopCleanupStarted = false
 
-    init(session: CameraSession, isSessionConnected: Bool = true,
+    init(session: CameraSession, recordingDirectory: URL? = nil,
+         isSessionConnected: Bool = true,
          onRetrySTA: @escaping () -> Void = {}, onPreparing: (() async -> Void)? = nil,
-         onStopped: ((Bool) -> Void)? = nil,
+         onStopped: ((Bool) async -> Void)? = nil,
          onTransportLost: (() -> Void)? = nil) {
         self.onStopped = onStopped
         self.onPreparing = onPreparing
@@ -75,6 +78,7 @@ struct RemoteView: View {
         self.isUSBSession = session.isUSB
         self.wirelessMode = session.wirelessMode
         _model = StateObject(wrappedValue: RemoteViewModel(camera: session,
+                                                            recordingDirectory: recordingDirectory,
                                                             onTransportLost: onTransportLost))
     }
 
@@ -82,7 +86,12 @@ struct RemoteView: View {
         ZStack {
             ZTransferColors.background.ignoresSafeArea()
             GeometryReader { proxy in
-                if layoutOrientation.isLandscape {
+                if immersiveFullscreen {
+                    immersiveRemoteLayout
+                        .frame(width: proxy.size.height, height: proxy.size.width)
+                        .rotationEffect(.degrees(layoutOrientation.rotationDegrees))
+                        .frame(width: proxy.size.width, height: proxy.size.height)
+                } else if layoutOrientation.isLandscape {
                     landscapeRemoteLayout
                         // Android keeps the host portrait and rotates a measured
                         // landscape canvas inside it, so system bars stay put.
@@ -95,9 +104,10 @@ struct RemoteView: View {
                         .transition(.opacity)
                 }
             }
+            .opacity(rotationOpacity)
         }
         .overlay(alignment: .bottom) {
-            if let hint = model.recordingHint {
+            if let hint = model.recordingHint ?? model.localRecordingHint {
                 Text(hint)
                     .font(.system(size: 14, weight: .medium))
                     .multilineTextAlignment(.center)
@@ -138,13 +148,19 @@ struct RemoteView: View {
                 UIDevice.current.endGeneratingDeviceOrientationNotifications()
                 orientationNotificationsActive = false
             }
+            orientationStabilityTask?.cancel()
+            rotationTransitionTask?.cancel()
             Task { @MainActor in
                 await model.stopAndWait()
-                onStopped?(model.transportLossWasNotified)
+                await onStopped?(model.transportLossWasNotified)
             }
         }
-        .onChange(of: model.state.frameSequence) { _ in updateZebraMask() }
-        .onChange(of: zebraVisible) { _ in updateZebraMask(force: true) }
+        .onChange(of: histogramVisible) { _ in
+            model.setFrameAnalysis(histogram: histogramVisible, zebra: zebraVisible)
+        }
+        .onChange(of: zebraVisible) { _ in
+            model.setFrameAnalysis(histogram: histogramVisible, zebra: zebraVisible)
+        }
         .sheet(item: $selectedField) { field in
             ExposureValueList(field: field, descriptor: model.exposureDescriptors[field]) { value in
                 model.setExposure(field, value: value)
@@ -166,7 +182,7 @@ struct RemoteView: View {
 
             Spacer().frame(height: 10)
 
-            portraitToolRows
+            adaptiveRemoteToolbar
                 .padding(.horizontal, 14)
 
             Spacer().frame(height: 12)
@@ -193,7 +209,7 @@ struct RemoteView: View {
                     remoteViewfinder
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                    landscapeToolBar
+                    adaptiveRemoteToolbar
                         .frame(maxWidth: .infinity)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -218,6 +234,25 @@ struct RemoteView: View {
         }
         .padding(.horizontal, 4)
         .padding(.vertical, 4)
+    }
+
+    private var immersiveRemoteLayout: some View {
+        ZStack(alignment: .topTrailing) {
+            remoteViewfinder
+                .padding(6)
+            Button {
+                withAnimation(ZTransferMotion.standard) { immersiveFullscreen = false }
+            } label: {
+                Image(systemName: "chevron.backward")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(ZTransferColors.primaryText)
+                    .frame(width: 38, height: 38)
+                    .background(.regularMaterial, in: Circle())
+            }
+            .buttonStyle(.plain)
+            .padding(12)
+            .accessibilityLabel(AppLocalized.resource("back"))
+        }
     }
 
     private var remoteTopBar: some View {
@@ -292,68 +327,13 @@ struct RemoteView: View {
         .accessibilityLabel(AppLocalized.resource("cd_camera_battery"))
     }
 
-    private var portraitToolRows: some View {
-        VStack(spacing: 8) {
-            HStack(spacing: 4) {
-                remoteToolButton(active: model.hdLiveView, label: { Text("HD").font(.system(size: 13, weight: .bold)).fixedSize() }) {
-                    withAnimation(ZTransferMotion.standard) {
-                        model.setHDLiveView(!model.hdLiveView)
-                    }
-                }
-                remoteToolButton(active: showFps, label: { Text("FPS").font(.system(size: 10.5, weight: .bold)).fixedSize() }) {
-                    withAnimation(ZTransferMotion.standard) { showFps.toggle() }
-                }
-                remoteToolButton(active: histogramVisible, label: { RemoteHistogramIcon().frame(width: 19, height: 19) }) {
-                    withAnimation(ZTransferMotion.standard) { histogramVisible.toggle() }
-                }
-                remoteToolButton(active: framingGrid != .off, label: { RemoteGridIcon().frame(width: 18, height: 18) }) {
-                    withAnimation(ZTransferMotion.standard) { framingGrid = framingGrid.next }
-                }
-                remoteToolButton(active: zebraVisible, label: { RemoteZebraIcon().frame(width: 18, height: 18) }) {
-                    withAnimation(ZTransferMotion.standard) { zebraVisible.toggle() }
-                }
-                remoteToolButton(active: desqueeze > 1.001, label: { RemoteAspectIcon().frame(width: 18, height: 18) }) {
-                    withAnimation(ZTransferMotion.standard) {
-                        desqueeze = RemoteDisplayOptions.nextDesqueeze(after: desqueeze)
-                    }
-                }
-                remoteToolButton(active: levelVisible, label: { RemoteLevelIcon().frame(width: 18, height: 18) }) {
-                    withAnimation(ZTransferMotion.standard) {
-                        levelVisible.toggle()
-                        model.setLevelVisible(levelVisible)
-                    }
-                }
-                remoteToolButton(active: false, label: { RemoteFullscreenIcon().frame(width: 17, height: 17) }) {
-                    withAnimation(ZTransferMotion.standard) { layoutOrientation = .landscapeLeft }
-                }
-                remoteToolButton(active: layoutOrientation.isLandscape, label: { RemoteRotateIcon().frame(width: 20, height: 20) }) {
-                    cycleLayoutOrientation()
-                }
-            }
-            HStack(spacing: 8) {
-                if model.movieMode {
-                    remoteToolButton(active: audioLevelsVisible, label: { RemoteAudioIcon().frame(width: 18, height: 18) }) {
-                        withAnimation(ZTransferMotion.standard) { audioLevelsVisible.toggle() }
-                    }
-                    remoteRecordButton
-                }
-                Spacer(minLength: 0)
-            }
-        }
-    }
-
-    private var landscapeToolBar: some View {
-        HStack(spacing: 7) {
+    private var adaptiveRemoteToolbar: some View {
+        RemoteAdaptiveToolLayout(horizontalSpacing: 7, verticalSpacing: 8) {
             remoteToolButton(active: model.hdLiveView, label: { Text("HD").font(.system(size: 13, weight: .bold)).fixedSize() }) {
                 withAnimation(ZTransferMotion.standard) { model.setHDLiveView(!model.hdLiveView) }
             }
             remoteToolButton(active: showFps, label: { Text("FPS").font(.system(size: 10.5, weight: .bold)).fixedSize() }) {
                 withAnimation(ZTransferMotion.standard) { showFps.toggle() }
-            }
-            if model.movieMode {
-                remoteToolButton(active: audioLevelsVisible, label: { RemoteAudioIcon().frame(width: 18, height: 18) }) {
-                    withAnimation(ZTransferMotion.standard) { audioLevelsVisible.toggle() }
-                }
             }
             remoteToolButton(active: histogramVisible, label: { RemoteHistogramIcon().frame(width: 19, height: 19) }) {
                 withAnimation(ZTransferMotion.standard) { histogramVisible.toggle() }
@@ -369,40 +349,95 @@ struct RemoteView: View {
                     desqueeze = RemoteDisplayOptions.nextDesqueeze(after: desqueeze)
                 }
             }
-                remoteToolButton(active: levelVisible, label: { RemoteLevelIcon().frame(width: 18, height: 18) }) {
-                    withAnimation(ZTransferMotion.standard) {
-                        levelVisible.toggle()
-                        model.setLevelVisible(levelVisible)
-                    }
+            remoteToolButton(active: model.levelVisible, label: { RemoteLevelIcon().frame(width: 18, height: 18) }) {
+                withAnimation(ZTransferMotion.standard) {
+                    model.setLevelVisible(!model.levelVisible)
+                }
             }
             if model.movieMode {
-                remoteRecordButton
+                remoteToolButton(active: audioLevelsVisible, label: { RemoteAudioIcon().frame(width: 18, height: 18) }) {
+                    withAnimation(ZTransferMotion.standard) { audioLevelsVisible.toggle() }
+                }
             }
+            remoteRecordButton
             remoteToolButton(active: false, label: { RemoteFullscreenIcon().frame(width: 17, height: 17) }) {
-                withAnimation(ZTransferMotion.standard) { layoutOrientation = .portrait }
+                enterImmersiveFullscreen()
             }
-            remoteToolButton(active: true, label: { RemoteRotateIcon().frame(width: 20, height: 20) }) {
+            remoteToolButton(active: layoutOrientation.isLandscape, label: { RemoteRotateIcon().frame(width: 20, height: 20) }) {
                 cycleLayoutOrientation()
             }
         }
     }
 
     private var remoteRecordButton: some View {
-        Button { model.toggleRecording() } label: {
-            ZStack {
-                Circle()
-                    .fill(Color.white.opacity(0.86))
-                    .overlay(Circle().stroke(Color.white.opacity(0.95), lineWidth: 1))
-                Circle()
-                    .fill(model.state.capture == .recording ? ZTransferColors.statusError : ZTransferColors.statusError.opacity(0.9))
-                    .frame(width: 19, height: 19)
+        let phase = model.localRecordingPhase
+        let recording = phase == .recording || phase == .paused
+        let expanded = recording || phase == .finalizing
+        let saved = phase == .saved
+        return ZStack(alignment: .leading) {
+            Capsule()
+                .fill(Color.white.opacity(0.86))
+                .overlay(Capsule().stroke(Color.white.opacity(0.95), lineWidth: 1))
+            Button {
+                switch phase {
+                case .idle: model.startLocalRecording()
+                case .recording, .paused: model.stopLocalRecording()
+                case .finalizing, .saved: break
+                }
+            } label: {
+                ZStack {
+                    Circle().fill(Color.white.opacity(0.001))
+                    if saved {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(ZTransferColors.statusConnected)
+                    } else if recording || phase == .finalizing {
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(ZTransferColors.statusError)
+                            .frame(width: 12, height: 12)
+                    } else {
+                        Circle().fill(ZTransferColors.statusError).frame(width: 14, height: 14)
+                    }
+                }
+                .frame(width: 28, height: 28)
             }
-            .frame(width: 36, height: 36)
+            .buttonStyle(.plain)
+            .disabled(phase == .finalizing || saved)
+            .padding(.leading, 4)
+
+            if expanded {
+                Button { model.toggleLocalRecordingPause() } label: {
+                    Image(systemName: phase == .paused ? "play.fill" : "pause.fill")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(ZTransferColors.primaryText)
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.plain)
+                .disabled(phase == .finalizing)
+                .offset(x: 38)
+                .transition(.opacity.combined(with: .scale(scale: 0.7)))
+            } else if saved {
+                Text(AppLocalized.resource("remote_rec_saved_label"))
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(ZTransferColors.statusConnected)
+                    .offset(x: 34)
+                    .transition(.opacity.combined(with: .move(edge: .leading)))
+            }
+
+            if recording {
+                Text(String(format: "%d:%02d", model.localRecordingSeconds / 60,
+                            model.localRecordingSeconds % 60))
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(.black.opacity(0.62), in: Capsule())
+                    .offset(x: 8, y: -28)
+            }
         }
-        .buttonStyle(.plain)
-        .disabled(!model.movieMode || model.recordingBusy)
-        .opacity(model.movieMode ? 1 : 0.45)
-        .accessibilityLabel(AppLocalized.resource("cd_remote_rec_start"))
+        .frame(width: saved ? 88 : (expanded ? 70 : 36), height: 36, alignment: .leading)
+        .animation(ZTransferMotion.emphasized, value: phase)
+        .accessibilityElement(children: .contain)
     }
 
     private func remoteToolButton<Label: View>(
@@ -470,7 +505,7 @@ struct RemoteView: View {
                             }
                         )
                 }
-                if let image {
+                if image != nil {
                     if let point = model.state.focus.point,
                        model.state.focus.phase != .idle {
                         RemoteFocusReticle(phase: model.state.focus.phase,
@@ -479,12 +514,12 @@ struct RemoteView: View {
                                            aspect: aspect)
                     }
                     if histogramVisible {
-                        RemoteHistogramOverlay(image: image)
+                        RemoteHistogramOverlay(bins: model.frameHistogram ?? [])
                             .frame(width: 150, height: 72)
                             .padding(12)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                     }
-                    if levelVisible, let roll = model.levelRoll {
+                    if model.levelVisible, let roll = model.levelRoll {
                         IOSLevelOverlay(rollDegrees: roll)
                             .allowsHitTesting(false)
                     }
@@ -507,7 +542,7 @@ struct RemoteView: View {
                         IOSFocusFrameOverlay(frame: focusFrame, aspect: aspect)
                             .allowsHitTesting(false)
                     }
-                    if zebraVisible, let zebraMask {
+                    if zebraVisible, let zebraMask = model.frameZebraMask {
                         IOSZebraOverlay(mask: zebraMask, aspect: aspect)
                             .allowsHitTesting(false)
                     }
@@ -797,39 +832,57 @@ struct RemoteView: View {
         }
     }
 
-    private func updateZebraMask(force: Bool = false) {
-        guard zebraVisible, let image = model.frameImage else {
-            zebraMask = nil
-            return
-        }
-        let now = CACurrentMediaTime()
-        guard force || now - lastZebraUpdate >= 0.25 else { return }
-        lastZebraUpdate = now
-        zebraMask = IOSZebraMask(image: image)
-    }
-
     private func applyDeviceOrientation(_ orientation: UIDeviceOrientation) {
         let target: RemoteLayoutOrientation
         switch orientation {
         case .landscapeLeft: target = .landscapeLeft
         case .landscapeRight: target = .landscapeRight
-        case .portrait, .portraitUpsideDown: target = .portrait
+        case .portrait: target = .portrait
         default:
             return
         }
-        guard target != layoutOrientation else { return }
-        withAnimation(ZTransferMotion.standard) {
-            layoutOrientation = target
+        guard target != orientationCandidate else { return }
+        orientationCandidate = target
+        orientationStabilityTask?.cancel()
+        guard target != manuallySuppressedOrientation else { return }
+        manuallySuppressedOrientation = nil
+        orientationStabilityTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(260))
+            guard !Task.isCancelled, orientationCandidate == target else { return }
+            requestLayoutOrientation(target)
         }
     }
 
     private func cycleLayoutOrientation() {
-        withAnimation(ZTransferMotion.standard) {
-            switch layoutOrientation {
-            case .portrait: layoutOrientation = .landscapeLeft
-            case .landscapeLeft: layoutOrientation = .landscapeRight
-            case .landscapeRight: layoutOrientation = .portrait
-            }
+        guard !switchingRotation else { return }
+        manuallySuppressedOrientation = orientationCandidate
+        orientationStabilityTask?.cancel()
+        let target: RemoteLayoutOrientation = switch layoutOrientation {
+        case .portrait: .landscapeLeft
+        case .landscapeLeft: .landscapeRight
+        case .landscapeRight: .portrait
+        }
+        requestLayoutOrientation(target)
+    }
+
+    private func enterImmersiveFullscreen() {
+        if layoutOrientation == .portrait { cycleLayoutOrientation() }
+        withAnimation(ZTransferMotion.standard) { immersiveFullscreen = true }
+    }
+
+    private func requestLayoutOrientation(_ target: RemoteLayoutOrientation) {
+        guard target != layoutOrientation, !switchingRotation else { return }
+        switchingRotation = true
+        rotationTransitionTask?.cancel()
+        rotationTransitionTask = Task { @MainActor in
+            withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.08)) { rotationOpacity = 0 }
+            try? await Task.sleep(for: .milliseconds(80))
+            guard !Task.isCancelled else { switchingRotation = false; return }
+            layoutOrientation = target
+            await Task.yield()
+            withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.14)) { rotationOpacity = 1 }
+            try? await Task.sleep(for: .milliseconds(140))
+            switchingRotation = false
         }
     }
 
@@ -847,14 +900,72 @@ struct RemoteView: View {
             ForEach(fields, id: \.self) { field in
                 RemoteExposureTile(field: field, descriptor: model.exposureDescriptors[field],
                                    onOpenList: { selectedField = field },
-                                   onCommit: { model.setExposure(field, value: $0, feedback: false) },
+                                   onCommit: { model.setExposure(field, value: $0, feedback: false, immediate: false) },
                                    onDetent: { model.detentFeedback() },
-                                   autoEnabled: field == .iso ? model.autoISOEnabled : nil,
+                                   autoEnabled: field == .iso && model.autoISODescriptor != nil ? model.autoISOEnabled : nil,
                                    autoToggle: field == .iso && model.autoISODescriptor != nil ?
-                                       { model.setAutoISO(!model.autoISOEnabled) } : nil)
+                                       { model.setAutoISO(!model.autoISOEnabled) } : nil,
+                                   autoBusy: model.autoISOBusy,
+                                   effectiveISO: model.effectiveISO?.current)
             }
         }
         .padding(.horizontal, 14)
+    }
+}
+
+/// Android's AdaptiveRemoteToolBar equivalent. Controls retain their intrinsic
+/// widths, wrap only when the next control no longer fits, and preserve source
+/// order so fullscreen and rotation stay at the end of the final row.
+private struct RemoteAdaptiveToolLayout: Layout {
+    let horizontalSpacing: CGFloat
+    let verticalSpacing: CGFloat
+
+    private func rows(for width: CGFloat, subviews: Subviews) -> [[(Subviews.Index, CGSize)]] {
+        var result: [[(Subviews.Index, CGSize)]] = [[]]
+        var used: CGFloat = 0
+        for index in subviews.indices {
+            let size = subviews[index].sizeThatFits(.unspecified)
+            let next = result[result.count - 1].isEmpty ? size.width : used + horizontalSpacing + size.width
+            if next > width, !result[result.count - 1].isEmpty {
+                result.append([(index, size)])
+                used = size.width
+            } else {
+                result[result.count - 1].append((index, size))
+                used = next
+            }
+        }
+        return result
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews,
+                      cache: inout ()) -> CGSize {
+        let available = max(1, proposal.width ?? subviews.reduce(0) {
+            $0 + $1.sizeThatFits(.unspecified).width + horizontalSpacing
+        })
+        let layout = rows(for: available, subviews: subviews)
+        let height = layout.enumerated().reduce(CGFloat.zero) { partial, row in
+            partial + (row.offset == 0 ? 0 : verticalSpacing) +
+                (row.element.map(\.1.height).max() ?? 0)
+        }
+        let contentWidth = layout.map { row in
+            row.map(\.1.width).reduce(0, +) + horizontalSpacing * CGFloat(max(0, row.count - 1))
+        }.max() ?? 0
+        return CGSize(width: proposal.width ?? contentWidth, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize,
+                       subviews: Subviews, cache: inout ()) {
+        var y = bounds.minY
+        for row in rows(for: bounds.width, subviews: subviews) {
+            let rowHeight = row.map(\.1.height).max() ?? 0
+            var x = bounds.minX
+            for (index, size) in row {
+                subviews[index].place(at: CGPoint(x: x, y: y + (rowHeight - size.height) / 2),
+                                      proposal: ProposedViewSize(size))
+                x += size.width + horizontalSpacing
+            }
+            y += rowHeight + verticalSpacing
+        }
     }
 }
 
@@ -986,10 +1097,10 @@ private struct RemoteFocusReticle: View {
 }
 
 private struct RemoteHistogramOverlay: View {
-    let image: UIImage
+    let bins: [Int]
     var body: some View {
         Canvas { context, size in
-            let bins = histogramBins()
+            guard !bins.isEmpty else { return }
             let maxValue = max(1, bins.max() ?? 1)
             for (index, value) in bins.enumerated() {
                 let width = size.width / CGFloat(bins.count)
@@ -1001,23 +1112,6 @@ private struct RemoteHistogramOverlay: View {
             }
         }
         .background(.black.opacity(0.35), in: RoundedRectangle(cornerRadius: 5))
-    }
-
-    private func histogramBins() -> [Int] {
-        guard let cg = image.cgImage, let provider = cg.dataProvider,
-              let data = provider.data as Data?, cg.bitsPerComponent == 8 else { return Array(repeating: 0, count: 24) }
-        let bytes = [UInt8](data)
-        let channels = cg.bitsPerPixel / 8
-        guard channels >= 3 else { return Array(repeating: 0, count: 24) }
-        var bins = Array(repeating: 0, count: 24)
-        let step = max(channels, bytes.count / 4096)
-        var index = 0
-        while index + 2 < bytes.count {
-            let luminance = (Int(bytes[index]) * 299 + Int(bytes[index + 1]) * 587 + Int(bytes[index + 2]) * 114) / 1000
-            bins[min(23, luminance * 24 / 256)] += 1
-            index += step
-        }
-        return bins
     }
 }
 
@@ -1070,59 +1164,8 @@ private struct IOSFramingGridOverlay: View {
     }
 }
 
-/// Android computes zebra blocks from the decoded frame, throttled to 250 ms.
-/// iOS keeps the same 120×80 center-sample mask and 95 IRE threshold.
-private struct IOSZebraMask {
-    let cols: Int
-    let rows: Int
-    let cells: [Bool]
-
-    init?(image: UIImage) {
-        guard let cg = image.cgImage,
-              cg.bitsPerComponent == 8,
-              cg.bitsPerPixel >= 24,
-              let provider = cg.dataProvider,
-              let providerData = provider.data as Data? else { return nil }
-        let width = max(1, cg.width)
-        let height = max(1, cg.height)
-        let cellWidth = max(1, (width + 119) / 120)
-        let cellHeight = max(1, (height + 79) / 80)
-        let computedCols = (width + cellWidth - 1) / cellWidth
-        let computedRows = (height + cellHeight - 1) / cellHeight
-        var result = Array(repeating: false, count: computedCols * computedRows)
-        let bytesPerPixel = max(3, cg.bitsPerPixel / 8)
-        let rowStride = cg.bytesPerRow
-        let littleEndian = cg.byteOrderInfo == .order32Little
-        providerData.withUnsafeBytes { raw in
-            guard let base = raw.bindMemory(to: UInt8.self).baseAddress else { return }
-            for row in 0..<computedRows {
-                let y = min(height - 1, row * cellHeight + cellHeight / 2)
-                var column = 0
-                while column < computedCols {
-                    let x = min(width - 1, column * cellWidth + cellWidth / 2)
-                    let pixel = base.advanced(by: y * rowStride + x * bytesPerPixel)
-                    let red: Int
-                    let green: Int
-                    let blue: Int
-                    if littleEndian && bytesPerPixel >= 4 {
-                        blue = Int(pixel[0]); green = Int(pixel[1]); red = Int(pixel[2])
-                    } else {
-                        red = Int(pixel[0]); green = Int(pixel[1]); blue = Int(pixel[2])
-                    }
-                    let luma = (54 * red + 183 * green + 19 * blue) >> 8
-                    result[row * computedCols + column] = luma >= 242
-                    column += 1
-                }
-            }
-        }
-        cols = computedCols
-        rows = computedRows
-        cells = result
-    }
-}
-
 private struct IOSZebraOverlay: View {
-    let mask: IOSZebraMask
+    let mask: RemoteZebraMask
     let aspect: CGFloat
 
     var body: some View {

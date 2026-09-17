@@ -1,9 +1,33 @@
 import Foundation
+import UIKit
+
+/// Keep the wire operation alongside its payload: standard frames must never
+/// be interpreted as enhanced AF metadata (RemoteLab.labGrabFrame).
+struct RemoteLiveViewPacket: Sendable {
+    let bytes: Data
+    let jpegOffset: Int
+    let operation: UInt16
+    let receivedAtUptime: TimeInterval
+
+    init(bytes: Data, jpegOffset: Int, operation: UInt16,
+         receivedAtUptime: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+        self.bytes = bytes
+        self.jpegOffset = jpegOffset
+        self.operation = operation
+        self.receivedAtUptime = receivedAtUptime
+    }
+}
 
 /// Nikon's GetLiveViewImg payload can contain a proprietary prefix and trailing
 /// bytes around the JPEG. Android locates the JPEG SOI before decoding; keep the
 /// same rule here instead of passing the whole PTP payload to UIImage.
 enum RemoteFrameParser {
+    static func jpegStart(in payload: Data) -> Int? {
+        guard payload.count >= 3 else { return nil }
+        return (payload.startIndex..<(payload.endIndex - 2)).first {
+            payload[$0] == 0xFF && payload[$0 + 1] == 0xD8 && payload[$0 + 2] == 0xFF
+        }
+    }
     static func jpegData(from payload: Data) -> Data? {
         guard let range = jpegRange(in: payload) else { return nil }
         return Data(payload[range])
@@ -155,4 +179,203 @@ struct RemoteLiveViewMetadata: Equatable, Sendable {
     let focusCoordinateWidth: Int?
     let focusCoordinateHeight: Int?
     let soundLevels: RemoteLiveViewSoundLevels?
+}
+
+struct RemoteZebraMask: Equatable, Sendable {
+    let cols: Int
+    let rows: Int
+    let cells: [Bool]
+}
+
+struct RemoteDecodedFrame: @unchecked Sendable {
+    let image: UIImage
+    let jpeg: Data
+    let metadata: RemoteLiveViewMetadata?
+    let histogram: [Int]?
+    let zebraMask: RemoteZebraMask?
+    let fps: Double
+    let generation: UInt64
+    let receivedAtUptime: TimeInterval
+}
+
+/// Mirrors Android's conflated frame channel: camera I/O immediately continues
+/// while decoding runs on a worker; if decoding falls behind, only the newest
+/// waiting packet is retained. Histogram and zebra work share the same 250 ms
+/// worker-side throttle and cost nothing while their overlays are disabled.
+actor RemoteFrameDecodePipeline {
+    struct Request: Sendable {
+        let packet: RemoteLiveViewPacket
+        let fps: Double
+        let generation: UInt64
+    }
+
+    private let publish: @MainActor @Sendable (RemoteDecodedFrame) -> Void
+    private let decodeDelayNanoseconds: UInt64
+    private var pending: Request?
+    private var worker: Task<Void, Never>?
+    private var generation: UInt64 = 0
+    private var histogramEnabled = false
+    private var zebraEnabled = false
+    private var cachedHistogram: [Int]?
+    private var cachedZebra: RemoteZebraMask?
+    private var histogramCalculatedAt: ContinuousClock.Instant?
+    private var zebraCalculatedAt: ContinuousClock.Instant?
+    private(set) var isDecoding = false
+
+    init(decodeDelayNanoseconds: UInt64 = 0,
+         publish: @escaping @MainActor @Sendable (RemoteDecodedFrame) -> Void) {
+        self.decodeDelayNanoseconds = decodeDelayNanoseconds
+        self.publish = publish
+    }
+
+    func reset(generation: UInt64) {
+        self.generation = generation
+        pending = nil
+    }
+
+    func setAnalysis(histogram: Bool, zebra: Bool) {
+        histogramEnabled = histogram
+        zebraEnabled = zebra
+        if !histogram { cachedHistogram = nil; histogramCalculatedAt = nil }
+        if !zebra { cachedZebra = nil; zebraCalculatedAt = nil }
+    }
+
+    func submit(_ request: Request) {
+        guard request.generation == generation else { return }
+        pending = request
+        guard worker == nil else { return }
+        worker = Task { [weak self] in await self?.drain() }
+    }
+
+    func waitUntilIdle() async {
+        while let worker { await worker.value }
+    }
+
+    private func drain() async {
+        while let request = pending {
+            pending = nil
+            let now = ContinuousClock.now
+            let calculateHistogram = histogramEnabled && (
+                cachedHistogram == nil || histogramCalculatedAt.map { $0.duration(to: now) >= .milliseconds(250) } == true
+            )
+            let calculateZebra = zebraEnabled && (
+                cachedZebra == nil || zebraCalculatedAt.map { $0.duration(to: now) >= .milliseconds(250) } == true
+            )
+            isDecoding = true
+            let delay = decodeDelayNanoseconds
+            let decoded = await Task.detached(priority: .userInitiated) {
+                if delay > 0 { try? await Task.sleep(nanoseconds: delay) }
+                return Self.decode(request, histogram: calculateHistogram, zebra: calculateZebra)
+            }.value
+            isDecoding = false
+            guard request.generation == generation, let decoded else { continue }
+            if calculateHistogram {
+                cachedHistogram = decoded.histogram
+                histogramCalculatedAt = now
+            }
+            if calculateZebra {
+                cachedZebra = decoded.zebraMask
+                zebraCalculatedAt = now
+            }
+            let result = RemoteDecodedFrame(
+                image: decoded.image,
+                jpeg: decoded.jpeg,
+                metadata: decoded.metadata,
+                histogram: histogramEnabled ? (calculateHistogram ? decoded.histogram : cachedHistogram) : nil,
+                zebraMask: zebraEnabled ? (calculateZebra ? decoded.zebraMask : cachedZebra) : nil,
+                fps: request.fps,
+                generation: request.generation,
+                receivedAtUptime: request.packet.receivedAtUptime
+            )
+            await publish(result)
+        }
+        worker = nil
+        // An enqueue can run after the loop observed nil but before worker is
+        // cleared because actor methods interleave at awaits. Re-arm it here.
+        if pending != nil {
+            worker = Task { [weak self] in await self?.drain() }
+        }
+    }
+
+    private nonisolated static func decode(
+        _ request: Request,
+        histogram: Bool,
+        zebra: Bool
+    ) -> RemoteDecodedFrame? {
+        let payload = request.packet.bytes
+        guard request.packet.jpegOffset >= 0, request.packet.jpegOffset < payload.count else { return nil }
+        let jpeg = Data(payload[request.packet.jpegOffset...])
+        guard let image = UIImage(data: jpeg) else { return nil }
+        let cg = image.cgImage
+        return RemoteDecodedFrame(
+            image: image,
+            jpeg: jpeg,
+            metadata: RemoteFrameParser.metadata(from: payload,
+                                                 jpegOffset: request.packet.jpegOffset,
+                                                 operation: request.packet.operation),
+            histogram: histogram ? cg.flatMap(histogramBins) : nil,
+            zebraMask: zebra ? cg.flatMap(zebraMask) : nil,
+            fps: request.fps,
+            generation: request.generation,
+            receivedAtUptime: request.packet.receivedAtUptime
+        )
+    }
+
+    private nonisolated static func histogramBins(_ cg: CGImage) -> [Int]? {
+        guard let pixels = rgbaPixels(cg) else { return nil }
+        let bytes = pixels.bytes
+        let channels = 4
+        var bins = Array(repeating: 0, count: 24)
+        let step = max(channels, bytes.count / 4096)
+        var index = 0
+        while index + 2 < bytes.count {
+            let luminance = (Int(bytes[index]) * 299 + Int(bytes[index + 1]) * 587 + Int(bytes[index + 2]) * 114) / 1000
+            bins[min(23, luminance * 24 / 256)] += 1
+            index += step
+        }
+        return bins
+    }
+
+    private nonisolated static func zebraMask(_ cg: CGImage) -> RemoteZebraMask? {
+        guard let pixels = rgbaPixels(cg) else { return nil }
+        let width = pixels.width
+        let height = pixels.height
+        let cellWidth = max(1, (width + 119) / 120)
+        let cellHeight = max(1, (height + 79) / 80)
+        let cols = (width + cellWidth - 1) / cellWidth
+        let rows = (height + cellHeight - 1) / cellHeight
+        var cells = Array(repeating: false, count: cols * rows)
+        for row in 0..<rows {
+            let y = min(height - 1, row * cellHeight + cellHeight / 2)
+            for column in 0..<cols {
+                let x = min(width - 1, column * cellWidth + cellWidth / 2)
+                let offset = y * pixels.rowBytes + x * 4
+                let red = Int(pixels.bytes[offset])
+                let green = Int(pixels.bytes[offset + 1])
+                let blue = Int(pixels.bytes[offset + 2])
+                cells[row * cols + column] = ((54 * red + 183 * green + 19 * blue) >> 8) >= 242
+            }
+        }
+        return RemoteZebraMask(cols: cols, rows: rows, cells: cells)
+    }
+
+    private nonisolated static func rgbaPixels(
+        _ cg: CGImage
+    ) -> (bytes: [UInt8], width: Int, height: Int, rowBytes: Int)? {
+        let width = max(1, cg.width)
+        let height = max(1, cg.height)
+        let rowBytes = width * 4
+        var bytes = Array(repeating: UInt8(0), count: rowBytes * height)
+        let rendered = bytes.withUnsafeMutableBytes { raw -> Bool in
+            guard let base = raw.baseAddress,
+                  let context = CGContext(data: base, width: width, height: height,
+                                          bitsPerComponent: 8, bytesPerRow: rowBytes,
+                                          space: CGColorSpaceCreateDeviceRGB(),
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+            else { return false }
+            context.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return true
+        }
+        return rendered ? (bytes, width, height, rowBytes) : nil
+    }
 }

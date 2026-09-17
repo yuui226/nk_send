@@ -70,14 +70,12 @@ actor PhotoThumbnailStore {
         directSTA: Bool = false,
         allowRemote: Bool,
         transform: @escaping @Sendable (Data) -> Data = { $0 },
+        validate: @escaping @Sendable (Data) -> Bool = { !$0.isEmpty },
         fetch: @escaping @Sendable () async throws -> Data
     ) async throws -> Data? {
         beginSession(identity: identity)
         guard let expectedIdentity = cameraIdentity else { return nil }
-        let key = directSTA
-            ? PhotoThumbnailDiskCache.staCacheFileName(handle: file.id, size: file.size)
-            : PhotoThumbnailDiskCache.cacheFileName(fileName: file.fileName, size: file.size, captureDate: file.captureDate)
-        let standardKey = PhotoThumbnailDiskCache.cacheFileName(fileName: file.fileName, size: file.size, captureDate: file.captureDate)
+        let (key, standardKey) = cacheKeys(for: file, directSTA: directSTA)
         if let value = memory[key] { touch(key); return value }
         if negative.contains(key) { return nil }
         if let store = cameraStore,
@@ -86,8 +84,13 @@ actor PhotoThumbnailStore {
            ), alternateName: directSTA ? standardKey : nil),
            let raw = try? Data(contentsOf: url), !raw.isEmpty {
             let value = transform(raw)
-            insert(value, key: key)
-            return value
+            if validate(value) {
+                insert(value, key: key)
+                return value
+            }
+            // A malformed disk entry is not an authoritative no-thumbnail
+            // result. Delete it and fall through to a fresh camera read.
+            cameraStore?.remove(key, url: url)
         }
         guard allowRemote else { return nil }
         if let flight = inFlight[key] {
@@ -96,6 +99,11 @@ actor PhotoThumbnailStore {
             guard cameraIdentity == expectedIdentity else { throw CancellationError() }
             guard !raw.isEmpty else { negative.insert(key); return nil }
             let processed = transform(raw)
+            guard validate(processed) else {
+                cameraStore?.remove(key)
+                if !(directSTA && file.fileExtension != ".jpg") { negative.insert(key) }
+                return nil
+            }
             insert(processed, key: key)
             _ = cameraStore?.write(raw, as: key)
             return processed
@@ -113,6 +121,11 @@ actor PhotoThumbnailStore {
             guard cameraIdentity == expectedIdentity else { throw CancellationError() }
             guard !value.isEmpty else { negative.insert(key); return nil }
             let processed = transform(value)
+            guard validate(processed) else {
+                cameraStore?.remove(key)
+                if !(directSTA && file.fileExtension != ".jpg") { negative.insert(key) }
+                return nil
+            }
             insert(processed, key: key)
             _ = cameraStore?.write(value, as: key)
             return processed
@@ -130,10 +143,7 @@ actor PhotoThumbnailStore {
     ) async throws -> Bool {
         beginSession(identity: identity)
         guard let expectedIdentity = cameraIdentity else { return false }
-        let key = directSTA
-            ? PhotoThumbnailDiskCache.staCacheFileName(handle: file.id, size: file.size)
-            : PhotoThumbnailDiskCache.cacheFileName(fileName: file.fileName, size: file.size, captureDate: file.captureDate)
-        let standardKey = PhotoThumbnailDiskCache.cacheFileName(fileName: file.fileName, size: file.size, captureDate: file.captureDate)
+        let (key, standardKey) = cacheKeys(for: file, directSTA: directSTA)
         // Android's no-thumbnail set is a settled result, not a transient
         // failure. A disk-fill pass must not keep retrying the same handle.
         if negative.contains(key) { return true }
@@ -192,12 +202,47 @@ actor PhotoThumbnailStore {
 
     func reconcile(files: [CameraFile], identity: String, directSTA: Bool) {
         beginSession(identity: identity)
-        let names = Set(files.map { file in
-            directSTA
-                ? PhotoThumbnailDiskCache.staCacheFileName(handle: file.id, size: file.size)
-                : PhotoThumbnailDiskCache.cacheFileName(fileName: file.fileName, size: file.size, captureDate: file.captureDate)
-        })
+        let names = Set(files.map { cacheKeys(for: $0, directSTA: directSTA).primary })
+        pruneSessionState(validKeys: names)
         _ = cameraStore?.reconcile(validNames: names)
+    }
+
+    /// Android drops handle-scoped memory, negative and in-flight state as
+    /// soon as an authoritative handle catalog removes an object. Disk files
+    /// remain until the complete metadata scan can reconcile stable keys.
+    func invalidate(files: [CameraFile], identity: String, directSTA: Bool) {
+        guard !files.isEmpty else { return }
+        beginSession(identity: identity)
+        let keys = Set(files.map { cacheKeys(for: $0, directSTA: directSTA).primary })
+        for key in keys {
+            if let value = memory.removeValue(forKey: key) { memoryBytes -= value.count }
+            memoryOrder.removeAll { $0 == key }
+            negative.remove(key)
+            if let flight = inFlight.removeValue(forKey: key) { flight.task.cancel() }
+        }
+    }
+
+    private func pruneSessionState(validKeys: Set<String>) {
+        for key in memory.keys where !validKeys.contains(key) {
+            if let value = memory.removeValue(forKey: key) { memoryBytes -= value.count }
+        }
+        memoryOrder.removeAll { !validKeys.contains($0) }
+        negative.formIntersection(validKeys)
+        for key in Array(inFlight.keys) where !validKeys.contains(key) {
+            inFlight.removeValue(forKey: key)?.task.cancel()
+        }
+    }
+
+    private func cacheKeys(for file: CameraFile, directSTA: Bool) -> (primary: String, standard: String) {
+        let standard = PhotoThumbnailDiskCache.cacheFileName(
+            fileName: file.fileName,
+            size: file.size,
+            captureDate: file.captureDate
+        )
+        let primary = directSTA
+            ? PhotoThumbnailDiskCache.staCacheFileName(handle: file.id, size: file.size)
+            : standard
+        return (primary, standard)
     }
 
     private func insert(_ value: Data, key: String) {

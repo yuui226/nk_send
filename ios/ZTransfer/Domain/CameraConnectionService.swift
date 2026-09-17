@@ -86,7 +86,6 @@ actor CameraConnectionService {
             let session = PTPSession(transport: SelectedUSBPTPTransport(transport: transport, deviceID: deviceID,
                                                                        sessionToken: sessionToken),
                                      defaultTimeoutNanoseconds: 60_000_000_000)
-            let repository = CameraRepository(session: session, isUSBConnection: true)
             let info = try await session.executeResponse(operation: PTPConstants.getDeviceInfo,
                                                          timeoutNanoseconds: 5_000_000_000)
             guard info.code == PTPConstants.responseOK else {
@@ -94,7 +93,11 @@ actor CameraConnectionService {
             }
             // Android accepts an OK response with missing/unparseable info;
             // model metadata is optional, while the PTP handshake is valid.
-            _ = PTPDatasetParser.parseDeviceInfo(info.data)
+            let identity = USBSessionIdentity(token: sessionToken)
+            let repository = CameraRepository(session: session, isUSBConnection: true,
+                                               deviceInfo: PTPDatasetParser.parseDeviceInfo(info.data),
+                                               usbTransport: transport, usbDeviceID: deviceID,
+                                               usbSessionIdentity: identity)
             try Task.checkCancellation()
             activeDeviceID = deviceID
             activeSessionToken = sessionToken

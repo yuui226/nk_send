@@ -73,6 +73,8 @@ struct RemoteFocusResult: Equatable, Sendable {
     let trackingStarted: Bool
     let polls: Int
     let timedOut: Bool
+    var responseCode: UInt16 = PTPConstants.responseOK
+    var trackingResponseCode: UInt16? = nil
 }
 
 enum RemoteEvent: Sendable {

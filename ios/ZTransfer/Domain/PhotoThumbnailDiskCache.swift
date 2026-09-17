@@ -117,6 +117,12 @@ final class PhotoThumbnailDiskCache: @unchecked Sendable {
             }
         }
 
+        func remove(_ name: String, url: URL? = nil) {
+            lock.lock(); defer { lock.unlock() }
+            try? FileManager.default.removeItem(at: url ?? target(name))
+            index.remove(name)
+        }
+
         /// Call only after a complete successful handle + metadata scan.
         @discardableResult
         func reconcile(validNames: Set<String>) -> Int {

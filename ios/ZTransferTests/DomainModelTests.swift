@@ -34,6 +34,153 @@ final class DomainModelTests: XCTestCase {
         XCTAssertEqual(sections[1].files.map(\.id), [3, 1])
     }
 
+    func testCatalogGroupingPreservesCameraOrderForEqualCaptureTimes() {
+        let raw = remoteLifecycleFile(0x091961BF, name: "DSC_0001.NEF")
+        let jpeg = remoteLifecycleFile(0x291961BF, name: "DSC_0001.JPG")
+        XCTAssertEqual(PhotoCatalogGrouping.byCaptureDay([raw, jpeg]).first?.files.map(\.id),
+                       [raw.id, jpeg.id])
+    }
+
+    func testPhotoDateRangeRejectsInvalidCalendarDates() {
+        let range = PhotoDateRange(start: "20260201", end: "20260301")
+        XCTAssertFalse(range.contains("20260229T120000"))
+        XCTAssertFalse(range.contains("20261301T120000"))
+        XCTAssertTrue(range.contains("20260228T235959"))
+        XCTAssertTrue(PhotoDateRange(start: "20240229", end: "20240229").contains("20240229T120000"))
+        XCTAssertEqual(validPhotoCaptureDay("20260806T010000"), "20260806")
+        XCTAssertNil(validPhotoCaptureDay("20260229T120000"))
+    }
+
+    func testPreviewCaptureDateFallsBackFromInvalidTimeAndRejectsInvalidDay() {
+        XCTAssertEqual(formatPreviewCaptureDate("20260724T123456"), "2026-07-24 12:34:56")
+        XCTAssertEqual(formatPreviewCaptureDate("20260724T996099"), "2026-07-24")
+        XCTAssertNil(formatPreviewCaptureDate("20261340T120000"))
+        XCTAssertNil(formatPreviewCaptureDate("20260229T120000"))
+    }
+
+    func testStorageFilterUsesPhysicalSlotsInsteadOfOpaqueStorageIDs() {
+        let firstID: UInt32 = 0x0001_0001
+        let secondID: UInt32 = 0x0002_0001
+        let mapping = photoStorageIDsBySlot([secondID, firstID])
+        XCTAssertEqual(mapping[1], [firstID])
+        XCTAssertEqual(mapping[2], [secondID])
+        let files = [
+            CameraFile(id: 1, storageID: firstID, format: 0x3801, size: 1,
+                       fileName: "a.JPG", captureDate: nil, isProtected: false,
+                       storageIDs: [firstID]),
+            CameraFile(id: 2, storageID: secondID, format: 0x3801, size: 1,
+                       fileName: "b.JPG", captureDate: nil, isProtected: false,
+                       storageIDs: [secondID]),
+        ]
+        var filter = PhotoFilterState()
+        filter.storageSlot = 2
+        XCTAssertEqual(PhotoFilter.apply(files, state: filter, storageIDsBySlot: mapping).map(\.id), [2])
+        XCTAssertNil(normalizedPhotoStorageSlot(2, available: [1], scanComplete: true))
+        XCTAssertEqual(normalizedPhotoStorageSlot(2, available: [], scanComplete: false), 2)
+        XCTAssertTrue(isPhotoStorageSlotSelected(nil, slot: 1))
+        XCTAssertTrue(isPhotoStorageSlotSelected(nil, slot: 2))
+        XCTAssertEqual(toggledPhotoStorageSlot(nil, toggled: 1, available: [1, 2]), 2)
+        XCTAssertEqual(toggledPhotoStorageSlot(2, toggled: 2, available: [1, 2]), 2)
+        XCTAssertNil(toggledPhotoStorageSlot(2, toggled: 1, available: [1, 2]))
+    }
+
+    func testFilterPersistenceMatchesAndroidAndDoesNotRestoreCameraSlot() throws {
+        let suite = "photo-filter-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let state = PhotoFilterState(extensions: [".jpg"], protectedOnly: true,
+                                     burstOnly: true, untransferredOnly: true,
+                                     storageSlot: 2,
+                                     dateRange: PhotoDateRange(start: "20260901", end: "20260917"))
+        PhotoFilterPersistence.save(state, to: defaults)
+        let restored = PhotoFilterPersistence.load(from: defaults)
+        XCTAssertEqual(restored.extensions, [".jpg"])
+        XCTAssertTrue(restored.protectedOnly)
+        XCTAssertTrue(restored.burstOnly)
+        XCTAssertTrue(restored.untransferredOnly)
+        XCTAssertNil(restored.storageSlot)
+        XCTAssertEqual(restored.dateRange, state.dateRange)
+    }
+
+    func testSTADirectStorageLayoutRejectsCrossSlotAggregateMembership() {
+        let reliable = analyzeSTADirectStorageLayout([
+            (0x0001_0001, [1, 2]),
+            (0x0002_0001, [3, 4]),
+        ])
+        XCTAssertEqual(reliable.storageIDsByHandle[1], [0x0001_0001])
+        XCTAssertEqual(reliable.filterStorageIDs, [0x0001_0001, 0x0002_0001])
+
+        let ambiguous = analyzeSTADirectStorageLayout([
+            (0x0001_0001, [1, 2]),
+            (0x0002_0001, [1, 2]),
+        ])
+        XCTAssertEqual(ambiguous.crossSlotOverlapCount, 2)
+        XCTAssertTrue(ambiguous.storageIDsByHandle.isEmpty)
+        XCTAssertTrue(ambiguous.filterStorageIDs.isEmpty)
+    }
+
+    func testRemovedPrimaryHandleSwitchesToSurvivingDualCardAlias() {
+        let firstID: UInt32 = 0x0001_0001
+        let secondID: UInt32 = 0x0002_0001
+        let primary = CameraFile(id: 10, storageID: firstID, format: 0x3801, size: 100,
+                                 fileName: "same.JPG", captureDate: "20260917T120000",
+                                 isProtected: false, storageIDs: [firstID, secondID])
+        let alias = CameraFile(id: 20, storageID: secondID, format: 0x3801, size: 100,
+                               fileName: "same.JPG", captureDate: "20260917T120000",
+                               isProtected: false, storageIDs: [secondID])
+        let reconciled = reconcilePublishedCameraFiles([primary], currentHandles: [20], indexedByHandle: [20: alias])
+        XCTAssertEqual(reconciled.map(\.id), [20])
+        XCTAssertEqual(reconciled.first?.storageIDs, [secondID])
+        XCTAssertEqual(PublishedPhotoIdentity(primary), PublishedPhotoIdentity(alias))
+    }
+
+    func testExpandedBurstFollowsSurvivingLogicalMembersWhenGroupIDChanges() {
+        let first = remoteLifecycleFile(10, name: "DSC_0001.JPG", captureDate: "20260917T120000")
+        let second = remoteLifecycleFile(11, name: "DSC_0002.JPG", captureDate: "20260917T120001")
+        let third = remoteLifecycleFile(12, name: "DSC_0003.JPG", captureDate: "20260917T120002")
+        let replacementFirst = remoteLifecycleFile(20, name: "DSC_0001.JPG", captureDate: "20260917T120000")
+        let previous = BurstPhotoGroup(id: "old", files: [first, second, third])
+        let current = BurstPhotoGroup(id: "new", files: [replacementFirst, second, third])
+
+        XCTAssertEqual(reconciledExpandedBurstIDs(previousGroups: [previous],
+                                                  currentGroups: [current],
+                                                  expandedIDs: ["old"]),
+                       ["new"])
+        XCTAssertEqual(reconciledExpandedBurstIDs(previousGroups: [previous],
+                                                  currentGroups: [current],
+                                                  expandedIDs: []),
+                       [])
+    }
+
+    func testCameraRemovalDaysIgnoreInitialAdditionsAndSurvivingAliases() {
+        let first = remoteLifecycleFile(10, name: "A.JPG", captureDate: "20260917T120000")
+        let second = remoteLifecycleFile(11, name: "B.JPG", captureDate: "20260916T120000")
+        let alias = remoteLifecycleFile(20, name: "A.JPG", captureDate: "20260917T120000")
+
+        XCTAssertEqual(publishedCameraRemovalDays(previous: [], current: [first]), [])
+        XCTAssertEqual(publishedCameraRemovalDays(previous: [first], current: [first, second]), [])
+        XCTAssertEqual(publishedCameraRemovalDays(previous: [first, second], current: [alias, second]), [])
+        XCTAssertEqual(publishedCameraRemovalDays(previous: [first, second], current: []),
+                       ["20260917", "20260916"])
+    }
+
+    func testUntransferredExitOnlyIncludesNewQueueBackedOriginals() {
+        let waiting = remoteLifecycleFile(31, name: "WAIT.JPG", captureDate: "20260917T120000")
+        let completed = remoteLifecycleFile(32, name: "DONE.JPG", captureDate: "20260917T120001")
+        let failed = remoteLifecycleFile(33, name: "FAIL.JPG", captureDate: "20260917T120002")
+        let items = [
+            TransferQueueItem(id: UUID(), file: waiting, status: .waiting),
+            TransferQueueItem(id: UUID(), file: completed, status: .completed),
+            TransferQueueItem(id: UUID(), file: failed, status: .failed),
+        ]
+        XCTAssertEqual(newlyExitingTransferredFileIDs(
+            previous: [31], current: [31, 32, 33, 99], queueItems: items, untransferredOnly: true
+        ), [32])
+        XCTAssertEqual(newlyExitingTransferredFileIDs(
+            previous: [], current: [32], queueItems: items, untransferredOnly: false
+        ), [])
+    }
+
     func testDualCardHeadSelectionMatchesAndroidMissingDateAndStableTieRules() {
         let dated = CameraFile(id: 1, storageID: 1, format: 0x3801, size: 1,
                                fileName: "dated.JPG", captureDate: "20260914T010000", isProtected: false)
@@ -59,6 +206,94 @@ final class DomainModelTests: XCTestCase {
 
         XCTAssertEqual(snapshot.remainingHandles.map(\.storageID), [1, 2])
         XCTAssertEqual(snapshot.remainingHandles.map(\.handles), [[10], [20]])
+    }
+
+    @MainActor
+    func testRemotePauseSetsGateBeforeWaitingAndResumeUsesFreshHandles() async throws {
+        let old = remoteLifecycleFile(1, name: "old.JPG")
+        let added = remoteLifecycleFile(2, name: "added.JPG")
+        let harness = RemoteListLifecycleHarness(firstBatch: [])
+        let model = remoteLifecycleModel(harness)
+
+        model.load()
+        try await waitForRemoteLifecycle { await harness.scanCount == 1 }
+        await model.pauseForRemote()
+
+        let pausedGates = await harness.gateChanges
+        XCTAssertEqual(pausedGates, [true])
+        XCTAssertEqual(model.loadState, .idle)
+        await harness.setResumeFiles([old, added])
+        await model.resumeAfterRemote(isConnected: true)
+        try await waitForRemoteLifecycle { model.hasCompletedFileScan }
+
+        let calls = await harness.scanCalls
+        XCTAssertEqual(calls.count, 2)
+        XCTAssertEqual(calls[0], RemoteListLifecycleHarness.ScanCall(preserve: false, hasSnapshot: false, detectNew: false))
+        XCTAssertEqual(calls[1], RemoteListLifecycleHarness.ScanCall(preserve: true, hasSnapshot: false, detectNew: true))
+        let resumedGates = await harness.gateChanges
+        XCTAssertEqual(resumedGates, [true, false])
+        XCTAssertEqual(model.availableFiles.map(\.id), [1, 2])
+    }
+
+    @MainActor
+    func testRemotePauseKeepsAcceptedBatchAndFreshResumeReconcilesIt() async throws {
+        let retained = remoteLifecycleFile(11, name: "retained.JPG")
+        let removed = remoteLifecycleFile(12, name: "removed.JPG")
+        let added = remoteLifecycleFile(13, name: "added.JPG")
+        let harness = RemoteListLifecycleHarness(firstBatch: [retained, removed])
+        let model = remoteLifecycleModel(harness)
+
+        model.load()
+        try await waitForRemoteLifecycle { model.availableFiles.count == 2 }
+        await model.pauseForRemote()
+        XCTAssertEqual(model.availableFiles.map(\.id), [11, 12])
+        XCTAssertFalse(model.hasCompletedFileScan)
+
+        await harness.setResumeFiles([retained, added], removed: [removed.id], added: [added.id])
+        await model.resumeAfterRemote(isConnected: true)
+        try await waitForRemoteLifecycle { model.hasCompletedFileScan }
+        XCTAssertEqual(model.availableFiles.map(\.id), [11, 13])
+    }
+
+    @MainActor
+    func testRemoteDisconnectReleasesGateWithoutStartingOldSessionScan() async throws {
+        let harness = RemoteListLifecycleHarness(firstBatch: [])
+        let model = remoteLifecycleModel(harness)
+        model.load()
+        try await waitForRemoteLifecycle { await harness.scanCount == 1 }
+
+        await model.pauseForRemote()
+        await model.resumeAfterRemote(isConnected: false)
+        try await Task.sleep(nanoseconds: 20_000_000)
+
+        let gates = await harness.gateChanges
+        let scans = await harness.scanCount
+        XCTAssertEqual(gates, [true, false])
+        XCTAssertEqual(scans, 1)
+        XCTAssertFalse(model.isLoadingFiles)
+    }
+
+    @MainActor
+    func testRemoteResumeWaitsForActivePreviewBeforeFreshHandleScan() async throws {
+        let file = remoteLifecycleFile(21, name: "after-preview.JPG")
+        let harness = RemoteListLifecycleHarness(firstBatch: [])
+        let model = remoteLifecycleModel(harness)
+        model.load()
+        try await waitForRemoteLifecycle { await harness.scanCount == 1 }
+        await model.pauseForRemote()
+
+        model.pauseForPreview()
+        await harness.setResumeFiles([file])
+        await model.resumeAfterRemote(isConnected: true)
+        try await Task.sleep(nanoseconds: 20_000_000)
+        let scansWhilePreviewing = await harness.scanCount
+        XCTAssertEqual(scansWhilePreviewing, 1)
+
+        model.resumeAfterPreview()
+        try await waitForRemoteLifecycle { model.hasCompletedFileScan }
+        let scansAfterPreview = await harness.scanCount
+        XCTAssertEqual(scansAfterPreview, 2)
+        XCTAssertEqual(model.availableFiles.map(\.id), [21])
     }
 
     func testThumbnailFillQueuePreservesSameDateEnumerationOrder() async {
@@ -190,6 +425,32 @@ final class DomainModelTests: XCTestCase {
         XCTAssertEqual(dispersed.compactMap(\.burstID).count, 3)
         XCTAssertTrue(dispersed.allSatisfy { $0.file != nil })
         XCTAssertNil(photoPreviewCollectionIndex(dispersed, memberIndex: 0))
+    }
+
+    func testPreviewRetainsOnlyTwoPagesAroundCurrentAndSkipsCollectionBitmap() {
+        let files = (1...7).map { number in
+            CameraFile(id: UInt32(number), storageID: 1, format: 0x3801, size: 1,
+                       fileName: "IMG_\(number).JPG", captureDate: nil, isProtected: false)
+        }
+        let collection = BurstPhotoGroup(id: "burst", files: [files[2], files[3]])
+        let entries: [PhotoPreviewEntry] = [
+            .photo(files[0]), .photo(files[1]), .burst(collection), .photo(files[4]),
+            .photo(files[5]), .photo(files[6])
+        ]
+
+        XCTAssertEqual(retainedPhotoPreviewIDs(entries: entries, currentIndex: 3), [2, 5, 6, 7])
+        XCTAssertEqual(retainedPhotoPreviewIDs(entries: entries, currentIndex: 0), [1, 2])
+    }
+
+    func testPreviewNeighborsUsePreviousThenNextPageOrder() {
+        let files = (1...3).map { number in
+            CameraFile(id: UInt32(number), storageID: 1, format: 0x3801, size: 1,
+                       fileName: "IMG_\(number).JPG", captureDate: nil, isProtected: false)
+        }
+        let entries = files.map { PhotoPreviewEntry.photo($0) }
+        XCTAssertEqual(neighboringPhotoPreviewIndices(entries: entries, currentIndex: 1), [0, 2])
+        XCTAssertEqual(neighboringPhotoPreviewIndices(entries: entries, currentIndex: 0), [1])
+        XCTAssertEqual(neighboringPhotoPreviewIndices(entries: entries, currentIndex: 2), [1])
     }
 
     func testManualQueueAllowsRepeatedExportsOfSameCameraHandle() async {
@@ -431,8 +692,11 @@ final class DomainModelTests: XCTestCase {
             CameraFile(id: 2, storageID: 2, format: 0xB101, size: 1, fileName: "b.NEF", captureDate: "20260912T010203", isProtected: false),
         ]
         let state = PhotoFilterState(extensions: [".jpg"], protectedOnly: true, untransferredOnly: true, storageSlot: 1, dateRange: PhotoDateRange(start: "20260913", end: "20260913"))
-        XCTAssertEqual(PhotoFilter.apply(files, state: state, transferredIDs: []).map(\.id), [1])
-        XCTAssertTrue(PhotoFilter.apply(files, state: state, transferredIDs: [1]).isEmpty)
+        let storageIDsBySlot: [UInt32: Set<UInt32>] = [1: [1], 2: [2]]
+        XCTAssertEqual(PhotoFilter.apply(files, state: state, transferredIDs: [],
+                                         storageIDsBySlot: storageIDsBySlot).map(\.id), [1])
+        XCTAssertTrue(PhotoFilter.apply(files, state: state, transferredIDs: [1],
+                                        storageIDsBySlot: storageIDsBySlot).isEmpty)
     }
 
     func testPhotoEffectsUseAndroidDefaultsAndNormalizeWatermarkText() {
@@ -447,6 +711,92 @@ final class DomainModelTests: XCTestCase {
         watermark.text = String(repeating: "x", count: 30)
         XCTAssertEqual(watermark.displayText.count, PhotoFrameWatermark.maxTextLength)
     }
+}
+
+private actor RemoteListLifecycleHarness {
+    struct ScanCall: Equatable, Sendable {
+        let preserve: Bool
+        let hasSnapshot: Bool
+        let detectNew: Bool
+    }
+
+    private let firstBatch: [CameraFile]
+    private var remoteGate = false
+    private var resumedFiles: [CameraFile] = []
+    private var resumedRemoved: Set<UInt32> = []
+    private var resumedAdded: Set<UInt32> = []
+    private(set) var scanCalls: [ScanCall] = []
+    private(set) var gateChanges: [Bool] = []
+    var scanCount: Int { scanCalls.count }
+
+    init(firstBatch: [CameraFile]) {
+        self.firstBatch = firstBatch
+    }
+
+    func setGate(_ active: Bool) {
+        remoteGate = active
+        gateChanges.append(active)
+    }
+
+    func setResumeFiles(_ files: [CameraFile], removed: Set<UInt32> = [], added: Set<UInt32> = []) {
+        resumedFiles = files
+        resumedRemoved = removed
+        resumedAdded = added
+    }
+
+    func scan(
+        preserve: Bool,
+        snapshot: PhotoScanSnapshot?,
+        detectNew: Bool,
+        onBatch: @escaping @Sendable ([CameraFile]) async throws -> Void
+    ) async throws -> PhotoScanResult {
+        scanCalls.append(ScanCall(preserve: preserve, hasSnapshot: snapshot != nil, detectNew: detectNew))
+        if scanCalls.count == 1 {
+            if !firstBatch.isEmpty { try await onBatch(firstBatch) }
+            while !remoteGate {
+                try Task.checkCancellation()
+                try await Task.sleep(nanoseconds: 1_000_000)
+            }
+            throw CameraRepositoryError.foregroundPreempted
+        }
+        if !resumedFiles.isEmpty { try await onBatch(resumedFiles) }
+        return PhotoScanResult(files: resumedFiles,
+                               removedHandles: resumedRemoved,
+                               addedHandles: resumedAdded,
+                               handleQueriesSucceeded: true,
+                               metadataComplete: true)
+    }
+}
+
+@MainActor
+private func remoteLifecycleModel(_ harness: RemoteListLifecycleHarness) -> PhotoListViewModel {
+    PhotoListViewModel(
+        scanCatalog: { preserve, snapshot, detectNew, onBatch in
+            try await harness.scan(preserve: preserve, snapshot: snapshot,
+                                   detectNew: detectNew, onBatch: onBatch)
+        },
+        setRemoteGate: { active in await harness.setGate(active) }
+    )
+}
+
+private func remoteLifecycleFile(_ id: UInt32, name: String,
+                                 captureDate: String = "20260917T120000") -> CameraFile {
+    CameraFile(id: id, storageID: 1, format: 0x3801, size: 100,
+               fileName: name, captureDate: captureDate, isProtected: false)
+}
+
+@MainActor
+private func waitForRemoteLifecycle(
+    timeoutNanoseconds: UInt64 = 1_000_000_000,
+    _ predicate: @escaping @MainActor () async -> Bool
+) async throws {
+    let deadline = ContinuousClock.now.advanced(by: .nanoseconds(Int64(timeoutNanoseconds)))
+    while ContinuousClock.now < deadline {
+        if await predicate() { return }
+        try await Task.sleep(nanoseconds: 1_000_000)
+    }
+    XCTFail("Timed out waiting for remote/list lifecycle state")
+    throw CocoaError(.coderReadCorrupt)
 }
 
 extension DomainModelTests {

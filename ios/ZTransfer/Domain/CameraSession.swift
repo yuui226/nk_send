@@ -1,4 +1,24 @@
 import Foundation
+import UIKit
+
+/// The ImageCaptureCore session token changes during Nikon's deliberate USB
+/// remote-control reopen. ConnectionViewModel reads this box without crossing
+/// actor isolation so the expected close/open pair is not mistaken for a cable
+/// disconnect.
+final class USBSessionIdentity: @unchecked Sendable {
+    private let lock = NSLock()
+    private var token: UUID
+    private var rotating = false
+
+    init(token: UUID) { self.token = token }
+    func snapshot() -> (token: UUID, rotating: Bool) {
+        lock.lock(); defer { lock.unlock() }
+        return (token, rotating)
+    }
+    func beginRotation() { lock.lock(); rotating = true; lock.unlock() }
+    func finishRotation(token: UUID) { lock.lock(); self.token = token; rotating = false; lock.unlock() }
+    func cancelRotation() { lock.lock(); rotating = false; lock.unlock() }
+}
 
 /// A connected camera's single owner. USB uses ImageCaptureCore for media;
 /// PTP/IP sessions use the same repository commands, while both expose one
@@ -10,7 +30,9 @@ actor CameraSession {
     /// Stable identity exposed to connection recovery without crossing actor
     /// isolation. It is immutable for the lifetime of a camera session.
     nonisolated let transportDeviceID: String?
-    nonisolated let usbSessionToken: UUID?
+    private nonisolated let usbIdentity: USBSessionIdentity?
+    nonisolated var usbSessionToken: UUID? { usbIdentity?.snapshot().token }
+    nonisolated var usbSessionRotationActive: Bool { usbIdentity?.snapshot().rotating ?? false }
     /// The connection pill uses the transport kind just like Android's
     /// SignalPill (USB icon for wired sessions, Wi‑Fi icon otherwise).
     nonisolated let isUSB: Bool
@@ -22,13 +44,15 @@ actor CameraSession {
     private let exifStore = PhotoExifStore()
 
     init(repository: CameraRepository, transport: ImageCaptureUSBTransport, deviceID: String, sessionToken: UUID) {
-        self.repository = repository; self.usbTransport = transport; self.deviceID = deviceID; self.transportDeviceID = deviceID; self.usbSessionToken = sessionToken; self.isUSB = true; self.wirelessMode = nil
+        self.repository = repository; self.usbTransport = transport; self.deviceID = deviceID; self.transportDeviceID = deviceID
+        self.usbIdentity = repository.usbSessionIdentity ?? USBSessionIdentity(token: sessionToken)
+        self.isUSB = true; self.wirelessMode = nil
     }
 
     /// Creates a network-backed session. The repository's PTPSession is the
     /// serialized command channel for thumbnails, reads and downloads.
     init(repository: CameraRepository, wirelessMode: WirelessMode = .ap) {
-        self.repository = repository; self.usbTransport = nil; self.deviceID = nil; self.transportDeviceID = nil; self.usbSessionToken = nil; self.isUSB = false; self.wirelessMode = wirelessMode
+        self.repository = repository; self.usbTransport = nil; self.deviceID = nil; self.transportDeviceID = nil; self.usbIdentity = nil; self.isUSB = false; self.wirelessMode = wirelessMode
     }
 
     func catalog() async throws -> [CameraFile] { try await repository.loadCatalog() }
@@ -66,20 +90,23 @@ actor CameraSession {
 
     /// Metadata-aware path used by the photo grid. It follows Android's
     /// memory → negative → disk → shared request → camera read order.
-    func thumbnail(file: CameraFile) async throws -> Data? {
+    func thumbnail(file: CameraFile, allowRemote: Bool = true) async throws -> Data? {
         let identity: String?
         if let deviceID { identity = deviceID }
         else { identity = await repository.thumbnailCacheIdentity() }
-        guard let identity else { return try await thumbnail(handle: file.id) }
+        guard let identity else {
+            return allowRemote ? try await thumbnail(handle: file.id) : nil
+        }
         let direct = await repository.usesDirectThumbnailRead()
         return try await thumbnailStore.load(
             file: file,
             identity: identity,
             directSTA: direct,
-            allowRemote: true,
+            allowRemote: allowRemote,
             transform: { data in
                 AndroidThumbnailProcessor.process(data, fileExtension: file.fileExtension)
             },
+            validate: { UIImage(data: $0) != nil },
             fetch: { try await self.thumbnail(handle: file.id) }
         )
     }
@@ -118,6 +145,7 @@ actor CameraSession {
             transform: { data in
                 AndroidThumbnailProcessor.process(data, fileExtension: file.fileExtension)
             },
+            validate: { UIImage(data: $0) != nil },
             fetch: { Data() }
         )
     }
@@ -130,6 +158,16 @@ actor CameraSession {
         guard let identity else { return }
         let direct = await repository.usesDirectThumbnailRead()
         await thumbnailStore.reconcile(files: files, identity: identity, directSTA: direct)
+    }
+
+    func invalidateThumbnailState(files: [CameraFile]) async {
+        guard !files.isEmpty else { return }
+        let identity: String?
+        if let deviceID { identity = deviceID }
+        else { identity = await repository.thumbnailCacheIdentity() }
+        guard let identity else { return }
+        let direct = await repository.usesDirectThumbnailRead()
+        await thumbnailStore.invalidate(files: files, identity: identity, directSTA: direct)
     }
 
     func setFHDActive(_ active: Bool) async { await repository.setFHDActive(active) }
@@ -172,9 +210,9 @@ actor CameraSession {
     /// reservation across both operations so a download slice cannot be
     /// inserted between them.  A failed FHD request does not suppress the
     /// subsequent EXIF attempt.
-    func previewAndExif(file: CameraFile) async -> (Data?, PhotoExif?) {
+    func previewAndExif(file: CameraFile, loadPreview: Bool = true) async -> (Data?, PhotoExif?) {
         await (try? repository.withInteractivePreviewPriority {
-            let image = try? await self.repository.preview(handle: file.id)
+            let image = loadPreview ? (try? await self.repository.preview(handle: file.id)) : nil
             let metadata = try? await self.exifStore.load(file: file) { length in
                 try await self.repository.readPrefix(handle: file.id, length: length)
             }
@@ -227,9 +265,11 @@ actor CameraSession {
         await repository.endLiveView()
     }
 
-    func liveViewFrame(preferEnhanced: Bool = true) async throws -> Data {
-        return try await repository.liveViewFrame(preferEnhanced: preferEnhanced)
+    func liveViewFrame() async throws -> RemoteLiveViewPacket {
+        try await repository.liveViewFrame()
     }
+
+    func remoteMovieMode() async throws -> Bool? { try await repository.remoteMovieMode() }
 
     func capturePhoto() async throws {
         try await repository.capturePhoto()
@@ -254,6 +294,17 @@ actor CameraSession {
     }
 
     func endSubjectTracking() async throws { try await repository.endSubjectTracking() }
+    func refreshUSBRemoteSession() async throws -> String { try await repository.refreshUSBRemoteSession() }
+    func setRemoteControlMode(_ enabled: Bool) async throws -> UInt16 {
+        try await repository.setRemoteControlMode(enabled)
+    }
+    func hasRemoteControlMode() async -> Bool { await repository.hasRemoteControlMode() }
+    func hasMovieApplicationMode() async -> Bool { await repository.hasMovieApplicationMode() }
+    func ensureMovieApplicationMode() async throws { try await repository.ensureMovieApplicationMode() }
+    func clearMovieApplicationMode(force: Bool) async { await repository.clearMovieApplicationMode(force: force) }
+    func startPreparedUSBMovieRecording() async throws -> RemoteMovieStartResult {
+        try await repository.startPreparedUSBMovieRecording()
+    }
     func startMovieRecording() async throws -> RemoteMovieStartResult {
         try await repository.startMovieRecording()
     }
@@ -268,7 +319,8 @@ protocol RemoteCameraControlling: Sendable {
     func remoteEvents() async throws -> [STAEvent]
     func startLiveView() async throws
     func endLiveView() async
-    func liveViewFrame(preferEnhanced: Bool) async throws -> Data
+    func liveViewFrame() async throws -> RemoteLiveViewPacket
+    func remoteMovieMode() async throws -> Bool?
     func capturePhoto() async throws
     func remoteProperty(_ property: RemoteProperty) async throws -> RemotePropertyDescriptor?
     func setRemoteProperty(_ descriptor: RemotePropertyDescriptor, value: UInt64) async throws
@@ -278,6 +330,25 @@ protocol RemoteCameraControlling: Sendable {
     func endSubjectTracking() async throws
     func startMovieRecording() async throws -> RemoteMovieStartResult
     func endMovieRecording() async throws -> UInt16
+    func refreshUSBRemoteSession() async throws -> String
+    func setRemoteControlMode(_ enabled: Bool) async throws -> UInt16
+    func hasRemoteControlMode() async -> Bool
+    func hasMovieApplicationMode() async -> Bool
+    func ensureMovieApplicationMode() async throws
+    func clearMovieApplicationMode(force: Bool) async
+    func startPreparedUSBMovieRecording() async throws -> RemoteMovieStartResult
+}
+
+extension RemoteCameraControlling {
+    func refreshUSBRemoteSession() async throws -> String { "" }
+    func setRemoteControlMode(_ enabled: Bool) async throws -> UInt16 { PTPConstants.responseOK }
+    func hasRemoteControlMode() async -> Bool { false }
+    func hasMovieApplicationMode() async -> Bool { false }
+    func ensureMovieApplicationMode() async throws {}
+    func clearMovieApplicationMode(force: Bool) async {}
+    func startPreparedUSBMovieRecording() async throws -> RemoteMovieStartResult {
+        try await startMovieRecording()
+    }
 }
 
 extension CameraSession: RemoteCameraControlling {}

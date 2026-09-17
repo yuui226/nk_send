@@ -164,8 +164,13 @@ struct PhotoFilterPopupOverlay: View {
                 section(AppLocalized.resource("filter_section_storage"))
                 HStack(spacing: 8) {
                     ForEach(availableStorageSlots, id: \.self) { slot in
-                        FilterChip(label: AppLocalized.formattedResource("filter_storage_slot", ["%1$d": String(slot)]), selected: working.storageSlot == slot) {
-                            commit(working.withStorageSlot(working.storageSlot == slot ? nil : slot))
+                        FilterChip(label: AppLocalized.formattedResource("filter_storage_slot", ["%1$d": String(slot)]),
+                                   selected: isPhotoStorageSlotSelected(working.storageSlot, slot: slot)) {
+                            commit(working.withStorageSlot(toggledPhotoStorageSlot(
+                                working.storageSlot,
+                                toggled: slot,
+                                available: availableStorageSlots
+                            )))
                         }
                     }
                 }

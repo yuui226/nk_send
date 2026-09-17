@@ -699,6 +699,7 @@ final class ConnectionViewModel: ObservableObject {
             // already accepted session back to the connecting card.
             return
         case let .sessionClosed(id, token):
+            if cameraSession?.usbSessionRotationActive == true { return }
             if let cameraSession, cameraSession.usbSessionToken != token { return }
             if let current = usbTransport.openedSessionToken(for: id), current != token { return }
         default:

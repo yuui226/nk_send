@@ -136,11 +136,12 @@ struct RootView: View {
         .fullScreenCover(isPresented: $monitorPresented) {
             if let session = connectionModel.cameraSession ?? establishedSession {
                 RemoteView(session: session,
+                           recordingDirectory: directoryStore.directoryURL,
                            isSessionConnected: connectionModel.cameraSession === session,
                            onRetrySTA: { connectionModel.retrySTAConnection() },
                            onPreparing: { await PhotoListViewModel.cached(session: session).pauseForRemote() },
                            onStopped: { transportLost in
-                               PhotoListViewModel.cached(session: session).resumeAfterRemote(
+                               await PhotoListViewModel.cached(session: session).resumeAfterRemote(
                                    isConnected: connectionModel.cameraSession === session && !transportLost)
                            },
                            onTransportLost: {

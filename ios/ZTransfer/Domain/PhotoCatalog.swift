@@ -11,6 +11,69 @@ struct BurstPhotoGroup: Identifiable, Equatable, Sendable {
     let files: [CameraFile]
 }
 
+struct PublishedPhotoIdentity: Hashable {
+    let fileName: String
+    let size: UInt64
+    let captureDate: String?
+
+    init(_ file: CameraFile) {
+        fileName = file.fileName
+        size = file.size
+        captureDate = file.captureDate
+    }
+}
+
+/// Dates whose visible logical photos disappeared in an authoritative camera
+/// update. A surviving dual-card alias changes the session handle only and is
+/// therefore deliberately excluded, matching Android's
+/// `publishedCameraRemovalDates`.
+func publishedCameraRemovalDays(
+    previous: [CameraFile],
+    current: [CameraFile]
+) -> Set<String> {
+    guard !previous.isEmpty else { return [] }
+    let currentHandles = Set(current.map(\.id))
+    let missing = previous.filter { !currentHandles.contains($0.id) }
+    guard !missing.isEmpty else { return [] }
+    let currentIdentities = Set(current.map(PublishedPhotoIdentity.init))
+    return Set(missing.compactMap { file -> String? in
+        guard !currentIdentities.contains(PublishedPhotoIdentity(file)) else { return nil }
+        guard let captureDate = file.captureDate, captureDate.count >= 8 else {
+            return PhotoCatalogGrouping.unknownDay
+        }
+        return String(captureDate.prefix(8))
+    })
+}
+
+/// Keeps an expanded burst expanded when an authoritative camera deletion
+/// changes the derived group id. Android matches successor groups by the
+/// surviving logical file identity, not by the session-local object handle.
+func reconciledExpandedBurstIDs(
+    previousGroups: [BurstPhotoGroup],
+    currentGroups: [BurstPhotoGroup],
+    expandedIDs: Set<String>
+) -> Set<String> {
+    guard !expandedIDs.isEmpty, !currentGroups.isEmpty else { return [] }
+    let currentIDs = Set(currentGroups.map(\.id))
+    var reconciled = expandedIDs.intersection(currentIDs)
+    guard previousGroups != currentGroups else { return reconciled }
+    let previouslyExpanded = previousGroups.filter { expandedIDs.contains($0.id) }
+    guard !previouslyExpanded.isEmpty else { return reconciled }
+
+    var successorIDsByFile: [PublishedPhotoIdentity: Set<String>] = [:]
+    for group in currentGroups {
+        for file in group.files {
+            successorIDsByFile[PublishedPhotoIdentity(file), default: []].insert(group.id)
+        }
+    }
+    for group in previouslyExpanded {
+        for file in group.files {
+            reconciled.formUnion(successorIDsByFile[PublishedPhotoIdentity(file)] ?? [])
+        }
+    }
+    return reconciled
+}
+
 /// Paging model used by the Android preview: a collapsed burst occupies one
 /// page and its members are inserted only after the user explicitly expands it.
 /// Keeping this separate from the flat camera catalog prevents preview paging
@@ -35,6 +98,27 @@ enum PhotoPreviewEntry: Identifiable, Equatable, Sendable {
         guard case .photo(_, let value) = self else { return nil }
         return value
     }
+}
+
+/// Android bounds preview-only image state to the current page plus two pages
+/// on either side. Collection pages do not own a high-resolution bitmap.
+func retainedPhotoPreviewIDs(
+    entries: [PhotoPreviewEntry],
+    currentIndex: Int,
+    radius: Int = 2
+) -> Set<UInt32> {
+    guard !entries.isEmpty, entries.indices.contains(currentIndex), radius >= 0 else { return [] }
+    let lower = max(entries.startIndex, currentIndex - radius)
+    let upper = min(entries.index(before: entries.endIndex), currentIndex + radius)
+    return Set(entries[lower...upper].compactMap { $0.file?.id })
+}
+
+/// Neighbor FHD prefetch is deliberately serial and follows Android's order:
+/// previous page first, then next page. Collection pages remain in the page
+/// sequence but are ignored by the loader because they have no single file.
+func neighboringPhotoPreviewIndices(entries: [PhotoPreviewEntry], currentIndex: Int) -> [Int] {
+    guard entries.indices.contains(currentIndex) else { return [] }
+    return [currentIndex - 1, currentIndex + 1].filter(entries.indices.contains)
 }
 
 /// Reproduces Android's initial preview item list.  Only the first member of a
@@ -96,7 +180,15 @@ enum PhotoCatalogGrouping {
             // order, so files without capture time stay at the top.
             return lhs > rhs
         }.map { day in
-            PhotoDaySection(day: day, files: (sections[day] ?? []).sorted { $0.captureDate.orEmpty > $1.captureDate.orEmpty })
+            // Kotlin's sortedByDescending is stable. Preserve the camera's
+            // enumeration order for equal timestamps so JPG/RAW pairs are not
+            // reordered by Swift's unspecified equal-element sort behavior.
+            let stable = (sections[day] ?? []).enumerated().sorted { lhs, rhs in
+                let left = lhs.element.captureDate.orEmpty
+                let right = rhs.element.captureDate.orEmpty
+                return left == right ? lhs.offset < rhs.offset : left > right
+            }.map(\.element)
+            return PhotoDaySection(day: day, files: stable)
         }
     }
 

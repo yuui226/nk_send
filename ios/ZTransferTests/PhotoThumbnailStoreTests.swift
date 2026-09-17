@@ -82,6 +82,70 @@ final class PhotoThumbnailStoreTests: XCTestCase {
         XCTAssertEqual(visible, Data([1, 2, 3, 9]))
         XCTAssertEqual(counter.value, 1)
     }
+
+    func testCacheOnlyPreviewGateDoesNotFetchAndRemoteLoadResumesLater() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ztransfer-thumb-cache-only-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = PhotoThumbnailStore(disk: PhotoThumbnailDiskCache(root: root))
+        let counter = LockedCounter()
+
+        let cacheOnly = try await store.load(file: file(), identity: "camera-gated", allowRemote: false) {
+            counter.increment()
+            return Data([1])
+        }
+        XCTAssertNil(cacheOnly)
+        XCTAssertEqual(counter.value, 0)
+
+        let resumed = try await store.load(file: file(), identity: "camera-gated", allowRemote: true) {
+            counter.increment()
+            return Data([1])
+        }
+        XCTAssertEqual(resumed, Data([1]))
+        XCTAssertEqual(counter.value, 1)
+    }
+
+    func testAuthoritativeRemovalClearsNegativeStateForReusedObject() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ztransfer-thumb-reuse-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = PhotoThumbnailStore(disk: PhotoThumbnailDiskCache(root: root))
+        let counter = LockedCounter()
+        let cameraFile = file()
+
+        let missing = try await store.load(file: cameraFile, identity: "camera-reuse", allowRemote: true) {
+            counter.increment()
+            return Data()
+        }
+        XCTAssertNil(missing)
+        await store.invalidate(files: [cameraFile], identity: "camera-reuse", directSTA: false)
+        let reused = try await store.load(file: cameraFile, identity: "camera-reuse", allowRemote: true) {
+            counter.increment()
+            return Data([7])
+        }
+
+        XCTAssertEqual(reused, Data([7]))
+        XCTAssertEqual(counter.value, 2)
+    }
+
+    func testMalformedDiskEntryIsDeletedAndRefetchedInsteadOfNegativelyCached() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ztransfer-thumb-corrupt-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = PhotoThumbnailStore(disk: PhotoThumbnailDiskCache(root: root))
+        let prefetched = try await store.prefetch(file: file(), identity: "camera-corrupt") {
+            Data([0])
+        }
+        XCTAssertTrue(prefetched)
+        let counter = LockedCounter()
+        let value = try await store.load(file: file(), identity: "camera-corrupt", allowRemote: true,
+                                         validate: { $0 == Data([9]) }) {
+            counter.increment()
+            return Data([9])
+        }
+        XCTAssertEqual(value, Data([9]))
+        XCTAssertEqual(counter.value, 1)
+    }
 }
 
 private final class LockedCounter: @unchecked Sendable {
