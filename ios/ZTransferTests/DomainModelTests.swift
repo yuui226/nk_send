@@ -159,6 +159,18 @@ final class DomainModelTests: XCTestCase {
         XCTAssertTrue(restored.untransferredOnly)
         XCTAssertNil(restored.storageSlot)
         XCTAssertEqual(restored.dateRange, state.dateRange)
+
+        defaults.set("2026-09-17", forKey: "filter_date_start")
+        defaults.set("2026-09-01", forKey: "filter_date_end")
+        XCTAssertEqual(
+            PhotoFilterPersistence.load(from: defaults).dateRange,
+            PhotoDateRange(start: "20260901", end: "20260917")
+        )
+        defaults.set("20260901", forKey: "filter_date_start")
+        XCTAssertNil(PhotoFilterPersistence.load(from: defaults).dateRange)
+        defaults.set("2026-02-29", forKey: "filter_date_start")
+        defaults.set("2026-03-01", forKey: "filter_date_end")
+        XCTAssertNil(PhotoFilterPersistence.load(from: defaults).dateRange)
     }
 
     func testSTADirectStorageLayoutRejectsCrossSlotAggregateMembership() {

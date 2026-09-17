@@ -29,6 +29,20 @@ func validPhotoCaptureDay(_ value: String?) -> String? {
     return resolved.year == year && resolved.month == month && resolved.day == day ? dayValue : nil
 }
 
+func restoredPhotoDateRange(start: String?, end: String?) -> PhotoDateRange? {
+    func parseISO(_ value: String?) -> String? {
+        guard let value,
+              value.range(of: #"^\d{4}-\d{2}-\d{2}$"#, options: .regularExpression) != nil else {
+            return nil
+        }
+        return validPhotoCaptureDay(value.replacingOccurrences(of: "-", with: ""))
+    }
+    guard let first = parseISO(start), let second = parseISO(end) else { return nil }
+    return first <= second
+        ? PhotoDateRange(start: first, end: second)
+        : PhotoDateRange(start: second, end: first)
+}
+
 struct PhotoFilterState: Equatable, Sendable, Codable {
     var extensions: Set<String>? = nil
     var protectedOnly = false
@@ -139,15 +153,15 @@ enum PhotoFilterPersistence {
 
     static func load(from defaults: UserDefaults = .standard) -> PhotoFilterState {
         let extensions = defaults.stringArray(forKey: extensionsKey).map { Set($0.map { $0.lowercased() }) }
-        let start = defaults.string(forKey: startKey)?.replacingOccurrences(of: "-", with: "")
-        let end = defaults.string(forKey: endKey)?.replacingOccurrences(of: "-", with: "")
-        let range = start.flatMap { first in end.map { PhotoDateRange(start: first, end: $0) } }
         return PhotoFilterState(extensions: extensions?.isEmpty == false ? extensions : nil,
                                 protectedOnly: defaults.bool(forKey: protectedKey),
                                 burstOnly: defaults.bool(forKey: burstKey),
                                 untransferredOnly: defaults.bool(forKey: untransferredKey),
                                 storageSlot: nil,
-                                dateRange: range.flatMap { $0.contains($0.start) && $0.contains($0.end) ? $0 : nil })
+                                dateRange: restoredPhotoDateRange(
+                                    start: defaults.string(forKey: startKey),
+                                    end: defaults.string(forKey: endKey)
+                                ))
     }
 
     static func save(_ state: PhotoFilterState, to defaults: UserDefaults = .standard) {
