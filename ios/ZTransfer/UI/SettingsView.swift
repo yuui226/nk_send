@@ -168,7 +168,7 @@ struct SettingsView: View {
         .task(id: watermarkPickerItems) {
             guard let item = watermarkPickerItems.last else { return }
             guard let data = try? await item.loadTransferable(type: Data.self), !Task.isCancelled,
-                  let image = UIImage(data: data), let hash = effectsStore.importWatermarkImage(image) else {
+                  let hash = effectsStore.importWatermarkImage(data: data) else {
                 if !Task.isCancelled { effectsHint = .init(resource: "photo_frame_image_import_failed"); watermarkPickerItems = [] }
                 return
             }

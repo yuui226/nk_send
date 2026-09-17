@@ -79,8 +79,7 @@ struct LocalPhotoEffectsView: View {
             guard let item = items.last else { return }
             Task {
                 guard let data = try? await item.loadTransferable(type: Data.self),
-                      let image = UIImage(data: data),
-                      let hash = effectsStore.importWatermarkImage(image) else {
+                      let hash = effectsStore.importWatermarkImage(data: data) else {
                     effectsHint = .init(resource: "photo_frame_image_import_failed")
                     await MainActor.run { watermarkPickerItems = [] }
                     return

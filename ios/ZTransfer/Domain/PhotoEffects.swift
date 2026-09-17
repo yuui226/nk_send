@@ -490,6 +490,7 @@ private func androidSHA256Hex(_ value: String, bytes: Int) -> String {
 
 @MainActor
 final class PhotoEffectsStore: ObservableObject {
+    static let maximumWatermarkImageBytes = 20 * 1024 * 1024
     @Published private(set) var settings: PhotoEffectsSettings
     private let defaults: UserDefaults
     private let key: String
@@ -559,14 +560,19 @@ final class PhotoEffectsStore: ObservableObject {
 
     /// Stores a watermark image in application support and returns its stable
     /// content hash, matching Android's private watermark copy semantics.
-    func importWatermarkImage(_ image: UIImage) -> String? {
-        guard let data = image.pngData() else { return nil }
+    func importWatermarkImage(data: Data) -> String? {
+        guard !data.isEmpty,
+              data.count <= Self.maximumWatermarkImageBytes,
+              UIImage(data: data) != nil else { return nil }
         let hash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
         let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("ZTransfer/Watermarks", isDirectory: true)
+        let destination = directory.appendingPathComponent("\(hash).png")
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            try data.write(to: directory.appendingPathComponent("\(hash).png"), options: .atomic)
+            if !FileManager.default.fileExists(atPath: destination.path) {
+                try data.write(to: destination, options: .atomic)
+            }
             return hash
         } catch { return nil }
     }

@@ -1,6 +1,7 @@
 import XCTest
 import UIKit
 import ImageIO
+import CryptoKit
 import UniformTypeIdentifiers
 @testable import ZTransfer
 
@@ -791,6 +792,29 @@ final class DomainModelTests: XCTestCase {
             PhotoFrameWatermark.limitText(String(repeating: "😀", count: 25)).unicodeScalars.count,
             PhotoFrameWatermark.maxTextLength
         )
+    }
+
+    @MainActor
+    func testWatermarkImportUsesOriginalBytesAndAndroidSizeLimit() throws {
+        let suite = "effects-watermark-import-\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = PhotoEffectsStore(defaults: defaults)
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 3, height: 2))
+        let image = renderer.image { context in
+            UIColor.systemOrange.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 3, height: 2))
+        }
+        let original = try XCTUnwrap(image.jpegData(compressionQuality: 0.73))
+        let expectedHash = SHA256.hash(data: original)
+            .map { String(format: "%02x", $0) }.joined()
+
+        XCTAssertEqual(store.importWatermarkImage(data: original), expectedHash)
+        XCTAssertNotNil(PhotoEffectsStore.watermarkImage(hash: expectedHash))
+        XCTAssertNil(store.importWatermarkImage(data: Data()))
+        XCTAssertNil(store.importWatermarkImage(
+            data: Data(count: PhotoEffectsStore.maximumWatermarkImageBytes + 1)
+        ))
     }
 
     @MainActor
