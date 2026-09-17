@@ -5,6 +5,30 @@ import UniformTypeIdentifiers
 @testable import ZTransfer
 
 final class DomainModelTests: XCTestCase {
+    func testGPSLocationFailuresMatchAndroidWaitingPermissionAndUnavailableStates() {
+        XCTAssertEqual(gpsLocationFailureAction(for: .locationUnknown), .keepWaiting)
+        XCTAssertEqual(gpsLocationFailureAction(for: .denied), .permissionRequired)
+        XCTAssertEqual(gpsLocationFailureAction(for: .network), .locationUnavailable)
+    }
+
+    func testGPSOnlyReusesLocationsFromAndroidsTwoMinuteWindow() {
+        let now = Date(timeIntervalSince1970: 2_000)
+        XCTAssertTrue(isReusableGPSLocation(CLLocation(
+            coordinate: .init(latitude: 31, longitude: 121),
+            altitude: 0,
+            horizontalAccuracy: 10,
+            verticalAccuracy: -1,
+            timestamp: now.addingTimeInterval(-120)
+        ), now: now))
+        XCTAssertFalse(isReusableGPSLocation(CLLocation(
+            coordinate: .init(latitude: 31, longitude: 121),
+            altitude: 0,
+            horizontalAccuracy: 10,
+            verticalAccuracy: -1,
+            timestamp: now.addingTimeInterval(-121)
+        ), now: now))
+    }
+
     func testLocalPhotoSelectionMatchesAndroidJPEGAndPNGInputRange() {
         XCTAssertTrue(isSupportedLocalPhoto([.jpeg]))
         XCTAssertTrue(isSupportedLocalPhoto([.png]))

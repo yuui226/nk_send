@@ -3,6 +3,7 @@ import Combine
 import Foundation
 
 enum NikonGPSBluetoothState: Equatable, Sendable {
+    case unauthorized
     case unavailable
     case scanning
     case connecting(String)
@@ -46,6 +47,7 @@ final class NikonGPSBluetoothClient: NSObject, ObservableObject {
     private var notificationsReady = Set<CBUUID>()
     private var pairingTimeout: Task<Void, Never>?
     private var directReconnectTask: Task<Void, Never>?
+    private var shouldRun = false
     private let defaults: UserDefaults
 
     init(controllerName: String = "ZTransfer", savedDevice: UInt32? = nil, savedNonce: UInt32? = nil, defaults: UserDefaults? = nil) {
@@ -90,12 +92,14 @@ final class NikonGPSBluetoothClient: NSObject, ObservableObject {
     }
 
     func start() {
+        shouldRun = true
         GPSDiagnostics.record("BLE start savedIdentity=\(savedDevice != nil && savedNonce != nil)")
         directReconnectTask?.cancel()
         directReconnectTask = nil
+        if central.state == .unknown || central.state == .resetting { return }
         guard central.state == .poweredOn else {
             GPSDiagnostics.record("Bluetooth adapter unavailable")
-            state = central.state == .unauthorized || central.state == .unsupported ? .unavailable : .failed("Bluetooth unavailable")
+            state = central.state == .unauthorized ? .unauthorized : .unavailable
             return
         }
         guard peripheral == nil else { return }
@@ -134,6 +138,7 @@ final class NikonGPSBluetoothClient: NSObject, ObservableObject {
     }
 
     func stop() {
+        shouldRun = false
         GPSDiagnostics.record("BLE stopped")
         directReconnectTask?.cancel()
         directReconnectTask = nil
@@ -266,6 +271,12 @@ extension NikonGPSBluetoothClient: CBCentralManagerDelegate {
         )
         MainActor.assumeIsolated { [weak self] in
             guard let self, let restored = restoredBox.value else { return }
+            guard self.defaults.bool(forKey: GPSPreferences.enabled) else {
+                self.central.cancelPeripheralConnection(restored)
+                self.state = .disconnected
+                return
+            }
+            self.shouldRun = true
             self.peripheral = restored
             self.peripheralIdentifier = restored.identifier
             self.savedPeripheralIdentifier = restored.identifier
@@ -281,7 +292,19 @@ extension NikonGPSBluetoothClient: CBCentralManagerDelegate {
     nonisolated func centralManagerDidUpdateState(_ central: CBCentralManager) {
         MainActor.assumeIsolated { [weak self] in
             guard let self else { return }
-            if central.state == .poweredOn { self.start() } else { self.state = .unavailable }
+            guard self.shouldRun else {
+                self.state = .disconnected
+                return
+            }
+            if central.state == .poweredOn {
+                self.start()
+            } else if central.state == .unknown || central.state == .resetting {
+                self.state = .disconnected
+            } else if central.state == .unauthorized {
+                self.state = .unauthorized
+            } else {
+                self.state = .unavailable
+            }
         }
     }
 
@@ -310,8 +333,13 @@ extension NikonGPSBluetoothClient: CBCentralManagerDelegate {
             guard let self, self.peripheral?.identifier == peripheral.identifier else { return }
             let wasDirectReconnect = self.savedPeripheralIdentifier == peripheral.identifier &&
                 self.state == .connecting(peripheral.name ?? "Nikon")
-            self.clearConnectionState(); self.state = error.map { .failed($0.localizedDescription) } ?? .disconnected
-            if wasDirectReconnect, error != nil { self.beginScan() }
+            if let error { GPSDiagnostics.record("BLE disconnected error=\(error.localizedDescription)") }
+            self.clearConnectionState()
+            if wasDirectReconnect {
+                self.beginScan()
+                return
+            }
+            self.state = .disconnected
         }
     }
 }

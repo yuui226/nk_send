@@ -53,6 +53,32 @@ struct GPSState: Equatable, Sendable {
     var message: String?
 }
 
+/// Core Location can report `locationUnknown` while it is still acquiring a fix.
+/// Android keeps waiting in that situation; only a real authorization denial is
+/// presented as a permission problem, while other setup failures use its
+/// "无法获取定位" error state.
+enum GPSLocationFailureAction: Equatable, Sendable {
+    case keepWaiting
+    case permissionRequired
+    case locationUnavailable
+}
+
+func gpsLocationFailureAction(for code: CLError.Code) -> GPSLocationFailureAction {
+    switch code {
+    case .locationUnknown:
+        return .keepWaiting
+    case .denied:
+        return .permissionRequired
+    default:
+        return .locationUnavailable
+    }
+}
+
+func isReusableGPSLocation(_ location: CLLocation, now: Date = Date()) -> Bool {
+    location.timestamp.timeIntervalSince1970 > 0 &&
+        abs(now.timeIntervalSince(location.timestamp)) <= 120
+}
+
 /// One-shot coordinate lookup state copied from Android's GpsPlaceLookupState.
 /// The coordinates stay attached to the result so a late geocoder callback
 /// cannot be mistaken for the current location.
