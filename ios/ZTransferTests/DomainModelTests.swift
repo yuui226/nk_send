@@ -1073,6 +1073,32 @@ extension DomainModelTests {
     }
 
     @MainActor
+    func testLocalEffectsFirstRunPersistsIndependentScopeWithoutEdits() {
+        let legacySuite = "effects-empty-legacy-\(UUID())"
+        let localSuite = "effects-empty-local-\(UUID())"
+        let legacy = UserDefaults(suiteName: legacySuite)!
+        let local = UserDefaults(suiteName: localSuite)!
+        defer {
+            legacy.removePersistentDomain(forName: legacySuite)
+            local.removePersistentDomain(forName: localSuite)
+        }
+
+        let first = PhotoEffectsStore(defaults: local, scope: .localPhotos,
+                                      legacyDefaults: legacy).settings
+        XCTAssertEqual(local.integer(forKey: "settings_version"), 3)
+        XCTAssertTrue(first.favoriteFilterIDs.isEmpty)
+
+        let preset = PhotoFilterCatalog.presets[0]
+        var camera = PhotoEffectsSettings()
+        camera.toggleFilterFavorite(preset.id)
+        PhotoEffectsStore(defaults: legacy).update(camera)
+
+        let reopened = PhotoEffectsStore(defaults: local, scope: .localPhotos,
+                                         legacyDefaults: legacy).settings
+        XCTAssertTrue(reopened.favoriteFilterIDs.isEmpty)
+    }
+
+    @MainActor
     func testAndroidIntensityCodecKeepsFirstDuplicateAndNormalizesValues() {
         let suite = "effects-codec-\(UUID())"
         let defaults = UserDefaults(suiteName: suite)!

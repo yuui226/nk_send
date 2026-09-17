@@ -471,6 +471,17 @@ final class PhotoEffectsStore: ObservableObject {
             if let first = PhotoFilterCatalog.presets.first {
                 settings.selectedFilter = .init(preset: first, intensityPercent: Np3FilterEngine.defaultIntensityPercent)
             }
+            if scope == .localPhotos {
+                // Android saves the initial local workbench snapshot as soon
+                // as the page is composed. Mark this independent scope as
+                // initialized even if the user leaves without editing, so a
+                // later camera-setting favorite is never mistaken for a
+                // first-run migration source.
+                Self.persistAndroidLocalSettings(settings, defaults: self.defaults)
+                if let data = try? JSONEncoder().encode(settings) {
+                    self.defaults.set(data, forKey: key)
+                }
+            }
         }
     }
 
