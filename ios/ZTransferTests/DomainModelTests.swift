@@ -720,7 +720,7 @@ final class DomainModelTests: XCTestCase {
         var watermark = PhotoFrameWatermark(text: "  a\nb\t")
         XCTAssertEqual(watermark.displayText, "a b")
         watermark.text = " \n\t "
-        XCTAssertEqual(watermark.displayText, "")
+        XCTAssertEqual(watermark.displayText, PhotoFrameWatermark.defaultText)
         watermark.text = String(repeating: "x", count: 30)
         XCTAssertEqual(watermark.displayText.count, PhotoFrameWatermark.maxTextLength)
     }

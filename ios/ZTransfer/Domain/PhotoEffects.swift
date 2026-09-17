@@ -42,7 +42,8 @@ struct PhotoFrameWatermark: Codable, Equatable, Sendable {
     var effect: PhotoFrameWatermarkEffect = .auto
 
     var displayText: String {
-        limitedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = limitedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? Self.defaultText : trimmed
     }
 
     /// Android replaces line breaks/tabs with one space, removes remaining
