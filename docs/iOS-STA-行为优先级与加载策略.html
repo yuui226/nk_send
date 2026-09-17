@@ -32,15 +32,15 @@
   <h1>iOS STA 模式：行为优先级与加载策略</h1>
   <p class="note">这份表格按当前 iOS 代码整理，描述“现在会怎样”，不是未来设计。STA 是 Wi‑Fi STA 连接；同一套相机 I/O 门控也用于 USB/AP，差异已在对应行标出。代码证据列给出主要实现文件。</p>
 
-  <p class="note">监看复核结果见<a href="#remote-audit">第五至八节</a>。下方优先级是功能让路概览，不是严格的全局抢占队列；传输/监看同时运行的时序仍需验证。</p>
-  <h2>一、功能让路概览（原有分类顺序）</h2>
-  <table><thead><tr><th>优先级</th><th>行为</th><th>谁给谁让路</th><th>当前策略</th><th>代码依据</th></tr></thead><tbody>
-    <tr class="high"><td>1：最高</td><td>传输当前文件</td><td>缩略图后台填充、空闲探测让路；交互预览会在下一个传输分片前插队。</td><td>传输按文件串行执行；每个下载被切成可让路的 transfer slice。当前文件不会被用户中途取消，暂停只在当前文件完成后生效。</td><td><code>CameraIOGate.swift</code><br><code>TransferQueue.swift</code><br><code>CameraRepository.swift</code></td></tr>
-    <tr class="high"><td>2</td><td>监看 / Remote Live View</td><td>照片列表扫描和缩略图填充暂停；传输不会被强行取消，但监看获得相机前台通道。</td><td>当前工作区在监看准备前设置门控；进入时保留扫描快照，退出后按连接/预览状态决定重新核对 handle。监看专项规则见 M01–M34。</td><td><code>RemoteViewModel.swift</code><br><code>CameraRepository.swift</code></td></tr>
-    <tr class="high"><td>3</td><td>交互预览 / FHD、EXIF</td><td>缩略图后台填充和元数据扫描暂停；传输在当前 slice 后让路。</td><td>完整 FHD/EXIF 操作持有 interactive reservation，避免两次相机操作之间被传输抢走；预览结束后扫描从原游标继续。</td><td><code>CameraIOGate.swift</code><br><code>CameraRepository.swift</code><br><code>PhotoPreviewView.swift</code></td></tr>
-    <tr><td>4</td><td>照片文件列表扫描</td><td>给监看、交互预览和传输让路；不会清掉已经显示的行来等待新结果。</td><td>先读取最新 storage/handle 快照，再按元数据批次发布；已存在的逻辑文件复用，确认相机已删除的 handle 才从列表移除。</td><td><code>PhotoListViewModel.swift</code><br><code>CameraRepository.swift</code></td></tr>
-    <tr><td>5</td><td>可见缩略图读取</td><td>给传输、监看和交互预览让路；普通相机 I/O 共享 FIFO。</td><td>内存 → 磁盘 → 同一文件的 in-flight 请求合并 → 相机读取；显示层只在需要时读取，不重复发起同一 key 的并发请求。</td><td><code>PhotoThumbnailStore.swift</code><br><code>CameraRepository.swift</code></td></tr>
-    <tr class="pause"><td>6：最低</td><td>后台缩略图填充 / 空闲探测</td><td>传输、监看、交互预览、文件扫描和可见读取都优先。</td><td>只在没有前台读取、监看、传输和效果预览时运行；没有工作时等待 wake，不退出整个生命周期。空闲探测在有下载活动时直接跳过。</td><td><code>PhotoListViewModel.swift</code><br><code>PhotoThumbnailFillQueue.swift</code><br><code>CameraIOGate.swift</code></td></tr>
+  <p class="note">监看复核结果见<a href="#remote-audit">第五至八节</a>。源码不存在单一全局优先级；入口互斥、interactive reservation、ordinary/transfer FIFO 和后台门控分别决定行为。下表已按实际资源关系重写。</p>
+  <h2>一、功能让路概览（按实际资源关系）</h2>
+  <table><thead><tr><th>关系</th><th>行为</th><th>谁给谁让路</th><th>当前策略</th><th>代码依据</th></tr></thead><tbody>
+    <tr class="high"><td>入口互斥</td><td>监看 / Remote Live View</td><td>活动传输会直接阻止进入监看；允许进入后，remoteActive 停止元数据扫描和后台补图。</td><td>监看不会抢占正在传输的文件。退出时释放门控，以 fresh handles、preserve existing 重新核对列表；规则见 M01–M05。</td><td><code>PhotoListView.swift</code><br><code>PhotoListViewModel.swift</code></td></tr>
+    <tr class="high"><td>交互保留权</td><td>当前页 FHD / EXIF</td><td>已开始的传输片段先完成，下一片必须等待 interactive reservation；列表扫描显式暂停，底层网格远程 GetThumb 关闭。</td><td>完整 FHD+EXIF 共用 reservation；释放后扫描从同一快照续扫，后台 worker 被唤醒。</td><td><code>CameraIOGate.swift</code><br><code>PhotoPreviewView.swift</code></td></tr>
+    <tr class="high"><td>分片 + FIFO</td><td>传输当前文件</td><td>后台补图和 idle 探测在整条下载期间让路；普通元数据、可见缩略图可在传输片段间按 FIFO 执行。</td><td>传输按文件串行、按片段使用锁；暂停只在当前文件边界生效。</td><td><code>CameraIOGate.swift</code><br><code>TransferQueue.swift</code></td></tr>
+    <tr><td>ordinary FIFO</td><td>文件列表扫描</td><td>与可见缩略图和传输片段共用相机锁；transferBusy 不会取消扫描。监看终止本轮，FHD 保存快照后暂停。</td><td>已发布行始终保留；FHD 结束后从原游标续扫，监看后使用新句柄，失败不破坏旧行。</td><td><code>PhotoListViewModel.swift</code><br><code>CameraRepository.swift</code></td></tr>
+    <tr><td>ordinary FIFO</td><td>可见缩略图读取</td><td>缓存先行；未命中时 GetThumb 与扫描、传输片段 FIFO。只有大图打开时，底层网格通过 allowRemote=false 明确禁发远程请求。</td><td>相同 key 共享 flight；大图关闭后重新允许远程读取。</td><td><code>PhotoThumbnailStore.swift</code><br><code>CameraSession.swift</code></td></tr>
+    <tr class="pause"><td>后台最低</td><td>批次预取 / 后台补图 / idle 探测</td><td>传输、监看、FHD、效果样张和可见读取都可使其等待；完整扫描前后台 fill worker 本来也不会启动。</td><td>前台状态释放后 wake；失败项等待真实状态变化，不热循环。idle 探测在下载活动中直接跳过。</td><td><code>PhotoListViewModel.swift</code><br><code>PhotoThumbnailFillQueue.swift</code><br><code>CameraIOGate.swift</code></td></tr>
   </tbody></table>
 
   <h2>二、文件列表和缩略图的生命周期</h2>
@@ -54,10 +54,10 @@
 
   <h2>三、功能之间的让路规则</h2>
   <table><thead><tr><th>当前功能</th><th>占用资源</th><th>会暂停谁</th><th>释放后谁恢复</th><th>特殊说明</th></tr></thead><tbody>
-    <tr><td>传输</td><td>TransferQueue + CameraIOGate transfer slice</td><td>后台缩略图、空闲探测；列表元数据只在普通锁可用时执行。</td><td>缩略图填充 worker 在 transferBusy 变为 false 后 wake。</td><td>传输设置 <code>transfersBusy</code>，下载活动跨越整个文件；分片之间允许交互操作插队。</td></tr>
-    <tr><td>监看</td><td>RemoteViewModel Live View 通道</td><td>扫描、缩略图远程读取和后台填充。</td><td>监看清理回调后先释放前台门控，再按连接和预览状态恢复；重新核对 handle 时放弃旧扫描快照，保留已有列表和缩略图。</td><td>监看期间可继续使用已有内存/磁盘数据，不为显示旧缓存而发起新的后台相机读取。</td></tr>
-    <tr><td>FHD/EXIF 预览</td><td>interactive reservation + ordinary command</td><td>缩略图填充和文件扫描等待；传输等当前 slice 结束。</td><td>预览 reservation 释放后，扫描从既有游标继续，缩略图 worker wake。</td><td>预览优先级覆盖普通列表读取，但不取消整个传输任务。</td></tr>
-    <tr><td>本地/照片效果预览</td><td>效果渲染 gate</td><td>只阻塞后台缩略图填充，不阻塞文件元数据扫描。</td><td>效果预览完成后后台填充恢复。</td><td>这是本地渲染资源竞争，和相机 I/O 的交互 reservation 分开。</td></tr>
+    <tr><td>传输</td><td>TransferQueue + CameraIOGate transfer slice</td><td>后台缩略图和空闲探测暂停；活动传输阻止监看入口。普通列表元数据和可见 GetThumb 并未整体暂停，而是在片段间共享 FIFO。</td><td>缩略图填充 worker 在 transferBusy 变为 false 后 wake。</td><td>交互预览 reservation 可阻止下一传输片段；普通命令没有同等插队权。</td></tr>
+    <tr><td>监看</td><td>RemoteViewModel 前台状态 + PTP 命令流</td><td>元数据扫描和后台缩略图填充；remoteActive 不是禁止所有 ordinary 命令的独占协议锁。</td><td>页面退出回调释放前台门控，再按连接和预览状态恢复；重新核对 handle 时放弃旧扫描快照，保留已有列表和缩略图。</td><td>已有缓存仍保留；不得把“后台停止”扩大描述为“所有远程缩略图请求必然被协议层拒绝”。</td></tr>
+    <tr><td>FHD/EXIF 预览</td><td>interactive reservation + ordinary command</td><td>文件扫描暂停、底层网格禁发远程 GetThumb、后台填充等待；已开始的传输 slice 先完成，后续 slice 等待。</td><td>reservation 释放后，扫描从既有游标继续，缩略图 worker wake。</td><td>reservation 只约束 transfer waiter；ordinary waiter 仍按 CameraIOGate 的可运行顺序处理。</td></tr>
+    <tr><td>照片效果像素渲染</td><td>本地效果渲染 gate</td><td>渲染 gate 本身只串行化本机像素处理；连接后入口另以 effectPreviewActive 暂停后台补图，不暂停元数据扫描。</td><td>样张请求结束后释放 effectPreviewActive 并唤醒后台填充。</td><td>样张的 FHD/EXIF 仍会使用相机 I/O；其 iOS 前置等待与 Android 不同，见新总表 D12。</td></tr>
     <tr><td>设置、传输队列页面</td><td>UI 路由，不直接占用相机 I/O</td><td>不应清除文件列表或缩略图缓存。</td><td>返回照片列表复用同一会话模型和已有缓存。</td><td>只有用户明确下拉刷新/新会话/连接恢复等边界才会触发扫描。</td></tr>
   </tbody></table>
 
@@ -66,7 +66,7 @@
     <li>“文件列表每次读取新的”和“缩略图复用缓存”是有意分开的：列表必须以相机当前 handle 为准，缩略图则可以按稳定 key 复用。</li>
     <li>每批 12 个是普通扫描和后台填充的稳定窗口；STA 直读首屏的 1/3/12 预热序列是当前 iOS 代码明确写出的低延迟策略，并非所有 STA 批次都固定为 12。</li>
     <li>缓存命中不代表一定跳过 UI 重建：路由返回时 SwiftUI 单元可能重新创建，但数据源会先从会话模型和 PhotoThumbnailStore 的内存/磁盘缓存返回，不应重新访问相机。</li>
-    <li>传输、监看和预览的优先级是相机 I/O 优先级；它不等同于 UI 动画层级，也不改变已经完成的文件传输状态。</li>
+    <li>不要把表格行号理解为全局优先级：监看由入口互斥和 remoteActive 控制，预览使用 interactive reservation，传输、扫描和可见缩略图则在锁中按各自 kind 调度。</li>
   </ul>
   <h2 id="remote-audit">五、监看对齐台账：复核结论与范围</h2>
   <p><strong>结论：之前列出的差异不完整，也存在判断过早的地方。</strong>本轮重新检查页面、ViewModel、相机协议调用和相关安卓测试，将原有 11 个对照点固定为 M01–M11，并补充 23 个对照点 M12–M34。共 34 项跟踪项不是“全部缺陷总数”，也不表示已完成对齐。</p>
@@ -117,9 +117,9 @@
   <h2>八、尚不能作出“完整对齐”结论的边界</h2>
   <ul>
     <li><strong>缓存基准：</strong>监看返回后的首批前抢占、半途抢占、fresh-handle 刷新和增删替换已由 M01–M05 覆盖；普通扫描失败时保留旧行另在照片列表台账继续扩展验证。</li>
-    <li><strong>事件消费者交接：</strong>列表后台轮询有 remoteActive 门控，但进入监看时已经在途的 GetEvent、事件 socket 与监看消费者的交接，还需时序测试；不能只凭门控变量断言绝不丢事件。</li>
-    <li><strong>并发功能：</strong>传输中进监看、GPS 同时启用、断网重连、切后台/锁屏、快速关闭再打开，尚未完成跨模块时序验证；不能把这一页理解成严格的全局优先级证明。</li>
-    <li><strong>完整产品复刻：</strong>免费试用/高级版限制、所有语言文案、全套对焦框反馈动画、所有工具参数和布局尺寸，还没有在本轮逐项验收。端侧录制的音频权限降级、目录回退、暂停计时、离页收尾和 MP4 生成已在 M31 对齐。</li>
+    <li><strong>事件消费者交接：</strong>两端都先置 remoteActive，再让监看读取参数和事件；列表侧已经在途的 GetEvent 会在同一命令锁内自然收尾，后续轮询在 remoteActive 门控处让路。STA 的独立事件 socket 在两端都保持接收，只登记文件增删；进入监看前被列表轮询取走的属性事件不会形成旧值窗口，因为监看参数读取排在该在途事务之后。源码规则一致。</li>
+    <li><strong>并发功能：</strong>活动传输阻止进入监看；GPS 使用独立 BLE 链路，可以和监看同时启用；断网时监看页面保留并在重连后重新读取参数；切后台/锁屏受 D11 所列 iOS 会话寿命差异约束；快速关闭会等待监看在途命令和录制收尾，再释放 remoteActive 并恢复列表。这里记录源码规则，不把真机时序验证作为对齐前提。</li>
+    <li><strong>完整产品复刻：</strong>所有语言文案、全套对焦框反馈动画、所有工具参数和布局尺寸，还没有在本轮逐项验收。iOS 的更新与高级版解锁按既定 App Store 方案处理，不列为本轮差异；端侧录制的音频权限降级、目录回退、暂停计时、离页收尾和 MP4 生成已在 M31 对齐。</li>
     <li><strong>验证依据：</strong>已阅读安卓 RemoteLiveViewSchedulingTest、RemoteBatteryTest、RemoteAutoIsoTest 的对应规则；测试源码是行为依据，不是本轮运行通过的记录。本次新增并执行的 iOS 测试结果见第十节，覆盖范围按对应条目列明。</li>
   </ul>
 <h2 id="photo-audit">九、照片列表行为对齐台账</h2>
@@ -138,7 +138,7 @@
 <tr id="P10"><td><strong>P10</strong><br><span class="status">已对齐（源码与专项测试）</span></td><td>缩略图查找、坏缓存与并发</td><td>内存→负缓存→磁盘→共享 in-flight→相机；坏磁盘文件删除后重取。</td><td>相同顺序；缓存只读门控不会访问相机；坏磁盘数据校验失败后删除并重新取图。</td><td>同 key 并发只发一次相机请求。</td><td class="sources">CameraViewModel.loadThumbnail / PhotoThumbnailStoreTests</td></tr>
 <tr id="P11"><td><strong>P11</strong><br><span class="status">已对齐（源码与专项测试）</span></td><td>失败与真实唤醒</td><td>扫描批次失败留给补漏；补漏失败进入 failed，只有外部状态变化才重试。</td><td>相同两阶段状态；空队列等待 conflated wake。</td><td>不会形成失败热循环。</td><td class="sources">ThumbnailFillQueueTest / PhotoThumbnailFillQueue</td></tr>
 <tr id="P12"><td><strong>P12</strong><br><span class="status">已对齐（源码与专项测试）</span></td><td>缓存清理边界</td><td>完整 handle + ObjectInfo 成功才 reconcile 磁盘；失败不删除。</td><td>authoritative 条件为 handleQueriesSucceeded && metadataComplete；同时修剪会话内存与负缓存。</td><td>不把不完整扫描当成相机已清空。</td><td class="sources">ThumbnailDiskCacheTest / PhotoThumbnailStore.reconcile</td></tr>
-<tr id="P13"><td><strong>P13</strong><br><span class="status">已对齐（源码依据）</span></td><td>STA RAW/视频与效果候选</td><td>STA RAW/视频缩略图延迟到可见；效果候选排除 MOV/MP4，RAW 可做设置预览。</td><td>相同；照片效果仍只在 JPG 输出链路生效。</td><td>缩略图策略与输出格式规则分开。</td><td class="sources">CameraViewModel.prefetchThumbnail / CameraSession.prefetchThumbnail</td></tr>
+<tr id="P13"><td><strong>P13</strong><br><span class="status">已对齐（源码依据）</span></td><td>STA RAW/视频与效果候选</td><td>STA RAW/视频缩略图延迟到可见；效果候选排除 MOV/MP4，RAW 可做设置预览。</td><td>相同；实际派生效果只对 JPG/JPEG/PNG 输出链路生效，RAW、TIFF、HEIC 和视频只传原片。</td><td>缩略图/设置样张资格与输出格式规则分开。</td><td class="sources">CameraViewModel.prefetchThumbnail / CameraSession.prefetchThumbnail / TransferQueue.supportsRenderedOutput</td></tr>
 <tr id="P14"><td><strong>P14</strong><br><span class="status">已对齐（源码与专项测试）</span></td><td>日期优先与新增照片队列</td><td>日期筛选只重排未完成项；ObjectAdded 放对应 lane 前端；settled 不重读。</td><td>相同；beginScan 保留 settled 与活动日期范围。</td><td>从新到旧补满，筛选范围先行。</td><td class="sources">PhotoDateRangeTest / ThumbnailFillQueueTest</td></tr>
 <tr id="P15"><td><strong>P15</strong><br><span class="status">已对齐（源码与专项测试）</span></td><td>筛选持久化与日期有效性</td><td>持久化类型、保护、连拍、未传输和日期；卡槽仅当前进程；非法日期忽略。</td><td>相同；严格校验闰年、月份和日期；建议日期只取最新合法拍摄日。</td><td>重启后恢复需要保存的条件，不恢复相机相关卡槽。</td><td class="sources">PhotoDateRangeTest / PhotoFilterPersistence</td></tr>
 <tr id="P16"><td><strong>P16</strong><br><span class="status">已对齐（源码与专项测试）</span></td><td>卡槽按钮多选语义</td><td>nil 表示两卡都选中；关闭一张即只看另一张；最后一张不能关闭；单卡隐藏入口。</td><td>相同逻辑槽映射和按钮状态；扫描完成后归一化无效选择。</td><td>修正了原 iOS 点击卡 1 反而只看卡 1 的相反行为。</td><td class="sources">StorageSlotFilterTest / PhotoFilterPopupOverlay.swift</td></tr>
@@ -146,7 +146,7 @@
 <tr id="P18"><td><strong>P18</strong><br><span class="status">已对齐（源码与专项测试）</span></td><td>连拍展开状态随删除迁移</td><td>删除首帧导致派生 group id 变化时，以存活 logical file 找 successor；拆成两组时两组都保持展开。</td><td>reconciledExpandedBurstIDs 使用文件名、大小、时间映射 successor。</td><td>相机删除成员不让已展开合集突然折回。</td><td class="sources">BurstGroupingTest / PhotoCatalog.swift</td></tr>
 <tr id="P19"><td><strong>P19</strong><br><span class="status">已对齐（源码与专项测试）</span></td><td>大图期间底层网格缩略图</td><td>预览打开时网格只读内存/磁盘，不能发 GetThumb；关闭后缺图格自动恢复远程读取。</td><td>CameraThumbnailView 的 task 以 allowRemote 为身份；打开预览取消旧等待并走 cache-only，关闭后重新进入远程路径。</td><td>大图 FHD/EXIF 不再与底层网格争相机通道。</td><td class="sources">ThumbnailPreviewPriorityTest / CameraSession.thumbnail</td></tr>
 <tr id="P20"><td><strong>P20</strong><br><span class="status">已对齐（源码与专项测试）</span></td><td>视频拍摄时间与本地来源快照</td><td>预览打开时冻结本地原图来源；非法时间退回合法日期，非法日期不显示。</td><td>本地来源初始化为 State 快照；日期用 Gregorian 严格校验。</td><td>传输在预览期间完成不会热替换当前图。</td><td class="sources">PhotoPreviewItemsTest / PhotoPreviewView.swift</td></tr>
-<tr id="P21"><td><strong>P21</strong><br><span class="status">已对齐（源码与专项测试）</span></td><td>当前页与邻页高清调度</td><td>动画稳定后先串行加载当前页 FHD+EXIF，再按前后邻页预取；只保留 ±2 页高清缓存。</td><td>预览父层统一持有高清状态；开场延迟 340ms 一次，当前页先完成本地或 FHD+EXIF，邻页按前后顺序串行；传输忙时只读本地，忙转闲后补取；翻页立即淘汰 ±2 外状态。</td><td>当前页不会再被每个子页的独立任务抢占，视频不发无效 FHD。</td><td class="sources">PhotoPreview.kt / PhotoPreviewView.swift / DomainModelTests</td></tr>
+<tr id="P21"><td><strong>P21</strong><br><span class="status">已对齐（源码与专项测试）</span></td><td>当前页与邻页高清调度</td><td>动画稳定后先串行加载当前页 FHD+EXIF，再按前后邻页预取；只保留 ±2 页高清缓存。</td><td>预览父层统一持有高清状态；开场延迟 340ms 一次，当前页先查本地，未命中时即使传输正忙也可通过 interactive reservation 在片段边界读取 FHD+EXIF；传输忙时只延后邻页的相机预取，忙转闲后补邻页；翻页立即淘汰 ±2 外状态。</td><td>当前页不会再被每个子页的独立任务抢占，视频不发无效 FHD；已修正“传输忙时当前页也只读本地”的错误描述。</td><td class="sources">PhotoPreview.kt / PhotoPreviewView.swift / CameraIOGate.swift / DomainModelTests</td></tr>
 <tr id="P22"><td><strong>P22</strong><br><span class="status">已对齐（源码依据）</span></td><td>关闭预览返回当前格</td><td>翻页后关闭会展开必要连拍、长距离先无感预定位、再短程滚动，并缩回当前照片格后双脉冲。</td><td>关闭前确认当前照片仍在筛选结果；必要时展开合集；远距离先预定位，再滚到目标并取得最新 bounds；缩回后对目标格播放两次 110/155ms 脉冲。</td><td>筛选已移除目标或日期已折叠时按安卓原地淡出。</td><td class="sources">FileListScreen.preparePreviewDismissTarget / PhotoListView.swift</td></tr>
 <tr id="P23"><td><strong>P23</strong><br><span class="status">已对齐（源码与专项测试）</span></td><td>相机删除重排动画</td><td>只对真正丢失 logical photo 的日期组做退出、位移、进入动画；别名替换不算可见删除。</td><td>保留独立 presented 快照，先挂载 affected-day 状态、下一帧再提交目标；受影响组使用 280ms 重排、180/160ms 进入退出，328ms 后清理；筛选和传输隐藏不会误判成相机删除。</td><td>只让真实可见删除产生对应日期组动效，双卡别名切换保持静止。</td><td class="sources">CameraRemovalPresentationTest / PhotoCatalog.swift / PhotoListView.swift</td></tr>
 <tr id="P24"><td><strong>P24</strong><br><span class="status">已对齐（源码与专项测试）</span></td><td>未传输筛选下的完成退场</td><td>本次队列完成的可见单格先 200ms 缩小淡出，再加入过滤集合并补位；折叠合集隐藏成员直接结算。</td><td>队列新写入本地索引时先把 waiting/transferring/completed 候选保留在过滤结果；可见格以 200ms 淡出并缩到 0.82，再用 280ms 补位；未组成的折叠成员立即结算，目录扫描命中的历史文件仍立即过滤。</td><td>单格退场、候选范围与隐藏成员处理一致。</td><td class="sources">TransferredThumbnailStateTest / PhotoFilter.swift / PhotoListViewModel.swift</td></tr>

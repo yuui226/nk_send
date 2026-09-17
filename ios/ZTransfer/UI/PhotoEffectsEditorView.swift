@@ -34,10 +34,9 @@ struct PhotoEffectsControls: View {
         draft.metadataByPreset[draft.photoFramePreset.rawValue] ?? PhotoFrameMetadataSettings.defaults(for: draft.photoFramePreset)
     }
     private var orderedFrameOptions: [PhotoFramePreset?] {
-        // Android keeps the frame wheel in the fixed catalog order and only
-        // decorates favorites with the star. Moving favorites to the front
-        // changes the detent sequence, so a swipe/click can select a different
-        // frame than the Android counterpart.
+        // Current iOS behavior keeps the fixed catalog order. Android moves
+        // favorites to the front in addition order; that difference is kept
+        // explicit in the alignment ledger until the shared control is fixed.
         return [nil] + PhotoFramePreset.allCases
     }
     private var photoWatermarkPositions: [PhotoFrameWatermarkPosition] {

@@ -15,8 +15,8 @@ final class LocalPhotoBatchViewModel: ObservableObject {
     private var idleTimerGeneration: UInt64?
 
     func select(_ items: [PhotosPickerItem]) {
-        // Android's photo-effects batch is JPEG-only. RAW assets must remain
-        // selectable elsewhere, but never enter this renderer.
+        // Current iOS accepts JPEG only. Android also accepts PNG sources;
+        // keep that known input-range difference explicit until it is aligned.
         let jpegItems = items.filter { $0.supportedContentTypes.contains(where: { $0.conforms(to: .jpeg) }) }
         guard state.select(jpegItems) else { return }
         // A terminal result may still have its 2400 ms timer running. A fresh
