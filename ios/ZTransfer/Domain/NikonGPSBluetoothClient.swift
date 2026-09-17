@@ -25,7 +25,7 @@ final class NikonGPSBluetoothClient: NSObject, ObservableObject {
     @Published private(set) var state: NikonGPSBluetoothState = .disconnected
     @Published private(set) var peripheralIdentifier: UUID?
 
-    private let central: CBCentralManager
+    private var central: CBCentralManager!
     private var peripheral: CBPeripheral?
     private var pairCharacteristic: CBCharacteristic?
     private var idCharacteristic: CBCharacteristic?
@@ -77,18 +77,20 @@ final class NikonGPSBluetoothClient: NSObject, ObservableObject {
         self.savedNonce = savedNonce ?? ((storedDevice != nil && storedNonce != nil) ? storedNonce : nil)
         self.savedPeripheralIdentifier = storage.string(forKey: GPSPreferences.bleAddress)
             .flatMap(UUID.init(uuidString:))
+        super.init()
         #if targetEnvironment(simulator)
         // CoreBluetooth rejects restoration identifiers in the simulator.
-        central = CBCentralManager(delegate: nil, queue: .main)
+        central = CBCentralManager(delegate: self, queue: .main)
         #else
+        // CoreBluetooth validates the state-restoration delegate during
+        // initialization, so the delegate must be supplied here rather than
+        // assigned afterward.
         central = CBCentralManager(
-            delegate: nil,
+            delegate: self,
             queue: .main,
             options: [CBCentralManagerOptionRestoreIdentifierKey: "com.ztransfer.nikon-gps"],
         )
         #endif
-        super.init()
-        central.delegate = self
     }
 
     func start() {

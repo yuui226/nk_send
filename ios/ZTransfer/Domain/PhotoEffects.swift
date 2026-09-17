@@ -5,6 +5,41 @@ import ImageIO
 import UIKit
 import UniformTypeIdentifiers
 
+private final class PhotoEffectsWatermarkImageCache: @unchecked Sendable {
+    private let lock = NSLock()
+    private var images: [String: UIImage] = [:]
+    private var insertionOrder: [String] = []
+    private let capacity: Int
+
+    init(capacity: Int) { self.capacity = capacity }
+
+    func image(for hash: String, load: () -> UIImage?) -> UIImage? {
+        lock.lock()
+        defer { lock.unlock() }
+        if let image = images[hash] { return image }
+        guard let image = load() else { return nil }
+        images[hash] = image
+        insertionOrder.append(hash)
+        while insertionOrder.count > capacity {
+            images.removeValue(forKey: insertionOrder.removeFirst())
+        }
+        return image
+    }
+
+    func removeAll() {
+        lock.lock()
+        images.removeAll()
+        insertionOrder.removeAll()
+        lock.unlock()
+    }
+
+    var count: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return images.count
+    }
+}
+
 /// Persisted names and defaults mirror PhotoFrameExporter.kt.  The renderer and
 /// settings UI both consume these values so a draft can never silently change a
 /// queued task's output.
@@ -519,11 +554,17 @@ private func androidSHA256Hex(_ value: String, bytes: Int) -> String {
 
 @MainActor
 final class PhotoEffectsStore: ObservableObject {
-    static let maximumWatermarkImageBytes = 20 * 1024 * 1024
+    nonisolated static let maximumWatermarkImageBytes = 20 * 1024 * 1024
+    nonisolated static let maximumWatermarkImagePixelDimension = 2_048
+    private nonisolated static let watermarkImageCache = PhotoEffectsWatermarkImageCache(capacity: 3)
     @Published private(set) var settings: PhotoEffectsSettings
+    @Published private(set) var watermarkImageImporting = false
+    @Published private(set) var lastImportedWatermarkHash: String?
+    @Published private(set) var watermarkImportRevision: UInt64 = 0
     private let defaults: UserDefaults
     private let key: String
     private let scope: Scope
+    private var watermarkImportGeneration: UInt64 = 0
 
     init(defaults: UserDefaults = .standard, scope: Scope = .cameraTransfer,
          legacyDefaults: UserDefaults? = nil) {
@@ -587,12 +628,56 @@ final class PhotoEffectsStore: ObservableObject {
 
     func beginDraft() -> PhotoEffectsSettings { settings }
 
+    func beginWatermarkImageImport() -> UInt64? {
+        guard !watermarkImageImporting else { return nil }
+        watermarkImportGeneration &+= 1
+        watermarkImageImporting = true
+        lastImportedWatermarkHash = nil
+        return watermarkImportGeneration
+    }
+
+    /// Returns false for a result superseded by a later store-owned import.
+    /// Keeping the token in the store (rather than either SwiftUI view) makes
+    /// closing and reopening the settings popup unable to revive an old logo.
+    func finishWatermarkImageImport(generation: UInt64, hash: String?) -> Bool {
+        guard watermarkImportGeneration == generation else { return false }
+        watermarkImageImporting = false
+        guard let hash else { return true }
+        var updated = settings
+        updated.watermark.content = .image
+        updated.watermark.imageHash = hash
+        if updated.photoFrameBorderEnabled,
+           let index = updated.favoriteFrameEffects.firstIndex(where: {
+               $0.preset == updated.photoFramePreset
+           }) {
+            updated.favoriteFrameEffects[index].watermark = updated.watermark
+        }
+        update(updated)
+        guard settings.watermark.content == .image,
+              settings.watermark.imageHash == hash else {
+            // The generation completed, but normalization rejected the file.
+            // Do not publish a hash that the effective Store does not contain.
+            return true
+        }
+        lastImportedWatermarkHash = hash
+        watermarkImportRevision &+= 1
+        return true
+    }
+
     /// Stores a watermark image in application support and returns its stable
     /// content hash, matching Android's private watermark copy semantics.
     func importWatermarkImage(data: Data) -> String? {
+        Self.importWatermarkImageData(data)
+    }
+
+    /// Hashing, bitmap validation and disk I/O may process up to 20 MiB. Keep
+    /// that work callable from a detached task so both photo-effect entry
+    /// points match Android's Dispatchers.IO import instead of blocking UI.
+    nonisolated static func importWatermarkImageData(_ data: Data) -> String? {
         guard !data.isEmpty,
               data.count <= Self.maximumWatermarkImageBytes,
-              UIImage(data: data) != nil else { return nil }
+              let source = CGImageSourceCreateWithData(data as CFData, nil),
+              decodeWatermarkImage(source) != nil else { return nil }
         let hash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
         let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("ZTransfer/Watermarks", isDirectory: true)
@@ -606,10 +691,107 @@ final class PhotoEffectsStore: ObservableObject {
         } catch { return nil }
     }
 
+    /// File-backed variant used by PhotosPicker. It mirrors Android's 128 KiB
+    /// stream copy: reject immediately after the 20 MiB boundary, hash the
+    /// original bytes, validate a bounded 2048-pixel decode, and atomically
+    /// publish the private copy only after every check succeeds.
+    nonisolated static func importWatermarkImageFile(_ sourceURL: URL) -> String? {
+        let fileManager = FileManager.default
+        let directory = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("ZTransfer/Watermarks", isDirectory: true)
+        var temporary: URL?
+        defer {
+            if let temporary { try? fileManager.removeItem(at: temporary) }
+        }
+        do {
+            try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+            let temporaryURL = directory.appendingPathComponent("watermark-import-\(UUID().uuidString).part")
+            temporary = temporaryURL
+            guard fileManager.createFile(atPath: temporaryURL.path, contents: nil) else { return nil }
+            let input = try FileHandle(forReadingFrom: sourceURL)
+            let output = try FileHandle(forWritingTo: temporaryURL)
+            var handlesClosed = false
+            defer {
+                if !handlesClosed {
+                    try? input.close()
+                    try? output.close()
+                }
+            }
+            var hasher = SHA256()
+            var copied = 0
+            while true {
+                let chunk = try input.read(upToCount: 128 * 1024) ?? Data()
+                if chunk.isEmpty { break }
+                copied += chunk.count
+                guard copied <= Self.maximumWatermarkImageBytes else { return nil }
+                hasher.update(data: chunk)
+                try output.write(contentsOf: chunk)
+            }
+            try output.synchronize()
+            try input.close()
+            try output.close()
+            handlesClosed = true
+            guard copied > 0,
+                  let source = CGImageSourceCreateWithURL(temporaryURL as CFURL, nil),
+                  let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as NSDictionary?,
+                  ((properties[kCGImagePropertyPixelWidth] as? NSNumber)?.intValue ?? 0) > 0,
+                  ((properties[kCGImagePropertyPixelHeight] as? NSNumber)?.intValue ?? 0) > 0,
+                  decodeWatermarkImage(source) != nil else {
+                return nil
+            }
+            let hash = hasher.finalize().map { String(format: "%02x", $0) }.joined()
+            let destination = directory.appendingPathComponent("\(hash).png")
+            if fileManager.fileExists(atPath: destination.path) {
+                try? fileManager.removeItem(at: temporaryURL)
+            } else {
+                do {
+                    try fileManager.moveItem(at: temporaryURL, to: destination)
+                } catch {
+                    guard fileManager.fileExists(atPath: destination.path) else { throw error }
+                    try? fileManager.removeItem(at: temporaryURL)
+                }
+            }
+            temporary = nil
+            return hash
+        } catch {
+            return nil
+        }
+    }
+
     nonisolated static func watermarkImage(hash: String) -> UIImage? {
         let url = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("ZTransfer/Watermarks/\(hash).png")
-        return (try? Data(contentsOf: url)).flatMap(UIImage.init(data:))
+        return watermarkImageCache.image(for: hash) {
+            guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+            return decodeWatermarkImage(source)
+        }
+    }
+
+    nonisolated static func resetWatermarkImageCache() {
+        watermarkImageCache.removeAll()
+    }
+
+    nonisolated static var watermarkImageCacheCount: Int {
+        watermarkImageCache.count
+    }
+
+    private nonisolated static func decodeWatermarkImage(_ source: CGImageSource) -> UIImage? {
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maximumWatermarkImagePixelDimension,
+            kCGImageSourceShouldCacheImmediately: true,
+        ]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+            return nil
+        }
+        return UIImage(cgImage: image, scale: 1, orientation: .up)
+    }
+
+    private nonisolated static func watermarkImageFileExists(hash: String) -> Bool {
+        let url = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("ZTransfer/Watermarks/\(hash).png")
+        return FileManager.default.fileExists(atPath: url.path)
     }
 
     /// Android LocalPhotoEffectsPreferences is separate from TransferState.
@@ -623,7 +805,7 @@ final class PhotoEffectsStore: ObservableObject {
         let validHash: String?
         if let candidateHash,
            candidateHash.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil,
-           watermarkImage(hash: candidateHash) != nil {
+           watermarkImageFileExists(hash: candidateHash) {
             validHash = candidateHash
         } else {
             validHash = nil

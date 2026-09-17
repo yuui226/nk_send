@@ -4,6 +4,38 @@ import SwiftUI
 import UIKit
 import ImageIO
 import UniformTypeIdentifiers
+import CoreTransferable
+
+/// Requests a file representation from PhotosPicker and copies it during the
+/// provider callback, while the security-scoped temporary URL is guaranteed to
+/// remain valid. Callers own and remove the returned private temporary file.
+struct PhotoPickerTemporaryFile: Transferable, Sendable {
+    let url: URL
+
+    static var transferRepresentation: some TransferRepresentation {
+        FileRepresentation(importedContentType: .image) { received in
+            let fileManager = FileManager.default
+            let directory = fileManager.temporaryDirectory
+                .appendingPathComponent("ZTransferPhotoPicker", isDirectory: true)
+            try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+            let suffix = received.file.pathExtension
+            let name = suffix.isEmpty ? UUID().uuidString : "\(UUID().uuidString).\(suffix)"
+            let destination = directory.appendingPathComponent(name)
+            try fileManager.copyItem(at: received.file, to: destination)
+            return PhotoPickerTemporaryFile(url: destination)
+        }
+    }
+}
+
+func importPhotoPickerWatermarkImage(_ item: PhotosPickerItem) async -> String? {
+    guard let file = try? await item.loadTransferable(type: PhotoPickerTemporaryFile.self) else {
+        return nil
+    }
+    return await Task.detached(priority: .userInitiated) { () -> String? in
+        defer { try? FileManager.default.removeItem(at: file.url) }
+        return PhotoEffectsStore.importWatermarkImageFile(file.url)
+    }.value
+}
 
 /// Owns references to picker items, never an array of full-resolution UIImages.
 /// A batch snapshots both sources and effects before any worker starts.
@@ -15,8 +47,10 @@ final class LocalPhotoBatchViewModel: ObservableObject {
     private var idleTimerGeneration: UInt64?
 
     func select(_ items: [PhotosPickerItem]) {
-        // Keep the picker contract identical to Android's exporter: only
-        // JPEG and PNG enter the batch; HEIF/RAW/video remain excluded.
+        // Android launches an image/* picker and lets each selected image reach
+        // the decoder; failures are counted per item instead of being silently
+        // removed before the batch begins. PhotosPicker already requests images,
+        // while this guard only rejects an unexpected non-image provider item.
         let supportedItems = items.filter { isSupportedLocalPhoto($0.supportedContentTypes) }
         guard state.select(supportedItems) else { return }
         // A terminal result may still have its 2400 ms timer running. A fresh
@@ -65,13 +99,6 @@ final class LocalPhotoBatchViewModel: ObservableObject {
         }
     }
 
-    func dispose() {
-        generationTask?.cancel()
-        generationTask = nil
-        state.cancel()
-        restoreIdleTimer()
-    }
-
     private func record(_ progress: PhotoEffectsBatchProgress, generation: UInt64) {
         state.update(progress, generation: generation)
     }
@@ -96,28 +123,29 @@ final class LocalPhotoBatchViewModel: ObservableObject {
 }
 
 func isSupportedLocalPhoto(_ contentTypes: [UTType]) -> Bool {
-    contentTypes.contains { type in
-        type.conforms(to: .jpeg) || type.conforms(to: .png)
-    }
+    contentTypes.isEmpty || contentTypes.contains { $0.conforms(to: .image) }
 }
 
 enum LocalPhotoOutput {
     static func generate(item: PhotosPickerItem, settings: PhotoEffectsSettings) async throws {
-        guard let data = try await item.loadTransferable(type: Data.self) else {
-            throw CocoaError(.fileReadCorruptFile)
-        }
+        let sourceURL = try await stagedSource(item: item)
+        defer { try? FileManager.default.removeItem(at: sourceURL) }
         try Task.checkCancellation()
         let renderer = Task.detached(priority: .userInitiated) {
             try Task.checkCancellation()
             return try autoreleasepool {
-                guard let image = UIImage(data: data) else { throw CocoaError(.fileReadCorruptFile) }
-                let metadata = PhotoExifParser.parse(data).map(PhotoFrameMetadata.init)
+                // Rendering follows Android's URI/file-backed lifetime and does
+                // not retain the entire compressed source beside bitmaps.
+                guard let image = UIImage(contentsOfFile: sourceURL.path) else {
+                    throw CocoaError(.fileReadCorruptFile)
+                }
+                let metadata = PhotoExifParser.parse(sourceURL).map(PhotoFrameMetadata.init)
                 let output = try PhotoEffectsRenderer.render(image, settings: settings, metadata: metadata)
                 try Task.checkCancellation()
                 // Match Android's JPEG output; retain only compressed data while
                 // waiting for the photo-library write to settle.
                 guard let encoded = PhotoEffectsJPEGEncoder.encode(
-                    output, copyingMetadataFrom: data
+                    output, copyingMetadataFrom: sourceURL
                 ) else {
                     throw CocoaError(.fileWriteUnknown)
                 }
@@ -137,16 +165,28 @@ enum LocalPhotoOutput {
         try Task.checkCancellation()
     }
 
-    static func decodePreview(item: PhotosPickerItem) async throws -> LocalPhotoDecodedSource {
-        guard let data = try await item.loadTransferable(type: Data.self) else {
+    private static func stagedSource(item: PhotosPickerItem) async throws -> URL {
+        guard let file = try await item.loadTransferable(type: PhotoPickerTemporaryFile.self) else {
             throw CocoaError(.fileReadCorruptFile)
         }
+        do {
+            try Task.checkCancellation()
+        } catch {
+            try? FileManager.default.removeItem(at: file.url)
+            throw error
+        }
+        return file.url
+    }
+
+    static func decodePreview(item: PhotosPickerItem) async throws -> LocalPhotoDecodedSource {
+        let sourceURL = try await stagedSource(item: item)
+        defer { try? FileManager.default.removeItem(at: sourceURL) }
         try Task.checkCancellation()
-        let metadata = PhotoExifParser.parse(data).map(PhotoFrameMetadata.init)
+        let metadata = PhotoExifParser.parse(sourceURL).map(PhotoFrameMetadata.init)
         let renderer = Task.detached(priority: .userInitiated) {
             try Task.checkCancellation()
             return try autoreleasepool {
-                guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+                guard let source = CGImageSourceCreateWithURL(sourceURL as CFURL, nil),
                       let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, [
                         kCGImageSourceCreateThumbnailFromImageAlways: true,
                         kCGImageSourceCreateThumbnailWithTransform: true,

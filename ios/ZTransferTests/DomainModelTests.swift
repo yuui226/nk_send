@@ -52,12 +52,13 @@ final class DomainModelTests: XCTestCase {
         XCTAssertEqual(gpsStatusAfterLocationFix(.searching), .connected)
     }
 
-    func testLocalPhotoSelectionMatchesAndroidJPEGAndPNGInputRange() {
+    func testLocalPhotoSelectionMatchesAndroidImageWildcardInputRange() {
         XCTAssertTrue(isSupportedLocalPhoto([.jpeg]))
         XCTAssertTrue(isSupportedLocalPhoto([.png]))
         XCTAssertTrue(isSupportedLocalPhoto([.image, .png]))
-        XCTAssertFalse(isSupportedLocalPhoto([.heic]))
-        XCTAssertFalse(isSupportedLocalPhoto([.rawImage]))
+        XCTAssertTrue(isSupportedLocalPhoto([.heic]))
+        XCTAssertTrue(isSupportedLocalPhoto([.rawImage]))
+        XCTAssertTrue(isSupportedLocalPhoto([]))
         XCTAssertFalse(isSupportedLocalPhoto([.movie]))
     }
 
@@ -865,21 +866,75 @@ final class DomainModelTests: XCTestCase {
 
     @MainActor
     func testWatermarkImportUsesOriginalBytesAndAndroidSizeLimit() throws {
+        PhotoEffectsStore.resetWatermarkImageCache()
+        defer { PhotoEffectsStore.resetWatermarkImageCache() }
         let suite = "effects-watermark-import-\(UUID())"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let store = PhotoEffectsStore(defaults: defaults)
-        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 3, height: 2))
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 2_300, height: 12))
         let image = renderer.image { context in
             UIColor.systemOrange.setFill()
-            context.fill(CGRect(x: 0, y: 0, width: 3, height: 2))
+            context.fill(CGRect(x: 0, y: 0, width: 2_300, height: 12))
         }
         let original = try XCTUnwrap(image.jpegData(compressionQuality: 0.73))
         let expectedHash = SHA256.hash(data: original)
             .map { String(format: "%02x", $0) }.joined()
+        let sourceURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("watermark-import-test-\(UUID().uuidString).jpg")
+        try original.write(to: sourceURL)
+        defer { try? FileManager.default.removeItem(at: sourceURL) }
 
+        let generation = try XCTUnwrap(store.beginWatermarkImageImport())
+        XCTAssertTrue(store.watermarkImageImporting)
+        XCTAssertNil(store.beginWatermarkImageImport())
+        XCTAssertTrue(store.finishWatermarkImageImport(generation: generation, hash: nil))
+        XCTAssertFalse(store.watermarkImageImporting)
+        XCTAssertFalse(store.finishWatermarkImageImport(generation: generation &+ 1, hash: nil))
+        XCTAssertEqual(PhotoEffectsStore.importWatermarkImageFile(sourceURL), expectedHash)
         XCTAssertEqual(store.importWatermarkImage(data: original), expectedHash)
-        XCTAssertNotNil(PhotoEffectsStore.watermarkImage(hash: expectedHash))
+        let successfulGeneration = try XCTUnwrap(store.beginWatermarkImageImport())
+        XCTAssertTrue(store.finishWatermarkImageImport(
+            generation: successfulGeneration, hash: expectedHash
+        ))
+        XCTAssertEqual(store.settings.watermark.content, .image)
+        XCTAssertEqual(store.settings.watermark.imageHash, expectedHash)
+        XCTAssertEqual(store.lastImportedWatermarkHash, expectedHash)
+        XCTAssertEqual(store.watermarkImportRevision, 1)
+        let repeatedGeneration = try XCTUnwrap(store.beginWatermarkImageImport())
+        XCTAssertTrue(store.finishWatermarkImageImport(
+            generation: repeatedGeneration, hash: expectedHash
+        ))
+        XCTAssertEqual(store.watermarkImportRevision, 2)
+        let decoded = try XCTUnwrap(PhotoEffectsStore.watermarkImage(hash: expectedHash))
+        XCTAssertLessThanOrEqual(
+            max(decoded.size.width, decoded.size.height),
+            CGFloat(PhotoEffectsStore.maximumWatermarkImagePixelDimension)
+        )
+        XCTAssertTrue(decoded === PhotoEffectsStore.watermarkImage(hash: expectedHash))
+        XCTAssertEqual(PhotoEffectsStore.watermarkImageCacheCount, 1)
+        for color in [UIColor.red, .green, .blue] {
+            let extra = UIGraphicsImageRenderer(size: CGSize(width: 2, height: 2)).image { context in
+                color.setFill()
+                context.fill(CGRect(x: 0, y: 0, width: 2, height: 2))
+            }
+            let data = try XCTUnwrap(extra.pngData())
+            let hash = try XCTUnwrap(PhotoEffectsStore.importWatermarkImageData(data))
+            XCTAssertNotNil(PhotoEffectsStore.watermarkImage(hash: hash))
+        }
+        XCTAssertEqual(PhotoEffectsStore.watermarkImageCacheCount, 3)
+        XCTAssertFalse(decoded === PhotoEffectsStore.watermarkImage(hash: expectedHash))
+
+        let rejectedHash = SHA256.hash(data: Data(UUID().uuidString.utf8))
+            .map { String(format: "%02x", $0) }.joined()
+        let rejectedGeneration = try XCTUnwrap(store.beginWatermarkImageImport())
+        XCTAssertTrue(store.finishWatermarkImageImport(
+            generation: rejectedGeneration, hash: rejectedHash
+        ))
+        XCTAssertNil(store.lastImportedWatermarkHash)
+        XCTAssertEqual(store.watermarkImportRevision, 2)
+        XCTAssertEqual(store.settings.watermark.content, .text)
+        XCTAssertNil(store.settings.watermark.imageHash)
         XCTAssertNil(store.importWatermarkImage(data: Data()))
         XCTAssertNil(store.importWatermarkImage(
             data: Data(count: PhotoEffectsStore.maximumWatermarkImageBytes + 1)
@@ -1119,12 +1174,74 @@ extension DomainModelTests {
         settings.photoFrameBorderEnabled = true
         settings.photoFramePreset = .plaque
         settings.watermark.enabled = false
+        settings.photoFilterEnabled = true
+        settings.selectedFilter = PhotoFilterSelection(
+            preset: PhotoFilterCatalog.presets[0], intensityPercent: 80
+        )
 
         let output = try PhotoEffectsRenderer.render(oriented, settings: settings)
 
         XCTAssertEqual(output.imageOrientation, .up)
         XCTAssertEqual(output.cgImage?.width, 4)
         XCTAssertEqual(output.cgImage?.height, 7)
+    }
+
+    func testBorderedFilterPreservesMirroredAndRotatedPixelOrientation() throws {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        let raw = UIGraphicsImageRenderer(
+            size: CGSize(width: 64, height: 48), format: format
+        ).image { context in
+            UIColor.red.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 32, height: 24))
+            UIColor.green.setFill()
+            context.fill(CGRect(x: 32, y: 0, width: 32, height: 24))
+            UIColor.blue.setFill()
+            context.fill(CGRect(x: 0, y: 24, width: 32, height: 24))
+            UIColor.yellow.setFill()
+            context.fill(CGRect(x: 32, y: 24, width: 32, height: 24))
+        }
+        let filter = PhotoFilterSelection(
+            preset: PhotoFilterCatalog.presets[0], intensityPercent: 80
+        )
+
+        func bytes(_ image: CGImage) throws -> [UInt8] {
+            var result = [UInt8](repeating: 0, count: image.width * image.height * 4)
+            let context = try XCTUnwrap(CGContext(
+                data: &result, width: image.width, height: image.height,
+                bitsPerComponent: 8, bytesPerRow: image.width * 4,
+                space: try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB)),
+                bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue |
+                    CGImageAlphaInfo.premultipliedLast.rawValue
+            ))
+            context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+            return result
+        }
+
+        for orientation in [UIImage.Orientation.right, .rightMirrored, .leftMirrored, .downMirrored] {
+            let source = UIImage(
+                cgImage: try XCTUnwrap(raw.cgImage), scale: 1, orientation: orientation
+            )
+            var filterOnly = PhotoEffectsSettings()
+            filterOnly.photoFilterEnabled = true
+            filterOnly.selectedFilter = filter
+            let reference = try PhotoEffectsRenderer.render(source, settings: filterOnly)
+            let referenceImage = try XCTUnwrap(reference.cgImage)
+
+            var bordered = filterOnly
+            bordered.photoFrameEnabled = true
+            bordered.photoFrameBorderEnabled = true
+            bordered.photoFramePreset = .plaque
+            bordered.watermark.enabled = false
+            let output = try PhotoEffectsRenderer.render(source, settings: bordered)
+            let outputImage = try XCTUnwrap(output.cgImage)
+            let photoLayer = try XCTUnwrap(outputImage.cropping(to: CGRect(
+                x: 0, y: 0, width: referenceImage.width, height: referenceImage.height
+            )))
+
+            XCTAssertEqual(try bytes(photoLayer), try bytes(referenceImage), "\(orientation)")
+        }
     }
 
     func testPhotoFilterDoesNotRecolorFrameBackdrop() throws {

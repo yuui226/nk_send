@@ -8,6 +8,19 @@ private enum PhotoEffectControlMetrics {
     static let secondaryWeight: CGFloat = 3
 }
 
+/// Installs the focus-dismiss tap behind interactive content. Unlike a tap
+/// gesture on the enclosing ScrollView, child TextFields, buttons and wheels
+/// remain the hit-test winner; only otherwise empty content reaches this layer.
+extension View {
+    func photoEffectsBackgroundFocusDismiss(_ action: @escaping () -> Void) -> some View {
+        background {
+            Color.clear
+                .contentShape(Rectangle())
+                .onTapGesture(perform: action)
+        }
+    }
+}
+
 /// Android SettingsScreen.PhotoFilterEditor / PhotoFrameWatermarkEditor are
 /// shared by transfer settings and LocalPhotoEffectsPage. The caller owns the
 /// draft, persistence scope, keyboard focus, and image picker lifecycle.
@@ -16,6 +29,7 @@ struct PhotoEffectsControls: View {
     @Binding var showingWatermarkPicker: Bool
     @FocusState.Binding var textFieldFocused: Bool
     var showLocationFields = false
+    var imageImporting = false
     @State private var metadataExpanded = false
     @State private var watermarkExpanded = false
     @Binding var filterChooser: PhotoFilterChooserState
@@ -252,6 +266,7 @@ struct PhotoEffectsControls: View {
                                                     updateWatermark { $0.content = value }
                                                 }
                                             }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height,
+                                            enabled: !imageImporting,
                                             accentColor: ZTransferColors.accentPurple)
                                 .frame(width: typeWidth)
                                 if draft.watermark.content == .text {
@@ -276,14 +291,21 @@ struct PhotoEffectsControls: View {
                                 } else {
                                     Button { showingWatermarkPicker = true } label: {
                                         HStack(spacing: 6) {
-                                            Image(systemName: "photo").font(.system(size: 16, weight: .medium))
-                                            Text(AppLocalized.resource("photo_frame_replace_image")).font(.system(size: 14, weight: .medium))
+                                            if imageImporting {
+                                                ProgressView()
+                                                    .controlSize(.small)
+                                                    .tint(ZTransferColors.accentPurple)
+                                            } else {
+                                                Image(systemName: "photo").font(.system(size: 16, weight: .medium))
+                                                Text(AppLocalized.resource("photo_frame_replace_image")).font(.system(size: 14, weight: .medium))
+                                            }
                                         }
                                         .foregroundStyle(ZTransferColors.primaryText)
                                         .frame(maxWidth: .infinity)
                                         .frame(height: PhotoEffectControlMetrics.height)
                                     }
                                     .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 13))
+                                    .disabled(imageImporting)
                                 }
                             }
                         }

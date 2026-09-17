@@ -117,6 +117,7 @@ struct SettingsView: View {
                                     showingWatermarkPicker: $showingWatermarkPicker,
                                     textFieldFocused: $watermarkTextFocused,
                                     showLocationFields: true,
+                                    imageImporting: effectsStore.watermarkImageImporting,
                                     filterChooser: $filterChooser,
                                     onWatermarkTextCommitted: { _ in commitFrameDraft() },
                                     onFavoriteImageMissing: { effectsHint = .init(resource: "photo_effect_favorite_image_missing") })
@@ -124,6 +125,10 @@ struct SettingsView: View {
                                     .padding(.bottom, 14)
                             }
                             .settingsHeight("effectsContent")
+                            .frame(maxWidth: .infinity)
+                            .photoEffectsBackgroundFocusDismiss {
+                                if watermarkTextFocused { watermarkTextFocused = false }
+                            }
                         }
                     }
                     .transition(.asymmetric(
@@ -169,21 +174,35 @@ struct SettingsView: View {
         .sheet(isPresented: $showingPicker) { DirectoryPicker { url in directory.setDirectory(url); showingPicker = false } }
         .photosPicker(isPresented: $showingWatermarkPicker, selection: $watermarkPickerItems,
                       maxSelectionCount: 1, matching: .images, preferredItemEncoding: .current)
-        .task(id: watermarkPickerItems) {
-            guard let item = watermarkPickerItems.last else { return }
-            guard let data = try? await item.loadTransferable(type: Data.self), !Task.isCancelled,
-                  let hash = effectsStore.importWatermarkImage(data: data) else {
-                if !Task.isCancelled { effectsHint = .init(resource: "photo_frame_image_import_failed"); watermarkPickerItems = [] }
-                return
+        .onChange(of: watermarkPickerItems) { items in
+            guard let item = items.last else { return }
+            // Persist the current frame draft before the picker result starts
+            // its background lifetime. The store can then finish the import
+            // even if this popup is removed before the bytes are copied.
+            commitFrameDraft()
+            guard let generation = effectsStore.beginWatermarkImageImport() else { return }
+            Task { @MainActor in
+                let hash = await importPhotoPickerWatermarkImage(item)
+                guard effectsStore.finishWatermarkImageImport(
+                    generation: generation, hash: hash
+                ) else { return }
+                watermarkPickerItems = []
+                if hash == nil || effectsStore.settings.watermark.imageHash != hash {
+                    effectsHint = .init(resource: "photo_frame_image_import_failed")
+                }
             }
+        }
+        .onChange(of: effectsStore.watermarkImportRevision) { _ in
+            guard let hash = effectsStore.lastImportedWatermarkHash else { return }
             effectsDraft.watermark.content = .image
             effectsDraft.watermark.imageHash = hash
             if effectsDraft.photoFrameBorderEnabled,
-               let index = effectsDraft.favoriteFrameEffects.firstIndex(where: { $0.preset == effectsDraft.photoFramePreset }) {
+               let index = effectsDraft.favoriteFrameEffects.firstIndex(where: {
+                   $0.preset == effectsDraft.photoFramePreset
+               }) {
                 effectsDraft.favoriteFrameEffects[index].watermark = effectsDraft.watermark
             }
             commitFrameDraft()
-            watermarkPickerItems = []
         }
         .onChange(of: dismissalRequested) { closing in
             if closing && settingsPage == .effects { commitEffectsDraft() }

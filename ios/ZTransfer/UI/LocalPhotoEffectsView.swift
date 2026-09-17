@@ -30,6 +30,7 @@ struct LocalPhotoEffectsView: View {
                                        showingWatermarkPicker: $showingWatermarkPicker,
                                        textFieldFocused: $watermarkTextFocused,
                                        showLocationFields: false,
+                                       imageImporting: effectsStore.watermarkImageImporting,
                                        filterChooser: $filterChooser,
                                        onFavoriteImageMissing: { effectsHint = .init(resource: "photo_effect_favorite_image_missing") })
                 .padding(.top, 10).padding(.bottom, 18)
@@ -37,6 +38,9 @@ struct LocalPhotoEffectsView: View {
             .padding(.horizontal, 20).padding(.vertical, 16)
             .frame(maxWidth: 680).frame(maxWidth: .infinity)
             .background(WorkbenchScrollTracker())
+            .photoEffectsBackgroundFocusDismiss {
+                if watermarkTextFocused { watermarkTextFocused = false }
+            }
         }
         .coordinateSpace(name: "workbenchScroll")
         .onPreferenceChange(WorkbenchScrollOffsetKey.self) { scrollOffset = $0 }
@@ -65,7 +69,6 @@ struct LocalPhotoEffectsView: View {
             }
         }
         .photoEffectsHint($effectsHint, duration: 2)
-        .onDisappear { batch.dispose() }
         .photosPicker(isPresented: $showingPicker, selection: $pickerItems,
                       matching: .images, preferredItemEncoding: .current)
         .photosPicker(isPresented: $showingWatermarkPicker, selection: $watermarkPickerItems,
@@ -76,25 +79,17 @@ struct LocalPhotoEffectsView: View {
             previewPage = 0
         }
         .onChange(of: watermarkPickerItems) { items in
-            guard let item = items.last else { return }
-            Task {
-                guard let data = try? await item.loadTransferable(type: Data.self),
-                      let hash = effectsStore.importWatermarkImage(data: data) else {
+            guard let item = items.last,
+                  let generation = effectsStore.beginWatermarkImageImport() else { return }
+            Task { @MainActor in
+                let hash = await importPhotoPickerWatermarkImage(item)
+                guard effectsStore.finishWatermarkImageImport(
+                    generation: generation, hash: hash
+                ) else { return }
+                watermarkPickerItems = []
+                if hash == nil || effectsStore.settings.watermark.imageHash != hash {
                     effectsHint = .init(resource: "photo_frame_image_import_failed")
-                    await MainActor.run { watermarkPickerItems = [] }
-                    return
                 }
-                var watermark = effectsStore.settings.watermark
-                watermark.content = .image
-                watermark.imageHash = hash
-                var updated = effectsStore.settings
-                updated.watermark = watermark
-                if updated.photoFrameBorderEnabled,
-                   let index = updated.favoriteFrameEffects.firstIndex(where: { $0.preset == updated.photoFramePreset }) {
-                    updated.favoriteFrameEffects[index].watermark = watermark
-                }
-                effectsStore.update(updated)
-                await MainActor.run { watermarkPickerItems = [] }
             }
         }
     }
@@ -136,7 +131,7 @@ struct LocalPhotoEffectsView: View {
             Text(AppLocalized.resource("local_photo_effects_entry")).font(.system(size: 16, weight: .bold)).lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .leading)
             if !batch.state.photos.isEmpty {
-                Button { showingPicker = true } label: {
+                Button { openPhotoPicker() } label: {
                     Text(AppLocalized.resource("local_photo_replace")).font(.system(size: 12, weight: .medium))
                         .padding(.horizontal, 10).frame(height: 38)
                 }
@@ -169,7 +164,7 @@ struct LocalPhotoEffectsView: View {
     private var preview: some View {
         Group {
             if batch.state.photos.isEmpty {
-                Button { showingPicker = true } label: {
+                Button { openPhotoPicker() } label: {
                     VStack(spacing: 6) {
                         Text(AppLocalized.resource("local_photo_choose_short")).font(.system(size: 14, weight: .medium)).foregroundStyle(ZTransferColors.accentBlue)
                         Text(AppLocalized.resource("local_photo_multi_select")).font(.system(size: 12)).foregroundStyle(ZTransferColors.secondaryText)
@@ -208,7 +203,7 @@ struct LocalPhotoEffectsView: View {
 
     private var batchButton: some View {
         Button {
-            if batch.state.photos.isEmpty { showingPicker = true }
+            if batch.state.photos.isEmpty { openPhotoPicker() }
             else { batch.generate(settings: previewSettings) }
         } label: {
             LocalPhotoBatchLabel(
@@ -219,6 +214,13 @@ struct LocalPhotoEffectsView: View {
         }
         .buttonStyle(WorkbenchGlassButtonStyle())
         .disabled(batch.state.phase != .ready || (!batch.state.photos.isEmpty && !effectsStore.settings.hasEffect))
+    }
+
+    private func openPhotoPicker() {
+        // Android launches a fresh ACTION_PICK for both choose and replace;
+        // do not feed the previous PhotosPicker selection back as preselection.
+        pickerItems = []
+        showingPicker = true
     }
 }
 

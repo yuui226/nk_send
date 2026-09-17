@@ -52,8 +52,17 @@ struct PhotoFrameMetadata: Equatable, Sendable {
 
 enum PhotoExifParser {
     static func parse(_ data: Data) -> PhotoExif? {
-        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
-              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as NSDictionary? else { return nil }
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        return parse(source)
+    }
+
+    static func parse(_ url: URL) -> PhotoExif? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+        return parse(source)
+    }
+
+    private static func parse(_ source: CGImageSource) -> PhotoExif? {
+        guard let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as NSDictionary? else { return nil }
         let exif = properties[kCGImagePropertyExifDictionary] as? NSDictionary
         let tiff = properties[kCGImagePropertyTIFFDictionary] as? NSDictionary
         let gps = properties[kCGImagePropertyGPSDictionary] as? NSDictionary

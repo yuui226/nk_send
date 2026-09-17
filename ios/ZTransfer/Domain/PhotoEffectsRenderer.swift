@@ -1,39 +1,53 @@
 import UIKit
 import CoreText
+import CoreImage
 
 /// Android serializes full preview composition so a stale frame cannot saturate
 /// the CPU while a newer wheel selection is being prepared.  The gate is used
 /// only by interactive previews; batch export keeps its own worker policy.
 actor PhotoEffectsPreviewRenderGate {
     static let shared = PhotoEffectsPreviewRenderGate()
+    private struct Waiter {
+        let id: UUID
+        let continuation: CheckedContinuation<Void, any Error>
+    }
+
     private var available = true
-    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var waiters: [Waiter] = []
 
     func withPermit<T: Sendable>(_ operation: @escaping @Sendable () async throws -> T) async throws -> T {
         if available {
             available = false
         } else {
-            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-                waiters.append(continuation)
-            }
-            do {
-                try Task.checkCancellation()
-            } catch {
-                release()
-                throw error
+            let id = UUID()
+            try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
+                    if Task.isCancelled {
+                        continuation.resume(throwing: CancellationError())
+                    } else {
+                        waiters.append(.init(id: id, continuation: continuation))
+                    }
+                }
+            } onCancel: {
+                Task { await self.cancelWaiter(id) }
             }
         }
         defer { release() }
+        try Task.checkCancellation()
         return try await operation()
     }
 
     private func release() {
-        if let waiter = waiters.first {
-            waiters.removeFirst()
-            waiter.resume()
+        if !waiters.isEmpty {
+            waiters.removeFirst().continuation.resume()
         } else {
             available = true
         }
+    }
+
+    private func cancelWaiter(_ id: UUID) {
+        guard let index = waiters.firstIndex(where: { $0.id == id }) else { return }
+        waiters.remove(at: index).continuation.resume(throwing: CancellationError())
     }
 }
 
@@ -99,30 +113,47 @@ enum PhotoEffectsRenderer {
 
     private static func orientationNormalized(_ image: UIImage) -> UIImage {
         guard image.imageOrientation != .up, let source = image.cgImage else { return image }
-        let swapsAxes: Bool
-        switch image.imageOrientation {
-        case .left, .leftMirrored, .right, .rightMirrored: swapsAxes = true
-        default: swapsAxes = false
+        // Keep EXIF normalization lazy. Android's region decoder applies the
+        // orientation to each source band; eagerly drawing a rotated UIImage
+        // here would retain another full-resolution bitmap beside the final
+        // canvas. A CI-backed UIImage lets photo/background draws and the tiled
+        // filter path request only the pixels needed by their destination.
+        let exifOrientation: Int32 = switch image.imageOrientation {
+        case .up: 1
+        case .upMirrored: 2
+        case .down: 3
+        case .downMirrored: 4
+        case .leftMirrored: 5
+        case .right: 6
+        case .rightMirrored: 7
+        case .left: 8
+        @unknown default: 1
         }
-        let size = swapsAxes
-            ? CGSize(width: source.height, height: source.width)
-            : CGSize(width: source.width, height: source.height)
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = 1
-        format.opaque = false
-        return UIGraphicsImageRenderer(size: size, format: format).image { _ in
-            image.draw(in: CGRect(origin: .zero, size: size))
+        var oriented = CIImage(cgImage: source).oriented(forExifOrientation: exifOrientation)
+        if oriented.extent.origin != .zero {
+            oriented = oriented.transformed(by: CGAffineTransform(
+                translationX: -oriented.extent.minX,
+                y: -oriented.extent.minY
+            ))
         }
+        return UIImage(ciImage: oriented, scale: 1, orientation: .up)
     }
 
     private static func applyFilter(_ image: UIImage, selection: PhotoFilterSelection) throws -> UIImage {
         guard let preset = Np3FilterCatalog.preset(id: selection.preset.id) else {
             throw PhotoEffectsRenderError.unknownFilter
         }
-        guard let source = image.cgImage else { throw PhotoEffectsRenderError.invalidBitmap }
+        guard let source = processingCGImage(image) else { throw PhotoEffectsRenderError.invalidBitmap }
         let filtered = try Np3BitmapFilter.apply(source, parameters: preset.parameters,
                                                   intensityPercent: selection.normalizedIntensityPercent)
         return UIImage(cgImage: filtered, scale: image.scale, orientation: image.imageOrientation)
+    }
+
+    private static func processingCGImage(_ image: UIImage) -> CGImage? {
+        if let source = image.cgImage { return source }
+        guard let source = image.ciImage else { return nil }
+        return CIContext(options: [.cacheIntermediates: false])
+            .createCGImage(source, from: source.extent)
     }
 
     private static func drawDecoration(_ image: UIImage, backdropImage: UIImage,
@@ -131,8 +162,7 @@ enum PhotoEffectsRenderer {
                                        previewPlaceholders: Bool,
                                        tiledFilter: PhotoFilterSelection?,
                                        previewLongEdge: CGFloat?) throws -> UIImage {
-        let sourceSize = CGSize(width: image.cgImage?.width ?? Int(image.size.width),
-                                height: image.cgImage?.height ?? Int(image.size.height))
+        let sourceSize = imagePixelSize(image)
         let layout = previewLongEdge.map {
             makePreviewLayout(sourceSize, preset: settings.photoFramePreset, longEdge: $0)
         } ?? makeLayout(sourceSize, preset: settings.photoFramePreset)
@@ -185,6 +215,16 @@ enum PhotoEffectsRenderer {
         }
         if let renderError { throw renderError }
         return rendered
+    }
+
+    private static func imagePixelSize(_ image: UIImage) -> CGSize {
+        if let source = image.cgImage {
+            return CGSize(width: source.width, height: source.height)
+        }
+        if let source = image.ciImage {
+            return source.extent.size
+        }
+        return image.size
     }
 
     /// Android's watermark-only path preserves the source dimensions and does
@@ -461,23 +501,40 @@ enum PhotoEffectsRenderer {
         _ context: CGContext, image: UIImage, rect: CGRect,
         selection: PhotoFilterSelection
     ) throws {
-        guard let source = image.cgImage, source.width > 0, source.height > 0 else {
+        let sourceWidth = Int(imagePixelSize(image).width.rounded())
+        let sourceHeight = Int(imagePixelSize(image).height.rounded())
+        guard sourceWidth > 0, sourceHeight > 0 else {
             throw PhotoEffectsRenderError.invalidBitmap
         }
-        let rowsPerTile = photoEffectsFilterTileRows(sourceWidth: source.width)
+        let rowsPerTile = photoEffectsFilterTileRows(sourceWidth: sourceWidth)
+        let ciContext = image.ciImage.map { _ in CIContext(options: [.cacheIntermediates: false]) }
         context.interpolationQuality = .none
         var top = 0
-        while top < source.height {
+        while top < sourceHeight {
             try Task.checkCancellation()
-            let bottom = min(source.height, top + rowsPerTile)
-            guard let region = source.cropping(to: CGRect(
-                x: 0, y: top, width: source.width, height: bottom - top
-            )) else { throw PhotoEffectsRenderError.invalidBitmap }
+            let bottom = min(sourceHeight, top + rowsPerTile)
+            let region: CGImage?
+            if let source = image.cgImage {
+                region = source.cropping(to: CGRect(
+                    x: 0, y: top, width: sourceWidth, height: bottom - top
+                ))
+            } else if let source = image.ciImage, let ciContext {
+                let crop = CGRect(
+                    x: source.extent.minX,
+                    y: source.extent.minY + CGFloat(sourceHeight - bottom),
+                    width: CGFloat(sourceWidth),
+                    height: CGFloat(bottom - top)
+                )
+                region = ciContext.createCGImage(source, from: crop)
+            } else {
+                region = nil
+            }
+            guard let region else { throw PhotoEffectsRenderError.invalidBitmap }
             let filtered = try applyFilter(
                 UIImage(cgImage: region, scale: 1, orientation: .up),
                 selection: selection
             )
-            let scaleY = rect.height / CGFloat(source.height)
+            let scaleY = rect.height / CGFloat(sourceHeight)
             let destination = CGRect(
                 x: rect.minX,
                 y: rect.minY + CGFloat(top) * scaleY,
@@ -495,11 +552,12 @@ enum PhotoEffectsRenderer {
     private static func filteredPalettePreview(
         _ image: UIImage, selection: PhotoFilterSelection?
     ) throws -> UIImage {
-        guard let selection, let source = image.cgImage else { return image }
+        guard let selection else { return image }
+        let sourceSize = imagePixelSize(image)
         var sample = 1
-        while max(source.width / sample, source.height / sample) > 192 { sample *= 2 }
-        let target = CGSize(width: max(1, source.width / sample),
-                            height: max(1, source.height / sample))
+        while max(Int(sourceSize.width) / sample, Int(sourceSize.height) / sample) > 192 { sample *= 2 }
+        let target = CGSize(width: CGFloat(max(1, Int(sourceSize.width) / sample)),
+                            height: CGFloat(max(1, Int(sourceSize.height) / sample)))
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
         format.opaque = true
@@ -559,7 +617,9 @@ enum PhotoEffectsRenderer {
     }
 
     private static func blurredBackground(_ image: UIImage, size: CGSize) -> UIImage {
-        guard let source = image.cgImage, size.width > 0, size.height > 0 else { return image }
+        guard size.width > 0, size.height > 0 else { return image }
+        let sourceSize = imagePixelSize(image)
+        guard sourceSize.width > 0, sourceSize.height > 0 else { return image }
         let longEdge: CGFloat = 192
         let proxySize = size.width >= size.height
             ? CGSize(width: longEdge, height: max(96, (longEdge * size.height / size.width).rounded()))
@@ -569,11 +629,10 @@ enum PhotoEffectsRenderer {
         proxyFormat.scale = 1
         proxyFormat.opaque = true
         let proxy = UIGraphicsImageRenderer(size: proxySize, format: proxyFormat).image { renderer in
-            let scale = max(proxySize.width / CGFloat(source.width), proxySize.height / CGFloat(source.height))
-            let drawSize = CGSize(width: CGFloat(source.width) * scale, height: CGFloat(source.height) * scale)
+            let scale = max(proxySize.width / sourceSize.width, proxySize.height / sourceSize.height)
+            let drawSize = CGSize(width: sourceSize.width * scale, height: sourceSize.height * scale)
             let rect = CGRect(x: (proxySize.width - drawSize.width) / 2, y: (proxySize.height - drawSize.height) / 2, width: drawSize.width, height: drawSize.height)
-            renderer.cgContext.interpolationQuality = .high
-            renderer.cgContext.draw(source, in: rect)
+            image.draw(in: rect)
         }
         guard let proxyCG = proxy.cgImage,
               let context = CGContext(data: &pixels, width: Int(proxySize.width), height: Int(proxySize.height),
@@ -1157,10 +1216,11 @@ enum PhotoEffectsRenderer {
         var pixels = Array(repeating: UInt8(0), count: sw * sh * 4)
         guard let context = CGContext(data: &pixels, width: sw, height: sh, bitsPerComponent: 8,
                                        bytesPerRow: sw * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
-                                       bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
-              let source = image.cgImage else { return }
+                                       bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return }
         context.interpolationQuality = .none
-        context.draw(source, in: CGRect(x: 0, y: 0, width: sw, height: sh))
+        UIGraphicsPushContext(context)
+        image.draw(in: CGRect(x: 0, y: 0, width: sw, height: sh))
+        UIGraphicsPopContext()
         var buckets = Array(repeating: (count: 0, r: 0, g: 0, b: 0), count: 512)
         for index in 0..<(sw * sh) {
             let offset = index * 4, alpha = Int(pixels[offset + 3])
