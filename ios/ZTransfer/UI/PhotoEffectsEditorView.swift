@@ -701,16 +701,22 @@ struct PhotoEffectsSettingsPreview: View {
             guard unfiltered != nil else { return }
             showUnfiltered = true
         })
-        .onTapGesture(count: 2) {
-            guard expanded == false else { return }
-            rotationQuarterTurns = (rotationQuarterTurns + 1) % 4
-        }
-        .onTapGesture {
-            guard expandedImage != nil else { return }
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            withTransaction(transaction) { expanded = true }
-        }
+        .simultaneousGesture(
+            TapGesture(count: 2)
+                .exclusively(before: TapGesture(count: 1))
+                .onEnded { gesture in
+                    switch gesture {
+                    case .first:
+                        guard expanded == false else { return }
+                        rotationQuarterTurns = (rotationQuarterTurns + 1) % 4
+                    case .second:
+                        guard expandedImage != nil else { return }
+                        var transaction = Transaction()
+                        transaction.disablesAnimations = true
+                        withTransaction(transaction) { expanded = true }
+                    }
+                }
+        )
         .fullScreenCover(isPresented: $expanded) {
             if let expandedImage {
                 PhotoEffectsExpandedPreview(image: expandedImage, initialAnchor: previewAnchor) {
@@ -903,18 +909,24 @@ private struct PhotoEffectsExpandedPreview: View {
                                 }
                                 .onEnded { _ in gestureStartOffset = offset }
                         )
-                        .onTapGesture(count: 2) {
-                            let target: CGFloat = scale > 1.01 ? 1 : 2.5
-                            withAnimation(.easeInOut(duration: 0.24)) {
-                                scale = target
-                                offset = .zero
-                            }
-                            gestureStartScale = target
-                            gestureStartOffset = .zero
-                        }
-                        .onTapGesture {
-                            if scale <= 1.01 { startClose() }
-                        }
+                        .simultaneousGesture(
+                            TapGesture(count: 2)
+                                .exclusively(before: TapGesture(count: 1))
+                                .onEnded { gesture in
+                                    switch gesture {
+                                    case .first:
+                                        let target: CGFloat = scale > 1.01 ? 1 : 2.5
+                                        withAnimation(.easeInOut(duration: 0.24)) {
+                                            scale = target
+                                            offset = .zero
+                                        }
+                                        gestureStartScale = target
+                                        gestureStartOffset = .zero
+                                    case .second:
+                                        if scale <= 1.01 { startClose() }
+                                    }
+                                }
+                        )
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .modifier(PhotoPreviewAnchorTransform(
