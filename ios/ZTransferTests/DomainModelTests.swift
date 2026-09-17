@@ -1199,6 +1199,37 @@ extension DomainModelTests {
         XCTAssertEqual(photoEffectsFilterTileRows(sourceWidth: 5_000_000), 1)
     }
 
+    func testPhotoEffectsBorderPreviewUsesAndroid1920PixelLayout() throws {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        let source = UIGraphicsImageRenderer(
+            size: CGSize(width: 400, height: 300), format: format
+        ).image { context in
+            UIColor.blue.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 400, height: 300))
+        }
+        func renderedSize(_ preset: PhotoFramePreset) throws -> CGSize {
+            try autoreleasepool {
+                var settings = PhotoEffectsSettings()
+                settings.photoFrameEnabled = true
+                settings.photoFrameBorderEnabled = true
+                settings.photoFramePreset = preset
+                settings.watermark.enabled = false
+                let output = try XCTUnwrap(PhotoEffectsRenderer.render(
+                    source, settings: settings, previewLongEdge: 1_920
+                ).cgImage)
+                return CGSize(width: output.width, height: output.height)
+            }
+        }
+
+        XCTAssertEqual(try renderedSize(.mist), CGSize(width: 1_920, height: 1_440))
+        XCTAssertEqual(try renderedSize(.plaque), CGSize(width: 1_920, height: 1_670))
+        XCTAssertEqual(try renderedSize(.classicSignature), CGSize(width: 1_920, height: 1_802))
+        // Android caps immersive previews but never upscales them.
+        XCTAssertEqual(try renderedSize(.immersive), CGSize(width: 400, height: 300))
+    }
+
     func testPhotoEffectsPreviewUsesAndroidMetadataPlaceholdersFieldByField() throws {
         var settings = PhotoFrameMetadataSettings()
         settings.showDate = true

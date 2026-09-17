@@ -759,7 +759,7 @@ struct PhotoEffectsSettingsPreview: View {
                         try autoreleasepool {
                             try PhotoEffectsRenderer.render(
                                 rotatedFallback, settings: fallbackSettings, metadata: nil,
-                                previewPlaceholders: true
+                                previewPlaceholders: true, previewLongEdge: 1_920
                             )
                         }
                     }

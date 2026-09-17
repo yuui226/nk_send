@@ -199,7 +199,8 @@ enum LocalPhotoOutput {
                     let filteredInput = filteredSource ?? image
                     let filtered = try PhotoEffectsRenderer.render(
                         filteredInput, settings: decorationOnly, metadata: metadata,
-                        previewPlaceholders: true, backdropSource: image
+                        previewPlaceholders: true, backdropSource: image,
+                        previewLongEdge: 1_920
                     )
                     try Task.checkCancellation()
                     // The comparison frame is deliberately deferred by the view
@@ -227,7 +228,7 @@ enum LocalPhotoOutput {
                     comparison.photoFilterEnabled = false
                     let output = try PhotoEffectsRenderer.render(
                         image, settings: comparison, metadata: metadata,
-                        previewPlaceholders: true
+                        previewPlaceholders: true, previewLongEdge: 1_920
                     )
                     try Task.checkCancellation()
                     return output

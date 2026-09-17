@@ -60,7 +60,8 @@ enum PhotoEffectsRenderer {
     static func render(_ image: UIImage, settings: PhotoEffectsSettings,
                        metadata: PhotoFrameMetadata? = nil,
                        previewPlaceholders: Bool = false,
-                       backdropSource: UIImage? = nil) throws -> UIImage {
+                       backdropSource: UIImage? = nil,
+                       previewLongEdge: CGFloat? = nil) throws -> UIImage {
         try Task.checkCancellation()
         // UIImage keeps the JPEG EXIF transform as presentation metadata.
         // Android applies that transform while decoding source regions and all
@@ -89,7 +90,8 @@ enum PhotoEffectsRenderer {
             output = try drawDecoration(output, backdropImage: orientedBackdrop,
                                         settings: settings, metadata: metadata,
                                         previewPlaceholders: previewPlaceholders,
-                                        tiledFilter: tiledFrameFilter)
+                                        tiledFilter: tiledFrameFilter,
+                                        previewLongEdge: previewLongEdge)
         }
         try Task.checkCancellation()
         return output
@@ -127,10 +129,13 @@ enum PhotoEffectsRenderer {
                                        settings: PhotoEffectsSettings,
                                        metadata: PhotoFrameMetadata?,
                                        previewPlaceholders: Bool,
-                                       tiledFilter: PhotoFilterSelection?) throws -> UIImage {
+                                       tiledFilter: PhotoFilterSelection?,
+                                       previewLongEdge: CGFloat?) throws -> UIImage {
         let sourceSize = CGSize(width: image.cgImage?.width ?? Int(image.size.width),
                                 height: image.cgImage?.height ?? Int(image.size.height))
-        let layout = makeLayout(sourceSize, preset: settings.photoFramePreset)
+        let layout = previewLongEdge.map {
+            makePreviewLayout(sourceSize, preset: settings.photoFramePreset, longEdge: $0)
+        } ?? makeLayout(sourceSize, preset: settings.photoFramePreset)
         let decorationImage = try settings.photoFramePreset == .colorArchive
             ? filteredPalettePreview(image, selection: tiledFilter) : image
         let format = UIGraphicsImageRendererFormat()
@@ -235,6 +240,100 @@ enum PhotoEffectsRenderer {
             }
         default:
             return standardLayout(source)
+        }
+    }
+
+    /// Android's interactive frame preview uses a fixed 1920-pixel output
+    /// canvas. This is intentionally separate from the original-quality
+    /// export layout above: preview may scale the decoded source, while export
+    /// always preserves every source pixel at 1:1 inside the decoration.
+    private static func makePreviewLayout(
+        _ source: CGSize, preset: PhotoFramePreset, longEdge: CGFloat
+    ) -> Layout {
+        let w = max(source.width, 1), h = max(source.height, 1)
+        let target = max(longEdge.rounded(), 1)
+        let scaleLayout: (Layout, CGFloat, Bool) -> Layout = { layout, scale, capSource in
+            let applied = capSource ? min(1, scale) : scale
+            func r(_ value: CGFloat) -> CGFloat { max(1, (value * applied).rounded()) }
+            let canvas = CGSize(width: r(layout.canvas.width), height: r(layout.canvas.height))
+            return Layout(
+                canvas: canvas,
+                photo: CGRect(
+                    x: layout.photo.minX * applied,
+                    y: layout.photo.minY * applied,
+                    width: layout.photo.width * applied,
+                    height: layout.photo.height * applied
+                ),
+                metadataTop: layout.metadataTop * applied
+            )
+        }
+        switch preset {
+        case .mist, .cinema, .minimal, .frosted:
+            let aspect = w / h
+            let canvas: CGSize
+            if aspect > 1.9 { canvas = CGSize(width: target, height: (target * 9 / 16).rounded(.down)) }
+            else if aspect > 1.1 { canvas = CGSize(width: target, height: (target * 3 / 4).rounded(.down)) }
+            else if aspect >= 0.9 { canvas = CGSize(width: target, height: target) }
+            else if aspect >= 0.72 { canvas = CGSize(width: (target * 3 / 4).rounded(.down), height: target) }
+            else if aspect >= 0.56 { canvas = CGSize(width: (target * 2 / 3).rounded(.down), height: target) }
+            else { canvas = CGSize(width: (target * 9 / 16).rounded(.down), height: target) }
+            let portrait = canvas.height > canvas.width
+            let square = canvas.height == canvas.width
+            let side = canvas.width * 0.052
+            let top = canvas.height * (portrait ? 0.030 : square ? 0.040 : 0.050)
+            let metadataTop = canvas.height * (portrait ? 0.900 : square ? 0.870 : 0.830)
+            let availableWidth = canvas.width - side * 2
+            let availableHeight = metadataTop - top - canvas.height * 0.012
+            let photoScale = min(availableWidth / w, availableHeight / h)
+            let photoSize = CGSize(width: w * photoScale, height: h * photoScale)
+            return Layout(
+                canvas: canvas,
+                photo: CGRect(
+                    x: (canvas.width - photoSize.width) / 2,
+                    y: top + availableHeight / 2 - photoSize.height / 2,
+                    width: photoSize.width,
+                    height: photoSize.height
+                ),
+                metadataTop: metadataTop
+            )
+        case .plaque:
+            let compositeHeight = h + w * 0.12
+            let scale = min(target / w, target / compositeHeight)
+            let canvasWidth = max(1, (w * scale).rounded())
+            let band = max(1, (canvasWidth * 0.12).rounded())
+            let photoHeight = min(max(1, (h * scale).rounded()), max(1, target - band))
+            return Layout(
+                canvas: CGSize(width: canvasWidth, height: photoHeight + band),
+                photo: CGRect(x: 0, y: 0, width: canvasWidth, height: photoHeight),
+                metadataTop: photoHeight
+            )
+        case .immersive:
+            let scale = min(1, target / max(w, h))
+            let canvas = CGSize(
+                width: max(1, (w * scale).rounded()),
+                height: max(1, (h * scale).rounded())
+            )
+            return Layout(canvas: canvas, photo: CGRect(origin: .zero, size: canvas),
+                          metadataTop: canvas.height)
+        case .brandInset, .brandGallery:
+            let sideRatio: CGFloat = 0.032
+            let bottomRatio: CGFloat = preset == .brandInset ? 0.032 : 0.16
+            let compositeWidth = w * (1 + sideRatio * 2)
+            let compositeHeight = h + w * (sideRatio + bottomRatio)
+            let scale = min(target / compositeWidth, target / compositeHeight)
+            let photoWidth = max(1, (w * scale).rounded())
+            let photoHeight = max(1, (h * scale).rounded())
+            let side = max(1, (photoWidth * sideRatio).rounded())
+            let bottom = max(1, (photoWidth * bottomRatio).rounded())
+            return Layout(
+                canvas: CGSize(width: photoWidth + side * 2,
+                               height: photoHeight + side + bottom),
+                photo: CGRect(x: side, y: side, width: photoWidth, height: photoHeight),
+                metadataTop: side + photoHeight
+            )
+        case .classicSignature, .galleryMat, .colorArchive, .filmGallery, .filmEdge:
+            let original = makeLayout(source, preset: preset)
+            return scaleLayout(original, target / max(original.canvas.width, original.canvas.height), false)
         }
     }
 
