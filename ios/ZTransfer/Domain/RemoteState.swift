@@ -69,6 +69,13 @@ struct RemoteFocusPoint: Equatable, Sendable {
     }
 }
 
+struct RemoteConfirmedFocusMarker: Equatable, Sendable {
+    let fallbackPoint: RemoteFocusPoint
+    let confirmedAtUptime: TimeInterval
+    let subjectTracking: Bool
+    let nonce: UInt64
+}
+
 struct RemoteFocusResult: Equatable, Sendable {
     let trackingStarted: Bool
     let polls: Int

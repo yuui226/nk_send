@@ -54,6 +54,7 @@ struct RemoteView: View {
     @State private var showFps = true
     @State private var framingGrid: IOSViewfinderGrid = .off
     @State private var zebraVisible = false
+    @State private var batteryExpanded = false
     @State private var layoutOrientation: RemoteLayoutOrientation = .portrait
     @State private var immersiveFullscreen = false
     @State private var orientationCandidate: RemoteLayoutOrientation?
@@ -110,8 +111,9 @@ struct RemoteView: View {
             }
             .opacity(rotationOpacity)
         }
-        .overlay(alignment: .bottom) {
-            if let hint = model.recordingHint ?? model.localRecordingHint {
+        .overlay(alignment: .top) {
+            if !immersiveFullscreen,
+               let hint = model.interactionHint ?? model.recordingHint ?? model.localRecordingHint {
                 Text(hint)
                     .font(.system(size: 14, weight: .medium))
                     .multilineTextAlignment(.center)
@@ -120,11 +122,17 @@ struct RemoteView: View {
                     .padding(.vertical, 10)
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
                     .padding(.horizontal, 20)
-                    .padding(.bottom, 28)
-                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    .padding(.top, 60)
+                    .transition(.asymmetric(
+                        insertion: .opacity.combined(with: .move(edge: .top))
+                            .animation(.easeInOut(duration: 0.20)),
+                        removal: .opacity.animation(.easeOut(duration: 0.30))
+                    ))
             }
         }
-        .animation(ZTransferMotion.standard, value: model.recordingHint)
+        .animation(.easeInOut(duration: 0.20), value: model.interactionHint)
+        .animation(.easeInOut(duration: 0.20), value: model.recordingHint)
+        .animation(.easeInOut(duration: 0.20), value: model.localRecordingHint)
         .animation(ZTransferMotion.standard, value: layoutOrientation)
         .statusBarHidden(false)
         .task {
@@ -257,7 +265,7 @@ struct RemoteView: View {
             }
             .buttonStyle(.plain)
             .padding(12)
-            .accessibilityLabel(AppLocalized.resource("back"))
+            .accessibilityLabel(AppLocalized.resource("cd_remote_fullscreen_exit"))
         }
     }
 
@@ -316,63 +324,100 @@ struct RemoteView: View {
     }
 
     private var remoteBatteryButton: some View {
-        HStack(spacing: 5) {
-            RemoteBatteryIcon(percent: model.batteryPercent)
-                .frame(width: 21, height: 15)
-            if let percent = model.batteryPercent {
-                Text("\(percent)%")
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
-                    .foregroundStyle(ZTransferColors.primaryText)
+        let valueText = model.batteryPercent.map { "\($0)%" } ?? "--"
+        let tint = remoteBatteryTint(model.batteryPercent)
+        return Button {
+            withAnimation(batteryExpanded
+                          ? .timingCurve(0.4, 0, 0.2, 1, duration: 0.22)
+                          : .spring(response: 0.42, dampingFraction: 0.72)) {
+                batteryExpanded.toggle()
             }
+        } label: {
+            HStack(spacing: batteryExpanded ? 6 : 0) {
+                RemoteBatteryIcon(percent: model.batteryPercent, tint: tint)
+                .frame(width: 21, height: 15)
+                if batteryExpanded {
+                    Text(valueText)
+                        .font(.system(size: 12, weight: .medium, design: .default))
+                        .foregroundStyle(tint)
+                        .fixedSize()
+                        .transition(.opacity)
+                }
+            }
+            .frame(width: batteryExpanded ? 54 : 21, height: 15, alignment: .leading)
+            .frame(width: batteryExpanded ? 82 : 48, height: 36)
+            .background(Color.white.opacity(0.86), in: Capsule())
+            .overlay(Capsule().stroke(Color.white.opacity(0.95), lineWidth: 1))
+            .shadow(color: .black.opacity(0.06), radius: 2, y: 1)
         }
-        .frame(minWidth: model.batteryPercent == nil ? 48 : 62)
-        .frame(height: 36)
-        .background(Color.white.opacity(0.86), in: Capsule())
-        .overlay(Capsule().stroke(Color.white.opacity(0.95), lineWidth: 1))
-        .shadow(color: .black.opacity(0.06), radius: 2, y: 1)
-        .accessibilityLabel(AppLocalized.resource("cd_camera_battery"))
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(AppLocalized.resource("cd_camera_battery")) \(valueText)")
+    }
+
+    private func remoteBatteryTint(_ percent: Int?) -> Color {
+        guard let percent else { return ZTransferColors.secondaryText }
+        if percent <= 20 { return ZTransferColors.statusError }
+        if percent <= 50 { return ZTransferColors.accentOrange }
+        return ZTransferColors.statusConnected
     }
 
     private var adaptiveRemoteToolbar: some View {
-        RemoteAdaptiveToolLayout(horizontalSpacing: 7, verticalSpacing: 8) {
-            remoteToolButton(active: model.hdLiveView, label: { Text("HD").font(.system(size: 13, weight: .bold)).fixedSize() }) {
+        RemoteAdaptiveToolLayout(horizontalSpacing: 7, verticalSpacing: 8, pinnedEndCount: 2) {
+            remoteToolButton(active: model.hdLiveView, accessibilityLabel: AppLocalized.resource("dev_hd_liveview"), label: { Text("HD").font(.system(size: 13, weight: .bold)).fixedSize() }) {
                 withAnimation(ZTransferMotion.standard) { model.setHDLiveView(!model.hdLiveView) }
             }
-            remoteToolButton(active: showFps, label: { Text("FPS").font(.system(size: 10.5, weight: .bold)).fixedSize() }) {
+            remoteToolButton(active: showFps, accessibilityLabel: AppLocalized.resource("dev_fps_overlay"), label: { Text("FPS").font(.system(size: 10.5, weight: .bold)).fixedSize() }) {
                 withAnimation(ZTransferMotion.standard) { showFps.toggle() }
             }
-            remoteToolButton(active: histogramVisible, label: { RemoteHistogramIcon().frame(width: 19, height: 19) }) {
+            remoteToolButton(active: histogramVisible, accessibilityLabel: AppLocalized.resource("cd_remote_histogram"), label: { RemoteHistogramIcon().frame(width: 19, height: 19) }) {
                 withAnimation(ZTransferMotion.standard) { histogramVisible.toggle() }
             }
-            remoteToolButton(active: framingGrid != .off, label: { RemoteGridIcon().frame(width: 18, height: 18) }) {
+            remoteToolButton(active: framingGrid != .off, accessibilityLabel: AppLocalized.resource("cd_remote_grid"), label: { RemoteGridIcon().frame(width: 18, height: 18) }) {
                 withAnimation(ZTransferMotion.standard) { framingGrid = framingGrid.next }
             }
-            remoteToolButton(active: zebraVisible, label: { RemoteZebraIcon().frame(width: 18, height: 18) }) {
+            remoteToolButton(active: zebraVisible, accessibilityLabel: AppLocalized.resource("cd_remote_zebra"), label: { RemoteZebraIcon().frame(width: 18, height: 18) }) {
                 withAnimation(ZTransferMotion.standard) { zebraVisible.toggle() }
             }
-            remoteToolButton(active: effectiveDesqueeze > 1.001, label: { RemoteAspectIcon().frame(width: 18, height: 18) }) {
+            remoteToolButton(active: effectiveDesqueeze > 1.001,
+                             accessibilityLabel: "\(RemoteDisplayOptions.label(for: effectiveDesqueeze))×",
+                             label: {
+                if effectiveDesqueeze > 1.001 {
+                    Text(RemoteDisplayOptions.label(for: effectiveDesqueeze))
+                        .font(.system(size: 12, weight: .bold))
+                        .fixedSize()
+                } else {
+                    RemoteAspectIcon().frame(width: 18, height: 18)
+                }
+            }) {
                 withAnimation(ZTransferMotion.standard) {
                     desqueeze = RemoteDisplayOptions.nextDesqueeze(after: effectiveDesqueeze)
                 }
             }
-            remoteToolButton(active: model.levelVisible, label: { RemoteLevelIcon().frame(width: 18, height: 18) }) {
+            remoteToolButton(active: model.levelVisible, accessibilityLabel: AppLocalized.resource("cd_remote_level"), label: { RemoteLevelIcon().frame(width: 18, height: 18) }) {
                 withAnimation(ZTransferMotion.standard) {
                     model.setLevelVisible(!model.levelVisible)
                 }
             }
             if model.movieMode {
-                remoteToolButton(active: audioLevelsVisible, label: { RemoteAudioIcon().frame(width: 18, height: 18) }) {
+                remoteToolButton(active: audioLevelsVisible, accessibilityLabel: AppLocalized.resource("cd_remote_audio_levels"), label: { RemoteAudioIcon().frame(width: 18, height: 18) }) {
                     withAnimation(ZTransferMotion.standard) { audioLevelsVisible.toggle() }
                 }
+                .transition(.asymmetric(
+                    insertion: .opacity.combined(with: .scale(scale: 0.01, anchor: .leading))
+                        .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.22)),
+                    removal: .opacity.combined(with: .scale(scale: 0.01, anchor: .leading))
+                        .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.20))
+                ))
             }
             remoteRecordButton
-            remoteToolButton(active: false, label: { RemoteFullscreenIcon().frame(width: 17, height: 17) }) {
+            remoteToolButton(active: false, accessibilityLabel: AppLocalized.resource("cd_remote_fullscreen_enter"), label: { RemoteFullscreenIcon().frame(width: 17, height: 17) }) {
                 enterImmersiveFullscreen()
             }
-            remoteToolButton(active: layoutOrientation.isLandscape, label: { RemoteRotateIcon().frame(width: 20, height: 20) }) {
+            remoteToolButton(active: layoutOrientation.isLandscape, accessibilityLabel: AppLocalized.resource("cd_remote_rotate"), label: { RemoteRotateIcon().frame(width: 20, height: 20) }) {
                 cycleLayoutOrientation()
             }
         }
+        .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.22), value: model.movieMode)
     }
 
     private var remoteRecordButton: some View {
@@ -448,6 +493,7 @@ struct RemoteView: View {
 
     private func remoteToolButton<Label: View>(
         active: Bool,
+        accessibilityLabel: String,
         @ViewBuilder label: @escaping () -> Label,
         action: @escaping () -> Void
     ) -> some View {
@@ -463,6 +509,7 @@ struct RemoteView: View {
                 .shadow(color: .black.opacity(0.05), radius: 2, y: 1)
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel)
     }
 
     private var shutterButton: some View {
@@ -542,10 +589,20 @@ struct RemoteView: View {
                                    alignment: .bottomLeading)
                             .allowsHitTesting(false)
                     }
-                    if let metadata = model.frameMetadata,
-                       let focusFrame = metadata.selectedFocusFrame,
-                       metadata.focusJudgement != .none {
-                        IOSFocusFrameOverlay(frame: focusFrame, aspect: aspect)
+                    if let marker = model.confirmedFocusMarker {
+                        let metadata = model.frameMetadata
+                        let cameraFrame = model.frameReceivedAtUptime >= marker.confirmedAtUptime &&
+                            (marker.subjectTracking || metadata?.focusJudgement == .focused)
+                            ? metadata?.selectedFocusFrame : nil
+                        IOSConfirmedFocusReticle(
+                            marker: marker,
+                            cameraFrame: cameraFrame,
+                            visible: model.state.focus.phase == .idle &&
+                                !model.halfPressVisualActive &&
+                                (!marker.subjectTracking || model.state.focus.tracking),
+                            aspect: aspect
+                        )
+                        .id(marker.nonce)
                             .allowsHitTesting(false)
                     }
                     if zebraVisible, let zebraMask = model.frameZebraMask {
@@ -608,20 +665,35 @@ struct RemoteView: View {
 
     private struct RemoteBatteryIcon: View {
         let percent: Int?
+        let tint: Color
+
+        private var level: Int {
+            guard let percent, percent > 0 else { return 0 }
+            if percent <= 33 { return 1 }
+            if percent <= 66 { return 2 }
+            return 3
+        }
+
         var body: some View {
             Canvas { context, size in
-                let body = CGRect(x: 1, y: 2, width: size.width - 5, height: size.height - 4)
-                context.stroke(Path(roundedRect: body, cornerRadius: 3),
-                               with: .color(ZTransferColors.accentOrange), lineWidth: 2)
-                let fraction = CGFloat(min(max(percent ?? 0, 0), 100)) / 100
-                context.fill(Path(roundedRect: CGRect(x: body.minX + 3, y: body.minY + 3,
-                                                       width: max(CGFloat(2), (body.width - 6) * fraction), height: body.height - 6),
-                                  cornerRadius: 1.5),
-                             with: .color(ZTransferColors.accentOrange))
-                context.fill(Path(roundedRect: CGRect(x: body.maxX, y: size.height * 0.34,
-                                                       width: 4, height: size.height * 0.32),
+                let body = CGRect(x: 0.5, y: 0.5, width: 17.5, height: size.height - 1)
+                context.stroke(Path(roundedRect: body, cornerRadius: 2.5),
+                               with: .color(tint), lineWidth: 1)
+                let gap: CGFloat = 1
+                let inset: CGFloat = 2
+                let barWidth = (body.width - inset * 2 - gap * 2) / 3
+                for index in 0..<3 {
+                    let rect = CGRect(x: body.minX + inset + CGFloat(index) * (barWidth + gap),
+                                      y: body.minY + inset,
+                                      width: barWidth,
+                                      height: body.height - inset * 2)
+                    context.fill(Path(roundedRect: rect, cornerRadius: 1),
+                                 with: .color(index < level ? tint : tint.opacity(0.28)))
+                }
+                context.fill(Path(roundedRect: CGRect(x: body.maxX, y: size.height * 0.30,
+                                                       width: 3, height: size.height * 0.40),
                                   cornerRadius: 1),
-                             with: .color(ZTransferColors.accentOrange))
+                             with: .color(tint))
             }
         }
     }
@@ -920,19 +992,35 @@ struct RemoteView: View {
 }
 
 /// Android's AdaptiveRemoteToolBar equivalent. Controls retain their intrinsic
-/// widths, wrap only when the next control no longer fits, and preserve source
-/// order so fullscreen and rotation stay at the end of the final row.
+/// widths and wrap only when the next control no longer fits. Android reserves
+/// room on the first row for fullscreen and rotation, so those two controls
+/// remain at the end of the first row even when the other tools wrap.
 private struct RemoteAdaptiveToolLayout: Layout {
     let horizontalSpacing: CGFloat
     let verticalSpacing: CGFloat
+    let pinnedEndCount: Int
 
-    private func rows(for width: CGFloat, subviews: Subviews) -> [[(Subviews.Index, CGSize)]] {
-        var result: [[(Subviews.Index, CGSize)]] = [[]]
+    private typealias Item = (Subviews.Index, CGSize)
+
+    private func arrangement(for width: CGFloat, subviews: Subviews) -> (rows: [[Item]], pinned: [Item]) {
+        let sizes = subviews.indices.map { ($0, subviews[$0].sizeThatFits(.unspecified)) }
+        let pinnedCount = min(max(0, pinnedEndCount), sizes.count)
+        let regularEnd = sizes.count - pinnedCount
+        let regular = Array(sizes[..<regularEnd])
+        let pinned = Array(sizes[regularEnd...])
+        let pinnedWidth = pinned.map(\.1.width).reduce(0, +)
+            + horizontalSpacing * CGFloat(max(0, pinned.count - 1))
+        let firstCapacity = pinned.isEmpty ? width : max(0, width - pinnedWidth - horizontalSpacing)
+        var result: [[Item]] = [[]]
         var used: CGFloat = 0
-        for index in subviews.indices {
-            let size = subviews[index].sizeThatFits(.unspecified)
+        for (offset, item) in regular.enumerated() {
+            let (index, size) = item
+            let capacity = result.count == 1 ? firstCapacity : width
             let next = result[result.count - 1].isEmpty ? size.width : used + horizontalSpacing + size.width
-            if next > width, !result[result.count - 1].isEmpty {
+            if next > capacity, !result[result.count - 1].isEmpty {
+                result.append([(index, size)])
+                used = size.width
+            } else if next > capacity, result.count == 1, offset == 0, !pinned.isEmpty {
                 result.append([(index, size)])
                 used = size.width
             } else {
@@ -940,7 +1028,11 @@ private struct RemoteAdaptiveToolLayout: Layout {
                 used = next
             }
         }
-        return result
+        return (result, pinned)
+    }
+
+    private func rowItems(_ row: Int, arrangement: (rows: [[Item]], pinned: [Item])) -> [Item] {
+        row == 0 ? arrangement.rows[row] + arrangement.pinned : arrangement.rows[row]
     }
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews,
@@ -948,27 +1040,39 @@ private struct RemoteAdaptiveToolLayout: Layout {
         let available = max(1, proposal.width ?? subviews.reduce(0) {
             $0 + $1.sizeThatFits(.unspecified).width + horizontalSpacing
         })
-        let layout = rows(for: available, subviews: subviews)
-        let height = layout.enumerated().reduce(CGFloat.zero) { partial, row in
-            partial + (row.offset == 0 ? 0 : verticalSpacing) +
-                (row.element.map(\.1.height).max() ?? 0)
+        let layout = arrangement(for: available, subviews: subviews)
+        let height = layout.rows.indices.reduce(CGFloat.zero) { partial, row in
+            partial + (row == 0 ? 0 : verticalSpacing) +
+                (rowItems(row, arrangement: layout).map(\.1.height).max() ?? 0)
         }
-        let contentWidth = layout.map { row in
-            row.map(\.1.width).reduce(0, +) + horizontalSpacing * CGFloat(max(0, row.count - 1))
+        let contentWidth = layout.rows.indices.map { row in
+            let row = rowItems(row, arrangement: layout)
+            return row.map(\.1.width).reduce(0, +)
+                + horizontalSpacing * CGFloat(max(0, row.count - 1))
         }.max() ?? 0
         return CGSize(width: proposal.width ?? contentWidth, height: height)
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize,
-                       subviews: Subviews, cache: inout ()) {
+        subviews: Subviews, cache: inout ()) {
         var y = bounds.minY
-        for row in rows(for: bounds.width, subviews: subviews) {
-            let rowHeight = row.map(\.1.height).max() ?? 0
+        let layout = arrangement(for: bounds.width, subviews: subviews)
+        for rowIndex in layout.rows.indices {
+            let regular = layout.rows[rowIndex]
+            let allItems = rowItems(rowIndex, arrangement: layout)
+            let rowHeight = allItems.map(\.1.height).max() ?? 0
             var x = bounds.minX
-            for (index, size) in row {
+            for (index, size) in regular {
                 subviews[index].place(at: CGPoint(x: x, y: y + (rowHeight - size.height) / 2),
                                       proposal: ProposedViewSize(size))
                 x += size.width + horizontalSpacing
+            }
+            if rowIndex == 0 {
+                for (index, size) in layout.pinned {
+                    subviews[index].place(at: CGPoint(x: x, y: y + (rowHeight - size.height) / 2),
+                                          proposal: ProposedViewSize(size))
+                    x += size.width + horizontalSpacing
+                }
             }
             y += rowHeight + verticalSpacing
         }
@@ -1068,7 +1172,7 @@ private struct RemoteFocusReticle: View {
     let point: RemoteFocusPoint
     let nonce: UInt64
     let aspect: CGFloat
-    @State private var scale: CGFloat = 1.35
+    @State private var appearScale: CGFloat = 1.45
 
     var body: some View {
         GeometryReader { proxy in
@@ -1076,29 +1180,63 @@ private struct RemoteFocusReticle: View {
             let rect = CGRect(x: (proxy.size.width - fitted * aspect) / 2,
                               y: (proxy.size.height - fitted) / 2,
                               width: fitted * aspect, height: fitted)
-            let center = CGPoint(x: rect.minX + rect.width * point.x,
-                                 y: rect.minY + rect.height * point.y)
+            let resultScale: CGFloat = phase == .focusing ? 1 : 0.9
+            let scale = appearScale * resultScale
+            let half = 32 * scale
+            let requestedCenter = CGPoint(x: rect.minX + rect.width * CGFloat(point.x),
+                                          y: rect.minY + rect.height * CGFloat(point.y))
+            let center = CGPoint(
+                x: rect.width >= half * 2
+                    ? min(max(requestedCenter.x, rect.minX + half), rect.maxX - half)
+                    : rect.midX,
+                y: rect.height >= half * 2
+                    ? min(max(requestedCenter.y, rect.minY + half), rect.maxY - half)
+                    : rect.midY
+            )
             let color: Color = switch phase {
-            case .locked: .green
-            case .failed: .red
-            default: .cyan
+            case .locked: ZTransferColors.statusConnected
+            case .failed: ZTransferColors.statusError
+            default: ZTransferColors.accentBlue
             }
-            Rectangle()
-                .stroke(color, lineWidth: 2)
-                .frame(width: 64, height: 64)
-                .scaleEffect(scale)
-                .position(center)
-                .opacity(phase == .failed ? 0.75 : 1)
+            focusCornerPath(center: center, halfWidth: half, halfHeight: half,
+                            cornerLength: 12 * scale)
+                .stroke(color.opacity(0.95),
+                        style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+                .animation(.spring(response: 0.42, dampingFraction: 0.72), value: phase)
                 .onAppear {
-                    scale = 1.35
-                    withAnimation(.easeOut(duration: 0.18)) { scale = 1 }
+                    appearScale = 1.45
+                    withAnimation(.easeOut(duration: 0.18)) { appearScale = 1 }
                 }
                 .onChange(of: nonce) { _ in
-                    scale = 1.35
-                    withAnimation(.easeOut(duration: 0.18)) { scale = 1 }
+                    appearScale = 1.45
+                    withAnimation(.easeOut(duration: 0.18)) { appearScale = 1 }
                 }
         }
         .allowsHitTesting(false)
+    }
+}
+
+private func focusCornerPath(center: CGPoint, halfWidth: CGFloat, halfHeight: CGFloat,
+                             cornerLength: CGFloat) -> Path {
+    let left = center.x - halfWidth
+    let right = center.x + halfWidth
+    let top = center.y - halfHeight
+    let bottom = center.y + halfHeight
+    let horizontal = min(cornerLength, halfWidth)
+    let vertical = min(cornerLength, halfHeight)
+    return Path { path in
+        path.move(to: CGPoint(x: left, y: top + vertical))
+        path.addLine(to: CGPoint(x: left, y: top))
+        path.addLine(to: CGPoint(x: left + horizontal, y: top))
+        path.move(to: CGPoint(x: right - horizontal, y: top))
+        path.addLine(to: CGPoint(x: right, y: top))
+        path.addLine(to: CGPoint(x: right, y: top + vertical))
+        path.move(to: CGPoint(x: left, y: bottom - vertical))
+        path.addLine(to: CGPoint(x: left, y: bottom))
+        path.addLine(to: CGPoint(x: left + horizontal, y: bottom))
+        path.move(to: CGPoint(x: right - horizontal, y: bottom))
+        path.addLine(to: CGPoint(x: right, y: bottom))
+        path.addLine(to: CGPoint(x: right, y: bottom - vertical))
     }
 }
 
@@ -1215,9 +1353,13 @@ private struct IOSZebraOverlay: View {
     }
 }
 
-private struct IOSFocusFrameOverlay: View {
-    let frame: RemoteLiveViewFocusFrame
+private struct IOSConfirmedFocusReticle: View {
+    let marker: RemoteConfirmedFocusMarker
+    let cameraFrame: RemoteLiveViewFocusFrame?
+    let visible: Bool
     let aspect: CGFloat
+    @State private var appearScale: CGFloat = 1.12
+    @State private var cachedCameraFrame: RemoteLiveViewFocusFrame?
 
     var body: some View {
         GeometryReader { proxy in
@@ -1226,26 +1368,40 @@ private struct IOSFocusFrameOverlay: View {
             let imageRect = CGRect(x: (proxy.size.width - imageWidth) / 2,
                                    y: (proxy.size.height - fitted) / 2,
                                    width: imageWidth, height: fitted)
-            let rect = CGRect(x: imageRect.minX + imageRect.width * CGFloat(frame.centerX - frame.width / 2),
-                              y: imageRect.minY + imageRect.height * CGFloat(frame.centerY - frame.height / 2),
-                              width: imageRect.width * CGFloat(frame.width),
-                              height: imageRect.height * CGFloat(frame.height))
-            let corner = min(rect.width, rect.height) * 0.24
-            Path { path in
-                path.move(to: CGPoint(x: rect.minX, y: rect.minY + corner))
-                path.addLine(to: CGPoint(x: rect.minX, y: rect.minY))
-                path.addLine(to: CGPoint(x: rect.minX + corner, y: rect.minY))
-                path.move(to: CGPoint(x: rect.maxX - corner, y: rect.minY))
-                path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
-                path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY + corner))
-                path.move(to: CGPoint(x: rect.minX, y: rect.maxY - corner))
-                path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
-                path.addLine(to: CGPoint(x: rect.minX + corner, y: rect.maxY))
-                path.move(to: CGPoint(x: rect.maxX - corner, y: rect.maxY))
-                path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
-                path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - corner))
-            }
-            .stroke(.green, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+            let displayedFrame = cameraFrame ?? cachedCameraFrame
+            let point = displayedFrame.map {
+                RemoteFocusPoint(x: Double($0.centerX), y: Double($0.centerY))
+            } ?? marker.fallbackPoint
+            let visibilityScale: CGFloat = visible ? 1 : 0.82
+            let rawHalfWidth = displayedFrame.map { imageRect.width * CGFloat($0.width) / 2 } ?? 25
+            let rawHalfHeight = displayedFrame.map { imageRect.height * CGFloat($0.height) / 2 } ?? 25
+            let halfWidth = min(max(rawHalfWidth * appearScale * visibilityScale,
+                                    min(13, imageRect.width / 2)), imageRect.width / 2)
+            let halfHeight = min(max(rawHalfHeight * appearScale * visibilityScale,
+                                     min(13, imageRect.height / 2)), imageRect.height / 2)
+            let requestedCenter = CGPoint(x: imageRect.minX + imageRect.width * CGFloat(point.x),
+                                          y: imageRect.minY + imageRect.height * CGFloat(point.y))
+            let center = CGPoint(
+                x: imageRect.width >= halfWidth * 2
+                    ? min(max(requestedCenter.x, imageRect.minX + halfWidth), imageRect.maxX - halfWidth)
+                    : imageRect.midX,
+                y: imageRect.height >= halfHeight * 2
+                    ? min(max(requestedCenter.y, imageRect.minY + halfHeight), imageRect.maxY - halfHeight)
+                    : imageRect.midY
+            )
+            focusCornerPath(center: center, halfWidth: halfWidth, halfHeight: halfHeight,
+                            cornerLength: min(10, min(halfWidth, halfHeight)))
+                .stroke(ZTransferColors.statusConnected.opacity(visible ? 0.85 : 0),
+                        style: StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round))
+                .animation(.easeInOut(duration: 0.20), value: visible)
+                .onAppear {
+                    cachedCameraFrame = cameraFrame
+                    appearScale = 1.12
+                    withAnimation(.easeOut(duration: 0.16)) { appearScale = 1 }
+                }
+                .onChange(of: cameraFrame) { next in
+                    if let next { cachedCameraFrame = next }
+                }
         }
     }
 }

@@ -166,6 +166,79 @@ final class RemoteLifecycleTests: XCTestCase {
         XCTAssertFalse(calls.contains("refresh:angleLevel"))
     }
 
+    func testTapFocusInManualModeShowsAndroidHintWithoutSendingAF() async throws {
+        let camera = RemoteLifecycleCamera()
+        await camera.setProperty(.init(property: .focusMode, dataType: 0x0002,
+                                       writable: false, current: 1, values: []))
+        let model = RemoteViewModel(camera: camera)
+        addTeardownBlock { await model.stopAndWait() }
+        model.start()
+        try await waitFor { model.state.session == .ready }
+
+        model.focus(at: .init(x: 0.5, y: 0.5))
+
+        XCTAssertEqual(model.interactionHint, AppLocalized.resource("remote_tap_focus_manual"))
+        let calls = await camera.log
+        XCTAssertFalse(calls.contains("tapfocus:start"))
+    }
+
+    func testInvalidTrackingModeShowsAndroidGuidance() async throws {
+        let camera = RemoteLifecycleCamera()
+        await camera.queueFocusResults([
+            .init(trackingStarted: false, polls: 0, timedOut: false,
+                  responseCode: 0xA004, trackingResponseCode: 0xA004)
+        ])
+        let model = RemoteViewModel(camera: camera)
+        addTeardownBlock { await model.stopAndWait() }
+        model.start()
+        try await waitFor { model.state.session == .ready }
+
+        model.focus(at: .init(x: 0.5, y: 0.5))
+
+        try await waitFor {
+            model.interactionHint == AppLocalized.resource("remote_tracking_area_mode_required")
+        }
+        XCTAssertEqual(model.state.focus.phase, .failed)
+    }
+
+    func testTapFocusSeparatesTransientFeedbackFromThreeSecondConfirmedMarker() async throws {
+        let camera = RemoteLifecycleCamera()
+        let model = RemoteViewModel(camera: camera)
+        addTeardownBlock { await model.stopAndWait() }
+        model.start()
+        try await waitFor { model.state.session == .ready }
+
+        model.focus(at: .init(x: 0.25, y: 0.75))
+
+        try await waitFor { model.confirmedFocusMarker != nil }
+        XCTAssertEqual(model.state.focus.phase, .locked)
+        XCTAssertEqual(model.confirmedFocusMarker?.fallbackPoint, .init(x: 0.25, y: 0.75))
+        try await waitFor(timeout: 2.2) { model.state.focus.phase == .idle }
+        XCTAssertNotNil(model.confirmedFocusMarker,
+                        "Android keeps the confirmed marker after the 1.8-second feedback ends")
+        try await waitFor(timeout: 1.6) { model.confirmedFocusMarker == nil }
+    }
+
+    func testHalfPressUsesLastFocusAreaAndKeepsLateConfirmedMarkerAfterRelease() async throws {
+        let camera = RemoteLifecycleCamera()
+        let model = RemoteViewModel(camera: camera)
+        addTeardownBlock { await model.stopAndWait() }
+        model.start()
+        try await waitFor { model.state.session == .ready }
+        await camera.delayFocus(milliseconds: 120)
+
+        model.beginHalfPress()
+
+        XCTAssertTrue(model.halfPressVisualActive)
+        XCTAssertEqual(model.state.focus.phase, .focusing)
+        XCTAssertEqual(model.state.focus.point, .init(x: 0.5, y: 0.5))
+        model.endHalfPress(fire: false)
+        XCTAssertFalse(model.halfPressVisualActive)
+        XCTAssertEqual(model.state.focus.phase, .idle)
+        try await waitFor { model.confirmedFocusMarker != nil }
+        XCTAssertEqual(model.confirmedFocusMarker?.fallbackPoint, .init(x: 0.5, y: 0.5))
+    }
+
     func testShutterWaitsForObjectAddedAndCommandFailureDoesNotFailLiveView() async throws {
         let camera = RemoteLifecycleCamera()
         let model = RemoteViewModel(camera: camera)
@@ -542,6 +615,7 @@ private actor RemoteLifecycleCamera: RemoteCameraControlling {
     private var writeResponses: [RemoteProperty: [UInt16]] = [:]
     private var writeDelay = 0
     private var focusDelay = 0
+    private var focusResults: [RemoteFocusResult] = []
     private var movieStarts: [RemoteMovieStartResult] = []
     private var remoteControlMode = false
     private var applicationMode = false
@@ -583,7 +657,10 @@ private actor RemoteLifecycleCamera: RemoteCameraControlling {
         if refreshFailures.contains(descriptor.property) { return nil }
         return overrides[descriptor.property] ?? descriptor
     }
-    func remoteFocusMode() -> RemotePropertyDescriptor? { log.append("focus"); return nil }
+    func remoteFocusMode() -> RemotePropertyDescriptor? {
+        log.append("focus")
+        return overrides[.focusMode] ?? overrides[.nikonAFMode]
+    }
     func emitBatteryEvent() { batteryEvent = true }
     func setProperty(_ descriptor: RemotePropertyDescriptor) { overrides[descriptor.property] = descriptor }
     func markUnsupported(_ property: RemoteProperty) { unsupported.insert(property) }
@@ -594,6 +671,7 @@ private actor RemoteLifecycleCamera: RemoteCameraControlling {
     func acceptWrites(_ property: RemoteProperty) { acceptedWrites.insert(property) }
     func setWriteResponses(_ property: RemoteProperty, _ codes: [UInt16]) { writeResponses[property] = codes }
     func delayFocus(milliseconds: Int) { focusDelay = milliseconds }
+    func queueFocusResults(_ results: [RemoteFocusResult]) { focusResults += results }
     func delayWrites(milliseconds: Int) { writeDelay = milliseconds }
     func current(_ property: RemoteProperty) -> UInt64? { overrides[property]?.current }
     func remoteEvents() -> [STAEvent] {
@@ -628,6 +706,7 @@ private actor RemoteLifecycleCamera: RemoteCameraControlling {
         do { if focusDelay > 0 { try await Task.sleep(for: .milliseconds(focusDelay)) } }
         catch { log.append("\(prefix):cancelled"); throw error }
         log.append("\(prefix):end")
+        if !focusResults.isEmpty { return focusResults.removeFirst() }
         return .init(trackingStarted: false, polls: 0, timedOut: false)
     }
     func endSubjectTracking() {}

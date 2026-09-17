@@ -29,6 +29,10 @@ final class RemoteViewModel: ObservableObject {
     @Published private(set) var localRecordingPhase: RemoteLocalRecordingPhase = .idle
     @Published private(set) var localRecordingSeconds = 0
     @Published private(set) var localRecordingHint: String?
+    @Published private(set) var interactionHint: String?
+    @Published private(set) var confirmedFocusMarker: RemoteConfirmedFocusMarker?
+    @Published private(set) var halfPressVisualActive = false
+    @Published private(set) var frameReceivedAtUptime: TimeInterval = 0
     @Published private var recordingOperations = RemoteRecordingOperationGate()
     @Published private(set) var levelRoll: Double?
     @Published private(set) var batteryPercent: Int?
@@ -61,12 +65,15 @@ final class RemoteViewModel: ObservableObject {
     private var halfPressTask: Task<Void, Never>?
     private var tapFocusTask: Task<Void, Never>?
     private var halfPressHeld = false
+    private var focusAreaPoint = RemoteFocusPoint(x: 0.5, y: 0.5)
+    private var confirmedFocusNonce: UInt64 = 0
     private var recordingTimerTask: Task<Void, Never>?
     private var recordingCommandTask: Task<Void, Never>?
     private var captureTask: Task<Void, Never>?
     private var captureObjectAdded = false
     private var lastStopCommandAt: ContinuousClock.Instant?
     private var recordingHintTask: Task<Void, Never>?
+    private var interactionHintTask: Task<Void, Never>?
     private var localRecorder: RemoteViewfinderRecorder?
     private var localRecordingTask: Task<Void, Never>?
     private var localRecordingTimerTask: Task<Void, Never>?
@@ -361,6 +368,7 @@ final class RemoteViewModel: ObservableObject {
         frameData = decoded.jpeg
         frameImage = decoded.image
         frameMetadata = decoded.metadata
+        frameReceivedAtUptime = decoded.receivedAtUptime
         frameHistogram = decoded.histogram
         frameZebraMask = decoded.zebraMask
         state = state.applying(.frameReceived(fps: decoded.fps))
@@ -726,6 +734,7 @@ final class RemoteViewModel: ObservableObject {
         stopMovieOnExit = state.capture == .recording || state.capture == .stopping
         effectiveISOGeneration &+= 1
         halfPressHeld = false
+        halfPressVisualActive = false
         levelGeneration &+= 1
         levelVisible = false
         levelRoll = nil
@@ -735,16 +744,22 @@ final class RemoteViewModel: ObservableObject {
         recordingTimerTask = nil
         recordingHintTask?.cancel()
         recordingHintTask = nil
+        interactionHintTask?.cancel()
+        interactionHintTask = nil
+        interactionHint = nil
         recordingSeconds = 0
         state = state.applying(.cancelled)
         frameImage = nil
         frameData = nil
         frameMetadata = nil
+        frameReceivedAtUptime = 0
         frameHistogram = nil
         frameZebraMask = nil
         frameDecodeGeneration &+= 1
         lastFrameAt = nil
         state.focus = .init()
+        confirmedFocusMarker = nil
+        focusAreaPoint = RemoteFocusPoint(x: 0.5, y: 0.5)
     }
 
     /// Waits for any active PTP operations to finish their normal protocol
@@ -793,15 +808,21 @@ final class RemoteViewModel: ObservableObject {
               !state.focus.manual, !halfPressHeld, halfPressTask == nil, tapFocusTask == nil,
               !stopRequested else { return }
         halfPressHeld = true
+        halfPressVisualActive = true
+        focusHideTask?.cancel()
+        confirmedFocusMarker = nil
         state.focus.tracking = false
+        state = state.applying(.focusRequested(focusAreaPoint))
         haptics.tick()
         halfPressTask = Task { [weak self] in
             guard let self else { return }
             defer { halfPressTask = nil }
             do {
                 let result = try await camera.halfPressFocus()
-                guard !Task.isCancelled, !stopRequested, halfPressHeld else { return }
+                guard !Task.isCancelled, !stopRequested else { return }
                 guard !result.timedOut, result.responseCode == PTPConstants.responseOK else { return }
+                setConfirmedFocusMarker(at: focusAreaPoint, subjectTracking: false)
+                guard halfPressHeld else { return }
                 haptics.tick()
                 state = state.applying(.focusLocked)
             } catch is CancellationError {
@@ -816,6 +837,9 @@ final class RemoteViewModel: ObservableObject {
     /// cancels the visual/haptic completion without sending a late tick.
     func endHalfPress(fire: Bool) {
         halfPressHeld = false
+        halfPressVisualActive = false
+        state.focus.phase = .idle
+        state.focus.point = nil
         guard fire, !stopRequested else { return }
         // Set shutter/record busy synchronously; those tasks wait for the AF
         // transaction before sending their command and starting confirmation.
@@ -1024,13 +1048,18 @@ final class RemoteViewModel: ObservableObject {
     }
 
     func focus(at point: RemoteFocusPoint, coordinateSize: CGSize = CGSize(width: 1000, height: 1000)) {
-        guard state.session == .ready, state.capture != .capturing, !state.focus.manual,
+        guard state.session == .ready, state.capture != .capturing,
               !stopRequested, tapFocusTask == nil, halfPressTask == nil, !halfPressHeld else { return }
+        if state.focus.manual {
+            showInteractionHint(AppLocalized.resource("remote_tap_focus_manual"))
+            return
+        }
         if state.focus.tracking {
             cancelTracking()
             return
         }
         guard state.focus.phase != .focusing else { return }
+        confirmedFocusMarker = nil
         state = state.applying(.focusRequested(point))
         haptics.tick()
         focusHideTask?.cancel()
@@ -1054,21 +1083,32 @@ final class RemoteViewModel: ObservableObject {
                                                       focusX: focusX, focusY: focusY)
                 guard !Task.isCancelled, !stopRequested else { return }
                 if result.timedOut || result.responseCode != PTPConstants.responseOK {
+                    if result.trackingResponseCode == 0xA004 {
+                        showInteractionHint(AppLocalized.resource("remote_tracking_area_mode_required"))
+                    }
                     state = state.applying(.focusFailed)
                     state.focus.tracking = result.trackingStarted
+                    if result.trackingStarted { focusAreaPoint = point }
+                    confirmedFocusMarker = nil
                     scheduleFocusHide(after: 1.3)
                 }
                 else {
                     haptics.tick()
+                    focusAreaPoint = point
                     state.focus.tracking = result.trackingStarted
                     state = state.applying(.focusLocked)
+                    setConfirmedFocusMarker(at: point, subjectTracking: result.trackingStarted)
                     let nonce = state.focus.nonce
                     focusHideTask = Task { [weak self] in
-                        try? await Task.sleep(nanoseconds: 3_000_000_000)
-                        guard let self, !Task.isCancelled, state.focus.nonce == nonce,
-                              !state.focus.tracking else { return }
+                        try? await Task.sleep(for: .milliseconds(1_800))
+                        guard let self, !Task.isCancelled, state.focus.nonce == nonce else { return }
                         state.focus.phase = .idle
                         state.focus.point = nil
+                        guard !state.focus.tracking else { return }
+                        try? await Task.sleep(for: .milliseconds(1_200))
+                        guard !Task.isCancelled, state.focus.nonce == nonce,
+                              !state.focus.tracking else { return }
+                        confirmedFocusMarker = nil
                     }
                 }
             } catch is CancellationError {
@@ -1076,6 +1116,7 @@ final class RemoteViewModel: ObservableObject {
                 guard !stopRequested else { return }
                 if Self.isTransportFailure(error) { notifyTransportLost() }
                 state = state.applying(.focusFailed)
+                confirmedFocusMarker = nil
                 scheduleFocusHide(after: 1.3)
             }
         }
@@ -1092,10 +1133,42 @@ final class RemoteViewModel: ObservableObject {
         }
     }
 
+    private func showInteractionHint(_ message: String) {
+        interactionHintTask?.cancel()
+        interactionHint = message
+        interactionHintTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(2_500))
+            guard let self, !Task.isCancelled, interactionHint == message else { return }
+            interactionHint = nil
+            interactionHintTask = nil
+        }
+    }
+
+    private func setConfirmedFocusMarker(at point: RemoteFocusPoint, subjectTracking: Bool) {
+        confirmedFocusNonce &+= 1
+        confirmedFocusMarker = RemoteConfirmedFocusMarker(
+            fallbackPoint: point,
+            confirmedAtUptime: ProcessInfo.processInfo.systemUptime,
+            subjectTracking: subjectTracking,
+            nonce: confirmedFocusNonce
+        )
+    }
+
     func cancelTracking() {
         guard state.focus.tracking, !stopRequested, tapFocusTask == nil else { return }
         haptics.tick()
         state = state.applying(.trackingEnded)
+        state.focus.phase = .idle
+        state.focus.point = nil
+        let markerNonce = confirmedFocusMarker?.nonce
+        focusHideTask?.cancel()
+        focusHideTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(220))
+            guard let self, !Task.isCancelled,
+                  confirmedFocusMarker?.nonce == markerNonce,
+                  !state.focus.tracking else { return }
+            confirmedFocusMarker = nil
+        }
         tapFocusTask = Task { [weak self] in
             guard let self else { return }
             defer { tapFocusTask = nil }
@@ -1121,6 +1194,7 @@ final class RemoteViewModel: ObservableObject {
         recordingCommandTask?.cancel()
         captureTask?.cancel()
         recordingHintTask?.cancel()
+        interactionHintTask?.cancel()
     }
 
     private static func message(for error: Error) -> String {
