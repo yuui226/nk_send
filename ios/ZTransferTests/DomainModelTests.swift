@@ -1124,6 +1124,131 @@ extension DomainModelTests {
         XCTAssertEqual(output.cgImage?.height, 7)
     }
 
+    func testPhotoFilterDoesNotRecolorFrameBackdrop() throws {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let source = UIGraphicsImageRenderer(
+            size: CGSize(width: 64, height: 48), format: format
+        ).image { context in
+            UIColor(red: 0.92, green: 0.16, blue: 0.08, alpha: 1).setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 32, height: 48))
+            UIColor(red: 0.04, green: 0.25, blue: 0.88, alpha: 1).setFill()
+            context.fill(CGRect(x: 32, y: 0, width: 32, height: 48))
+        }
+        var unfiltered = PhotoEffectsSettings()
+        unfiltered.photoFrameEnabled = true
+        unfiltered.photoFrameBorderEnabled = true
+        unfiltered.photoFramePreset = .cinema
+        unfiltered.watermark.enabled = false
+        var filtered = unfiltered
+        filtered.photoFilterEnabled = true
+        let preset = Np3FilterCatalog.presets[0]
+        filtered.selectedFilter = PhotoFilterSelection(
+            preset: .init(id: preset.id, name: preset.name), intensityPercent: 100
+        )
+
+        let plainOutput = try PhotoEffectsRenderer.render(source, settings: unfiltered)
+        var filterOnly = PhotoEffectsSettings()
+        filterOnly.photoFilterEnabled = true
+        filterOnly.selectedFilter = filtered.selectedFilter
+        let preparedFilter = try PhotoEffectsRenderer.render(source, settings: filterOnly)
+        var decorationOnly = filtered
+        decorationOnly.photoFilterEnabled = false
+        let filteredOutput = try PhotoEffectsRenderer.render(
+            preparedFilter, settings: decorationOnly, backdropSource: source
+        )
+
+        func bytes(_ image: UIImage) throws -> [UInt8] {
+            let cgImage = try XCTUnwrap(image.cgImage)
+            var result = [UInt8](repeating: 0, count: cgImage.width * cgImage.height * 4)
+            let context = try XCTUnwrap(CGContext(
+                data: &result, width: cgImage.width, height: cgImage.height,
+                bitsPerComponent: 8, bytesPerRow: cgImage.width * 4,
+                space: try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB)),
+                bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue |
+                    CGImageAlphaInfo.premultipliedLast.rawValue
+            ))
+            context.draw(cgImage, in: CGRect(x: 0, y: 0,
+                                             width: cgImage.width, height: cgImage.height))
+            return result
+        }
+        let plainBytes = try bytes(plainOutput)
+        let filteredBytes = try bytes(filteredOutput)
+        let width = try XCTUnwrap(plainOutput.cgImage).width
+        let height = try XCTUnwrap(plainOutput.cgImage).height
+        func pixel(_ data: [UInt8], x: Int, y: Int) -> ArraySlice<UInt8> {
+            let offset = (y * width + x) * 4
+            return data[offset..<(offset + 4)]
+        }
+
+        XCTAssertEqual(pixel(plainBytes, x: 0, y: 0),
+                       pixel(filteredBytes, x: 0, y: 0))
+        XCTAssertNotEqual(pixel(plainBytes, x: width / 2, y: height / 2),
+                          pixel(filteredBytes, x: width / 2, y: height / 2))
+    }
+
+    func testPhotoEffectsPreviewUsesAndroidMetadataPlaceholdersFieldByField() throws {
+        var settings = PhotoFrameMetadataSettings()
+        settings.showDate = true
+        settings.showTime = true
+        settings.showLensModel = true
+        settings.showCoordinates = true
+        settings.showAltitude = true
+        let calendar = Calendar.current
+        let now = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026, month: 8, day: 17, hour: 12
+        )))
+        let empty = PhotoFrameMetadata(
+            make: nil, model: nil, lensModel: nil, focalLength: nil,
+            aperture: nil, shutter: nil, iso: nil, exposureCompensation: nil,
+            dateTime: nil
+        )
+
+        let preview = presentedPhotoFrameMetadata(
+            empty, settings: settings, preview: true, now: now
+        )
+        XCTAssertEqual(preview.make, "NIKON")
+        XCTAssertEqual(preview.model, "Z 233")
+        XCTAssertEqual(preview.lensModel, "1-800mm f/0.1")
+        XCTAssertEqual(preview.focalLength, "5100mm")
+        XCTAssertEqual(preview.aperture, "f/0.1")
+        XCTAssertEqual(preview.shutter, "1/99999")
+        XCTAssertEqual(preview.iso, "ISO999999")
+        XCTAssertEqual(preview.dateTime, "2026-08-18 25:61:61")
+        XCTAssertEqual(preview.latitude, 66.6666)
+        XCTAssertEqual(preview.longitude, 66.6666)
+        XCTAssertEqual(preview.altitude, 23_333)
+
+        let exported = presentedPhotoFrameMetadata(empty, settings: settings)
+        XCTAssertNil(exported.make)
+        XCTAssertNil(exported.model)
+        XCTAssertNil(exported.lensModel)
+        XCTAssertNil(exported.focalLength)
+        XCTAssertNil(exported.aperture)
+        XCTAssertNil(exported.shutter)
+        XCTAssertNil(exported.iso)
+        XCTAssertNil(exported.dateTime)
+        XCTAssertNil(exported.latitude)
+        XCTAssertNil(exported.longitude)
+        XCTAssertNil(exported.altitude)
+    }
+
+    func testPhotoEffectsMetadataInfersBrandFromModelLikeAndroid() {
+        let metadata = PhotoFrameMetadata(
+            make: nil, model: "NIKON Z 8", lensModel: nil, focalLength: nil,
+            aperture: nil, shutter: nil, iso: nil, exposureCompensation: nil,
+            dateTime: nil
+        )
+        var settings = PhotoFrameMetadataSettings()
+        settings.showBrand = true
+        settings.showModel = false
+
+        let presented = presentedPhotoFrameMetadata(metadata, settings: settings)
+
+        XCTAssertEqual(presented.make, "NIKON")
+        XCTAssertNil(presented.model)
+    }
+
     func testFilterSelectionUsesOwnRememberedIntensityAndOffKeepsSelection() {
         let first = PhotoFilterCatalog.presets[0]
         let next = PhotoFilterCatalog.presets[1]

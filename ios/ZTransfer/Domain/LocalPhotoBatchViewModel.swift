@@ -197,7 +197,10 @@ enum LocalPhotoOutput {
                     var decorationOnly = settings
                     decorationOnly.photoFilterEnabled = false
                     let filteredInput = filteredSource ?? image
-                    let filtered = try PhotoEffectsRenderer.render(filteredInput, settings: decorationOnly, metadata: metadata)
+                    let filtered = try PhotoEffectsRenderer.render(
+                        filteredInput, settings: decorationOnly, metadata: metadata,
+                        previewPlaceholders: true, backdropSource: image
+                    )
                     try Task.checkCancellation()
                     // The comparison frame is deliberately deferred by the view
                     // until the filtered frame is visible, matching Android's
@@ -222,7 +225,10 @@ enum LocalPhotoOutput {
                 try autoreleasepool {
                     var comparison = settings
                     comparison.photoFilterEnabled = false
-                    let output = try PhotoEffectsRenderer.render(image, settings: comparison, metadata: metadata)
+                    let output = try PhotoEffectsRenderer.render(
+                        image, settings: comparison, metadata: metadata,
+                        previewPlaceholders: true
+                    )
                     try Task.checkCancellation()
                     return output
                 }

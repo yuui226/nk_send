@@ -740,7 +740,10 @@ struct PhotoEffectsSettingsPreview: View {
                     try Task.checkCancellation()
                     return try await PhotoEffectsPreviewRenderGate.shared.withPermit {
                         try autoreleasepool {
-                            try PhotoEffectsRenderer.render(rotatedFallback, settings: fallbackSettings, metadata: nil)
+                            try PhotoEffectsRenderer.render(
+                                rotatedFallback, settings: fallbackSettings, metadata: nil,
+                                previewPlaceholders: true
+                            )
                         }
                     }
                 }.value

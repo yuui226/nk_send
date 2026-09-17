@@ -50,13 +50,18 @@ enum PhotoEffectsRenderer {
         func intersects(_ other: BrandBounds) -> Bool { rect.intersects(other.rect) }
     }
 
-    static func render(_ image: UIImage, settings: PhotoEffectsSettings, metadata: PhotoFrameMetadata? = nil) throws -> UIImage {
+    static func render(_ image: UIImage, settings: PhotoEffectsSettings,
+                       metadata: PhotoFrameMetadata? = nil,
+                       previewPlaceholders: Bool = false,
+                       backdropSource: UIImage? = nil) throws -> UIImage {
         try Task.checkCancellation()
         // UIImage keeps the JPEG EXIF transform as presentation metadata.
         // Android applies that transform while decoding source regions and all
         // later layout uses the oriented dimensions. Flatten it here before a
         // filter reads cgImage pixels or a frame calculates its canvas.
-        var output = orientationNormalized(image)
+        let orientedSource = orientationNormalized(image)
+        let orientedBackdrop = backdropSource.map(orientationNormalized) ?? orientedSource
+        var output = orientedSource
         if settings.photoFilterEnabled, let filter = settings.selectedFilter {
             output = try applyFilter(output, selection: filter)
         }
@@ -66,7 +71,12 @@ enum PhotoEffectsRenderer {
                 try Task.checkCancellation()
                 return output
             }
-            output = drawDecoration(output, settings: settings, metadata: metadata)
+            // Android builds the frame backdrop from the original photo, then
+            // applies the selected filter only to the photo layer. Keep both
+            // inputs so a filter never recolors the surrounding blur/gradient.
+            output = drawDecoration(output, backdropImage: orientedBackdrop,
+                                    settings: settings, metadata: metadata,
+                                    previewPlaceholders: previewPlaceholders)
         }
         try Task.checkCancellation()
         return output
@@ -100,7 +110,10 @@ enum PhotoEffectsRenderer {
         return UIImage(cgImage: filtered, scale: image.scale, orientation: image.imageOrientation)
     }
 
-    private static func drawDecoration(_ image: UIImage, settings: PhotoEffectsSettings, metadata: PhotoFrameMetadata?) -> UIImage {
+    private static func drawDecoration(_ image: UIImage, backdropImage: UIImage,
+                                       settings: PhotoEffectsSettings,
+                                       metadata: PhotoFrameMetadata?,
+                                       previewPlaceholders: Bool) -> UIImage {
         let sourceSize = CGSize(width: image.cgImage?.width ?? Int(image.size.width),
                                 height: image.cgImage?.height ?? Int(image.size.height))
         let layout = makeLayout(sourceSize, preset: settings.photoFramePreset)
@@ -109,7 +122,7 @@ enum PhotoEffectsRenderer {
         format.opaque = true
         return UIGraphicsImageRenderer(size: layout.canvas, format: format).image { renderer in
             let cg = renderer.cgContext
-            drawBackdrop(cg, image: image, layout: layout, preset: settings.photoFramePreset)
+            drawBackdrop(cg, image: backdropImage, layout: layout, preset: settings.photoFramePreset)
             if settings.photoFramePreset == .galleryMat || settings.photoFramePreset == .filmGallery {
                 let photo = layout.photo
                 let inset = min(photo.width, photo.height) * 0.045
@@ -133,7 +146,9 @@ enum PhotoEffectsRenderer {
             } else {
                 image.draw(in: layout.photo)
             }
-            let visibleMetadata = metadata?.resolved(for: settings.metadata) ?? .empty
+            let visibleMetadata = presentedPhotoFrameMetadata(
+                metadata, settings: settings.metadata, preview: previewPlaceholders
+            )
             drawPresetDecoration(cg, image: image, layout: layout,
                                  preset: settings.photoFramePreset,
                                  metadata: visibleMetadata,
@@ -1146,30 +1161,53 @@ enum PhotoEffectsRenderer {
     }
 }
 
+/// Mirrors Android's `PhotoFrameMetadata.withPresentation`. Interactive
+/// previews deliberately substitute conspicuously fake values for unavailable
+/// fields so every metadata switch has immediate visible feedback. Exports
+/// omit unavailable fields instead.
+func presentedPhotoFrameMetadata(
+    _ metadata: PhotoFrameMetadata?, settings: PhotoFrameMetadataSettings,
+    preview: Bool = false, now: Date = Date()
+) -> PhotoFrameMetadata {
+    (metadata ?? .empty).resolved(for: settings, preview: preview, now: now)
+}
+
 private extension PhotoFrameMetadata {
     static let empty = PhotoFrameMetadata(make: nil, model: nil, lensModel: nil, focalLength: nil, aperture: nil, shutter: nil, iso: nil, exposureCompensation: nil, dateTime: nil)
     /// Android resolves metadata visibility and date/time formatting before any
     /// frame branch draws. Keep the same single filtered snapshot on iOS so
     /// every border receives identical values and never invents rows.
-    func resolved(for settings: PhotoFrameMetadataSettings) -> PhotoFrameMetadata {
-        let modelValue = PhotoFrameMetadata(make: make, model: model, lensModel: lensModel,
-                                            focalLength: focalLength, aperture: aperture,
-                                            shutter: shutter, iso: iso,
-                                            exposureCompensation: exposureCompensation,
-                                            dateTime: dateTime).normalizedModel
+    func resolved(for settings: PhotoFrameMetadataSettings, preview: Bool,
+                  now: Date) -> PhotoFrameMetadata {
+        func cleaned(_ value: String?) -> String? {
+            value?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        }
+        let sourceMake = cleaned(make)
+        let sourceModel = cleaned(model)
+        let sourceLens = cleaned(lensModel)
+        let inferredBrand = cameraBrandLabel(make: make, model: model).nilIfEmpty
+        let modelValue = normalizedModel.nilIfEmpty
+        let validCoordinates = latitude?.isFinite == true && longitude?.isFinite == true &&
+            latitude != 0 && longitude != 0 &&
+            (-90...90).contains(latitude!) && (-180...180).contains(longitude!)
+        let validAltitude = altitude?.isFinite == true && altitude != 0
         return PhotoFrameMetadata(
-            make: settings.showBrand ? make : nil,
-            model: settings.showModel ? modelValue : nil,
-            lensModel: settings.showLensModel ? lensModel : nil,
-            focalLength: settings.showFocalLength ? focalLength : nil,
-            aperture: settings.showExposure ? aperture : nil,
-            shutter: settings.showExposure ? shutter : nil,
-            iso: settings.showExposure ? iso : nil,
-            exposureCompensation: settings.showExposure ? exposureCompensation : nil,
-            dateTime: formatDateTime(dateTime, settings: settings),
-            latitude: settings.showCoordinates ? latitude : nil,
-            longitude: settings.showCoordinates ? longitude : nil,
-            altitude: settings.showAltitude ? altitude : nil
+            make: !settings.showBrand ? nil
+                : sourceMake ?? (!settings.showModel ? inferredBrand ?? (preview ? "NIKON" : nil)
+                    : preview ? inferredBrand ?? "NIKON" : nil),
+            model: !settings.showModel ? nil
+                : !settings.showBrand ? modelValue ?? (preview ? "Z 233" : nil)
+                : sourceModel ?? (preview ? "Z 233" : nil),
+            lensModel: settings.showLensModel ? sourceLens ?? (preview ? "1-800mm f/0.1" : nil) : nil,
+            focalLength: settings.showFocalLength ? cleaned(focalLength) ?? (preview ? "5100mm" : nil) : nil,
+            aperture: settings.showExposure ? cleaned(aperture) ?? (preview ? "f/0.1" : nil) : nil,
+            shutter: settings.showExposure ? cleaned(shutter) ?? (preview ? "1/99999" : nil) : nil,
+            iso: settings.showExposure ? cleaned(iso) ?? (preview ? "ISO999999" : nil) : nil,
+            exposureCompensation: settings.showExposure ? cleaned(exposureCompensation) : nil,
+            dateTime: formatDateTime(dateTime, settings: settings, preview: preview, now: now),
+            latitude: settings.showCoordinates ? (validCoordinates ? latitude : preview ? 66.6666 : nil) : nil,
+            longitude: settings.showCoordinates ? (validCoordinates ? longitude : preview ? 66.6666 : nil) : nil,
+            altitude: settings.showAltitude ? (validAltitude ? altitude : preview ? 23_333 : nil) : nil
         )
     }
     var locationRow: String? {
@@ -1235,6 +1273,34 @@ private extension PhotoFrameMetadata {
         }
         return value
     }
+    func cameraBrandLabel(make: String?, model: String?) -> String {
+        let normalized = PhotoFrameMetadata(
+            make: make, model: nil, lensModel: nil, focalLength: nil,
+            aperture: nil, shutter: nil, iso: nil, exposureCompensation: nil,
+            dateTime: nil
+        ).normalizedMake.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !normalized.isEmpty { return String(normalized.uppercased().prefix(32)) }
+        let value = model?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let candidates: [(String, String)] = [
+            ("nikon", "NIKON"), ("canon", "CANON"), ("sony", "SONY"),
+            ("fujifilm", "FUJIFILM"), ("hasselblad", "HASSELBLAD"),
+            ("leica", "LEICA"), ("panasonic", "PANASONIC"),
+            ("olympus", "OM SYSTEM"), ("om system", "OM SYSTEM"),
+            ("pentax", "PENTAX"), ("ricoh", "RICOH"), ("iphone", "APPLE"),
+            ("pixel", "GOOGLE"), ("galaxy", "SAMSUNG"), ("sm-", "SAMSUNG"),
+            ("xiaomi", "XIAOMI"), ("redmi", "XIAOMI"), ("huawei", "HUAWEI"),
+            ("honor", "HONOR"), ("oneplus", "ONEPLUS"), ("oppo", "OPPO"),
+            ("vivo", "VIVO"), ("realme", "REALME")
+        ]
+        for (needle, label) in candidates {
+            if needle == "sm-" {
+                if value.lowercased().hasPrefix(needle) { return label }
+            } else if value.localizedCaseInsensitiveContains(needle) {
+                return label
+            }
+        }
+        return ""
+    }
     func rows(_ settings: PhotoFrameMetadataSettings) -> [String] {
         var values: [String] = []
         if settings.showBrand, !normalizedMake.isEmpty { values.append(normalizedMake) }
@@ -1247,17 +1313,68 @@ private extension PhotoFrameMetadata {
         return values
     }
 
-    private func formatDateTime(_ value: String?, settings: PhotoFrameMetadataSettings) -> String? {
-        guard let value, !value.isEmpty, settings.showDate || settings.showTime else { return nil }
-        let parts = value.split(separator: " ", maxSplits: 1).map(String.init)
-        let date = parts.first?.replacingOccurrences(of: ":", with: "-")
-        let time = parts.count > 1 ? parts[1] : nil
+    private func formatDateTime(_ value: String?, settings: PhotoFrameMetadataSettings,
+                                preview: Bool, now: Date) -> String? {
+        guard settings.showDate || settings.showTime else { return nil }
+        let raw = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let normalized: String = {
+            guard raw.count >= 10 else { return raw }
+            let characters = Array(raw)
+            guard characters[4] == ":", characters[7] == ":",
+                  characters[0..<4].allSatisfy(\.isNumber),
+                  characters[5..<7].allSatisfy(\.isNumber),
+                  characters[8..<10].allSatisfy(\.isNumber) else { return raw }
+            return String(characters[0..<4]) + "-" + String(characters[5..<7]) + "-" +
+                String(characters[8...])
+        }()
+        let parts = normalized.split(separator: " ", maxSplits: 1).map(String.init)
+        let date = validDate(parts.first)
+        let time = parts.count > 1 ? validTime(parts[1]) : nil
         var output: [String] = []
-        if settings.showDate, let date {
+        if settings.showDate, let date = date ?? (preview ? tomorrow(now) : nil) {
             output.append(applyDatePattern(date, pattern: settings.datePattern))
         }
-        if settings.showTime, let time { output.append(applyTimePattern(time, pattern: settings.timePattern)) }
+        if settings.showTime {
+            if let time { output.append(applyTimePattern(time, pattern: settings.timePattern)) }
+            else if preview { output.append(fakeTime(pattern: settings.timePattern)) }
+        }
         return output.filter { !$0.isEmpty }.joined(separator: " ").nilIfEmpty
+    }
+    private func validDate(_ value: String?) -> String? {
+        guard let value,
+              value.range(of: #"^\d{4}-\d{2}-\d{2}$"#, options: .regularExpression) != nil else { return nil }
+        let values = value.split(separator: "-").compactMap { Int($0) }
+        guard values.count == 3 else { return nil }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let components = DateComponents(year: values[0], month: values[1], day: values[2])
+        guard let date = calendar.date(from: components) else { return nil }
+        let result = calendar.dateComponents([.year, .month, .day], from: date)
+        return result.year == values[0] && result.month == values[1] && result.day == values[2]
+            ? value : nil
+    }
+    private func validTime(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let candidate = String(value.prefix(8))
+        guard candidate.range(of: #"^\d{2}:\d{2}:\d{2}$"#, options: .regularExpression) != nil else { return nil }
+        let parts = candidate.split(separator: ":").compactMap { Int($0) }
+        return parts.count == 3 && (0..<24).contains(parts[0]) &&
+            (0..<60).contains(parts[1]) && (0..<60).contains(parts[2]) ? candidate : nil
+    }
+    private func tomorrow(_ now: Date) -> String {
+        let calendar = Calendar.current
+        let date = calendar.date(byAdding: .day, value: 1, to: now) ?? now
+        let components = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d-%02d-%02d", components.year ?? 0,
+                      components.month ?? 0, components.day ?? 0)
+    }
+    private func fakeTime(pattern: String) -> String {
+        switch pattern.trimmingCharacters(in: .whitespacesAndNewlines) {
+        case "HH:mm": return "25:61"
+        case "HH.mm": return "25.61"
+        case "HH.mm.ss": return "25.61.61"
+        default: return "25:61:61"
+        }
     }
     private func applyDatePattern(_ value: String, pattern: String) -> String {
         let digits = value.split(separator: "-")
