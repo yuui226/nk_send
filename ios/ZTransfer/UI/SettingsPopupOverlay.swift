@@ -8,18 +8,21 @@ struct SettingsPopupOverlay: View {
     let effectsStore: PhotoEffectsStore
     let directory: DirectoryAccessStore
     let anchor: CGRect
+    let requestTransferDirectoryAttention: Bool
     let effectPreviewSource: UIImage?
     let effectPreviewExif: PhotoExif?
     let onEffectPreviewRequested: () -> Void
 
     init(isPresented: Binding<Bool>, showPhotoEffectsEntry: Bool, effectsStore: PhotoEffectsStore,
-         directory: DirectoryAccessStore, anchor: CGRect, effectPreviewSource: UIImage? = nil,
+         directory: DirectoryAccessStore, anchor: CGRect,
+         requestTransferDirectoryAttention: Bool = false, effectPreviewSource: UIImage? = nil,
          effectPreviewExif: PhotoExif? = nil, onEffectPreviewRequested: @escaping () -> Void = {}) {
         _isPresented = isPresented
         self.showPhotoEffectsEntry = showPhotoEffectsEntry
         self.effectsStore = effectsStore
         self.directory = directory
         self.anchor = anchor
+        self.requestTransferDirectoryAttention = requestTransferDirectoryAttention
         self.effectPreviewSource = effectPreviewSource
         self.effectPreviewExif = effectPreviewExif
         self.onEffectPreviewRequested = onEffectPreviewRequested
@@ -81,6 +84,7 @@ struct SettingsPopupOverlay: View {
                         filterChooser: $filterChooser,
                         effectsHint: $effectsHint,
                         dismissalRequested: dismissalRequested,
+                        requestTransferDirectoryAttention: requestTransferDirectoryAttention,
                         effectPreviewSource: effectPreviewSource,
                         effectPreviewExif: effectPreviewExif,
                         onEffectPreviewRequested: onEffectPreviewRequested,

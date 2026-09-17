@@ -205,6 +205,7 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
     @State private var remoteIntroHandledForEntry = false
     @AppStorage("remote_entry_intro_play_count") private var remoteEntryIntroPlayCount = 0
     @State private var showingSettings = false
+    @State private var transferDirectoryAttention = false
     @State private var settingsAnchor: CGRect = .zero
     @State private var signalExpanded = false
     @State private var effectPreviewSource: UIImage?
@@ -619,6 +620,9 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
             model.setTransferBusy(busy)
             Task { await session.setTransfersBusy(busy) }
         }
+        .onChange(of: showingSettings) { isShowing in
+            if !isShowing { transferDirectoryAttention = false }
+        }
         .onChange(of: selectedFile) { file in
             if file == nil {
                 // Android: fade-in 220ms after 30ms, with the slide/scale
@@ -664,6 +668,7 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
                     effectsStore: effectsStore,
                     directory: directoryStore,
                     anchor: settingsAnchor,
+                    requestTransferDirectoryAttention: transferDirectoryAttention,
                     effectPreviewSource: effectPreviewSource,
                     effectPreviewExif: effectPreviewExif,
                     onEffectPreviewRequested: requestEffectPreview
@@ -706,7 +711,7 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
                          }) { file in
             guard directoryStore.directoryURL != nil else {
                 selectedFile = nil
-                showingSettings = true
+                requestTransferDirectory()
                 return false
             }
             if !deferTransferStart {
@@ -718,7 +723,7 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
         } onEnqueueBurst: { burstFiles in
             guard directoryStore.directoryURL != nil else {
                 selectedFile = nil
-                showingSettings = true
+                requestTransferDirectory()
                 return false
             }
             if !deferTransferStart, let directory = directoryStore.directoryURL {
@@ -757,7 +762,10 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
         HStack(spacing: 8) {
             if topControlsVisible {
                 HStack(spacing: 8) {
-                    Button { showingSettings = true } label: {
+                    Button {
+                        transferDirectoryAttention = false
+                        showingSettings = true
+                    } label: {
                         DoubleZMark(tint: ZTransferColors.primaryText)
                             .frame(width: 20 * DoubleZMark.aspectRatio, height: 20)
                             .padding(.horizontal, 12)
@@ -1016,6 +1024,13 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
     }
 
     private func openRemote() {
+        // Android requires the shared transfer/recording destination before
+        // monitor entry. Local recording uses this same directory, so opening
+        // RemoteView first would only defer the failure until record is tapped.
+        guard directoryStore.directoryURL != nil else {
+            requestTransferDirectory()
+            return
+        }
         // Android keeps the PTP channel exclusive while a transfer worker is
         // active. Do the same here instead of allowing live view to collide
         // with an in-flight download and surface a session error.
@@ -1166,7 +1181,7 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
     }
 
     private func enqueueSection(_ files: [CameraFile]) {
-        guard directoryStore.directoryURL != nil else { showingSettings = true; return }
+        guard directoryStore.directoryURL != nil else { requestTransferDirectory(); return }
         ZTransferHaptics.shared.tick()
         for file in files {
             if deferTransferStart { queueModel.enqueue(file, organizeByDate: organizeByDate, effects: effectsStore.settings) }
@@ -1185,7 +1200,7 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
         } else if directoryStore.directoryURL == nil {
             // Android routes a transfer attempt with no valid destination to the
             // existing settings overlay; it does not enqueue an unusable task.
-            showingSettings = true
+            requestTransferDirectory()
         } else if !deferTransferStart {
             ZTransferHaptics.shared.tick()
             queueModel.enqueue(file, autoStart: session, directory: directoryStore.directoryURL, organizeByDate: organizeByDate, effects: effectsStore.settings)
@@ -1194,6 +1209,21 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
             ZTransferHaptics.shared.tick()
             queueModel.enqueue(file, organizeByDate: organizeByDate, effects: effectsStore.settings)
             startListQueueFlight(for: file)
+        }
+    }
+
+    private func requestTransferDirectory() {
+        transferDirectoryAttention = true
+        showingSettings = true
+        let hintID = UUID()
+        remoteEntryHintID = hintID
+        withAnimation(ZTransferMotion.standard) {
+            remoteEntryHint = AppLocalized.resource("transfer_directory_required_hint")
+        }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_800_000_000)
+            guard !Task.isCancelled, remoteEntryHintID == hintID else { return }
+            withAnimation(ZTransferMotion.standard) { remoteEntryHint = nil }
         }
     }
 

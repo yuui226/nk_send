@@ -36,6 +36,7 @@ struct SettingsView: View {
     @State private var showingEffectsHelp = false
     @State private var helpAnchor: CGRect = .zero
     @State private var settingsTransitionDirection: CGFloat = 1
+    @State private var directoryAttentionProgress: CGFloat = 0
     @AppStorage("organize_transfers_by_date") private var organizeByDate = false
     @AppStorage("auto_transfer_new_media") private var autoTransfer = false
     @AppStorage("defer_transfer_start") private var deferStart = false
@@ -51,6 +52,7 @@ struct SettingsView: View {
     @AppStorage("photo_effects_help_viewed") private var photoEffectsHelpViewed = false
 
     var showPhotoEffectsEntry: Bool = true
+    let requestTransferDirectoryAttention: Bool
     var onClose: (() -> Void)? = nil
     var dismissalRequested = false
     let effectPreviewSource: UIImage?
@@ -66,6 +68,7 @@ struct SettingsView: View {
     init(showPhotoEffectsEntry: Bool, effectsStore: PhotoEffectsStore, directory: DirectoryAccessStore,
          effectsDraft: Binding<PhotoEffectsSettings>, filterChooser: Binding<PhotoFilterChooserState>,
          effectsHint: Binding<PhotoEffectsHint?>, dismissalRequested: Bool,
+         requestTransferDirectoryAttention: Bool = false,
          effectPreviewSource: UIImage? = nil, effectPreviewExif: PhotoExif? = nil,
          onEffectPreviewRequested: @escaping () -> Void = {},
          onContentHeightChange: @escaping (CGFloat) -> Void = { _ in }, onClose: (() -> Void)? = nil) {
@@ -77,6 +80,7 @@ struct SettingsView: View {
         _filterChooser = filterChooser
         _effectsHint = effectsHint
         self.dismissalRequested = dismissalRequested
+        self.requestTransferDirectoryAttention = requestTransferDirectoryAttention
         self.effectPreviewSource = effectPreviewSource
         self.effectPreviewExif = effectPreviewExif
         self.onEffectPreviewRequested = onEffectPreviewRequested
@@ -195,6 +199,28 @@ struct SettingsView: View {
             // locale instead of only changing the wheel label.
             if !["system", "en", "zh-Hans", "zh-Hant"].contains(appLanguage) {
                 appLanguage = "system"
+            }
+        }
+        .task(id: directoryAttentionActive) {
+            guard directoryAttentionActive else {
+                directoryAttentionProgress = 0
+                return
+            }
+            directoryAttentionProgress = 0.25
+            for _ in 0..<2 {
+                withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.18)) {
+                    directoryAttentionProgress = 1
+                }
+                try? await Task.sleep(nanoseconds: 180_000_000)
+                guard !Task.isCancelled else { return }
+                withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.28)) {
+                    directoryAttentionProgress = 0.32
+                }
+                try? await Task.sleep(nanoseconds: 280_000_000)
+                guard !Task.isCancelled else { return }
+            }
+            withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.22)) {
+                directoryAttentionProgress = 0.55
             }
         }
     }
@@ -316,12 +342,25 @@ struct SettingsView: View {
     }
 
     private var directoryCard: some View {
-        SettingsCard {
+        SettingsCard(
+            borderColor: directory.directoryURL == nil
+                ? ZTransferColors.accentOrange.opacity(0.8)
+                : ZTransferColors.primaryText.opacity(0.10),
+            attentionColor: directoryAttentionActive ? ZTransferColors.accentOrange : nil,
+            attentionProgress: directoryAttentionProgress
+        ) {
             HStack(spacing: 10) {
                 Image(systemName: "location.fill").foregroundStyle(directory.directoryURL == nil ? ZTransferColors.accentOrange : .green)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(AppLocalized.resource("transfer_directory")).zTransferText(size: ZTransferMetrics.caption, weight: .semibold)
-                    Text(directory.directoryURL?.lastPathComponent ?? AppLocalized.resource("dir_not_set")).zTransferText(size: ZTransferMetrics.caption).lineLimit(1)
+                    Text(directory.directoryURL?.lastPathComponent ?? AppLocalized.resource(
+                        directoryAttentionActive ? "dir_please_set" : "dir_not_set"
+                    ))
+                    .zTransferText(size: ZTransferMetrics.caption,
+                                   weight: directoryAttentionActive ? .bold : .regular)
+                    .foregroundStyle(directory.directoryURL == nil
+                                     ? ZTransferColors.accentOrange : ZTransferColors.secondaryText)
+                    .lineLimit(1)
                 }
                 Spacer()
                 Button { showingPicker = true } label: {
@@ -340,6 +379,11 @@ struct SettingsView: View {
                 ToggleWheel(label: AppLocalized.resource("defer_transfer_start"), isOn: $deferStart, disabled: directory.directoryURL == nil)
             }
         }
+        .scaleEffect(1 + directoryAttentionProgress * 0.008)
+    }
+
+    private var directoryAttentionActive: Bool {
+        requestTransferDirectoryAttention && directory.directoryURL == nil
     }
 
     private var listCard: some View {
@@ -568,6 +612,9 @@ extension PhotoFramePreset {
 }
 
 private struct SettingsCard<Content: View>: View {
+    var borderColor = ZTransferColors.primaryText.opacity(0.10)
+    var attentionColor: Color?
+    var attentionProgress: CGFloat = 0
     @ViewBuilder let content: Content
     var body: some View {
         // Materialize the builder as one vertical group before applying the
@@ -578,7 +625,14 @@ private struct SettingsCard<Content: View>: View {
             .padding(12)
             .background(ZTransferGlassSurface(cornerRadius: 14, kind: .button))
             .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(ZTransferColors.primaryText.opacity(0.10), lineWidth: 1))
+                .stroke(borderColor, lineWidth: 1))
+            .overlay {
+                if let attentionColor {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(attentionColor.opacity(0.18 + 0.62 * attentionProgress), lineWidth: 1.5)
+                        .shadow(color: attentionColor.opacity(0.28 * attentionProgress), radius: 8)
+                }
+            }
     }
 }
 
