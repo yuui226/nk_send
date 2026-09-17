@@ -46,14 +46,22 @@ struct PhotoFrameWatermark: Codable, Equatable, Sendable {
         return trimmed.isEmpty ? Self.defaultText : trimmed
     }
 
-    /// Android replaces line breaks/tabs with one space, removes remaining
-    /// control scalars, then truncates by Unicode code point.
-    var limitedText: String {
-        let singleLine = text.replacingOccurrences(of: "[\\r\\n\\t]+", with: " ", options: .regularExpression)
+    static func limitText(_ value: String) -> String {
+        let singleLine = value.replacingOccurrences(
+            of: "[\\r\\n\\t]+",
+            with: " ",
+            options: .regularExpression
+        )
         let scalars = singleLine.unicodeScalars.filter {
             !CharacterSet.controlCharacters.contains($0)
         }
         return String(String.UnicodeScalarView(scalars.prefix(Self.maxTextLength)))
+    }
+
+    /// Android replaces line breaks/tabs with one space, removes remaining
+    /// control scalars, then truncates by Unicode code point.
+    var limitedText: String {
+        Self.limitText(text)
     }
 }
 

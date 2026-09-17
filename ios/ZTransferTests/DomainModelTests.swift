@@ -771,6 +771,14 @@ final class DomainModelTests: XCTestCase {
         XCTAssertEqual(watermark.displayText, PhotoFrameWatermark.defaultText)
         watermark.text = String(repeating: "x", count: 30)
         XCTAssertEqual(watermark.displayText.count, PhotoFrameWatermark.maxTextLength)
+        XCTAssertEqual(
+            PhotoFrameWatermark.limitText("line one\nline two\t\u{0007}"),
+            "line one line two "
+        )
+        XCTAssertEqual(
+            PhotoFrameWatermark.limitText(String(repeating: "😀", count: 25)).unicodeScalars.count,
+            PhotoFrameWatermark.maxTextLength
+        )
     }
 }
 

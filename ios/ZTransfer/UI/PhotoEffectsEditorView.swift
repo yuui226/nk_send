@@ -257,7 +257,11 @@ struct PhotoEffectsControls: View {
                                 if draft.watermark.content == .text {
                                     TextField("", text: Binding(
                                         get: { draft.watermark.text },
-                                        set: { value in updateWatermark { $0.text = String(value.prefix(PhotoFrameWatermark.maxTextLength)) } }
+                                        set: { value in
+                                            updateWatermark {
+                                                $0.text = PhotoFrameWatermark.limitText(value)
+                                            }
+                                        }
                                     ))
                                     .textFieldStyle(.plain)
                                     .multilineTextAlignment(.center)

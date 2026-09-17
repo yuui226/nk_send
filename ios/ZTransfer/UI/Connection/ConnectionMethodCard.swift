@@ -275,9 +275,6 @@ struct ConnectionMethodCard: View {
         }
     }
 
-    // These existing utility entries still need their Android action flows.
-    // Keep them as visual content until the corresponding task is implemented;
-    // do not attach invented settings URLs or fake successful pairing actions.
     private func utilityIcon(_ name: String, tint: Color, size: CGFloat = 34) -> some View {
         Image(systemName: name).font(.system(size: 18, weight: .semibold))
             .foregroundStyle(tint).frame(width: size, height: size)
