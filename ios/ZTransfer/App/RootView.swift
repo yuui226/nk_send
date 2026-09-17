@@ -64,6 +64,7 @@ struct RootView: View {
     @AppStorage("app_language") private var appLanguage = "system"
     @AppStorage("keep_screen_on") private var keepScreenOn = true
     @AppStorage("skin_preset") private var skinPreset = "FROSTED_GLASS"
+    @AppStorage("thumbnail_columns") private var thumbnailColumns = 3
     @Environment(\.scenePhase) private var scenePhase
     // Keep HomeScreen alive for the connection-success celebration before
     // handing off to the file list. The final hand-off is a short cross-fade,
@@ -166,6 +167,8 @@ struct RootView: View {
         .onAppear {
             let restoredSkin = normalizedSkinPreset(UserDefaults.standard.string(forKey: "skin_preset"))
             if skinPreset != restoredSkin { skinPreset = restoredSkin }
+            let restoredColumns = normalizedThumbnailColumns(thumbnailColumns)
+            if thumbnailColumns != restoredColumns { thumbnailColumns = restoredColumns }
             UIApplication.shared.isIdleTimerDisabled = keepScreenOn
             gpsCoordinator.setAPModeBlocked(gpsBlockedByAPCamera)
             if connectionModel.cameraSession != nil, !connectionCelebrationConsumed {

@@ -789,6 +789,13 @@ final class DomainModelTests: XCTestCase {
         XCTAssertEqual(RemoteDisplayOptions.nextDesqueeze(after: 1.2), 1.33)
         XCTAssertEqual(RemoteDisplayOptions.nextDesqueeze(after: 9), 1)
     }
+
+    func testThumbnailColumnsRestoreWithinAndroidRange() {
+        XCTAssertEqual(normalizedThumbnailColumns(-1), 2)
+        XCTAssertEqual(normalizedThumbnailColumns(1), 2)
+        XCTAssertEqual(normalizedThumbnailColumns(3), 3)
+        XCTAssertEqual(normalizedThumbnailColumns(8), 4)
+    }
 }
 
 private actor RemoteListLifecycleHarness {

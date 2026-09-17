@@ -1,6 +1,10 @@
 import SwiftUI
 import UIKit
 
+func normalizedThumbnailColumns(_ value: Int) -> Int {
+    min(max(value, 2), 4)
+}
+
 @preconcurrency
 private struct PhotoListTopControlsTransition: AnimatableModifier {
     var progress: CGFloat
@@ -228,9 +232,10 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
     }
 
     private var columns: [GridItem] {
-        // Android clamps the persisted preference to one through four columns;
+        // Android clamps the persisted preference to two through four columns;
         // the grid uses the same 6dp inter-cell spacing on both axes.
-        Array(repeating: GridItem(.flexible(minimum: 0), spacing: 6), count: min(max(thumbnailColumns, 1), 4))
+        Array(repeating: GridItem(.flexible(minimum: 0), spacing: 6),
+              count: normalizedThumbnailColumns(thumbnailColumns))
     }
 
     var body: some View {
