@@ -286,6 +286,8 @@ private struct LocalEffectPreview: View {
     @State private var prefetched: [String: LocalPhotoPreviewImages] = [:]
     @State private var lastPreviewSettings: PhotoEffectsSettings?
     @State private var failed = false
+    @State private var renderedCanvasKey = ""
+    @State private var previewRestoreRevision = 0
     @GestureState private var comparing = false
 
     private static func settingsKey(_ settings: PhotoEffectsSettings) -> String {
@@ -340,7 +342,16 @@ private struct LocalEffectPreview: View {
     var body: some View {
         Group {
             if let images {
-                Image(uiImage: comparing ? images.unfiltered : images.filtered).resizable().scaledToFit()
+                PhotoEffectsAnimatedImage(
+                    frame: .init(
+                        image: images.filtered,
+                        comparison: images.unfiltered,
+                        canvasKey: renderedCanvasKey
+                    ),
+                    requestedCanvasKey: photoEffectsPreviewCanvasKey(settings),
+                    showComparison: comparing,
+                    restoreRevision: previewRestoreRevision
+                )
             } else if failed {
                 Text(AppLocalized.resource("local_photo_preview_failed"))
                     .font(.system(size: 12)).foregroundStyle(ZTransferColors.secondaryText)
@@ -405,6 +416,7 @@ private struct LocalEffectPreview: View {
                                                               metadata: metadata, filteredSource: preparedSource)
                 }
                 try Task.checkCancellation()
+                renderedCanvasKey = photoEffectsPreviewCanvasKey(settings)
                 images = next
                 failed = false
                 if settings.photoFilterEnabled {
@@ -434,6 +446,7 @@ private struct LocalEffectPreview: View {
                 }
             } catch is CancellationError {} catch {
                 if images == nil { failed = true }
+                else { previewRestoreRevision &+= 1 }
             }
         }
     }

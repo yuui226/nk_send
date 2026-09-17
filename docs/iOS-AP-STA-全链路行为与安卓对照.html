@@ -170,7 +170,7 @@
 
   <h2 id="settings">九、设置、缓存与已读状态的持久化边界</h2>
   <div class="table-scroll"><table class="compact"><thead><tr><th>编号</th><th>数据</th><th>iOS 保存方式与恢复范围</th><th>Android 对照</th><th>代码依据</th></tr></thead><tbody>
-    <tr><td class="id">S01</td><td>传输目录</td><td>保存 security-scoped bookmark；恢复成功后持有访问权限并后台清旧临时文件。队列运行时若目录失效，会标记等待任务失败，PhotoList 观察 invalidatedDirectory 后清 bookmark。若应用启动时 bookmark 本身无法解析/授权，当前 URL 保持 nil，但原 bookmark 数据不会在 restore 内主动删除。</td><td class="warn">正常选择和运行期失效路径与 SAF 语义一致；已记录启动恢复失败时的实际残留边界。</td><td class="sources"><a href="../ios/ZTransfer/Domain/DirectoryAccessStore.swift">DirectoryAccessStore.swift</a><br><a href="../ios/ZTransfer/Domain/TransferQueue.swift">TransferQueue.swift</a></td></tr>
+    <tr><td class="id">S01</td><td>传输目录</td><td>保存 security-scoped bookmark；恢复成功后持有访问权限并后台清旧临时文件。与 Android 启动时只恢复已保存 URI 相同，启动阶段无法恢复时不凭空改写用户配置；队列真正使用目录并验证失效后，标记等待任务失败并清除 bookmark。</td><td class="ok">选择、启动恢复和使用期失效清理规则一致。</td><td class="sources"><a href="../app/src/main/java/com/ztransfer/viewmodel/TransferViewModel.kt">TransferViewModel.kt</a><br><a href="../ios/ZTransfer/Domain/DirectoryAccessStore.swift">DirectoryAccessStore.swift</a><br><a href="../ios/ZTransfer/Domain/TransferQueue.swift">TransferQueue.swift</a></td></tr>
     <tr><td class="id">S02</td><td>传输选项</td><td>按日期整理、自动传输、选完再传使用 AppStorage；重启恢复。</td><td class="ok">一致。</td><td class="sources"><a href="../ios/ZTransfer/UI/SettingsView.swift">SettingsView.swift</a></td></tr>
     <tr><td class="id">S03</td><td>列表偏好</td><td>每行 2/3/4、连拍收合、点击/长按操作持久化。</td><td class="ok">一致。</td><td class="sources"><a href="../ios/ZTransfer/UI/SettingsView.swift">SettingsView.swift</a></td></tr>
     <tr><td class="id">S04</td><td>外观</td><td>明暗、语言、按钮风格、触感、屏幕常亮持久化；屏幕常亮仅 active scene 生效。</td><td class="ok">一致。</td><td class="sources"><a href="../ios/ZTransfer/App/RootView.swift">RootView.swift</a></td></tr>
@@ -217,13 +217,14 @@
     <tr id="D15"><td class="id">D15<br><span class="status same">已对齐</span></td><td>两处照片效果偏好的恢复归一化</td><td>校验水印 hash/文件、文本、强度、收藏和元数据字段；允许用户把文字水印留空；本地入口移除隐藏定位字段。</td><td>scope-aware normalization 已执行相同校验；无效图片回退文字，空文本不再被强制改回 ZTransfer，本地 scope 清除坐标和海拔。</td><td>恢复后的 UI、预览和导出使用同一有效状态。</td><td class="sources"><a href="../ios/ZTransfer/Domain/PhotoEffects.swift">PhotoEffects.swift</a></td></tr>
     <tr id="D16"><td class="id">D16<br><span class="status same">已对齐</span></td><td>本地照片效果独立配置的首次迁移</td><td>独立配置首次建立时只从旧共享配置迁入滤镜和边框收藏，随后完全分离。</td><td>空 local scope 会执行一次相同迁移并立即保存，已有独立配置不会再次读旧值。</td><td>升级后保留收藏且不混入相机传输当前效果。</td><td class="sources"><a href="../ios/ZTransfer/Domain/PhotoEffects.swift">PhotoEffects.swift</a></td></tr>
     <tr id="D17"><td class="id">D17<br><span class="status same">已对齐</span></td><td>旧相机会话的列表模型与缩略图任务淘汰</td><td>连接 owner 生命周期内只保留当前会话状态；替换连接时旧扫描与缩略图工作终止。</td><td>同一 session 的列表/队列/设置/监看仍复用模型；新 session 替换时 <code>evict</code>取消扫描、填充、目录监听和索引工作，并移除静态强引用。</td><td>页面往返不重载；真实重连也不会累积失效会话。</td><td class="sources"><a href="../ios/ZTransfer/Domain/PhotoListViewModel.swift">PhotoListViewModel.swift</a><br><a href="../ios/ZTransfer/App/RootView.swift">RootView.swift</a></td></tr>
+    <tr id="D18"><td class="id">D18<br><span class="status same">已对齐</span></td><td>照片效果两处入口的成片切换动画</td><td>普通滤镜、水印和参数变化保留旧成片作不透明底层，新成片以 220ms FastOutSlowIn 渐入；旋转或边框画布变化先以 110ms Linear 淡出旧成片，成片就绪后以 190ms FastOutSlowIn 淡入。延迟完成的长按对比图只补数据，不重启动画；渲染失败恢复旧成片。</td><td>连接后设置二级页与本地照片效果工作台共同使用 <code>PhotoEffectsAnimatedImage</code>；按位图身份与旋转/边框画布身份选择同样的两套时序，长按比较直接切换同一帧，失败 revision 恢复旧帧。连接后旋转的 4:3/3:4 视口也按 Android 的 340ms overlayExpand 曲线变化。</td><td>两处入口不再在新渲染完成时瞬时跳图，也不会在对比图延迟补齐时二次闪动。</td><td class="sources"><a href="../app/src/main/java/com/ztransfer/ui/screen/SettingsScreen.kt">SettingsScreen.kt</a><br><a href="../ios/ZTransfer/UI/PhotoEffectsEditorView.swift">PhotoEffectsEditorView.swift</a><br><a href="../ios/ZTransfer/UI/LocalPhotoEffectsView.swift">LocalPhotoEffectsView.swift</a></td></tr>
   </tbody></table></div>
 
   <h2 id="evidence">十二、证据、验证状态和后续使用规则</h2>
   <ul>
     <li><strong>本次是源码行为审查：</strong>没有把“需要真机验证”列为完成条件；差异结论来自当前 Android/iOS 实现中的状态机、持久化键、调度和导出路径。</li>
     <li><strong>本轮自动化证据：</strong>相机 I/O、领域模型和 GPS 协议/策略合并专项共 75 项通过、0 失败，包含照片效果 EXIF、PNG 输入、偏好归一化、相机 I/O 占用和 GPS 海拔策略；随后的完整 <code>build-for-testing</code> 也成功。测试结果保存于 <code>Test-ZTransfer-2026.09.17_13-10-17-+0800.xcresult</code>。</li>
-    <li><strong>本轮结论：</strong>D01–D08、D12–D17 已按 Android 规则或 iOS 对应平台能力完成；D09 已确认是授权换手机而非相机断开，随 R05 的 App Store 方案处理。D10/D11 仍是 iOS 无 Android foreground service、WakeLock/WiFiLock 等价能力造成的系统生命周期差异；D03 的卫星数量同样受 CoreLocation 公共 API 限制。</li>
+    <li><strong>本轮结论：</strong>D01–D08、D12–D18 已按 Android 规则或 iOS 对应平台能力完成；D09 已确认是授权换手机而非相机断开，随 R05 的 App Store 方案处理。D10/D11 仍是 iOS 无 Android foreground service、WakeLock/WiFiLock 等价能力造成的系统生命周期差异；D03 的卫星数量同样受 CoreLocation 公共 API 限制。</li>
     <li><strong>维护规则：</strong>后续发现差异继续追加 D 编号；修复时在原行改状态、补测试或源码证据。不要用删除差异行的方式表示完成。</li>
   </ul>
   <footer>来源链接均指向仓库内当前实现。Android 是功能基准；iOS 行为描述以本文更新日期的工作区代码为准。</footer>

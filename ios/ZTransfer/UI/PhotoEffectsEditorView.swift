@@ -355,6 +355,143 @@ struct PhotoEffectsControls: View {
 
 }
 
+struct PhotoEffectsPreviewFrame {
+    let image: UIImage
+    let comparison: UIImage?
+    let canvasKey: String
+}
+
+private struct PhotoEffectsPreviewFrameKey: Hashable {
+    let image: ObjectIdentifier
+    let canvas: String
+}
+
+/// Matches Android's completed-frame transition: ordinary effect changes keep
+/// the old frame opaque while the new frame fades in for 220 ms. Rotation or a
+/// border canvas change fades the old frame out for 110 ms, swaps only after
+/// the new bitmap is ready, then fades it in for 190 ms. Comparison updates use
+/// the same bitmap identity and therefore never restart the transition.
+struct PhotoEffectsAnimatedImage: View {
+    let frame: PhotoEffectsPreviewFrame
+    let requestedCanvasKey: String
+    let showComparison: Bool
+    var cornerRadius: CGFloat = 0
+    var restoreRevision = 0
+
+    @State private var visible: PhotoEffectsPreviewFrame
+    @State private var outgoing: PhotoEffectsPreviewFrame?
+    @State private var incomingOpacity: CGFloat = 1
+    @State private var replacementOpacity: CGFloat = 1
+
+    init(
+        frame: PhotoEffectsPreviewFrame,
+        requestedCanvasKey: String,
+        showComparison: Bool,
+        cornerRadius: CGFloat = 0,
+        restoreRevision: Int = 0
+    ) {
+        self.frame = frame
+        self.requestedCanvasKey = requestedCanvasKey
+        self.showComparison = showComparison
+        self.cornerRadius = cornerRadius
+        self.restoreRevision = restoreRevision
+        _visible = State(initialValue: frame)
+    }
+
+    private var frameKey: PhotoEffectsPreviewFrameKey {
+        .init(image: ObjectIdentifier(frame.image), canvas: frame.canvasKey)
+    }
+
+    private func currentValue(for stored: PhotoEffectsPreviewFrame) -> PhotoEffectsPreviewFrame {
+        ObjectIdentifier(stored.image) == ObjectIdentifier(frame.image) ? frame : stored
+    }
+
+    @ViewBuilder
+    private func layer(_ stored: PhotoEffectsPreviewFrame, opacity: CGFloat) -> some View {
+        let value = currentValue(for: stored)
+        Image(uiImage: showComparison ? (value.comparison ?? value.image) : value.image)
+            .resizable()
+            .scaledToFit()
+            .opacity(opacity)
+    }
+
+    var body: some View {
+        ZStack {
+            if let outgoing {
+                layer(outgoing, opacity: replacementOpacity)
+            }
+            layer(
+                visible,
+                opacity: replacementOpacity * (outgoing == nil ? 1 : incomingOpacity)
+            )
+        }
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        .task(id: requestedCanvasKey) {
+            if visible.canvasKey != requestedCanvasKey {
+                withAnimation(.linear(duration: 0.11)) { replacementOpacity = 0 }
+            } else {
+                await Task.yield()
+                guard !Task.isCancelled else { return }
+                withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.19)) {
+                    replacementOpacity = 1
+                }
+            }
+        }
+        .task(id: frameKey) {
+            let next = frame
+            guard ObjectIdentifier(next.image) != ObjectIdentifier(visible.image) else {
+                visible = next
+                if next.canvasKey == requestedCanvasKey {
+                    withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.19)) {
+                        replacementOpacity = 1
+                    }
+                }
+                return
+            }
+            if next.canvasKey != visible.canvasKey {
+                withAnimation(.linear(duration: 0.11)) { replacementOpacity = 0 }
+                try? await Task.sleep(for: .milliseconds(110))
+                guard !Task.isCancelled else { return }
+                outgoing = nil
+                visible = next
+                incomingOpacity = 1
+                await Task.yield()
+                guard !Task.isCancelled else { return }
+                withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.19)) {
+                    replacementOpacity = 1
+                }
+            } else {
+                outgoing = visible
+                visible = next
+                replacementOpacity = 1
+                incomingOpacity = 0
+                await Task.yield()
+                guard !Task.isCancelled else { return }
+                withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.22)) {
+                    incomingOpacity = 1
+                }
+                try? await Task.sleep(for: .milliseconds(220))
+                guard !Task.isCancelled,
+                      ObjectIdentifier(visible.image) == ObjectIdentifier(next.image) else { return }
+                outgoing = nil
+            }
+        }
+        .task(id: restoreRevision) {
+            guard restoreRevision > 0 else { return }
+            withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.19)) {
+                replacementOpacity = 1
+            }
+        }
+    }
+}
+
+func photoEffectsPreviewCanvasKey(_ settings: PhotoEffectsSettings, rotationQuarterTurns: Int = 0) -> String {
+    let border = settings.photoFrameEnabled && settings.photoFrameBorderEnabled
+        ? settings.photoFramePreset.rawValue
+        : "none"
+    return "rotation:\(rotationQuarterTurns)|frame:\(border)"
+}
+
 /// Android keeps the last rendered effect visible while a new preview is
 /// prepared. Rendering is detached from SwiftUI so wheel interaction remains
 /// responsive and a cancelled generation cannot replace a newer one.
@@ -364,7 +501,9 @@ struct PhotoEffectsSettingsPreview: View {
     let settings: PhotoEffectsSettings
     let onRequest: () -> Void
     @State private var rendered: UIImage?
+    @State private var renderedCanvasKey = ""
     @State private var unfiltered: UIImage?
+    @State private var previewRestoreRevision = 0
     @State private var showUnfiltered = false
     @State private var prefetched: [String: UIImage] = [:]
     @State private var filteredSource: UIImage?
@@ -404,6 +543,10 @@ struct PhotoEffectsSettingsPreview: View {
 
     private var renderKeyWithRotation: String {
         "\(renderKey)|rotation:\(rotationQuarterTurns)"
+    }
+
+    private var requestedCanvasKey: String {
+        photoEffectsPreviewCanvasKey(settings, rotationQuarterTurns: rotationQuarterTurns)
     }
 
     private var sourceContextKey: String {
@@ -493,10 +636,18 @@ struct PhotoEffectsSettingsPreview: View {
 
     var body: some View {
         Group {
-            if let displayed = showUnfiltered ? (unfiltered ?? rendered) : rendered {
-                Image(uiImage: displayed)
-                    .resizable().scaledToFit()
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            if let rendered {
+                PhotoEffectsAnimatedImage(
+                    frame: .init(
+                        image: rendered,
+                        comparison: unfiltered,
+                        canvasKey: renderedCanvasKey
+                    ),
+                    requestedCanvasKey: requestedCanvasKey,
+                    showComparison: showUnfiltered,
+                    cornerRadius: 12,
+                    restoreRevision: previewRestoreRevision
+                )
             } else if source != nil {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(ZTransferColors.primaryText.opacity(0.045))
@@ -518,6 +669,7 @@ struct PhotoEffectsSettingsPreview: View {
         // rendered bitmap's ratio here would make the preview jump in height.
         .aspectRatio(source == nil || !sourceIsPortrait ? CGFloat(4) / 3 : CGFloat(3) / 4,
                      contentMode: .fit)
+        .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.34), value: sourceIsPortrait)
         .contentShape(Rectangle())
         .onLongPressGesture(minimumDuration: 0.5, pressing: { pressing in
             if !pressing { showUnfiltered = false }
@@ -575,6 +727,11 @@ struct PhotoEffectsSettingsPreview: View {
                     }
                 }.value
                 guard !Task.isCancelled else { return }
+                guard let fallbackResult else {
+                    previewRestoreRevision &+= 1
+                    return
+                }
+                renderedCanvasKey = requestedCanvasKey
                 rendered = fallbackResult
                 return
             }
@@ -613,6 +770,11 @@ struct PhotoEffectsSettingsPreview: View {
                 ).filtered
             }
             guard !Task.isCancelled else { return }
+            guard let result else {
+                previewRestoreRevision &+= 1
+                return
+            }
+            renderedCanvasKey = requestedCanvasKey
             rendered = result
             guard settings.photoFilterEnabled, settings.selectedFilter != nil else { return }
 
