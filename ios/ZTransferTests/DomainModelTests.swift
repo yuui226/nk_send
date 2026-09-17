@@ -55,6 +55,15 @@ final class DomainModelTests: XCTestCase {
         XCTAssertEqual(retainLastValidTransferSpeed(previous: 2_400, sample: 1_200), 1_200)
     }
 
+    func testTransferCardCompletionFillsBeforeFadingWhileFailuresKeepRealProgress() {
+        XCTAssertEqual(transferCardProgressTarget(status: .completed, progress: 0.87), 1)
+        XCTAssertEqual(transferCardProgressTarget(status: .failed, progress: 0.87), 0.87)
+        XCTAssertEqual(transferCardProgressTarget(status: .cancelled, progress: .nan), 0)
+        XCTAssertTrue(transferCardWaveEligible(status: .transferring))
+        XCTAssertTrue(transferCardWaveEligible(status: .completed))
+        XCTAssertFalse(transferCardWaveEligible(status: .failed))
+    }
+
     @MainActor
     func testEffectPreviewCandidateSkipsVideoAndUsesNewestCaptureDateThenHandle() {
         let files = [

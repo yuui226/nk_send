@@ -1,6 +1,14 @@
 import SwiftUI
 import UIKit
 
+func transferCardProgressTarget(status: TransferStatus, progress: Double) -> Double {
+    status == .completed ? 1 : (progress.isFinite ? min(max(progress, 0), 1) : 0)
+}
+
+func transferCardWaveEligible(status: TransferStatus) -> Bool {
+    status == .transferring || status == .completed
+}
+
 /// The queue is the second page of the photo-list transfer workspace. It keeps
 /// the Android queue actions: retry, remove and pause/resume. Directory
 /// selection remains in Settings.
@@ -271,11 +279,12 @@ private struct QueueItemView: View {
 
     var body: some View {
         ZStack {
-            if item.status == .transferring {
-                LiquidTransferProgressFill(progress: displayedProgress, seed: item.id.uuidString)
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
-                    .transition(.opacity)
-            }
+            TransferCardProgressLayer(
+                status: item.status,
+                progress: displayedProgress,
+                seed: item.id.uuidString
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 14))
             HStack(spacing: 12) {
                 ZStack(alignment: .bottomTrailing) {
                     QueueThumbnail(session: session, handle: item.file.id, item: item)
@@ -531,6 +540,77 @@ private struct QueueTaskStatusBadge: View {
     }
 }
 
+/// Matches Android's AnimatedVisibility exit: successful transfers first fill
+/// to 100%, wait 100 ms, then fade for 220 ms. Failed and cancelled tasks only
+/// fade their real last progress and never imply successful completion.
+private struct TransferCardProgressLayer: View {
+    let status: TransferStatus
+    let progress: Double
+    let seed: String
+    @State private var mounted: Bool
+    @State private var opacity: Double
+    @State private var target: Double
+    @State private var hasTransferred: Bool
+
+    init(status: TransferStatus, progress: Double, seed: String) {
+        self.status = status
+        self.progress = progress
+        self.seed = seed
+        let active = status == .transferring
+        _mounted = State(initialValue: active)
+        _opacity = State(initialValue: 0)
+        _target = State(initialValue: active ? transferCardProgressTarget(status: status, progress: progress) : 0)
+        _hasTransferred = State(initialValue: active)
+    }
+
+    var body: some View {
+        Group {
+            if mounted {
+                LiquidTransferProgressFill(
+                    progress: target,
+                    seed: seed,
+                    waveEligible: transferCardWaveEligible(status: status)
+                )
+                .opacity(opacity)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .allowsHitTesting(false)
+        .onChange(of: progress) { value in
+            guard status == .transferring else { return }
+            target = transferCardProgressTarget(status: status, progress: value)
+        }
+        .task(id: status) {
+            switch status {
+            case .transferring:
+                hasTransferred = true
+                mounted = true
+                target = transferCardProgressTarget(status: status, progress: progress)
+                await Task.yield()
+                guard !Task.isCancelled else { return }
+                withAnimation(.easeOut(duration: 0.18)) { opacity = 1 }
+            case .completed where hasTransferred:
+                mounted = true
+                target = transferCardProgressTarget(status: status, progress: progress)
+                try? await Task.sleep(for: .milliseconds(100))
+                guard !Task.isCancelled else { return }
+                withAnimation(.easeOut(duration: 0.22)) { opacity = 0 }
+                try? await Task.sleep(for: .milliseconds(220))
+                guard !Task.isCancelled else { return }
+                mounted = false
+                hasTransferred = false
+            default:
+                guard mounted else { return }
+                withAnimation(.easeOut(duration: 0.18)) { opacity = 0 }
+                try? await Task.sleep(for: .milliseconds(180))
+                guard !Task.isCancelled else { return }
+                mounted = false
+                hasTransferred = false
+            }
+        }
+    }
+}
+
 /// Android's transfer cards use a low-amplitude liquid fill instead of a
 /// static progress bar. The phase is driven by TimelineView so progress
 /// updates do not create a second task per card.
@@ -564,11 +644,14 @@ struct LiquidTransferProgressFill: View {
     let progress: Double
     let seed: String
     var isCapsule = false
+    var waveEligible = true
     var body: some View {
         SmoothTransferProgress(target: progress, resetKey: seed) { value in
-            TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: value <= 0 || value >= 1)) { timeline in
+            TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: !waveEligible || value <= 0 || value >= 1)) { timeline in
                 LiquidTransferShape(progress: value,
-                    phase: CGFloat(timeline.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: isCapsule ? 2.2 : 2.6) / (isCapsule ? 2.2 : 2.6)),
+                    phase: waveEligible
+                        ? CGFloat(timeline.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: isCapsule ? 2.2 : 2.6) / (isCapsule ? 2.2 : 2.6))
+                        : 0,
                     seed: seedPhase, amplitude: isCapsule ? 2 : 3,
                     segments: isCapsule ? 8 : 12, spatialScale: isCapsule ? 1 : 0.55)
                     .fill(ZTransferColors.accentBlue.opacity(isCapsule ? 0.22 : 0.14))
