@@ -448,9 +448,15 @@ final class PhotoEffectsStore: ObservableObject {
         self.scope = scope
         key = scope == .cameraTransfer ? "photoEffectsSettings.v1" : "localPhotoEffectsSettings.v1"
         if scope == .cameraTransfer, let value = Self.restoreAndroidTransferSettings(defaults: self.defaults) {
-            settings = Self.normalized(value, scope: scope)
+            let restored = Self.normalized(value, scope: scope)
+            settings = restored
+            // Android folds the legacy one-value intensity into the per-filter
+            // map during restore, then removes the old key immediately.
+            Self.persistAndroidTransferSettings(restored, defaults: self.defaults)
         } else if scope == .localPhotos, let value = Self.restoreAndroidLocalSettings(defaults: self.defaults) {
-            settings = Self.normalized(value, scope: scope)
+            let restored = Self.normalized(value, scope: scope)
+            settings = restored
+            Self.persistAndroidLocalSettings(restored, defaults: self.defaults)
         } else if let data = self.defaults.data(forKey: key), let value = try? JSONDecoder().decode(PhotoEffectsSettings.self, from: data) {
             settings = Self.normalized(value, scope: scope)
         } else if scope == .localPhotos,
@@ -533,7 +539,12 @@ final class PhotoEffectsStore: ObservableObject {
             .filter { validFilterKeys.contains($0) && seenFilters.insert($0).inserted }
         if let selected = value.selectedFilter {
             if let preset = PhotoFilterCatalog.resolve(selected.preset.id) {
-                result.selectedFilter = .init(preset: preset, intensityPercent: selected.normalizedIntensityPercent)
+                let intensity = selected.normalizedIntensityPercent
+                result.selectedFilter = .init(preset: preset, intensityPercent: intensity)
+                let key = PhotoEffectsSettings.filterKey(preset.id)
+                if result.filterIntensities[key] == nil {
+                    result.filterIntensities[key] = intensity
+                }
             } else {
                 result.selectedFilter = nil
                 result.photoFilterEnabled = false
@@ -633,6 +644,7 @@ final class PhotoEffectsStore: ObservableObject {
         if let selected = value.selectedFilter { defaults.set(selected.preset.id, forKey: "photo_filter_selected_id") }
         else { defaults.removeObject(forKey: "photo_filter_selected_id") }
         defaults.set(encodeAndroidIntensities(value.filterIntensities), forKey: "photo_filter_intensities_v1")
+        defaults.removeObject(forKey: "photo_filter_intensity")
         defaults.set(encodeAndroidFavorites(value.favoriteFilterIDs), forKey: "favorite_photo_filters_v1")
         defaults.set(value.watermark.enabled, forKey: "photo_frame_branding_enabled")
         defaults.set(value.watermark.content.rawValue, forKey: "photo_frame_watermark_content")
@@ -699,6 +711,7 @@ final class PhotoEffectsStore: ObservableObject {
         if let selected = value.selectedFilter { defaults.set(selected.preset.id, forKey: "filter_id") } else { defaults.removeObject(forKey: "filter_id") }
         defaults.set(value.photoFilterEnabled && value.selectedFilter != nil, forKey: "filter_enabled")
         defaults.set(encodeAndroidIntensities(value.filterIntensities), forKey: "filter_intensities_v1")
+        defaults.removeObject(forKey: "filter_intensity")
         defaults.set(encodeAndroidFavorites(value.favoriteFilterIDs), forKey: "favorite_photo_filters_v1")
         defaults.set(encodeAndroidFrameFavorites(value.favoriteFrameEffects), forKey: "favorite_frame_effects_v1")
     }

@@ -1086,6 +1086,38 @@ extension DomainModelTests {
         XCTAssertEqual(restored.favoriteFilterIDs, [b.catalogKey, a.catalogKey])
     }
 
+    @MainActor
+    func testLegacyCurrentFilterIntensityMigratesIntoPerFilterMap() {
+        let transferSuite = "effects-transfer-intensity-migration-\(UUID())"
+        let localSuite = "effects-local-intensity-migration-\(UUID())"
+        let transferDefaults = UserDefaults(suiteName: transferSuite)!
+        let localDefaults = UserDefaults(suiteName: localSuite)!
+        defer {
+            transferDefaults.removePersistentDomain(forName: transferSuite)
+            localDefaults.removePersistentDomain(forName: localSuite)
+        }
+        let preset = Np3FilterCatalog.presets[0]
+
+        transferDefaults.set(preset.id, forKey: "photo_filter_selected_id")
+        transferDefaults.set(37, forKey: "photo_filter_intensity")
+        let transfer = PhotoEffectsStore(defaults: transferDefaults).settings
+        let transferIntensity = Np3FilterEngine.normalizeIntensity(37)
+        XCTAssertEqual(transfer.selectedFilter?.intensityPercent, transferIntensity)
+        XCTAssertEqual(transfer.filterIntensities[preset.catalogKey], transferIntensity)
+        XCTAssertNil(transferDefaults.object(forKey: "photo_filter_intensity"))
+        XCTAssertEqual(transferDefaults.string(forKey: "photo_filter_intensities_v1"), "\(preset.catalogKey),\(transferIntensity)")
+
+        localDefaults.set(3, forKey: "settings_version")
+        localDefaults.set(preset.id, forKey: "filter_id")
+        localDefaults.set(42, forKey: "filter_intensity")
+        let local = PhotoEffectsStore(defaults: localDefaults, scope: .localPhotos).settings
+        let localIntensity = Np3FilterEngine.normalizeIntensity(42)
+        XCTAssertEqual(local.selectedFilter?.intensityPercent, localIntensity)
+        XCTAssertEqual(local.filterIntensities[preset.catalogKey], localIntensity)
+        XCTAssertNil(localDefaults.object(forKey: "filter_intensity"))
+        XCTAssertEqual(localDefaults.string(forKey: "filter_intensities_v1"), "\(preset.catalogKey),\(localIntensity)")
+    }
+
     func testFrameFavoriteUsesCurrentContentAndRejectsMissingLogo() throws {
         let historical = PhotoFrameWatermark(content: .image, text: "historical", imageHash: String(repeating: "a", count: 64), sizePercent: 242, opacityPercent: 1)
         let favorite = PhotoFrameFavorite(preset: .minimal, watermark: historical)
