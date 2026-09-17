@@ -780,6 +780,15 @@ final class DomainModelTests: XCTestCase {
             PhotoFrameWatermark.maxTextLength
         )
     }
+
+    func testRemoteDesqueezeRestoresWithinAndroidRange() {
+        XCTAssertEqual(RemoteDisplayOptions.normalizedDesqueeze(0.25), 1)
+        XCTAssertEqual(RemoteDisplayOptions.normalizedDesqueeze(1.33), 1.33)
+        XCTAssertEqual(RemoteDisplayOptions.normalizedDesqueeze(9), 2)
+        XCTAssertEqual(RemoteDisplayOptions.normalizedDesqueeze(.infinity), 1)
+        XCTAssertEqual(RemoteDisplayOptions.nextDesqueeze(after: 1.2), 1.33)
+        XCTAssertEqual(RemoteDisplayOptions.nextDesqueeze(after: 9), 1)
+    }
 }
 
 private actor RemoteListLifecycleHarness {

@@ -65,6 +65,10 @@ struct RemoteView: View {
     @State private var orientationNotificationsActive = false
     @State private var stopCleanupStarted = false
 
+    private var effectiveDesqueeze: Double {
+        RemoteDisplayOptions.normalizedDesqueeze(desqueeze)
+    }
+
     init(session: CameraSession, recordingDirectory: URL? = nil,
          isSessionConnected: Bool = true,
          onRetrySTA: @escaping () -> Void = {}, onPreparing: (() async -> Void)? = nil,
@@ -132,6 +136,8 @@ struct RemoteView: View {
         // of the app stays portrait; this page rotates its own canvas to match
         // the device instead of changing the application's interface size.
         .onAppear {
+            let normalizedDesqueeze = effectiveDesqueeze
+            if desqueeze != normalizedDesqueeze { desqueeze = normalizedDesqueeze }
             guard !orientationNotificationsActive else { return }
             orientationNotificationsActive = true
             UIDevice.current.beginGeneratingDeviceOrientationNotifications()
@@ -344,9 +350,9 @@ struct RemoteView: View {
             remoteToolButton(active: zebraVisible, label: { RemoteZebraIcon().frame(width: 18, height: 18) }) {
                 withAnimation(ZTransferMotion.standard) { zebraVisible.toggle() }
             }
-            remoteToolButton(active: desqueeze > 1.001, label: { RemoteAspectIcon().frame(width: 18, height: 18) }) {
+            remoteToolButton(active: effectiveDesqueeze > 1.001, label: { RemoteAspectIcon().frame(width: 18, height: 18) }) {
                 withAnimation(ZTransferMotion.standard) {
-                    desqueeze = RemoteDisplayOptions.nextDesqueeze(after: desqueeze)
+                    desqueeze = RemoteDisplayOptions.nextDesqueeze(after: effectiveDesqueeze)
                 }
             }
             remoteToolButton(active: model.levelVisible, label: { RemoteLevelIcon().frame(width: 18, height: 18) }) {
@@ -473,7 +479,7 @@ struct RemoteView: View {
     private var remoteViewfinder: some View {
         GeometryReader { proxy in
             let image = model.frameImage
-            let aspect = image.map { ($0.size.width / max($0.size.height, 1)) * CGFloat(desqueeze) } ?? 1.5
+            let aspect = image.map { ($0.size.width / max($0.size.height, 1)) * CGFloat(effectiveDesqueeze) } ?? 1.5
             ZStack {
                 RoundedRectangle(cornerRadius: 22, style: .continuous)
                     .fill(RadialGradient(
@@ -486,7 +492,7 @@ struct RemoteView: View {
                     Image(uiImage: image)
                         .resizable()
                         .aspectRatio(aspect, contentMode: .fit)
-                        .scaleEffect(x: CGFloat(desqueeze), y: 1, anchor: .center)
+                        .scaleEffect(x: CGFloat(effectiveDesqueeze), y: 1, anchor: .center)
                         .scaleEffect(zoom)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .contentShape(Rectangle())
@@ -597,7 +603,7 @@ struct RemoteView: View {
 
     private var remoteViewfinderAspect: CGFloat {
         guard let image = model.frameImage else { return 1.5 }
-        return (image.size.width / max(image.size.height, 1)) * CGFloat(desqueeze)
+        return (image.size.width / max(image.size.height, 1)) * CGFloat(effectiveDesqueeze)
     }
 
     private struct RemoteBatteryIcon: View {
