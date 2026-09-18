@@ -21,6 +21,7 @@ struct ConnectionPage: View {
     @AppStorage("ap_connection_help_viewed") private var apHelpViewed = false
     @State private var attentionOrigin = Date()
     @State private var settingsAnchor: CGRect = .zero
+    @State private var connectionHint: PhotoEffectsHint?
 
     var body: some View {
         pageBody()
@@ -43,6 +44,10 @@ struct ConnectionPage: View {
                             attentionOrigin: attentionOrigin,
                             selected: model.cameraSession?.isUSB == true,
                             celebrationStart: celebrationStart)
+                            .modifier(GPSBlockedConnectionCard(
+                                blocked: gpsCoordinator.state.enabled,
+                                onBlockedTap: showGPSConnectionBlockedHint
+                            ))
                         ConnectionSceneFadeTimeline(start: celebrationStart) {
                             GPSConnectionControl(
                                 coordinator: gpsCoordinator,
@@ -86,6 +91,10 @@ struct ConnectionPage: View {
                         staHelpViewed: staHelpViewed,
                         apHelpViewed: apHelpViewed)
                         .frame(width: layout.cardWidth)
+                        .modifier(GPSBlockedConnectionCard(
+                            blocked: gpsCoordinator.state.enabled,
+                            onBlockedTap: showGPSConnectionBlockedHint
+                        ))
                     }
                     .padding(.horizontal, layout.horizontalPadding)
                     .padding(.top, layout.cardsTop)
@@ -172,6 +181,7 @@ struct ConnectionPage: View {
         }
         .coordinateSpace(name: ZTransferPopupAnchorSpace.name)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .photoEffectsHint($connectionHint, duration: 1.8)
         .onChange(of: gpsCoordinator.state.enabled) { enabled in
             if !enabled { attentionOrigin = Date() }
         }
@@ -203,6 +213,10 @@ struct ConnectionPage: View {
         }
     }
 
+    private func showGPSConnectionBlockedHint() {
+        connectionHint = PhotoEffectsHint(resource: "gps_close_before_connect")
+    }
+
     /// Android opens the phone's hotspot settings for STA and Wi‑Fi settings
     /// for AP. iOS has no public deep-link API for either page, so try the
     /// corresponding system route and fall back to the app settings page if
@@ -213,6 +227,25 @@ struct ConnectionPage: View {
         UIApplication.shared.open(url, options: [:]) { opened in
             guard !opened, let fallback = URL(string: UIApplication.openSettingsURLString) else { return }
             UIApplication.shared.open(fallback)
+        }
+    }
+}
+
+private struct GPSBlockedConnectionCard: ViewModifier {
+    let blocked: Bool
+    let onBlockedTap: () -> Void
+
+    func body(content: Content) -> some View {
+        content.overlay {
+            if blocked {
+                RoundedRectangle(cornerRadius: ConnectionLayout.cardRadius, style: .continuous)
+                    .fill(Color.clear)
+                    .contentShape(RoundedRectangle(
+                        cornerRadius: ConnectionLayout.cardRadius,
+                        style: .continuous
+                    ))
+                    .onTapGesture(perform: onBlockedTap)
+            }
         }
     }
 }

@@ -287,6 +287,14 @@ func normalizedSkinPreset(_ stored: String?) -> String {
 private let CONNECTION_HANDOFF_FADE_START_MS = 1_380.0
 private let CONNECTION_HANDOFF_FADE_DURATION_MS = 220.0
 
+func workspacePagerUserScrollEnabled(
+    gpsEnabled: Bool,
+    currentPage: Int,
+    gpsPanelPresented: Bool
+) -> Bool {
+    currentPage == 1 || (!gpsEnabled && !gpsPanelPresented)
+}
+
 
 /// Android HomeWorkspacePager equivalent. The workbench is the page below the
 /// connection page; it is never presented as a sheet or a modal route.
@@ -314,7 +322,14 @@ private struct HomeWorkspacePagerIOS: View {
         GeometryReader { proxy in
             VerticalWorkspacePager(
                 selection: $page,
-                isScrollEnabled: !(gpsPanelPresented && page == 0),
+                // Android blocks entry into the lower workbench for the whole
+                // GPS session, while still allowing a page already below to
+                // return upward to the connection page.
+                isScrollEnabled: workspacePagerUserScrollEnabled(
+                    gpsEnabled: gpsCoordinator.state.enabled,
+                    currentPage: page,
+                    gpsPanelPresented: gpsPanelPresented
+                ),
                 onInteractiveTransitionBegan: { destination in
                     if destination == 1, !gpsCoordinator.state.enabled {
                         connection.setConnectionDiscoveryPaused(true)
@@ -363,6 +378,7 @@ private struct HomeWorkspacePagerIOS: View {
 
     private func navigate(to destination: Int) {
         guard destination != page else { return }
+        guard destination != 1 || !gpsCoordinator.state.enabled else { return }
         // A presented GPS overflow pauses only the connection-page pager.
         // Clear it before changing selection so a stale scroll lock cannot
         // swallow the workbench's explicit back button.

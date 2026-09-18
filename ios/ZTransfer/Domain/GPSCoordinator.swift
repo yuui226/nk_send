@@ -2,6 +2,10 @@
 import Combine
 import Foundation
 
+func gpsBackgroundLocationModeEnabled(_ modes: [String]?) -> Bool {
+    modes?.contains("location") == true
+}
+
 /// Coordinates the Android-equivalent GPS lifecycle: location permission/fix,
 /// Nikon BLE connection and throttled GEO writes.  The AP conflict is surfaced
 /// by the caller instead of silently changing the selected connection mode.
@@ -12,6 +16,9 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
     @Published private(set) var connectionHelpViewed = false
     @Published private(set) var frequency: GPSUpdateFrequency
     let bluetooth: NikonGPSBluetoothClient
+    var locationAuthorizationStatus: CLAuthorizationStatus {
+        locationManager.authorizationStatus
+    }
     private let locationManager = CLLocationManager()
     private let defaults: UserDefaults
     private var lastWrite: Date?
@@ -131,7 +138,21 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
         }
         awaitingPairingAction = false
         reconnectTask?.cancel(); reconnectTask = nil
-        beginRunning()
+        switch locationManager.authorizationStatus {
+        case .notDetermined:
+            locationManager.requestWhenInUseAuthorization()
+        case .authorizedAlways:
+            beginRunning()
+        case .authorizedWhenInUse:
+            locationManager.requestAlwaysAuthorization()
+            beginRunning()
+        case .denied, .restricted:
+            state.status = .error
+            state.message = AppLocalized.resource("gps_permission_required")
+        @unknown default:
+            state.status = .error
+            state.message = AppLocalized.resource("gps_permission_required")
+        }
     }
 
     /// Android's HomeScreen informs the GPS foreground service whenever an AP
@@ -296,8 +317,7 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
         }
         locationManager.desiredAccuracy = frequency.desiredAccuracy
         locationManager.distanceFilter = kCLDistanceFilterNone
-        locationManager.allowsBackgroundLocationUpdates = true
-        locationManager.showsBackgroundLocationIndicator = true
+        configureBackgroundLocation()
         GPSDiagnostics.record("GPS session started")
         if case .ready = bluetooth.state {
             state.status = .waitingFix
@@ -313,10 +333,20 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
         locationManager.stopUpdatingLocation()
         locationManager.desiredAccuracy = frequency.desiredAccuracy
         locationManager.distanceFilter = kCLDistanceFilterNone
-        locationManager.allowsBackgroundLocationUpdates = true
-        locationManager.showsBackgroundLocationIndicator = true
+        configureBackgroundLocation()
         locationManager.startUpdatingLocation()
         GPSDiagnostics.record("location pipeline started")
+    }
+
+    private func configureBackgroundLocation() {
+        let configuredModes = Bundle.main.object(forInfoDictionaryKey: "UIBackgroundModes") as? [String]
+        let enabled = locationManager.authorizationStatus == .authorizedAlways &&
+            gpsBackgroundLocationModeEnabled(configuredModes)
+        // Core Location raises an Objective-C assertion if this is set to true
+        // without the matching background mode. Keep foreground GPS functional
+        // even if a future target accidentally drops the plist capability.
+        locationManager.allowsBackgroundLocationUpdates = enabled
+        locationManager.showsBackgroundLocationIndicator = enabled
     }
 
     private func resumeEnabledSession() {

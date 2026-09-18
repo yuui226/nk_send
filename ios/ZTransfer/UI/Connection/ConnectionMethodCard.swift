@@ -556,11 +556,22 @@ private struct ConnectionBreathingModifier: ViewModifier {
     let active: Bool
     let origin: Date
     let offset: Double
+    @State private var intensity: CGFloat = 0
+
     func body(content: Content) -> some View {
-        TimelineView(.animation(paused: !active || scenePhase != .active)) { context in
+        TimelineView(.animation(paused: intensity <= 0.001 || scenePhase != .active)) { context in
             let elapsed = max(0, context.date.timeIntervalSince(origin))
             let phase = (elapsed / 2.4 + offset).truncatingRemainder(dividingBy: 1)
-            content.scaleEffect(1 + (active ? 0.04 * attention(phase) : 0))
+            content.scaleEffect(1 + 0.04 * attention(phase) * intensity)
+        }
+        .onAppear { intensity = active ? 1 : 0 }
+        .onChange(of: active) { enabled in
+            // Match Android's dedicated attentionIntensity tween. Keep the
+            // timeline alive while the current breath settles instead of
+            // snapping both connection cards back to scale 1 when GPS starts.
+            withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.32)) {
+                intensity = enabled ? 1 : 0
+            }
         }
     }
     private func attention(_ phase: Double) -> Double {

@@ -74,6 +74,35 @@ final class DomainModelTests: XCTestCase {
         XCTAssertEqual(gpsLocationFailureAction(for: .network), .locationUnavailable)
     }
 
+    func testGPSBackgroundLocationRequiresDeclaredLocationMode() {
+        XCTAssertFalse(gpsBackgroundLocationModeEnabled(nil))
+        XCTAssertFalse(gpsBackgroundLocationModeEnabled(["audio"]))
+        XCTAssertTrue(gpsBackgroundLocationModeEnabled(["location"]))
+    }
+
+    func testGPSBlocksOnlyEntryIntoWorkspaceAndPanelOwnsConnectionPageGesture() {
+        XCTAssertFalse(workspacePagerUserScrollEnabled(
+            gpsEnabled: true,
+            currentPage: 0,
+            gpsPanelPresented: false
+        ))
+        XCTAssertTrue(workspacePagerUserScrollEnabled(
+            gpsEnabled: true,
+            currentPage: 1,
+            gpsPanelPresented: false
+        ))
+        XCTAssertFalse(workspacePagerUserScrollEnabled(
+            gpsEnabled: false,
+            currentPage: 0,
+            gpsPanelPresented: true
+        ))
+        XCTAssertTrue(workspacePagerUserScrollEnabled(
+            gpsEnabled: false,
+            currentPage: 0,
+            gpsPanelPresented: false
+        ))
+    }
+
     func testGPSOnlyReusesLocationsFromAndroidsTwoMinuteWindow() {
         let now = Date(timeIntervalSince1970: 2_000)
         XCTAssertTrue(isReusableGPSLocation(CLLocation(

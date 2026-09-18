@@ -14,12 +14,40 @@ struct GPSConnectionControl: View {
     @State private var showHelp = false
     @State private var ambientHigh = false
 
+    private var entryError: Bool {
+        coordinator.state.enabled &&
+            (coordinator.state.status == .apUnavailable || coordinator.state.status == .error)
+    }
+
+    private var entryAccent: Color {
+        entryError ? ZTransferColors.statusError : ZTransferColors.accentBlue
+    }
+
+    private var statusAccent: Color {
+        guard coordinator.state.enabled else { return ZTransferColors.statusWaiting }
+        switch coordinator.state.status {
+        case .off:
+            return ZTransferColors.statusWaiting
+        case .pairingSuccess, .connected, .writing, .waitingFix, .ready:
+            return ZTransferColors.statusConnected
+        case .apUnavailable, .error:
+            return ZTransferColors.statusError
+        default:
+            return ZTransferColors.accentBlue
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             let active = coordinator.state.enabled
-            let ambientAlpha: CGFloat = active
-                ? (ambientHigh ? 0.160 : 0.075)
-                : (ambientHigh ? 0.145 : 0.050)
+            let breathing = !expanded && !entryError
+            let ambientAlpha: CGFloat = entryError ? 0 : (
+                breathing
+                    ? (active
+                        ? (ambientHigh ? 0.160 : 0.075)
+                        : (ambientHigh ? 0.145 : 0.050))
+                    : (active ? 0.105 : 0.070)
+            )
             // Android uses ReleaseCommitWheel for this boolean control. Using
             // the shared wheel preserves tap-to-toggle, long-press diagnostics,
             // detent feedback and the same disabled/active material treatment.
@@ -35,18 +63,20 @@ struct GPSConnectionControl: View {
                 cornerRadius: 20,
                 optionFontSize: 18,
                 optionFontWeight: .bold,
-                accentColor: active ? ZTransferColors.accentBlue : ZTransferColors.secondaryText,
+                accentColor: statusAccent,
                 emphasized: expanded || active,
                 showEmphasisBorder: false,
                 showDragHint: false,
                 onLongClick: {
                     UIPasteboard.general.string = gpsDiagnosticsSnapshot()
                 },
-                ambientEffectColor: active ? ZTransferColors.accentBlue : ZTransferColors.background,
+                ambientEffectColor: entryAccent,
                 ambientEffectAlpha: ambientAlpha
             )
-            .onAppear { startAmbientPulse(active: active) }
-            .onChange(of: active) { startAmbientPulse(active: $0) }
+            .onAppear { updateAmbientPulse() }
+            .onChange(of: active) { _ in updateAmbientPulse() }
+            .onChange(of: expanded) { _ in updateAmbientPulse() }
+            .onChange(of: entryError) { _ in updateAmbientPulse() }
         }
         .background {
             GeometryReader { proxy in
@@ -120,12 +150,15 @@ struct GPSConnectionControl: View {
         }
     }
 
-    private func startAmbientPulse(active: Bool) {
+    private func updateAmbientPulse() {
         var reset = Transaction()
         reset.disablesAnimations = true
         withTransaction(reset) { ambientHigh = false }
+        guard !expanded, !entryError else { return }
+        let active = coordinator.state.enabled
         DispatchQueue.main.async {
-            withAnimation(.easeInOut(duration: (active ? 2.4 : 2.8) / 2)
+            guard !expanded, !entryError else { return }
+            withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: active ? 2.4 : 2.8)
                 .repeatForever(autoreverses: true)) {
                 ambientHigh = true
             }
@@ -226,17 +259,26 @@ private struct GPSInlinePanel: View {
                         statusControl(width: actionWidth)
                             .frame(width: actionWidth)
                     }
+                    .animation(
+                        .timingCurve(0.4, 0, 0.2, 1, duration: 0.18),
+                        value: coordinator.state.enabled
+                    )
+                    .animation(
+                        .timingCurve(0.4, 0, 0.2, 1, duration: 0.18),
+                        value: requiresHoldToDisable
+                    )
                 }
             }
             .frame(height: 42)
         }
-        .padding(12)
+        .padding(.horizontal, 12)
+        .padding(.bottom, 10)
         // A live system blur and its rasterized animation snapshot resolve the
         // backdrop at different moments. Swapping them at the final frame used
         // to look like an extra grey mask flashing over the GPS panel. The
         // shared panel surface is visually stable in both representations, so
         // the handoff needs neither a second overlay nor a material crossfade.
-        .background(ZTransferGlassSurface(cornerRadius: 18, kind: .panel))
+        .background(ZTransferGlassSurface(cornerRadius: 24, kind: .panel))
         .coordinateSpace(name: "gps-inline-panel")
         .onPreferenceChange(GPSHelpAnchorPreferenceKey.self) { helpAnchor = $0 }
         .overlay {
@@ -501,16 +543,19 @@ private struct GPSInlinePanel: View {
                 Image(systemName: "link.slash")
                     .symbolRenderingMode(.hierarchical)
                     .font(.system(size: 18, weight: .medium))
-                    .frame(maxWidth: .infinity).frame(height: 42)
+                    .frame(width: 42, height: 42)
             }
             .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 14, panel: true))
             .disabled(!coordinator.bluetooth.hasSavedPairing)
             .opacity(coordinator.bluetooth.hasSavedPairing ? 1 : 0.42)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .transition(.opacity.combined(with: .scale(scale: 0.96)))
         } else if requiresHoldToDisable {
             let value = coordinator.state.lastSentAt.map { date in
                 let formatter = DateFormatter()
                 formatter.dateFormat = "HH:mm:ss"
                 formatter.locale = Locale(identifier: "en_US_POSIX")
+                formatter.timeZone = TimeZone(identifier: "Asia/Shanghai")
                 return formatter.string(from: date)
             } ?? "--:--:--"
             DetentWheel(label: "", options: [value], selected: value,
@@ -519,8 +564,10 @@ private struct GPSInlinePanel: View {
                         optionFontSize: 13, accentColor: ZTransferColors.accentBlue,
                         emphasized: coordinator.state.lastSentAt != nil,
                         showEmphasisBorder: false)
+                .transition(.opacity.combined(with: .scale(scale: 0.96)))
         } else {
             Color.clear
+                .transition(.opacity)
         }
     }
 
@@ -536,13 +583,17 @@ private struct GPSInlinePanel: View {
                         wheelHeight: 42, readOnly: true, cornerRadius: 14,
                         optionFontSize: 13, accentColor: ZTransferColors.statusConnected,
                         emphasized: true, showEmphasisBorder: false)
-        } else {
+        } else if !coordinator.state.enabled {
             DetentWheel(label: AppLocalized.resource("gps_update_frequency_label"),
                         options: GPSUpdateFrequency.allCases, selected: coordinator.frequency,
                         optionLabel: { $0.title }, onCommit: coordinator.setFrequency,
-                        rowHeight: 16, wheelHeight: 42, enabled: !coordinator.state.enabled,
+                        rowHeight: 16, wheelHeight: 42, enabled: true,
                         cornerRadius: 14, optionFontSize: 13,
                         accentColor: ZTransferColors.accentBlue, onDetent: {})
+                .transition(.opacity.combined(with: .scale(scale: 0.96)))
+        } else {
+            Color.clear
+                .transition(.opacity)
         }
     }
 
@@ -551,7 +602,16 @@ private struct GPSInlinePanel: View {
             guard !requiresHoldToDisable, !holdConsumedTap else { return }
             ZTransferHaptics.shared.tick()
             if !coordinator.state.enabled { coordinator.setEnabled(true) }
-            else if coordinator.state.status == .error { coordinator.retry() }
+            else if coordinator.state.status == .error {
+                switch coordinator.locationAuthorizationStatus {
+                case .denied, .restricted:
+                    if let settings = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(settings)
+                    }
+                default:
+                    coordinator.retry()
+                }
+            }
             else if !requiresHoldToDisable && coordinator.state.status != .apUnavailable { coordinator.setEnabled(false) }
         } label: {
             ZStack {
