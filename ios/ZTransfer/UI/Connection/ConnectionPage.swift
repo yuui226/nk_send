@@ -14,6 +14,7 @@ struct ConnectionPage: View {
     @Binding var gpsPanelPresented: Bool
     @State private var showSettings = false
     @State private var showSTAReset = false
+    @State private var showGPSReset = false
     @State private var showSTATips = false
     @State private var tipsWirelessMode: WirelessMode = .sta
     @State private var tipsAnchor: CGRect = .zero
@@ -51,7 +52,8 @@ struct ConnectionPage: View {
                         ConnectionSceneFadeTimeline(start: celebrationStart) {
                             GPSConnectionControl(
                                 coordinator: gpsCoordinator,
-                                expanded: $gpsPanelPresented
+                                expanded: $gpsPanelPresented,
+                                showingResetPairing: $showGPSReset
                             )
                         }
                     }
@@ -154,6 +156,18 @@ struct ConnectionPage: View {
                     STAResetPairingOverlay(count: model.pairedCameraCount, models: model.pairedCameraModels,
                         onConfirm: { showSTAReset = false; Task { await model.resetSTAPairing() } },
                         onDismiss: { showSTAReset = false })
+                    .ignoresSafeArea()
+                }
+            }
+            if showGPSReset {
+                ConnectionSceneFadeTimeline(start: celebrationStart) {
+                    GPSResetPairingOverlay(
+                        onConfirm: {
+                            showGPSReset = false
+                            gpsCoordinator.clearPairing()
+                        },
+                        onDismiss: { showGPSReset = false }
+                    )
                     .ignoresSafeArea()
                 }
             }

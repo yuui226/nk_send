@@ -46,9 +46,8 @@ private enum QueueExecutionVisualMode: Hashable {
 
 private struct PhotoListWorkspaceTransition: AnimatableModifier {
     var progress: CGFloat
-    let horizontalMultiplier: CGFloat
-    let initialOpacity: CGFloat
-    let initialScale: CGFloat
+    let horizontalFraction: CGFloat
+    let fadedOpacity: CGFloat
 
     nonisolated var animatableData: CGFloat {
         get { progress }
@@ -56,15 +55,20 @@ private struct PhotoListWorkspaceTransition: AnimatableModifier {
     }
 
     func body(content: Content) -> some View {
-        content
-            .opacity(initialOpacity + (1 - initialOpacity) * progress)
-            .offset(x: UIScreen.main.bounds.width * horizontalMultiplier * (1 - progress))
-            .scaleEffect(initialScale + (1 - initialScale) * progress, anchor: .center)
+        GeometryReader { proxy in
+            content
+                .frame(width: proxy.size.width, height: proxy.size.height)
+                .opacity(fadedOpacity + (1 - fadedOpacity) * progress)
+                .offset(x: proxy.size.width * horizontalFraction * (1 - progress))
+        }
     }
 }
 
 private let photoQueueWorkspaceAnimation =
-    Animation.timingCurve(0.22, 0.84, 0.24, 1.0, duration: 0.34)
+    // Android Motion.queuePageSlide: 320 ms FastOutSlowIn. A fixed-duration
+    // curve also reverses cleanly from the current frame without inheriting
+    // stale spring velocity after a rapid back action.
+    Animation.timingCurve(0.4, 0.0, 0.2, 1.0, duration: 0.32)
 
 /// The default SwiftUI hold is 500ms. The photo grid is a deliberate
 /// tap/hold mode switch, so use the user-approved shorter threshold while
@@ -221,6 +225,8 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
     @State private var showingFilter = false
     @State private var filterAnchor: CGRect = .zero
     @State private var showingQueue = false
+    @State private var queueTopControlsVisible = false
+    @State private var queueWorkspaceTransitionNonce = 0
     @AppStorage("defer_transfer_start") private var deferTransferStart = false
     @AppStorage("organize_transfers_by_date") private var organizeByDate = false
     @AppStorage("collapse_burst_photos") private var collapseBurstPhotos = true
@@ -311,21 +317,20 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
                 TransferQueueView(model: queueModel, session: session, directory: directoryStore,
                                   isSessionConnected: isSessionConnected,
                                   apSignalPercent: apSignalPercent,
-                                  onRetrySTA: onRetrySTA) {
-                    withAnimation(photoQueueWorkspaceAnimation) {
-                        showingQueue = false
-                    }
-                }
+                                  onRetrySTA: onRetrySTA,
+                                  showsTopControls: false,
+                                  onNavigateBack: dismissQueuePage)
                 .transition(.asymmetric(
                     insertion: .modifier(
-                        active: PhotoListWorkspaceTransition(progress: 0, horizontalMultiplier: 1, initialOpacity: 0.82, initialScale: 0.985),
-                        identity: PhotoListWorkspaceTransition(progress: 1, horizontalMultiplier: 1, initialOpacity: 0.82, initialScale: 0.985)
+                        active: PhotoListWorkspaceTransition(progress: 0, horizontalFraction: 1, fadedOpacity: 0.72),
+                        identity: PhotoListWorkspaceTransition(progress: 1, horizontalFraction: 1, fadedOpacity: 0.72)
                     ),
                     removal: .modifier(
-                        active: PhotoListWorkspaceTransition(progress: 0, horizontalMultiplier: 1, initialOpacity: 0.82, initialScale: 0.985),
-                        identity: PhotoListWorkspaceTransition(progress: 1, horizontalMultiplier: 1, initialOpacity: 0.82, initialScale: 0.985)
+                        active: PhotoListWorkspaceTransition(progress: 0, horizontalFraction: 1, fadedOpacity: 0.72),
+                        identity: PhotoListWorkspaceTransition(progress: 1, horizontalFraction: 1, fadedOpacity: 0.72)
                     )
                 ))
+                .zIndex(1)
             } else {
             ScrollViewReader { reader in
                 ScrollView(showsIndicators: false) {
@@ -587,20 +592,22 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
                 }
                 // The two workspace pages are a horizontal pair. The files
                 // page enters from the left when returning from the queue and
-                // keeps a subtle scale/opacity settle during the hand-off.
+                // uses Android's one-third parallax plus opacity hand-off.
                 .transition(.asymmetric(
                     insertion: .modifier(
-                        active: PhotoListWorkspaceTransition(progress: 0, horizontalMultiplier: -1, initialOpacity: 0.72, initialScale: 0.985),
-                        identity: PhotoListWorkspaceTransition(progress: 1, horizontalMultiplier: -1, initialOpacity: 0.72, initialScale: 0.985)
+                        active: PhotoListWorkspaceTransition(progress: 0, horizontalFraction: -1 / 3, fadedOpacity: 0.5),
+                        identity: PhotoListWorkspaceTransition(progress: 1, horizontalFraction: -1 / 3, fadedOpacity: 0.5)
                     ),
                     removal: .modifier(
-                        active: PhotoListWorkspaceTransition(progress: 0, horizontalMultiplier: -1, initialOpacity: 0.72, initialScale: 0.985),
-                        identity: PhotoListWorkspaceTransition(progress: 1, horizontalMultiplier: -1, initialOpacity: 0.72, initialScale: 0.985)
+                        active: PhotoListWorkspaceTransition(progress: 0, horizontalFraction: -1 / 3, fadedOpacity: 0.5),
+                        identity: PhotoListWorkspaceTransition(progress: 1, horizontalFraction: -1 / 3, fadedOpacity: 0.5)
                     )
                 ))
+                .zIndex(0)
             }
             }
             if selectedFile != nil { previewOverlay }
+            if queueTopControlsVisible { queuePageTopControls }
             // A single workspace-owned control survives both page transitions.
             queueTopRightControls
                 .padding(.horizontal, 12)
@@ -996,6 +1003,84 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
         .onPreferenceChange(PhotoListFilterAnchorPreferenceKey.self) { filterAnchor = $0 }
     }
 
+    /// Android keeps the queue page's back/signal group outside the moving
+    /// page. It fades in only after the 320 ms page slide has settled, and
+    /// disappears immediately when returning so it never overlaps the list
+    /// header that is still sliding into place.
+    private var queuePageTopControls: some View {
+        HStack(spacing: 8) {
+            Button(action: dismissQueuePage) {
+                Image(systemName: "arrow.left")
+                    .font(.system(size: 16, weight: .bold))
+                    .frame(width: 36, height: 36)
+            }
+            .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
+
+            Button {
+                if session.isUSB || session.wirelessMode == .ap {
+                    guard isSessionConnected else { return }
+                    withAnimation(signalExpanded
+                                  ? .timingCurve(0.4, 0, 0.2, 1, duration: 0.22)
+                                  : .spring(response: 0.42, dampingFraction: 0.72)) {
+                        signalExpanded.toggle()
+                    }
+                } else if session.wirelessMode == .sta && !isSessionConnected {
+                    onRetrySTA()
+                }
+            } label: {
+                HStack(spacing: signalExpanded ? 5 : 0) {
+                    PhotoListSignalIcon(isUSB: session.isUSB,
+                                        wirelessMode: session.wirelessMode,
+                                        connected: isSessionConnected,
+                                        apSignalPercent: apSignalPercent)
+                    if signalExpanded && session.isUSB && isSessionConnected {
+                        Text(AppLocalized.resource("connection_usb"))
+                            .zTransferTypography(.labelSmall, weight: .medium)
+                            .foregroundStyle(ZTransferColors.accentBlue)
+                    } else if signalExpanded && session.wirelessMode == .ap && isSessionConnected {
+                        Text(apSignalPercent.map { "\($0)%" } ?? "--%")
+                            .zTransferTypography(.labelSmall, weight: .medium)
+                            .monospacedDigit()
+                            .foregroundStyle(apSignalTint(percent: apSignalPercent))
+                    }
+                }
+                .padding(.horizontal, 10)
+                .frame(minWidth: 40, minHeight: 36, maxHeight: 36)
+            }
+            .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .transition(.opacity)
+        .zIndex(3)
+    }
+
+    private func presentQueuePage() {
+        guard !showingQueue else { return }
+        queueWorkspaceTransitionNonce &+= 1
+        let nonce = queueWorkspaceTransitionNonce
+        queueTopControlsVisible = false
+        withAnimation(photoQueueWorkspaceAnimation) { showingQueue = true }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 320_000_000)
+            guard showingQueue, queueWorkspaceTransitionNonce == nonce else { return }
+            withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.14)) {
+                queueTopControlsVisible = true
+            }
+        }
+    }
+
+    private func dismissQueuePage() {
+        guard showingQueue else { return }
+        queueWorkspaceTransitionNonce &+= 1
+        withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.08)) {
+            queueTopControlsVisible = false
+        }
+        withAnimation(photoQueueWorkspaceAnimation) { showingQueue = false }
+    }
+
     /// Android keeps queue execution and the queue pill outside the files ↔
     /// transfer page transition. Reusing this group in both pages preserves
     /// one source of truth for start/pause availability and pill animation.
@@ -1051,10 +1136,7 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
             }
 
             Button {
-                    guard !showingQueue else { return }
-                    withAnimation(photoQueueWorkspaceAnimation) {
-                        showingQueue = true
-                    }
+                    presentQueuePage()
                 } label: {
                     QueuePill(snapshot: queueModel.snapshot, activeProgress: queueModel.activeProgress,
                               heldCount: heldFlightCount,

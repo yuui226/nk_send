@@ -8,6 +8,7 @@ enum NikonGPSBluetoothState: Equatable, Sendable {
     case scanning
     case connecting(String)
     case pairing
+    case cameraConfirm
     case ready(String)
     case disconnected
     case failed(String)
@@ -48,6 +49,7 @@ final class NikonGPSBluetoothClient: NSObject, ObservableObject {
     private var pairingTimeout: Task<Void, Never>?
     private var directReconnectTask: Task<Void, Never>?
     private var shouldRun = false
+    private var freshPairingAttempt = false
     private let defaults: UserDefaults
 
     init(controllerName: String = "ZTransfer", savedDevice: UInt32? = nil, savedNonce: UInt32? = nil, defaults: UserDefaults? = nil) {
@@ -178,6 +180,7 @@ final class NikonGPSBluetoothClient: NSObject, ObservableObject {
     private func clearConnectionState() {
         peripheral = nil; pairCharacteristic = nil; idCharacteristic = nil; geoCharacteristic = nil
         stage1 = nil; stage3Sent = false; idQueued = false
+        freshPairingAttempt = false
         let abandoned = writeQueue
         writeQueue.removeAll(); writeInFlight = false
         abandoned.forEach { $0.completion?(false) }
@@ -199,6 +202,7 @@ final class NikonGPSBluetoothClient: NSObject, ObservableObject {
     private func beginPairing(_ peripheral: CBPeripheral) {
         guard let pairCharacteristic else { return }
         let restoringIdentity = savedDevice != nil && savedNonce != nil
+        freshPairingAttempt = !restoringIdentity
         stage1 = NikonGPSPairingProtocol().newStage1(deviceOverride: savedDevice, nonceOverride: savedNonce)
         if let stage1 {
             // A newly generated identity becomes the active identity in this
@@ -224,6 +228,7 @@ final class NikonGPSBluetoothClient: NSObject, ObservableObject {
     private func handlePairingValue(_ value: Data, peripheral: CBPeripheral) {
         if value == Data([0x01, 0x00]) {
             GPSDiagnostics.record("pairing stage4 received")
+            if freshPairingAttempt { state = .cameraConfirm }
             queueControllerID(peripheral); return
         }
         guard let packet = NikonGPSPairingPacket.decode(value), let first = stage1 else { return }
@@ -234,6 +239,7 @@ final class NikonGPSBluetoothClient: NSObject, ObservableObject {
             pairingTimeout?.cancel(); stage3Sent = true
             GPSDiagnostics.record("pairing stage3 sent")
             enqueueWrite(peripheral: peripheral, characteristic: pairCharacteristic, data: response.encode())
+            if freshPairingAttempt { state = .cameraConfirm }
             pairingTimeout = Task { [weak self] in
                 try? await Task.sleep(nanoseconds: 7_000_000_000)
                 guard let self, !Task.isCancelled, !self.idQueued else { return }
@@ -241,6 +247,7 @@ final class NikonGPSBluetoothClient: NSObject, ObservableObject {
             }
         } else if packet.stage == 4 {
             pairingTimeout?.cancel()
+            if freshPairingAttempt { state = .cameraConfirm }
             Task { [weak self, weak peripheral] in
                 try? await Task.sleep(nanoseconds: 1_500_000_000)
                 guard let self, let peripheral, !Task.isCancelled else { return }

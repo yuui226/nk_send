@@ -332,7 +332,8 @@ struct ConnectionMethodCard: View {
                 HStack {
                     TipLightbulbButton(
                         attention: !staHelpViewed, size: 34,
-                        accessibilityLabel: AppLocalized.resource("tip_sta_title")
+                        accessibilityLabel: AppLocalized.resource("tip_sta_title"),
+                        suppressFrostedShadowInLight: true
                     ) {
                         onSTAHelpRequested?(staHelpButtonFrame)
                     }
@@ -351,14 +352,20 @@ struct ConnectionMethodCard: View {
                         Path { p in p.move(to: CGPoint(x: 9, y: 9)); p.addLine(to: CGPoint(x: 25, y: 25)) }
                             .stroke(staResetIconColor, style: StrokeStyle(lineWidth: 2, lineCap: .round))
                       }.frame(width: 34, height: 34)
-                    }.buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 11))
+                    }.buttonStyle(ZTransferGlassButtonStyle(
+                        cornerRadius: 11,
+                        suppressFrostedShadowInLight: true
+                    ))
                      .disabled(state.wifiPhase == .connected)
                      .accessibilityLabel(AppLocalized.resource("sta_reset_pairing"))
                     Spacer(minLength: 0)
                     Button { onSTAHotspotSettings?() } label: {
                         utilityIcon(ZTransferIcon.settings, tint: ZTransferColors.secondaryText)
                     }
-                    .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 11))
+                    .buttonStyle(ZTransferGlassButtonStyle(
+                        cornerRadius: 11,
+                        suppressFrostedShadowInLight: true
+                    ))
                     .disabled(state.wifiPhase == .connected)
                     .accessibilityLabel(AppLocalized.resource("sta_hotspot_settings_short"))
                 }
@@ -368,14 +375,18 @@ struct ConnectionMethodCard: View {
                         .foregroundStyle(materialForeground)
                         .frame(maxWidth: .infinity).frame(height: 42)
                 }
-                .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 14))
+                .buttonStyle(ZTransferGlassButtonStyle(
+                    cornerRadius: 14,
+                    suppressFrostedShadowInLight: true
+                ))
                 .disabled(state.wifiPhase == .connected)
             }
         } else {
             HStack(spacing: 8) {
                 TipLightbulbButton(
                     attention: !apHelpViewed, size: 36,
-                    accessibilityLabel: AppLocalized.resource("tip_title")
+                    accessibilityLabel: AppLocalized.resource("tip_title"),
+                    suppressFrostedShadowInLight: true
                 ) {
                     onAPHelpRequested?(apHelpButtonFrame)
                 }
@@ -393,7 +404,10 @@ struct ConnectionMethodCard: View {
                         .foregroundStyle(wifiSettingsTextColor)
                         .frame(maxWidth: .infinity).frame(height: 36)
                 }
-                .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 12))
+                .buttonStyle(ZTransferGlassButtonStyle(
+                    cornerRadius: 12,
+                    suppressFrostedShadowInLight: true
+                ))
                 .disabled(dimmed)
             }
         }

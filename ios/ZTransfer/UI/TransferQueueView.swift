@@ -20,6 +20,7 @@ struct TransferQueueView: View {
     let apSignalPercent: Int?
     let onRetrySTA: () -> Void
     let onNavigateBack: () -> Void
+    let showsTopControls: Bool
     @State private var pendingConfirmation: QueueConfirmation?
     @State private var removingItemIDs: Set<UUID> = []
     @State private var clearAllInProgress = false
@@ -33,12 +34,14 @@ struct TransferQueueView: View {
     init(model: TransferQueueViewModel, session: CameraSession?, directory: DirectoryAccessStore,
          isSessionConnected: Bool = true, apSignalPercent: Int? = nil,
          onRetrySTA: @escaping () -> Void = {},
+         showsTopControls: Bool = true,
          onNavigateBack: @escaping () -> Void) {
         self.model = model
         self.session = session
         self.isSessionConnected = isSessionConnected
         self.apSignalPercent = apSignalPercent
         self.onRetrySTA = onRetrySTA
+        self.showsTopControls = showsTopControls
         self.directory = directory
         self.onNavigateBack = onNavigateBack
     }
@@ -70,7 +73,7 @@ struct TransferQueueView: View {
                 }
                 .animation(ZTransferMotion.standard, value: model.snapshot.items)
             }
-            queueTopControls
+            if showsTopControls { queueTopControls }
             queueBottomControls
         }
         .overlay { queueConfirmationOverlay }

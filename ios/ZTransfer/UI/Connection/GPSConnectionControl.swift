@@ -8,11 +8,13 @@ struct GPSConnectionControl: View {
     private let preferredPanelWidth: CGFloat = 280
     @ObservedObject var coordinator: GPSCoordinator
     @Binding var expanded: Bool
+    @Binding var showingResetPairing: Bool
     @State private var panelMounted = false
     @State private var panelProgress: CGFloat = 0
     @State private var headerWidth: CGFloat = 1
     @State private var showHelp = false
     @State private var ambientHigh = false
+    @State private var hintText: String?
 
     private var entryError: Bool {
         coordinator.state.enabled &&
@@ -69,6 +71,7 @@ struct GPSConnectionControl: View {
                 showDragHint: false,
                 onLongClick: {
                     UIPasteboard.general.string = gpsDiagnosticsSnapshot()
+                    hintText = AppLocalized.resource("code_copied")
                 },
                 ambientEffectColor: entryAccent,
                 ambientEffectAlpha: ambientAlpha
@@ -96,7 +99,12 @@ struct GPSConnectionControl: View {
                 // coordinates so expansion and collapse return to the same
                 // physical control instead of fading toward a generic edge.
                 GeniePopupPanel(
-                    content: GPSInlinePanel(coordinator: coordinator, showHelp: $showHelp),
+                    content: GPSInlinePanel(
+                        coordinator: coordinator,
+                        showHelp: $showHelp,
+                        showingResetPairing: $showingResetPairing,
+                        hintText: $hintText
+                    ),
                     targetProgress: panelProgress,
                     anchor: panelSourceAnchor,
                     panelOrigin: .zero,
@@ -116,7 +124,22 @@ struct GPSConnectionControl: View {
                 .offset(y: headerHeight + panelGap)
             }
         }
+        .overlay(alignment: .topTrailing) {
+            if let hintText {
+                Text(hintText)
+                    .zTransferText(size: 11, weight: .medium)
+                    .foregroundStyle(ZTransferColors.accentBlue)
+                    .offset(y: headerHeight + 5)
+                    .transition(.opacity)
+            }
+        }
         .zIndex(panelMounted ? 2 : 0)
+        .task(id: hintText) {
+            guard hintText != nil else { return }
+            try? await Task.sleep(for: .milliseconds(1_800))
+            guard !Task.isCancelled else { return }
+            hintText = nil
+        }
     }
 
     private var panelSourceAnchor: CGRect {
@@ -190,7 +213,8 @@ private struct GPSInlinePanel: View {
     @AppStorage("haptics_enabled") private var hapticsEnabled = true
     @ObservedObject var coordinator: GPSCoordinator
     @Binding var showHelp: Bool
-    @State private var showingReset = false
+    @Binding var showingResetPairing: Bool
+    @Binding var hintText: String?
     @State private var holdPressed = false
     @State private var holdConsumedTap = false
     @State private var holdCompleted = false
@@ -200,6 +224,9 @@ private struct GPSInlinePanel: View {
     @State private var previousStatusRank = 0
     @State private var statusTransitionDirection = 1
     @State private var helpAnchor: CGRect = .zero
+    @State private var updateBurstID = 0
+    @State private var updateBurstProgress: CGFloat = 0
+    @Environment(\.colorScheme) private var colorScheme
     private var statusLabel: String {
         switch coordinator.state.status {
         case .off: return AppLocalized.resource("gps_enable")
@@ -241,35 +268,15 @@ private struct GPSInlinePanel: View {
             }
             .id(showConnectionSteps ? "guide" : (hasCoordinates ? "location" : "empty"))
             .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .topLeading)))
-            TimelineView(.periodic(from: .now, by: 1)) { context in
-                GeometryReader { geometry in
-                    // Android uses weights 0.82 / 0.86 / 1.18 with two 8dp
-                    // gaps. Keep those proportions instead of fixing the
-                    // leading control to 44pt, which made the panel diverge
-                    // on narrow phones.
-                    let unit = max(0, geometry.size.width - 16) / 2.86
-                    let leadingWidth = unit * 0.82
-                    let frequencyWidth = unit * 0.86
-                    let actionWidth = unit * 1.18
-                    HStack(spacing: 8) {
-                        leadingControl(width: leadingWidth, now: context.date)
-                            .frame(width: leadingWidth)
-                        frequencyControl(width: frequencyWidth, now: context.date)
-                            .frame(width: frequencyWidth)
-                        statusControl(width: actionWidth)
-                            .frame(width: actionWidth)
-                    }
-                    .animation(
-                        .timingCurve(0.4, 0, 0.2, 1, duration: 0.18),
-                        value: coordinator.state.enabled
-                    )
-                    .animation(
-                        .timingCurve(0.4, 0, 0.2, 1, duration: 0.18),
-                        value: requiresHoldToDisable
-                    )
+            if requiresHoldToDisable {
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    controlRow(now: context.date)
                 }
+                .frame(height: 42)
+            } else {
+                controlRow(now: Date())
+                    .frame(height: 42)
             }
-            .frame(height: 42)
         }
         .padding(.horizontal, 12)
         .padding(.bottom, 10)
@@ -295,12 +302,6 @@ private struct GPSInlinePanel: View {
                 .zIndex(3)
             }
         }
-        .alert(AppLocalized.resource("gps_clear_pairing_title"), isPresented: $showingReset) {
-            Button(AppLocalized.resource("cancel"), role: .cancel) {}
-            Button(AppLocalized.resource("gps_clear_pairing"), role: .destructive) { coordinator.clearPairing() }
-        } message: {
-            Text(AppLocalized.resource("gps_clear_pairing_message"))
-        }
         .onAppear { updateSessionEvidence() }
         .onAppear { previousStatusRank = statusRank }
         .onDisappear { ZTransferHaptics.shared.cancelProgressiveHold() }
@@ -314,6 +315,16 @@ private struct GPSInlinePanel: View {
             if !required { ZTransferHaptics.shared.cancelProgressiveHold() }
         }
         .onChange(of: coordinator.state.status) { _ in updateSessionEvidence() }
+        .onChange(of: coordinator.state.status) { status in
+            if status == .writing { updateBurstID &+= 1 }
+        }
+        .onChange(of: coordinator.state.message) { message in
+            guard coordinator.state.status == .error, let message else { return }
+            if message == AppLocalized.resource("gps_permission_required") ||
+                message == AppLocalized.resource("gps_bluetooth_required") {
+                hintText = message
+            }
+        }
         .onChange(of: statusRank) { newRank in
             statusTransitionDirection = newRank >= previousStatusRank ? 1 : -1
             previousStatusRank = newRank
@@ -345,6 +356,18 @@ private struct GPSInlinePanel: View {
         .animation(.easeInOut(duration: 0.24), value: hasCoordinates)
         .animation(.easeInOut(duration: 0.17), value: coordinator.placeLookupState)
         .animation(.easeInOut(duration: 0.18), value: showHelp)
+        .task(id: updateBurstID) {
+            guard updateBurstID > 0 else { return }
+            updateBurstProgress = 0
+            withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.085)) {
+                updateBurstProgress = 1
+            }
+            try? await Task.sleep(for: .milliseconds(85))
+            guard !Task.isCancelled else { return }
+            withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.36)) {
+                updateBurstProgress = 0
+            }
+        }
         .task(id: placeBubbleTaskKey) {
             guard let requested = placeBubbleCoordinates else { return }
             if coordinator.placeLookupState.status == .success,
@@ -389,15 +412,23 @@ private struct GPSInlinePanel: View {
     private var connectionGuide: some View {
         ZStack(alignment: .topTrailing) {
             VStack(alignment: .leading, spacing: 10) {
-                gpsPreparationRow(icon: "iphone", title: AppLocalized.resource("gps_phone_label"), detail: AppLocalized.resource("gps_phone_ready"))
-                gpsPreparationRow(icon: "camera.fill", title: AppLocalized.resource("gps_camera_label"), detail: AppLocalized.resource("gps_camera_ready"), status: coordinator.bluetooth.hasSavedPairing ? AppLocalized.resource("gps_paired_badge") : nil)
+                // The bulb only overlaps the two preparation rows. Keep its
+                // 36pt reservation local to those rows so the first-pairing
+                // instruction below can use the panel's full content width,
+                // matching Android and avoiding a two-character orphan line.
+                VStack(alignment: .leading, spacing: 10) {
+                    gpsPreparationRow(icon: "iphone", title: AppLocalized.resource("gps_phone_label"), detail: AppLocalized.resource("gps_phone_ready"))
+                    gpsPreparationRow(icon: "camera.fill", title: AppLocalized.resource("gps_camera_label"), detail: AppLocalized.resource("gps_camera_ready"), status: coordinator.bluetooth.hasSavedPairing ? AppLocalized.resource("gps_paired_badge") : nil)
+                }
+                .padding(.trailing, 36)
                 if !coordinator.bluetooth.hasSavedPairing {
                     HStack(spacing: 6) {
                         Text(AppLocalized.resource("gps_first_pairing_label"))
                             .zTransferText(size: 12, weight: .bold)
                             .foregroundStyle(ZTransferColors.accentBlue)
                         Text(AppLocalized.resource("gps_first_pairing_path"))
-                            .zTransferText(size: 11)
+                            .zTransferText(size: 10)
+                            .lineSpacing(3)
                             .lineLimit(2)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -407,23 +438,29 @@ private struct GPSInlinePanel: View {
                     .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(ZTransferColors.accentBlue.opacity(0.20)))
                 }
             }
-            .padding(.trailing, 36)
-            if !coordinator.state.enabled {
-                TipLightbulbButton(
-                    attention: !coordinator.connectionHelpViewed, size: 30,
-                    accessibilityLabel: AppLocalized.resource("gps_auto_write"),
-                    embeddedInPanel: true
-                ) {
-                    coordinator.markConnectionHelpViewed()
-                    showHelp = true
-                }
-                .background {
-                    GeometryReader { proxy in
-                        Color.clear.preference(
-                            key: GPSHelpAnchorPreferenceKey.self,
-                            value: proxy.frame(in: .named("gps-inline-panel"))
-                        )
-                    }
+            TipLightbulbButton(
+                attention: !coordinator.connectionHelpViewed && !coordinator.state.enabled,
+                size: 30,
+                accessibilityLabel: AppLocalized.resource("gps_auto_write"),
+                embeddedInPanel: true
+            ) {
+                guard !coordinator.state.enabled else { return }
+                coordinator.markConnectionHelpViewed()
+                showHelp = true
+            }
+            .opacity(coordinator.state.enabled ? 0 : 1)
+            .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.14),
+                       value: coordinator.state.enabled)
+            .scaleEffect(coordinator.state.enabled ? 0.92 : 1)
+            .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.16),
+                       value: coordinator.state.enabled)
+            .allowsHitTesting(!coordinator.state.enabled)
+            .background {
+                GeometryReader { proxy in
+                    Color.clear.preference(
+                        key: GPSHelpAnchorPreferenceKey.self,
+                        value: proxy.frame(in: .named("gps-inline-panel"))
+                    )
                 }
             }
         }
@@ -455,29 +492,46 @@ private struct GPSInlinePanel: View {
                 coordinateSurface(text: formatCoordinate(coordinator.state.longitude, latitude: false), tint: ZTransferColors.accentOrange)
                     .onTapGesture { copyAndLookup() }
             }
+            .overlay(alignment: .top) {
+                if let bubble = placeBubblePresentation {
+                    placeBubble(bubble.text, loading: bubble.loading)
+                        .frame(maxWidth: 270)
+                        .offset(y: 50)
+                        .zIndex(2)
+                }
+            }
+            .zIndex(2)
             Text(AppLocalized.formattedResource("gps_altitude_value", ["%1$d": "\(Int((coordinator.state.altitudeMeters ?? 0).rounded()))"]))
                 .zTransferText(size: 15, weight: .semibold)
                 .frame(maxWidth: .infinity, minHeight: 42)
-                .background(ZTransferColors.accentBlue.opacity(0.065), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(ZTransferColors.accentBlue.opacity(0.20)))
-            if placeBubbleCoordinates != nil && coordinator.placeLookupState.status == .loading {
-                placeBubble(AppLocalized.resource("gps_place_loading"), loading: true)
-            } else if placeBubbleCoordinates != nil && coordinator.placeLookupState.status == .success,
-                      let name = coordinator.placeLookupState.placeName {
-                placeBubble(name, loading: false)
-            } else if placeBubbleCoordinates != nil && coordinator.placeLookupState.status == .error {
-                placeBubble(AppLocalized.resource("gps_place_unavailable"), loading: false)
-            }
+                .background(ZTransferColors.statusConnected.opacity(detailFillOpacity), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(ZTransferColors.statusConnected.opacity(detailBorderOpacity)))
         }
         .padding(.top, 8)
+    }
+
+    private var detailFillOpacity: Double { colorScheme == .dark ? 0.10 : 0.065 }
+    private var detailBorderOpacity: Double { colorScheme == .dark ? 0.28 : 0.20 }
+
+    private var placeBubblePresentation: (text: String, loading: Bool)? {
+        guard placeBubbleCoordinates != nil else { return nil }
+        switch coordinator.placeLookupState.status {
+        case .idle, .loading:
+            return (AppLocalized.resource("gps_place_loading"), true)
+        case .success:
+            guard let name = coordinator.placeLookupState.placeName else { return nil }
+            return (name, false)
+        case .error:
+            return (AppLocalized.resource("gps_place_unavailable"), false)
+        }
     }
 
     private func coordinateSurface(text: String, tint: Color) -> some View {
         Text(text)
             .zTransferText(size: 15, weight: .semibold)
             .frame(maxWidth: .infinity, minHeight: 42)
-            .background(tint.opacity(0.065), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(tint.opacity(0.20)))
+            .background(tint.opacity(detailFillOpacity), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(tint.opacity(detailBorderOpacity)))
             .lineLimit(1)
             .minimumScaleFactor(0.72)
     }
@@ -485,14 +539,25 @@ private struct GPSInlinePanel: View {
     @ViewBuilder
     private func placeBubble(_ text: String, loading: Bool) -> some View {
         HStack(spacing: 8) {
-            if loading { ProgressView().tint(ZTransferColors.accentBlue) }
-            Text(text).zTransferText(size: 12, weight: .medium)
+            if loading {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(ZTransferColors.accentBlue)
+                    .frame(width: 19, height: 19)
+            }
+            Text(text)
+                .zTransferText(size: 14, weight: loading ? .regular : .medium)
+                .lineLimit(8)
         }
         .padding(.horizontal, 14).padding(.vertical, 11)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(ZTransferColors.secondaryText.opacity(0.16)))
-        .transition(.opacity.combined(with: .move(edge: .bottom)))
+        .frame(maxWidth: 270, alignment: .leading)
+        .background(ZTransferGlassSurface(cornerRadius: 20, kind: .panel))
+        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
+            .stroke(ZTransferColors.primaryText.opacity(0.12), lineWidth: 1))
+        .transition(.asymmetric(
+            insertion: .opacity.combined(with: .offset(y: 8)),
+            removal: .opacity.combined(with: .offset(y: 8))
+        ))
     }
 
     private func copyAndLookup() {
@@ -514,14 +579,28 @@ private struct GPSInlinePanel: View {
     private func gpsPreparationRow(icon: String, title: String, detail: String, status: String? = nil) -> some View {
         HStack {
             Image(systemName: icon)
-                .font(.system(size: 18, weight: .semibold))
+                .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(ZTransferColors.accentBlue)
                 .frame(width: 30, height: 30)
                 .background(ZTransferColors.accentBlue.opacity(0.10), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(title).zTransferText(size: 12, weight: .bold).foregroundStyle(ZTransferColors.secondaryText)
-                    if let status { Text(status).zTransferText(size: 10, weight: .medium).foregroundStyle(ZTransferColors.accentBlue) }
+                    if let status {
+                        Text(status)
+                            .zTransferText(size: 9, weight: .medium)
+                            .foregroundStyle(ZTransferColors.accentBlue)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(
+                                ZTransferColors.accentBlue.opacity(0.08),
+                                in: Capsule()
+                            )
+                            .overlay(Capsule().stroke(
+                                ZTransferColors.accentBlue.opacity(0.18),
+                                lineWidth: 1
+                            ))
+                    }
                 }
                 Text(detail).zTransferText(size: 14, weight: .medium)
             }
@@ -536,10 +615,36 @@ private struct GPSInlinePanel: View {
         }
     }
 
+    private func controlRow(now: Date) -> some View {
+        GeometryReader { geometry in
+            // Android uses weights 0.82 / 0.86 / 1.18 with two 8dp gaps.
+            let unit = max(0, geometry.size.width - 16) / 2.86
+            let leadingWidth = unit * 0.82
+            let frequencyWidth = unit * 0.86
+            let actionWidth = unit * 1.18
+            HStack(spacing: 8) {
+                leadingControl(now: now)
+                    .frame(width: leadingWidth)
+                frequencyControl(now: now)
+                    .frame(width: frequencyWidth)
+                statusControl()
+                    .frame(width: actionWidth)
+            }
+            .animation(
+                .timingCurve(0.4, 0, 0.2, 1, duration: 0.18),
+                value: coordinator.state.enabled
+            )
+            .animation(
+                .timingCurve(0.4, 0, 0.2, 1, duration: 0.18),
+                value: requiresHoldToDisable
+            )
+        }
+    }
+
     @ViewBuilder
-    private func leadingControl(width: CGFloat, now: Date) -> some View {
+    private func leadingControl(now: Date) -> some View {
         if !coordinator.state.enabled {
-            Button { showingReset = true } label: {
+            Button { showingResetPairing = true } label: {
                 Image(systemName: "link.slash")
                     .symbolRenderingMode(.hierarchical)
                     .font(.system(size: 18, weight: .medium))
@@ -572,7 +677,7 @@ private struct GPSInlinePanel: View {
     }
 
     @ViewBuilder
-    private func frequencyControl(width: CGFloat, now: Date) -> some View {
+    private func frequencyControl(now: Date) -> some View {
         if requiresHoldToDisable {
             let remaining = coordinator.state.lastSentAt.map {
                 max(0, Int(ceil(Double(coordinator.frequency.rawValue) - now.timeIntervalSince($0))))
@@ -582,7 +687,9 @@ private struct GPSInlinePanel: View {
                         optionLabel: { $0 }, onCommit: { _ in }, rowHeight: 16,
                         wheelHeight: 42, readOnly: true, cornerRadius: 14,
                         optionFontSize: 13, accentColor: ZTransferColors.statusConnected,
-                        emphasized: true, showEmphasisBorder: false)
+                        emphasized: true, showEmphasisBorder: false,
+                        ambientEffectColor: ZTransferColors.statusConnected,
+                        ambientEffectAlpha: 0.18 * updateBurstProgress)
         } else if !coordinator.state.enabled {
             DetentWheel(label: AppLocalized.resource("gps_update_frequency_label"),
                         options: GPSUpdateFrequency.allCases, selected: coordinator.frequency,
@@ -597,18 +704,21 @@ private struct GPSInlinePanel: View {
         }
     }
 
-    private func statusControl(width: CGFloat) -> some View {
+    private func statusControl() -> some View {
         Button {
             guard !requiresHoldToDisable, !holdConsumedTap else { return }
             ZTransferHaptics.shared.tick()
             if !coordinator.state.enabled { coordinator.setEnabled(true) }
             else if coordinator.state.status == .error {
-                switch coordinator.locationAuthorizationStatus {
-                case .denied, .restricted:
+                let message = coordinator.state.message ?? ""
+                let needsSettings = message == AppLocalized.resource("gps_bluetooth_required") ||
+                    message == AppLocalized.resource("gps_permission_required") ||
+                    !CLLocationManager.locationServicesEnabled()
+                if needsSettings {
                     if let settings = URL(string: UIApplication.openSettingsURLString) {
                         UIApplication.shared.open(settings)
                     }
-                default:
+                } else {
                     coordinator.retry()
                 }
             }

@@ -24,7 +24,7 @@
 "GPS 信号弱时，定位精度会下降，海拔可能显示 0 米，属于正常现象。" = "With a weak GPS signal, accuracy may drop and altitude may show 0 m; this is normal.";
 "Logo" = "Logo";
 "OpenSession 失败：%1$s" = "OpenSession failed: %1$s";
-"PS：本模式对应相机中的 Wi-Fi AP 模式" = "PS: This corresponds to the camera\\'s Wi-Fi AP mode";
+"PS：本模式对应相机中的 Wi-Fi AP 模式" = "PS: This corresponds to the camera's Wi-Fi AP mode";
 "STA 相机已断开，点击重新连接。" = "STA camera disconnected. Tap to reconnect.";
 "STA 相机已连接" = "STA camera connected";
 "STA 连接指引" = "STA connection guide";
@@ -93,7 +93,7 @@
 "取消" = "Cancel";
 "取消收藏当前效果" = "Remove current effect from favorites";
 "可多选照片，共用当前滤镜、边框和水印，效果图另存。" = "Select multiple photos to apply the same filter, frame, and watermark. Edited photos are saved as new copies.";
-"可将「Wi-Fi 连接」加入相机的 i 菜单，之后按 i 键即可快速开启。" = "Add “Wi-Fi connection” to the camera\\'s i menu, then press i to turn it on quickly.";
+"可将「Wi-Fi 连接」加入相机的 i 菜单，之后按 i 键即可快速开启。" = "Add “Wi-Fi connection” to the camera's i menu, then press i to turn it on quickly.";
 "可读性" = "Legibility";
 "和煦" = "Soft Harmony";
 "品牌" = "Brand";

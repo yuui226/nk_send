@@ -1,5 +1,6 @@
 @preconcurrency import CoreLocation
 import Combine
+import Contacts
 import Foundation
 
 func gpsBackgroundLocationModeEnabled(_ modes: [String]?) -> Bool {
@@ -36,6 +37,7 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
     private var readyTransitionTask: Task<Void, Never>?
     private var bluetoothObservation: AnyCancellable?
     private var awaitingPairingAction = false
+    private var pairingConfirmationPending = false
     private var apModeBlocked = false
     private var placeCache: [String: String] = [:]
     private var placeCacheOrder: [String] = []
@@ -88,6 +90,7 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
         GPSDiagnostics.record("set enabled=\(enabled)")
         defaults.set(enabled, forKey: GPSPreferences.enabled)
         awaitingPairingAction = false
+        pairingConfirmationPending = false
         writeTask?.cancel(); writeTask = nil
         writeTimeoutTask?.cancel(); writeTimeoutTask = nil
         reconnectTask?.cancel(); reconnectTask = nil
@@ -105,6 +108,7 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
             latestTrustedAltitudeFix = nil
             pendingAltitudeRefresh = false
             cameraVerified = false
+            pairingConfirmationPending = false
             preserveReadyDuringReconnect = false
             return
         }
@@ -294,6 +298,13 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
     }
 
     private static func bestPlaceName(_ placemark: CLPlacemark) -> String? {
+        if let postalAddress = placemark.postalAddress {
+            let line = CNPostalAddressFormatter.string(from: postalAddress, style: .mailingAddress)
+                .split(whereSeparator: { $0.isNewline })
+                .joined(separator: " ")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !line.isEmpty { return line }
+        }
         let values: [String?] = [
             placemark.name,
             placemark.thoroughfare,
@@ -387,9 +398,11 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
             state.cameraName = name
             if !preserveReadyDuringReconnect { state.status = .connecting }
         case .pairing: state.status = .pairing
+        case .cameraConfirm: state.status = .cameraConfirm
         case .ready(let name):
             reconnectTask?.cancel(); reconnectTask = nil
             state.cameraName = name
+            pairingConfirmationPending = state.status == .cameraConfirm || state.status == .pairing
             state.status = preserveReadyDuringReconnect ? .ready : .connected
             state.message = nil
             cameraVerified = preserveReadyDuringReconnect
@@ -435,6 +448,7 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
     private func applyBluetoothFailure(_ message: String) {
         GPSDiagnostics.record("error=\(message)")
         locationManager.stopUpdatingLocation()
+        pairingConfirmationPending = false
         let lowercased = message.lowercased()
         if lowercased.contains("pairing rejected") ||
             lowercased.contains("identity expired") ||
@@ -476,6 +490,7 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
         latestLocationDuringWrite = nil
         pendingAltitudeRefresh = false
         cameraVerified = false
+        pairingConfirmationPending = false
         preserveReadyDuringReconnect = false
         locationManager.stopUpdatingLocation()
         bluetooth.stop()
@@ -624,17 +639,28 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
             return
         }
         let firstVerifiedWrite = !cameraVerified
+        let confirmedFreshPairing = pairingConfirmationPending
         cameraVerified = true
+        pairingConfirmationPending = false
         lastWrite = Date()
         state.lastSentAt = lastWrite
         state.message = nil
         if firstVerifiedWrite {
-            state.status = .connected
+            state.status = confirmedFreshPairing ? .pairingSuccess : .connected
             readyTransitionTask?.cancel()
             readyTransitionTask = Task { [weak self] in
+                guard let self else { return }
+                if confirmedFreshPairing {
+                    try? await Task.sleep(for: .milliseconds(650))
+                    guard !Task.isCancelled, self.state.enabled,
+                          case .ready = self.bluetooth.state,
+                          self.state.status == .pairingSuccess else { return }
+                    self.state.status = .connected
+                }
                 try? await Task.sleep(for: .milliseconds(700))
-                guard let self, !Task.isCancelled, self.state.enabled,
-                      case .ready = self.bluetooth.state else { return }
+                guard !Task.isCancelled, self.state.enabled,
+                      case .ready = self.bluetooth.state,
+                      self.state.status == .connected else { return }
                 self.state.status = .ready
             }
         } else {

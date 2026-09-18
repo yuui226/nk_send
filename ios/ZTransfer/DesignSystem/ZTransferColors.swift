@@ -150,6 +150,7 @@ struct ZTransferGlassButtonStyle: ButtonStyle {
     var activeOutline: Bool
     var materialContentColor: Color?
     var disabledAlpha: CGFloat
+    var suppressFrostedShadowInLight: Bool
 
     @AppStorage("skin_preset") private var skinPreset = ZTransferButtonSkin.frostedGlass.rawValue
     @Environment(\.colorScheme) private var colorScheme
@@ -164,7 +165,8 @@ struct ZTransferGlassButtonStyle: ButtonStyle {
         activeColor: Color = ZTransferColors.accentBlue,
         activeOutline: Bool = false,
         materialContentColor: Color? = nil,
-        disabledAlpha: CGFloat = 0.45
+        disabledAlpha: CGFloat = 0.45,
+        suppressFrostedShadowInLight: Bool = false
     ) {
         self.tint = tint
         self.cornerRadius = cornerRadius
@@ -175,6 +177,7 @@ struct ZTransferGlassButtonStyle: ButtonStyle {
         self.activeOutline = activeOutline
         self.materialContentColor = materialContentColor
         self.disabledAlpha = disabledAlpha
+        self.suppressFrostedShadowInLight = suppressFrostedShadowInLight
     }
 
     private var skin: ZTransferButtonSkin {
@@ -205,7 +208,8 @@ struct ZTransferGlassButtonStyle: ButtonStyle {
                     active: active,
                     activeColor: activeColor,
                     activeOutline: activeOutline,
-                    pressed: configuration.isPressed && isEnabled
+                    pressed: configuration.isPressed && isEnabled,
+                    suppressFrostedShadowInLight: suppressFrostedShadowInLight
                 )
             }
             .scaleEffect(pressedScale)
@@ -278,6 +282,7 @@ struct ZTransferButtonMaterialSurface: View {
     var activeColor: Color = ZTransferColors.accentBlue
     var activeOutline = false
     var pressed = false
+    var suppressFrostedShadowInLight = false
 
     @Environment(\.colorScheme) private var colorScheme
     @ObservedObject private var textureStore = ZTransferMaterialTextureStore.shared
@@ -285,11 +290,24 @@ struct ZTransferButtonMaterialSurface: View {
     private var shape: RoundedRectangle {
         RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
     }
+    private var shadowSuppressed: Bool {
+        panel || (suppressFrostedShadowInLight && !dark &&
+                  (skin == .frostedGlass || skin == .liquidGlass))
+    }
 
     var body: some View {
         Group {
             if skin == .liquidGlass && !panel {
-                nativeLiquidGlassMaterial
+                if suppressFrostedShadowInLight && !dark {
+                    // Native Liquid Glass draws its own drop shadow outside
+                    // the requested shape. The Android Wi-Fi card is flat in
+                    // light mode, so clip only these card-local controls at
+                    // the material boundary while retaining native refraction
+                    // and press behavior inside it.
+                    nativeLiquidGlassMaterial.clipShape(shape)
+                } else {
+                    nativeLiquidGlassMaterial
+                }
             } else {
                 material
                     .clipShape(shape)
@@ -299,9 +317,9 @@ struct ZTransferButtonMaterialSurface: View {
                         }
                     }
                     .shadow(
-                        color: panel ? .clear : .black.opacity(shadowOpacity),
-                        radius: panel ? 0 : shadowRadius,
-                        y: panel ? 0 : shadowY
+                        color: shadowSuppressed ? .clear : .black.opacity(shadowOpacity),
+                        radius: shadowSuppressed ? 0 : shadowRadius,
+                        y: shadowSuppressed ? 0 : shadowY
                     )
             }
         }
