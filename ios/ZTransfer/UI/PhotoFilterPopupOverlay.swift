@@ -15,8 +15,6 @@ struct PhotoFilterPopupOverlay: View {
 
     @State private var working: PhotoFilterState
     @State private var editingDate = false
-    @State private var startDate: Date
-    @State private var endDate: Date
 
     init(isPresented: Binding<Bool>, anchor: Anchor<CGRect>,
          initial: PhotoFilterState,
@@ -30,12 +28,6 @@ struct PhotoFilterPopupOverlay: View {
         self.suggestedDate = suggestedDate
         self.onChange = onChange
         _working = State(initialValue: initial)
-        let fallback = Calendar.current.startOfDay(for: Date())
-        let initialDate = Self.date(from: initial.dateRange?.end)
-            ?? Self.date(from: suggestedDate)
-            ?? fallback
-        _startDate = State(initialValue: Self.date(from: initial.dateRange?.start) ?? initialDate)
-        _endDate = State(initialValue: Self.date(from: initial.dateRange?.end) ?? initialDate)
     }
 
     var body: some View {
@@ -99,8 +91,13 @@ struct PhotoFilterPopupOverlay: View {
         .frame(width: max(1, width - 28))
         .fixedSize(horizontal: false, vertical: true)
         .padding(14)
-        .background(ZTransferGlassSurface(cornerRadius: 16, kind: .panel))
-        .shadow(color: .black.opacity(0.16), radius: 10, y: 5)
+        // Shadow the panel surface once. Applying a shadow to the entire
+        // content makes the synchronous Genie capture blur every child.
+        .background {
+            ZTransferGlassSurface(cornerRadius: 16, kind: .panel)
+                .compositingGroup()
+                .shadow(color: .black.opacity(0.16), radius: 10, y: 5)
+        }
         .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.15), value: editingDate)
     }
 
@@ -174,42 +171,10 @@ struct PhotoFilterPopupOverlay: View {
     }
 
     private var dateEditor: some View {
-        let calendar = Calendar.current
-        let years = Array(1990...max(1990, calendar.component(.year, from: Date()) + 1))
-        return VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                Button { editingDate = false } label: {
-                    Image(systemName: "chevron.left").frame(width: 28, height: 28)
-                }.buttonStyle(.plain)
-                Text(AppLocalized.resource("date_range"))
-                    .zTransferTypography(.titleMedium, weight: .semibold)
-                Spacer(minLength: 0)
-            }
-            DateEndpointEditor(label: AppLocalized.resource("date_start"), date: $startDate, years: years)
-            DateEndpointEditor(label: AppLocalized.resource("date_end"), date: $endDate, years: years)
-            HStack(spacing: 8) {
-                Button(AppLocalized.resource("clear")) {
-                    commit(working.withDateRange(nil)); editingDate = false
-                }
-                .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 11, panel: true))
-                .frame(maxWidth: .infinity, minHeight: 40)
-                Button(AppLocalized.resource("done")) {
-                    let cal = Calendar.current
-                    let a = cal.startOfDay(for: min(startDate, endDate))
-                    let b = cal.startOfDay(for: max(startDate, endDate))
-                    commit(working.withDateRange(PhotoDateRange(
-                        start: Self.dateKey(from: a), end: Self.dateKey(from: b)
-                    )))
-                    editingDate = false
-                }
-                .buttonStyle(ZTransferGlassButtonStyle(
-                    cornerRadius: 11,
-                    panel: true,
-                    active: true,
-                    activeColor: ZTransferColors.accentBlue
-                ))
-                .frame(maxWidth: .infinity, minHeight: 40)
-            }
+        PhotoFilterDateEditor(current: working.dateRange, suggestedDate: suggestedDate,
+                              onBack: { editingDate = false }) { range in
+            commit(working.withDateRange(range))
+            editingDate = false
         }
     }
 
@@ -284,12 +249,66 @@ struct PhotoFilterPopupOverlay: View {
     private func resetDraft() {
         working = initial
         editingDate = false
-        let fallback = Calendar.current.startOfDay(for: Date())
-        let initialDate = Self.date(from: initial.dateRange?.end)
+    }
+}
+
+/// Android DateRangeEditor owns these two values only while its page exists.
+/// Opening the filter popup itself must not parse or initialize date drafts.
+@MainActor
+private struct PhotoFilterDateEditor: View {
+    let onBack: () -> Void
+    let onApply: (PhotoDateRange?) -> Void
+    @State private var startDate: Date
+    @State private var endDate: Date
+
+    init(current: PhotoDateRange?, suggestedDate: String?,
+         onBack: @escaping () -> Void, onApply: @escaping (PhotoDateRange?) -> Void) {
+        self.onBack = onBack
+        self.onApply = onApply
+        let initialDate = Self.date(from: current?.end)
             ?? Self.date(from: suggestedDate)
-            ?? fallback
-        startDate = Self.date(from: initial.dateRange?.start) ?? initialDate
-        endDate = Self.date(from: initial.dateRange?.end) ?? initialDate
+            ?? Calendar.current.startOfDay(for: Date())
+        _startDate = State(initialValue: Self.date(from: current?.start) ?? initialDate)
+        _endDate = State(initialValue: initialDate)
+    }
+
+    var body: some View {
+        let calendar = Calendar.current
+        let years = Array(1990...max(1990, calendar.component(.year, from: Date()) + 1))
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Button { onBack() } label: {
+                    Image(systemName: "chevron.left").frame(width: 28, height: 28)
+                }.buttonStyle(.plain)
+                Text(AppLocalized.resource("date_range"))
+                    .zTransferTypography(.titleMedium, weight: .semibold)
+                Spacer(minLength: 0)
+            }
+            DateEndpointEditor(label: AppLocalized.resource("date_start"), date: $startDate, years: years)
+            DateEndpointEditor(label: AppLocalized.resource("date_end"), date: $endDate, years: years)
+            HStack(spacing: 8) {
+                Button(AppLocalized.resource("clear")) {
+                    onApply(nil)
+                }
+                .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 11, panel: true))
+                .frame(maxWidth: .infinity, minHeight: 40)
+                Button(AppLocalized.resource("done")) {
+                    let cal = Calendar.current
+                    let a = cal.startOfDay(for: min(startDate, endDate))
+                    let b = cal.startOfDay(for: max(startDate, endDate))
+                    onApply(PhotoDateRange(
+                        start: Self.dateKey(from: a), end: Self.dateKey(from: b)
+                    ))
+                }
+                .buttonStyle(ZTransferGlassButtonStyle(
+                    cornerRadius: 11,
+                    panel: true,
+                    active: true,
+                    activeColor: ZTransferColors.accentBlue
+                ))
+                .frame(maxWidth: .infinity, minHeight: 40)
+            }
+        }
     }
 
     private static func date(from value: String?) -> Date? {
