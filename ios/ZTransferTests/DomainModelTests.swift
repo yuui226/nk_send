@@ -7,6 +7,37 @@ import UniformTypeIdentifiers
 @testable import ZTransfer
 
 final class DomainModelTests: XCTestCase {
+    func testPreparedGenieGeometryMatchesOriginalCurve() {
+        // Frozen pre-optimization equations: preparation must not approximate
+        // the curve, including padded rows outside the visible panel bounds.
+        for size in [CGSize(width: 280, height: 193),
+                     CGSize(width: 340, height: 399 + 1.0 / 3),
+                     CGSize(width: 378, height: 670)] {
+            for source in [CGRect(x: 12, y: -8, width: 20, height: 0),
+                           CGRect(x: 240, y: -8, width: 28, height: 0),
+                           CGRect(x: 10, y: -10, width: 155, height: 0)] {
+                for step in 0...120 {
+                    let p = CGFloat(step) / 120
+                    let frame = GeniePopupMotion.FrameGeometry(progress: p, source: source, size: size)
+                    for index in 0...48 {
+                        let fraction = (CGFloat(index) / 48 * (size.height + 24) - 12) / size.height
+                        let v = min(1, max(0, fraction))
+                        let length = p * (2 - p)
+                        let spread = pow(p, 0.85 + 2.1 * (1 - v) * (1 - v))
+                        let width = source.width + (size.width - source.width) * spread
+                        let center = source.midX + (size.width / 2 - source.midX) * spread
+                        let bent = fraction + 0.4 * (1 - p) * (v * v - v)
+                        let row = frame.row(at: .init(fraction: fraction))
+                        XCTAssertEqual(row.left, center - width / 2, accuracy: 1e-9)
+                        XCTAssertEqual(row.right, center + width / 2, accuracy: 1e-9)
+                        XCTAssertEqual(row.y, source.maxY * (1 - length) + size.height * length * bent,
+                                       accuracy: 1e-9)
+                    }
+                }
+            }
+        }
+    }
+
     func testGeniePopupUsesTriggerShortEdgeAndSharedEndpoints() {
         for button in [CGRect(x: 119, y: 62, width: 40, height: 40),
                        CGRect(x: 12, y: 68, width: 55, height: 36),
@@ -94,6 +125,15 @@ final class DomainModelTests: XCTestCase {
         context.draw(bandImage, in: CGRect(x: 0, y: 0, width: 1, height: 1))
         XCTAssertGreaterThan(pixel[0], 200)
         XCTAssertGreaterThan(pixel[3], 200)
+        // A frame skipped because progress is unchanged must still redraw if
+        // the button moves in that same frame (e.g. a safe-area/layout update).
+        let originalLeft = layers[24].transform.m41
+        popup.configure(target: 1, anchorX: 148.0 / 340, anchorWidth: 20.0 / 340, anchorGap: 8)
+        popup.layoutIfNeeded()
+        XCTAssertEqual(layers[24].transform.m41, originalLeft + 40, accuracy: 0.0001)
+        popup.configure(target: 1, anchorX: 108.0 / 340, anchorWidth: 20.0 / 340, anchorGap: 8)
+        popup.layoutIfNeeded()
+        XCTAssertEqual(layers[24].transform.m41, originalLeft, accuracy: 0.0001)
         try await Task.sleep(for: .milliseconds(80))
         popup.configure(target: 0, anchorX: 108.0 / 340, anchorWidth: 20.0 / 340, anchorGap: 8)
         popup.layoutIfNeeded()
@@ -105,6 +145,7 @@ final class DomainModelTests: XCTestCase {
         XCTAssertTrue(popup.host.view.isUserInteractionEnabled)
         XCTAssertTrue(popup.subviews.last?.isHidden == true)
         XCTAssertTrue(layers.allSatisfy { $0.contents == nil })
+        XCTAssertTrue(layers.allSatisfy { ($0.animationKeys() ?? []).isEmpty })
         popup.configure(target: 0, anchorX: 108.0 / 340, anchorWidth: 20.0 / 340, anchorGap: 8)
         popup.layoutIfNeeded()
         try await Task.sleep(for: .milliseconds(400))

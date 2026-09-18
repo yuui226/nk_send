@@ -1,8 +1,7 @@
 import SwiftUI
 import QuartzCore
 
-/// Small shared contract for the three popup entrances. Geometry lives in the
-/// SwiftUI transition itself; this type contains only timing and anchor math.
+/// Shared timing, attachment and cross-section geometry for all three popups.
 enum GeniePopupMotion {
     private static let expandDuration = 0.36
     private static let collapseDuration = 0.28
@@ -47,15 +46,58 @@ enum GeniePopupMotion {
     /// pulled in. Each cross-section has its own width AND horizontal travel,
     /// so the whole surface bends instead of scaling behind a curved mask.
     static func row(progress: CGFloat, fraction: CGFloat, source: CGRect, size: CGSize) -> Row {
-        let p = Self.progress(progress)
-        let v = min(1, max(0, fraction))
-        let length = p * (2 - p)
-        let spread = pow(p, 0.85 + 2.1 * (1 - v) * (1 - v))
-        let width = source.width + (size.width - source.width) * spread
-        let center = source.midX + (size.width / 2 - source.midX) * spread
-        let bent = fraction + 0.4 * (1 - p) * (v * v - v)
-        return Row(left: center - width / 2, right: center + width / 2,
-                   y: source.maxY * (1 - length) + size.height * length * bent)
+        FrameGeometry(progress: progress, source: source, size: size)
+            .row(at: CrossSection(fraction: fraction))
+    }
+
+    /// Depends only on the captured panel's height, not animation progress.
+    /// Prepare these 49 samples once per size, including the shadow padding.
+    struct CrossSection {
+        let fraction: CGFloat
+        let spreadExponent: CGFloat
+        let bend: CGFloat
+
+        init(fraction: CGFloat) {
+            self.fraction = fraction
+            let v = min(1, max(0, fraction))
+            spreadExponent = 0.85 + 2.1 * (1 - v) * (1 - v)
+            bend = v * v - v
+        }
+    }
+
+    /// Quantities shared by every cross-section of the current frame. Keep
+    /// the original arithmetic; no lookup-table or curve approximation.
+    struct FrameGeometry {
+        private let progress: CGFloat
+        private let sourceWidth: CGFloat
+        private let widthDelta: CGFloat
+        private let sourceCenter: CGFloat
+        private let centerDelta: CGFloat
+        private let originY: CGFloat
+        private let stretchedHeight: CGFloat
+        private let bendFactor: CGFloat
+
+        init(progress: CGFloat, source: CGRect, size: CGSize) {
+            let p = GeniePopupMotion.progress(progress)
+            let length = p * (2 - p)
+            self.progress = p
+            sourceWidth = source.width
+            widthDelta = size.width - source.width
+            sourceCenter = source.midX
+            centerDelta = size.width / 2 - source.midX
+            originY = source.maxY * (1 - length)
+            stretchedHeight = size.height * length
+            bendFactor = 0.4 * (1 - p)
+        }
+
+        func row(at section: CrossSection) -> Row {
+            let spread = pow(progress, section.spreadExponent)
+            let width = sourceWidth + widthDelta * spread
+            let center = sourceCenter + centerDelta * spread
+            let bent = section.fraction + bendFactor * section.bend
+            return Row(left: center - width / 2, right: center + width / 2,
+                       y: originY + stretchedHeight * bent)
+        }
     }
 
     static func opacity(_ progress: CGFloat) -> CGFloat {

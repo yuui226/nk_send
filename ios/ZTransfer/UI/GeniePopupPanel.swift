@@ -14,9 +14,9 @@ struct GeniePopupPanel<Content: View>: UIViewRepresentable {
     let anchorGap: CGFloat
 
     func makeUIView(context: Context) -> GeniePopupHostView {
-        let view = GeniePopupHostView()
-        updateUIView(view, context: context)
-        return view
+        // SwiftUI calls updateUIView after creation; assigning the hosted
+        // content here too would build the same hierarchy twice.
+        GeniePopupHostView()
     }
 
     func updateUIView(_ view: GeniePopupHostView, context: Context) {
@@ -48,6 +48,7 @@ final class GeniePopupHostView: UIView {
     private let bands = (0..<48).map { _ in CALayer() }
     private let capturePadding: CGFloat = 12
     private var capturedSize = CGSize.zero
+    private var crossSections: [GeniePopupMotion.CrossSection] = []
     private var hasCapture = false
     private var displayLink: CADisplayLink?
     private var progress: CGFloat = 0
@@ -58,6 +59,8 @@ final class GeniePopupHostView: UIView {
     private var anchorX: CGFloat = 0.5
     private var anchorWidth: CGFloat = 0.1
     private var anchorGap: CGFloat = 8
+    private var lastDrawnProgress: CGFloat?
+    private var settledTarget: CGFloat?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -105,6 +108,9 @@ final class GeniePopupHostView: UIView {
 
     func configure(target next: CGFloat, anchorX: CGFloat,
                    anchorWidth: CGFloat, anchorGap: CGFloat) {
+        if self.anchorX != anchorX || self.anchorWidth != anchorWidth || self.anchorGap != anchorGap {
+            lastDrawnProgress = nil
+        }
         self.anchorX = anchorX
         self.anchorWidth = anchorWidth
         self.anchorGap = anchorGap
@@ -155,7 +161,13 @@ final class GeniePopupHostView: UIView {
             host.view.layer.render(in: context.cgContext)
         }
         guard let cgImage = image.cgImage else { return }
-        capturedSize = bounds.size
+        if capturedSize != bounds.size {
+            capturedSize = bounds.size
+            crossSections = (0...bands.count).map { index in
+                let fraction = (CGFloat(index) / CGFloat(bands.count) * rect.height - capturePadding) / bounds.height
+                return GeniePopupMotion.CrossSection(fraction: fraction)
+            }
+        }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         for (index, band) in bands.enumerated() {
@@ -171,58 +183,78 @@ final class GeniePopupHostView: UIView {
         }
         CATransaction.commit()
         hasCapture = true
+        lastDrawnProgress = nil
         host.view.layer.opacity = 0
-        canvas.isHidden = false
+        host.view.isUserInteractionEnabled = false
+        host.view.accessibilityElementsHidden = true
     }
 
     @objc private func tick(_ link: CADisplayLink) {
         let elapsed = link.timestamp - startedAt
         let fraction = min(1, max(0, elapsed / max(duration, 0.001)))
-        let eased = GeniePopupMotion.timing(fraction, expanding: target > from)
-        progress = from + (target - from) * eased
         if fraction >= 1 {
             progress = target
-            stop()
             settle()
-        } else {
-            drawFrame()
+            return
         }
+        let eased = GeniePopupMotion.timing(fraction, expanding: target > from)
+        progress = from + (target - from) * eased
+        drawFrame()
     }
 
     private func drawFrame() {
-        guard hasCapture else { return }
+        // Layout can run again without advancing the animation. Only rewrite
+        // the 48 transforms when progress, capture or attachment has changed.
+        guard hasCapture, lastDrawnProgress != progress else { return }
+        lastDrawnProgress = progress
         let size = capturedSize
-        let paddedHeight = size.height + 2 * capturePadding
+        let paddingFraction = capturePadding / size.width
         let source = CGRect(x: anchorX * size.width - anchorWidth * size.width / 2,
                             y: -anchorGap, width: anchorWidth * size.width, height: 0)
+        let geometry = GeniePopupMotion.FrameGeometry(progress: progress, source: source, size: size)
+        var top = geometry.row(at: crossSections[0]).padded(by: paddingFraction)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         for (index, band) in bands.enumerated() {
-            let topFraction = (CGFloat(index) / CGFloat(bands.count) * paddedHeight - capturePadding) / size.height
-            let bottomFraction = (CGFloat(index + 1) / CGFloat(bands.count) * paddedHeight - capturePadding) / size.height
-            let top = GeniePopupMotion.row(progress: progress, fraction: topFraction, source: source, size: size)
-            let bottom = GeniePopupMotion.row(progress: progress, fraction: bottomFraction, source: source, size: size)
+            let bottom = geometry.row(at: crossSections[index + 1]).padded(by: paddingFraction)
             band.transform = GeniePopupMotion.bandTransform(
                 size: band.bounds.size,
-                top: top.padded(by: capturePadding / size.width),
-                bottom: bottom.padded(by: capturePadding / size.width)
+                top: top,
+                bottom: bottom
             )
+            // Adjacent bands share this exact edge. Evaluate its power curve
+            // and padding once (49 rows per frame instead of 96).
+            top = bottom
         }
-        canvas.alpha = GeniePopupMotion.opacity(progress)
-        canvas.isHidden = progress <= 0
-        host.view.layer.opacity = 0
-        host.view.isUserInteractionEnabled = false
-        host.view.accessibilityElementsHidden = true
+        let alpha = GeniePopupMotion.opacity(progress)
+        if canvas.alpha != alpha { canvas.alpha = alpha }
+        let hidden = progress <= 0
+        if canvas.isHidden != hidden { canvas.isHidden = hidden }
         CATransaction.commit()
     }
 
     private func settle() {
+        // Content/layout updates can visit this method while already idle.
+        // The outer UIKit visibility flags have not changed in that case.
+        guard settledTarget != target || hasCapture || displayLink != nil else { return }
+        // Also handles a reversal back to the current endpoint before the
+        // first tick: an already settled popup needs no display-link callback.
+        stop()
+        // Plain CALayers can otherwise implicitly animate contents=nil,
+        // keeping discarded captures alive after the canvas is hidden.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
         canvas.isHidden = true
         host.view.layer.opacity = target == 0 ? 0 : 1
         host.view.isUserInteractionEnabled = target == 1
         host.view.accessibilityElementsHidden = target == 0
-        hasCapture = false
-        for band in bands { band.contents = nil }
+        if hasCapture {
+            hasCapture = false
+            lastDrawnProgress = nil
+            for band in bands { band.contents = nil }
+        }
+        CATransaction.commit()
+        settledTarget = target
     }
 
     func stop() {
