@@ -28,7 +28,8 @@ actor WiFiConnectionService {
                 throw PTPSessionError.responseCode(result.code)
             }
             opened = true
-            let repo = CameraRepository(session: session)
+            let repo = CameraRepository(session: session,
+                                        transportCameraIdentifier: socket.responderGUID)
             _ = try? await repo.loadDeviceInfo()
             // A complete negative DeviceInfo response is optional on Android.
             // A timed-out or malformed transaction poisons iOS's command
@@ -66,7 +67,8 @@ actor WiFiConnectionService {
         else if let deferred = try await selection.tryDeferred() { camera = deferred }
         else { throw await coordinator.lastFailure ?? STAConnectionFailure(cause: STAConnectionError.notFound, knownCamera: false) }
         guard !Task.isCancelled, generation == request else { await camera.close(); throw CancellationError() }
-        let repo = CameraRepository(session: camera.session, staAlbum: camera.album)
+        let repo = CameraRepository(session: camera.session, staAlbum: camera.album,
+                                    transportCameraIdentifier: camera.guid)
         camera.startEvents { await repo.receiveEvent($0) }
         closeConnection = camera.close
         closeSocket = { Task { await camera.close() } }

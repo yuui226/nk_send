@@ -6,6 +6,7 @@ import SwiftUI
 struct PhotoFilterPopupOverlay: View {
     @Binding var isPresented: Bool
     let anchor: CGRect
+    let motionAnchor: CGRect
     let initial: PhotoFilterState
     let availableExtensions: [String]
     let availableStorageSlots: [UInt32]
@@ -18,14 +19,15 @@ struct PhotoFilterPopupOverlay: View {
     @State private var endDate: Date
     @State private var animationProgress: CGFloat = 0
     @State private var contentHeight: CGFloat?
-    @State private var openingStarted = false
     @State private var dismissalRequested = false
 
-    init(isPresented: Binding<Bool>, anchor: CGRect, initial: PhotoFilterState,
+    init(isPresented: Binding<Bool>, anchor: CGRect, motionAnchor: CGRect,
+         initial: PhotoFilterState,
          availableExtensions: [String], availableStorageSlots: [UInt32],
          suggestedDate: String?, onChange: @escaping (PhotoFilterState) -> Void) {
         _isPresented = isPresented
         self.anchor = anchor
+        self.motionAnchor = motionAnchor
         self.initial = initial
         self.availableExtensions = availableExtensions.map { $0.lowercased() }
         self.availableStorageSlots = availableStorageSlots
@@ -42,25 +44,33 @@ struct PhotoFilterPopupOverlay: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let overlayFrame = proxy.frame(in: .global)
+            let overlayFrame = proxy.frame(in: .named(ZTransferPopupAnchorSpace.name))
             let localAnchor = anchor.offsetBy(dx: -overlayFrame.minX, dy: -overlayFrame.minY)
             let width = min(340, max(1, proxy.size.width - 24))
             // Match Android FilterOverlay: the panel starts 8dp below the
             // measured filter button and clamps only horizontally. The old
             // bottom-based top clamp made a tall popup jump upward and lose
             // its relationship with the button.
-            let left = min(max(anchor == .zero ? 12 : localAnchor.minX, 12),
-                           max(12, proxy.size.width - width - 12))
+            // The popup itself is centered in the viewport. The button anchor
+            // only defines the transform origin; coupling it to panelLeft made
+            // the entire filter form visibly lean toward the leading edge.
+            let left = max(0, (proxy.size.width - width) / 2)
             let fallbackTop = max(proxy.safeAreaInsets.top + 106, 106)
             let top = anchor == .zero
                 ? fallbackTop
                 : localAnchor.maxY + 8
             let availableHeight = max(1, proxy.size.height - top - max(12, proxy.safeAreaInsets.bottom))
             let panelHeight = min(contentHeight ?? availableHeight, availableHeight)
+            // As with Settings, the mouth is the full trigger button rather
+            // than the FilterMark glyph inside it.
+            let mouthWidth = localAnchor.width > 0 ? localAnchor.width : 44
             let sourceAnchor = (anchor == .zero
                 ? CGRect(x: min(max(proxy.size.width * 0.35, 12), proxy.size.width - 48),
-                         y: top - 36, width: 36, height: 36)
-                : localAnchor)
+                         y: top - 9, width: mouthWidth, height: 1)
+                : CGRect(x: localAnchor.midX - mouthWidth / 2,
+                         y: localAnchor.maxY - 1,
+                         width: mouthWidth,
+                         height: 1))
                 .offsetBy(dx: -left, dy: -top)
             ZStack(alignment: .topLeading) {
                 Color.clear
@@ -68,15 +78,19 @@ struct PhotoFilterPopupOverlay: View {
                     .contentShape(Rectangle())
                     .onTapGesture { close() }
 
+                // Reuse the exact same anchored genie container as Settings:
+                // identical mesh geometry, easing, duration, interruption and
+                // collapse-completion semantics. The popup remains centered;
+                // only the mesh mouth follows the filter button.
                 GeniePopupPanel(
                     content: panelContent(width: width) { height in
+                        guard height > 0,
+                              abs((contentHeight ?? 0) - height) > 0.5 else { return }
                         contentHeight = height
-                        guard !dismissalRequested, !openingStarted else { return }
-                        openingStarted = true
-                        // Let the hosted tree commit its measured height before
-                        // the first snapshot, avoiding a provisional-height flash.
+                        guard !dismissalRequested else { return }
                         DispatchQueue.main.async {
-                            guard !dismissalRequested else { return }
+                            guard !dismissalRequested,
+                                  contentHeight == height else { return }
                             animationProgress = 1
                         }
                     },
@@ -92,8 +106,8 @@ struct PhotoFilterPopupOverlay: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .onAppear {
-                openingStarted = false
                 dismissalRequested = false
+                animationProgress = 0
             }
         }
         .ignoresSafeArea()
@@ -111,7 +125,7 @@ struct PhotoFilterPopupOverlay: View {
                     .transition(.opacity.combined(with: .offset(x: -12)))
             }
         }
-        .frame(width: width)
+        .frame(width: max(1, width - 28))
         .fixedSize(horizontal: false, vertical: true)
         .padding(14)
         .background(ZTransferGlassSurface(cornerRadius: 16, kind: .panel))
@@ -129,9 +143,11 @@ struct PhotoFilterPopupOverlay: View {
     private var filterForm: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
-                Image(systemName: "line.3.horizontal.decrease.circle")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(ZTransferColors.accentBlue)
+                // Android reuses FilterMark in both the toolbar and popup.
+                // Keep one iOS vector too; the system circled glyph had a
+                // different silhouette and visual center.
+                PhotoListFilterIcon(active: false, color: ZTransferColors.accentBlue)
+                    .frame(width: 18, height: 18)
                 Text(AppLocalized.resource("filter_title"))
                     .zTransferTypography(.titleMedium, weight: .semibold)
                     .foregroundStyle(ZTransferColors.primaryText)
@@ -207,7 +223,7 @@ struct PhotoFilterPopupOverlay: View {
                 Button(AppLocalized.resource("clear")) {
                     commit(working.withDateRange(nil)); editingDate = false
                 }
-                .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 11))
+                .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 11, panel: true))
                 .frame(maxWidth: .infinity, minHeight: 40)
                 Button(AppLocalized.resource("done")) {
                     let cal = Calendar.current
@@ -217,7 +233,11 @@ struct PhotoFilterPopupOverlay: View {
                     commit(working.withDateRange(PhotoDateRange(start: f.string(from: a), end: f.string(from: b))))
                     editingDate = false
                 }
-                .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 11))
+                .buttonStyle(ZTransferGlassButtonStyle(
+                    cornerRadius: 11,
+                    active: true,
+                    activeColor: ZTransferColors.accentBlue
+                ))
                 .frame(maxWidth: .infinity, minHeight: 40)
             }
         }
@@ -256,6 +276,10 @@ struct PhotoFilterPopupOverlay: View {
     private func close() {
         guard isPresented, !dismissalRequested else { return }
         dismissalRequested = true
+        if contentHeight == nil {
+            isPresented = false
+            return
+        }
         animationProgress = 0
     }
 

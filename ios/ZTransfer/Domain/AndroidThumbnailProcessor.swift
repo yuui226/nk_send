@@ -7,6 +7,11 @@ import UIKit
 /// enters the bitmap cache. iOS keeps the same boundary: this helper runs only
 /// for GetThumb data, never for FHD/LargeThumb preview data or photo effects.
 enum AndroidThumbnailProcessor {
+    struct CameraThumbnailResult {
+        let data: Data
+        let image: UIImage
+    }
+
     private static let blackPixelLimit: UInt8 = 32
     private static let maxBarFraction: CGFloat = 0.15
     private static let videoBandAverageLimit: UInt8 = 40
@@ -16,6 +21,39 @@ enum AndroidThumbnailProcessor {
             return data
         }
         return processed.jpegData(compressionQuality: 0.94) ?? data
+    }
+
+    /// Camera-cache entry point. Android decodes once, rejects invalid bytes,
+    /// and only changes pixels when black bars are actually cropped. Returning
+    /// the original encoded JPEG for an unchanged frame avoids iOS's previous
+    /// decode → JPEG re-encode → validation decode cycle on every visible cell.
+    static func processCameraThumbnail(_ data: Data, fileExtension: String) -> Data {
+        processCameraThumbnailResult(data, fileExtension: fileExtension)?.data ?? Data()
+    }
+
+    /// Returns both forms produced by Android's single decode boundary. The
+    /// caller puts `image` straight into the decoded LRU instead of decoding
+    /// `data` a second time after validation/cropping.
+    static func processCameraThumbnailResult(
+        _ data: Data,
+        fileExtension: String
+    ) -> CameraThumbnailResult? {
+        guard let image = UIImage(data: data),
+              let original = image.cgImage else { return nil }
+        guard original.width >= 16, original.height >= 16 else {
+            return CameraThumbnailResult(data: data, image: image)
+        }
+        guard let processed = process(image, fileExtension: fileExtension),
+              let output = processed.cgImage else {
+            return CameraThumbnailResult(data: data, image: image)
+        }
+        if original.width == output.width && original.height == output.height {
+            return CameraThumbnailResult(data: data, image: processed)
+        }
+        return CameraThumbnailResult(
+            data: processed.jpegData(compressionQuality: 0.94) ?? data,
+            image: processed
+        )
     }
 
     static func process(_ image: UIImage, fileExtension: String) -> UIImage? {

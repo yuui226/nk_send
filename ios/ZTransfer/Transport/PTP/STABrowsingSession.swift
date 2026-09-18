@@ -139,9 +139,10 @@ actor STABrowsingSession {
         throw STAConnectionError.pairingCompleted
     }
     private func command(_ operation: UInt16, _ parameters: [UInt32] = []) async throws -> PTPResponse {
-        // Android switches both PTP/IP sockets from the 5 s handshake timeout
-        // to its 60 s normal read timeout before initializeStaBrowsingSession.
+        // NikonCamera.connectSta keeps 5 s through OpenSession and all of
+        // initializeStaBrowsingSession; only successful initialization switches
+        // command reads to 60 s. The earlier "before" comment was incorrect.
         try await session.executeResponse(operation: operation, parameters: parameters,
-                                          timeoutNanoseconds: 60_000_000_000)
+                                          timeoutNanoseconds: 5_000_000_000)
     }
 }

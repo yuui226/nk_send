@@ -154,6 +154,8 @@ private final class STABonjourDiscovery: NSObject, @preconcurrency NetServiceBro
     private let browser = NetServiceBrowser()
     private var services: [NetService] = []
     private var addresses: [String] = []
+    private var firstAddressWaiter: CheckedContinuation<Void, Never>?
+    private var timeoutTask: Task<Void, Never>?
 
     static func discover() async -> [String] {
         for type in ["_ptp._tcp.", "_nikon._tcp."] {
@@ -161,7 +163,7 @@ private final class STABonjourDiscovery: NSObject, @preconcurrency NetServiceBro
             let scan = STABonjourDiscovery()
             scan.browser.delegate = scan
             scan.browser.searchForServices(ofType: type, inDomain: "local.")
-            do { try await Task.sleep(nanoseconds: 1_500_000_000) } catch {}
+            await scan.waitForFirstAddressOrTimeout()
             scan.browser.stop()
             scan.services.forEach { $0.stop() }
             guard !Task.isCancelled else { return [] }
@@ -169,6 +171,38 @@ private final class STABonjourDiscovery: NSObject, @preconcurrency NetServiceBro
             do { try await Task.sleep(nanoseconds: 100_000_000) } catch { return [] }
         }
         return []
+    }
+
+    /// Android's NSD continuation resumes as soon as the first IPv4 service
+    /// resolves; the 1.5 s value is only an upper bound. Keeping a fixed sleep
+    /// here delayed the fastest STA discovery path even after the camera was
+    /// already known.
+    private func waitForFirstAddressOrTimeout() async {
+        if !addresses.isEmpty { return }
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                if !addresses.isEmpty || Task.isCancelled {
+                    continuation.resume()
+                    return
+                }
+                firstAddressWaiter = continuation
+                timeoutTask = Task { [weak self] in
+                    do { try await Task.sleep(nanoseconds: 1_500_000_000) } catch {}
+                    guard let self else { return }
+                    self.finishAddressWait()
+                }
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in self?.finishAddressWait() }
+        }
+    }
+
+    private func finishAddressWait() {
+        timeoutTask?.cancel()
+        timeoutTask = nil
+        let waiter = firstAddressWaiter
+        firstAddressWaiter = nil
+        waiter?.resume()
     }
     func netServiceBrowser(_ browser: NetServiceBrowser, didFind service: NetService, moreComing: Bool) {
         services.append(service)
@@ -182,7 +216,10 @@ private final class STABonjourDiscovery: NSObject, @preconcurrency NetServiceBro
             var buffer = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
             guard inet_ntop(AF_INET, &address.sin_addr, &buffer, socklen_t(INET_ADDRSTRLEN)) != nil else { continue }
             let ip = String(decoding: buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
-            if !addresses.contains(ip) { addresses.append(ip) }
+            if !addresses.contains(ip) {
+                addresses.append(ip)
+                finishAddressWait()
+            }
         }
     }
 }

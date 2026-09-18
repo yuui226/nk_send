@@ -46,6 +46,10 @@ targets:
           UISceneConfigurations: {}
         UILaunchScreen:
           UILaunchScreen: {}
+    entitlements:
+      path: ZTransfer/ZTransfer.entitlements
+      properties:
+        com.apple.developer.networking.wifi-info: true
     frameworks:
       - ImageCaptureCore
     settings:
@@ -65,7 +69,8 @@ targets:
         INFOPLIST_KEY_NSLocalNetworkUsageDescription: "用于连接相机"
         TARGETED_DEVICE_FAMILY: "1,2"
         SWIFT_EMIT_LOC_STRINGS: YES
-        ASSETCATALOG_COMPILER_APPICON_NAME: ""
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        CODE_SIGN_ENTITLEMENTS: ZTransfer/ZTransfer.entitlements
     scheme:
       testTargets:
         - ZTransferTests

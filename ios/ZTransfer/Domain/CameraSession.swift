@@ -1,6 +1,27 @@
 import Foundation
 import UIKit
 
+/// Android keeps decoded thumbnails in a byte-costed LRU. NSCache is the
+/// native thread-safe equivalent and lets SwiftUI recover a reused cell's
+/// image synchronously instead of decoding the same JPEG on every appearance.
+private final class PhotoDecodedThumbnailCache: @unchecked Sendable {
+    private let cache = NSCache<NSString, UIImage>()
+
+    init() {
+        cache.totalCostLimit = max(4 * 1024 * 1024, Int(ProcessInfo.processInfo.physicalMemory / 8))
+    }
+
+    func image(for key: String) -> UIImage? { cache.object(forKey: key as NSString) }
+
+    func insert(_ image: UIImage, for key: String) {
+        let cost = image.cgImage.map { $0.bytesPerRow * $0.height } ?? 0
+        cache.setObject(image, forKey: key as NSString, cost: cost)
+    }
+
+    func remove(_ key: String) { cache.removeObject(forKey: key as NSString) }
+    func clear() { cache.removeAllObjects() }
+}
+
 /// Stable ImageCaptureCore session identity shared across actor boundaries.
 /// USB remote control keeps this accepted session instead of cycling it.
 final class USBSessionIdentity: @unchecked Sendable {
@@ -38,6 +59,7 @@ actor CameraSession {
     /// collapsing every PTP/IP connection into a generic Wi‑Fi glyph.
     nonisolated let wirelessMode: WirelessMode?
     private let thumbnailStore = PhotoThumbnailStore()
+    private nonisolated let decodedThumbnailCache = PhotoDecodedThumbnailCache()
     private let exifStore = PhotoExifStore()
 
     init(repository: CameraRepository, transport: ImageCaptureUSBTransport, deviceID: String, sessionToken: UUID) {
@@ -69,10 +91,9 @@ actor CameraSession {
         onBatch: @escaping @Sendable ([CameraFile]) async throws -> Void
     ) async throws -> PhotoScanResult {
         if !preserveExisting {
-            let identity: String?
-            if let deviceID { identity = deviceID }
-            else { identity = await repository.thumbnailCacheIdentity() }
-            if let identity { await thumbnailStore.resetForScan(identity: identity) }
+            decodedThumbnailCache.clear()
+            let identity = await thumbnailCacheIdentity()
+            await thumbnailStore.resetForScan(identity: identity)
             await exifStore.reset()
         }
         return try await repository.scanCatalog(preserveExisting: preserveExisting,
@@ -88,12 +109,7 @@ actor CameraSession {
     /// Metadata-aware path used by the photo grid. It follows Android's
     /// memory → negative → disk → shared request → camera read order.
     func thumbnail(file: CameraFile, allowRemote: Bool = true) async throws -> Data? {
-        let identity: String?
-        if let deviceID { identity = deviceID }
-        else { identity = await repository.thumbnailCacheIdentity() }
-        guard let identity else {
-            return allowRemote ? try await thumbnail(handle: file.id) : nil
-        }
+        let identity = await thumbnailCacheIdentity()
         let direct = await repository.usesDirectThumbnailRead()
         return try await thumbnailStore.load(
             file: file,
@@ -101,38 +117,83 @@ actor CameraSession {
             directSTA: direct,
             allowRemote: allowRemote,
             transform: { data in
-                AndroidThumbnailProcessor.process(data, fileExtension: file.fileExtension)
+                self.processAndCacheThumbnail(data, file: file)
             },
-            validate: { UIImage(data: $0) != nil },
+            validate: { !$0.isEmpty },
             fetch: { try await self.thumbnail(handle: file.id) }
         )
     }
 
+    /// Decoded bitmap path used by the grid. Android returns its in-memory
+    /// ImageBitmap directly; keep the same one-decode-per-cache-entry boundary.
+    func thumbnailImage(file: CameraFile, allowRemote: Bool = true) async throws -> UIImage? {
+        let key = Self.decodedThumbnailKey(file)
+        if let image = decodedThumbnailCache.image(for: key) { return image }
+        guard let data = try await thumbnail(file: file, allowRemote: allowRemote) else { return nil }
+        // A disk/remote miss was decoded by the processor above. Reuse that
+        // exact image just as Android returns its freshly decoded ImageBitmap.
+        if let image = decodedThumbnailCache.image(for: key) { return image }
+        guard let image = UIImage(data: data) else { return nil }
+        decodedThumbnailCache.insert(image, for: key)
+        return image
+    }
+
+    /// Synchronous cache lookup used to initialize SwiftUI cell state before
+    /// its first frame. NSCache is thread-safe and this does not cross actor data.
+    nonisolated func memoryThumbnailImage(file: CameraFile) -> UIImage? {
+        decodedThumbnailCache.image(for: Self.decodedThumbnailKey(file))
+    }
+
+    private nonisolated static func decodedThumbnailKey(_ file: CameraFile) -> String {
+        "\(file.id)\u{0}\(file.fileName)\u{0}\(file.size)\u{0}\(file.captureDate ?? "")"
+    }
+
+    private nonisolated func processAndCacheThumbnail(_ data: Data, file: CameraFile) -> Data {
+        guard let result = AndroidThumbnailProcessor.processCameraThumbnailResult(
+            data,
+            fileExtension: file.fileExtension
+        ) else { return Data() }
+        decodedThumbnailCache.insert(result.image, for: Self.decodedThumbnailKey(file))
+        return result.data
+    }
+
+    /// Android always opens a camera-scoped cache. Network sessions fall back
+    /// to responder GUID/model identity instead of bypassing the store.
+    private func thumbnailCacheIdentity() async -> String {
+        if let deviceID { return deviceID }
+        return await repository.thumbnailCacheIdentity()
+    }
+
     func prefetchThumbnail(file: CameraFile) async throws -> Bool {
-        // Android STA direct browsing leaves RAW/video previews lazy; these
-        // formats are resolved only when visible or opened in preview.
         let direct = await repository.usesDirectThumbnailRead()
-        if direct && [".nef", ".nrw", ".mov", ".mp4"].contains(file.fileExtension) { return true }
-        let identity: String?
-        if let deviceID { identity = deviceID }
-        else { identity = await repository.thumbnailCacheIdentity() }
-        guard let identity else { return false }
-        return try await thumbnailStore.prefetch(
+        let identity = await thumbnailCacheIdentity()
+        let sequential = wirelessMode == .sta
+        // STA fills every format. Validate before accepting a disk/camera hit,
+        // without retaining every decoded image in the visible-cell LRU.
+        let validator: (@Sendable (Data) -> Bool)? = sequential ? { @Sendable data in
+            autoreleasepool { UIImage(data: data)?.cgImage != nil }
+        } : nil
+        let settled = try await thumbnailStore.prefetch(
             file: file,
             identity: identity,
             directSTA: direct,
+            validate: validator,
             fetch: { try await self.thumbnail(handle: file.id) }
         )
+        if settled { await thumbnailStore.publish(handle: file.id) }
+        else if sequential { await repository.discardRejectedThumbnail(handle: file.id) }
+        return settled
+    }
+
+    func thumbnailUpdates(handle: UInt32) async -> AsyncStream<Void> {
+        await thumbnailStore.updates(handle: handle)
     }
 
     /// Cache-only lookup used when the effects editor opens. Android first
     /// publishes an already cached thumbnail and never starts a new GetThumb
     /// just to populate the editor placeholder.
     func cachedThumbnail(file: CameraFile) async throws -> Data? {
-        let identity: String?
-        if let deviceID { identity = deviceID }
-        else { identity = await repository.thumbnailCacheIdentity() }
-        guard let identity else { return nil }
+        let identity = await thumbnailCacheIdentity()
         let direct = await repository.usesDirectThumbnailRead()
         return try await thumbnailStore.load(
             file: file,
@@ -140,29 +201,24 @@ actor CameraSession {
             directSTA: direct,
             allowRemote: false,
             transform: { data in
-                AndroidThumbnailProcessor.process(data, fileExtension: file.fileExtension)
+                self.processAndCacheThumbnail(data, file: file)
             },
-            validate: { UIImage(data: $0) != nil },
+            validate: { !$0.isEmpty },
             fetch: { Data() }
         )
     }
 
     func reconcileThumbnailCache(files: [CameraFile], authoritative: Bool) async {
         guard authoritative else { return }
-        let identity: String?
-        if let deviceID { identity = deviceID }
-        else { identity = await repository.thumbnailCacheIdentity() }
-        guard let identity else { return }
+        let identity = await thumbnailCacheIdentity()
         let direct = await repository.usesDirectThumbnailRead()
         await thumbnailStore.reconcile(files: files, identity: identity, directSTA: direct)
     }
 
     func invalidateThumbnailState(files: [CameraFile]) async {
         guard !files.isEmpty else { return }
-        let identity: String?
-        if let deviceID { identity = deviceID }
-        else { identity = await repository.thumbnailCacheIdentity() }
-        guard let identity else { return }
+        for file in files { decodedThumbnailCache.remove(Self.decodedThumbnailKey(file)) }
+        let identity = await thumbnailCacheIdentity()
         let direct = await repository.usesDirectThumbnailRead()
         await thumbnailStore.invalidate(files: files, identity: identity, directSTA: direct)
     }

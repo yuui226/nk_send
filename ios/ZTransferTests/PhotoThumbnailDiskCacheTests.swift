@@ -1,5 +1,7 @@
 import XCTest
+#if !THUMBNAIL_CACHE_STANDALONE
 @testable import ZTransfer
+#endif
 
 final class PhotoThumbnailDiskCacheTests: XCTestCase {
     func testKeysAreStableAndSeparateByMetadata() {
@@ -27,10 +29,20 @@ final class PhotoThumbnailDiskCacheTests: XCTestCase {
         let key = PhotoThumbnailDiskCache.cacheFileName(fileName: "a.JPG", size: 3, captureDate: nil)
         XCTAssertTrue(store.write(Data([1, 2, 3]), as: key))
         XCTAssertEqual(try Data(contentsOf: XCTUnwrap(store.find(key))), Data([1, 2, 3]))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: store.target(key + ".tmp").path))
         let stale = PhotoThumbnailDiskCache.cacheFileName(fileName: "stale.JPG", size: 1, captureDate: nil)
         XCTAssertTrue(store.write(Data([9]), as: stale))
         XCTAssertEqual(store.reconcile(validNames: [key]), 1)
         XCTAssertNil(store.find(stale))
+    }
+
+    func testExpirationCleanupIsClaimedOnlyOncePerSharedCache() {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ztransfer-cache-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let cache = PhotoThumbnailDiskCache(root: root)
+        XCTAssertTrue(cache.claimCleanup())
+        XCTAssertFalse(cache.claimCleanup())
     }
 
     func testLegacyFileNameMatchesAndroidSafeCharacters() {

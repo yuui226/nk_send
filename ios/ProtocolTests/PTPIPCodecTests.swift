@@ -6,6 +6,86 @@ import XCTest
 #endif
 
 final class PTPIPCodecTests: XCTestCase {
+    func testSignedUnknownDownloadDeclarationsMatchAndroid() throws {
+        // NikonCamera.pump reads the 64-bit field as signed Long. A negative
+        // declaration is not a positive expected length (including all-ones).
+        for declaration in [UInt64.max, UInt64.max - 1, UInt64(Int64.max) + 1] {
+            for borrowed in [false, true] {
+                var phase = PTPIPDownloadPhase(transactionID: 7)
+                let sink = PTPDataSink(started: { XCTAssertNil($0) }, received: { XCTAssertEqual($0, Data([1, 2, 3])) })
+                let start = Data(UInt32(7).littleEndianBytes + declaration.littleEndianBytes)
+                if borrowed {
+                    XCTAssertNil(try start.withUnsafeBytes { try phase.consume(type: .startData, payload: $0, sink: sink) })
+                } else {
+                    XCTAssertNil(try phase.consume(.init(type: .startData, payload: start), sink: sink))
+                }
+                let end = Data(UInt32(7).littleEndianBytes + [1, 2, 3])
+                XCTAssertNil(try phase.consume(.init(type: .endData, payload: end), sink: sink))
+                let response = Data(UInt16(0x2001).littleEndianBytes + UInt32(7).littleEndianBytes)
+                let result = try XCTUnwrap(phase.consume(.init(type: .commandResponse, payload: response), sink: sink))
+                XCTAssertEqual(result.receivedByteCount, 3)
+                XCTAssertNil(result.declaredByteCount)
+            }
+        }
+    }
+
+    func testNonnegativeDownloadDeclarationsRetainAndroidValidationBoundaries() throws {
+        // Do not erase the separate 32-bit SIZE_UNKNOWN marker: Android's
+        // full-object and partial-object paths intentionally check it differently.
+        for declaration in [UInt64(0), 3, UInt64(UInt32.max), UInt64(UInt32.max) + 1, UInt64(Int64.max)] {
+            var phase = PTPIPDownloadPhase(transactionID: 7)
+            let sink = PTPDataSink(started: { XCTAssertEqual($0, declaration) }, received: { _ in })
+            let start = Data(UInt32(7).littleEndianBytes + declaration.littleEndianBytes)
+            XCTAssertNil(try phase.consume(.init(type: .startData, payload: start), sink: sink))
+            XCTAssertEqual(phase.declaredByteCount, declaration)
+        }
+        var phase = PTPIPDownloadPhase(transactionID: 7)
+        let sink = PTPDataSink(started: { XCTAssertEqual($0, UInt64(UInt32.max)) }, received: { _ in })
+        let shortStart = Data(UInt32(7).littleEndianBytes + UInt32.max.littleEndianBytes)
+        XCTAssertNil(try phase.consume(.init(type: .startData, payload: shortStart), sink: sink))
+        XCTAssertEqual(phase.declaredByteCount, UInt64(UInt32.max))
+    }
+
+    func testBorrowedPhaseRejectsTruncatedAndMismatchedDataBeforeCallingSink() throws {
+        var phase = PTPIPDownloadPhase(transactionID: 7)
+        let sink = PTPDataSink(started: { _ in }, received: { _ in XCTFail("Invalid bytes escaped") },
+                               receivedBorrowed: { _ in XCTFail("Invalid borrowed bytes escaped") })
+        for payload in [Data([7, 0, 0]), Data([8, 0, 0, 0, 1])] {
+            XCTAssertThrowsError(try payload.withUnsafeBytes {
+                try phase.consume(type: .data, payload: $0, sink: sink)
+            }) { XCTAssertEqual($0 as? PTPSessionError, .invalidResponse) }
+        }
+        XCTAssertEqual(phase.receivedByteCount, 0)
+    }
+
+    func testBorrowedDataHasNoTransactionPrefixAndWaitsForResponse() throws {
+        var phase = PTPIPDownloadPhase(transactionID: 7)
+        let sink = PTPDataSink(started: { _ in }, received: { _ in XCTFail("Unexpected owned payload") },
+                               receivedBorrowed: { XCTAssertEqual(Data($0), Data([9, 8])) })
+        let packet = Data([7, 0, 0, 0, 9, 8])
+        XCTAssertNil(try packet.withUnsafeBytes { try phase.consume(type: .endData, payload: $0, sink: sink) })
+        XCTAssertEqual(phase.receivedByteCount, 2)
+        let response = Data([1, 0x20, 7, 0, 0, 0])
+        let completed = try response.withUnsafeBytes { try phase.consume(type: .commandResponse, payload: $0, sink: sink) }
+        XCTAssertEqual(completed?.receivedByteCount, 2)
+    }
+
+    func testPacketLimitAcceptsAndroidHighThroughputChunkWithFraming() {
+        XCTAssertEqual(PTPIPCodec.maxPacketLength, 256 * 1024 * 1024)
+        XCTAssertGreaterThanOrEqual(PTPIPCodec.maxPacketLength, 64 * 1024 * 1024 + 12)
+    }
+
+    func testStreamingReadWindowCoalescesHeaderAndAllowsLargeBodyChunks() {
+        let header = ptpipReadWindow(remaining: 8, coalesce: false)
+        XCTAssertEqual(header.minimum, 1)
+        XCTAssertEqual(header.maximum, 64 * 1024)
+        let body = ptpipReadWindow(remaining: 12 * 1024 * 1024, coalesce: false)
+        XCTAssertEqual(body.minimum, 1)
+        XCTAssertEqual(body.maximum, 4 * 1024 * 1024)
+        let ordinary = ptpipReadWindow(remaining: 128 * 1024, coalesce: true)
+        XCTAssertEqual(ordinary.minimum, 64 * 1024)
+        XCTAssertEqual(ordinary.maximum, 64 * 1024)
+    }
     func testDownloadPhaseConsumesEndDataThenCommandResponseAndRetainsDeclaration() throws {
         let sink = PTPDataSink(started: { _ in }, received: { _ in })
         var phase = PTPIPDownloadPhase(transactionID: 7)
@@ -80,6 +160,17 @@ final class PTPIPCodecTests: XCTestCase {
         XCTAssertEqual(response.code, 0x2001)
         XCTAssertEqual(response.transactionID, 7)
         XCTAssertEqual(response.type, .response)
+    }
+
+    func testSplitHeaderAndBodyDecodeWithoutRejoiningPacket() throws {
+        let body = Data([4, 3, 2, 1, 9, 8, 7])
+        var header = Data()
+        header.append(contentsOf: UInt32(PTPIPCodec.headerSize + body.count).littleEndianBytes)
+        header.append(contentsOf: PTPIPPacketType.data.rawValue.littleEndianBytes)
+        let packet = try PTPIPCodec.decode(header: header, body: body)
+        XCTAssertEqual(packet, PTPIPPacket(type: .data, payload: body))
+
+        XCTAssertThrowsError(try PTPIPCodec.decode(header: header, body: body.dropLast()))
     }
 
     func testRejectsLengthMismatchAndUnknownType() throws {

@@ -7,7 +7,6 @@ enum GeniePopupMotion {
     static let expandDuration: TimeInterval = 0.32
     static let collapseDuration: TimeInterval = 0.35
     static let renderBands = 12
-    static let zMarkWidth: CGFloat = 27.2
 
     struct Row {
         let left: CGFloat
@@ -45,44 +44,65 @@ enum GeniePopupMotion {
     }
 
     static func row(progress rawProgress: CGFloat, fraction rawFraction: CGFloat,
-                    anchor: CGRect, panel: CGRect, mouthWidth: CGFloat = zMarkWidth) -> Row {
+                    anchor: CGRect, panel: CGRect, mouthWidth: CGFloat? = nil) -> Row {
         let p = progress(rawProgress)
         let v = progress(rawFraction)
         if p == 1 { return Row(left: 0, right: panel.width, y: panel.height * v, tilt: 0) }
 
+        // Android mirrors the complete funnel for right-hand buttons. This is
+        // important for Filter: reusing a left-hand bend makes the mesh fold
+        // against its travel direction during the narrow final frames.
         if anchor.midX > panel.midX {
             let mirrored = CGRect(
                 x: panel.minX + panel.maxX - anchor.maxX,
-                y: anchor.minY, width: anchor.width, height: anchor.height
+                y: anchor.minY,
+                width: anchor.width,
+                height: anchor.height
             )
-            let reflected = row(progress: p, fraction: v, anchor: mirrored,
-                                panel: panel, mouthWidth: mouthWidth)
-            return Row(left: panel.width - reflected.right,
-                       right: panel.width - reflected.left,
-                       y: reflected.y, tilt: -reflected.tilt)
+            let reflected = row(
+                progress: p,
+                fraction: v,
+                anchor: mirrored,
+                panel: panel,
+                mouthWidth: mouthWidth
+            )
+            return Row(
+                left: panel.width - reflected.right,
+                right: panel.width - reflected.left,
+                y: reflected.y,
+                tilt: -reflected.tilt
+            )
         }
 
         let dockX = anchor.midX - panel.minX
         let dockY = anchor.maxY - panel.minY
-        let travel = length(p)
+        let length = length(p)
+        let requestedWidth = mouthWidth.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+            ?? anchor.width
+        let seedWidth = min(min(anchor.width, panel.width), max(1, requestedWidth))
+        // Keep width and travel on separate clocks derived from the same
+        // progress, exactly as Android GeniePopupGeometry. The mouth reacts
+        // first while the broad tail follows without a phase discontinuity.
         let spread = pow(p, 0.85 + 2.1 * pow(1 - v, 2))
-        let seedWidth = min(min(anchor.width, panel.width),
-                            mouthWidth.isFinite && mouthWidth > 0 ? mouthWidth : anchor.width * 0.5)
         let width = mix(seedWidth, panel.width, spread)
         let envelope = 16 * p * p * pow(1 - p, 2)
         let drift = seedWidth * 0.22 * envelope * (1 - spread) * (0.35 + 0.65 * v)
         let center = mix(dockX, panel.width / 2, spread) + drift
         let bowPhase = max(0, sin(.pi * v))
-        let bow = min(min(min(panel.width * 0.075, anchor.width * 0.5), width * 0.2) *
-                          envelope * bowPhase * bowPhase,
-                      (width - seedWidth) * 0.3)
+        let bow = min(
+            min(min(panel.width * 0.075, anchor.width * 0.5), width * 0.2) *
+                envelope * bowPhase * bowPhase,
+            (width - seedWidth) * 0.3
+        )
         let left = center - width / 2 + bow
         let right = center + width / 2 - bow * 0.15
         let bentV = v + 0.4 * (1 - p) * (v * v - v)
-        let mouthTilt = min(seedWidth * 0.14, panel.width * 0.045) * (1 - travel)
-        let y = dockY * (1 - travel) + panel.height * travel * bentV + mouthTilt / 2
-        let bodyTilt = min(min((right - left) * 0.07, panel.width * 0.035),
-                           panel.height * travel * 0.12) * envelope * v * v
+        let mouthTilt = min(seedWidth * 0.14, panel.width * 0.045) * (1 - length)
+        let y = dockY * (1 - length) + panel.height * length * bentV + mouthTilt / 2
+        let bodyTilt = min(
+            min((right - left) * 0.07, panel.width * 0.035),
+            panel.height * length * 0.12
+        ) * envelope * v * v
         let tilt = min(min(mouthTilt + bodyTilt, (right - left) * 0.14),
                        panel.width * 0.045)
         return Row(left: left, right: right, y: y, tilt: tilt)

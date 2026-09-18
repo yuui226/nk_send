@@ -731,10 +731,12 @@ struct PhotoEffectsSettingsPreview: View {
         .contentShape(Rectangle())
         .background {
             GeometryReader { proxy in
-                Color.clear.preference(
-                    key: PhotoEffectsPreviewAnchorPreferenceKey.self,
-                    value: proxy.frame(in: .global)
-                )
+                Color.clear
+                    .allowsHitTesting(false)
+                    .preference(
+                        key: PhotoEffectsPreviewAnchorPreferenceKey.self,
+                        value: proxy.frame(in: .global)
+                    )
             }
         }
         .onPreferenceChange(PhotoEffectsPreviewAnchorPreferenceKey.self) { previewAnchor = $0 }
@@ -1307,8 +1309,14 @@ private struct PhotoEffectFavoriteButton: View {
             .foregroundStyle(markColor)
             .frame(width: PhotoEffectControlMetrics.height, height: PhotoEffectControlMetrics.height)
         }
-        .buttonStyle(ZTransferGlassButtonStyle(tint: markColor, cornerRadius: 13))
-        .overlay(RoundedRectangle(cornerRadius: 13).strokeBorder(ZTransferColors.accentOrange.opacity(favorite ? 0.75 : 0), lineWidth: 1))
+        .buttonStyle(ZTransferGlassButtonStyle(
+            tint: markColor,
+            cornerRadius: 13,
+            active: favorite,
+            activeColor: ZTransferColors.accentOrange,
+            activeOutline: true,
+            materialContentColor: markColor
+        ))
         .disabled(!enabled).opacity(enabled ? 1 : 0.48)
         .accessibilityLabel(AppLocalized.resource(favorite ? "photo_effect_favorite_remove" : "photo_effect_favorite_add"))
         .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.18), value: favorite)

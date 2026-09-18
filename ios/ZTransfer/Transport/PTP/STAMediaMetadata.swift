@@ -6,7 +6,10 @@ enum STAMediaMetadata {
     struct Preview: Hashable, Sendable { let offset: Int; let length: Int; var imageType: Int = 0 }
     struct FileNumber: Equatable, Sendable { let directory: Int; let number: Int }
     struct Anchor: Sendable { let sequence: UInt32; let file: FileNumber }
-    struct Header: Sendable { let captureDate: String?; let previews: [Preview] }
+    struct Header: Sendable {
+        let captureDate: String?
+        let previews: [Preview]
+    }
 
     static func extensionFromHandle(_ handle: UInt32) -> String? {
         switch handle >> 24 { case 0x29: return ".jpg"; case 0x09: return ".nef"; case 0x61: return ".mp4"; default: return nil }
@@ -129,7 +132,7 @@ enum STAMediaMetadata {
         guard let base = exifBase(data), let tiff = TIFF(data, base: base), let first = tiff.firstIFD else {
             return Header(captureDate: nil, previews: [])
         }
-        var visited = Set<Int>(), previews = Set<Preview>()
+        var visited = Set<Int>(), previews: [Preview] = []
         var bestDate: (priority: Int, value: String)?
         func walk(_ offset: Int, depth: Int) {
             guard depth <= 8, offset >= base + 8, visited.insert(offset).inserted, let entries = tiff.entries(offset) else { return }
@@ -153,13 +156,22 @@ enum STAMediaMetadata {
                 }
             }
             for (relative, size) in Array(zip(jpegOffsets, jpegLengths)) + (compression == 6 ? Array(zip(stripOffsets, stripLengths)) : []) {
-                if relative > 0 && (4...(16 * 1024 * 1024)).contains(size) { previews.insert(Preview(offset: base + relative, length: size)) }
+                let preview = Preview(offset: base + relative, length: size)
+                if relative > 0 && (4...(16 * 1024 * 1024)).contains(size), !previews.contains(preview) { previews.append(preview) }
             }
             if let next = tiff.u32(offset + 2 + entries.count * 12), next > 0 { children.append(base + next) }
             children.forEach { walk($0, depth: depth + 1) }
         }
         walk(first, depth: 0)
-        return Header(captureDate: bestDate?.value, previews: previews.sorted { $0.length > $1.length })
+        return Header(
+            captureDate: bestDate?.value,
+            // Kotlin distinct().sortedByDescending is stable for equal sizes.
+            // A Set lost directory order and changed which .last thumbnail won.
+            previews: previews.sorted { $0.length > $1.length }
+        )
+    }
+    static func nefExifThumbnail(_ data: Data) -> Data? {
+        NEFExifThumbnail.read(data)
     }
     static func mpfPreviews(_ data: Data, objectSize: UInt64) -> [Preview] {
         guard let segment = jpegSegment(data, marker: 0xE2, prefix: Data([77, 80, 70, 0])),
@@ -182,19 +194,30 @@ enum STAMediaMetadata {
         return previews.sorted { priority($0) == priority($1) ? $0.length < $1.length : priority($0) < priority($1) }
     }
     static func largestEmbeddedJPEG(_ data: Data) -> Preview? {
-        let bytes = [UInt8](data)
-        guard bytes.count >= 4 else { return nil }
-        var start: Int?, best: Preview?, index = 0
-        while index + 1 < bytes.count {
-            if bytes[index] == 255 && bytes[index + 1] == 216 { start = index; index += 2; continue }
-            if let begin = start, bytes[index] == 255 && bytes[index + 1] == 217 {
-                let length = index + 2 - begin
-                if length > (best?.length ?? 0) { best = Preview(offset: begin, length: length) }
-                start = nil; index += 2; continue
+        guard data.count >= 4 else { return nil }
+        // RAW probing repeats this scan while growing the prefix up to 16 MiB.
+        // Android scans its ByteArray in place; materializing [UInt8](data) at
+        // every step made iOS copy the whole accumulated NEF prefix first.
+        return data.withUnsafeBytes { raw -> Preview? in
+            let bytes = raw.bindMemory(to: UInt8.self)
+            var start: Int?, best: Preview?, index = 0
+            while index + 1 < bytes.count {
+                if bytes[index] == 255 && bytes[index + 1] == 216 {
+                    start = index
+                    index += 2
+                    continue
+                }
+                if let begin = start, bytes[index] == 255 && bytes[index + 1] == 217 {
+                    let length = index + 2 - begin
+                    if length > (best?.length ?? 0) { best = Preview(offset: begin, length: length) }
+                    start = nil
+                    index += 2
+                    continue
+                }
+                index += 1
             }
-            index += 1
+            return best
         }
-        return best
     }
     static func videoDate(_ data: Data) -> String? {
         guard let range = data.range(of: Data("mvhd".utf8)), range.lowerBound + 12 <= data.count else { return nil }

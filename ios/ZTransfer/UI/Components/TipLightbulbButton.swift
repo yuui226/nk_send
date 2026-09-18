@@ -8,23 +8,33 @@ struct TipLightbulbButton: View {
     let attention: Bool
     let size: CGFloat
     let accessibilityLabel: String
+    var motionPaused = false
     let action: () -> Void
+    @AppStorage("skin_preset") private var skinPreset = ZTransferButtonSkin.frostedGlass.rawValue
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
     @State private var attentionOrigin = Date()
+    @State private var frozenDate: Date?
+
+    private var iconColor: Color {
+        zTransferButtonForeground(
+            skin: .init(storedValue: skinPreset),
+            scheme: colorScheme,
+            fallback: ZTransferColors.accentOrange
+        )
+    }
 
     var body: some View {
-        TimelineView(.animation(paused: !attention || scenePhase != .active)) { context in
+        TimelineView(.animation(paused: !attention || motionPaused || scenePhase != .active)) { context in
+            let sampleDate = motionPaused ? (frozenDate ?? context.date) : context.date
             let values = attention
-                ? TipAttentionValues(elapsed: context.date.timeIntervalSince(attentionOrigin))
+                ? TipAttentionValues(elapsed: sampleDate.timeIntervalSince(attentionOrigin))
                 : .read
-            // Defer the popup state mutation until the touch-up transaction
-            // has released the glass button. Otherwise the newly inserted
-            // popup and the button's pressed-scale animation are composited
-            // in the same frame, producing a visible size flash.
-            Button(action: { Task { @MainActor in action() } }) {
+            Button(action: action) {
                 Image(systemName: "lightbulb.fill")
                     .resizable()
                     .scaledToFit()
+                    .foregroundStyle(iconColor)
                     .frame(width: size * 0.45, height: size * 0.45)
                     .frame(width: size, height: size)
                     .overlay(alignment: .topTrailing) {
@@ -40,7 +50,15 @@ struct TipLightbulbButton: View {
                         }
                     }
             }
-            .buttonStyle(ZTransferGlassButtonStyle(tint: ZTransferColors.accentOrange, cornerRadius: 12))
+            .buttonStyle(ZTransferGlassButtonStyle(
+                tint: iconColor,
+                cornerRadius: 12,
+                materialContentColor: iconColor
+            ))
+            // Keep the complete glass tile as the physical touch target. The
+            // icon and unread-dot overlays are purely visual and must not
+            // reduce the tappable region inside transformed popup hosts.
+            .contentShape(Rectangle())
             .scaleEffect(values.buttonScale)
             .accessibilityLabel(accessibilityLabel)
             // Parent popup animations must not animate the read-state reset
@@ -51,6 +69,19 @@ struct TipLightbulbButton: View {
         .onChange(of: attention) { unread in
             if unread { attentionOrigin = Date() }
         }
+        .onChange(of: motionPaused) { paused in
+            let now = Date()
+            if paused {
+                frozenDate = now
+            } else if let frozenDate {
+                // Remove the time spent inside the popup mesh transition from
+                // the attention clock. The live bulb resumes from the exact
+                // snapshot phase instead of flashing to a differently sized
+                // dot at the mesh/live hand-off.
+                attentionOrigin = attentionOrigin.addingTimeInterval(now.timeIntervalSince(frozenDate))
+                self.frozenDate = nil
+            }
+        }
     }
 }
 
@@ -60,94 +91,120 @@ struct AdaptiveTipPanel<Content: View>: View {
     let anchor: CGRect
     var maxWidth: CGFloat = 300
     @ViewBuilder let content: Content
-    @State private var contentHeight: CGFloat = 0
 
     var body: some View {
         GeometryReader { proxy in
-            let width = min(maxWidth, max(1, proxy.size.width - 24))
-            let below = max(0, proxy.size.height - anchor.maxY - 20)
-            let above = max(0, anchor.minY - 20)
-            let useBelow = contentHeight <= below || below >= above
-            let height = min(contentHeight, useBelow ? below : above)
-            let top = useBelow ? anchor.maxY + 8 : anchor.minY - 8 - height
-            let left = min(max(12, anchor.midX - width / 2), max(12, proxy.size.width - width - 12))
-            ScrollView(.vertical, showsIndicators: false) {
+            AdaptiveTipPlacementLayout(anchor: anchor, maxWidth: maxWidth) {
+                // Layout measures this copy synchronously, then places only
+                // the ScrollView below. Unlike a PreferenceKey round trip,
+                // the visible viewport can never be left at zero height.
                 content
-                    .frame(width: width)
                     .fixedSize(horizontal: false, vertical: true)
-                    .background(GeometryReader { measurement in
-                        Color.clear.preference(key: TipContentHeightKey.self, value: measurement.size.height)
-                    })
+                    .hidden()
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+
+                ScrollView(.vertical, showsIndicators: false) {
+                    content
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
-            .frame(width: width, height: height)
-            .offset(x: left, y: top)
-            .onPreferenceChange(TipContentHeightKey.self) { contentHeight = $0 }
+            .frame(width: proxy.size.width, height: proxy.size.height)
         }
     }
 }
 
-private struct TipContentHeightKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+private struct AdaptiveTipPlacementLayout: Layout {
+    let anchor: CGRect
+    let maxWidth: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews,
+                      cache: inout ()) -> CGSize {
+        proposal.replacingUnspecifiedDimensions()
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize,
+                       subviews: Subviews, cache: inout ()) {
+        guard subviews.count == 2 else { return }
+        let width = min(maxWidth, max(1, bounds.width - 24))
+        let natural = subviews[0].sizeThatFits(
+            ProposedViewSize(width: width, height: nil)
+        )
+        let below = max(0, bounds.maxY - anchor.maxY - 20)
+        let above = max(0, anchor.minY - bounds.minY - 20)
+        let useBelow = natural.height <= below || below >= above
+        let availableHeight = max(1, useBelow ? below : above)
+        let height = min(max(1, natural.height), availableHeight)
+        let left = min(
+            max(bounds.minX + 12, anchor.midX - width / 2),
+            max(bounds.minX + 12, bounds.maxX - width - 12)
+        )
+        let top = useBelow
+            ? anchor.maxY + 8
+            : anchor.minY - 8 - height
+
+        // The hidden copy participates only in measurement.
+        subviews[0].place(
+            at: CGPoint(x: bounds.minX - width - 1, y: bounds.minY - natural.height - 1),
+            anchor: .topLeading,
+            proposal: ProposedViewSize(width: width, height: natural.height)
+        )
+        subviews[1].place(
+            at: CGPoint(x: left, y: top),
+            anchor: .topLeading,
+            proposal: ProposedViewSize(width: width, height: height)
+        )
+    }
 }
 
 extension View {
-    /// Keep a real anchored popover on iOS 16 as well as newer compact devices.
+    /// Attach presentation to the actual SwiftUI button. A background
+    /// UIViewRepresentable anchor can still intercept physical touches at the
+    /// hosting boundary even when its inner UIView disables interaction.
     func bulbPopover<Content: View>(isPresented: Binding<Bool>, width: CGFloat = 300,
                                     @ViewBuilder content: () -> Content) -> some View {
-        background(BulbPopoverPresenter(isPresented: isPresented, width: width, content: content()))
+        modifier(BulbPopoverModifier(
+            isPresented: isPresented,
+            width: width,
+            popupContent: content()
+        ))
     }
 }
 
-private struct BulbPopoverPresenter<Content: View>: UIViewRepresentable {
+private struct BulbPopoverModifier<PopupContent: View>: ViewModifier {
     @Binding var isPresented: Bool
     let width: CGFloat
-    let content: Content
+    let popupContent: PopupContent
 
-    func makeCoordinator() -> Coordinator { Coordinator(isPresented: $isPresented) }
-    func makeUIView(context: Context) -> UIView { UIView() }
-    func updateUIView(_ source: UIView, context: Context) {
-        context.coordinator.isPresented = $isPresented
-        guard isPresented else {
-            context.coordinator.host?.dismiss(animated: true)
-            context.coordinator.host = nil
-            return
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 16.4, *) {
+            content.popover(
+                isPresented: $isPresented,
+                attachmentAnchor: .rect(.bounds),
+                arrowEdge: .top
+            ) {
+                popupBody
+                    .presentationCompactAdaptation(.popover)
+            }
+        } else {
+            // iOS 16.0–16.3 has no compact-adaptation override. Keep the
+            // button's native presentation path; the system may adapt it to a
+            // sheet, but physical touch and dismissal remain reliable.
+            content.popover(
+                isPresented: $isPresented,
+                attachmentAnchor: .rect(.bounds),
+                arrowEdge: .top
+            ) {
+                popupBody
+            }
         }
-        guard context.coordinator.host == nil, let window = source.window else { return }
-        var presenter = window.rootViewController
-        while let presented = presenter?.presentedViewController { presenter = presented }
-        let panelWidth = min(width, window.bounds.width - 32)
-        let natural = UIHostingController(rootView: content.frame(width: panelWidth))
-        let size = natural.sizeThatFits(in: CGSize(width: panelWidth, height: .greatestFiniteMagnitude))
-        let rect = source.convert(source.bounds, to: window)
-        let space = max(rect.minY - window.safeAreaInsets.top,
-                        window.bounds.height - window.safeAreaInsets.bottom - rect.maxY) - 28
-        let host = UIHostingController(rootView: ScrollView { content.frame(width: panelWidth) })
-        host.preferredContentSize = CGSize(width: panelWidth, height: min(size.height, max(1, space)))
-        host.modalPresentationStyle = .popover
-        if let popover = host.popoverPresentationController {
-            popover.sourceView = source
-            popover.sourceRect = source.bounds.insetBy(dx: 0, dy: -8)
-            popover.permittedArrowDirections = [.up, .down]
-            popover.delegate = context.coordinator
-        }
-        context.coordinator.host = host
-        presenter?.present(host, animated: true)
     }
 
-    static func dismantleUIView(_ uiView: UIView, coordinator: Coordinator) {
-        coordinator.host?.dismiss(animated: false)
-    }
-
-    final class Coordinator: NSObject, UIPopoverPresentationControllerDelegate {
-        var isPresented: Binding<Bool>
-        var host: UIViewController?
-        init(isPresented: Binding<Bool>) { self.isPresented = isPresented }
-        func adaptivePresentationStyle(for controller: UIPresentationController,
-                                       traitCollection: UITraitCollection) -> UIModalPresentationStyle { .none }
-        func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
-            host = nil
-            isPresented.wrappedValue = false
-        }
+    private var popupBody: some View {
+        popupContent
+            .frame(width: width)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }

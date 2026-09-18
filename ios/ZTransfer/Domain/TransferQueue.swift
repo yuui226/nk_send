@@ -115,6 +115,53 @@ struct TransferDownloadProgress: Equatable, Sendable {
     var bytesPerSecond: Int64 = 0
 }
 
+/// UIKit's expiration handler must return the assertion before waiting for
+/// network/file cleanup. Android TransferService.onTimeout similarly ends its
+/// system keep-alive promptly. This owns only the assertion, never a socket.
+/// The injected identifiers/callbacks keep the exact lifecycle host-testable.
+@MainActor
+final class TransferBackgroundActivity<Identifier> {
+    typealias Begin = (@escaping @MainActor @Sendable () -> Void) -> Identifier?
+    private let end: (Identifier) -> Void
+    private let onExpiration: @MainActor @Sendable () -> Void
+    private var identifier: Identifier?
+    private var starting = true
+    private var expirationPending = false
+    private var finished = false
+
+    init(begin: Begin, end: @escaping (Identifier) -> Void,
+         onExpiration: @escaping @MainActor @Sendable () -> Void) {
+        self.end = end
+        self.onExpiration = onExpiration
+        identifier = begin { [weak self] in self?.expire() }
+        starting = false
+        if identifier == nil {
+            // Failure to grant extra background time must not stop foreground
+            // transfer (as when Android's foreground service cannot start).
+            finished = true
+        } else if expirationPending {
+            expire()
+        }
+    }
+
+    func finish() {
+        guard !finished else { return }
+        finished = true
+        let current = identifier
+        identifier = nil
+        if let current { end(current) }
+    }
+
+    private func expire() {
+        guard !finished else { return }
+        if starting { expirationPending = true; return }
+        finish()
+        // End first, then notify the queue. No actor hop or PTP drain delays
+        // UIApplication.endBackgroundTask past the system's deadline.
+        onExpiration()
+    }
+}
+
 /// The queue only needs the existing camera download operation. Keeping this
 /// boundary explicit also lets state-transition tests hold a real task in flight.
 protocol TransferDownloading: Sendable {
@@ -235,7 +282,7 @@ actor TransferQueue {
     /// bounded background assertion to finish a short transition. USB opts out
     /// because ImageCaptureCore itself suspends device communication as soon as
     /// the app backgrounds; the assertion cannot override that platform rule.
-    private var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
+    private var backgroundActivity: TransferBackgroundActivity<UIBackgroundTaskIdentifier>?
     private var backgroundTaskToken: UUID?
     private var pending = PendingTransferQueue()
     private var frameWorkers: [UUID: Task<Void, Never>] = [:]
@@ -349,32 +396,42 @@ actor TransferQueue {
     }
 
     private func beginBackgroundTransferActivity() async {
-        guard backgroundTaskID == .invalid else { return }
+        guard backgroundTaskToken == nil else { return }
         let token = UUID()
         backgroundTaskToken = token
-        let id = await MainActor.run { [weak self] in
-            UIApplication.shared.beginBackgroundTask(withName: "ZTransfer transfer") {
+        let expiringWorker = worker
+        let activity = await MainActor.run { [weak self] in
+            TransferBackgroundActivity<UIBackgroundTaskIdentifier>(begin: { expiration in
+                let id = UIApplication.shared.beginBackgroundTask(withName: "ZTransfer transfer", expirationHandler: expiration)
+                return id == .invalid ? nil : id
+            }, end: { UIApplication.shared.endBackgroundTask($0) }, onExpiration: {
+                // Cancel the captured owner immediately, not whatever worker
+                // happens to be current when a later actor callback executes.
+                expiringWorker?.cancel()
                 Task { await self?.backgroundTransferExpired(token: token) }
-            }
+            })
         }
-        backgroundTaskID = id
-        if id == .invalid { backgroundTaskToken = nil }
+        // Expiration may have been delivered before MainActor.run returned.
+        // Never install that expired assertion on a newer worker generation.
+        guard backgroundTaskToken == token else { await activity.finish(); return }
+        backgroundActivity = activity
     }
 
     private func endBackgroundTransferActivity() {
-        let id = backgroundTaskID
-        backgroundTaskID = .invalid
+        let activity = backgroundActivity
+        backgroundActivity = nil
         backgroundTaskToken = nil
-        guard id != .invalid else { return }
-        Task { @MainActor in UIApplication.shared.endBackgroundTask(id) }
+        Task { @MainActor in activity?.finish() }
     }
 
     private func backgroundTransferExpired(token: UUID) {
         guard backgroundTaskToken == token else { return }
+        backgroundTaskToken = nil
+        backgroundActivity = nil
+        // The assertion owner has already been cancelled synchronously.
         // Cancellation preserves the current .nkpart_ file. The worker's
         // normal cancellation path returns the item to WAITING so a later
         // foreground reconnect can resume it from the next chunk boundary.
-        worker?.cancel()
     }
 
     /// Explicitly starting the pending queue is the Android

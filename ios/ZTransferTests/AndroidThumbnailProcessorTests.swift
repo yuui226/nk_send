@@ -42,6 +42,39 @@ final class AndroidThumbnailProcessorTests: XCTestCase {
         XCTAssertEqual(AndroidThumbnailProcessor.process(data, fileExtension: ".jpg"), data)
     }
 
+    func testCameraCacheRejectsInvalidDataWithoutASecondValidationDecode() {
+        XCTAssertTrue(AndroidThumbnailProcessor.processCameraThumbnail(
+            Data([0x01, 0x02, 0x03]),
+            fileExtension: ".jpg"
+        ).isEmpty)
+    }
+
+    func testCameraCacheKeepsUncroppedJpegBytesExactly() throws {
+        let image = makeImage(width: 100, height: 100) { _, _ in (180, 120, 80, 255) }
+        let data = try XCTUnwrap(image.jpegData(compressionQuality: 0.9))
+        let result = try XCTUnwrap(AndroidThumbnailProcessor.processCameraThumbnailResult(
+            data,
+            fileExtension: ".jpg"
+        ))
+        XCTAssertEqual(result.data, data)
+        XCTAssertEqual(result.image.cgImage?.width, 100)
+        XCTAssertEqual(result.image.cgImage?.height, 100)
+    }
+
+    func testCameraCacheReturnsCroppedImageWithEncodedCacheBytesFromOneDecode() throws {
+        let image = makeImage(width: 100, height: 100) { _, y in
+            y < 10 || y >= 90 ? (0, 0, 0, 255) : (220, 180, 140, 255)
+        }
+        let data = try XCTUnwrap(image.jpegData(compressionQuality: 1))
+        let result = try XCTUnwrap(AndroidThumbnailProcessor.processCameraThumbnailResult(
+            data,
+            fileExtension: ".jpg"
+        ))
+        XCTAssertEqual(result.image.cgImage?.width, 100)
+        XCTAssertLessThan(result.image.cgImage?.height ?? 100, 100)
+        XCTAssertNotEqual(result.data, data)
+    }
+
     private func makeImage(
         width: Int,
         height: Int,

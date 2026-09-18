@@ -55,6 +55,7 @@ struct SettingsView: View {
     let requestTransferDirectoryAttention: Bool
     var onClose: (() -> Void)? = nil
     var dismissalRequested = false
+    let popupMotionPaused: Bool
     let effectPreviewSource: UIImage?
     let effectPreviewExif: PhotoExif?
     let onEffectPreviewRequested: () -> Void
@@ -65,9 +66,21 @@ struct SettingsView: View {
         case effects
     }
 
+    private var buttonSkinOptions: [String] {
+        var options = ["FROSTED_GLASS"]
+        if #available(iOS 26.0, *) { options.append("LIQUID_GLASS") }
+        options.append(contentsOf: ["WOOD", "CAMERA_CONTROLS", "TITANIUM"])
+        return options
+    }
+
+    private var visibleSkinPreset: String {
+        buttonSkinOptions.contains(skinPreset) ? skinPreset : "FROSTED_GLASS"
+    }
+
     init(showPhotoEffectsEntry: Bool, effectsStore: PhotoEffectsStore, directory: DirectoryAccessStore,
          effectsDraft: Binding<PhotoEffectsSettings>, filterChooser: Binding<PhotoFilterChooserState>,
          effectsHint: Binding<PhotoEffectsHint?>, dismissalRequested: Bool,
+         popupMotionPaused: Bool = false,
          requestTransferDirectoryAttention: Bool = false,
          effectPreviewSource: UIImage? = nil, effectPreviewExif: PhotoExif? = nil,
          onEffectPreviewRequested: @escaping () -> Void = {},
@@ -80,6 +93,7 @@ struct SettingsView: View {
         _filterChooser = filterChooser
         _effectsHint = effectsHint
         self.dismissalRequested = dismissalRequested
+        self.popupMotionPaused = popupMotionPaused
         self.requestTransferDirectoryAttention = requestTransferDirectoryAttention
         self.effectPreviewSource = effectPreviewSource
         self.effectPreviewExif = effectPreviewExif
@@ -219,6 +233,8 @@ struct SettingsView: View {
             if !["system", "en", "zh-Hans", "zh-Hant"].contains(appLanguage) {
                 appLanguage = "system"
             }
+            let restoredSkin = normalizedSkinPreset(skinPreset)
+            if skinPreset != restoredSkin { skinPreset = restoredSkin }
         }
         .task(id: directoryAttentionActive) {
             guard directoryAttentionActive else {
@@ -272,17 +288,20 @@ struct SettingsView: View {
             Spacer()
             TipLightbulbButton(
                 attention: !photoEffectsHelpViewed, size: 28,
-                accessibilityLabel: AppLocalized.resource("photo_effects_info_title")
+                accessibilityLabel: AppLocalized.resource("photo_effects_info_title"),
+                motionPaused: popupMotionPaused
             ) {
                 photoEffectsHelpViewed = true
                 showingEffectsHelp.toggle()
             }
             .background {
                 GeometryReader { proxy in
-                    Color.clear.preference(
-                        key: SettingsHelpAnchorPreferenceKey.self,
-                        value: proxy.frame(in: .named("settings-panel"))
-                    )
+                    Color.clear
+                        .allowsHitTesting(false)
+                        .preference(
+                            key: SettingsHelpAnchorPreferenceKey.self,
+                            value: proxy.frame(in: .named("settings-panel"))
+                        )
                 }
             }
         }
@@ -335,17 +354,20 @@ struct SettingsView: View {
                 .fixedSize(horizontal: true, vertical: false)
             TipLightbulbButton(
                 attention: !mainSettingsHelpViewed, size: 30,
-                accessibilityLabel: AppLocalized.resource("settings_help_title")
+                accessibilityLabel: AppLocalized.resource("settings_help_title"),
+                motionPaused: popupMotionPaused
             ) {
                 mainSettingsHelpViewed = true
                 showingHelp.toggle()
             }
             .background {
                 GeometryReader { proxy in
-                    Color.clear.preference(
-                        key: SettingsHelpAnchorPreferenceKey.self,
-                        value: proxy.frame(in: .named("settings-panel"))
-                    )
+                    Color.clear
+                        .allowsHitTesting(false)
+                        .preference(
+                            key: SettingsHelpAnchorPreferenceKey.self,
+                            value: proxy.frame(in: .named("settings-panel"))
+                        )
                 }
             }
             Spacer()
@@ -434,8 +456,9 @@ struct SettingsView: View {
                     default: return AppLocalized.resource("language_system")
                     }
                 }, onCommit: { appLanguage = $0; onClose?() }, rowHeight: 16, wheelHeight: 42, optionFontSize: 13).frame(maxWidth: .infinity)
-                DetentWheel(label: AppLocalized.resource("button_style"), options: ["FROSTED_GLASS", "WOOD", "CAMERA_CONTROLS", "TITANIUM"], selected: skinPreset, optionLabel: {
+                DetentWheel(label: AppLocalized.resource("button_style"), options: buttonSkinOptions, selected: visibleSkinPreset, optionLabel: {
                     switch $0 {
+                    case "LIQUID_GLASS": return AppLocalized.resource("skin_liquid_glass")
                     case "WOOD": return AppLocalized.resource("skin_wood")
                     case "CAMERA_CONTROLS": return AppLocalized.resource("skin_camera_controls")
                     case "TITANIUM": return AppLocalized.resource("skin_titanium")
@@ -699,11 +722,8 @@ private struct SettingsFooterButton: View {
                 .zTransferText(size: ZTransferMetrics.caption, weight: .semibold)
                 .padding(.horizontal, 10)
                 .frame(height: 28)
-                .background(ZTransferGlassSurface(cornerRadius: 12, kind: .button))
-                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(ZTransferColors.primaryText.opacity(0.10), lineWidth: 1))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 14))
     }
 }
 

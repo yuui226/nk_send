@@ -29,6 +29,8 @@ final class STABrowsingSessionTests: XCTestCase {
         XCTAssertEqual(recorded, [.pairing])
         let commands = await wire.commands
         XCTAssertEqual(commands.map(\.transactionID), [0, 1, 2, 3, 4, 5])
+        let timeouts = await wire.readTimeouts
+        XCTAssertEqual(timeouts, Array(repeating: 5_000_000_000, count: 6))
         let remaining = await wire.remaining; XCTAssertEqual(remaining, 0)
         XCTAssertTrue(prefs.store.isPaired(guid))
     }
@@ -50,6 +52,23 @@ final class STABrowsingSessionTests: XCTestCase {
         XCTAssertEqual(album.prefetchedHandles?.handles, handles)
         XCTAssertEqual(album.deviceInfo?.model, "Z 30")
         let remaining = await wire.remaining; XCTAssertEqual(remaining, 0)
+    }
+
+    func testHandshakeCommandsUseFiveSecondsThenNormalCommandsUseSessionDefault() async throws {
+        let prefs = STAProfileFixture(); prefs.store.markPaired(guid)
+        let wire = STAScriptTransport([
+            .init(0x1002, [1]), .init(0x941C), .init(0x1004, payload: staU32Array([0x10001])),
+            .init(0x1001, payload: staDeviceInfo()), .init(0x1007, [.max, .max, 0], payload: staU32Array([7])),
+            .init(0x1008, [7], payload: Data(repeating: 0, count: 53)),
+            .init(0x1001, payload: staDeviceInfo()),
+        ])
+        let session = PTPSession(transport: wire, firstTransactionID: 0, defaultTimeoutNanoseconds: 60_000_000_000)
+        let browsing = STABrowsingSession(session: session, guid: guid, identity: .pairedComputer,
+            profiles: prefs.store, onStage: { _ in }, waitForPairingEvent: {})
+        _ = try await browsing.open()
+        _ = try await session.execute(operation: PTPConstants.getDeviceInfo)
+        let timeouts = await wire.readTimeouts
+        XCTAssertEqual(timeouts, Array(repeating: 5_000_000_000, count: 6) + [60_000_000_000])
     }
 
     func testDeniedObjectInfoRequiresPositiveSizeAndPartialReadNotJustThumbnail() async throws {
@@ -149,8 +168,13 @@ struct STAExchange: Sendable {
 actor STAScriptTransport: PTPCommandTransport {
     private var script: [STAExchange]
     private(set) var commands: [PTPContainer] = []
+    private(set) var readTimeouts: [UInt64] = []
     var remaining: Int { script.count }
     init(_ script: [STAExchange]) { self.script = script }
+    func sendPTP(command: Data, data: Data?, readTimeoutNanoseconds: UInt64) async throws -> (response: Data, payload: Data) {
+        readTimeouts.append(readTimeoutNanoseconds)
+        return try await sendPTP(command: command, data: data)
+    }
     func sendPTP(command: Data, data: Data?) async throws -> (response: Data, payload: Data) {
         let command = try PTPCodec.decode(command)
         commands.append(command)

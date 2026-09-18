@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 let cameraExifHeaderCaptureBytes = 256 * 1024
 
@@ -105,6 +106,10 @@ enum CameraDownloadError: Error, Equatable, LocalizedError, Sendable {
 /// off the repository actor; the lock also protects against late callbacks
 /// after timeout closing the file. Only the bounded JPEG prefix is retained.
 final class CameraDownloadWriter: @unchecked Sendable {
+    /// Android wraps the destination in a 1 MiB BufferedOutputStream. iOS can
+    /// also target a File Provider-backed URL, where issuing one write for
+    /// every small PTP/IP packet adds avoidable provider/syscall overhead.
+    private static let outputBufferBytes = 1024 * 1024
     private let lock = NSLock()
     private let output: FileHandle
     private let resumeOffset: UInt64
@@ -116,19 +121,26 @@ final class CameraDownloadWriter: @unchecked Sendable {
     private var total: UInt64
     private var written: UInt64
     private var header = Data()
+    private var pendingOutput = Data()
     private var closed = false
+    private let diagnostics: PTPTransferDiagnostics?
 
     init(output: FileHandle, resumeOffset: UInt64, totalHint: UInt64, captureHeader: Bool,
-         startedAt: ContinuousClock.Instant, onProgress: (@Sendable (TransferDownloadProgress) -> Void)?) {
+         startedAt: ContinuousClock.Instant, onProgress: (@Sendable (TransferDownloadProgress) -> Void)?,
+         diagnostics: PTPTransferDiagnostics? = nil) {
         self.output = output; self.resumeOffset = resumeOffset
         self.totalHint = totalHint; self.total = totalHint; self.written = resumeOffset
         self.captureHeader = captureHeader && resumeOffset == 0
         self.startedAt = startedAt; self.lastProgressAt = startedAt
         self.onProgress = onProgress
+        self.diagnostics = diagnostics
+        self.pendingOutput.reserveCapacity(Self.outputBufferBytes)
     }
 
     var sink: PTPDataSink {
-        PTPDataSink(started: { [self] expected in begin(expected) }, received: { [self] data in try write(data) })
+        PTPDataSink(started: { [self] expected in begin(expected) }, received: { [self] data in
+            try data.withUnsafeBytes { try write($0) }
+        }, diagnostics: diagnostics, receivedBorrowed: { [self] bytes in try write(bytes) })
     }
 
     private func begin(_ expected: UInt64?) {
@@ -139,19 +151,66 @@ final class CameraDownloadWriter: @unchecked Sendable {
         if let progress { onProgress?(progress) }
     }
 
-    private func write(_ data: Data) throws {
+    private func write(_ data: UnsafeRawBufferPointer) throws {
         try Task.checkCancellation()
         let progress = try lock.withLock {
             guard !closed else { throw CancellationError() }
-            do { try output.write(contentsOf: data) }
-            catch { throw CameraDownloadError.write(error.localizedDescription) }
+            try writeBuffered(data)
             if captureHeader, header.count < cameraExifHeaderCaptureBytes {
-                header.append(data.prefix(cameraExifHeaderCaptureBytes - header.count))
+                header.append(contentsOf: data.prefix(cameraExifHeaderCaptureBytes - header.count))
             }
             written += UInt64(data.count)
             return progressSnapshot(force: false)
         }
         if let progress { onProgress?(progress) }
+    }
+
+    private func writeBuffered(_ data: UnsafeRawBufferPointer) throws {
+        guard !data.isEmpty else { return }
+        // A packet at least as large as the buffer is already suitably
+        // batched. Flush older small packets, then avoid copying this one into
+        // another 1 MiB staging allocation.
+        if data.count >= Self.outputBufferBytes {
+            try flushPendingOutput()
+            try writeToOutput(data)
+            return
+        }
+        if pendingOutput.count + data.count > Self.outputBufferBytes {
+            try flushPendingOutput()
+        }
+        pendingOutput.append(contentsOf: data)
+        if pendingOutput.count == Self.outputBufferBytes {
+            try flushPendingOutput()
+        }
+    }
+
+    private func flushPendingOutput() throws {
+        guard !pendingOutput.isEmpty else { return }
+        try pendingOutput.withUnsafeBytes { try writeToOutput($0) }
+        pendingOutput.removeAll(keepingCapacity: true)
+    }
+
+    private func writeToOutput(_ data: UnsafeRawBufferPointer) throws {
+        let start = diagnostics.map { _ in ContinuousClock.now }
+        defer {
+            if let start { diagnostics?.write(bytes: data.count, elapsedMS: PTPTransferDiagnostics.milliseconds(since: start)) }
+        }
+        // Android BufferedOutputStream writes a large borrowed byte[] directly.
+        // Consume synchronously without constructing an owning Data or letting
+        // a no-copy wrapper escape. Retry partial writes/EINTR like FileHandle.
+        var offset = 0
+        while offset < data.count {
+            let count = Darwin.write(output.fileDescriptor, data.baseAddress!.advanced(by: offset), data.count - offset)
+            if count < 0 {
+                let code = errno
+                if code == EINTR { continue }
+                throw CameraDownloadError.write(NSError(domain: NSPOSIXErrorDomain, code: Int(code)).localizedDescription)
+            }
+            guard count > 0 else {
+                throw CameraDownloadError.write(NSError(domain: NSPOSIXErrorDomain, code: Int(EIO)).localizedDescription)
+            }
+            offset += count
+        }
     }
 
     private func progressSnapshot(force: Bool) -> TransferDownloadProgress? {
@@ -179,7 +238,16 @@ final class CameraDownloadWriter: @unchecked Sendable {
         try lock.withLock {
             guard !closed else { return }
             closed = true
-            try output.close()
+            do {
+                try flushPendingOutput()
+                try output.close()
+            } catch let error as CameraDownloadError {
+                try? output.close()
+                throw error
+            } catch {
+                try? output.close()
+                throw CameraDownloadError.write(error.localizedDescription)
+            }
         }
     }
 }

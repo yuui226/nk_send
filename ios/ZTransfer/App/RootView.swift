@@ -108,6 +108,7 @@ struct RootView: View {
                                   directory: directoryStore,
                                   effectsStore: effectsStore,
                                   isSessionConnected: connectionModel.cameraSession === session,
+                                  apSignalPercent: connectionModel.apSignalPercent,
                                   onRetrySTA: { connectionModel.retrySTAConnection() },
                                   remotePresentation: $monitorPresented,
                                   onTransportLost: { failedSession in
@@ -145,6 +146,7 @@ struct RootView: View {
                 RemoteView(session: session,
                            recordingDirectory: directoryStore.directoryURL,
                            isSessionConnected: connectionModel.cameraSession === session,
+                           apSignalPercent: connectionModel.apSignalPercent,
                            onRetrySTA: { connectionModel.retrySTAConnection() },
                            onPreparing: { await listModel.pauseForRemote() },
                            onStopped: { transportLost in
@@ -273,6 +275,10 @@ struct RootView: View {
 /// back immediately.
 func normalizedSkinPreset(_ stored: String?) -> String {
     guard let stored else { return "FROSTED_GLASS" }
+    if stored == "LIQUID_GLASS" {
+        if #available(iOS 26.0, *) { return stored }
+        return "FROSTED_GLASS"
+    }
     return ["FROSTED_GLASS", "WOOD", "CAMERA_CONTROLS", "TITANIUM"].contains(stored)
         ? stored
         : "TITANIUM"
@@ -293,6 +299,7 @@ private struct HomeWorkspacePagerIOS: View {
     @State private var page = 0
     @State private var pagerDragGeneration = 0
     @State private var observingEntryDrag = false
+    @State private var gpsPanelPresented = false
 
     private var localWorkspaceMustRelease: Bool {
         if connection.cameraSession != nil { return true }
@@ -314,8 +321,8 @@ private struct HomeWorkspacePagerIOS: View {
                                directory: directory,
                                celebrationStart: celebrationStart,
                                onOpenWorkspace: {
-                    withAnimation(.interactiveSpring(response: 0.34, dampingFraction: 0.88)) { page = 1 }
-                })
+                    navigate(to: 1)
+                }, gpsPanelPresented: $gpsPanelPresented)
                     .rotationEffect(.degrees(-90))
                     .frame(width: proxy.size.width, height: proxy.size.height)
                     .tag(0)
@@ -324,7 +331,7 @@ private struct HomeWorkspacePagerIOS: View {
                         ZTransferColors.background
                     } else {
                         LocalPhotoEffectsView(onNavigateUp: {
-                            withAnimation(.interactiveSpring(response: 0.34, dampingFraction: 0.88)) { page = 0 }
+                            navigate(to: 0)
                         })
                     }
                 }
@@ -338,6 +345,11 @@ private struct HomeWorkspacePagerIOS: View {
             .background(ZTransferColors.background)
             .tabViewStyle(.page(indexDisplayMode: .never))
             .indexViewStyle(.page(backgroundDisplayMode: .never))
+            // The GPS detail is an interactive overflow surface. While it is
+            // open, its vertical frequency wheel owns vertical drags; letting
+            // UIPageViewController observe the same touch made a downward
+            // detent gesture turn the whole workspace page instead.
+            .scrollDisabled(gpsPanelPresented && page == 0)
             // Android pauses discovery as soon as a drag targets the local
             // workbench, before the pager has settled. Observe the same edge
             // gesture so a camera cannot be accepted midway through the page
@@ -374,12 +386,24 @@ private struct HomeWorkspacePagerIOS: View {
             .onChange(of: page) { currentPage in
                 pagerDragGeneration &+= 1
                 observingEntryDrag = false
+                if currentPage != 0 { gpsPanelPresented = false }
                 connection.setConnectionDiscoveryPaused(currentPage != 0)
             }
         }
         .background(ZTransferColors.background.ignoresSafeArea())
         .onAppear {
             connection.setConnectionDiscoveryPaused(page != 0)
+        }
+    }
+
+    private func navigate(to destination: Int) {
+        guard destination != page else { return }
+        // A presented GPS overflow pauses only the connection-page pager.
+        // Clear it before changing selection so a stale scroll lock cannot
+        // swallow the workbench's explicit back button.
+        if gpsPanelPresented { gpsPanelPresented = false }
+        withAnimation(.interactiveSpring(response: 0.34, dampingFraction: 0.88)) {
+            page = destination
         }
     }
 }

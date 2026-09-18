@@ -1,5 +1,12 @@
 import SwiftUI
 
+/// Buttons and popup overlays both resolve through this page-local space.
+/// Using `.global` here is subtly wrong once the overlay ignores safe areas:
+/// its origin can differ from the presenting page by the system inset.
+enum ZTransferPopupAnchorSpace {
+    static let name = "ztransfer-popup-anchor-space"
+}
+
 /// Android SettingsOverlay/AnchorPopup equivalent. It lives in the presenting
 /// view's hierarchy so the page remains visible beneath the panel.
 struct SettingsPopupOverlay: View {
@@ -8,13 +15,14 @@ struct SettingsPopupOverlay: View {
     let effectsStore: PhotoEffectsStore
     let directory: DirectoryAccessStore
     let anchor: CGRect
+    let motionAnchor: CGRect
     let requestTransferDirectoryAttention: Bool
     let effectPreviewSource: UIImage?
     let effectPreviewExif: PhotoExif?
     let onEffectPreviewRequested: () -> Void
 
     init(isPresented: Binding<Bool>, showPhotoEffectsEntry: Bool, effectsStore: PhotoEffectsStore,
-         directory: DirectoryAccessStore, anchor: CGRect,
+         directory: DirectoryAccessStore, anchor: CGRect, motionAnchor: CGRect,
          requestTransferDirectoryAttention: Bool = false, effectPreviewSource: UIImage? = nil,
          effectPreviewExif: PhotoExif? = nil, onEffectPreviewRequested: @escaping () -> Void = {}) {
         _isPresented = isPresented
@@ -22,6 +30,7 @@ struct SettingsPopupOverlay: View {
         self.effectsStore = effectsStore
         self.directory = directory
         self.anchor = anchor
+        self.motionAnchor = motionAnchor
         self.requestTransferDirectoryAttention = requestTransferDirectoryAttention
         self.effectPreviewSource = effectPreviewSource
         self.effectPreviewExif = effectPreviewExif
@@ -34,10 +43,11 @@ struct SettingsPopupOverlay: View {
     @State private var filterChooser = PhotoFilterChooserState()
     @State private var effectsHint: PhotoEffectsHint?
     @State private var contentHeight: CGFloat?
+    @State private var panelSettled = false
 
     var body: some View {
         GeometryReader { proxy in
-            let overlayFrame = proxy.frame(in: .global)
+            let overlayFrame = proxy.frame(in: .named(ZTransferPopupAnchorSpace.name))
             let localAnchor = anchor.offsetBy(dx: -overlayFrame.minX, dy: -overlayFrame.minY)
             let panelLeft: CGFloat = 12
             let panelWidth = max(0, proxy.size.width - panelLeft * 2)
@@ -62,9 +72,16 @@ struct SettingsPopupOverlay: View {
             // SwiftUI padding below. Convert both rectangles into that
             // container's local coordinate space; otherwise the mesh uses the
             // panel origin twice and opens from a point above the button.
+            // Expansion and collapse both meet the complete trigger button:
+            // horizontally centred, with the exact button width. Do not use
+            // the inner Z glyph because its visual bounds vary by theme.
+            let mouthWidth = localAnchor.width > 0 ? localAnchor.width : 44
             let sourceAnchor = (anchor == .zero
-                ? CGRect(x: panelLeft, y: panelTop - 44, width: 36, height: 36)
-                : localAnchor)
+                ? CGRect(x: panelLeft, y: panelTop - 9, width: mouthWidth, height: 1)
+                : CGRect(x: localAnchor.midX - mouthWidth / 2,
+                         y: localAnchor.maxY - 1,
+                         width: mouthWidth,
+                         height: 1))
                 .offsetBy(dx: -panelLeft, dy: -panelTop)
             ZStack(alignment: .topLeading) {
                 // A transparent hit area still closes the popup on outside
@@ -84,6 +101,7 @@ struct SettingsPopupOverlay: View {
                         filterChooser: $filterChooser,
                         effectsHint: $effectsHint,
                         dismissalRequested: dismissalRequested,
+                        popupMotionPaused: !panelSettled || dismissalRequested,
                         requestTransferDirectoryAttention: requestTransferDirectoryAttention,
                         effectPreviewSource: effectPreviewSource,
                         effectPreviewExif: effectPreviewExif,
@@ -108,6 +126,7 @@ struct SettingsPopupOverlay: View {
                     anchor: sourceAnchor,
                     panelOrigin: .zero,
                     viewport: proxy.size,
+                    onExpanded: { panelSettled = true },
                     onCollapsed: { isPresented = false }
                 )
                 .frame(width: panelWidth)
@@ -125,6 +144,7 @@ struct SettingsPopupOverlay: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .onAppear {
                 effectsDraft = effectsStore.beginDraft()
+                panelSettled = false
             }
         }
         .ignoresSafeArea()

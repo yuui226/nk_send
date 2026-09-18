@@ -119,6 +119,10 @@ final class STAConnectionCoordinatorTests: XCTestCase {
     func testRetryClassificationAndBackoffMatchAndroid() {
         XCTAssertTrue(STAConnectionCoordinator.isTransientReadinessFailure(PTPSessionError.timeout))
         XCTAssertTrue(STAConnectionCoordinator.isTransientReadinessFailure(NWError.posix(.ECONNREFUSED)))
+        XCTAssertTrue(STAConnectionCoordinator.isTransientReadinessFailure(PTPIPPOSIXChannel.ChannelError.timeout))
+        XCTAssertTrue(STAConnectionCoordinator.isTransientReadinessFailure(PTPIPPOSIXChannel.ChannelError.system(POSIXErrorCode.ECONNREFUSED.rawValue)))
+        XCTAssertTrue(STAConnectionCoordinator.isTransientReadinessFailure(PTPIPPOSIXChannel.ChannelError.system(POSIXErrorCode.ETIMEDOUT.rawValue)))
+        XCTAssertFalse(STAConnectionCoordinator.isTransientReadinessFailure(PTPIPPOSIXChannel.ChannelError.system(POSIXErrorCode.EHOSTUNREACH.rawValue)))
         XCTAssertTrue(STAConnectionCoordinator.isTransientReadinessFailure(STAConnectionError.albumUnavailable(0x2001)))
         XCTAssertFalse(STAConnectionCoordinator.isTransientReadinessFailure(NWError.posix(.EHOSTUNREACH)))
         XCTAssertFalse(STAConnectionCoordinator.isTransientReadinessFailure(STAConnectionError.noMedia))

@@ -17,6 +17,7 @@ struct TransferQueueView: View {
     @ObservedObject var directory: DirectoryAccessStore
     let session: CameraSession?
     let isSessionConnected: Bool
+    let apSignalPercent: Int?
     let onRetrySTA: () -> Void
     let onNavigateBack: () -> Void
     @State private var pendingConfirmation: QueueConfirmation?
@@ -30,11 +31,13 @@ struct TransferQueueView: View {
     }
 
     init(model: TransferQueueViewModel, session: CameraSession?, directory: DirectoryAccessStore,
-         isSessionConnected: Bool = true, onRetrySTA: @escaping () -> Void = {},
+         isSessionConnected: Bool = true, apSignalPercent: Int? = nil,
+         onRetrySTA: @escaping () -> Void = {},
          onNavigateBack: @escaping () -> Void) {
         self.model = model
         self.session = session
         self.isSessionConnected = isSessionConnected
+        self.apSignalPercent = apSignalPercent
         self.onRetrySTA = onRetrySTA
         self.directory = directory
         self.onNavigateBack = onNavigateBack
@@ -99,33 +102,36 @@ struct TransferQueueView: View {
             .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
             if let session {
                 Button {
-                    if session.isUSB {
-                        if isSessionConnected {
-                            withAnimation(signalExpanded
-                                          ? .timingCurve(0.4, 0, 0.2, 1, duration: 0.22)
-                                          : .spring(response: 0.42, dampingFraction: 0.72)) {
-                                signalExpanded.toggle()
-                            }
+                    if session.isUSB || session.wirelessMode == .ap {
+                        guard isSessionConnected else { return }
+                        withAnimation(signalExpanded
+                                      ? .timingCurve(0.4, 0, 0.2, 1, duration: 0.22)
+                                      : .spring(response: 0.42, dampingFraction: 0.72)) {
+                            signalExpanded.toggle()
                         }
                     } else if session.wirelessMode == .sta && !isSessionConnected {
                         onRetrySTA()
                     }
                 } label: {
-                    HStack(spacing: signalExpanded && session.isUSB ? 5 : 0) {
+                    HStack(spacing: signalExpanded ? 5 : 0) {
                         PhotoListSignalIcon(isUSB: session.isUSB, wirelessMode: session.wirelessMode,
-                                            connected: isSessionConnected)
+                                            connected: isSessionConnected,
+                                            apSignalPercent: apSignalPercent)
                         if signalExpanded && session.isUSB && isSessionConnected {
                             Text(AppLocalized.resource("connection_usb"))
                                 .zTransferTypography(.labelSmall, weight: .medium)
                                 .foregroundStyle(ZTransferColors.accentBlue)
+                        } else if signalExpanded && session.wirelessMode == .ap && isSessionConnected {
+                            Text(apSignalPercent.map { "\($0)%" } ?? "--%")
+                                .zTransferTypography(.labelSmall, weight: .medium)
+                                .monospacedDigit()
+                                .foregroundStyle(apSignalTint(percent: apSignalPercent))
                         }
                     }
                         .padding(.horizontal, 10)
                         .frame(minWidth: 40, minHeight: 36, maxHeight: 36)
-                        .background(.thinMaterial, in: Capsule())
-                        .overlay(Capsule().stroke(.white.opacity(0.45), lineWidth: 1))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
             }
             Spacer()
 
@@ -306,7 +312,7 @@ private struct QueueItemView: View {
             .clipShape(RoundedRectangle(cornerRadius: 14))
             HStack(spacing: 12) {
                 ZStack(alignment: .bottomTrailing) {
-                    QueueThumbnail(session: session, handle: item.file.id, item: item)
+                    QueueThumbnail(session: session, item: item)
                     QueueTaskStatusBadge(item: item)
                 }
                 .frame(width: 56, height: 56)
@@ -639,22 +645,45 @@ struct SmoothTransferProgress<Content: View>: View {
     let resetKey: AnyHashable?
     @ViewBuilder let content: (Double) -> Content
     @State private var accepted = 0.0
+    @State private var pending = 0.0
+    @State private var resetting = false
+    @State private var resetTask: Task<Void, Never>?
     var body: some View {
         content(accepted)
             .onAppear { advance() }
             .onChange(of: target) { _ in advance() }
             .onChange(of: resetKey) { _ in
-                var transaction = Transaction()
-                transaction.disablesAnimations = true
-                withTransaction(transaction) { accepted = 0 }
-                advance()
+                resetForNextTask()
             }
+            .onDisappear { resetTask?.cancel() }
     }
     private func advance() {
         let normalized = target.isFinite ? min(max(target, 0), 1) : 0
-        guard normalized > accepted else { return }
+        pending = max(pending, normalized)
+        guard !resetting else { return }
+        guard pending > accepted else { return }
         withAnimation(.interpolatingSpring(mass: 1, stiffness: 180, damping: 2 * sqrt(180))) {
-            accepted = normalized
+            accepted = pending
+        }
+    }
+
+    private func resetForNextTask() {
+        resetTask?.cancel()
+        let normalized = target.isFinite ? min(max(target, 0), 1) : 0
+        pending = normalized
+        resetting = true
+        // Keep the fill continuous across task identity changes: visibly drain
+        // the completed item back to zero, then let the next item resume the
+        // same critically-damped forward tracking.
+        withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.22)) {
+            accepted = 0
+        }
+        resetTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 220_000_000)
+            guard !Task.isCancelled else { return }
+            resetting = false
+            advance()
+            resetTask = nil
         }
     }
 }
@@ -675,7 +704,8 @@ struct LiquidTransferProgressFill: View {
                     segments: isCapsule ? 8 : 12, spatialScale: isCapsule ? 1 : 0.55)
                     .fill(ZTransferColors.accentBlue.opacity(isCapsule ? 0.22 : 0.14))
             }
-        }.allowsHitTesting(false)
+        }
+        .allowsHitTesting(false)
     }
     private var seedPhase: CGFloat {
         let hash = seed.utf8.reduce(UInt32(0)) { ($0 &* 31) &+ UInt32($1) }
@@ -747,9 +777,15 @@ private struct TransferInfoPill: View {
 
 private struct QueueThumbnail: View {
     let session: CameraSession?
-    let handle: UInt32
     let item: TransferQueueItem
     @State private var image: UIImage?
+
+    init(session: CameraSession?, item: TransferQueueItem) {
+        self.session = session
+        self.item = item
+        _image = State(initialValue: session?.memoryThumbnailImage(file: item.file))
+    }
+
     var body: some View {
         Group {
             if let image { Image(uiImage: image).resizable().scaledToFill() }
@@ -759,9 +795,15 @@ private struct QueueThumbnail: View {
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .task(id: item.id) {
             guard image == nil, let session else { return }
-            if let data = try? await session.cachedThumbnail(file: item.file), let image = UIImage(data: data) {
-                self.image = image
-            } else if let data = try? await session.thumbnail(handle: handle), let image = UIImage(data: data) {
+            if session.wirelessMode == .sta {
+                for await _ in await session.thumbnailUpdates(handle: item.file.id) {
+                    guard !Task.isCancelled else { return }
+                    if let cached = try? await session.thumbnailImage(file: item.file, allowRemote: false) {
+                        image = cached
+                        return
+                    }
+                }
+            } else if let image = try? await session.thumbnailImage(file: item.file) {
                 self.image = image
             }
         }

@@ -15,10 +15,11 @@ enum AsyncDeadline {
         }, operation: operation)
     }
 
-    /// Allows a data-phase watchdog to renew its deadline on incoming bytes
-    /// while preserving the same prompt cancellation and late-result rules.
+    /// Allows a data-phase watchdog to renew its deadline on incoming bytes.
+    /// Nil omits the timer when socket reads enforce their own timeout, while
+    /// preserving prompt cancellation and late-result rules for recovery.
     static func run<Value: Sendable>(
-        timeout: @escaping @Sendable () async throws -> Void,
+        timeout: (@Sendable () async throws -> Void)? = nil,
         operation: @escaping @Sendable () async throws -> Value
     ) async throws -> Value {
         try Task.checkCancellation()
@@ -34,12 +35,15 @@ enum AsyncDeadline {
                         completion.resolve(.failure(error))
                     }
                 }
-                let timer = Task {
-                    do { try await timeout() }
-                    catch is CancellationError { return }
-                    catch { completion.resolve(.failure(error)) }
+                var tasks = [work]
+                if let timeout {
+                    tasks.append(Task {
+                        do { try await timeout() }
+                        catch is CancellationError { return }
+                        catch { completion.resolve(.failure(error)) }
+                    })
                 }
-                completion.attach([work, timer])
+                completion.attach(tasks)
             }
         } onCancel: {
             completion.resolve(.failure(CancellationError()))

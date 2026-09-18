@@ -92,7 +92,7 @@ echo "IPA: $IPA_ARTIFACT"
 # reinstall over the existing app, and launch it. The device archive above is
 # not installable on a simulator, so this is a separate simulator build.
 SIMCTL="$(command -v xcrun || true)"
-if [[ -n "$SIMCTL" ]]; then
+if [[ -n "$SIMCTL" && "${IOS_SKIP_SIMULATOR:-0}" != "1" ]]; then
   BOOTED_SIM_IDS="$(xcrun simctl list devices booted 2>/dev/null | sed -nE 's/.*\(([A-F0-9-]+)\) \(Booted\).*/\1/p')"
   if [[ -n "$BOOTED_SIM_IDS" ]]; then
     SIM_DERIVED_DATA="$DERIVED_DATA-simulator"

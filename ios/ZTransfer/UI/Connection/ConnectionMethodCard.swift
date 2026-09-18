@@ -27,11 +27,24 @@ struct ConnectionMethodCard: View {
     var onAPHotspotSettings: (() -> Void)?
     var staHelpViewed = false
     var apHelpViewed = false
-    @State private var helpButtonFrame: CGRect = .zero
+    @State private var staHelpButtonFrame: CGRect = .zero
+    @State private var apHelpButtonFrame: CGRect = .zero
+    @AppStorage("skin_preset") private var skinPreset = ZTransferButtonSkin.frostedGlass.rawValue
+    @Environment(\.colorScheme) private var colorScheme
 
     private var accent: Color { mode == .usb ? ZTransferColors.accentOrange : ZTransferColors.accentBlue }
     private var isSTA: Bool { state.wirelessMode == .sta }
-    private var steps: [String] {
+    private var buttonSkin: ZTransferButtonSkin { .init(storedValue: skinPreset) }
+    private var materialForeground: Color {
+        zTransferButtonForeground(skin: buttonSkin, scheme: colorScheme)
+    }
+    private var wifiSettingsTextColor: Color {
+        buttonSkin == .wood ? materialForeground : ZTransferColors.accentBlue
+    }
+    private var staResetIconColor: Color {
+        buttonSkin == .wood ? ZTransferColors.primaryText : ZTransferColors.accentOrange
+    }
+    private func steps(for wirelessMode: WirelessMode? = nil) -> [String] {
         if mode == .usb {
             return [
                 AppLocalized.resource("usb_step_mode"),
@@ -39,7 +52,10 @@ struct ConnectionMethodCard: View {
                 AppLocalized.resource("usb_step_cable"),
             ]
         }
-        if isSTA { return [AppLocalized.resource("sta_step_phone_hotspot"), AppLocalized.resource("sta_step_connect_camera")] }
+        if wirelessMode == .sta {
+            return [AppLocalized.resource("sta_step_phone_hotspot"),
+                    AppLocalized.resource("sta_step_connect_camera")]
+        }
         return [AppLocalized.resource("step_camera_wifi"), AppLocalized.resource("step_phone_wifi")]
     }
 
@@ -74,35 +90,26 @@ struct ConnectionMethodCard: View {
             if mode == .wifi {
                 modeTabs
                 Spacer().frame(height: 12)
-            }
-
-            if mode == .wifi && isSTA {
-                // Android reserves this slot. Failure replaces the steps inside
-                // it, leaving both footer rows and the card outline stationary.
+                // Keep both final layouts mounted in one fixed content slot.
+                // Only their opacity changes, so STA/AP never flash through a
+                // transient empty frame and the card outline/tabs do not move.
                 ZStack(alignment: .topLeading) {
-                    if case let .failed(message) = state.wifiPhase {
-                        ConnectionFeedback(
-                            title: AppLocalized.resource("sta_camera_not_found_short"),
-                            message: message
-                        )
-                        .transition(.asymmetric(
-                            insertion: .opacity.animation(.timingCurve(0.0, 0.0, 0.2, 1.0, duration: 0.22).delay(0.05)),
-                            removal: .opacity.animation(.timingCurve(0.4, 0.0, 1.0, 1.0, duration: 0.13))
-                        ))
-                    } else {
-                        instructions
-                            .transition(.asymmetric(
-                                insertion: .opacity.animation(.timingCurve(0.0, 0.0, 0.2, 1.0, duration: 0.22).delay(0.05)),
-                                removal: .opacity.animation(.timingCurve(0.4, 0.0, 1.0, 1.0, duration: 0.13))
-                            ))
-                    }
+                    wirelessModeContent(.ap)
+                        .opacity(isSTA ? 0 : 1)
+                        .allowsHitTesting(!isSTA)
+                        .accessibilityHidden(isSTA)
+                    wirelessModeContent(.sta)
+                        .opacity(isSTA ? 1 : 0)
+                        .allowsHitTesting(isSTA)
+                        .accessibilityHidden(!isSTA)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .clipped()
-                .animation(.timingCurve(0.4, 0.0, 0.2, 1.0, duration: 0.22), value: state.wifiPhase)
+                .animation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.22),
+                           value: state.wirelessMode)
             } else {
-                instructions
-                if let feedback = wifiFeedback {
+                instructions(for: nil)
+                if let feedback = wifiFeedback(for: nil) {
                     ConnectionFeedback(title: feedback.title, message: feedback.message)
                         .padding(.top, 12)
                         .transition(.asymmetric(
@@ -112,14 +119,12 @@ struct ConnectionMethodCard: View {
                 }
                 Spacer(minLength: 0)
             }
-            if mode == .wifi { wirelessFooter }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 16)
         .frame(maxWidth: .infinity)
         .frame(height: height)
-        .background(ZTransferGlassSurface(cornerRadius: ConnectionLayout.cardRadius,
-                                           kind: .connection, tint: accent.opacity(0.018)))
+        .background(connectionCardBackground)
         .overlay {
             // Android dims with a background wash, not by making text transparent.
             RoundedRectangle(cornerRadius: ConnectionLayout.cardRadius)
@@ -168,9 +173,9 @@ struct ConnectionMethodCard: View {
         .allowsHitTesting(false)
     }
 
-    private var instructions: some View {
+    private func instructions(for wirelessMode: WirelessMode?) -> some View {
         VStack(alignment: .leading, spacing: 13) {
-            ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
+            ForEach(Array(steps(for: wirelessMode).enumerated()), id: \.offset) { index, step in
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text("\(index + 1)")
                         .zTransferTypography(.labelSmall, weight: .bold)
@@ -195,8 +200,55 @@ struct ConnectionMethodCard: View {
         }
         .frame(width: 22, height: 22)
         .frame(width: 42, height: 42)
-        .background(badgeAccent.opacity(0.10), in: RoundedRectangle(cornerRadius: 13))
+        .background {
+            ZTransferButtonMaterialSurface(
+                skin: .init(storedValue: skinPreset),
+                cornerRadius: 13,
+                active: success,
+                activeColor: badgeAccent
+            )
+            .overlay(RoundedRectangle(cornerRadius: 13)
+                .fill(badgeAccent.opacity(0.08)))
+        }
         .overlay(RoundedRectangle(cornerRadius: 13).strokeBorder(badgeAccent.opacity(0.35), lineWidth: 1))
+    }
+
+    @ViewBuilder private var connectionCardBackground: some View {
+        let skin = ZTransferButtonSkin(storedValue: skinPreset)
+        let dark = colorScheme == .dark
+        if skin == .frostedGlass || skin == .liquidGlass {
+            ZTransferGlassSurface(cornerRadius: ConnectionLayout.cardRadius,
+                                  kind: .connection, tint: accent.opacity(0.018))
+        } else {
+            let base: Color = switch skin {
+            case .titanium: dark ? Color(red: 0.137, green: 0.157, blue: 0.173)
+                                     : Color(red: 0.949, green: 0.957, blue: 0.961)
+            case .wood: dark ? Color(red: 0.149, green: 0.118, blue: 0.094)
+                                : Color(red: 1, green: 0.976, blue: 0.941)
+            case .cameraControls: dark ? Color(red: 0.098, green: 0.106, blue: 0.114)
+                                          : Color(red: 0.949, green: 0.953, blue: 0.953)
+            case .frostedGlass, .liquidGlass: .clear
+            }
+            let edgeTop: Color = switch skin {
+            case .titanium: dark ? .white.opacity(0.36) : Color(red: 0.678, green: 0.725, blue: 0.749).opacity(0.48)
+            case .wood: dark ? Color(red: 0.91, green: 0.745, blue: 0.482).opacity(0.38)
+                             : Color(red: 0.784, green: 0.561, blue: 0.263).opacity(0.42)
+            case .cameraControls: dark ? Color(red: 0.816, green: 0.835, blue: 0.843).opacity(0.32)
+                                       : Color(red: 0.384, green: 0.420, blue: 0.439).opacity(0.36)
+            case .frostedGlass, .liquidGlass: .clear
+            }
+            RoundedRectangle(cornerRadius: ConnectionLayout.cardRadius, style: .continuous)
+                .fill(base)
+                .overlay(RoundedRectangle(cornerRadius: ConnectionLayout.cardRadius)
+                    .fill(accent.opacity(0.018)))
+                .overlay(RoundedRectangle(cornerRadius: ConnectionLayout.cardRadius)
+                    .fill(LinearGradient(colors: [edgeTop.opacity(0.20), .clear, .black.opacity(0.04)],
+                                         startPoint: .top, endPoint: .bottom)))
+                .overlay(RoundedRectangle(cornerRadius: ConnectionLayout.cardRadius)
+                    .strokeBorder(LinearGradient(colors: [edgeTop, .black.opacity(dark ? 0.52 : 0.30)],
+                                                 startPoint: .top, endPoint: .bottom), lineWidth: 0.9))
+                .shadow(color: .black.opacity(0.20), radius: skin == .cameraControls ? 5.5 : 5, y: 3)
+        }
     }
 
     private var modeTabs: some View {
@@ -215,43 +267,94 @@ struct ConnectionMethodCard: View {
         .padding(2)
         .frame(height: 30)
         .background(ZTransferColors.primaryText.opacity(0.055), in: RoundedRectangle(cornerRadius: 10))
+        .animation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.18),
+                   value: state.wirelessMode)
     }
 
-    @ViewBuilder private var wirelessFooter: some View {
-        if isSTA {
+    @ViewBuilder private func wirelessModeContent(_ wirelessMode: WirelessMode) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if wirelessMode == .sta {
+                // Android reserves this slot. Failure replaces the steps
+                // inside it, leaving both footer rows and the outline fixed.
+                ZStack(alignment: .topLeading) {
+                    if case let .failed(message) = state.wifiPhase {
+                        ConnectionFeedback(
+                            title: AppLocalized.resource("sta_camera_not_found_short"),
+                            message: message
+                        )
+                        .transition(.asymmetric(
+                            insertion: .opacity.animation(.timingCurve(0, 0, 0.2, 1, duration: 0.22).delay(0.05)),
+                            removal: .opacity.animation(.timingCurve(0.4, 0, 1, 1, duration: 0.13))
+                        ))
+                    } else {
+                        instructions(for: .sta)
+                            .transition(.asymmetric(
+                                insertion: .opacity.animation(.timingCurve(0, 0, 0.2, 1, duration: 0.22).delay(0.05)),
+                                removal: .opacity.animation(.timingCurve(0.4, 0, 1, 1, duration: 0.13))
+                            ))
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .clipped()
+                .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.22),
+                           value: state.wifiPhase)
+            } else {
+                instructions(for: .ap)
+                if let feedback = wifiFeedback(for: .ap) {
+                    ConnectionFeedback(title: feedback.title, message: feedback.message)
+                        .padding(.top, 12)
+                        .transition(.asymmetric(
+                            insertion: .opacity.animation(.timingCurve(0, 0, 0.2, 1, duration: 0.22).delay(0.035)),
+                            removal: .opacity.animation(.timingCurve(0.4, 0, 1, 1, duration: 0.15))
+                        ))
+                }
+                Spacer(minLength: 0)
+            }
+            wirelessFooter(for: wirelessMode)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    @ViewBuilder private func wirelessFooter(for wirelessMode: WirelessMode) -> some View {
+        if wirelessMode == .sta {
             VStack(spacing: 8) {
                 HStack {
                     TipLightbulbButton(
                         attention: !staHelpViewed, size: 34,
                         accessibilityLabel: AppLocalized.resource("tip_sta_title")
                     ) {
-                        onSTAHelpRequested?(helpButtonFrame)
+                        onSTAHelpRequested?(staHelpButtonFrame)
                     }
                     .background(GeometryReader { proxy in
-                        Color.clear.onAppear { helpButtonFrame = proxy.frame(in: .global) }
+                        Color.clear
+                            .allowsHitTesting(false)
+                            .onAppear { staHelpButtonFrame = proxy.frame(in: .global) }
+                            .onChange(of: proxy.frame(in: .global)) {
+                                staHelpButtonFrame = $0
+                            }
                     })
                     Spacer(minLength: 0)
                     Button { onResetSTAPairing?() } label: {
                       ZStack {
-                        utilityIcon("link", tint: ZTransferColors.accentOrange)
+                        utilityIcon("link", tint: staResetIconColor)
                         Path { p in p.move(to: CGPoint(x: 9, y: 9)); p.addLine(to: CGPoint(x: 25, y: 25)) }
-                            .stroke(ZTransferColors.accentOrange, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                            .stroke(staResetIconColor, style: StrokeStyle(lineWidth: 2, lineCap: .round))
                       }.frame(width: 34, height: 34)
-                    }.buttonStyle(.plain)
+                    }.buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 11))
                      .disabled(state.wifiPhase == .connected)
                      .accessibilityLabel(AppLocalized.resource("sta_reset_pairing"))
                     Spacer(minLength: 0)
                     Button { onSTAHotspotSettings?() } label: {
                         utilityIcon(ZTransferIcon.settings, tint: ZTransferColors.secondaryText)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 11))
                     .disabled(state.wifiPhase == .connected)
                     .accessibilityLabel(AppLocalized.resource("sta_hotspot_settings_short"))
                 }
                 Button(action: { onConnect?() }) {
                     Text(staButtonTitle)
                         .zTransferTypography(.labelLarge, weight: .semibold)
-                        .foregroundStyle(ZTransferColors.primaryText)
+                        .foregroundStyle(materialForeground)
                         .frame(maxWidth: .infinity).frame(height: 42)
                 }
                 .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 14))
@@ -263,19 +366,23 @@ struct ConnectionMethodCard: View {
                     attention: !apHelpViewed, size: 36,
                     accessibilityLabel: AppLocalized.resource("tip_title")
                 ) {
-                    onAPHelpRequested?(helpButtonFrame)
+                    onAPHelpRequested?(apHelpButtonFrame)
                 }
                 .background(GeometryReader { proxy in
-                    Color.clear.onAppear { helpButtonFrame = proxy.frame(in: .global) }
+                    Color.clear
+                        .allowsHitTesting(false)
+                        .onAppear { apHelpButtonFrame = proxy.frame(in: .global) }
+                        .onChange(of: proxy.frame(in: .global)) {
+                            apHelpButtonFrame = $0
+                        }
                 })
                 Button { onAPHotspotSettings?() } label: {
                     Text(AppLocalized.resource("open_wifi_settings"))
                         .zTransferTypography(.labelSmall, weight: .semibold)
-                        .foregroundStyle(accent)
+                        .foregroundStyle(wifiSettingsTextColor)
                         .frame(maxWidth: .infinity).frame(height: 36)
-                        .background(ZTransferGlassSurface(cornerRadius: 12, kind: .button))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 12))
                 .disabled(dimmed)
             }
         }
@@ -284,7 +391,6 @@ struct ConnectionMethodCard: View {
     private func utilityIcon(_ name: String, tint: Color, size: CGFloat = 34) -> some View {
         Image(systemName: name).font(.system(size: 18, weight: .semibold))
             .foregroundStyle(tint).frame(width: size, height: size)
-            .background(ZTransferGlassSurface(cornerRadius: size == 36 ? 12 : 11, kind: .button))
     }
 
     private var staButtonTitle: String {
@@ -296,8 +402,8 @@ struct ConnectionMethodCard: View {
         case .idle, .unavailable, .reconnecting, .failed: return AppLocalized.resource("sta_connect_action")
         }
     }
-    private var wifiFeedback: (title: String, message: String)? {
-        guard mode == .wifi, !isSTA else {
+    private func wifiFeedback(for wirelessMode: WirelessMode?) -> (title: String, message: String)? {
+        guard mode == .wifi, wirelessMode != .sta else {
             if mode == .usb, case let .failed(message) = state.usbPhase {
                 return (AppLocalized.resource("connection_failed_short"), message)
             }

@@ -24,14 +24,17 @@
 	<string>public.app-category.photography</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>用于连接 Nikon GPS 设备</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_ptp._tcp</string>
+		<string>_nikon._tcp</string>
+	</array>
 	<key>NSCameraUsageDescription</key>
 	<string>用于通过 USB 连接相机、浏览和传输照片并控制拍摄</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>用于连接相机</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>用于向相机写入拍摄位置</string>
-	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>用于在锁屏或切到后台后继续向相机写入拍摄位置</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>用于保存工作台生成的效果图</string>
 	<key>NSPhotoLibraryUsageDescription</key>
@@ -42,14 +45,6 @@
 		<string>bebas_neue_regular.ttf</string>
 		<string>cormorant_garamond_medium_italic.ttf</string>
 	</array>
-	<key>UISupportedInterfaceOrientations</key>
-	<array>
-		<string>UIInterfaceOrientationPortrait</string>
-	</array>
-	<key>UISupportedInterfaceOrientations~ipad</key>
-	<array>
-		<string>UIInterfaceOrientationPortrait</string>
-	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
@@ -57,20 +52,18 @@
 		<key>UISceneConfigurations</key>
 		<dict/>
 	</dict>
-	<key>UIBackgroundModes</key>
-	<array>
-		<string>location</string>
-		<string>bluetooth-central</string>
-	</array>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UILaunchScreen</key>
 		<dict/>
 	</dict>
-	<key>NSBonjourServices</key>
+	<key>UISupportedInterfaceOrientations</key>
 	<array>
-		<string>_ptp._tcp</string>
-		<string>_nikon._tcp</string>
+		<string>UIInterfaceOrientationPortrait</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
 	</array>
 </dict>
 </plist>

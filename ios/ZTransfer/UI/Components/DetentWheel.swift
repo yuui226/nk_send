@@ -30,6 +30,8 @@ struct DetentWheel<Option: Hashable>: View {
     var favoriteIconColor: Color? = nil
     var ambientEffectColor: Color? = nil
     var ambientEffectAlpha: Double = 0
+    var contentAnchorSpace: AnyHashable? = nil
+    var onContentAnchorChange: ((CGRect) -> Void)? = nil
     @State private var position: CGFloat
     @State private var dragStart: CGFloat
     @State private var dragging = false
@@ -50,7 +52,9 @@ struct DetentWheel<Option: Hashable>: View {
          centerIcon: ((Color) -> AnyView)? = nil,
          favoriteOption: @escaping (Option) -> Bool = { _ in false },
          favoriteIconColor: Color? = nil, ambientEffectColor: Color? = nil,
-         ambientEffectAlpha: Double = 0) {
+         ambientEffectAlpha: Double = 0,
+         contentAnchorSpace: AnyHashable? = nil,
+         onContentAnchorChange: ((CGRect) -> Void)? = nil) {
         precondition(!options.isEmpty, "DetentWheel requires at least one option")
         self.label = label; self.options = options; self.selected = selected
         self.optionLabel = optionLabel; self.onCommit = onCommit
@@ -64,6 +68,8 @@ struct DetentWheel<Option: Hashable>: View {
         self.centerIcon = centerIcon; self.favoriteOption = favoriteOption
         self.favoriteIconColor = favoriteIconColor; self.ambientEffectColor = ambientEffectColor
         self.ambientEffectAlpha = ambientEffectAlpha
+        self.contentAnchorSpace = contentAnchorSpace
+        self.onContentAnchorChange = onContentAnchorChange
         let initial = options.firstIndex(of: selected) ?? 0
         _position = State(initialValue: CGFloat(initial)); _dragStart = State(initialValue: CGFloat(initial))
     }
@@ -139,6 +145,10 @@ struct DetentWheel<Option: Hashable>: View {
         .accessibilityAddTraits(.isButton)
         .onChange(of: selected) { value in sync(value: value) }
         .onChange(of: options) { _ in sync(value: selected) }
+        .onPreferenceChange(DetentWheelContentAnchorPreferenceKey.self) { frame in
+            guard frame != .zero else { return }
+            onContentAnchorChange?(frame)
+        }
         .onChange(of: gestureActive) { active in
             // GestureState resets automatically when SwiftUI cancels a drag
             // (for example when a parent ScrollView takes ownership). A normal
@@ -167,6 +177,18 @@ struct DetentWheel<Option: Hashable>: View {
                     .fixedSize(horizontal: false, vertical: optionMaxLines > 1)
                     .multilineTextAlignment(.center)
                     .foregroundStyle(color)
+                    .background {
+                        if active, let contentAnchorSpace {
+                            GeometryReader { geometry in
+                                Color.clear
+                                    .allowsHitTesting(false)
+                                    .preference(
+                                        key: DetentWheelContentAnchorPreferenceKey.self,
+                                        value: geometry.frame(in: .named(contentAnchorSpace))
+                                    )
+                            }
+                        }
+                    }
             }
             .frame(maxWidth: .infinity).frame(height: rowHeight)
             // ZStack already centers each row. Only move neighboring rows by
@@ -239,5 +261,13 @@ struct DetentWheel<Option: Hashable>: View {
         // A custom callback replaces the default, never adds a second tick.
         if let onDetent { onDetent() }
         else { ZTransferHaptics.shared.tick() }
+    }
+}
+
+private struct DetentWheelContentAnchorPreferenceKey: PreferenceKey {
+    static let defaultValue: CGRect = .zero
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        let next = nextValue()
+        if next != .zero { value = next }
     }
 }

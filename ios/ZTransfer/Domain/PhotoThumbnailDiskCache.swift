@@ -92,7 +92,7 @@ final class PhotoThumbnailDiskCache: @unchecked Sendable {
             guard !data.isEmpty else { return false }
             lock.lock(); defer { lock.unlock() }
             let fm = FileManager.default
-            try? fm.createDirectory(at: directory, withIntermediateDirectories: true)
+            ensureDirectoryLocked()
             let targetURL = target(name)
             if ((try? targetURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) > 0 {
                 index.insert(name); return true
@@ -100,7 +100,10 @@ final class PhotoThumbnailDiskCache: @unchecked Sendable {
             let tempURL = directory.appendingPathComponent(name + ".tmp")
             do {
                 try? fm.removeItem(at: tempURL)
-                try data.write(to: tempURL, options: .atomic)
+                // The explicit .tmp + move is already the same atomic publish
+                // boundary Android uses. Data.write(.atomic) created and
+                // renamed a second hidden temporary file for every thumbnail.
+                try data.write(to: tempURL)
                 guard ((try? tempURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) == data.count else {
                     try? fm.removeItem(at: tempURL); return false
                 }
@@ -123,6 +126,22 @@ final class PhotoThumbnailDiskCache: @unchecked Sendable {
             index.remove(name)
         }
 
+        fileprivate func cleanupTemporaryFiles() {
+            lock.lock(); defer { lock.unlock() }
+            let files = (try? FileManager.default.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: [.fileSizeKey],
+                options: [.skipsHiddenFiles]
+            )) ?? []
+            for file in files {
+                let size = (try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+                if file.pathExtension.lowercased() == "tmp" || size == 0 {
+                    try? FileManager.default.removeItem(at: file)
+                    index.remove(file.lastPathComponent)
+                }
+            }
+        }
+
         /// Call only after a complete successful handle + metadata scan.
         @discardableResult
         func reconcile(validNames: Set<String>) -> Int {
@@ -141,11 +160,22 @@ final class PhotoThumbnailDiskCache: @unchecked Sendable {
     private let root: URL
     private let lock = NSLock()
     private var stores: [String: CameraStore] = [:]
+    private var cleanupClaimed = false
 
     init(root: URL? = nil) {
         self.root = root ?? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("thumbnails", isDirectory: true)
         try? FileManager.default.createDirectory(at: self.root, withIntermediateDirectories: true)
+    }
+
+    /// Android owns one ThumbnailDiskCache for the ViewModel lifetime and
+    /// launches its expiration sweep once. Shared iOS stores use this claim to
+    /// preserve the same rule across camera reconnects.
+    func claimCleanup() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard !cleanupClaimed else { return false }
+        cleanupClaimed = true
+        return true
     }
 
     func openCamera(identity: String, now: Date = Date()) -> CameraStore {
@@ -177,6 +207,12 @@ final class PhotoThumbnailDiskCache: @unchecked Sendable {
             let value = Double((try? String(contentsOf: marker, encoding: .utf8)) ?? "") ?? 0
             let mtime = (try? dir.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate?.timeIntervalSince1970) ?? 0
             if max(value, mtime) < cutoff { try? fm.removeItem(at: dir); removed += 1 }
+            else if let store = stores[dir.lastPathComponent] {
+                // The background sweep may overlap an active scan. Android
+                // takes the CameraCache lock here so it cannot delete the
+                // explicit .tmp file while a thumbnail write is in progress.
+                store.cleanupTemporaryFiles()
+            }
             else {
                 let children = (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.fileSizeKey], options: [.skipsHiddenFiles])) ?? []
                 for child in children where child.pathExtension.lowercased() == "tmp" || (((try? child.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) == 0) {

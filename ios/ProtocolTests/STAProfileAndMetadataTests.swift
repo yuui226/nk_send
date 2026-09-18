@@ -1,4 +1,6 @@
 import XCTest
+import ImageIO
+import UniformTypeIdentifiers
 #if SWIFT_PACKAGE
 @testable import ZTransferProtocol
 #else
@@ -104,6 +106,34 @@ final class STAMetadataTests: XCTestCase {
         XCTAssertEqual(header.captureDate, "20260818T000016")
         XCTAssertEqual(header.previews, [.init(offset: 300000, length: 1068298)])
     }
+    func testNefJoinsAndroidExifInterfaceJPEGCompressedThumbnailStrips() {
+        let bytes = nefStripThumbnailFixture()
+        let metadata = STAMediaMetadata.tiffHeader(bytes)
+        XCTAssertTrue(metadata.previews.isEmpty)
+        XCTAssertEqual(STAMediaMetadata.nefExifThumbnail(bytes), Data([0xFF, 0xD8, 1, 2, 3, 0xFF, 0xD9]))
+        XCTAssertEqual(STAMediaMetadata.nefExifThumbnail(Data(bytes.prefix(178))), Data())
+    }
+    func testDirectNefHeaderUsesMarkerScanBeforeExifStripsLikeAndroid() async throws {
+        let handle: UInt32 = 0x09000071
+        let bytes = nefStripThumbnailFixture()
+        let wire = STAScriptTransport([
+            .init(0x9421, [handle], payload: staInteger(UInt64(24_000_000))),
+            .init(0x9431, [handle, 0, 0, 128 * 1024, 0], payload: bytes),
+        ])
+        let reader = STAObjectReader(
+            session: PTPSession(transport: wire),
+            operations: [PTPConstants.getPartialObjectEx]
+        )
+
+        let file = try await reader.file(handle: handle, storage: 0x10001)
+        let thumbnail = try await reader.thumbnail(handle: handle)
+
+        XCTAssertEqual(file.fileExtension, ".nef")
+        XCTAssertEqual(thumbnail, bytes.subdata(in: 152..<179))
+        let commands = await wire.commands
+        XCTAssertEqual(commands.map(\.code), [0x9421, 0x9431])
+        let remaining = await wire.remaining; XCTAssertEqual(remaining, 0)
+    }
     func testMpfSecondaryPreviewFromAndroidFixtureAndObjectSizeLimit() {
         var bytes = Data(repeating: 0, count: 82)
         bytes.replaceSubrange(0..<10, with: [255, 216, 255, 226, 0, 76, 77, 80, 70, 0])
@@ -115,6 +145,205 @@ final class STAMetadataTests: XCTestCase {
         bytes.replaceSubrange(80..<82, with: [255, 218])
         XCTAssertEqual(STAMediaMetadata.mpfPreviews(bytes, objectSize: 1000000), [.init(offset: 500010, length: 123456, imageType: 0x010002)])
         XCTAssertEqual(STAMediaMetadata.mpfPreviews(bytes, objectSize: 600000), [])
+    }
+
+    // NikonCamera.readStaDirectRawThumbnailInternal treats a rejected hint as
+    // a miss and continues with this file's TIFF/prefix. Use actual decodable
+    // JPEGs here: SOI/EOI marker-only fixtures cannot prove the grid can display it.
+    func testRawRejectedOrEmptyPreviousFileHintStillLoadsCurrentThumbnail() async throws {
+        for response: UInt16 in [0x200F, 0x2001] {
+            let jpeg = try thumbnailJPEG()
+            let first: UInt32 = 0x09000071, second: UInt32 = 0x09000072
+            let firstBytes = rawThumbnailPrefix(jpeg: jpeg, jpegOffset: 140_000)
+            let secondBytes = rawThumbnailPrefix(jpeg: jpeg, jpegOffset: 180_000)
+            let wire = STAScriptTransport([
+                .init(0x9421, [first], payload: staInteger(UInt64(24_000_000))),
+                .init(0x9431, [first, 0, 0, 128 * 1024, 0], payload: Data(firstBytes.prefix(128 * 1024))),
+                .init(0x9431, [first, 128 * 1024, 0, 112 * 1024, 0], payload: Data(firstBytes.dropFirst(128 * 1024))),
+                .init(0x9421, [second], payload: staInteger(UInt64(24_000_000))),
+                .init(0x9431, [second, 0, 0, 128 * 1024, 0], payload: Data(secondBytes.prefix(128 * 1024))),
+                .init(0x9431, [second, 140_000, 0, 128 * 1024, 0], response: response),
+                .init(0x9431, [second, 128 * 1024, 0, 112 * 1024, 0], payload: Data(secondBytes.dropFirst(128 * 1024))),
+            ])
+            let reader = STAObjectReader(session: PTPSession(transport: wire), operations: [0x9431])
+            _ = try await reader.file(handle: first, storage: .max)
+            _ = try await reader.thumbnail(handle: first)
+            _ = try await reader.file(handle: second, storage: .max)
+            let image = try await reader.thumbnail(handle: second)
+            try assertThumbnailJPEG(image, expected: jpeg)
+            let cached = try await reader.thumbnail(handle: second)
+            XCTAssertEqual(cached, jpeg)
+            let remaining = await wire.remaining; XCTAssertEqual(remaining, 0)
+        }
+    }
+
+    func testRawShortHintReadsRemainingMarginLikeAndroid() async throws {
+        let jpeg = try thumbnailJPEG()
+        let first: UInt32 = 0x09000071, second: UInt32 = 0x09000072
+        let bytes = rawThumbnailPrefix(jpeg: jpeg, jpegOffset: 140_000)
+        let wire = STAScriptTransport([
+            .init(0x9421, [first], payload: staInteger(UInt64(24_000_000))),
+            .init(0x9431, [first, 0, 0, 128 * 1024, 0], payload: Data(bytes.prefix(128 * 1024))),
+            .init(0x9431, [first, 128 * 1024, 0, 112 * 1024, 0], payload: Data(bytes.dropFirst(128 * 1024))),
+            .init(0x9421, [second], payload: staInteger(UInt64(24_000_000))),
+            .init(0x9431, [second, 0, 0, 128 * 1024, 0], payload: Data(bytes.prefix(128 * 1024))),
+            .init(0x9431, [second, 140_000, 0, 128 * 1024, 0], payload: Data(jpeg.prefix(64))),
+            .init(0x9431, [second, 140_064, 0, 192 * 1024 - 64, 0], payload: Data(jpeg.dropFirst(64))),
+        ])
+        let reader = STAObjectReader(session: PTPSession(transport: wire), operations: [0x9431])
+        _ = try await reader.file(handle: first, storage: .max)
+        _ = try await reader.thumbnail(handle: first)
+        _ = try await reader.file(handle: second, storage: .max)
+        let image = try await reader.thumbnail(handle: second)
+        try assertThumbnailJPEG(image, expected: jpeg)
+        let remaining = await wire.remaining; XCTAssertEqual(remaining, 0)
+    }
+
+    func testRawRejectedIndexedReadStillExtractsJPEGAlreadyInPrefix() async throws {
+        let jpeg = try thumbnailJPEG(), handle: UInt32 = 0x09000071
+        var bytes = rawThumbnailPrefix(jpeg: jpeg, jpegOffset: 140_000)
+        // The SubIFD appears only in the 240 KiB probe. The camera denies its
+        // referenced range, but Android still scans the bytes it already read.
+        put(&bytes, 8, UInt16(1)); put(&bytes, 10, UInt16(0x014A))
+        put(&bytes, 12, UInt16(4)); put(&bytes, 14, UInt32(1)); put(&bytes, 18, UInt32(200_000))
+        put(&bytes, 200_000, UInt16(2))
+        put(&bytes, 200_002, UInt16(0x0201)); put(&bytes, 200_004, UInt16(4))
+        put(&bytes, 200_006, UInt32(1)); put(&bytes, 200_010, UInt32(300_000))
+        put(&bytes, 200_014, UInt16(0x0202)); put(&bytes, 200_016, UInt16(4))
+        put(&bytes, 200_018, UInt32(1)); put(&bytes, 200_022, UInt32(jpeg.count))
+        let wire = STAScriptTransport([
+            .init(0x9421, [handle], payload: staInteger(UInt64(24_000_000))),
+            .init(0x9431, [handle, 0, 0, 128 * 1024, 0], payload: Data(bytes.prefix(128 * 1024))),
+            .init(0x9431, [handle, 128 * 1024, 0, 112 * 1024, 0], payload: Data(bytes.dropFirst(128 * 1024))),
+            .init(0x9431, [handle, 300_000, 0, UInt32(jpeg.count), 0], response: 0x200F),
+        ])
+        let reader = STAObjectReader(session: PTPSession(transport: wire), operations: [0x9431])
+        _ = try await reader.file(handle: handle, storage: .max)
+        let image = try await reader.thumbnail(handle: handle)
+        try assertThumbnailJPEG(image, expected: jpeg)
+        let remaining = await wire.remaining; XCTAssertEqual(remaining, 0)
+    }
+
+    func testRawRejectedPrefixProbeCanLoadOnNextVisibleRequest() async throws {
+        let jpeg = try thumbnailJPEG(), handle: UInt32 = 0x09000071
+        let bytes = rawThumbnailPrefix(jpeg: jpeg, jpegOffset: 140_000)
+        let wire = STAScriptTransport([
+            .init(0x9421, [handle], payload: staInteger(UInt64(24_000_000))),
+            .init(0x9431, [handle, 0, 0, 128 * 1024, 0], payload: Data(bytes.prefix(128 * 1024))),
+            .init(0x9431, [handle, 128 * 1024, 0, 112 * 1024, 0], response: 0x2019),
+            .init(0x9431, [handle, 128 * 1024, 0, 112 * 1024, 0], payload: Data(bytes.dropFirst(128 * 1024))),
+        ])
+        let reader = STAObjectReader(session: PTPSession(transport: wire), operations: [0x9431])
+        _ = try await reader.file(handle: handle, storage: .max)
+        let busy = try await reader.thumbnail(handle: handle)
+        XCTAssertTrue(busy.isEmpty)
+        let image = try await reader.thumbnail(handle: handle)
+        try assertThumbnailJPEG(image, expected: jpeg)
+        let remaining = await wire.remaining; XCTAssertEqual(remaining, 0)
+    }
+
+    func testRawProbeTransportFailureIsNotTreatedAsARejectedRange() async throws {
+        let jpeg = try thumbnailJPEG(), handle: UInt32 = 0x09000071
+        let bytes = rawThumbnailPrefix(jpeg: jpeg, jpegOffset: 140_000)
+        let wire = STAScriptTransport([
+            .init(0x9421, [handle], payload: staInteger(UInt64(24_000_000))),
+            .init(0x9431, [handle, 0, 0, 128 * 1024, 0], payload: Data(bytes.prefix(128 * 1024))),
+        ])
+        let failingWire = RawProbeFailureTransport(prefix: wire)
+        let reader = STAObjectReader(session: PTPSession(transport: failingWire), operations: [0x9431])
+        _ = try await reader.file(handle: handle, storage: .max)
+        do {
+            _ = try await reader.thumbnail(handle: handle)
+            XCTFail("A broken transport must propagate, not continue probing")
+        } catch {
+            XCTAssertEqual((error as? URLError)?.code, .networkConnectionLost)
+        }
+        let attempts = await failingWire.attempts
+        XCTAssertEqual(attempts, 3)
+    }
+
+    func testExifCompressedStripsProduceDecodableBytesWithoutChangingPipelinePriority() throws {
+        let jpeg = try thumbnailJPEG()
+        var bytes = nefStripThumbnailFixture()
+        // Replace the old marker-only fixture with two non-contiguous pieces
+        // of a real JPEG and verify ImageIO can decode the assembled result.
+        let split = jpeg.count / 2, secondOffset = 2_000
+        bytes.append(Data(repeating: 0, count: 4_096 - bytes.count))
+        put(&bytes, 132, UInt32(256)); put(&bytes, 136, UInt32(secondOffset))
+        put(&bytes, 140, UInt32(split)); put(&bytes, 144, UInt32(jpeg.count - split))
+        bytes.replaceSubrange(256..<(256 + split), with: jpeg.prefix(split))
+        bytes.replaceSubrange(secondOffset..<(secondOffset + jpeg.count - split), with: jpeg.dropFirst(split))
+        // Test the ExifInterface branch itself. Android's header caller gives
+        // the earlier marker scan priority even when its range contains gaps.
+        let image = try XCTUnwrap(STAMediaMetadata.nefExifThumbnail(bytes))
+        try assertThumbnailJPEG(image, expected: jpeg)
+    }
+
+    private func thumbnailJPEG() throws -> Data {
+        let pixels = Data(repeating: 127, count: 16 * 12 * 3)
+        let provider = try XCTUnwrap(CGDataProvider(data: pixels as CFData))
+        let image = try XCTUnwrap(CGImage(width: 16, height: 12, bitsPerComponent: 8,
+            bitsPerPixel: 24, bytesPerRow: 16 * 3, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGBitmapInfo(rawValue: 0), provider: provider,
+            decode: nil, shouldInterpolate: false, intent: .defaultIntent))
+        let encoded = NSMutableData()
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithData(encoded, UTType.jpeg.identifier as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, image, nil)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        return encoded as Data
+    }
+
+    func testCachedRawIndexFailureReturnsAndRetriesSameRangeWithoutExtraProbe() async throws {
+        let jpeg = try thumbnailJPEG(), handle: UInt32 = 0x09000071
+        var header = Data(repeating: 0, count: 128 * 1024)
+        header.replaceSubrange(0..<2, with: [73, 73])
+        put(&header, 2, UInt16(42)); put(&header, 4, UInt32(8)); put(&header, 8, UInt16(2))
+        put(&header, 10, UInt16(0x0201)); put(&header, 12, UInt16(4)); put(&header, 14, UInt32(1)); put(&header, 18, UInt32(300_000))
+        put(&header, 22, UInt16(0x0202)); put(&header, 24, UInt16(4)); put(&header, 26, UInt32(1)); put(&header, 30, UInt32(jpeg.count))
+        let wire = STAScriptTransport([
+            // Like Android, trust the IFD request even if metadata's size is
+            // smaller than its range; do not silently skip that command.
+            .init(0x9421, [handle], payload: staInteger(UInt64(header.count))),
+            .init(0x9431, [handle, 0, 0, UInt32(header.count), 0], payload: header),
+            .init(0x9431, [handle, 300_000, 0, UInt32(jpeg.count), 0], response: 0x2019),
+            .init(0x9431, [handle, 300_000, 0, UInt32(jpeg.count), 0], payload: jpeg)
+        ])
+        let reader = STAObjectReader(session: PTPSession(transport: wire), operations: [0x9431])
+        _ = try await reader.file(handle: handle, storage: .max)
+        let miss = try await reader.thumbnail(handle: handle)
+        XCTAssertTrue(miss.isEmpty)
+        let remainingAfterMiss = await wire.remaining
+        XCTAssertEqual(remainingAfterMiss, 1)
+        try assertThumbnailJPEG(try await reader.thumbnail(handle: handle), expected: jpeg)
+        let remaining = await wire.remaining; XCTAssertEqual(remaining, 0)
+    }
+
+    func testEqualLengthNefRangesKeepAndroidDirectoryOrder() {
+        var header = Data(repeating: 0, count: 128)
+        header.replaceSubrange(0..<2, with: [73, 73])
+        put(&header, 2, UInt16(42)); put(&header, 4, UInt32(8)); put(&header, 8, UInt16(2))
+        put(&header, 10, UInt16(0x0201)); put(&header, 12, UInt16(4)); put(&header, 14, UInt32(3)); put(&header, 18, UInt32(64))
+        put(&header, 22, UInt16(0x0202)); put(&header, 24, UInt16(4)); put(&header, 26, UInt32(3)); put(&header, 30, UInt32(80))
+        for (i, offset) in [300_000, 200_000, 300_000].enumerated() {
+            put(&header, 64 + i * 4, UInt32(offset)); put(&header, 80 + i * 4, UInt32(1000))
+        }
+        XCTAssertEqual(STAMediaMetadata.tiffHeader(header).previews,
+                       [.init(offset: 300_000, length: 1000), .init(offset: 200_000, length: 1000)])
+    }
+
+    private func rawThumbnailPrefix(jpeg: Data, jpegOffset: Int) -> Data {
+        var bytes = Data(repeating: 0, count: 240 * 1024)
+        bytes.replaceSubrange(0..<2, with: [73, 73])
+        put(&bytes, 2, UInt16(42)); put(&bytes, 4, UInt32(8))
+        bytes.replaceSubrange(jpegOffset..<(jpegOffset + jpeg.count), with: jpeg)
+        return bytes
+    }
+
+    private func assertThumbnailJPEG(_ bytes: Data, expected: Data) throws {
+        XCTAssertEqual(bytes, expected)
+        let source = try XCTUnwrap(CGImageSourceCreateWithData(bytes as CFData, nil))
+        let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        XCTAssertEqual(image.width, 16); XCTAssertEqual(image.height, 12)
     }
     func testMakerFileInfoHasIndependentByteOrderAndRejectsTruncation() {
         for big in [false, true] {
@@ -147,6 +376,9 @@ final class STAMetadataTests: XCTestCase {
         XCTAssertEqual(file.captureDate, "20260824T135715")
         XCTAssertEqual(file.size, 5_000_000_000)
         _ = try await reader.file(handle: handle, storage: 0x10001)
+        // Android attempts the compact filename/date indexes once per camera
+        // session; a list refresh must not resend them for every known row.
+        try await reader.prepare(groups: [(0x10001, [handle])])
         let remaining = await wire.remaining; XCTAssertEqual(remaining, 0)
     }
     func testEventDecodingRejectsTruncationAndKeepsFirstParameter() {
@@ -159,7 +391,49 @@ final class STAMetadataTests: XCTestCase {
     private func metadataDate(handle: UInt32) -> Data {
         staInteger(UInt32(100)) + staInteger(UInt32(1)) + staInteger(handle) + staInteger(UInt32(0)) + Data([0, 15, 57, 13, 24, 8]) + staInteger(UInt16(2026))
     }
+    private func nefStripThumbnailFixture() -> Data {
+        var bytes = Data(repeating: 0, count: 192)
+        bytes.replaceSubrange(0..<2, with: [73, 73])
+        put(&bytes, 2, UInt16(42)); put(&bytes, 4, UInt32(8))
+
+        // IFD0 points to the thumbnail IFD through the standard next-IFD link.
+        put(&bytes, 8, UInt16(1))
+        put(&bytes, 10, UInt16(0x0100)); put(&bytes, 12, UInt16(4))
+        put(&bytes, 14, UInt32(1)); put(&bytes, 18, UInt32(6000))
+        put(&bytes, 22, UInt32(40))
+
+        put(&bytes, 40, UInt16(6))
+        func entry(_ index: Int, _ tag: UInt16, _ type: UInt16, _ count: UInt32, _ value: UInt32) {
+            let offset = 42 + index * 12
+            put(&bytes, offset, tag); put(&bytes, offset + 2, type)
+            put(&bytes, offset + 4, count); put(&bytes, offset + 8, value)
+        }
+        entry(0, 0x0100, 4, 1, 160)
+        entry(1, 0x0101, 4, 1, 120)
+        entry(2, 0x0102, 3, 3, 124)
+        entry(3, 0x0103, 3, 1, 7)
+        entry(4, 0x0111, 4, 2, 132)
+        entry(5, 0x0117, 4, 2, 140)
+        put(&bytes, 114, UInt32(0))
+        put(&bytes, 124, UInt16(8)); put(&bytes, 126, UInt16(8)); put(&bytes, 128, UInt16(8))
+        put(&bytes, 132, UInt32(152)); put(&bytes, 136, UInt32(176))
+        put(&bytes, 140, UInt32(4)); put(&bytes, 144, UInt32(3))
+        bytes.replaceSubrange(152..<156, with: [0xFF, 0xD8, 1, 2])
+        bytes.replaceSubrange(176..<179, with: [3, 0xFF, 0xD9])
+        return bytes
+    }
     private func put<T: FixedWidthInteger>(_ data: inout Data, _ offset: Int, _ value: T) {
         data.replaceSubrange(offset..<(offset + MemoryLayout<T>.size), with: staInteger(value))
+    }
+}
+
+private actor RawProbeFailureTransport: PTPCommandTransport {
+    let prefix: STAScriptTransport
+    private(set) var attempts = 0
+    init(prefix: STAScriptTransport) { self.prefix = prefix }
+    func sendPTP(command: Data, data: Data?) async throws -> (response: Data, payload: Data) {
+        attempts += 1
+        if attempts > 2 { throw URLError(.networkConnectionLost) }
+        return try await prefix.sendPTP(command: command, data: data)
     }
 }

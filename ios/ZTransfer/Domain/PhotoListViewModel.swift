@@ -54,10 +54,12 @@ final class PhotoListViewModel: ObservableObject {
     private let invalidateThumbnailState: @Sendable ([CameraFile]) async -> Void
     private let setRemoteGate: @Sendable (Bool) async -> Void
     private let onTransportLost: (() -> Void)?
-    private let thumbnailFillQueue = PhotoThumbnailFillQueue()
+    private let thumbnailFillQueue: PhotoThumbnailFillQueue
+    private let sequentialLoading: Bool
     private var catalogUpdatesTask: Task<Void, Never>?
     private var loadTask: Task<Void, Never>?
     private var fillTask: Task<Void, Never>?
+    private var fillResumeTask: Task<Void, Never>?
     private var fillWorkerActive = false
     private var previewPausedScan = false
     private var previewActive = false
@@ -95,6 +97,8 @@ final class PhotoListViewModel: ObservableObject {
     }
 
     init(session: CameraSession, onTransportLost: (() -> Void)? = nil) {
+        sequentialLoading = session.wirelessMode == .sta
+        thumbnailFillQueue = PhotoThumbnailFillQueue(sequential: session.wirelessMode == .sta)
         self._filter = Published(initialValue: PhotoFilterPersistence.load())
         self.onTransportLost = onTransportLost
         self.setRemoteGate = { await session.setRemoteActive($0) }
@@ -108,6 +112,12 @@ final class PhotoListViewModel: ObservableObject {
         self.prefetchBatch = { files in
             var settled = Set<UInt32>()
             for file in files {
+                if session.wirelessMode == .sta {
+                    while !Task.isCancelled, !(await session.backgroundThumbnailFillAllowed()) {
+                        do { try await Task.sleep(for: .milliseconds(50)) }
+                        catch { return settled }
+                    }
+                }
                 guard !Task.isCancelled, await session.backgroundThumbnailFillAllowed() else { return settled }
                 if (try? await session.prefetchThumbnail(file: file)) == true { settled.insert(file.id) }
             }
@@ -141,8 +151,11 @@ final class PhotoListViewModel: ObservableObject {
         reconcileCache: @escaping @Sendable ([CameraFile], Bool) async -> Void = { _, _ in },
         invalidateThumbnailState: @escaping @Sendable ([CameraFile]) async -> Void = { _ in },
         setRemoteGate: @escaping @Sendable (Bool) async -> Void,
+        sequentialLoading: Bool = false,
         onTransportLost: (() -> Void)? = nil
     ) {
+        self.sequentialLoading = sequentialLoading
+        self.thumbnailFillQueue = PhotoThumbnailFillQueue(sequential: sequentialLoading)
         self.scanCatalog = scanCatalog
         self.resumeSnapshotProvider = resumeSnapshotProvider
         self.prefetchBatch = prefetchBatch
@@ -189,7 +202,12 @@ final class PhotoListViewModel: ObservableObject {
          ".arw"].contains(file.fileExtension)
     }
 
-    deinit { loadTask?.cancel(); fillTask?.cancel(); catalogUpdatesTask?.cancel() }
+    deinit {
+        loadTask?.cancel()
+        fillTask?.cancel()
+        fillResumeTask?.cancel()
+        catalogUpdatesTask?.cancel()
+    }
 
     private func retire() {
         loadGeneration &+= 1
@@ -198,6 +216,8 @@ final class PhotoListViewModel: ObservableObject {
         loadTask = nil
         fillTask?.cancel()
         fillTask = nil
+        fillResumeTask?.cancel()
+        fillResumeTask = nil
         fillWorkerActive = false
         catalogUpdatesTask?.cancel()
         catalogUpdatesTask = nil
@@ -213,6 +233,8 @@ final class PhotoListViewModel: ObservableObject {
         loadTask?.cancel()
         fillTask?.cancel()
         fillTask = nil
+        fillResumeTask?.cancel()
+        fillResumeTask = nil
         fillWorkerActive = false
         loadGeneration &+= 1
         let generation = loadGeneration
@@ -226,9 +248,11 @@ final class PhotoListViewModel: ObservableObject {
         }
     }
 
-    /// Awaitable refresh used by SwiftUI's pull-to-refresh.  A cancelled scan
-    /// never replaces the current catalog, matching Android's refresh reducer.
+    /// Explicit refresh for non-STA owners. The list has no pull-to-refresh;
+    /// repeated STA entry requests cannot replace the session's scan.
     func reload() async {
+        // STA has one session-owned scan. UI refreshes cannot replace its cursor.
+        guard !sequentialLoading else { load(); return }
         loadGeneration &+= 1
         let generation = loadGeneration
         // CameraViewModel.loadFiles cancels the previous fileLoadJob before
@@ -250,6 +274,8 @@ final class PhotoListViewModel: ObservableObject {
         // issue GetThumb while this generation is enumerating handles.
         fillTask?.cancel()
         fillTask = nil
+        fillResumeTask?.cancel()
+        fillResumeTask = nil
         fillWorkerActive = false
         await thumbnailFillQueue.beginScan()
         loadState = .loading
@@ -357,6 +383,16 @@ final class PhotoListViewModel: ObservableObject {
             additions.append(file)
         }
         publishSections()
+        if sequentialLoading {
+            // User-defined STA contract: all formats, in publication order.
+            // This callback provides backpressure without tying IO to cells.
+            for file in additions {
+                try await waitForSequentialChannel()
+                let settled = await prefetchBatch([file])
+                for id in settled { await thumbnailFillQueue.markSettled(id) }
+            }
+            return
+        }
         // The repository awaits this callback: scanning cannot request the
         // next metadata batch until this batch's per-file prefetch has finished,
         // matching Android's accepted-batch/backpressure order.
@@ -399,6 +435,7 @@ final class PhotoListViewModel: ObservableObject {
     }
 
     func cancelLoading() {
+        guard !sequentialLoading else { return }
         loadGeneration &+= 1
         loadTask?.cancel()
         loadTask = nil
@@ -409,6 +446,7 @@ final class PhotoListViewModel: ObservableObject {
     /// owns the camera channel, retaining the published rows for resumption.
     func pauseForPreview() {
         previewActive = true
+        guard !sequentialLoading else { return }
         guard isLoadingFiles else { return }
         previewPausedScan = true
         loadGeneration &+= 1
@@ -419,6 +457,7 @@ final class PhotoListViewModel: ObservableObject {
 
     func resumeAfterPreview() {
         previewActive = false
+        if sequentialLoading { wakeThumbnailFill(); return }
         guard !remoteActive else { return }
         if remoteRefreshPending {
             remoteRefreshPending = false
@@ -445,6 +484,7 @@ final class PhotoListViewModel: ObservableObject {
         if !filter.untransferredOnly { exitingTransferredFileIDs.removeAll() }
         PhotoFilterPersistence.save(filter)
         publishSections()
+        guard !sequentialLoading else { return }
         Task { [weak self] in
             guard let self else { return }
             await thumbnailFillQueue.updatePriorityRange(allFiles, range: filter.dateRange)
@@ -459,11 +499,36 @@ final class PhotoListViewModel: ObservableObject {
     func setTransferBusy(_ busy: Bool) {
         guard transferBusy != busy else { return }
         transferBusy = busy
-        if !busy { startThumbnailFillWorker() }
+        if sequentialLoading {
+            if !busy { wakeThumbnailFill() }
+            return
+        }
+        fillResumeTask?.cancel()
+        fillResumeTask = nil
+        if busy {
+            // Android's collectLatest cancels the active background-fill
+            // coroutine as soon as a transfer takes ownership. Cancelling the
+            // waiter also cancels its sole thumbnail flight, so the first file
+            // chunk is not left waiting behind a full GetThumb transaction.
+            fillTask?.cancel()
+        } else {
+            // A cancelled worker clears fillWorkerActive in its defer. Wait
+            // for that cleanup before restarting or startThumbnailFillWorker
+            // would observe the old worker and lose this resume edge.
+            let stoppingWorker = fillTask
+            fillResumeTask = Task { [weak self] in
+                await stoppingWorker?.value
+                guard let self, !Task.isCancelled, !self.transferBusy else { return }
+                self.startThumbnailFillWorker()
+            }
+        }
     }
 
     /// Reawaken background filling after a remote/FHD full-screen owner closes.
-    func wakeThumbnailFill() { startThumbnailFillWorker() }
+    func wakeThumbnailFill() {
+        guard !sequentialLoading || hasCompletedFileScan else { return }
+        startThumbnailFillWorker()
+    }
 
     /// Remote monitor can capture new media, therefore its return path starts
     /// a fresh handle enumeration rather than resuming the old scan snapshot.
@@ -474,6 +539,7 @@ final class PhotoListViewModel: ObservableObject {
         guard !remoteActive else { return }
         remoteActive = true
         await setRemoteGate(true)
+        guard !sequentialLoading else { return }
         await loadTask?.value
         isLoadingFiles = false
     }
@@ -487,6 +553,7 @@ final class PhotoListViewModel: ObservableObject {
         // is visibly open, matching Android setRemoteActive(false).
         await setRemoteGate(false)
         guard isConnected else { return }
+        if sequentialLoading { wakeThumbnailFill(); return }
         if previewActive { remoteRefreshPending = true; return }
         refreshAfterRemote()
     }
@@ -583,6 +650,14 @@ final class PhotoListViewModel: ObservableObject {
 
     func clearFilter() { setFilter(PhotoFilterState()) }
 
+    private func waitForSequentialChannel() async throws {
+        while true {
+            try Task.checkCancellation()
+            if !transferBusy && !previewActive && !remoteActive, await canFill() { return }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+    }
+
     private func startThumbnailFillWorker() {
         if fillWorkerActive {
             Task { await thumbnailFillQueue.wake() }
@@ -606,6 +681,14 @@ final class PhotoListViewModel: ObservableObject {
                 // consumed. Do not capture a one-time catalog snapshot here:
                 // ObjectAdded can enqueue a file after the worker starts.
                 guard let file = self.allFiles.first(where: { $0.id == id }) else {
+                    continue
+                }
+                if sequentialLoading {
+                    do { try await waitForSequentialChannel() }
+                    catch { return }
+                    let settled = await prefetchBatch([file])
+                    if settled.contains(id) { await thumbnailFillQueue.markSettled(id) }
+                    else { await thumbnailFillQueue.markFailed(id) }
                     continue
                 }
                 guard !self.transferBusy, await canFill() else {

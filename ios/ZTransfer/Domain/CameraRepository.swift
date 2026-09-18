@@ -1,5 +1,33 @@
 import Foundation
 
+/// Android rejects placeholder serials before selecting the physical
+/// transport identity. Keep the same rule so cameras that report an empty or
+/// synthetic DeviceInfo serial still share their own thumbnail cache.
+func normalizedCameraIdentifier(_ value: String?) -> String? {
+    guard let normalized = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+          !normalized.isEmpty else { return nil }
+    switch normalized.lowercased() {
+    case "unknown", "none", "null", "n/a": return nil
+    default: break
+    }
+    let hasIdentityCharacter = normalized.unicodeScalars.contains { scalar in
+        scalar.properties.isAlphabetic ||
+            // Android compares the character to the ASCII literal '0'; retain
+            // that exact placeholder rule rather than normalizing digit value.
+            (scalar.properties.numericType == .decimal && scalar.value != 0x30)
+    }
+    return hasIdentityCharacter ? normalized : nil
+}
+
+func cameraThumbnailCacheIdentity(deviceInfo: PTPDeviceInfo?, transportIdentifier: String?) -> String {
+    let manufacturer = deviceInfo?.manufacturer.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    let model = deviceInfo?.model.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    let physicalID = normalizedCameraIdentifier(deviceInfo?.serialNumber)
+        ?? normalizedCameraIdentifier(transportIdentifier)
+        ?? "unknown-device"
+    return "\(manufacturer)\u{0}\(model)\u{0}\(physicalID)"
+}
+
 #if DEBUG
 private struct DebugNullTransport: PTPCommandTransport {
     func sendPTP(command: Data, data: Data?) async throws -> (response: Data, payload: Data) { (Data(), Data()) }
@@ -257,6 +285,9 @@ actor CameraRepository {
     private var liveViewImageOperation: UInt16?
     private var liveViewEnhancedFailures = 0
     private let staAlbum: STAAlbumAccess?
+    /// PTP/IP InitCommandAck responder GUID. Android uses it when DeviceInfo
+    /// omits a usable serial, for both AP and STA sessions.
+    private let transportCameraIdentifier: String?
     private let directReader: STAObjectReader?
     private var prefetchedStorageIDs: [UInt32]?
     private var prefetchedHandles: (storageID: UInt32, handles: [UInt32])?
@@ -282,12 +313,14 @@ actor CameraRepository {
     private var catalogContinuations: [UUID: AsyncStream<[CameraFile]>.Continuation] = [:]
 
     init(session: PTPSession, staAlbum: STAAlbumAccess? = nil, isUSBConnection: Bool = false,
-         deviceInfo: PTPDeviceInfo? = nil, usbSessionIdentity: USBSessionIdentity? = nil) {
+         deviceInfo: PTPDeviceInfo? = nil, usbSessionIdentity: USBSessionIdentity? = nil,
+         transportCameraIdentifier: String? = nil) {
         self.session = session
         #if DEBUG
         self.debugData = nil
         #endif
         self.staAlbum = staAlbum; self.isUSBConnection = isUSBConnection
+        self.transportCameraIdentifier = transportCameraIdentifier
         self.usbSessionIdentity = usbSessionIdentity
         self.cachedDeviceInfo = deviceInfo ?? staAlbum?.deviceInfo
         self.prefetchedStorageIDs = staAlbum?.storageIDs
@@ -300,6 +333,7 @@ actor CameraRepository {
         self.session = PTPSession(transport: DebugNullTransport())
         self.debugData = debugData
         self.staAlbum = nil; self.isUSBConnection = false
+        self.transportCameraIdentifier = nil
         self.usbSessionIdentity = nil
         self.prefetchedStorageIDs = [0x00010001, 0x00020001]
         self.prefetchedHandles = nil; self.directReader = nil
@@ -745,13 +779,12 @@ actor CameraRepository {
         return info
     }
 
-    /// Stable per-body cache identity. A network session without an announced
-    /// serial deliberately returns nil rather than mixing thumbnails between
-    /// cameras, matching Android's camera-scoped cache invariant.
-    func thumbnailCacheIdentity() -> String? {
-        guard let info = staAlbum?.deviceInfo,
-              !info.serialNumber.isEmpty else { return nil }
-        return "\(info.manufacturer)\u{0}\(info.model)\u{0}\(info.serialNumber)"
+    /// Stable per-body cache identity, matching Android's serial -> transport
+    /// GUID -> model-scoped fallback. It must never disable the thumbnail
+    /// store merely because DeviceInfo omitted a serial number.
+    func thumbnailCacheIdentity() -> String {
+        cameraThumbnailCacheIdentity(deviceInfo: cachedDeviceInfo,
+                                     transportIdentifier: transportCameraIdentifier)
     }
 
     func usesDirectThumbnailRead() -> Bool { directReader != nil }
@@ -803,6 +836,16 @@ actor CameraRepository {
     }
 
     private func waitForForegroundPreview() async throws {
+        if staAlbum != nil {
+            // STA scan belongs to the session, not a screen. Never restart its
+            // snapshot when a foreground owner temporarily needs the channel.
+            while remoteActive || fhdActive || transfersBusy || effectPreviewActive {
+                try Task.checkCancellation()
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            try Task.checkCancellation()
+            return
+        }
         // Android cancels a list scan when remote monitor takes ownership. The
         // monitor may capture new media, so its next list load must enumerate
         // fresh handles instead of resuming the old snapshot.
@@ -882,6 +925,22 @@ actor CameraRepository {
     private func readCatalogMetadataBatch(
         _ requests: [(groupIndex: Int, handle: UInt32, storage: UInt32)]
     ) async throws -> [CatalogMetadataResult] {
+        if staAlbum != nil {
+            var results: [CatalogMetadataResult] = []
+            for request in requests {
+                // Wait outside ioGate: the foreground owner must be able to
+                // acquire it while the scan retains its current cursor.
+                try await waitForForegroundPreview()
+                results += try await readCatalogMetadataCommands([request])
+            }
+            return results
+        }
+        return try await readCatalogMetadataCommands(requests)
+    }
+
+    private func readCatalogMetadataCommands(
+        _ requests: [(groupIndex: Int, handle: UInt32, storage: UInt32)]
+    ) async throws -> [CatalogMetadataResult] {
         let session = self.session
         let directReader = self.directReader
         return try await ioGate.withCommand {
@@ -929,7 +988,11 @@ actor CameraRepository {
     }
 
     private func checkRemoteScanOwnership() throws {
-        if remoteActive { throw CameraRepositoryError.foregroundPreempted }
+        if staAlbum == nil && remoteActive { throw CameraRepositoryError.foregroundPreempted }
+    }
+
+    func discardRejectedThumbnail(handle: UInt32) async {
+        await directReader?.discardThumbnail(handle: handle)
     }
 
     func thumbnail(handle: UInt32) async throws -> Data {
@@ -1031,11 +1094,51 @@ actor CameraRepository {
         }
         #endif
         activeForegroundReads += 1; defer { activeForegroundReads -= 1; scheduleObjectResolver() }
-        let startedAt = ContinuousClock.now
         let safeName = URL(fileURLWithPath: fileName).lastPathComponent
         let temporary = directory.appendingPathComponent(
             transferPartialFileName(size: size, captureDate: captureDate, fileName: safeName), isDirectory: false
         )
+        let existingSize = (try? temporary.resourceValues(forKeys: [.fileSizeKey]).fileSize)
+            .map { UInt64(max(0, $0)) } ?? 0
+        let resumeOffset = transferResumeOffset(existingSize: existingSize, totalSize: size, reportedSize: size) ?? 0
+        if resumeOffset == 0 { try? FileManager.default.removeItem(at: temporary) }
+        if resumeOffset > 0 && resumeOffset < existingSize {
+            let trim = try FileHandle(forWritingTo: temporary)
+            try trim.truncate(atOffset: resumeOffset)
+            try trim.close()
+        }
+        if size > 0, size != UInt64(UInt32.max), resumeOffset == size {
+            let startedAt = ContinuousClock.now
+            let destination = try finalizeDownloadedFile(temporary: temporary, directory: directory, fileName: safeName)
+            return CameraDownloadResult(url: destination, bytes: size, transferredBytes: 0,
+                                        startedAt: startedAt, headerPrefix: nil)
+        }
+        if !FileManager.default.fileExists(atPath: temporary.path) {
+            guard FileManager.default.createFile(atPath: temporary.path, contents: nil) else {
+                throw CocoaError(.fileWriteUnknown)
+            }
+        }
+        let output = try FileHandle(forWritingTo: temporary)
+        // Also close if size lookup or policy validation fails before the
+        // writer takes ownership. Closing an already-closed handle is harmless.
+        defer { try? output.close() }
+        try output.seek(toOffset: resumeOffset)
+        // TransferViewModel prepares/seeks the output before downloadToFile's
+        // clock begins. Size lookup, camera waits, writes and final save remain
+        // in the same end-to-end duration; never report recv-only throughput.
+        let startedAt = ContinuousClock.now
+        #if DEBUG
+        // Android's normal download loop has no per-recv diagnostic counters.
+        // Enable explicitly from a development launch, never merely by Debug.
+        let diagnostics = staAlbum != nil && PTPTransferDiagnostics.isEnabledForDevelopmentLaunch
+            ? PTPTransferDiagnostics() : nil
+        #else
+        let diagnostics: PTPTransferDiagnostics? = nil
+        #endif
+        diagnostics?.beginFile(size: size)
+        var diagnosticSuccess = false
+        var diagnosticFinalizeMS: Double = 0
+        defer { diagnostics?.finish(success: diagnosticSuccess, finalizeMS: diagnosticFinalizeMS) }
         var effectiveSize = size
         if size == UInt64(UInt32.max) || size == 0 {
             let response = try await ioGate.withTransferSlice {
@@ -1050,20 +1153,6 @@ actor CameraRepository {
             }
         }
         var sizeKnown = effectiveSize > 0 && effectiveSize != UInt64(UInt32.max)
-        let existingSize = (try? temporary.resourceValues(forKeys: [.fileSizeKey]).fileSize)
-            .map { UInt64(max(0, $0)) } ?? 0
-        let resumeOffset = transferResumeOffset(existingSize: existingSize, totalSize: effectiveSize, reportedSize: size) ?? 0
-        if resumeOffset == 0 { try? FileManager.default.removeItem(at: temporary) }
-        if resumeOffset > 0 && resumeOffset < existingSize {
-            let trim = try FileHandle(forWritingTo: temporary)
-            try trim.truncate(atOffset: resumeOffset)
-            try trim.close()
-        }
-        if size > 0, size != UInt64(UInt32.max), resumeOffset == effectiveSize {
-            let destination = try finalizeDownloadedFile(temporary: temporary, directory: directory, fileName: safeName)
-            return CameraDownloadResult(url: destination, bytes: effectiveSize, transferredBytes: 0,
-                                        startedAt: startedAt, headerPrefix: nil)
-        }
         // Snapshot after size resolution, immediately before the first file
         // data command. Page changes must not switch strategy midway through.
         let highThroughput = preferHighThroughputTransfers
@@ -1078,16 +1167,9 @@ actor CameraRepository {
             forcePartial: directReader != nil || (isUSBConnection && effectiveSize > transferChunkSize)
         )
         if resumeOffset > 0 && !usePartial { throw CameraRepositoryError.resumeUnavailable }
-        if !FileManager.default.fileExists(atPath: temporary.path) {
-            guard FileManager.default.createFile(atPath: temporary.path, contents: nil) else {
-                throw CocoaError(.fileWriteUnknown)
-            }
-        }
-        let output = try FileHandle(forWritingTo: temporary)
-        try output.seek(toOffset: resumeOffset)
         let writer = CameraDownloadWriter(output: output, resumeOffset: resumeOffset,
                                            totalHint: sizeKnown ? effectiveSize : 0, captureHeader: captureHeader,
-                                           startedAt: startedAt, onProgress: progress)
+                                           startedAt: startedAt, onProgress: progress, diagnostics: diagnostics)
         defer { try? writer.close() }
         let chunkSize = transferDownloadChunkSize(effectiveSize: effectiveSize,
                                                   isUSBConnection: isUSBConnection, preferHighThroughput: highThroughput)
@@ -1097,13 +1179,19 @@ actor CameraRepository {
             try Task.checkCancellation()
             let offset = writer.bytes
             let request = sizeKnown ? min(chunkSize, effectiveSize - offset) : chunkSize
+            diagnostics?.beginChunk(offset: offset, requested: request)
             let response = try await ioGate.withTransferSlice {
-                try await session.executeReceiving(
+                diagnostics?.gateAcquired()
+                var responseCode: UInt16?
+                defer { diagnostics?.endChunk(code: responseCode) }
+                let response = try await session.executeReceiving(
                     operation: PTPConstants.getPartialObjectEx,
                     parameters: [handle, UInt32(truncatingIfNeeded: offset), UInt32(truncatingIfNeeded: offset >> 32),
                                   UInt32(truncatingIfNeeded: request), UInt32(truncatingIfNeeded: request >> 32)],
                     sink: writer.sink, timeoutNanoseconds: PTPConstants.cameraReadTimeoutNanoseconds
                 )
+                responseCode = response.code
+                return response
             }
             guard response.code == PTPConstants.responseOK else {
                 // A non-empty failed phase has already written bytes. Only an
@@ -1145,10 +1233,16 @@ actor CameraRepository {
             firstPartial = false
         }
         if useFull {
+            diagnostics?.beginChunk(offset: writer.bytes, requested: sizeKnown ? effectiveSize : 0)
             let response = try await ioGate.withTransferSlice {
-                try await session.executeReceiving(operation: PTPConstants.getObject,
+                diagnostics?.gateAcquired()
+                var responseCode: UInt16?
+                defer { diagnostics?.endChunk(code: responseCode) }
+                let response = try await session.executeReceiving(operation: PTPConstants.getObject,
                                                    parameters: [handle], sink: writer.sink,
                                                    timeoutNanoseconds: PTPConstants.cameraReadTimeoutNanoseconds)
+                responseCode = response.code
+                return response
             }
             guard response.code == PTPConstants.responseOK else { throw CameraDownloadError.response(response.code) }
             if let expected = response.declaredByteCount, expected > 0, expected != UInt64(UInt32.max), writer.bytes != expected {
@@ -1157,8 +1251,11 @@ actor CameraRepository {
         } else if sizeKnown && writer.bytes != effectiveSize {
             throw CameraDownloadError.incomplete(received: writer.bytes, expected: effectiveSize)
         }
+        let finalizeStarted = ContinuousClock.now
+        defer { diagnosticFinalizeMS = PTPTransferDiagnostics.milliseconds(since: finalizeStarted) }
         try writer.close()
         let destination = try finalizeDownloadedFile(temporary: temporary, directory: directory, fileName: safeName)
+        diagnosticSuccess = true
         return writer.result(url: destination)
     }
 
@@ -1575,7 +1672,7 @@ actor CameraRepository {
     func receiveEvent(_ payload: Data) {
         if let event = STAEvent.socket(payload) { receiveEvent(event) }
     }
-    private func receiveEvent(_ event: STAEvent) {
+    func receiveEvent(_ event: STAEvent) {
         switch event.code {
         case 0x4002:
             guard event.handle != 0, event.handle != .max,
@@ -1591,7 +1688,7 @@ actor CameraRepository {
     }
     private var backgroundReadsAllowed: Bool {
         catalogReady && !catalogLoading && activeForegroundReads == 0 &&
-            !remoteActive && !fhdActive && !transfersBusy
+            !remoteActive && !fhdActive && !transfersBusy && !effectPreviewActive
     }
     /// Android's 2 s polling and 10 s handle-only reconciliation. Never turn a
     /// failed/DeviceBusy response into an authoritative empty card.

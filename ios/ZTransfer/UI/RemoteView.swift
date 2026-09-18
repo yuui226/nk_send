@@ -39,6 +39,7 @@ struct RemoteView: View {
     private let onPreparing: (() async -> Void)?
     private let onTransportLost: (() -> Void)?
     private let isSessionConnected: Bool
+    private let apSignalPercent: Int?
     private let onRetrySTA: () -> Void
     private let isUSBSession: Bool
     private let wirelessMode: WirelessMode?
@@ -81,6 +82,7 @@ struct RemoteView: View {
 
     init(session: CameraSession, recordingDirectory: URL? = nil,
          isSessionConnected: Bool = true,
+         apSignalPercent: Int? = nil,
          onRetrySTA: @escaping () -> Void = {}, onPreparing: (() async -> Void)? = nil,
          onStopped: ((Bool) async -> Void)? = nil,
          onTransportLost: (() -> Void)? = nil) {
@@ -88,6 +90,7 @@ struct RemoteView: View {
         self.onPreparing = onPreparing
         self.onTransportLost = onTransportLost
         self.isSessionConnected = isSessionConnected
+        self.apSignalPercent = apSignalPercent
         self.onRetrySTA = onRetrySTA
         self.isUSBSession = session.isUSB
         self.wirelessMode = session.wirelessMode
@@ -276,9 +279,8 @@ struct RemoteView: View {
                     .font(.system(size: 18, weight: .bold))
                     .foregroundStyle(ZTransferColors.primaryText)
                     .frame(width: 38, height: 38)
-                    .background(.regularMaterial, in: Circle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 19))
             .padding(12)
             .accessibilityLabel(AppLocalized.resource("cd_remote_fullscreen_exit"))
         }
@@ -311,45 +313,44 @@ struct RemoteView: View {
                 .font(.system(size: 18, weight: .semibold))
                 .foregroundStyle(ZTransferColors.primaryText)
                 .frame(width: 36, height: 36)
-                .background(Color.white.opacity(0.86), in: Capsule())
-                .overlay(Capsule().stroke(Color.white.opacity(0.95), lineWidth: 1))
-                .shadow(color: .black.opacity(0.06), radius: 2, y: 1)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
         .accessibilityLabel(AppLocalized.resource("cd_back"))
     }
 
     private var remoteSignalButton: some View {
         Button {
-            if isUSBSession {
-                if isSessionConnected {
-                    withAnimation(signalExpanded
-                                  ? .timingCurve(0.4, 0, 0.2, 1, duration: 0.22)
-                                  : .spring(response: 0.42, dampingFraction: 0.72)) {
-                        signalExpanded.toggle()
-                    }
+            if isUSBSession || wirelessMode == .ap {
+                guard isSessionConnected else { return }
+                withAnimation(signalExpanded
+                              ? .timingCurve(0.4, 0, 0.2, 1, duration: 0.22)
+                              : .spring(response: 0.42, dampingFraction: 0.72)) {
+                    signalExpanded.toggle()
                 }
             } else if wirelessMode == .sta && !isSessionConnected {
                 onRetrySTA()
             }
         } label: {
-            HStack(spacing: signalExpanded && isUSBSession ? 5 : 0) {
+            HStack(spacing: signalExpanded ? 5 : 0) {
                 PhotoListSignalIcon(isUSB: isUSBSession, wirelessMode: wirelessMode,
-                                    connected: isSessionConnected)
+                                    connected: isSessionConnected,
+                                    apSignalPercent: apSignalPercent)
                     .frame(width: 19, height: 19)
                 if signalExpanded && isUSBSession && isSessionConnected {
                     Text(AppLocalized.resource("connection_usb"))
                         .zTransferTypography(.labelSmall, weight: .medium)
                         .foregroundStyle(ZTransferColors.accentBlue)
+                } else if signalExpanded && wirelessMode == .ap && isSessionConnected {
+                    Text(apSignalPercent.map { "\($0)%" } ?? "--%")
+                        .zTransferTypography(.labelSmall, weight: .medium)
+                        .monospacedDigit()
+                        .foregroundStyle(apSignalTint(percent: apSignalPercent))
                 }
             }
             .padding(.horizontal, 10)
             .frame(minWidth: 40, minHeight: 36, maxHeight: 36)
-            .background(Color.white.opacity(0.86), in: Capsule())
-            .overlay(Capsule().stroke(Color.white.opacity(0.95), lineWidth: 1))
-            .shadow(color: .black.opacity(0.06), radius: 2, y: 1)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
         .accessibilityLabel(AppLocalized.resource(
             isUSBSession ? "connection_usb" :
                 (wirelessMode == .sta && !isSessionConnected
@@ -380,11 +381,8 @@ struct RemoteView: View {
             }
             .frame(width: batteryExpanded ? 54 : 21, height: 15, alignment: .leading)
             .frame(width: batteryExpanded ? 82 : 48, height: 36)
-            .background(Color.white.opacity(0.86), in: Capsule())
-            .overlay(Capsule().stroke(Color.white.opacity(0.95), lineWidth: 1))
-            .shadow(color: .black.opacity(0.06), radius: 2, y: 1)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
         .accessibilityLabel("\(AppLocalized.resource("cd_camera_battery")) \(valueText)")
     }
 
@@ -547,9 +545,8 @@ struct RemoteView: View {
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(ZTransferColors.secondaryText)
                 .frame(width: 32, height: 32)
-                .background(ZTransferGlassSurface(cornerRadius: 16, kind: .button))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 16))
         .accessibilityLabel(accessibilityLabel)
     }
 
@@ -559,9 +556,8 @@ struct RemoteView: View {
         let expanded = recording || phase == .finalizing
         let saved = phase == .saved
         return ZStack(alignment: .leading) {
-            Capsule()
-                .fill(Color.white.opacity(0.86))
-                .overlay(Capsule().stroke(Color.white.opacity(0.95), lineWidth: 1))
+            ZTransferGlassSurface(cornerRadius: 18, kind: .panel)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             Button {
                 switch phase {
                 case .idle: model.startLocalRecording()
@@ -585,7 +581,11 @@ struct RemoteView: View {
                 }
                 .frame(width: 28, height: 28)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(ZTransferGlassButtonStyle(
+                cornerRadius: 14,
+                active: saved,
+                activeColor: ZTransferColors.statusConnected
+            ))
             .disabled(phase == .finalizing || saved)
             .padding(.leading, 4)
 
@@ -596,7 +596,7 @@ struct RemoteView: View {
                         .foregroundStyle(ZTransferColors.primaryText)
                         .frame(width: 28, height: 28)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 14))
                 .disabled(phase == .finalizing)
                 .offset(x: 38)
                 .transition(.opacity.combined(with: .scale(scale: 0.7)))
@@ -636,12 +636,12 @@ struct RemoteView: View {
                 .environment(\.remoteToolTint, active ? ZTransferColors.accentBlue : ZTransferColors.secondaryText)
                 .frame(minWidth: 20, minHeight: 20)
                 .frame(width: 36, height: 36)
-                .background(active ? ZTransferColors.accentBlue.opacity(0.16) : Color.white.opacity(0.86),
-                            in: Circle())
-                .overlay(Circle().stroke(Color.white.opacity(0.95), lineWidth: 1))
-                .shadow(color: .black.opacity(0.05), radius: 2, y: 1)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(ZTransferGlassButtonStyle(
+            cornerRadius: 18,
+            active: active,
+            activeColor: ZTransferColors.accentBlue
+        ))
         .accessibilityLabel(accessibilityLabel)
     }
 

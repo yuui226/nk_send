@@ -5,7 +5,14 @@ protocol PTPCommandTransport: Sendable {
     /// transports can suspend communication independently of Swift tasks and
     /// must rely on their own terminal callback/error instead.
     var managesCommandTimeouts: Bool { get }
+    /// BSD reads use Android-style per-read socket timeouts. This is
+    /// distinct from framework-owned, non-cancellable command lifetimes.
+    var usesSocketReadTimeouts: Bool { get }
+    /// Blocking Android socket reads finish the current ordinary command even
+    /// when its thumbnail waiter disappears. File data phases remain abortable.
+    var completesBufferedCommandsAfterCancellation: Bool { get }
     func sendPTP(command: Data, data: Data?) async throws -> (response: Data, payload: Data)
+    func sendPTP(command: Data, data: Data?, readTimeoutNanoseconds: UInt64) async throws -> (response: Data, payload: Data)
     func receivePTP(command: Data, sink: PTPDataSink) async throws -> PTPDataTransfer
     /// Requests cancellation of an active data phase. Transports that can drain
     /// the final response keep the session reusable; others return false.
@@ -16,6 +23,12 @@ struct PTPDataSink: Sendable {
     let started: @Sendable (UInt64?) -> Void
     let received: @Sendable (Data) throws -> Void
     var activity: @Sendable () -> Void = {}
+    var diagnostics: PTPTransferDiagnostics? = nil
+    /// Synchronous download-only borrow, matching Android writeChunk(byte[],
+    /// offset, count). Never retain the pointer or use it from a Task/queue.
+    /// Consumers needing ownership continue to receive an owning Data value.
+    var receivedBorrowed: (@Sendable (UnsafeRawBufferPointer) throws -> Void)? = nil
+    var readTimeoutNanoseconds: UInt64? = nil
 }
 
 struct PTPDataTransfer: Sendable {
@@ -26,6 +39,11 @@ struct PTPDataTransfer: Sendable {
 
 extension PTPCommandTransport {
     var managesCommandTimeouts: Bool { false }
+    var usesSocketReadTimeouts: Bool { false }
+    func sendPTP(command: Data, data: Data?, readTimeoutNanoseconds: UInt64) async throws -> (response: Data, payload: Data) {
+        try await sendPTP(command: command, data: data)
+    }
+    var completesBufferedCommandsAfterCancellation: Bool { false }
     func cancelPTP(transactionID: UInt32) async -> Bool { false }
 
     /// ImageCaptureCore delivers one completed data phase. Socket transports
@@ -99,7 +117,12 @@ actor PTPSession {
                          timeoutNanoseconds: UInt64? = nil) async throws -> PTPResponse {
         try await acquire()
         defer { release() }
-        return try await perform(operation: operation, parameters: parameters, data: data, timeoutNanoseconds: timeoutNanoseconds ?? defaultTimeoutNanoseconds)
+        let response = try await perform(operation: operation, parameters: parameters, data: data, timeoutNanoseconds: timeoutNanoseconds ?? defaultTimeoutNanoseconds)
+        // Cancellation after CMD_RESPONSE is not a transport failure.
+        // Only socket transports opt into delayed cancellation. Framework
+        // transports keep their callback-owned completion contract unchanged.
+        if transport.completesBufferedCommandsAfterCancellation { try Task.checkCancellation() }
+        return response
     }
 
     func withCommandSequence<T: Sendable>(
@@ -119,14 +142,17 @@ actor PTPSession {
     private func performSequence(owner: UUID, operation: UInt16, parameters: [UInt32], data: Data?,
                                  timeoutNanoseconds: UInt64?) async throws -> PTPResponse {
         guard sequenceOwner == owner else { throw PTPSessionError.invalidated }
-        return try await perform(operation: operation, parameters: parameters, data: data,
-                                 timeoutNanoseconds: timeoutNanoseconds ?? defaultTimeoutNanoseconds)
+        let response = try await perform(operation: operation, parameters: parameters, data: data,
+                                         timeoutNanoseconds: timeoutNanoseconds ?? defaultTimeoutNanoseconds)
+        if transport.completesBufferedCommandsAfterCancellation { try Task.checkCancellation() }
+        return response
     }
 
     func executeReceiving(operation: UInt16, parameters: [UInt32], sink: PTPDataSink,
                           timeoutNanoseconds: UInt64? = nil) async throws -> PTPResponse {
         try await acquire()
         defer { release() }
+        sink.diagnostics?.sessionAcquired()
         return try await perform(operation: operation, parameters: parameters, data: nil,
                                  timeoutNanoseconds: timeoutNanoseconds ?? defaultTimeoutNanoseconds, sink: sink)
     }
@@ -172,13 +198,34 @@ actor PTPSession {
                 // Keep the transport task alive while asking a PTP/IP transport
                 // to send Cancel and drain the command response. Cancelling this
                 // task would close the socket before the camera has synchronized.
-                let activity = PTPReceiveActivity(timeoutNanoseconds: timeoutNanoseconds)
+                let activity = transport.usesSocketReadTimeouts ? nil : PTPReceiveActivity(timeoutNanoseconds: timeoutNanoseconds)
                 let timedSink = PTPDataSink(
-                    started: { expected in activity.record(); sink.started(expected) },
-                    received: { bytes in activity.record(); try sink.received(bytes) },
-                    activity: { activity.record(); sink.activity() }
+                    started: { expected in activity?.record(); sink.started(expected) },
+                    received: { bytes in
+                        activity?.record()
+                        let start = sink.diagnostics.map { _ in ContinuousClock.now }
+                        defer {
+                            if let start { sink.diagnostics?.sink(bytes: bytes.count, elapsedMS: PTPTransferDiagnostics.milliseconds(since: start)) }
+                        }
+                        try sink.received(bytes)
+                    },
+                    activity: { activity?.record(); sink.activity() },
+                    diagnostics: sink.diagnostics
                 )
-                let receiveTask = Task { try await transport.receivePTP(command: command, sink: timedSink) }
+                var streamingSink = timedSink
+                streamingSink.readTimeoutNanoseconds = timeoutNanoseconds
+                if let borrowed = sink.receivedBorrowed {
+                    streamingSink.receivedBorrowed = { bytes in
+                        activity?.record()
+                        let start = sink.diagnostics.map { _ in ContinuousClock.now }
+                        defer {
+                            if let start { sink.diagnostics?.sink(bytes: bytes.count, elapsedMS: PTPTransferDiagnostics.milliseconds(since: start)) }
+                        }
+                        try borrowed(bytes)
+                    }
+                }
+                let receiveSink = streamingSink
+                let receiveTask = Task { try await transport.receivePTP(command: command, sink: receiveSink) }
                 do {
                     let transfer: PTPDataTransfer
                     if transport.managesCommandTimeouts {
@@ -186,10 +233,15 @@ actor PTPSession {
                         // Wait for its terminal callback so leaving a page never
                         // requires closing the camera connection to resync PTP.
                         transfer = try await receiveTask.value
-                    } else {
+                    } else if let activity {
                         transfer = try await AsyncDeadline.run(
                             timeout: { try await activity.waitForTimeout() }
                         ) { try await receiveTask.value }
+                    } else {
+                        // Socket recv owns the deadline. Keep prompt task
+                        // cancellation/recovery without a second timer that
+                        // incorrectly expires during synchronous file writes.
+                        transfer = try await AsyncDeadline.run { try await receiveTask.value }
                     }
                     result = (transfer.response, Data(), transfer.receivedByteCount, transfer.declaredByteCount)
                 } catch {
@@ -216,7 +268,8 @@ actor PTPSession {
                 }
             } else {
                 let operation: @Sendable () async throws -> (response: Data, payload: Data, received: UInt64, declared: UInt64?) = {
-                    let reply = try await transport.sendPTP(command: command, data: data)
+                    let reply = try await transport.sendPTP(command: command, data: data,
+                                                            readTimeoutNanoseconds: timeoutNanoseconds)
                     return (reply.response, reply.payload, UInt64(reply.payload.count), nil)
                 }
                 do {
@@ -225,6 +278,24 @@ actor PTPSession {
                         // callback cooperatively; prompt Swift cancellation would
                         // abandon a live PTP transaction with no legal Cancel API.
                         result = try await operation()
+                    } else if transport.usesSocketReadTimeouts && transport.completesBufferedCommandsAfterCancellation {
+                        // Android blocking ordinary commands finish even when
+                        // the thumbnail waiter disappears. Per-read deadlines
+                        // still bound a silent peer; no whole-command timer.
+                        let transaction = Task { try await operation() }
+                        result = try await transaction.value
+                    } else if transport.completesBufferedCommandsAfterCancellation {
+                        // Keep the response deadline without inheriting the
+                        // disappearing cell's cancellation. The mutex stays
+                        // owned until CMD_RESPONSE; only real wire errors enter
+                        // recovery. Streaming download cancellation is unchanged.
+                        let transaction = Task {
+                            try await AsyncDeadline.run(
+                                nanoseconds: timeoutNanoseconds, timeoutError: PTPSessionError.timeout,
+                                operation: operation
+                            )
+                        }
+                        result = try await transaction.value
                     } else {
                         result = try await AsyncDeadline.run(
                             nanoseconds: timeoutNanoseconds, timeoutError: PTPSessionError.timeout,

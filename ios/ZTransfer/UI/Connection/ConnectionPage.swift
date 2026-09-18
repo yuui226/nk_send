@@ -11,6 +11,7 @@ struct ConnectionPage: View {
     let directory: DirectoryAccessStore
     let celebrationStart: Date?
     let onOpenWorkspace: () -> Void
+    @Binding var gpsPanelPresented: Bool
     @State private var showSettings = false
     @State private var showSTAReset = false
     @State private var showSTATips = false
@@ -20,6 +21,7 @@ struct ConnectionPage: View {
     @AppStorage("ap_connection_help_viewed") private var apHelpViewed = false
     @State private var attentionOrigin = Date()
     @State private var settingsAnchor: CGRect = .zero
+    @State private var settingsMotionAnchor: CGRect = .zero
 
     var body: some View {
         TimelineView(.animation(paused: celebrationStart == nil)) { context in
@@ -50,7 +52,10 @@ struct ConnectionPage: View {
                             success: celebration.success > 0 && model.cameraSession?.isUSB == true,
                             selectionSceneProgress: celebration.hero,
                             successEffectProgress: celebration.success)
-                        GPSConnectionControl(coordinator: gpsCoordinator)
+                        GPSConnectionControl(
+                            coordinator: gpsCoordinator,
+                            expanded: $gpsPanelPresented
+                        )
                             .opacity(pageFade)
                     }
                     .frame(width: layout.cardWidth)
@@ -99,10 +104,33 @@ struct ConnectionPage: View {
                     Button { Task { @MainActor in showSettings = true } } label: {
                         DoubleZMark(tint: ZTransferColors.primaryText)
                             .frame(width: 20 * DoubleZMark.aspectRatio, height: 20)
+                            .background {
+                                GeometryReader { anchor in
+                                    Color.clear
+                                        .allowsHitTesting(false)
+                                        .preference(
+                                            key: SettingsMotionAnchorPreferenceKey.self,
+                                            value: anchor.frame(in: .named(ZTransferPopupAnchorSpace.name))
+                                        )
+                                }
+                            }
                             .padding(.horizontal, 14)
                             .frame(height: 36)
                     }
-                    .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
+                    .buttonStyle(ZTransferGlassButtonStyle(
+                        cornerRadius: 22,
+                        materialContentColor: ZTransferColors.accentYellow
+                    ))
+                    .background {
+                        GeometryReader { anchor in
+                            Color.clear
+                                .allowsHitTesting(false)
+                                .preference(
+                                    key: SettingsAnchorPreferenceKey.self,
+                                    value: anchor.frame(in: .named(ZTransferPopupAnchorSpace.name))
+                                )
+                        }
+                    }
                     #if DEBUG
                     Button { model.connectDebugSimulator() } label: {
                         Image(systemName: "photo.on.rectangle.angled")
@@ -115,12 +143,6 @@ struct ConnectionPage: View {
                     .padding(.leading, 12)
                     .padding(.top, 6)
                     .opacity(pageFade)
-                    .background {
-                        GeometryReader { anchor in
-                            Color.clear.preference(key: SettingsAnchorPreferenceKey.self,
-                                                   value: anchor.frame(in: .global))
-                        }
-                    }
 
                 }
                 .overlay(alignment: .bottom) {
@@ -132,6 +154,9 @@ struct ConnectionPage: View {
                         .opacity(pageFade)
                 }
                 .onPreferenceChange(SettingsAnchorPreferenceKey.self) { settingsAnchor = $0 }
+                .onPreferenceChange(SettingsMotionAnchorPreferenceKey.self) {
+                    settingsMotionAnchor = $0
+                }
             }
 
             // Keep the scrim outside the safe-area-constrained page overlay.
@@ -151,6 +176,7 @@ struct ConnectionPage: View {
                     effectsStore: effectsStore,
                     directory: directory,
                     anchor: settingsAnchor,
+                    motionAnchor: settingsMotionAnchor,
                     effectPreviewSource: nil,
                     effectPreviewExif: nil,
                     onEffectPreviewRequested: {}
@@ -164,6 +190,7 @@ struct ConnectionPage: View {
                     .opacity(pageFade)
             }
         }
+        .coordinateSpace(name: ZTransferPopupAnchorSpace.name)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onChange(of: gpsCoordinator.state.enabled) { enabled in
             if !enabled { attentionOrigin = Date() }
@@ -251,6 +278,11 @@ struct ConnectionCelebrationValues: Equatable {
 }
 
 private struct SettingsAnchorPreferenceKey: PreferenceKey {
+    static let defaultValue: CGRect = .zero
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
+}
+
+private struct SettingsMotionAnchorPreferenceKey: PreferenceKey {
     static let defaultValue: CGRect = .zero
     static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
 }

@@ -6,7 +6,7 @@ struct STAConnectedCamera: Sendable {
     let album: STAAlbumAccess
     let guid: String?
     let close: @Sendable () async -> Void
-    let startEvents: @Sendable (@escaping @Sendable (Data) async -> Void) -> Void
+    let startEvents: @Sendable (@escaping @Sendable (STAEvent) async -> Void) -> Void
 }
 
 struct STAAttemptFailure: Error {
@@ -137,6 +137,10 @@ actor STAConnectionCoordinator {
         if case PTPSessionError.timeout = error { return true }
         if case STAConnectionError.albumUnavailable = error { return true }
         if case NWError.posix(let code) = error { return code == .ECONNREFUSED || code == .ETIMEDOUT }
+        if case PTPIPPOSIXChannel.ChannelError.timeout = error { return true }
+        if case PTPIPPOSIXChannel.ChannelError.system(let code) = error {
+            return code == POSIXErrorCode.ECONNREFUSED.rawValue || code == POSIXErrorCode.ETIMEDOUT.rawValue
+        }
         return false
     }
     static func reconnectDelay(attempt: Int) -> UInt64 {
@@ -150,8 +154,11 @@ actor STAConnectionCoordinator {
                      onStage: @escaping @Sendable (STAConnectionStage) async -> Void) async throws -> STAConnectedCamera {
         let socket: PTPIPSocketTransport
         do {
+            // Android STA uses one blocking command socket + reusable reader.
+            // Keep that same path in both build configurations. AP/USB are
+            // unchanged. See STA下载-Android与iOS实现差异审查.md for evidence.
             socket = try await PTPIPSocketTransport.open(host: candidate.ip, localAddress: candidate.localAddress,
-                staInitiatorID: profiles.initiatorID(identity), expectedGUID: expectedGUID)
+                staInitiatorID: profiles.initiatorID(identity), expectedGUID: expectedGUID, backend: .bsdSocket)
         } catch { throw STAAttemptFailure(cause: error, guid: nil, model: nil, storageProbeReached: false) }
         let session = PTPSession(transport: socket, firstTransactionID: 0, defaultTimeoutNanoseconds: 60_000_000_000)
         let browsing = STABrowsingSession(session: session, guid: socket.responderGUID, identity: identity,

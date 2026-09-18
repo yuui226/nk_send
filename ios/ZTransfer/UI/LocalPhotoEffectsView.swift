@@ -127,7 +127,7 @@ struct LocalPhotoEffectsView: View {
                 Image(systemName: "chevron.up").font(.system(size: 19, weight: .semibold))
                     .frame(width: 38, height: 38)
             }
-            .buttonStyle(WorkbenchGlassButtonStyle())
+            .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 19))
             Text(AppLocalized.resource("local_photo_effects_entry")).font(.system(size: 16, weight: .bold)).lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .leading)
             if !batch.state.photos.isEmpty {
@@ -135,7 +135,8 @@ struct LocalPhotoEffectsView: View {
                     Text(AppLocalized.resource("local_photo_replace")).font(.system(size: 12, weight: .medium))
                         .padding(.horizontal, 10).frame(height: 38)
                 }
-                .buttonStyle(WorkbenchGlassButtonStyle()).disabled(batch.state.generating)
+                .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 16))
+                .disabled(batch.state.generating)
             }
             TipLightbulbButton(
                 attention: !localPhotoEffectsHelpViewed, size: 38,
@@ -212,7 +213,12 @@ struct LocalPhotoEffectsView: View {
             )
                 .frame(maxWidth: .infinity).frame(height: 50).clipped()
         }
-        .buttonStyle(WorkbenchGlassButtonStyle())
+        .buttonStyle(ZTransferGlassButtonStyle(
+            cornerRadius: 16,
+            active: batch.state.generating ||
+                (!batch.state.photos.isEmpty && effectsStore.settings.hasEffect),
+            activeColor: ZTransferColors.accentBlue
+        ))
         .disabled(batch.state.phase != .ready || (!batch.state.photos.isEmpty && !effectsStore.settings.hasEffect))
     }
 
@@ -508,16 +514,4 @@ private struct LocalPreviewPrefetchRequest: Equatable {
     let item: PhotosPickerItem
     let settings: PhotoEffectsSettings
     let enabled: Bool
-}
-
-private struct WorkbenchGlassButtonStyle: ButtonStyle {
-    @Environment(\.isEnabled) private var enabled
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
-            .overlay(RoundedRectangle(cornerRadius: 16).stroke(ZTransferColors.secondaryText.opacity(0.15)))
-            .opacity(enabled ? 1 : 0.45)
-            .scaleEffect(configuration.isPressed ? 0.96 : 1)
-            .animation(ZTransferMotion.standard, value: configuration.isPressed)
-    }
 }

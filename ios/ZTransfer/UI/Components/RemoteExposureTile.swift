@@ -18,6 +18,7 @@ struct RemoteExposureTile: View {
     @State private var dragStart: CGFloat = 0
     @State private var dragging = false
     @State private var lastFeedbackIndex: Int?
+    @Environment(\.colorScheme) private var colorScheme
 
     private var values: [UInt64] { descriptor?.values ?? [] }
     private var selectedIndex: Int {
@@ -71,17 +72,23 @@ struct RemoteExposureTile: View {
                     .font(.system(size: 8, weight: .semibold))
                     .foregroundStyle(ZTransferColors.secondaryText)
                     .padding(.horizontal, 5).frame(height: 17)
-                    .background(autoEnabled ? ZTransferColors.accentYellow.opacity(0.24) : Color.white.opacity(0.86), in: RoundedRectangle(cornerRadius: 5))
-                    .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.white.opacity(0.9), lineWidth: 1))
+                    .background(autoEnabled
+                                ? ZTransferColors.accentYellow.opacity(colorScheme == .dark ? 0.34 : 0.24)
+                                : ZTransferColors.primaryText.opacity(colorScheme == .dark ? 0.12 : 0.08),
+                                in: RoundedRectangle(cornerRadius: 5))
+                    .overlay(RoundedRectangle(cornerRadius: 5)
+                        .stroke(ZTransferColors.primaryText.opacity(colorScheme == .dark ? 0.24 : 0.12), lineWidth: 1))
                     .disabled(autoBusy)
                     .padding(4)
             }
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
         .frame(maxWidth: .infinity, minHeight: 54, maxHeight: 54)
-        .background(Color.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Color.white.opacity(0.96), lineWidth: 1))
-        .shadow(color: .black.opacity(0.04), radius: 2, y: 1)
+        .background(ZTransferGlassSurface(cornerRadius: 18, kind: .button))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
+            .stroke(ZTransferColors.primaryText.opacity(colorScheme == .dark ? 0.20 : 0.10), lineWidth: 1))
+        .shadow(color: .black.opacity(colorScheme == .dark ? 0.16 : 0.04), radius: 2, y: 1)
         .opacity(writable || autoToggle != nil || descriptor == nil ? 1 : 0.48)
         .onAppear { position = CGFloat(selectedIndex) }
         .onChange(of: descriptor?.current) { _ in

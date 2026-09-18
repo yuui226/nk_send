@@ -31,7 +31,7 @@ private actor GateTestOrder {
 }
 
 private actor FrameworkManagedPTPReplay: PTPCommandTransport {
-    var managesCommandTimeouts: Bool { true }
+    nonisolated var managesCommandTimeouts: Bool { true }
     private let started: GateTestLatch
     private let release = GateTestLatch()
     private(set) var cancellationRequested = false

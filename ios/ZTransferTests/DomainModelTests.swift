@@ -7,6 +7,55 @@ import UniformTypeIdentifiers
 
 final class DomainModelTests: XCTestCase {
     @MainActor
+    func testSTASequentialScanSurvivesTransferPreviewRemoteAndFilterChanges() async throws {
+        let harness = SequentialListHarness()
+        let files = (1...4).map { remoteLifecycleFile(UInt32($0), name: "\($0).NEF") }
+        let model = PhotoListViewModel(
+            scanCatalog: { _, _, _, onBatch in
+                await harness.didStartScan()
+                try await onBatch(files)
+                return PhotoScanResult(files: files, removedHandles: [], addedHandles: [],
+                                       handleQueriesSucceeded: true, metadataComplete: true)
+            },
+            prefetchBatch: { await harness.prefetch($0) },
+            canFill: { true },
+            setRemoteGate: { await harness.setRemote($0) },
+            sequentialLoading: true
+        )
+        model.load()
+        try await waitForRemoteLifecycle { await harness.requested == [1] }
+        model.setTransferBusy(true)
+        model.pauseForPreview()
+        await model.pauseForRemote() // Must not await/cancel the suspended scan.
+        model.setFilter(PhotoFilterState(extensions: [".jpg"]))
+        model.cancelLoading() // A disappearing UI is not the session owner.
+        await model.reload()
+        model.load()
+        await harness.releaseFirst()
+        try await Task.sleep(for: .milliseconds(80))
+        var requested = await harness.requested
+        XCTAssertEqual(requested, [1])
+        XCTAssertTrue(model.isLoadingFiles)
+        model.setTransferBusy(false)
+        await model.resumeAfterRemote(isConnected: true)
+        try await Task.sleep(for: .milliseconds(80))
+        requested = await harness.requested
+        XCTAssertEqual(requested, [1], "Preview still owns the foreground")
+        model.resumeAfterPreview()
+        try await waitForRemoteLifecycle { model.hasCompletedFileScan }
+        let scans = await harness.scans
+        let gates = await harness.remoteGates
+        requested = await harness.requested
+        XCTAssertEqual(scans, 1)
+        XCTAssertEqual(requested, [1, 2, 3, 4])
+        XCTAssertEqual(gates, [true, false])
+        XCTAssertEqual(model.availableFiles.map(\.id), [1, 2, 3, 4])
+        model.clearFilter()
+        try await Task.sleep(for: .milliseconds(20))
+        requested = await harness.requested
+        XCTAssertEqual(requested, [1, 2, 3, 4])
+    }
+    @MainActor
     func testInvalidTransferDirectoryBookmarkIsRemovedDuringRestore() throws {
         let suite = "directory-invalid-bookmark-\(UUID())"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
@@ -82,7 +131,23 @@ final class DomainModelTests: XCTestCase {
     func testSkinPreferenceRestorationMatchesAndroidMigration() {
         XCTAssertEqual(normalizedSkinPreset(nil), "FROSTED_GLASS")
         XCTAssertEqual(normalizedSkinPreset("WOOD"), "WOOD")
+        if #available(iOS 26.0, *) {
+            XCTAssertEqual(normalizedSkinPreset("LIQUID_GLASS"), "LIQUID_GLASS")
+        } else {
+            XCTAssertEqual(normalizedSkinPreset("LIQUID_GLASS"), "FROSTED_GLASS")
+        }
         XCTAssertEqual(normalizedSkinPreset("retired_skin"), "TITANIUM")
+    }
+
+    func testAPSignalPercentUsesFourAscendingBands() {
+        XCTAssertEqual(apSignalLevel(percent: nil), 0)
+        XCTAssertEqual(apSignalLevel(percent: 0), 0)
+        XCTAssertEqual(apSignalLevel(percent: 1), 1)
+        XCTAssertEqual(apSignalLevel(percent: 24), 1)
+        XCTAssertEqual(apSignalLevel(percent: 25), 2)
+        XCTAssertEqual(apSignalLevel(percent: 50), 3)
+        XCTAssertEqual(apSignalLevel(percent: 75), 4)
+        XCTAssertEqual(apSignalLevel(percent: 100), 4)
     }
 
     @MainActor
@@ -1001,6 +1066,26 @@ final class DomainModelTests: XCTestCase {
         XCTAssertEqual(normalizedThumbnailColumns(1), 2)
         XCTAssertEqual(normalizedThumbnailColumns(3), 3)
         XCTAssertEqual(normalizedThumbnailColumns(8), 4)
+    }
+}
+
+private actor SequentialListHarness {
+    private(set) var requested: [UInt32] = []
+    private(set) var scans = 0
+    private(set) var remoteGates: [Bool] = []
+    private var firstReleased = false
+    func didStartScan() { scans += 1 }
+    func setRemote(_ active: Bool) { remoteGates.append(active) }
+    func releaseFirst() { firstReleased = true }
+    func prefetch(_ files: [CameraFile]) async -> Set<UInt32> {
+        for file in files {
+            requested.append(file.id)
+            while file.id == 1 && !firstReleased {
+                do { try await Task.sleep(for: .milliseconds(1)) }
+                catch { return [] }
+            }
+        }
+        return Set(files.map(\.id))
     }
 }
 
@@ -2154,6 +2239,35 @@ private actor FailOnceFrameRenderer {
 }
 
 extension DomainModelTests {
+    func testThumbnailCacheIdentityMatchesAndroidSerialAndResponderFallbacks() {
+        let validSerial = deviceInfo(manufacturer: " Nikon ", model: " Z 8 ", serial: " 12345 ")
+        XCTAssertEqual(cameraThumbnailCacheIdentity(deviceInfo: validSerial,
+                                                     transportIdentifier: "guid-fallback"),
+                       "Nikon\u{0}Z 8\u{0}12345")
+
+        for placeholder in ["", " ", "unknown", "NONE", "null", "n/a", "00-00"] {
+            let info = deviceInfo(manufacturer: " Nikon ", model: " Z 8 ", serial: placeholder)
+            XCTAssertEqual(cameraThumbnailCacheIdentity(deviceInfo: info,
+                                                         transportIdentifier: " responder-guid "),
+                           "Nikon\u{0}Z 8\u{0}responder-guid")
+        }
+    }
+
+    func testThumbnailCacheIdentityStillScopesCameraWithoutAnyPhysicalIdentifier() {
+        let info = deviceInfo(manufacturer: " Nikon ", model: " Z 8 ", serial: "0000")
+        XCTAssertEqual(cameraThumbnailCacheIdentity(deviceInfo: info, transportIdentifier: "---"),
+                       "Nikon\u{0}Z 8\u{0}unknown-device")
+        XCTAssertEqual(cameraThumbnailCacheIdentity(deviceInfo: nil, transportIdentifier: "abc123"),
+                       "\u{0}\u{0}abc123")
+    }
+
+    private func deviceInfo(manufacturer: String, model: String, serial: String) -> PTPDeviceInfo {
+        PTPDeviceInfo(standardVersion: 100, vendorExtensionID: 10, vendorExtensionVersion: 100,
+                      vendorExtensionDescription: "", functionalMode: 0,
+                      manufacturer: manufacturer, model: model, version: "", serialNumber: serial,
+                      operations: [], events: [], properties: [], captureFormats: [], imageFormats: [])
+    }
+
     func testExportedOriginalIndexMatchesCopyNameSizeAndDestination() {
         let file = CameraFile(id: 1, storageID: 1, format: 0x3801, size: 100,
                               fileName: "DSC_0001.JPG", captureDate: "20260817T120000", isProtected: false)

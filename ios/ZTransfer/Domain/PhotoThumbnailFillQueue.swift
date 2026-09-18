@@ -3,7 +3,10 @@ import Foundation
 /// Priority queue used by the thumbnail fill pipeline.  It mirrors Android's
 /// `ThumbnailFillQueue`: settled items survive a new scan, failed items are
 /// kept out of the hot loop, and a retry only happens after an explicit wake.
+/// STA's explicit user contract uses the sequential variant: display filters
+/// do not prioritize work and additions go after the remaining catalog.
 actor PhotoThumbnailFillQueue {
+    private let sequential: Bool
     private var priority: [UInt32] = []
     private var regular: [UInt32] = []
     private var pending = Set<UInt32>()
@@ -20,7 +23,8 @@ actor PhotoThumbnailFillQueue {
     private let wakeStream: AsyncStream<Void>
     private let wakeContinuation: AsyncStream<Void>.Continuation
 
-    init() {
+    init(sequential: Bool = false) {
+        self.sequential = sequential
         var continuation: AsyncStream<Void>.Continuation?
         wakeStream = AsyncStream(bufferingPolicy: .bufferingNewest(1)) { streamContinuation in
             continuation = streamContinuation
@@ -57,17 +61,17 @@ actor PhotoThumbnailFillQueue {
         guard seededRevision != revision else { return }
         seededRevision = revision
         for file in files { filesByID[file.id] = file }
-        self.priorityRange = priorityRange
-        let ordered = stableNewestFirst(files)
+        self.priorityRange = sequential ? nil : priorityRange
+        let ordered = sequential ? files : stableNewestFirst(files)
         for file in ordered where !settled.contains(file.id) && !pending.contains(file.id) && !failed.contains(file.id) {
-            enqueue(file.id, priority: priorityRange?.contains(file.captureDate) == true, front: false)
+            enqueue(file.id, priority: self.priorityRange?.contains(file.captureDate) == true, front: false)
         }
     }
 
     func enqueueNew(_ files: [CameraFile]) {
         for file in files { filesByID[file.id] = file }
         for file in files where !settled.contains(file.id) {
-            enqueue(file.id, priority: priorityRange?.contains(file.captureDate) == true, front: true)
+            enqueue(file.id, priority: priorityRange?.contains(file.captureDate) == true, front: !sequential)
         }
     }
 
@@ -117,7 +121,8 @@ actor PhotoThumbnailFillQueue {
     func retryFailed() {
         // Android keeps the failure insertion order for equal capture times;
         // Swift's standard sort is not stable, so preserve the explicit order.
-        let files = stableNewestFirst(failedOrder.compactMap { filesByID[$0] })
+        let failedFiles = failedOrder.compactMap { filesByID[$0] }
+        let files = sequential ? failedFiles : stableNewestFirst(failedFiles)
         failed.removeAll(); failedOrder.removeAll()
         for file in files {
             enqueue(file.id, priority: priorityRange?.contains(file.captureDate) == true, front: false)
@@ -125,6 +130,7 @@ actor PhotoThumbnailFillQueue {
     }
 
     func updatePriorityRange(_ files: [CameraFile], range: PhotoDateRange?) {
+        guard !sequential else { return }
         guard self.priorityRange != range else { return }
         for file in files { filesByID[file.id] = file }
         self.priorityRange = range

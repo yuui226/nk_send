@@ -30,6 +30,32 @@ final class CameraDownloadTests: XCTestCase {
         }
     }
 
+    func testSTADirectReadKeepsPartialObjectEvenInHighThroughputWorkspace() async throws {
+        let wire = DownloadReplay([
+            .init(0x9431, [7, 0, 0, 6, 0], chunks: [Data(1...6)], declared: 6),
+        ])
+        let album = STAAlbumAccess(storageIDs: [1], prefetchedHandles: nil,
+                                   directObjectRead: true, deviceInfo: nil)
+        let repository = CameraRepository(session: PTPSession(transport: wire), staAlbum: album)
+        await repository.setPreferHighThroughputTransfers(true)
+        let result = try await repository.downloadResult(handle: 7, size: 6, fileName: "a.JPG", to: directory())
+        XCTAssertEqual(try Data(contentsOf: result.url), Data(1...6))
+        let commands = await wire.commands
+        XCTAssertEqual(commands.map(\.code), [0x9431])
+    }
+
+    func testOutputPreparationFailureDoesNotStartCameraSizeProbe() async throws {
+        let wire = DownloadReplay([])
+        let target = try directory().appendingPathComponent("missing", isDirectory: true)
+        do {
+            _ = try await CameraRepository(session: PTPSession(transport: wire))
+                .downloadResult(handle: 7, size: 0, fileName: "a.JPG", to: target)
+            XCTFail("Missing output directory must fail before camera I/O")
+        } catch { XCTAssertTrue(error is CocoaError) }
+        let commands = await wire.commands
+        XCTAssertTrue(commands.isEmpty)
+    }
+
     func testImageCaptureUSBUsesBoundedPartialRequestsAboveOneCallbackChunk() async throws {
         let tail = Data([3, 4])
         let wire = DownloadReplay([
@@ -273,6 +299,29 @@ final class CameraDownloadTests: XCTestCase {
         XCTAssertLessThanOrEqual(values.value.last?.bytesPerSecond ?? .max, 500)
         XCTAssertGreaterThan(values.value.last?.bytesPerSecond ?? 0, 0)
         try writer.close()
+    }
+
+    func testWriterBatchesSmallPacketsAndFlushesEveryByteOnClose() throws {
+        let target = try directory().appendingPathComponent("buffered.part")
+        FileManager.default.createFile(atPath: target.path, contents: Data())
+        let writer = CameraDownloadWriter(
+            output: try FileHandle(forWritingTo: target), resumeOffset: 0,
+            totalHint: 1_100_000, captureHeader: false, startedAt: .now, onProgress: nil
+        )
+        let first = Data(repeating: 0x11, count: 700_000)
+        let second = Data(repeating: 0x22, count: 400_000)
+
+        try writer.sink.received(first)
+        XCTAssertEqual((try target.resourceValues(forKeys: [.fileSizeKey]).fileSize), 0)
+        try writer.sink.received(second)
+        XCTAssertEqual((try target.resourceValues(forKeys: [.fileSizeKey]).fileSize), first.count)
+        XCTAssertEqual(writer.bytes, UInt64(first.count + second.count))
+
+        try writer.close()
+        let saved = try Data(contentsOf: target)
+        XCTAssertEqual(saved.count, first.count + second.count)
+        XCTAssertEqual(saved.prefix(first.count), first)
+        XCTAssertEqual(saved.suffix(second.count), second)
     }
 
     func testFreshJPEGMetadataFlowsToFrameWithoutSecondCameraRead() async throws {

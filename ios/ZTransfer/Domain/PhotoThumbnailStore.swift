@@ -3,6 +3,7 @@ import Foundation
 /// Session-owned thumbnail lookup pipeline. The order and negative-cache rules
 /// mirror Android `CameraViewModel.loadThumbnail`.
 actor PhotoThumbnailStore {
+    private static let sharedDisk = PhotoThumbnailDiskCache()
     private struct PrefetchCacheWriteError: Error {}
     private let disk: PhotoThumbnailDiskCache
     private var cameraStore: PhotoThumbnailDiskCache.CameraStore?
@@ -31,14 +32,38 @@ actor PhotoThumbnailStore {
         }
     }
     private var inFlight: [String: Flight] = [:]
+    private var observers: [UInt32: [UUID: AsyncStream<Void>.Continuation]] = [:]
     private let remoteGate = ThumbnailRemoteGate()
 
-    init(disk: PhotoThumbnailDiskCache = PhotoThumbnailDiskCache()) {
-        self.disk = disk
+    init(disk: PhotoThumbnailDiskCache? = nil) {
+        self.disk = disk ?? Self.sharedDisk
         // Android reserves about one eighth of the process heap for bitmap LRU.
         // Data is compressed thumbnail bytes on iOS, so retain the same ratio
         // with a small floor and no arbitrary entry-count eviction.
         self.memoryBudget = max(4 * 1024 * 1024, Int(ProcessInfo.processInfo.physicalMemory / 8))
+    }
+
+    /// Cancelling a cell removes only its subscription, never camera work.
+    /// The initial event closes the subscribe/cache-read race on reappearance.
+    func updates(handle: UInt32) -> AsyncStream<Void> {
+        let id = UUID()
+        let (stream, continuation) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        observers[handle, default: [:]][id] = continuation
+        continuation.onTermination = { [weak self] _ in
+            Task { await self?.removeObserver(handle: handle, id: id) }
+        }
+        continuation.yield(())
+        return stream
+    }
+
+    private func removeObserver(handle: UInt32, id: UUID) {
+        observers[handle]?[id] = nil
+        if observers[handle]?.isEmpty == true { observers[handle] = nil }
+    }
+
+    func publish(handle: UInt32) {
+        guard let continuations = observers[handle]?.values else { return }
+        for continuation in continuations { continuation.yield(()) }
     }
 
     func beginSession(identity: String) {
@@ -51,7 +76,14 @@ actor PhotoThumbnailStore {
         negative.removeAll(keepingCapacity: true)
         cameraIdentity = identity
         cameraStore = disk.openCamera(identity: identity)
-        _ = disk.cleanupExpired()
+        if disk.claimCleanup() {
+            let disk = self.disk
+            // Android performs the 90-day sweep on a background IO coroutine
+            // at ViewModel startup. It is not part of the STA catalog critical
+            // path. Start it only after the active camera directory is opened
+            // and marked current, then let scanning proceed immediately.
+            Task.detached(priority: .utility) { _ = disk.cleanupExpired() }
+        }
     }
 
     /// Android clears the in-memory bitmap and negative sets at the beginning
@@ -97,7 +129,13 @@ actor PhotoThumbnailStore {
             flight.waiters += 1
             let raw = try await awaitFlight(WaiterToken(key: key, flight: flight))
             guard cameraIdentity == expectedIdentity else { throw CancellationError() }
-            guard !raw.isEmpty else { negative.insert(key); return nil }
+            guard !raw.isEmpty else {
+                // Android keeps a direct-STA RAW/video bounded-probe miss
+                // retryable. It is not the camera's authoritative NoThumbnail
+                // response and may succeed when the cell becomes visible again.
+                if !(directSTA && file.fileExtension != ".jpg") { negative.insert(key) }
+                return nil
+            }
             let processed = transform(raw)
             guard validate(processed) else {
                 cameraStore?.remove(key)
@@ -119,7 +157,10 @@ actor PhotoThumbnailStore {
         do {
             let value = try await awaitFlight(WaiterToken(key: key, flight: flight))
             guard cameraIdentity == expectedIdentity else { throw CancellationError() }
-            guard !value.isEmpty else { negative.insert(key); return nil }
+            guard !value.isEmpty else {
+                if !(directSTA && file.fileExtension != ".jpg") { negative.insert(key) }
+                return nil
+            }
             let processed = transform(value)
             guard validate(processed) else {
                 cameraStore?.remove(key)
@@ -139,6 +180,7 @@ actor PhotoThumbnailStore {
         file: CameraFile,
         identity: String,
         directSTA: Bool = false,
+        validate: (@Sendable (Data) -> Bool)? = nil,
         fetch: @escaping @Sendable () async throws -> Data
     ) async throws -> Bool {
         beginSession(identity: identity)
@@ -146,16 +188,28 @@ actor PhotoThumbnailStore {
         let (key, standardKey) = cacheKeys(for: file, directSTA: directSTA)
         // Android's no-thumbnail set is a settled result, not a transient
         // failure. A disk-fill pass must not keep retrying the same handle.
-        if negative.contains(key) { return true }
+        if let value = memory[key], validate?(value) != false { touch(key); return true }
+        if negative.contains(key), validate == nil { return true }
+        if validate != nil { negative.remove(key) }
         if let store = cameraStore,
            let url = store.find(key, legacyName: PhotoThumbnailDiskCache.legacyCacheFileName(
                fileName: file.fileName, size: file.size, captureDate: file.captureDate
-           ), alternateName: directSTA ? standardKey : nil),
-           let value = try? Data(contentsOf: url), !value.isEmpty { return true }
+           ), alternateName: directSTA ? standardKey : nil) {
+            // Ordinary Android-compatible fill uses indexed file length.
+            // Sequential STA also validates old entries, so an in-place app
+            // update cannot keep treating rejected bytes as completed work.
+            if let validate {
+                if let raw = try? Data(contentsOf: url), validate(raw) { return true }
+                store.remove(key, url: url)
+            } else { return true }
+        }
+        // All formats participate in the ordered fill, including direct-STA
+        // RAW/video. Visibility is never a prerequisite for camera reads.
         if let flight = inFlight[key] {
             flight.waiters += 1
             let value = try await awaitFlight(WaiterToken(key: key, flight: flight))
             guard cameraIdentity == expectedIdentity else { throw CancellationError() }
+            if let validate, !validate(value) { cameraStore?.remove(key); return false }
             guard !value.isEmpty else { return true }
             guard cameraStore?.write(value, as: key) == true else { return false }
             return true
@@ -165,6 +219,7 @@ actor PhotoThumbnailStore {
         // and must not start a duplicate GetThumb in the write window.
         let task = Task<Data, Error> {
             let raw = try await self.remoteGate.withPermit { try await fetch() }
+            if let validate, !validate(raw) { throw PrefetchCacheWriteError() }
             try self.persistPrefetch(raw, key: key, expectedIdentity: expectedIdentity)
             return raw
         }
@@ -173,12 +228,12 @@ actor PhotoThumbnailStore {
         do {
             _ = try await awaitFlight(WaiterToken(key: key, flight: flight))
             guard cameraIdentity == expectedIdentity else { throw CancellationError() }
-            // An empty GetThumb response is authoritative and has already
-            // been entered in the negative cache by persistPrefetch.
+            // With a validator only usable bytes reach persistence. Ordinary
+            // GetThumb also retains its authoritative empty-response handling.
             return true
         } catch is PrefetchCacheWriteError {
-            // Android stops the background fill when disk writes fail, while a
-            // visible request may still retry through its own lane.
+            // Neither invalid image bytes nor a failed write settles the item.
+            // The sequential owner can retry without relying on cell visibility.
             return false
         } catch { throw error }
     }
@@ -190,6 +245,10 @@ actor PhotoThumbnailStore {
     }
 
     func clear() {
+        for subscriptions in observers.values {
+            for continuation in subscriptions.values { continuation.finish() }
+        }
+        observers.removeAll()
         for flight in inFlight.values { flight.task.cancel() }
         inFlight.removeAll()
         memory.removeAll()
@@ -258,7 +317,11 @@ actor PhotoThumbnailStore {
 
     private func awaitFlight(_ token: WaiterToken) async throws -> Data {
         defer {
-            Task { self.release(token, cancelUnderlying: Task.isCancelled) }
+            // We are already back on this actor. Release before returning the
+            // miss so an immediate visible retry cannot join a completed failed
+            // flight. A new Task also reads its own cancellation flag, not the
+            // cancelled caller's flag (unlike Android's finally block).
+            release(token, cancelUnderlying: Task.isCancelled)
         }
         return try await withTaskCancellationHandler {
             try await token.flight.task.value
@@ -288,30 +351,58 @@ actor PhotoThumbnailStore {
 /// Android serializes background thumbnail reads with a one-permit gate so a
 /// scan cannot flood the same PTP/IP transaction channel.
 private actor ThumbnailRemoteGate {
+    private struct Waiter {
+        let id: UUID
+        let continuation: CheckedContinuation<Bool, Never>
+    }
     private var available = true
-    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var waiters: [Waiter] = []
 
     func withPermit<T>(_ operation: @escaping @Sendable () async throws -> T) async throws -> T {
-        if available {
-            available = false
-        } else {
-            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-                waiters.append(continuation)
-            }
-            do { try Task.checkCancellation() }
-            catch {
-                releasePermit()
-                throw error
-            }
-        }
+        try await acquire()
         defer { releasePermit() }
         return try await operation()
+    }
+
+    private func acquire() async throws {
+        try Task.checkCancellation()
+        if available {
+            available = false
+            return
+        }
+        let id = UUID()
+        let ownsPermit = await withTaskCancellationHandler {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+                if Task.isCancelled { continuation.resume(returning: false) }
+                else { waiters.append(Waiter(id: id, continuation: continuation)) }
+            }
+        } onCancel: {
+            // Swift continuations do not leave a queue automatically when the
+            // cell's .task is cancelled. Android's Semaphore does; remove the
+            // stale waiter so newly visible thumbnails do not sit behind a
+            // long chain of off-screen requests.
+            Task { await self.cancelWaiter(id) }
+        }
+        guard ownsPermit else { throw CancellationError() }
+        do { try Task.checkCancellation() }
+        catch {
+            // The waiter may have received the permit concurrently with its
+            // cancellation. In that race it owns the permit and must pass it on.
+            releasePermit()
+            throw error
+        }
+    }
+
+    private func cancelWaiter(_ id: UUID) {
+        guard let index = waiters.firstIndex(where: { $0.id == id }) else { return }
+        let waiter = waiters.remove(at: index)
+        waiter.continuation.resume(returning: false)
     }
 
     private func releasePermit() {
         if let waiter = waiters.first {
             waiters.removeFirst()
-            waiter.resume()
+            waiter.continuation.resume(returning: true)
         } else {
             available = true
         }

@@ -128,6 +128,7 @@ struct PhotoPreviewView: View {
     let onBurstChanged: (String, Bool) -> Void
     let onQueueFlightStarted: (Int) -> Void
     let onQueueFlightFinished: (Int) -> Void
+    let onQueueFlightCancelled: (Int) -> Void
     let initialAnchor: CGRect?
     let prepareDismissTarget: (CameraFile) async -> CGRect?
     let onDismiss: (CameraFile?) -> Void
@@ -160,7 +161,7 @@ struct PhotoPreviewView: View {
     @State private var currentZoomed = false
     @State private var queueFlightTask: Task<Void, Never>?
     @State private var queueFlightActive = false
-    @State private var queueFlightProgress: CGFloat = 0
+    @State private var queueFlightStartedAt: Date?
     @State private var queueFlightImage: UIImage?
     @State private var queueFlightImages: [UIImage?] = []
     @State private var queueFlightCount = 0
@@ -193,6 +194,7 @@ struct PhotoPreviewView: View {
          onEnqueueBurst: @escaping ([CameraFile]) -> Bool = { _ in false },
          onQueueFlightStarted: @escaping (Int) -> Void = { _ in },
          onQueueFlightFinished: @escaping (Int) -> Void = { _ in },
+         onQueueFlightCancelled: @escaping (Int) -> Void = { _ in },
          prepareDismissTarget: @escaping (CameraFile) async -> CGRect? = { _ in nil },
          onDismiss: @escaping (CameraFile?) -> Void = { _ in }) {
         self.queueModel = queueModel
@@ -206,6 +208,7 @@ struct PhotoPreviewView: View {
         self.onEnqueue = onEnqueue; self.onEnqueueBurst = onEnqueueBurst
         self.onQueueFlightStarted = onQueueFlightStarted
         self.onQueueFlightFinished = onQueueFlightFinished
+        self.onQueueFlightCancelled = onQueueFlightCancelled
         self.onBurstChanged = onBurstChanged
         self.prepareDismissTarget = prepareDismissTarget
         self.onDismiss = onDismiss
@@ -319,16 +322,22 @@ struct PhotoPreviewView: View {
                         if let file = currentPhoto { startQueueFlight(for: file) }
                     }
             )
-            if queueFlightActive, let queueTarget, previewEntries.indices.contains(index) {
+            if queueFlightActive, previewEntries.indices.contains(index) {
                 GeometryReader { proxy in
+                    let screen = UIScreen.main.bounds
+                    let resolvedTarget = queueTarget.flatMap { frame in
+                        frame.isEmpty || frame.isInfinite || frame.isNull ? nil : frame
+                    } ?? CGRect(x: screen.maxX - 13, y: 48, width: 1, height: 36)
                     PhotoPreviewQueueFlightView(
-                        progress: queueFlightProgress,
+                        startedAt: queueFlightStartedAt,
                         image: queueFlightImage,
                         images: queueFlightImages,
                         from: CGPoint(x: proxy.size.width / 2, y: proxy.size.height * 0.46),
                         target: CGPoint(
-                            x: queueTarget.midX - proxy.frame(in: .global).minX,
-                            y: queueTarget.midY - proxy.frame(in: .global).minY
+                            // Match the list/Android landing point: the stable
+                            // right edge of the carrier, inset into the capsule.
+                            x: resolvedTarget.maxX - 28 - proxy.frame(in: .global).minX,
+                            y: resolvedTarget.midY - proxy.frame(in: .global).minY
                         ),
                         size: CGSize(width: proxy.size.width * 0.72, height: proxy.size.height * 0.52),
                         stackCount: queueFlightCount
@@ -436,9 +445,9 @@ struct PhotoPreviewView: View {
             neighborPrefetchTask = nil
             queueFlightTask?.cancel()
             queueFlightTask = nil
-            if queueFlightCount > 0 { onQueueFlightFinished(queueFlightCount) }
+            if queueFlightCount > 0 { onQueueFlightCancelled(queueFlightCount) }
             queueFlightCount = 0
-            queueFlightProgress = 0
+            queueFlightStartedAt = nil
             queueFlightImage = nil
             queueFlightImages = []
         }
@@ -782,43 +791,45 @@ struct PhotoPreviewView: View {
 
     private func startQueueFlight(for file: CameraFile, burstFiles: [CameraFile]? = nil) {
         guard !closing, !burstTransitionBusy, !queueFlightActive else { return }
-        guard burstFiles.map(onEnqueueBurst) ?? onEnqueue(file) else { return }
-        ZTransferHaptics.shared.tick()
         let flightCount = burstFiles?.count ?? 1
         onQueueFlightStarted(flightCount)
+        guard burstFiles.map(onEnqueueBurst) ?? onEnqueue(file) else {
+            onQueueFlightCancelled(flightCount)
+            return
+        }
+        ZTransferHaptics.shared.tick()
         queueFlightCount = flightCount
         queueFlightActive = true
-        queueFlightProgress = 0
+        queueFlightStartedAt = Date().addingTimeInterval(0.032)
         queueFlightImage = nil
         queueFlightImages = []
-        withAnimation(.timingCurve(0.4, 0.0, 0.2, 1.0, duration: 0.155)) {
+        let riseDuration: UInt64 = queueDragOffset < -1 ? 105_000_000 : 155_000_000
+        withAnimation(.timingCurve(
+            0.4, 0.0, 0.2, 1.0,
+            duration: Double(riseDuration) / 1_000_000_000
+        )) {
             queueDragOffset = -132
-        }
-        withAnimation(.spring(response: 0.36, dampingFraction: 0.78).delay(0.155)) {
-            queueDragOffset = 0
-        }
-        withAnimation(.timingCurve(0.5, 0, 0.8, 0.35, duration: 0.56).delay(0.035)) {
-            queueFlightProgress = 1
         }
         queueFlightTask?.cancel()
         queueFlightTask = Task { @MainActor in
             let flightFiles = burstFiles?.prefix(3).map { $0 } ?? [file]
-            var cachedImages: [UIImage] = []
             var cachedLayers: [UIImage?] = []
             for candidate in flightFiles {
-                if let data = try? await session.cachedThumbnail(file: candidate),
-                   let image = UIImage(data: data) {
-                    cachedImages.append(image)
-                    cachedLayers.append(image)
-                } else {
-                    cachedLayers.append(nil)
-                }
+                cachedLayers.append(
+                    displayedImages[candidate.id] ?? session.memoryThumbnailImage(file: candidate)
+                )
             }
             queueFlightImages = cachedLayers
-            if let image = cachedImages.first {
-                queueFlightImage = image
+            queueFlightImage = displayedImages[file.id]
+                ?? cachedLayers.compactMap { $0 }.first
+            // The immutable start time already includes Android's 32 ms
+            // preroll. Wait for the complete rise before issuing the return.
+            try? await Task.sleep(nanoseconds: riseDuration)
+            guard !Task.isCancelled, queueFlightActive else { return }
+            withAnimation(.spring(response: 0.36, dampingFraction: 0.78)) {
+                queueDragOffset = 0
             }
-            try? await Task.sleep(nanoseconds: 560_000_000)
+            try? await Task.sleep(nanoseconds: 592_000_000 - riseDuration)
             guard !Task.isCancelled else { return }
             queueDragOffset = 0
             queueFlightActive = false
@@ -844,7 +855,7 @@ private func luminanceHistogram(_ image: UIImage) -> [CGFloat] {
 }
 
 private struct PhotoPreviewQueueFlightView: View {
-    let progress: CGFloat
+    let startedAt: Date?
     let image: UIImage?
     let images: [UIImage?]
     let from: CGPoint
@@ -853,40 +864,86 @@ private struct PhotoPreviewQueueFlightView: View {
     let stackCount: Int
 
     var body: some View {
-        let p = min(max(progress, 0), 1)
-        let control = CGPoint(
-            x: from.x + (target.x - from.x) * 0.42,
-            y: min(from.y, target.y) - max(56, abs(target.x - from.x) * 0.18)
-        )
-        let position = previewQuadraticBezier(start: from, control: control, end: target, t: p)
-        let width = max(10, size.width * (1 - p * 0.56))
-        let height = max(10, size.height * (1 - p * 0.56))
-        ZStack {
-            ForEach(Array(0..<min(max(stackCount, 1), 3)), id: \.self) { layer in
-                Group {
-                    if let image = (images.indices.contains(layer) ? images[layer] : nil) ?? image {
-                        Image(uiImage: image).resizable().scaledToFill()
-                    } else {
-                        RoundedRectangle(cornerRadius: 18).fill(.white.opacity(0.26))
+        // The view exists for less than a second, so keep its timeline live.
+        // The immutable future start date supplies the transparent preroll
+        // without asking a paused timeline to resume after insertion.
+        TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { timeline in
+            let linear = startedAt.map {
+                min(max(timeline.date.timeIntervalSince($0) / 0.56, 0), 1)
+            } ?? 0
+            let layerCount = stackCount > 1 ? min(stackCount, 3) : 1
+            ZStack {
+                ForEach(Array(0..<layerCount), id: \.self) { layer in
+                    Group {
+                        if let image = (images.indices.contains(layer) ? images[layer] : nil) ?? image {
+                            Image(uiImage: image).resizable().scaledToFill()
+                        } else {
+                            RoundedRectangle(cornerRadius: 18).fill(.white.opacity(0.26))
+                        }
                     }
+                    .frame(width: size.width, height: size.height)
+                    .clipShape(RoundedRectangle(cornerRadius: 18))
+                    .overlay(RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.32), lineWidth: 1))
+                    .offset(
+                        x: layerCount > 1 ? CGFloat(layer - 1) * 12 : 0,
+                        y: layerCount > 1 ? CGFloat(1 - layer) * 5 : 0
+                    )
+                    .rotationEffect(.degrees(layerCount > 1 ? Double(layer - 1) * 9 : 0))
                 }
-                .frame(width: width, height: height)
-                .clipShape(RoundedRectangle(cornerRadius: max(8, width * 0.04)))
-                .overlay(RoundedRectangle(cornerRadius: max(8, width * 0.04)).stroke(.white.opacity(0.32), lineWidth: 1))
-                .offset(x: CGFloat(layer - 1) * min(12, width * 0.04), y: CGFloat(layer) * 5)
-                .rotationEffect(.degrees(Double(p) * 8 + Double(layer - 1) * 3))
             }
+            // TimelineView advances the path itself. This avoids the SwiftUI
+            // insertion + implicit-animation coalescing that could leave only
+            // the fully transparent endpoint and make the flight disappear.
+            .modifier(PhotoPreviewQueueFlightArc(
+                progress: queueFlightEasedProgress(CGFloat(linear)),
+                start: from,
+                end: target,
+                baseSize: size
+            ))
         }
-        .position(position)
-        .opacity(1 - p * 0.2)
     }
 }
 
-private func previewQuadraticBezier(start: CGPoint, control: CGPoint, end: CGPoint, t: CGFloat) -> CGPoint {
-    let oneMinus = 1 - t
+@preconcurrency
+private struct PhotoPreviewQueueFlightArc: AnimatableModifier {
+    var progress: CGFloat
+    let start: CGPoint
+    let end: CGPoint
+    let baseSize: CGSize
+
+    nonisolated var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    func body(content: Content) -> some View {
+        let t = min(max(progress, 0), 1)
+        let dx = abs(end.x - start.x)
+        let lift = min(90, 36 + 0.35 * dx)
+        let control = CGPoint(
+            x: (start.x + end.x) / 2 - 52 * (1 - min(dx / 160, 1)),
+            y: max(min(start.y, end.y) - lift, (48 - start.y - end.y) / 2)
+        )
+        let point = photoPreviewQuadraticBezier(start: start, control: control, end: end, t: t)
+        let appear = min(t / 0.12, 1)
+        let endScale = 18 / max(max(baseSize.width, baseSize.height), 1)
+        let scale = 0.82 + (endScale - 0.82) * t
+        let arc = sin(.pi * t)
+        return content
+            .scaleEffect(scale)
+            .rotationEffect(.degrees(Double(2.2 * arc)))
+            .opacity(appear * (t > 0.94 ? (1 - t) / 0.06 : 1) * 0.86)
+            .position(point)
+    }
+}
+
+private func photoPreviewQuadraticBezier(
+    start: CGPoint, control: CGPoint, end: CGPoint, t: CGFloat
+) -> CGPoint {
+    let remaining = 1 - t
     return CGPoint(
-        x: oneMinus * oneMinus * start.x + 2 * oneMinus * t * control.x + t * t * end.x,
-        y: oneMinus * oneMinus * start.y + 2 * oneMinus * t * control.y + t * t * end.y
+        x: remaining * remaining * start.x + 2 * remaining * t * control.x + t * t * end.x,
+        y: remaining * remaining * start.y + 2 * remaining * t * control.y + t * t * end.y
     )
 }
 
@@ -903,10 +960,14 @@ private struct PreviewCircleButton: View {
                 .font(.system(size: symbol == "plus" ? size * 0.5 : 20, weight: .semibold))
                 .foregroundStyle(ZTransferColors.accentBlue)
                 .frame(width: size, height: size)
-                .background(.regularMaterial, in: Circle())
-                .overlay(Circle().stroke(.white.opacity(active ? 0.9 : 0.55), lineWidth: 1))
         }
-        .buttonStyle(.plain)
+        // Android BurstCollectionNavigationButton,
+        // PreviewHistogramButton and TransferQueueButton all use GlassButton.
+        .buttonStyle(ZTransferGlassButtonStyle(
+            cornerRadius: size / 2,
+            active: active,
+            activeColor: ZTransferColors.accentBlue
+        ))
         .accessibilityLabel(AppLocalized.resource(accessibilityKey))
     }
 }
@@ -960,6 +1021,12 @@ private struct CachedBurstThumbnail: View {
     let file: CameraFile
     @State private var image: UIImage?
 
+    init(session: CameraSession, file: CameraFile) {
+        self.session = session
+        self.file = file
+        _image = State(initialValue: session.memoryThumbnailImage(file: file))
+    }
+
     var body: some View {
         Group {
             if let image {
@@ -972,9 +1039,7 @@ private struct CachedBurstThumbnail: View {
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(.white.opacity(0.32), lineWidth: 1))
         .task {
             guard image == nil else { return }
-            if let data = try? await session.cachedThumbnail(file: file), let decoded = UIImage(data: data) {
-                image = decoded
-            }
+            image = try? await session.thumbnailImage(file: file, allowRemote: false)
         }
     }
 }
@@ -1095,8 +1160,7 @@ private struct PreviewImage: View {
             // Android publishes a cached thumbnail immediately, then waits
             // for the overlay transition to settle before opening the FHD
             // channel. This avoids competing with the opening animation.
-            if let data = try? await session.cachedThumbnail(file: file),
-               let thumb = UIImage(data: data) {
+            if let thumb = session.memoryThumbnailImage(file: file) {
                 thumbnail = thumb
                 onDisplayImage(thumb)
             }
@@ -1109,8 +1173,7 @@ private struct PreviewImage: View {
         }
         .task(id: allowRemoteThumbnailFallback) {
             guard allowRemoteThumbnailFallback, thumbnail == nil, highResolutionImage == nil else { return }
-            guard let data = try? await session.thumbnail(file: file),
-                  let thumb = UIImage(data: data) else {
+            guard let thumb = try? await session.thumbnailImage(file: file) else {
                 if !Task.isCancelled { remoteThumbnailUnavailable = true }
                 return
             }

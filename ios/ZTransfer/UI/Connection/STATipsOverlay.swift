@@ -7,7 +7,7 @@ struct STATipsOverlay: View {
     @Binding var isPresented: Bool
     let wirelessMode: WirelessMode
     let anchor: CGRect
-    @State private var progress: CGFloat = 0
+    @State private var progress: CGFloat = 1
 
     var body: some View {
             ZStack(alignment: .topLeading) {
@@ -26,10 +26,6 @@ struct STATipsOverlay: View {
                     .opacity(progress)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .onAppear {
-                progress = 0
-                withAnimation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.24)) { progress = 1 }
-            }
     }
 
     @ViewBuilder

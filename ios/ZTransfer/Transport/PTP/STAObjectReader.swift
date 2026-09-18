@@ -10,6 +10,7 @@ actor STAObjectReader {
     private let operations: Set<UInt16>
     private var names: [UInt32: String] = [:]
     private var dates: [UInt32: String] = [:]
+    private var datesLoaded = false
     private var files: [UInt32: CameraFile] = [:]
     private var anchors: [UInt32: STAMediaMetadata.Anchor] = [:]
     private var sessionAnchor: STAMediaMetadata.Anchor?
@@ -39,7 +40,7 @@ actor STAObjectReader {
                 if result.code == PTPConstants.responseOK { names.merge(STAMediaMetadata.fileNamePropertyList(result.data)) { _, new in new } }
             }
         }
-        try await refreshDates(storageIDs: groups.map(\.storage))
+        try await refreshDates(storageIDs: groups.map(\.storage), force: false)
         for group in groups where group.storage == .max || anchors[group.storage] == nil {
             guard let handle = group.handles.first(where: {
                 let ext = STAMediaMetadata.extensionFromHandle($0)
@@ -56,7 +57,15 @@ actor STAObjectReader {
         }
     }
 
-    func refreshDates(storageIDs: [UInt32]) async throws {
+    func refreshDates(storageIDs: [UInt32], force: Bool = true) async throws {
+        // Android loads this compact index once per session during catalog
+        // setup. Only the new-object resolver explicitly forces a refresh.
+        if !force {
+            guard !datesLoaded else { return }
+            datesLoaded = true
+        } else {
+            datesLoaded = true
+        }
         guard operations.contains(PTPConstants.getObjectsMetadata) else { return }
         for storage in Set(storageIDs).sorted() {
             let result = try await command(PTPConstants.getObjectsMetadata, [storage, 0, 0])
@@ -83,10 +92,20 @@ actor STAObjectReader {
     func thumbnail(handle: UInt32) async throws -> Data {
         if let cached = thumbnails[handle] { return cached }
         if noThumbnail.contains(handle) { return Data() }
-        let file = try await file(handle: handle, storage: files[handle]?.storageID ?? .max)
+        // NikonCamera.getThumbnail chooses its route from the catalog cache.
+        // An unknown handle reads only the header on this request, not a RAW
+        // probe as well. Catalogued NEFs take the lazy RAW route below.
+        guard let file = files[handle] else {
+            do { _ = try await readHeader(handle: handle, storage: .max) }
+            catch PTPSessionError.responseCode { }
+            catch PTPSessionError.invalidResponse { }
+            if let cached = thumbnails[handle] { return cached }
+            noThumbnail.insert(handle)
+            return Data()
+        }
         let bytes: Data?
         switch file.fileExtension {
-        case ".nef": bytes = try await rawImage(file, preview: false)
+        case ".nef": bytes = try await rawThumbnail(file)
         case ".mov", ".mp4":
             _ = try await readHeader(handle: handle, storage: file.storageID)
             if let thumbnail = thumbnails[handle] { return thumbnail }
@@ -130,7 +149,7 @@ actor STAObjectReader {
                 let data = try await partial(handle, offset: reference.offset, length: reference.length)
                 if completeJPEG(data, length: reference.length), dimensions(data) != nil { return data }
             }
-        } else if file.fileExtension == ".nef", let data = try await rawImage(file, preview: true) { return data }
+        } else if file.fileExtension == ".nef", let data = try await rawPreview(file) { return data }
         return Data()
     }
 
@@ -149,6 +168,14 @@ actor STAObjectReader {
         thumbnailBytes -= thumbnails.removeValue(forKey: handle)?.count ?? 0
         thumbnailOrder.removeAll { $0 == handle }; noThumbnail.remove(handle)
         rawPreviews.removeValue(forKey: handle); rawIndexedHandles.remove(handle); mpfPreviews.removeValue(forKey: handle)
+    }
+
+    /// Decode rejection is not a successful cached image. Keep catalog data
+    /// and preview indexes, but let the next attempt read the camera again.
+    func discardThumbnail(handle: UInt32) {
+        thumbnailBytes -= thumbnails.removeValue(forKey: handle)?.count ?? 0
+        thumbnailOrder.removeAll { $0 == handle }
+        noThumbnail.remove(handle)
     }
 
     private func readHeader(handle: UInt32, storage: UInt32, requirePreview: Bool = false) async throws -> CameraFile {
@@ -182,6 +209,9 @@ actor STAObjectReader {
             else { mpfPreviews[handle] = STAMediaMetadata.mpfPreviews(header, objectSize: size) }
             if let reference = metadata.previews.first(where: { $0.offset + $0.length <= header.count }) { thumbnail = slice(header, reference) }
             if thumbnail == nil, let range = STAMediaMetadata.largestEmbeddedJPEG(header) { thumbnail = slice(header, range) }
+            // Android's exact order is IFD range -> marker scan ->
+            // ExifInterface(File).thumbnailBytes, including undecodable ranges.
+            if ext == ".nef", thumbnail == nil { thumbnail = STAMediaMetadata.nefExifThumbnail(header) }
         } else if ext == ".mov" || ext == ".mp4" {
             date = STAMediaMetadata.videoDate(header) ?? date
             if date == nil && size > header.count {
@@ -222,10 +252,24 @@ actor STAObjectReader {
         try await session.executeResponse(operation: operation, parameters: parameters, timeoutNanoseconds: 60_000_000_000)
     }
     private func partial(_ handle: UInt32, offset: Int, length: Int) async throws -> Data {
-        let reply = try await session.execute(operation: PTPConstants.getPartialObjectEx,
-            parameters: [handle, UInt32(truncatingIfNeeded: offset), UInt32(offset >> 32), UInt32(length), 0], timeoutNanoseconds: 60_000_000_000)
+        let reply = try await partialResponse(handle, offset: offset, length: length)
+        guard reply.code == PTPConstants.responseOK else { throw PTPSessionError.responseCode(reply.code) }
         guard !reply.data.isEmpty else { throw PTPSessionError.invalidResponse }
         return reply.data
+    }
+    private func partialResponse(_ handle: UInt32, offset: Int, length: Int) async throws -> PTPResponse {
+        try await command(PTPConstants.getPartialObjectEx,
+            [handle, UInt32(truncatingIfNeeded: offset), UInt32(offset >> 32), UInt32(length), 0])
+    }
+    /// NikonCamera.readStaDirectPartialInternal returns null for a complete
+    /// negative/empty response. RAW hints and indexed ranges are probes: a
+    /// rejected range must not prevent the prefix parser from finding this
+    /// NEF's actual JPEG. Transport/malformed-response/cancellation errors still
+    /// propagate, because they do not establish a completed PTP transaction.
+    private func rawPartial(_ handle: UInt32, offset: Int, length: Int) async throws -> Data? {
+        guard length > 0 else { return nil }
+        let reply = try await partialResponse(handle, offset: offset, length: length)
+        return reply.code == PTPConstants.responseOK && !reply.data.isEmpty ? reply.data : nil
     }
     private func readPrefix(_ handle: UInt32, target: Int) async throws -> Data {
         let existing = prefixes[handle] ?? Data()
@@ -236,8 +280,12 @@ actor STAObjectReader {
         return prefix
     }
     private func rememberPrefix(_ handle: UInt32, _ data: Data) {
-        let retained = Data(data.prefix(512 * 1024))
-        guard retained.count > (prefixes[handle]?.count ?? 0) else { return }
+        let retainedLength = min(data.count, 512 * 1024)
+        // Match Android's check-before-copy order. Once the retained 512 KiB
+        // cap is reached, later 1/2/4/8/16 MiB RAW probe steps must not copy
+        // another 512 KiB merely to discover that the cache cannot grow.
+        guard retainedLength > (prefixes[handle]?.count ?? 0) else { return }
+        let retained = retainedLength == data.count ? data : Data(data.prefix(retainedLength))
         if prefixes[handle] == nil { prefixOrder.append(handle) }
         prefixes[handle] = retained
         while prefixOrder.count > 4 { prefixes.removeValue(forKey: prefixOrder.removeFirst()) }
@@ -290,14 +338,74 @@ actor STAObjectReader {
         } catch { return nil }
     }
 
-    private func rawImage(_ file: CameraFile, preview: Bool) async throws -> Data? {
+    /// Literal thumbnail state machine from readStaDirectRawThumbnailInternal.
+    /// Keep it separate from full-screen preview: Android has separate readers
+    /// with different candidate selection, completeness checks and cache writes.
+    private func rawThumbnail(_ file: CameraFile) async throws -> Data? {
+        func readReference(_ reference: STAMediaMetadata.Preview) async throws -> Data? {
+            guard let bytes = try await rawPartial(file.id, offset: reference.offset, length: reference.length),
+                  bytes.starts(with: [255, 216]) else { return nil }
+            return bytes
+        }
+        // A cached reference is authoritative for the route, not the outcome:
+        // null is returned directly and remains retryable on the next request.
+        // Do not update the session hint on this cached-reference branch.
+        if let reference = rawPreviews[file.id]?.last { return try await readReference(reference) }
+        if let hint = rawThumbnailHint, UInt64(hint.offset) < file.size {
+            let available = Int(clamping: file.size) - hint.offset
+            let maximum = min(available, max(192 * 1024, hint.length + 64 * 1024))
+            let initial = min(maximum, max(128 * 1024, hint.length + 16 * 1024))
+            if var bytes = try await rawPartial(file.id, offset: hint.offset, length: initial) {
+                if STAMediaMetadata.largestEmbeddedJPEG(bytes) == nil && bytes.count < maximum,
+                   let tail = try await rawPartial(file.id, offset: hint.offset + bytes.count, length: maximum - bytes.count) {
+                    bytes += tail
+                }
+                if let range = STAMediaMetadata.largestEmbeddedJPEG(bytes), let image = slice(bytes, range) {
+                    let absolute = STAMediaMetadata.Preview(offset: hint.offset + range.offset, length: range.length)
+                    rawThumbnailHint = absolute; rawPreviews[file.id] = [absolute]
+                    return image
+                }
+            }
+        }
+        let maximum = min(Int(clamping: file.size), 16 * 1024 * 1024)
+        guard maximum > 0 else { return nil }
+        var accumulated = Data((prefixes[file.id] ?? Data()).prefix(maximum))
+        var foundReference = false
+        for step in Self.rawProbeSizes {
+            let target = min(step, maximum)
+            if target > accumulated.count {
+                guard let chunk = try await rawPartial(file.id, offset: accumulated.count, length: target - accumulated.count) else { break }
+                accumulated.append(chunk.prefix(maximum - accumulated.count))
+            }
+            rememberPrefix(file.id, accumulated)
+            let references = STAMediaMetadata.tiffHeader(accumulated).previews
+            if let reference = references.last {
+                foundReference = true
+                if let bytes = try await readReference(reference) {
+                    rawPreviews[file.id] = references; rawIndexedHandles.insert(file.id)
+                    rawThumbnailHint = reference
+                    return bytes
+                }
+            }
+            // Android does not call ExifInterface during progressive probing.
+            if let range = STAMediaMetadata.largestEmbeddedJPEG(accumulated), let bytes = slice(accumulated, range) {
+                rawPreviews[file.id] = [range]; rawThumbnailHint = range
+                return bytes
+            }
+            if accumulated.count >= maximum || accumulated.count < target { break }
+        }
+        if !foundReference && accumulated.count >= maximum { noThumbnail.insert(file.id) }
+        return nil
+    }
+
+    private func rawPreview(_ file: CameraFile) async throws -> Data? {
         func readIndexed(_ references: [STAMediaMetadata.Preview]) async throws -> Data? {
             let ordered = references.sorted { $0.length < $1.length }
-            let candidates = preview ? (ordered.filter { $0.length >= 512 * 1024 }.isEmpty ? ordered : ordered.filter { $0.length >= 512 * 1024 }) : Array(ordered.prefix(1))
+            let plausible = ordered.filter { $0.length >= 512 * 1024 }
+            let candidates = plausible.isEmpty ? ordered : plausible
             var last: Data?
-            for reference in candidates where reference.offset + reference.length <= Int(clamping: file.size) {
-                let bytes = try await partial(file.id, offset: reference.offset, length: reference.length)
-                if !preview { if bytes.starts(with: [255, 216]) { rawThumbnailHint = reference; return bytes }; continue }
+            for reference in candidates {
+                guard let bytes = try await rawPartial(file.id, offset: reference.offset, length: reference.length) else { continue }
                 if completeJPEG(bytes, length: reference.length), let edge = dimensions(bytes) {
                     last = bytes
                     if edge >= 1600 { return bytes }
@@ -305,43 +413,30 @@ actor STAObjectReader {
             }
             return last
         }
-        if !preview || rawIndexedHandles.contains(file.id),
+        if rawIndexedHandles.contains(file.id),
            let refs = rawPreviews[file.id], !refs.isEmpty, let bytes = try await readIndexed(refs) { return bytes }
-        if !preview, let hint = rawThumbnailHint, UInt64(hint.offset) < file.size {
-            let available = Int(clamping: file.size) - hint.offset
-            let maximum = min(available, max(192 * 1024, hint.length + 64 * 1024))
-            let initial = min(maximum, max(128 * 1024, hint.length + 16 * 1024))
-            var bytes = try await partial(file.id, offset: hint.offset, length: initial)
-            if STAMediaMetadata.largestEmbeddedJPEG(bytes) == nil && bytes.count == initial && initial < maximum {
-                bytes += try await partial(file.id, offset: hint.offset + bytes.count, length: maximum - bytes.count)
-            }
-            if let range = STAMediaMetadata.largestEmbeddedJPEG(bytes), let image = slice(bytes, range) {
-                let absolute = STAMediaMetadata.Preview(offset: hint.offset + range.offset, length: range.length)
-                rawThumbnailHint = absolute; rawPreviews[file.id] = [absolute]
-                return image
-            }
-        }
         let maximum = min(Int(clamping: file.size), 16 * 1024 * 1024)
-        var accumulated = prefixes[file.id] ?? Data()
-        var foundReference = false
+        guard maximum > 0 else { return nil }
+        var accumulated = Data((prefixes[file.id] ?? Data()).prefix(maximum))
         var bestScanned: STAMediaMetadata.Preview?
         for step in Self.rawProbeSizes {
             let target = min(step, maximum)
-            if target > accumulated.count { accumulated += try await partial(file.id, offset: accumulated.count, length: target - accumulated.count) }
+            if target > accumulated.count {
+                guard let chunk = try await rawPartial(file.id, offset: accumulated.count, length: target - accumulated.count) else { break }
+                accumulated.append(chunk.prefix(maximum - accumulated.count))
+            }
             rememberPrefix(file.id, accumulated)
-            let references = STAMediaMetadata.tiffHeader(accumulated).previews
+            let metadata = STAMediaMetadata.tiffHeader(accumulated)
+            let references = metadata.previews
             if !references.isEmpty {
-                foundReference = true; rawPreviews[file.id] = references; rawIndexedHandles.insert(file.id)
+                rawPreviews[file.id] = references; rawIndexedHandles.insert(file.id)
                 if let bytes = try await readIndexed(references) { return bytes }
             }
-            if let range = STAMediaMetadata.largestEmbeddedJPEG(accumulated), let bytes = slice(accumulated, range) {
-                foundReference = true
-                if !preview { rawPreviews[file.id] = [range]; rawThumbnailHint = range; return bytes }
+            if let range = STAMediaMetadata.largestEmbeddedJPEG(accumulated) {
                 if range.length > (bestScanned?.length ?? 0) { bestScanned = range }
             }
             if accumulated.count >= maximum || accumulated.count < target { break }
         }
-        if !preview && !foundReference && accumulated.count >= maximum { noThumbnail.insert(file.id) }
         return bestScanned.flatMap { slice(accumulated, $0) }
     }
 }

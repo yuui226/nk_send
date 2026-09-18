@@ -3,8 +3,17 @@ import CoreLocation
 import UIKit
 
 struct GPSConnectionControl: View {
+    private let headerHeight: CGFloat = 50
+    private let panelGap: CGFloat = 10
+    private let preferredPanelWidth: CGFloat = 280
     @ObservedObject var coordinator: GPSCoordinator
-    @State private var expanded = false
+    @Binding var expanded: Bool
+    @State private var panelMounted = false
+    @State private var panelProgress: CGFloat = 0
+    @State private var headerWidth: CGFloat = 1
+    @State private var gpsTextAnchor: CGRect = .zero
+    @State private var showHelp = false
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             TimelineView(.animation) { context in
@@ -24,12 +33,9 @@ struct GPSConnectionControl: View {
                     selected: expanded,
                     optionLabel: { _ in AppLocalized.resource("gps_auto_write") },
                     onCommit: { next in
-                        let animation: Animation = next
-                            ? .easeInOut(duration: 0.26).delay(0.025)
-                            : .easeInOut(duration: 0.22).delay(0.02)
-                        withAnimation(animation) { expanded = next }
+                        setExpanded(next)
                     },
-                    wheelHeight: 50,
+                    wheelHeight: headerHeight,
                     cornerRadius: 20,
                     optionFontSize: 18,
                     optionFontWeight: .bold,
@@ -42,33 +48,93 @@ struct GPSConnectionControl: View {
                     },
                     ambientEffectColor: active ? ZTransferColors.accentBlue : ZTransferColors.background,
                     ambientEffectAlpha: ambientAlpha,
+                    contentAnchorSpace: GPSButtonAnchorSpace.name,
+                    onContentAnchorChange: { gpsTextAnchor = $0 }
                 )
             }
         }
-        .overlay(alignment: .topLeading) {
-            if expanded {
-                GPSInlinePanel(coordinator: coordinator)
-                    // HomeScreen.kt uses GPS_DETAIL_PANEL_WIDTH = 250.dp and
-                    // deliberately places it in an overflow layer. Overlay
-                    // keeps the two connection cards at their measured width.
-                    .frame(width: 250)
-                    .padding(.top, 60)
-                    .transition(.asymmetric(
-                        insertion: .opacity
-                            .combined(with: .scale(scale: 0.965, anchor: .topLeading))
-                            .combined(with: .move(edge: .top)),
-                        removal: .opacity
-                            .combined(with: .scale(scale: 0.975, anchor: .topLeading))
-                            .combined(with: .move(edge: .top))
-                    ))
+        .background {
+            GeometryReader { proxy in
+                Color.clear
+                    .allowsHitTesting(false)
+                    .preference(key: GPSHeaderWidthPreferenceKey.self,
+                                value: proxy.size.width)
             }
         }
-        // Android GpsDetailOverflowLayer uses 260ms enter/220ms exit motion;
-        // keep the panel mounted in the overlay so the neighbouring card is
-        // never remeasured during either direction.
-        .animation(expanded
-            ? .easeInOut(duration: 0.26).delay(0.025)
-            : .easeInOut(duration: 0.22).delay(0.02), value: expanded)
+        .onPreferenceChange(GPSHeaderWidthPreferenceKey.self) { width in
+            if width > 0 { headerWidth = width }
+        }
+        .overlay(alignment: .topLeading) {
+            if panelMounted {
+                // Reuse the exact native genie host used by the Z settings
+                // popup. The GPS wheel is expressed in the panel's local
+                // coordinates so expansion and collapse return to the same
+                // physical control instead of fading toward a generic edge.
+                GeniePopupPanel(
+                    content: GPSInlinePanel(coordinator: coordinator, showHelp: $showHelp),
+                    targetProgress: panelProgress,
+                    anchor: panelSourceAnchor,
+                    panelOrigin: .zero,
+                    viewport: UIScreen.main.bounds.size,
+                    onCollapsed: {
+                        if !expanded { panelMounted = false }
+                    }
+                )
+                // Android uses a 250dp overflow detail and keeps a 10dp gap
+                // below the 50dp header without remeasuring either card.
+                .frame(width: min(preferredPanelWidth, UIScreen.main.bounds.width - 28))
+                // An overlay inherits the header's 50pt height proposal.
+                // Opt out vertically before applying the visual offset;
+                // padding here used to leave Genie with a zero-height proposal,
+                // so its live content overflowed upward over the GPS button.
+                .fixedSize(horizontal: false, vertical: true)
+                .offset(y: headerHeight + panelGap)
+            }
+        }
+        .zIndex(panelMounted ? 2 : 0)
+        .coordinateSpace(name: GPSButtonAnchorSpace.name)
+    }
+
+    private var panelSourceAnchor: CGRect {
+        // The whole GPS capsule is the mouth. Its text bounds are deliberately
+        // ignored so localization and font metrics cannot move the landing
+        // point or change its width.
+        return CGRect(
+            x: 0,
+            y: -panelGap - 1,
+            width: headerWidth,
+            height: 1
+        )
+    }
+
+    private func setExpanded(_ next: Bool) {
+        guard next != expanded || (next && !panelMounted) else { return }
+        expanded = next
+        if next {
+            panelMounted = true
+            panelProgress = 0
+            // Mount and measure the live panel before starting the same mesh
+            // transition used by Settings. This avoids a provisional-height
+            // flash on the first expansion.
+            DispatchQueue.main.async {
+                guard expanded, panelMounted else { return }
+                panelProgress = 1
+            }
+        } else {
+            showHelp = false
+            panelProgress = 0
+        }
+    }
+}
+
+private enum GPSButtonAnchorSpace {
+    static let name = "ztransfer-gps-button-anchor-space"
+}
+
+private struct GPSHeaderWidthPreferenceKey: PreferenceKey {
+    static let defaultValue: CGFloat = 1
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 
@@ -81,12 +147,12 @@ private struct GPSInlinePanel: View {
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("haptics_enabled") private var hapticsEnabled = true
     @ObservedObject var coordinator: GPSCoordinator
+    @Binding var showHelp: Bool
     @State private var showingReset = false
     @State private var holdPressed = false
     @State private var holdConsumedTap = false
     @State private var holdCompleted = false
     @State private var sessionEstablished = false
-    @State private var showHelp = false
     @State private var placeBubbleCoordinates: (latitude: Double, longitude: Double)?
     @State private var placeBubbleRequestID = 0
     @State private var previousStatusRank = 0
@@ -452,6 +518,9 @@ private struct GPSInlinePanel: View {
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(ZTransferColors.primaryText)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.76)
+                    .allowsTightening(true)
+                    .frame(maxWidth: .infinity)
                     .transition(.asymmetric(
                         insertion: .move(edge: statusTransitionDirection > 0 ? .bottom : .top)
                             .combined(with: .opacity),
@@ -459,10 +528,19 @@ private struct GPSInlinePanel: View {
                             .combined(with: .opacity)
                     ))
             }
-            .frame(maxWidth: .infinity)
+            // Keep the material and both transition frames at the Android
+            // button's real 42pt size. Previously only the outer Button was
+            // stretched, so the glass stayed at the text's intrinsic height
+            // and an outgoing label could render beyond the rounded capsule.
+            .frame(maxWidth: .infinity, minHeight: 42, maxHeight: 42)
+            .clipped()
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
-        .frame(maxWidth: .infinity).frame(height: 42)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .frame(maxWidth: .infinity)
+        .buttonStyle(ZTransferGlassButtonStyle(
+            cornerRadius: 14,
+            disabledAlpha: 1
+        ))
         // Android's GpsStatusButton gives a held-to-disable press a short
         // foreground glow (90ms in, 170ms out) while the 800ms progressive
         // hold is running. Keep the glow inside the button so it never
@@ -472,7 +550,6 @@ private struct GPSInlinePanel: View {
                 .fill(ZTransferColors.primaryText.opacity(0.055 * (holdPressed ? 1 : 0)))
                 .allowsHitTesting(false)
         }
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(ZTransferColors.secondaryText.opacity(0.15)))
         .onLongPressGesture(
             minimumDuration: 0.8,
             maximumDistance: 24,
@@ -484,6 +561,10 @@ private struct GPSInlinePanel: View {
                     ZTransferHaptics.shared.startProgressiveHold()
                 } else {
                     if !holdCompleted { ZTransferHaptics.shared.cancelProgressiveHold() }
+                    // Suppress only the synthetic tap emitted by this long
+                    // press. Reset on the next run-loop so a later tap on the
+                    // newly displayed “开启GPS” state remains usable.
+                    DispatchQueue.main.async { holdConsumedTap = false }
                 }
                 withAnimation(.easeInOut(duration: pressing ? 0.09 : 0.17)) {
                     holdPressed = pressing

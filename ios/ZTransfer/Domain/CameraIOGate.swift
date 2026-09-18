@@ -27,6 +27,16 @@ actor CameraIOGate {
     private var interactiveReservations = 0
     private var activeDownloads = 0
 
+    #if STA_GATE_HANDOFF_TESTING
+    // Host regression barrier only; this flag is never enabled in the app.
+    // Pause after a grant to reproduce another actor job registering priority
+    // before the granted transfer resumes. No timing sleeps are required.
+    private var transferHandoffProbe: (@Sendable () async -> Void)?
+    func setTransferHandoffProbe(_ probe: @escaping @Sendable () async -> Void) {
+        transferHandoffProbe = probe
+    }
+    #endif
+
     func withInteractivePriority<T: Sendable>(
         _ operation: @Sendable () async throws -> T
     ) async throws -> T {
@@ -91,10 +101,23 @@ actor CameraIOGate {
         kind: Kind,
         _ operation: @Sendable () async throws -> T
     ) async throws -> T {
-        try await acquire(kind: kind)
-        defer { release() }
-        try Task.checkCancellation()
-        return try await operation()
+        while true {
+            try await acquire(kind: kind)
+            defer { release() }
+            #if STA_GATE_HANDOFF_TESTING
+            if kind == .transfer, let probe = transferHandoffProbe {
+                transferHandoffProbe = nil
+                await probe()
+            }
+            #endif
+            try Task.checkCancellation()
+            // NikonCamera.CameraIoGate checks priority again AFTER mutex.lock.
+            // acquire may suspend: a reservation can arrive after the grant
+            // but before this actor continuation resumes. Return the grant
+            // and wait for that reservation rather than starting a new slice.
+            if kind == .transfer && interactiveReservations > 0 { continue }
+            return try await operation()
+        }
     }
 
     private func acquire(kind: Kind) async throws {
