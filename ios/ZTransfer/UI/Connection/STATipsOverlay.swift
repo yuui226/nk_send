@@ -10,6 +10,9 @@ struct STATipsOverlay: View {
     @State private var progress: CGFloat = 1
 
     var body: some View {
+        GeometryReader { proxy in
+            let frame = proxy.frame(in: .global)
+            let localAnchor = anchor.offsetBy(dx: -frame.minX, dy: -frame.minY)
             ZStack(alignment: .topLeading) {
                 // Android TipsBubble is a non-dimming AnchorPopup. The clear
                 // hit target dismisses it without changing the page colors.
@@ -17,15 +20,17 @@ struct STATipsOverlay: View {
                     .ignoresSafeArea()
                     .contentShape(Rectangle())
                     .onTapGesture { dismiss() }
-                AdaptiveTipPanel(anchor: anchor, maxWidth: 360) {
-                    tipContent
-                        .padding(18)
-                        .background(ZTransferGlassSurface(cornerRadius: 18, kind: .panel))
+                AdaptiveTipPanel(anchor: localAnchor, maxWidth: 360, gap: 8) {
+                    TipBubbleSurface(padding: 18) {
+                        tipContent
+                    }
                         .scaleEffect(0.94 + progress * 0.06, anchor: .topLeading)
                 }
                     .opacity(progress)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+        .ignoresSafeArea()
     }
 
     @ViewBuilder

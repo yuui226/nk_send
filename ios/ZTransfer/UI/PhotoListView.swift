@@ -167,7 +167,6 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
     @State private var previewReturnNonce = 0
     @State private var showingFilter = false
     @State private var filterAnchor: CGRect = .zero
-    @State private var filterMotionAnchor: CGRect = .zero
     @State private var showingQueue = false
     @AppStorage("defer_transfer_start") private var deferTransferStart = false
     @AppStorage("organize_transfers_by_date") private var organizeByDate = false
@@ -215,7 +214,6 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
     @State private var showingSettings = false
     @State private var transferDirectoryAttention = false
     @State private var settingsAnchor: CGRect = .zero
-    @State private var settingsMotionAnchor: CGRect = .zero
     @State private var signalExpanded = false
     @State private var effectPreviewSource: UIImage?
     @State private var effectPreviewExif: PhotoExif?
@@ -710,7 +708,6 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
                     effectsStore: effectsStore,
                     directory: directoryStore,
                     anchor: settingsAnchor,
-                    motionAnchor: settingsMotionAnchor,
                     requestTransferDirectoryAttention: transferDirectoryAttention,
                     effectPreviewSource: effectPreviewSource,
                     effectPreviewExif: effectPreviewExif,
@@ -723,7 +720,6 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
                 PhotoFilterPopupOverlay(
                     isPresented: $showingFilter,
                     anchor: filterAnchor,
-                    motionAnchor: filterMotionAnchor,
                     initial: model.filter,
                     availableExtensions: Array(Set(files.map(\.fileExtension))).sorted().isEmpty
                         ? [".jpg", ".nef", ".mp4"]
@@ -814,16 +810,6 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
                     } label: {
                         DoubleZMark(tint: ZTransferColors.primaryText)
                             .frame(width: 20 * DoubleZMark.aspectRatio, height: 20)
-                            .background {
-                                GeometryReader { proxy in
-                                    Color.clear
-                                        .allowsHitTesting(false)
-                                        .preference(
-                                            key: PhotoListSettingsMotionAnchorPreferenceKey.self,
-                                            value: proxy.frame(in: .named(ZTransferPopupAnchorSpace.name))
-                                        )
-                                }
-                            }
                             .padding(.horizontal, 12)
                             .frame(height: 36)
                     }
@@ -884,16 +870,6 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
                             color: model.filter.isActive ? filterPalette.active : filterPalette.inactive
                         )
                             .frame(width: 20, height: 20)
-                            .background {
-                                GeometryReader { proxy in
-                                    Color.clear
-                                        .allowsHitTesting(false)
-                                        .preference(
-                                            key: PhotoListFilterMotionAnchorPreferenceKey.self,
-                                            value: proxy.frame(in: .named(ZTransferPopupAnchorSpace.name))
-                                        )
-                                }
-                            }
                             .frame(width: 40, height: 36)
                     }
                     .buttonStyle(ZTransferGlassButtonStyle(
@@ -932,13 +908,7 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
         .padding(.top, 0)
         .animation(ZTransferMotion.standard, value: queueModel.snapshot.items.count)
         .onPreferenceChange(PhotoListSettingsAnchorPreferenceKey.self) { settingsAnchor = $0 }
-        .onPreferenceChange(PhotoListSettingsMotionAnchorPreferenceKey.self) {
-            settingsMotionAnchor = $0
-        }
         .onPreferenceChange(PhotoListFilterAnchorPreferenceKey.self) { filterAnchor = $0 }
-        .onPreferenceChange(PhotoListFilterMotionAnchorPreferenceKey.self) {
-            filterMotionAnchor = $0
-        }
     }
 
     /// Android keeps queue execution and the queue pill outside the files ↔
@@ -1941,17 +1911,7 @@ private struct PhotoListSettingsAnchorPreferenceKey: PreferenceKey {
     static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
 }
 
-private struct PhotoListSettingsMotionAnchorPreferenceKey: PreferenceKey {
-    static let defaultValue: CGRect = .zero
-    static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
-}
-
 private struct PhotoListFilterAnchorPreferenceKey: PreferenceKey {
-    static let defaultValue: CGRect = .zero
-    static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
-}
-
-private struct PhotoListFilterMotionAnchorPreferenceKey: PreferenceKey {
     static let defaultValue: CGRect = .zero
     static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
 }

@@ -288,7 +288,7 @@ struct ZTransferButtonMaterialSurface: View {
 
     var body: some View {
         Group {
-            if skin == .liquidGlass {
+            if skin == .liquidGlass && !panel {
                 nativeLiquidGlassMaterial
             } else {
                 material

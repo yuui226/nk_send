@@ -9,6 +9,7 @@ struct TipLightbulbButton: View {
     let size: CGFloat
     let accessibilityLabel: String
     var motionPaused = false
+    var embeddedInPanel = false
     let action: () -> Void
     @AppStorage("skin_preset") private var skinPreset = ZTransferButtonSkin.frostedGlass.rawValue
     @Environment(\.colorScheme) private var colorScheme
@@ -53,6 +54,7 @@ struct TipLightbulbButton: View {
             .buttonStyle(ZTransferGlassButtonStyle(
                 tint: iconColor,
                 cornerRadius: 12,
+                panel: embeddedInPanel,
                 materialContentColor: iconColor
             ))
             // Keep the complete glass tile as the physical touch target. The
@@ -85,16 +87,17 @@ struct TipLightbulbButton: View {
     }
 }
 
-/// Android AnchorPopup content stays clear of its bulb. Measure the natural
-/// height, choose the side with room, and scroll only when the text cannot fit.
+/// Android AnchorPopup content stays below and clear of its bulb. Measure the
+/// natural height and scroll only when the space below cannot fit the text.
 struct AdaptiveTipPanel<Content: View>: View {
     let anchor: CGRect
     var maxWidth: CGFloat = 300
+    var gap: CGFloat = 8
     @ViewBuilder let content: Content
 
     var body: some View {
         GeometryReader { proxy in
-            AdaptiveTipPlacementLayout(anchor: anchor, maxWidth: maxWidth) {
+            AdaptiveTipPlacementLayout(anchor: anchor, maxWidth: maxWidth, gap: gap) {
                 // Layout measures this copy synchronously, then places only
                 // the ScrollView below. Unlike a PreferenceKey round trip,
                 // the visible viewport can never be left at zero height.
@@ -115,9 +118,31 @@ struct AdaptiveTipPanel<Content: View>: View {
     }
 }
 
+/// One shared visual shell for every lightbulb help panel. Callers may vary
+/// their copy and maximum width, but never their presentation material,
+/// corner shape, border or shadow.
+struct TipBubbleSurface<Content: View>: View {
+    var padding: CGFloat = 16
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        content
+            .foregroundStyle(ZTransferColors.primaryText)
+            .padding(padding)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(ZTransferGlassSurface(cornerRadius: 18, kind: .panel))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(ZTransferColors.primaryText.opacity(0.12), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.16), radius: 14, y: 7)
+    }
+}
+
 private struct AdaptiveTipPlacementLayout: Layout {
     let anchor: CGRect
     let maxWidth: CGFloat
+    let gap: CGFloat
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews,
                       cache: inout ()) -> CGSize {
@@ -131,18 +156,16 @@ private struct AdaptiveTipPlacementLayout: Layout {
         let natural = subviews[0].sizeThatFits(
             ProposedViewSize(width: width, height: nil)
         )
-        let below = max(0, bounds.maxY - anchor.maxY - 20)
-        let above = max(0, anchor.minY - bounds.minY - 20)
-        let useBelow = natural.height <= below || below >= above
-        let availableHeight = max(1, useBelow ? below : above)
+        // Every bulb panel belongs below its trigger. Do not flip above or
+        // move the anchor when space is tight; constrain only the scrollable
+        // content height and preserve the same small visual gap.
+        let availableHeight = max(1, bounds.maxY - anchor.maxY - gap - 12)
         let height = min(max(1, natural.height), availableHeight)
         let left = min(
             max(bounds.minX + 12, anchor.midX - width / 2),
             max(bounds.minX + 12, bounds.maxX - width - 12)
         )
-        let top = useBelow
-            ? anchor.maxY + 8
-            : anchor.minY - 8 - height
+        let top = anchor.maxY + gap
 
         // The hidden copy participates only in measurement.
         subviews[0].place(
@@ -155,56 +178,5 @@ private struct AdaptiveTipPlacementLayout: Layout {
             anchor: .topLeading,
             proposal: ProposedViewSize(width: width, height: height)
         )
-    }
-}
-
-extension View {
-    /// Attach presentation to the actual SwiftUI button. A background
-    /// UIViewRepresentable anchor can still intercept physical touches at the
-    /// hosting boundary even when its inner UIView disables interaction.
-    func bulbPopover<Content: View>(isPresented: Binding<Bool>, width: CGFloat = 300,
-                                    @ViewBuilder content: () -> Content) -> some View {
-        modifier(BulbPopoverModifier(
-            isPresented: isPresented,
-            width: width,
-            popupContent: content()
-        ))
-    }
-}
-
-private struct BulbPopoverModifier<PopupContent: View>: ViewModifier {
-    @Binding var isPresented: Bool
-    let width: CGFloat
-    let popupContent: PopupContent
-
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if #available(iOS 16.4, *) {
-            content.popover(
-                isPresented: $isPresented,
-                attachmentAnchor: .rect(.bounds),
-                arrowEdge: .top
-            ) {
-                popupBody
-                    .presentationCompactAdaptation(.popover)
-            }
-        } else {
-            // iOS 16.0–16.3 has no compact-adaptation override. Keep the
-            // button's native presentation path; the system may adapt it to a
-            // sheet, but physical touch and dismissal remain reliable.
-            content.popover(
-                isPresented: $isPresented,
-                attachmentAnchor: .rect(.bounds),
-                arrowEdge: .top
-            ) {
-                popupBody
-            }
-        }
-    }
-
-    private var popupBody: some View {
-        popupContent
-            .frame(width: width)
-            .fixedSize(horizontal: false, vertical: true)
     }
 }

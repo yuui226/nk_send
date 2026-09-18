@@ -21,7 +21,6 @@ struct ConnectionPage: View {
     @AppStorage("ap_connection_help_viewed") private var apHelpViewed = false
     @State private var attentionOrigin = Date()
     @State private var settingsAnchor: CGRect = .zero
-    @State private var settingsMotionAnchor: CGRect = .zero
 
     var body: some View {
         TimelineView(.animation(paused: celebrationStart == nil)) { context in
@@ -104,16 +103,6 @@ struct ConnectionPage: View {
                     Button { Task { @MainActor in showSettings = true } } label: {
                         DoubleZMark(tint: ZTransferColors.primaryText)
                             .frame(width: 20 * DoubleZMark.aspectRatio, height: 20)
-                            .background {
-                                GeometryReader { anchor in
-                                    Color.clear
-                                        .allowsHitTesting(false)
-                                        .preference(
-                                            key: SettingsMotionAnchorPreferenceKey.self,
-                                            value: anchor.frame(in: .named(ZTransferPopupAnchorSpace.name))
-                                        )
-                                }
-                            }
                             .padding(.horizontal, 14)
                             .frame(height: 36)
                     }
@@ -154,9 +143,6 @@ struct ConnectionPage: View {
                         .opacity(pageFade)
                 }
                 .onPreferenceChange(SettingsAnchorPreferenceKey.self) { settingsAnchor = $0 }
-                .onPreferenceChange(SettingsMotionAnchorPreferenceKey.self) {
-                    settingsMotionAnchor = $0
-                }
             }
 
             // Keep the scrim outside the safe-area-constrained page overlay.
@@ -176,7 +162,6 @@ struct ConnectionPage: View {
                     effectsStore: effectsStore,
                     directory: directory,
                     anchor: settingsAnchor,
-                    motionAnchor: settingsMotionAnchor,
                     effectPreviewSource: nil,
                     effectPreviewExif: nil,
                     onEffectPreviewRequested: {}
@@ -278,11 +263,6 @@ struct ConnectionCelebrationValues: Equatable {
 }
 
 private struct SettingsAnchorPreferenceKey: PreferenceKey {
-    static let defaultValue: CGRect = .zero
-    static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
-}
-
-private struct SettingsMotionAnchorPreferenceKey: PreferenceKey {
     static let defaultValue: CGRect = .zero
     static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
 }

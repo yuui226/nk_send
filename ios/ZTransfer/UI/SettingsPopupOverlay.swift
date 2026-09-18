@@ -15,14 +15,13 @@ struct SettingsPopupOverlay: View {
     let effectsStore: PhotoEffectsStore
     let directory: DirectoryAccessStore
     let anchor: CGRect
-    let motionAnchor: CGRect
     let requestTransferDirectoryAttention: Bool
     let effectPreviewSource: UIImage?
     let effectPreviewExif: PhotoExif?
     let onEffectPreviewRequested: () -> Void
 
     init(isPresented: Binding<Bool>, showPhotoEffectsEntry: Bool, effectsStore: PhotoEffectsStore,
-         directory: DirectoryAccessStore, anchor: CGRect, motionAnchor: CGRect,
+         directory: DirectoryAccessStore, anchor: CGRect,
          requestTransferDirectoryAttention: Bool = false, effectPreviewSource: UIImage? = nil,
          effectPreviewExif: PhotoExif? = nil, onEffectPreviewRequested: @escaping () -> Void = {}) {
         _isPresented = isPresented
@@ -30,7 +29,6 @@ struct SettingsPopupOverlay: View {
         self.effectsStore = effectsStore
         self.directory = directory
         self.anchor = anchor
-        self.motionAnchor = motionAnchor
         self.requestTransferDirectoryAttention = requestTransferDirectoryAttention
         self.effectPreviewSource = effectPreviewSource
         self.effectPreviewExif = effectPreviewExif
@@ -44,11 +42,13 @@ struct SettingsPopupOverlay: View {
     @State private var effectsHint: PhotoEffectsHint?
     @State private var contentHeight: CGFloat?
     @State private var panelSettled = false
+    @State private var frozenAnchor: CGRect = .zero
 
     var body: some View {
         GeometryReader { proxy in
             let overlayFrame = proxy.frame(in: .named(ZTransferPopupAnchorSpace.name))
-            let localAnchor = anchor.offsetBy(dx: -overlayFrame.minX, dy: -overlayFrame.minY)
+            let stableAnchor = frozenAnchor == .zero ? anchor : frozenAnchor
+            let localAnchor = stableAnchor.offsetBy(dx: -overlayFrame.minX, dy: -overlayFrame.minY)
             let panelLeft: CGFloat = 12
             let panelWidth = max(0, proxy.size.width - panelLeft * 2)
             // The settings button normally supplies the exact anchor. During
@@ -64,7 +64,7 @@ struct SettingsPopupOverlay: View {
             let fallbackClearance: CGFloat = showPhotoEffectsEntry ? 106 : 50
             let fallbackPanelTop = max(proxy.safeAreaInsets.top + fallbackClearance,
                                        fallbackClearance)
-            let panelTop = anchor == .zero
+            let panelTop = stableAnchor == .zero
                 ? fallbackPanelTop
                 : max(localAnchor.maxY + 8, fallbackPanelTop)
             let availableHeight = max(1, proxy.size.height - panelTop - max(12, proxy.safeAreaInsets.bottom))
@@ -72,16 +72,16 @@ struct SettingsPopupOverlay: View {
             // SwiftUI padding below. Convert both rectangles into that
             // container's local coordinate space; otherwise the mesh uses the
             // panel origin twice and opens from a point above the button.
-            // Expansion and collapse both meet the complete trigger button:
-            // horizontally centred, with the exact button width. Do not use
-            // the inner Z glyph because its visual bounds vary by theme.
-            let mouthWidth = localAnchor.width > 0 ? localAnchor.width : 44
-            let sourceAnchor = (anchor == .zero
-                ? CGRect(x: panelLeft, y: panelTop - 9, width: mouthWidth, height: 1)
-                : CGRect(x: localAnchor.midX - mouthWidth / 2,
-                         y: localAnchor.maxY - 1,
-                         width: mouthWidth,
-                         height: 1))
+            // Attach to the central, non-corner part of the complete button.
+            // The segment is derived from the frozen outer frame, so its
+            // centre cannot drift when the glyph/theme changes.
+            let fallbackButton = CGRect(
+                x: panelLeft, y: panelTop - 45, width: 52, height: 36
+            )
+            let sourceAnchor = GeniePopupMotion.attachmentAnchor(
+                for: stableAnchor == .zero ? fallbackButton : localAnchor,
+                cornerRadius: 22
+            )
                 .offsetBy(dx: -panelLeft, dy: -panelTop)
             ZStack(alignment: .topLeading) {
                 // A transparent hit area still closes the popup on outside
@@ -143,8 +143,12 @@ struct SettingsPopupOverlay: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .onAppear {
+                if anchor != .zero { frozenAnchor = anchor }
                 effectsDraft = effectsStore.beginDraft()
                 panelSettled = false
+            }
+            .onChange(of: anchor) { value in
+                if frozenAnchor == .zero, value != .zero { frozenAnchor = value }
             }
         }
         .ignoresSafeArea()

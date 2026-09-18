@@ -17,6 +17,7 @@ struct LocalPhotoEffectsView: View {
     @State private var filterChooser = PhotoFilterChooserState()
     @State private var effectsHint: PhotoEffectsHint?
     @State private var scrollOffset: CGFloat = 0
+    @State private var helpAnchor: CGRect = .zero
     @FocusState private var watermarkTextFocused: Bool
 
     var body: some View {
@@ -43,6 +44,8 @@ struct LocalPhotoEffectsView: View {
             }
         }
         .coordinateSpace(name: "workbenchScroll")
+        .coordinateSpace(name: "local-effects-page")
+        .onPreferenceChange(LocalEffectsHelpAnchorPreferenceKey.self) { helpAnchor = $0 }
         .onPreferenceChange(WorkbenchScrollOffsetKey.self) { scrollOffset = $0 }
         // The Android pager takes over when the workbench is at its top edge.
         // Keeping this simultaneous avoids stealing vertical scrolling inside
@@ -64,10 +67,24 @@ struct LocalPhotoEffectsView: View {
         })
         .background(ZTransferColors.background.ignoresSafeArea())
         .overlay {
-            if filterChooser.isPresented {
-                PhotoFilterChooserOverlay(draft: effectsBinding, state: $filterChooser)
+            ZStack(alignment: .topLeading) {
+                if filterChooser.isPresented {
+                    PhotoFilterChooserOverlay(draft: effectsBinding, state: $filterChooser)
+                }
+                if showingHelp {
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture { showingHelp = false }
+                        .zIndex(1)
+                    AdaptiveTipPanel(anchor: helpAnchor, maxWidth: 300, gap: 8) {
+                        localHelpBubble
+                    }
+                    .transition(.opacity)
+                    .zIndex(2)
+                }
             }
         }
+        .animation(.easeInOut(duration: 0.18), value: showingHelp)
         .photoEffectsHint($effectsHint, duration: 2)
         .photosPicker(isPresented: $showingPicker, selection: $pickerItems,
                       matching: .images, preferredItemEncoding: .current)
@@ -125,9 +142,17 @@ struct LocalPhotoEffectsView: View {
         HStack(spacing: 10) {
             Button(action: onNavigateUp) {
                 Image(systemName: "chevron.up").font(.system(size: 19, weight: .semibold))
-                    .frame(width: 38, height: 38)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
-            .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 19))
+            .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
+            // UIPageViewController's rotated vertical pager can retain the
+            // Button's internal tap recognizer after an interactive page
+            // transition. Own the physical tap at the toolbar level and send
+            // it through the exact same callback used by the downward return
+            // gesture. The pager's destination guard makes a second delivery
+            // from keyboard/accessibility activation harmless.
+            .highPriorityGesture(TapGesture().onEnded { onNavigateUp() })
             Text(AppLocalized.resource("local_photo_effects_entry")).font(.system(size: 16, weight: .bold)).lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .leading)
             if !batch.state.photos.isEmpty {
@@ -145,21 +170,31 @@ struct LocalPhotoEffectsView: View {
                 localPhotoEffectsHelpViewed = true
                 showingHelp = true
             }
-            .bulbPopover(isPresented: $showingHelp) {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(AppLocalized.resource("photo_effects_info_title")).font(.headline)
-                    Text([
-                        AppLocalized.resource("local_photo_effects_info_description"),
-                        AppLocalized.resource("local_photo_effects_gesture_hint"),
-                        AppLocalized.resource("local_photo_effects_exif_hint"),
-                        AppLocalized.resource("local_photo_ios_save_hint")
-                    ].joined(separator: "\n"))
-                    .font(.system(size: 13))
+            .background {
+                GeometryReader { proxy in
+                    Color.clear.preference(
+                        key: LocalEffectsHelpAnchorPreferenceKey.self,
+                        value: proxy.frame(in: .named("local-effects-page"))
+                    )
                 }
-                .padding(16)
             }
         }
         .foregroundStyle(ZTransferColors.primaryText)
+    }
+
+    private var localHelpBubble: some View {
+        TipBubbleSurface {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(AppLocalized.resource("photo_effects_info_title")).font(.headline)
+                Text([
+                    AppLocalized.resource("local_photo_effects_info_description"),
+                    AppLocalized.resource("local_photo_effects_gesture_hint"),
+                    AppLocalized.resource("local_photo_effects_exif_hint"),
+                    AppLocalized.resource("local_photo_ios_save_hint")
+                ].joined(separator: "\n"))
+                .font(.system(size: 13))
+            }
+        }
     }
 
     private var preview: some View {
@@ -233,6 +268,13 @@ struct LocalPhotoEffectsView: View {
 private struct WorkbenchScrollOffsetKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
+private struct LocalEffectsHelpAnchorPreferenceKey: PreferenceKey {
+    static let defaultValue: CGRect = .zero
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        value = nextValue()
+    }
 }
 
 private struct WorkbenchScrollTracker: View {

@@ -43,6 +43,22 @@ enum GeniePopupMotion {
             panel.width > 0 && panel.height > 0 && anchor.maxY <= panel.minY
     }
 
+    /// Central attachment segment of a rounded trigger. Narrow capsules keep
+    /// at least their middle half; wider controls can avoid the complete corner
+    /// radius. The returned segment is always exactly centred on the button.
+    static func attachmentAnchor(for button: CGRect, cornerRadius: CGFloat) -> CGRect {
+        guard button.width > 0, button.height > 0 else { return .zero }
+        let effectiveRadius = min(max(0, cornerRadius), button.height / 2)
+        let inset = min(effectiveRadius, button.width / 4)
+        let width = max(1, button.width - inset * 2)
+        return CGRect(
+            x: button.midX - width / 2,
+            y: button.maxY - 1,
+            width: width,
+            height: 1
+        )
+    }
+
     static func row(progress rawProgress: CGFloat, fraction rawFraction: CGFloat,
                     anchor: CGRect, panel: CGRect, mouthWidth: CGFloat? = nil) -> Row {
         let p = progress(rawProgress)
@@ -86,26 +102,23 @@ enum GeniePopupMotion {
         let spread = pow(p, 0.85 + 2.1 * pow(1 - v, 2))
         let width = mix(seedWidth, panel.width, spread)
         let envelope = 16 * p * p * pow(1 - p, 2)
-        let drift = seedWidth * 0.22 * envelope * (1 - spread) * (0.35 + 0.65 * v)
-        let center = mix(dockX, panel.width / 2, spread) + drift
+        // Keep the complete motion on the straight centre line between the
+        // trigger and the panel. Android's small one-sided drift looks natural
+        // for its fixed left Z mark, but made the three differently positioned
+        // iOS controls appear to expand and collapse from a crooked location.
+        let center = mix(dockX, panel.width / 2, spread)
         let bowPhase = max(0, sin(.pi * v))
         let bow = min(
             min(min(panel.width * 0.075, anchor.width * 0.5), width * 0.2) *
                 envelope * bowPhase * bowPhase,
             (width - seedWidth) * 0.3
         )
+        // Apply the bow symmetrically so it changes silhouette, never position.
         let left = center - width / 2 + bow
-        let right = center + width / 2 - bow * 0.15
+        let right = center + width / 2 - bow
         let bentV = v + 0.4 * (1 - p) * (v * v - v)
-        let mouthTilt = min(seedWidth * 0.14, panel.width * 0.045) * (1 - length)
-        let y = dockY * (1 - length) + panel.height * length * bentV + mouthTilt / 2
-        let bodyTilt = min(
-            min((right - left) * 0.07, panel.width * 0.035),
-            panel.height * length * 0.12
-        ) * envelope * v * v
-        let tilt = min(min(mouthTilt + bodyTilt, (right - left) * 0.14),
-                       panel.width * 0.045)
-        return Row(left: left, right: right, y: y, tilt: tilt)
+        let y = dockY * (1 - length) + panel.height * length * bentV
+        return Row(left: left, right: right, y: y, tilt: 0)
     }
 
     /// Solve the same cubic Bézier as Compose's CubicBezierEasing. Core

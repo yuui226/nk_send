@@ -6,7 +6,6 @@ import SwiftUI
 struct PhotoFilterPopupOverlay: View {
     @Binding var isPresented: Bool
     let anchor: CGRect
-    let motionAnchor: CGRect
     let initial: PhotoFilterState
     let availableExtensions: [String]
     let availableStorageSlots: [UInt32]
@@ -20,14 +19,14 @@ struct PhotoFilterPopupOverlay: View {
     @State private var animationProgress: CGFloat = 0
     @State private var contentHeight: CGFloat?
     @State private var dismissalRequested = false
+    @State private var frozenAnchor: CGRect = .zero
 
-    init(isPresented: Binding<Bool>, anchor: CGRect, motionAnchor: CGRect,
+    init(isPresented: Binding<Bool>, anchor: CGRect,
          initial: PhotoFilterState,
          availableExtensions: [String], availableStorageSlots: [UInt32],
          suggestedDate: String?, onChange: @escaping (PhotoFilterState) -> Void) {
         _isPresented = isPresented
         self.anchor = anchor
-        self.motionAnchor = motionAnchor
         self.initial = initial
         self.availableExtensions = availableExtensions.map { $0.lowercased() }
         self.availableStorageSlots = availableStorageSlots
@@ -45,7 +44,8 @@ struct PhotoFilterPopupOverlay: View {
     var body: some View {
         GeometryReader { proxy in
             let overlayFrame = proxy.frame(in: .named(ZTransferPopupAnchorSpace.name))
-            let localAnchor = anchor.offsetBy(dx: -overlayFrame.minX, dy: -overlayFrame.minY)
+            let stableAnchor = frozenAnchor == .zero ? anchor : frozenAnchor
+            let localAnchor = stableAnchor.offsetBy(dx: -overlayFrame.minX, dy: -overlayFrame.minY)
             let width = min(340, max(1, proxy.size.width - 24))
             // Match Android FilterOverlay: the panel starts 8dp below the
             // measured filter button and clamps only horizontally. The old
@@ -56,21 +56,21 @@ struct PhotoFilterPopupOverlay: View {
             // the entire filter form visibly lean toward the leading edge.
             let left = max(0, (proxy.size.width - width) / 2)
             let fallbackTop = max(proxy.safeAreaInsets.top + 106, 106)
-            let top = anchor == .zero
+            let top = stableAnchor == .zero
                 ? fallbackTop
                 : localAnchor.maxY + 8
             let availableHeight = max(1, proxy.size.height - top - max(12, proxy.safeAreaInsets.bottom))
             let panelHeight = min(contentHeight ?? availableHeight, availableHeight)
-            // As with Settings, the mouth is the full trigger button rather
-            // than the FilterMark glyph inside it.
-            let mouthWidth = localAnchor.width > 0 ? localAnchor.width : 44
-            let sourceAnchor = (anchor == .zero
-                ? CGRect(x: min(max(proxy.size.width * 0.35, 12), proxy.size.width - 48),
-                         y: top - 9, width: mouthWidth, height: 1)
-                : CGRect(x: localAnchor.midX - mouthWidth / 2,
-                         y: localAnchor.maxY - 1,
-                         width: mouthWidth,
-                         height: 1))
+            let fallbackButton = CGRect(
+                x: min(max(proxy.size.width * 0.35, 12), proxy.size.width - 52),
+                y: top - 45,
+                width: 40,
+                height: 36
+            )
+            let sourceAnchor = GeniePopupMotion.attachmentAnchor(
+                for: stableAnchor == .zero ? fallbackButton : localAnchor,
+                cornerRadius: 22
+            )
                 .offsetBy(dx: -left, dy: -top)
             ZStack(alignment: .topLeading) {
                 Color.clear
@@ -106,8 +106,12 @@ struct PhotoFilterPopupOverlay: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .onAppear {
+                if anchor != .zero { frozenAnchor = anchor }
                 dismissalRequested = false
                 animationProgress = 0
+            }
+            .onChange(of: anchor) { value in
+                if frozenAnchor == .zero, value != .zero { frozenAnchor = value }
             }
         }
         .ignoresSafeArea()
@@ -235,6 +239,7 @@ struct PhotoFilterPopupOverlay: View {
                 }
                 .buttonStyle(ZTransferGlassButtonStyle(
                     cornerRadius: 11,
+                    panel: true,
                     active: true,
                     activeColor: ZTransferColors.accentBlue
                 ))

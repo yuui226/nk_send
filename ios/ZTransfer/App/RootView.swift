@@ -297,8 +297,6 @@ private struct HomeWorkspacePagerIOS: View {
     let directory: DirectoryAccessStore
     let celebrationStart: Date?
     @State private var page = 0
-    @State private var pagerDragGeneration = 0
-    @State private var observingEntryDrag = false
     @State private var gpsPanelPresented = false
 
     private var localWorkspaceMustRelease: Bool {
@@ -314,7 +312,19 @@ private struct HomeWorkspacePagerIOS: View {
 
     var body: some View {
         GeometryReader { proxy in
-            TabView(selection: $page) {
+            VerticalWorkspacePager(
+                selection: $page,
+                isScrollEnabled: !(gpsPanelPresented && page == 0),
+                onInteractiveTransitionBegan: { destination in
+                    if destination == 1, !gpsCoordinator.state.enabled {
+                        connection.setConnectionDiscoveryPaused(true)
+                    }
+                },
+                onTransitionSettled: { currentPage in
+                    if currentPage != 0 { gpsPanelPresented = false }
+                    connection.setConnectionDiscoveryPaused(currentPage != 0)
+                },
+                firstPage: {
                 ConnectionPage(model: connection,
                                effectsStore: effectsStore,
                                gpsCoordinator: gpsCoordinator,
@@ -323,9 +333,9 @@ private struct HomeWorkspacePagerIOS: View {
                                onOpenWorkspace: {
                     navigate(to: 1)
                 }, gpsPanelPresented: $gpsPanelPresented)
-                    .rotationEffect(.degrees(-90))
                     .frame(width: proxy.size.width, height: proxy.size.height)
-                    .tag(0)
+                },
+                secondPage: {
                 Group {
                     if localWorkspaceMustRelease {
                         ZTransferColors.background
@@ -335,57 +345,12 @@ private struct HomeWorkspacePagerIOS: View {
                         })
                     }
                 }
-                .rotationEffect(.degrees(-90))
                 .frame(width: proxy.size.width, height: proxy.size.height)
-                .tag(1)
-            }
-            .rotationEffect(.degrees(90))
-            .frame(width: proxy.size.height, height: proxy.size.width)
-            .offset(x: (proxy.size.width - proxy.size.height) / 2, y: (proxy.size.height - proxy.size.width) / 2)
+                }
+            )
+            .frame(width: proxy.size.width, height: proxy.size.height)
             .background(ZTransferColors.background)
-            .tabViewStyle(.page(indexDisplayMode: .never))
-            .indexViewStyle(.page(backgroundDisplayMode: .never))
-            // The GPS detail is an interactive overflow surface. While it is
-            // open, its vertical frequency wheel owns vertical drags; letting
-            // UIPageViewController observe the same touch made a downward
-            // detent gesture turn the whole workspace page instead.
-            .scrollDisabled(gpsPanelPresented && page == 0)
-            // Android pauses discovery as soon as a drag targets the local
-            // workbench, before the pager has settled. Observe the same edge
-            // gesture so a camera cannot be accepted midway through the page
-            // transition. A cancelled drag restores discovery after settling.
-            .simultaneousGesture(
-                DragGesture(minimumDistance: 8)
-                    .onChanged { value in
-                        guard page == 0, !gpsCoordinator.state.enabled,
-                              value.translation.height < 0,
-                              abs(value.translation.height) > abs(value.translation.width),
-                              !observingEntryDrag else { return }
-                        observingEntryDrag = true
-                        pagerDragGeneration &+= 1
-                        connection.setConnectionDiscoveryPaused(true)
-                    }
-                    .onEnded { _ in
-                        guard observingEntryDrag else { return }
-                        observingEntryDrag = false
-                        let generation = pagerDragGeneration
-                        Task { @MainActor in
-                            try? await Task.sleep(for: .milliseconds(550))
-                            guard generation == pagerDragGeneration else { return }
-                            connection.setConnectionDiscoveryPaused(page != 0)
-                        }
-                    }
-            )
-            // GPS owns the camera radio. Match Android by swallowing only the
-            // page-entry drag while on the connection page; the workbench's
-            // return gesture remains available when it is already visible.
-            .highPriorityGesture(
-                DragGesture(minimumDistance: 8),
-                including: gpsCoordinator.state.enabled && page == 0 ? .all : .none
-            )
             .onChange(of: page) { currentPage in
-                pagerDragGeneration &+= 1
-                observingEntryDrag = false
                 if currentPage != 0 { gpsPanelPresented = false }
                 connection.setConnectionDiscoveryPaused(currentPage != 0)
             }
@@ -402,8 +367,163 @@ private struct HomeWorkspacePagerIOS: View {
         // Clear it before changing selection so a stale scroll lock cannot
         // swallow the workbench's explicit back button.
         if gpsPanelPresented { gpsPanelPresented = false }
-        withAnimation(.interactiveSpring(response: 0.34, dampingFraction: 0.88)) {
-            page = destination
+        // VerticalWorkspacePager owns the native animated transition. A
+        // SwiftUI animation transaction only changes the selection value and
+        // makes UIPageViewController jump, which reads as a screen refresh.
+        page = destination
+    }
+}
+
+/// A vertical UIPageViewController gives programmatic entry/return the same
+/// full-page movement as a finger-driven swipe. SwiftUI's page-style TabView
+/// does not reliably animate selection changes, even inside withAnimation.
+private struct VerticalWorkspacePager<FirstPage: View, SecondPage: View>: UIViewControllerRepresentable {
+    @Binding var selection: Int
+    let isScrollEnabled: Bool
+    let onInteractiveTransitionBegan: (Int) -> Void
+    let onTransitionSettled: (Int) -> Void
+    let firstPage: FirstPage
+    let secondPage: SecondPage
+
+    init(
+        selection: Binding<Int>,
+        isScrollEnabled: Bool,
+        onInteractiveTransitionBegan: @escaping (Int) -> Void,
+        onTransitionSettled: @escaping (Int) -> Void,
+        @ViewBuilder firstPage: () -> FirstPage,
+        @ViewBuilder secondPage: () -> SecondPage
+    ) {
+        _selection = selection
+        self.isScrollEnabled = isScrollEnabled
+        self.onInteractiveTransitionBegan = onInteractiveTransitionBegan
+        self.onTransitionSettled = onTransitionSettled
+        self.firstPage = firstPage()
+        self.secondPage = secondPage()
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    func makeUIViewController(context: Context) -> UIPageViewController {
+        let pager = UIPageViewController(
+            transitionStyle: .scroll,
+            navigationOrientation: .vertical
+        )
+        pager.dataSource = context.coordinator
+        pager.delegate = context.coordinator
+        pager.view.backgroundColor = .clear
+        pager.setViewControllers(
+            [context.coordinator.controller(for: selection)],
+            direction: .forward,
+            animated: false
+        )
+        context.coordinator.visibleIndex = selection
+        updateScrolling(in: pager)
+        return pager
+    }
+
+    func updateUIViewController(_ pager: UIPageViewController, context: Context) {
+        let coordinator = context.coordinator
+        coordinator.parent = self
+        coordinator.first.rootView = firstPage
+        coordinator.second.rootView = secondPage
+        updateScrolling(in: pager)
+
+        let target = min(1, max(0, selection))
+        guard target != coordinator.visibleIndex,
+              !coordinator.transitioning else { return }
+        let direction: UIPageViewController.NavigationDirection =
+            target > coordinator.visibleIndex ? .forward : .reverse
+        coordinator.transitioning = true
+        pager.setViewControllers(
+            [coordinator.controller(for: target)],
+            direction: direction,
+            animated: true
+        ) { finished in
+            DispatchQueue.main.async {
+                coordinator.transitioning = false
+                guard finished else {
+                    coordinator.parent.selection = coordinator.visibleIndex
+                    return
+                }
+                coordinator.visibleIndex = target
+                coordinator.parent.onTransitionSettled(target)
+            }
+        }
+    }
+
+    private func updateScrolling(in pager: UIPageViewController) {
+        for scrollView in pager.view.subviews.compactMap({ $0 as? UIScrollView }) {
+            scrollView.isScrollEnabled = isScrollEnabled
+        }
+    }
+
+    final class Coordinator: NSObject, UIPageViewControllerDataSource, UIPageViewControllerDelegate {
+        var parent: VerticalWorkspacePager
+        let first: UIHostingController<FirstPage>
+        let second: UIHostingController<SecondPage>
+        var visibleIndex: Int
+        var transitioning = false
+
+        init(parent: VerticalWorkspacePager) {
+            self.parent = parent
+            first = UIHostingController(rootView: parent.firstPage)
+            second = UIHostingController(rootView: parent.secondPage)
+            visibleIndex = min(1, max(0, parent.selection))
+            super.init()
+            first.view.backgroundColor = .clear
+            second.view.backgroundColor = .clear
+        }
+
+        func controller(for index: Int) -> UIViewController {
+            index == 0 ? first : second
+        }
+
+        private func index(of controller: UIViewController) -> Int? {
+            if controller === first { return 0 }
+            if controller === second { return 1 }
+            return nil
+        }
+
+        func pageViewController(
+            _ pageViewController: UIPageViewController,
+            viewControllerBefore viewController: UIViewController
+        ) -> UIViewController? {
+            index(of: viewController) == 1 ? first : nil
+        }
+
+        func pageViewController(
+            _ pageViewController: UIPageViewController,
+            viewControllerAfter viewController: UIViewController
+        ) -> UIViewController? {
+            index(of: viewController) == 0 ? second : nil
+        }
+
+        func pageViewController(
+            _ pageViewController: UIPageViewController,
+            willTransitionTo pendingViewControllers: [UIViewController]
+        ) {
+            guard let pending = pendingViewControllers.first,
+                  let destination = index(of: pending) else { return }
+            transitioning = true
+            parent.onInteractiveTransitionBegan(destination)
+        }
+
+        func pageViewController(
+            _ pageViewController: UIPageViewController,
+            didFinishAnimating finished: Bool,
+            previousViewControllers: [UIViewController],
+            transitionCompleted completed: Bool
+        ) {
+            transitioning = false
+            guard let current = pageViewController.viewControllers?.first,
+                  let currentIndex = index(of: current) else { return }
+            visibleIndex = currentIndex
+            if parent.selection != currentIndex {
+                parent.selection = currentIndex
+            }
+            parent.onTransitionSettled(currentIndex)
         }
     }
 }

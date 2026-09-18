@@ -11,47 +11,42 @@ struct GPSConnectionControl: View {
     @State private var panelMounted = false
     @State private var panelProgress: CGFloat = 0
     @State private var headerWidth: CGFloat = 1
-    @State private var gpsTextAnchor: CGRect = .zero
     @State private var showHelp = false
+    @State private var ambientHigh = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            TimelineView(.animation) { context in
-                let active = coordinator.state.enabled
-                let period = active ? 2.4 : 2.8
-                let phase = context.date.timeIntervalSinceReferenceDate
-                    .truncatingRemainder(dividingBy: period) / period
-                let ambientAlpha = active
-                    ? 0.075 + 0.085 * CGFloat((sin(phase * 2 * .pi) + 1) / 2)
-                    : 0.050 + 0.095 * CGFloat((sin(phase * 2 * .pi) + 1) / 2)
-                // Android uses ReleaseCommitWheel for this boolean control. Using
-                // the shared wheel preserves tap-to-toggle, long-press diagnostics,
-                // detent feedback and the same disabled/active material treatment.
-                DetentWheel(
-                    label: "",
-                    options: [false, true],
-                    selected: expanded,
-                    optionLabel: { _ in AppLocalized.resource("gps_auto_write") },
-                    onCommit: { next in
-                        setExpanded(next)
-                    },
-                    wheelHeight: headerHeight,
-                    cornerRadius: 20,
-                    optionFontSize: 18,
-                    optionFontWeight: .bold,
-                    accentColor: active ? ZTransferColors.accentBlue : ZTransferColors.secondaryText,
-                    emphasized: expanded || active,
-                    showEmphasisBorder: false,
-                    showDragHint: false,
-                    onLongClick: {
-                        UIPasteboard.general.string = gpsDiagnosticsSnapshot()
-                    },
-                    ambientEffectColor: active ? ZTransferColors.accentBlue : ZTransferColors.background,
-                    ambientEffectAlpha: ambientAlpha,
-                    contentAnchorSpace: GPSButtonAnchorSpace.name,
-                    onContentAnchorChange: { gpsTextAnchor = $0 }
-                )
-            }
+            let active = coordinator.state.enabled
+            let ambientAlpha: CGFloat = active
+                ? (ambientHigh ? 0.160 : 0.075)
+                : (ambientHigh ? 0.145 : 0.050)
+            // Android uses ReleaseCommitWheel for this boolean control. Using
+            // the shared wheel preserves tap-to-toggle, long-press diagnostics,
+            // detent feedback and the same disabled/active material treatment.
+            DetentWheel(
+                label: "",
+                options: [false, true],
+                selected: expanded,
+                optionLabel: { _ in AppLocalized.resource("gps_auto_write") },
+                onCommit: { next in
+                    setExpanded(next)
+                },
+                wheelHeight: headerHeight,
+                cornerRadius: 20,
+                optionFontSize: 18,
+                optionFontWeight: .bold,
+                accentColor: active ? ZTransferColors.accentBlue : ZTransferColors.secondaryText,
+                emphasized: expanded || active,
+                showEmphasisBorder: false,
+                showDragHint: false,
+                onLongClick: {
+                    UIPasteboard.general.string = gpsDiagnosticsSnapshot()
+                },
+                ambientEffectColor: active ? ZTransferColors.accentBlue : ZTransferColors.background,
+                ambientEffectAlpha: ambientAlpha
+            )
+            .onAppear { startAmbientPulse(active: active) }
+            .onChange(of: active) { startAmbientPulse(active: $0) }
         }
         .background {
             GeometryReader { proxy in
@@ -92,18 +87,17 @@ struct GPSConnectionControl: View {
             }
         }
         .zIndex(panelMounted ? 2 : 0)
-        .coordinateSpace(name: GPSButtonAnchorSpace.name)
     }
 
     private var panelSourceAnchor: CGRect {
-        // The whole GPS capsule is the mouth. Its text bounds are deliberately
-        // ignored so localization and font metrics cannot move the landing
-        // point or change its width.
-        return CGRect(
-            x: 0,
-            y: -panelGap - 1,
-            width: headerWidth,
-            height: 1
+        GeniePopupMotion.attachmentAnchor(
+            for: CGRect(
+                x: 0,
+                y: -panelGap - headerHeight,
+                width: headerWidth,
+                height: headerHeight
+            ),
+            cornerRadius: 20
         )
     }
 
@@ -125,16 +119,31 @@ struct GPSConnectionControl: View {
             panelProgress = 0
         }
     }
-}
 
-private enum GPSButtonAnchorSpace {
-    static let name = "ztransfer-gps-button-anchor-space"
+    private func startAmbientPulse(active: Bool) {
+        var reset = Transaction()
+        reset.disablesAnimations = true
+        withTransaction(reset) { ambientHigh = false }
+        DispatchQueue.main.async {
+            withAnimation(.easeInOut(duration: (active ? 2.4 : 2.8) / 2)
+                .repeatForever(autoreverses: true)) {
+                ambientHigh = true
+            }
+        }
+    }
 }
 
 private struct GPSHeaderWidthPreferenceKey: PreferenceKey {
     static let defaultValue: CGFloat = 1
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = max(value, nextValue())
+    }
+}
+
+private struct GPSHelpAnchorPreferenceKey: PreferenceKey {
+    static let defaultValue: CGRect = .zero
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        value = nextValue()
     }
 }
 
@@ -157,6 +166,7 @@ private struct GPSInlinePanel: View {
     @State private var placeBubbleRequestID = 0
     @State private var previousStatusRank = 0
     @State private var statusTransitionDirection = 1
+    @State private var helpAnchor: CGRect = .zero
     private var statusLabel: String {
         switch coordinator.state.status {
         case .off: return AppLocalized.resource("gps_enable")
@@ -221,8 +231,28 @@ private struct GPSInlinePanel: View {
             .frame(height: 42)
         }
         .padding(12)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18))
-        .overlay(RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.55), lineWidth: 1))
+        // A live system blur and its rasterized animation snapshot resolve the
+        // backdrop at different moments. Swapping them at the final frame used
+        // to look like an extra grey mask flashing over the GPS panel. The
+        // shared panel surface is visually stable in both representations, so
+        // the handoff needs neither a second overlay nor a material crossfade.
+        .background(ZTransferGlassSurface(cornerRadius: 18, kind: .panel))
+        .coordinateSpace(name: "gps-inline-panel")
+        .onPreferenceChange(GPSHelpAnchorPreferenceKey.self) { helpAnchor = $0 }
+        .overlay {
+            if showHelp {
+                ZStack(alignment: .topLeading) {
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture { showHelp = false }
+                    AdaptiveTipPanel(anchor: helpAnchor, maxWidth: 244, gap: 8) {
+                        gpsHelpBubble
+                    }
+                }
+                .transition(.opacity)
+                .zIndex(3)
+            }
+        }
         .alert(AppLocalized.resource("gps_clear_pairing_title"), isPresented: $showingReset) {
             Button(AppLocalized.resource("cancel"), role: .cancel) {}
             Button(AppLocalized.resource("gps_clear_pairing"), role: .destructive) { coordinator.clearPairing() }
@@ -272,6 +302,7 @@ private struct GPSInlinePanel: View {
         .animation(.easeInOut(duration: 0.24), value: showConnectionSteps)
         .animation(.easeInOut(duration: 0.24), value: hasCoordinates)
         .animation(.easeInOut(duration: 0.17), value: coordinator.placeLookupState)
+        .animation(.easeInOut(duration: 0.18), value: showHelp)
         .task(id: placeBubbleTaskKey) {
             guard let requested = placeBubbleCoordinates else { return }
             if coordinator.placeLookupState.status == .success,
@@ -338,29 +369,40 @@ private struct GPSInlinePanel: View {
             if !coordinator.state.enabled {
                 TipLightbulbButton(
                     attention: !coordinator.connectionHelpViewed, size: 30,
-                    accessibilityLabel: AppLocalized.resource("gps_auto_write")
+                    accessibilityLabel: AppLocalized.resource("gps_auto_write"),
+                    embeddedInPanel: true
                 ) {
                     coordinator.markConnectionHelpViewed()
                     showHelp = true
                 }
-                .bulbPopover(isPresented: $showHelp, width: 244) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text(AppLocalized.resource("gps_detail_description"))
-                            .zTransferText(size: 14, weight: .semibold)
-                        Text(AppLocalized.resource("gps_help_intro"))
-                            .zTransferText(size: 12, weight: .bold)
-                            .foregroundStyle(ZTransferColors.accentOrange)
-                        Text(AppLocalized.resource("gps_help_battery") + "\n" + AppLocalized.resource("gps_help_multitask"))
-                            .zTransferText(size: 12)
-                        Text(AppLocalized.resource("gps_help_accuracy_note"))
-                            .zTransferText(size: 12)
-                            .foregroundStyle(ZTransferColors.secondaryText)
+                .background {
+                    GeometryReader { proxy in
+                        Color.clear.preference(
+                            key: GPSHelpAnchorPreferenceKey.self,
+                            value: proxy.frame(in: .named("gps-inline-panel"))
+                        )
                     }
-                    .padding(14)
                 }
             }
         }
         .padding(.top, 12)
+    }
+
+    private var gpsHelpBubble: some View {
+        TipBubbleSurface {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(AppLocalized.resource("gps_detail_description"))
+                    .zTransferText(size: 14, weight: .semibold)
+                Text(AppLocalized.resource("gps_help_intro"))
+                    .zTransferText(size: 12, weight: .bold)
+                    .foregroundStyle(ZTransferColors.accentOrange)
+                Text(AppLocalized.resource("gps_help_battery") + "\n" + AppLocalized.resource("gps_help_multitask"))
+                    .zTransferText(size: 12)
+                Text(AppLocalized.resource("gps_help_accuracy_note"))
+                    .zTransferText(size: 12)
+                    .foregroundStyle(ZTransferColors.secondaryText)
+            }
+        }
     }
 
     private var locationContent: some View {
@@ -461,7 +503,7 @@ private struct GPSInlinePanel: View {
                     .font(.system(size: 18, weight: .medium))
                     .frame(maxWidth: .infinity).frame(height: 42)
             }
-            .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 14))
+            .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 14, panel: true))
             .disabled(!coordinator.bluetooth.hasSavedPairing)
             .opacity(coordinator.bluetooth.hasSavedPairing ? 1 : 0.42)
         } else if requiresHoldToDisable {
@@ -539,6 +581,7 @@ private struct GPSInlinePanel: View {
         .frame(maxWidth: .infinity)
         .buttonStyle(ZTransferGlassButtonStyle(
             cornerRadius: 14,
+            panel: true,
             disabledAlpha: 1
         ))
         // Android's GpsStatusButton gives a held-to-disable press a short

@@ -75,6 +75,10 @@ import UIKit
     private var startedFrom: CGFloat = 0
     private var duration: TimeInterval = 0
     private var snapshotReady = false
+    private var rowBuffer = Array(
+        repeating: GeniePopupMotion.Row(left: 0, right: 0, y: 0, tilt: 0),
+        count: GeniePopupMotion.renderBands + 1
+    )
 
     init(host: UIHostingController<AnyView>) {
         self.host = host
@@ -118,16 +122,19 @@ import UIKit
     override func layoutSubviews() {
         super.layoutSubviews()
         // The button mouth lives in the 8/10 pt gap above the panel. Keep a
-        // clear render gutter so Metal never clips that part of the mesh.
+        // clear render gutter so the triangle mesh never clips that part.
         meshView.frame = bounds.insetBy(dx: -canvasPadding, dy: -canvasPadding)
         if requestedProgress != currentProgress && runningTarget != requestedProgress &&
             bounds.width > 0 && bounds.height > 0 {
             beginTransition(to: requestedProgress)
         }
-        renderFrame()
+        // `beginTransition` renders its first frame. Settled panels must not
+        // keep recalculating hidden mesh matrices on unrelated SwiftUI layout.
+        if runningTarget != nil { renderFrame() }
     }
 
     func updateGeometry(anchor: CGRect, panelOrigin: CGPoint, viewport _: CGSize) {
+        guard self.anchor != anchor || self.panelOrigin != panelOrigin else { return }
         self.anchor = anchor
         self.panelOrigin = panelOrigin
         setNeedsLayout()
@@ -158,7 +165,7 @@ import UIKit
         // current live controls once; interrupted transitions reuse the texture
         // already in flight instead of forcing another hierarchy render.
         if !snapshotReady || (target == 0 && currentProgress >= 0.9999) {
-            capturePanel()
+            capturePanel(useVisibleHierarchy: target == 0 && currentProgress >= 0.9999)
         }
         host.view.isUserInteractionEnabled = false
         host.view.layer.opacity = 0
@@ -179,34 +186,46 @@ import UIKit
         }
         link.add(to: .main, forMode: .common)
         displayLink = link
-        renderFrame()
     }
 
     /// `drawHierarchy` includes UIVisualEffect/material pixels, unlike
     /// CALayer.render. The live view is exposed only inside this uncommitted
     /// transaction, so GPS never flashes a different background colour.
-    private func capturePanel() {
+    private func capturePanel(useVisibleHierarchy: Bool) {
         guard bounds.width > 0, bounds.height > 0 else { return }
-        let previousOpacity = host.view.layer.opacity
+        let previousAlpha = host.view.alpha
         let previousHidden = host.view.isHidden
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         host.view.isHidden = false
-        host.view.layer.opacity = 1
+        // `drawHierarchy` consults UIView state. Updating `alpha`, instead of
+        // only the backing layer's model value, prevents a newly mounted host
+        // whose presentation opacity is still zero from producing a fully
+        // transparent opening texture.
+        host.view.alpha = 1
         host.view.layoutIfNeeded()
         let format = UIGraphicsImageRendererFormat()
         format.scale = window?.screen.scale ?? UIScreen.main.scale
         format.opaque = false
         format.preferredRange = .standard
-        let image = UIGraphicsImageRenderer(size: bounds.size, format: format).image { context in
-            // We are already inside the committed layout pass. Waiting for a
-            // *future* screen update here deadlocks the main run loop at the
-            // mouth frame; capture the current fully-laid-out hierarchy.
-            if !host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: false) {
+        let renderer = UIGraphicsImageRenderer(size: bounds.size, format: format)
+        let image = renderer.image { context in
+            if useVisibleHierarchy {
+                // Collapse starts from a hierarchy that is already on screen,
+                // so this path retains native material pixels accurately.
+                if !host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: false) {
+                    host.view.layer.render(in: context.cgContext)
+                }
+            } else {
+                // During first expansion the hosting view has final layout but
+                // no committed visible presentation yet. drawHierarchy can
+                // report success while producing a transparent bitmap. Render
+                // the model layer directly: deterministic, one pass, and no
+                // full-image validation readback on the main thread.
                 host.view.layer.render(in: context.cgContext)
             }
         }
-        host.view.layer.opacity = previousOpacity
+        host.view.alpha = previousAlpha
         host.view.isHidden = previousHidden
         CATransaction.commit()
 
@@ -234,19 +253,17 @@ import UIKit
         // layers are allocated once per snapshot, so retaining all bands does
         // not add per-frame allocation and avoids a visible topology switch.
         let bands = GeniePopupMotion.renderBands
-        var rows: [GeniePopupMotion.Row] = []
-        rows.reserveCapacity(bands + 1)
         for index in 0...bands {
-            rows.append(GeniePopupMotion.row(
+            rowBuffer[index] = GeniePopupMotion.row(
                 progress: currentProgress,
                 fraction: CGFloat(index) / CGFloat(bands),
                 anchor: source,
                 panel: panel,
                 mouthWidth: source.width
-            ))
+            )
         }
         meshView.update(
-            rows: rows,
+            rows: rowBuffer,
             padding: canvasPadding,
             alpha: GeniePopupMotion.panelAlpha(currentProgress)
         )
@@ -260,6 +277,11 @@ import UIKit
         host.view.layer.opacity = target == 1 ? 1 : 0
         host.view.isUserInteractionEnabled = target == 1
         if target == 1 {
+            // Closing always captures the then-current controls again. The
+            // opening bitmap is therefore dead weight once live content takes
+            // over; release it while retaining the small mesh skeleton.
+            snapshotReady = false
+            meshView.releaseSnapshot()
             onExpanded?()
         } else {
             snapshotReady = false
@@ -293,11 +315,10 @@ import UIKit
 private final class GenieTriangleCanvas: UIView {
     private struct Triangle {
         let layer: CALayer
-        let source: (CGPoint, CGPoint, CGPoint)
     }
 
     private var triangles: [Triangle] = []
-    private var imageSize: CGSize = .zero
+    private var configuredSize: CGSize = .zero
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -310,9 +331,21 @@ private final class GenieTriangleCanvas: UIView {
     required init?(coder: NSCoder) { nil }
 
     func setSnapshot(_ image: UIImage) {
-        clearSnapshot()
         guard let cgImage = image.cgImage, image.size.width > 0, image.size.height > 0 else { return }
-        imageSize = image.size
+        if triangles.count == GeniePopupMotion.renderBands * 2,
+           configuredSize == image.size {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            triangles.forEach {
+                $0.layer.contents = cgImage
+                $0.layer.contentsScale = image.scale
+            }
+            CATransaction.commit()
+            return
+        }
+
+        clearSnapshot()
+        configuredSize = image.size
         let bandHeight = image.size.height / CGFloat(GeniePopupMotion.renderBands)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -321,19 +354,47 @@ private final class GenieTriangleCanvas: UIView {
             let bottom = band == GeniePopupMotion.renderBands - 1
                 ? image.size.height
                 : CGFloat(band + 1) * bandHeight
+            let height = bottom - top
+            let bandSize = CGSize(width: image.size.width, height: height)
+            let contentsRect = CGRect(
+                x: 0,
+                y: top / image.size.height,
+                width: 1,
+                height: height / image.size.height
+            )
+            // Each layer owns only one band-sized render surface. The CGImage
+            // remains shared, while contentsRect selects the required rows.
+            // The previous full-panel bounds caused 24 complete offscreen
+            // passes and could freeze the photo list when Filter was tapped.
             let upper = (
-                CGPoint(x: 0, y: top),
-                CGPoint(x: image.size.width, y: top),
-                CGPoint(x: 0, y: bottom)
+                CGPoint(x: 0, y: 0),
+                CGPoint(x: image.size.width, y: 0),
+                CGPoint(x: 0, y: height)
             )
             let lower = (
-                CGPoint(x: image.size.width, y: bottom),
-                CGPoint(x: 0, y: bottom),
-                CGPoint(x: image.size.width, y: top)
+                CGPoint(x: image.size.width, y: height),
+                CGPoint(x: 0, y: height),
+                CGPoint(x: image.size.width, y: 0)
             )
-            triangles.append(makeTriangle(image: cgImage, scale: image.scale, source: upper))
-            triangles.append(makeTriangle(image: cgImage, scale: image.scale, source: lower))
+            triangles.append(makeTriangle(
+                image: cgImage, scale: image.scale, size: bandSize,
+                contentsRect: contentsRect, source: upper
+            ))
+            triangles.append(makeTriangle(
+                image: cgImage, scale: image.scale, size: bandSize,
+                contentsRect: contentsRect, source: lower
+            ))
         }
+        CATransaction.commit()
+    }
+
+    /// Drop the large bitmap immediately after handoff, but retain the tiny
+    /// layer/mask skeleton so collapse can reuse it without 48 allocations.
+    func releaseSnapshot() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        triangles.forEach { $0.layer.contents = nil }
+        layer.opacity = 0
         CATransaction.commit()
     }
 
@@ -342,7 +403,7 @@ private final class GenieTriangleCanvas: UIView {
         CATransaction.setDisableActions(true)
         triangles.forEach { $0.layer.removeFromSuperlayer() }
         triangles.removeAll(keepingCapacity: true)
-        imageSize = .zero
+        configuredSize = .zero
         layer.opacity = 0
         CATransaction.commit()
     }
@@ -366,19 +427,21 @@ private final class GenieTriangleCanvas: UIView {
                 CGPoint(x: bottom.left + padding, y: bottom.leftY + padding),
                 CGPoint(x: top.right + padding, y: top.rightY + padding)
             )
-            apply(upperDestination, to: triangles[band * 2])
-            apply(lowerDestination, to: triangles[band * 2 + 1])
+            applyUpper(upperDestination, to: triangles[band * 2].layer)
+            applyLower(lowerDestination, to: triangles[band * 2 + 1].layer)
         }
         CATransaction.commit()
     }
 
-    private func makeTriangle(image: CGImage, scale: CGFloat,
+    private func makeTriangle(image: CGImage, scale: CGFloat, size: CGSize,
+                              contentsRect: CGRect,
                               source: (CGPoint, CGPoint, CGPoint)) -> Triangle {
         let imageLayer = CALayer()
-        imageLayer.bounds = CGRect(origin: .zero, size: imageSize)
+        imageLayer.bounds = CGRect(origin: .zero, size: size)
         imageLayer.anchorPoint = .zero
         imageLayer.position = .zero
         imageLayer.contents = image
+        imageLayer.contentsRect = contentsRect
         imageLayer.contentsScale = scale
         imageLayer.contentsGravity = .resize
         imageLayer.magnificationFilter = .linear
@@ -398,34 +461,38 @@ private final class GenieTriangleCanvas: UIView {
         mask.allowsEdgeAntialiasing = false
         imageLayer.mask = mask
         layer.addSublayer(imageLayer)
-        return Triangle(layer: imageLayer, source: source)
+        return Triangle(layer: imageLayer)
     }
 
-    private func apply(_ destination: (CGPoint, CGPoint, CGPoint), to triangle: Triangle) {
-        guard let transform = affineMap(from: triangle.source, to: destination) else { return }
-        triangle.layer.setAffineTransform(transform)
+    private func applyUpper(_ destination: (CGPoint, CGPoint, CGPoint), to layer: CALayer) {
+        let (topLeft, topRight, bottomLeft) = destination
+        let width = max(1, layer.bounds.width)
+        let height = max(1, layer.bounds.height)
+        layer.setAffineTransform(CGAffineTransform(
+            a: (topRight.x - topLeft.x) / width,
+            b: (topRight.y - topLeft.y) / width,
+            c: (bottomLeft.x - topLeft.x) / height,
+            d: (bottomLeft.y - topLeft.y) / height,
+            tx: topLeft.x,
+            ty: topLeft.y
+        ))
     }
 
-    /// Unique affine map through three non-collinear point pairs.
-    private func affineMap(from source: (CGPoint, CGPoint, CGPoint),
-                           to destination: (CGPoint, CGPoint, CGPoint)) -> CGAffineTransform? {
-        let (s0, s1, s2) = source
-        let (d0, d1, d2) = destination
-        let determinant = s0.x * (s1.y - s2.y) +
-            s1.x * (s2.y - s0.y) + s2.x * (s0.y - s1.y)
-        guard abs(determinant) > .ulpOfOne else { return nil }
-        func coefficients(_ v0: CGFloat, _ v1: CGFloat, _ v2: CGFloat) -> (CGFloat, CGFloat, CGFloat) {
-            let first = (v0 * (s1.y - s2.y) + v1 * (s2.y - s0.y) +
-                v2 * (s0.y - s1.y)) / determinant
-            let second = (v0 * (s2.x - s1.x) + v1 * (s0.x - s2.x) +
-                v2 * (s1.x - s0.x)) / determinant
-            let offset = (v0 * (s1.x * s2.y - s2.x * s1.y) +
-                v1 * (s2.x * s0.y - s0.x * s2.y) +
-                v2 * (s0.x * s1.y - s1.x * s0.y)) / determinant
-            return (first, second, offset)
-        }
-        let x = coefficients(d0.x, d1.x, d2.x)
-        let y = coefficients(d0.y, d1.y, d2.y)
-        return CGAffineTransform(a: x.0, b: y.0, c: x.1, d: y.1, tx: x.2, ty: y.2)
+    private func applyLower(_ destination: (CGPoint, CGPoint, CGPoint), to layer: CALayer) {
+        let (bottomRight, bottomLeft, topRight) = destination
+        let width = max(1, layer.bounds.width)
+        let height = max(1, layer.bounds.height)
+        let a = (bottomRight.x - bottomLeft.x) / width
+        let b = (bottomRight.y - bottomLeft.y) / width
+        let c = (bottomRight.x - topRight.x) / height
+        let d = (bottomRight.y - topRight.y) / height
+        layer.setAffineTransform(CGAffineTransform(
+            a: a,
+            b: b,
+            c: c,
+            d: d,
+            tx: bottomLeft.x - c * height,
+            ty: bottomLeft.y - d * height
+        ))
     }
 }

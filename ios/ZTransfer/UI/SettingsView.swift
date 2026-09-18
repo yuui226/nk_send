@@ -280,7 +280,7 @@ struct SettingsView: View {
                     .foregroundStyle(ZTransferColors.primaryText)
                     .frame(width: 30, height: 30)
             }
-            .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 12))
+            .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 12, panel: true))
             Text(AppLocalized.resource("photo_effects"))
                 .zTransferText(size: ZTransferMetrics.title, weight: .bold)
                 .lineLimit(1)
@@ -289,7 +289,8 @@ struct SettingsView: View {
             TipLightbulbButton(
                 attention: !photoEffectsHelpViewed, size: 28,
                 accessibilityLabel: AppLocalized.resource("photo_effects_info_title"),
-                motionPaused: popupMotionPaused
+                motionPaused: popupMotionPaused,
+                embeddedInPanel: true
             ) {
                 photoEffectsHelpViewed = true
                 showingEffectsHelp.toggle()
@@ -355,7 +356,8 @@ struct SettingsView: View {
             TipLightbulbButton(
                 attention: !mainSettingsHelpViewed, size: 30,
                 accessibilityLabel: AppLocalized.resource("settings_help_title"),
-                motionPaused: popupMotionPaused
+                motionPaused: popupMotionPaused,
+                embeddedInPanel: true
             ) {
                 mainSettingsHelpViewed = true
                 showingHelp.toggle()
@@ -411,7 +413,7 @@ struct SettingsView: View {
                         .padding(.horizontal, 12)
                         .frame(height: 30)
                 }
-                .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 12))
+                .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 12, panel: true))
             }
             SettingsDivider()
             HStack(spacing: 8) {
@@ -594,28 +596,23 @@ private struct SettingsHelpBubble: View {
     ]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(AppLocalized.resource("settings_help_title"))
-                .zTransferTypography(.titleMedium, weight: .bold)
-            ForEach(items, id: \.0) { label, summary in
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(AppLocalized.resource(label))
-                        .zTransferTypography(.labelMedium, weight: .bold)
-                        .foregroundStyle(ZTransferColors.accentOrange)
-                    Text(AppLocalized.resource(summary))
-                        .zTransferTypography(.bodySmall)
-                        .foregroundStyle(ZTransferColors.primaryText)
-                        .fixedSize(horizontal: false, vertical: true)
+        TipBubbleSurface {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(AppLocalized.resource("settings_help_title"))
+                    .zTransferTypography(.titleMedium, weight: .bold)
+                ForEach(items, id: \.0) { label, summary in
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(AppLocalized.resource(label))
+                            .zTransferTypography(.labelMedium, weight: .bold)
+                            .foregroundStyle(ZTransferColors.accentOrange)
+                        Text(AppLocalized.resource(summary))
+                            .zTransferTypography(.bodySmall)
+                            .foregroundStyle(ZTransferColors.primaryText)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
         }
-        .foregroundStyle(ZTransferColors.primaryText)
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(ZTransferGlassSurface(cornerRadius: 18, kind: .panel))
-        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
-            .stroke(ZTransferColors.primaryText.opacity(0.12), lineWidth: 1))
-        .shadow(color: .black.opacity(0.16), radius: 14, y: 7)
     }
 }
 
@@ -623,25 +620,20 @@ private struct SettingsHelpBubble: View {
 /// sourced from the same Android resource keys used by the detail page.
 private struct PhotoEffectsHelpBubble: View {
     var body: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            Text(AppLocalized.resource("photo_effects_info_title"))
-                .zTransferTypography(.titleMedium, weight: .bold)
-            Text(AppLocalized.resource("photo_effects_info_description"))
-                .zTransferTypography(.bodySmall)
-            Text(AppLocalized.resource("photo_effects_gesture_hint"))
-                .zTransferTypography(.bodySmall)
-                .fontWeight(.semibold)
-            Text(AppLocalized.resource("photo_effects_wheel_hint"))
-                .zTransferTypography(.bodySmall)
-                .fontWeight(.semibold)
+        TipBubbleSurface {
+            VStack(alignment: .leading, spacing: 9) {
+                Text(AppLocalized.resource("photo_effects_info_title"))
+                    .zTransferTypography(.titleMedium, weight: .bold)
+                Text(AppLocalized.resource("photo_effects_info_description"))
+                    .zTransferTypography(.bodySmall)
+                Text(AppLocalized.resource("photo_effects_gesture_hint"))
+                    .zTransferTypography(.bodySmall)
+                    .fontWeight(.semibold)
+                Text(AppLocalized.resource("photo_effects_wheel_hint"))
+                    .zTransferTypography(.bodySmall)
+                    .fontWeight(.semibold)
+            }
         }
-        .foregroundStyle(ZTransferColors.primaryText)
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(ZTransferGlassSurface(cornerRadius: 18, kind: .panel))
-        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
-            .stroke(ZTransferColors.primaryText.opacity(0.12), lineWidth: 1))
-        .shadow(color: .black.opacity(0.16), radius: 14, y: 7)
     }
 }
 
@@ -723,7 +715,7 @@ private struct SettingsFooterButton: View {
                 .padding(.horizontal, 10)
                 .frame(height: 28)
         }
-        .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 14))
+        .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 14, panel: true))
     }
 }
 
