@@ -5,6 +5,22 @@ func normalizedThumbnailColumns(_ value: Int) -> Int {
     min(max(value, 2), 4)
 }
 
+/// A return target only counts as visible when every edge is inside the
+/// scrollable photo viewport. `intersects` is intentionally insufficient: a
+/// clipped first/last row still needs a small corrective scroll before the
+/// preview collapses into it.
+func photoFrameIsFullyVisible(_ frame: CGRect, in viewport: CGRect,
+                              tolerance: CGFloat = 0.5) -> Bool {
+    guard frame.width > 0, frame.height > 0,
+          viewport.width > 0, viewport.height > 0,
+          !frame.isNull, !frame.isInfinite,
+          !viewport.isNull, !viewport.isInfinite else { return false }
+    return frame.minX >= viewport.minX - tolerance &&
+        frame.maxX <= viewport.maxX + tolerance &&
+        frame.minY >= viewport.minY - tolerance &&
+        frame.maxY <= viewport.maxY + tolerance
+}
+
 @preconcurrency
 private struct PhotoListTopControlsTransition: AnimatableModifier {
     var progress: CGFloat
@@ -50,20 +66,39 @@ private struct PhotoListWorkspaceTransition: AnimatableModifier {
 private let photoQueueWorkspaceAnimation =
     Animation.timingCurve(0.22, 0.84, 0.24, 1.0, duration: 0.34)
 
+/// The default SwiftUI hold is 500ms. The photo grid is a deliberate
+/// tap/hold mode switch, so use the user-approved shorter threshold while
+/// retaining a small movement allowance to avoid firing during a scroll.
+let photoPreviewLongPressDuration = 0.25
+
 private struct PhotoReturnFocusPulse: ViewModifier {
     let trigger: Int
-    @State private var scale: CGFloat = 1
+    @State private var progress: CGFloat = 0
 
     func body(content: Content) -> some View {
         content
-            .scaleEffect(scale)
+            // Android applies the return emphasis in the render layer: two
+            // 5.5% scale pulses plus a faint white wash. Keeping it outside
+            // layout prevents the surrounding grid from being remeasured.
+            .overlay {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.white.opacity(Double(progress) * 0.11))
+                    .allowsHitTesting(false)
+            }
+            .scaleEffect(1 + 0.055 * progress)
             .task(id: trigger) {
+                let reset = Transaction(animation: nil)
+                withTransaction(reset) { progress = 0 }
                 guard trigger > 0 else { return }
                 for _ in 0..<2 {
-                    withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.11)) { scale = 1.055 }
-                    try? await Task.sleep(nanoseconds: 110_000_000)
-                    withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.155)) { scale = 1 }
-                    try? await Task.sleep(nanoseconds: 190_000_000)
+                    withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.11)) { progress = 1 }
+                    do { try await Task.sleep(nanoseconds: 110_000_000) }
+                    catch { return }
+                    withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.155)) { progress = 0 }
+                    do { try await Task.sleep(nanoseconds: 155_000_000) }
+                    catch { return }
+                    do { try await Task.sleep(nanoseconds: 35_000_000) }
+                    catch { return }
                 }
             }
     }
@@ -120,6 +155,24 @@ private struct PhotoDateGridHeightPreferenceKey: PreferenceKey {
         value.merge(nextValue(), uniquingKeysWith: { _, new in new })
     }
 }
+
+private struct PhotoListViewportPreferenceKey: PreferenceKey {
+    static let defaultValue: CGRect = .zero
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        let next = nextValue()
+        if next.width > 0, next.height > 0 { value = next }
+    }
+}
+
+private struct PhotoListTopControlsBoundsPreferenceKey: PreferenceKey {
+    static let defaultValue: CGRect = .zero
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        let next = nextValue()
+        if next.width > 0, next.height > 0 { value = next }
+    }
+}
+
+private let photoListTopControlsHeight: CGFloat = 36
 
 private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> AnyTransition {
     if burstMember {
@@ -224,6 +277,8 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
     @State private var effectPreviewLoadingKey: String?
     @State private var topControlsVisible = true
     @State private var cellBounds: [UInt32: CGRect] = [:]
+    @State private var photoListViewportBounds: CGRect = .zero
+    @State private var photoListTopControlsBounds: CGRect = .zero
     @State private var sectionEnqueueBounds: [String: CGRect] = [:]
     @State private var queueTargetBounds: CGRect = .zero
     @State private var queueFlights: [PhotoListQueueFlight] = []
@@ -407,14 +462,13 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
                                             cameraRemoval: cameraRemovalAffectedDays.contains(section.day)
                                         ))
                                         .onTapGesture { handleTap(entry, file: file) }
-                                        .onLongPressGesture {
+                                        .onLongPressGesture(
+                                            minimumDuration: photoPreviewLongPressDuration,
+                                            maximumDistance: 12
+                                        ) {
                                             guard !burstAnimationBusy, collapsingDay == nil,
                                                   cameraRemovalAffectedDays.isEmpty else { return }
-                                            ZTransferHaptics.shared.longPress()
-                                            if case let .burst(group) = entry {
-                                                expandedBurstIDs.insert(group.id)
-                                                openPreview(group.files[0], anchorFileID: file.id)
-                                            } else { openPreview(file, anchorFileID: file.id) }
+                                            handleLongPress(entry, file: file)
                                         }
 
                                     }
@@ -471,7 +525,20 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
                     }.padding(.horizontal, 12).padding(.top, 8)
                 }
                 .coordinateSpace(name: "photo-list-scroll")
+                .background {
+                    GeometryReader { proxy in
+                        Color.clear
+                            .allowsHitTesting(false)
+                            .preference(
+                                key: PhotoListViewportPreferenceKey.self,
+                                value: proxy.frame(in: .global)
+                            )
+                    }
+                }
                 .onAppear { photoListScrollProxy = reader }
+                .onPreferenceChange(PhotoListViewportPreferenceKey.self) { bounds in
+                    photoListViewportBounds = bounds
+                }
                 .onPreferenceChange(PhotoListCellBoundsPreferenceKey.self) { bounds in
                     // Lazy-grid cells unregister when they leave composition.
                     // Keep only the current preference snapshot so preview
@@ -906,7 +973,25 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
         }
         .padding(.horizontal, 12)
         .padding(.top, 0)
+        // The controls animate inside a stable safe-area slot. Removing this
+        // height while previewing makes ScrollView compensate its content
+        // offset when the controls return, which looks like an unsolicited
+        // list scroll and distorts the target-cell pulse.
+        .frame(height: photoListTopControlsHeight, alignment: .top)
+        .background {
+            GeometryReader { proxy in
+                Color.clear
+                    .allowsHitTesting(false)
+                    .preference(
+                        key: PhotoListTopControlsBoundsPreferenceKey.self,
+                        value: proxy.frame(in: .global)
+                    )
+            }
+        }
         .animation(ZTransferMotion.standard, value: queueModel.snapshot.items.count)
+        .onPreferenceChange(PhotoListTopControlsBoundsPreferenceKey.self) {
+            photoListTopControlsBounds = $0
+        }
         .onPreferenceChange(PhotoListSettingsAnchorPreferenceKey.self) { settingsAnchor = $0 }
         .onPreferenceChange(PhotoListFilterAnchorPreferenceKey.self) { filterAnchor = $0 }
     }
@@ -1325,7 +1410,29 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
         if tapToPreview {
             ZTransferHaptics.shared.longPress()
             openPreview(file, anchorFileID: file.id)
-        } else if directoryStore.directoryURL == nil {
+        } else {
+            enqueueFileFromList(file)
+        }
+    }
+
+    /// Android swaps the single-photo tap/hold actions when “tap to preview”
+    /// is enabled. The burst collection keeps its dedicated contract: tap its
+    /// arrow/action controls, hold the image area to preview the first member.
+    private func handleLongPress(_ entry: PhotoGridEntry, file: CameraFile) {
+        if case let .burst(group) = entry {
+            ZTransferHaptics.shared.longPress()
+            expandedBurstIDs.insert(group.id)
+            openPreview(group.files[0], anchorFileID: file.id)
+        } else if tapToPreview {
+            enqueueFileFromList(file)
+        } else {
+            ZTransferHaptics.shared.longPress()
+            openPreview(file, anchorFileID: file.id)
+        }
+    }
+
+    private func enqueueFileFromList(_ file: CameraFile) {
+        if directoryStore.directoryURL == nil {
             // Android routes a transfer attempt with no valid destination to the
             // existing settings overlay; it does not enqueue an unusable task.
             requestTransferDirectory()
@@ -1363,6 +1470,28 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
         selectedFile = file
     }
 
+    /// Measure both the ScrollView and the permanent top slot. Depending on the
+    /// OS, `safeAreaInset` can report the ScrollView frame before or after its
+    /// safe region is reduced; using the measured slot edge avoids subtracting
+    /// its 36pt twice on either implementation.
+    private var photoListVisibleViewport: CGRect {
+        let measured = photoListViewportBounds
+        let base = measured.width > 0 && measured.height > 0
+            ? measured
+            : UIScreen.main.bounds
+        let measuredControls = photoListTopControlsBounds
+        let top = measuredControls.width > 0 && measuredControls.height > 0
+            ? max(base.minY, measuredControls.maxY)
+            : base.minY + photoListTopControlsHeight
+        let clampedTop = min(top, base.maxY)
+        return CGRect(
+            x: base.minX,
+            y: clampedTop,
+            width: base.width,
+            height: max(0, base.maxY - clampedTop)
+        )
+    }
+
     @MainActor
     private func preparePreviewDismissTarget(_ file: CameraFile) async -> CGRect? {
         guard let targetSection = model.sections.first(where: { section in
@@ -1377,10 +1506,11 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
             await Task.yield()
         }
 
-        let viewport = UIScreen.main.bounds
-        if let frame = cellBounds[file.id], frame.width > 0, frame.height > 0,
-           frame.intersects(viewport) {
-            return frame
+        let viewport = photoListVisibleViewport
+        let initialFrame = cellBounds[file.id]
+        if let initialFrame,
+           photoFrameIsFullyVisible(initialFrame, in: viewport) {
+            return initialFrame
         }
         guard let reader = photoListScrollProxy else { return nil }
 
@@ -1406,13 +1536,25 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
             reader.scrollTo(visibleEntries[nearbyIndex].scrollID, anchor: .center)
             await Task.yield()
         }
+        let targetAnchor: UnitPoint
+        if let initialFrame, initialFrame.minY < viewport.minY {
+            targetAnchor = .top
+        } else if let initialFrame, initialFrame.maxY > viewport.maxY {
+            targetAnchor = .bottom
+        } else if targetIndex < visibleIndex {
+            targetAnchor = .top
+        } else if targetIndex > visibleIndex {
+            targetAnchor = .bottom
+        } else {
+            targetAnchor = .center
+        }
         withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.26)) {
-            reader.scrollTo("photo_\(file.id)", anchor: .top)
+            reader.scrollTo("photo_\(file.id)", anchor: targetAnchor)
         }
         try? await Task.sleep(nanoseconds: 280_000_000)
         await Task.yield()
-        guard let frame = cellBounds[file.id], frame.width > 0, frame.height > 0,
-              frame.intersects(viewport) else { return nil }
+        guard let frame = cellBounds[file.id],
+              photoFrameIsFullyVisible(frame, in: photoListVisibleViewport) else { return nil }
         return frame
     }
 
@@ -1787,24 +1929,18 @@ struct PhotoListSignalIcon: View {
             if connected {
                 let level = apSignalLevel(percent: apSignalPercent)
                 let colors = apBarColors(level: level)
-                Canvas { context, size in
-                    let barWidth = size.width * 0.205
-                    let gap = size.width * 0.105
-                    let heights: [CGFloat] = [0.40, 0.60, 0.80, 1.0].map { size.height * $0 }
-                    let total = barWidth * 4 + gap * 3
-                    let start = (size.width - total) / 2
-                    for (index, height) in heights.enumerated() {
-                        let x = start + CGFloat(index) * (barWidth + gap)
-                        let rect = CGRect(x: x, y: size.height - height,
-                                          width: barWidth, height: height)
-                        let lit = index < max(level, 1)
-                        context.fill(
-                            Path(roundedRect: rect, cornerRadius: barWidth * 0.38),
-                            with: .color(lit ? colors.lit : colors.unlit)
-                        )
+                HStack(alignment: .bottom, spacing: 2.5) {
+                    ForEach(0..<4, id: \.self) { index in
+                        RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                            .fill(index < max(level, 1) ? colors.lit : colors.unlit)
+                            .frame(width: 4, height: CGFloat(6 + index * 3))
                     }
                 }
-                .frame(width: 18, height: 15)
+                // Android SignalPill uses four exact 4dp bars with 2.5dp
+                // gaps. The former proportional Canvas produced fractional
+                // widths at different sub-pixel origins, so equally specified
+                // bars rasterized at visibly different widths on Retina.
+                .frame(width: 23.5, height: 15, alignment: .bottom)
                 .accessibilityLabel(apSignalPercent.map {
                     AppLocalized.resource("ap_signal_strength_percent")
                         .replacingOccurrences(of: "%1$d", with: "\($0)")

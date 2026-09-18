@@ -1067,6 +1067,147 @@ final class DomainModelTests: XCTestCase {
         XCTAssertEqual(normalizedThumbnailColumns(3), 3)
         XCTAssertEqual(normalizedThumbnailColumns(8), 4)
     }
+
+    func testPreviewReturnOnlyTreatsCompleteCellAsVisible() {
+        let viewport = CGRect(x: 0, y: 100, width: 390, height: 700)
+
+        XCTAssertTrue(photoFrameIsFullyVisible(
+            CGRect(x: 12, y: 120, width: 118, height: 118),
+            in: viewport
+        ))
+        XCTAssertTrue(photoFrameIsFullyVisible(
+            CGRect(x: 12, y: 99.75, width: 118, height: 118),
+            in: viewport
+        ))
+        XCTAssertFalse(photoFrameIsFullyVisible(
+            CGRect(x: 12, y: 99, width: 118, height: 118),
+            in: viewport
+        ))
+        XCTAssertFalse(photoFrameIsFullyVisible(
+            CGRect(x: 12, y: 700, width: 118, height: 118),
+            in: viewport
+        ))
+        XCTAssertFalse(photoFrameIsFullyVisible(.zero, in: viewport))
+    }
+
+    func testPhotoPreviewHoldAndHistogramMatchPresentationContract() throws {
+        XCTAssertEqual(photoPreviewLongPressDuration, 0.25, accuracy: 0.0001)
+        XCTAssertEqual(photoPreviewRotationDuration, 0.22, accuracy: 0.0001)
+        XCTAssertEqual(photoPreviewZoomPanMinimumDistance, 8, accuracy: 0.0001)
+        XCTAssertEqual(photoPreviewDoubleTapDuration, 0.24, accuracy: 0.0001)
+        XCTAssertEqual(photoPreviewDoubleTapZoom, 2.5, accuracy: 0.0001)
+
+        let viewport = CGSize(width: 400, height: 800)
+        XCTAssertEqual(
+            photoPreviewRotationFitScale(
+                imageSize: CGSize(width: 200, height: 400),
+                viewportSize: viewport,
+                rotationDegrees: 0
+            ),
+            1,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            photoPreviewRotationFitScale(
+                imageSize: CGSize(width: 200, height: 400),
+                viewportSize: viewport,
+                rotationDegrees: -90
+            ),
+            0.5,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            photoPreviewQueueDragDirection(translation: CGSize(width: 2, height: -20)),
+            .upward
+        )
+        XCTAssertEqual(
+            photoPreviewQueueDragDirection(translation: CGSize(width: 20, height: -2)),
+            .rejected
+        )
+        XCTAssertEqual(
+            photoPreviewQueueDragDirection(translation: CGSize(width: 9, height: -9)),
+            .undecided
+        )
+        XCTAssertEqual(
+            photoPreviewQueueVisualOffset(upwardDistance: 200),
+            -118.88,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            photoPreviewDisplaySize(
+                imageSize: CGSize(width: 400, height: 200),
+                viewportSize: viewport,
+                rotationDegrees: -90
+            ),
+            CGSize(width: 400, height: 800)
+        )
+        XCTAssertEqual(
+            photoPreviewClampedOffset(
+                CGSize(width: 500, height: -1_000),
+                scale: 2.5,
+                imageSize: CGSize(width: 400, height: 200),
+                viewportSize: viewport,
+                rotationDegrees: 0
+            ),
+            CGSize(width: 300, height: 0)
+        )
+        XCTAssertEqual(
+            photoPreviewDoubleTapOffset(
+                location: CGPoint(x: 300, y: 400),
+                scale: 2.5,
+                imageSize: CGSize(width: 400, height: 200),
+                viewportSize: viewport,
+                rotationDegrees: 0
+            ),
+            CGSize(width: -150, height: 0)
+        )
+        XCTAssertEqual(
+            photoPreviewMaximumZoom(
+                imageSize: CGSize(width: 400, height: 200),
+                viewportSize: viewport,
+                rotationDegrees: 0
+            ),
+            4,
+            accuracy: 0.0001
+        )
+        XCTAssertTrue(photoPreviewHistogramOverlayVisible(
+            enabled: true,
+            currentPhotoID: 42,
+            histogramFileID: 42,
+            binCount: 256
+        ))
+        XCTAssertFalse(photoPreviewHistogramOverlayVisible(
+            enabled: true,
+            currentPhotoID: nil,
+            histogramFileID: 42,
+            binCount: 256
+        ))
+        XCTAssertTrue(photoPreviewHistogramOverlayVisible(
+            enabled: true,
+            currentPhotoID: 42,
+            histogramFileID: 42,
+            binCount: 256
+        ))
+
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        let image = UIGraphicsImageRenderer(
+            size: CGSize(width: 2, height: 1),
+            format: format
+        ).image { context in
+            UIColor.black.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 1, height: 1))
+            UIColor.white.setFill()
+            context.fill(CGRect(x: 1, y: 0, width: 1, height: 1))
+        }
+
+        let histogram = previewLuminanceHistogram(image)
+        XCTAssertEqual(histogram.count, 256)
+        XCTAssertEqual(histogram[0], 1, accuracy: 0.0001)
+        XCTAssertEqual(histogram[255], 1, accuracy: 0.0001)
+        XCTAssertEqual(histogram[128], 0, accuracy: 0.0001)
+    }
 }
 
 private actor SequentialListHarness {

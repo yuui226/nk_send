@@ -23,17 +23,11 @@ struct ConnectionPage: View {
     @State private var settingsAnchor: CGRect = .zero
 
     var body: some View {
-        TimelineView(.animation(paused: celebrationStart == nil)) { context in
-            let elapsed = celebrationStart.map {
-                max(0, context.date.timeIntervalSince($0) * 1_000)
-            } ?? 0
-            pageBody(celebration: ConnectionCelebrationValues(elapsedMilliseconds: elapsed))
-        }
+        pageBody()
     }
 
     @ViewBuilder
-    private func pageBody(celebration: ConnectionCelebrationValues) -> some View {
-        let pageFade = 1 - connectionCelebrationEase(celebration.hero)
+    private func pageBody() -> some View {
         ZStack {
             GeometryReader { proxy in
                 let layout = ConnectionLayout(size: proxy.size)
@@ -48,14 +42,13 @@ struct ConnectionPage: View {
                             attentionActive: model.cameraSession == nil && !gpsCoordinator.state.enabled,
                             attentionOrigin: attentionOrigin,
                             selected: model.cameraSession?.isUSB == true,
-                            success: celebration.success > 0 && model.cameraSession?.isUSB == true,
-                            selectionSceneProgress: celebration.hero,
-                            successEffectProgress: celebration.success)
-                        GPSConnectionControl(
-                            coordinator: gpsCoordinator,
-                            expanded: $gpsPanelPresented
-                        )
-                            .opacity(pageFade)
+                            celebrationStart: celebrationStart)
+                        ConnectionSceneFadeTimeline(start: celebrationStart) {
+                            GPSConnectionControl(
+                                coordinator: gpsCoordinator,
+                                expanded: $gpsPanelPresented
+                            )
+                        }
                     }
                     .frame(width: layout.cardWidth)
                     .zIndex(1)
@@ -66,9 +59,7 @@ struct ConnectionPage: View {
                         attentionActive: model.cameraSession == nil && !gpsCoordinator.state.enabled,
                         attentionOrigin: attentionOrigin,
                         selected: model.cameraSession != nil && model.cameraSession?.isUSB == false,
-                        success: celebration.success > 0 && model.cameraSession != nil && model.cameraSession?.isUSB == false,
-                        selectionSceneProgress: celebration.hero,
-                        successEffectProgress: celebration.success,
+                        celebrationStart: celebrationStart,
                         onWirelessModeChanged: model.select(wirelessMode:),
                         onConnect: { Task { await model.connectSelectedWiFi() } },
                         onResetSTAPairing: { Task { await model.refreshSTAProfiles(); showSTAReset = true } },
@@ -99,48 +90,49 @@ struct ConnectionPage: View {
                     .padding(.horizontal, layout.horizontalPadding)
                     .padding(.top, layout.cardsTop)
 
-                    HStack(spacing: 8) {
-                    Button { Task { @MainActor in showSettings = true } } label: {
-                        DoubleZMark(tint: ZTransferColors.primaryText)
-                            .frame(width: 20 * DoubleZMark.aspectRatio, height: 20)
-                            .padding(.horizontal, 14)
-                            .frame(height: 36)
-                    }
-                    .buttonStyle(ZTransferGlassButtonStyle(
-                        cornerRadius: 22,
-                        materialContentColor: ZTransferColors.accentYellow
-                    ))
-                    .background {
-                        GeometryReader { anchor in
-                            Color.clear
-                                .allowsHitTesting(false)
-                                .preference(
-                                    key: SettingsAnchorPreferenceKey.self,
-                                    value: anchor.frame(in: .named(ZTransferPopupAnchorSpace.name))
-                                )
+                    ConnectionSceneFadeTimeline(start: celebrationStart) {
+                        HStack(spacing: 8) {
+                            Button { Task { @MainActor in showSettings = true } } label: {
+                                DoubleZMark(tint: ZTransferColors.primaryText)
+                                    .frame(width: 20 * DoubleZMark.aspectRatio, height: 20)
+                                    .padding(.horizontal, 14)
+                                    .frame(height: 36)
+                            }
+                            .buttonStyle(ZTransferGlassButtonStyle(
+                                cornerRadius: 22,
+                                materialContentColor: ZTransferColors.accentYellow
+                            ))
+                            .background {
+                                GeometryReader { anchor in
+                                    Color.clear
+                                        .allowsHitTesting(false)
+                                        .preference(
+                                            key: SettingsAnchorPreferenceKey.self,
+                                            value: anchor.frame(in: .named(ZTransferPopupAnchorSpace.name))
+                                        )
+                                }
+                            }
+                            #if DEBUG
+                            Button { model.connectDebugSimulator() } label: {
+                                Image(systemName: "photo.on.rectangle.angled")
+                                    .font(.system(size: 18, weight: .semibold))
+                                    .frame(width: 36, height: 36)
+                            }
+                            .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
+                            #endif
                         }
+                        .padding(.leading, 12)
+                        .padding(.top, 6)
                     }
-                    #if DEBUG
-                    Button { model.connectDebugSimulator() } label: {
-                        Image(systemName: "photo.on.rectangle.angled")
-                            .font(.system(size: 18, weight: .semibold))
-                            .frame(width: 36, height: 36)
-                    }
-                    .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
-                    #endif
-                    }
-                    .padding(.leading, 12)
-                    .padding(.top, 6)
-                    .opacity(pageFade)
-
                 }
                 .overlay(alignment: .bottom) {
-                    ConnectionWorkspaceButton(
-                        enabled: !gpsCoordinator.state.enabled,
-                        action: onOpenWorkspace,
-                    )
+                    ConnectionSceneFadeTimeline(start: celebrationStart) {
+                        ConnectionWorkspaceButton(
+                            enabled: !gpsCoordinator.state.enabled,
+                            action: onOpenWorkspace,
+                        )
                         .padding(.bottom, 18)
-                        .opacity(pageFade)
+                    }
                 }
                 .onPreferenceChange(SettingsAnchorPreferenceKey.self) { settingsAnchor = $0 }
             }
@@ -149,30 +141,33 @@ struct ConnectionPage: View {
             // This lets it dim the complete application surface while the
             // page's measured card positions remain unchanged.
             if showSTAReset {
-                STAResetPairingOverlay(count: model.pairedCameraCount, models: model.pairedCameraModels,
-                    onConfirm: { showSTAReset = false; Task { await model.resetSTAPairing() } },
-                    onDismiss: { showSTAReset = false })
+                ConnectionSceneFadeTimeline(start: celebrationStart) {
+                    STAResetPairingOverlay(count: model.pairedCameraCount, models: model.pairedCameraModels,
+                        onConfirm: { showSTAReset = false; Task { await model.resetSTAPairing() } },
+                        onDismiss: { showSTAReset = false })
                     .ignoresSafeArea()
-                    .opacity(pageFade)
+                }
             }
             if showSettings {
-                SettingsPopupOverlay(
-                    isPresented: $showSettings,
-                    showPhotoEffectsEntry: false,
-                    effectsStore: effectsStore,
-                    directory: directory,
-                    anchor: settingsAnchor,
-                    effectPreviewSource: nil,
-                    effectPreviewExif: nil,
-                    onEffectPreviewRequested: {}
-                )
-                .ignoresSafeArea()
-                .opacity(pageFade)
+                ConnectionSceneFadeTimeline(start: celebrationStart) {
+                    SettingsPopupOverlay(
+                        isPresented: $showSettings,
+                        showPhotoEffectsEntry: false,
+                        effectsStore: effectsStore,
+                        directory: directory,
+                        anchor: settingsAnchor,
+                        effectPreviewSource: nil,
+                        effectPreviewExif: nil,
+                        onEffectPreviewRequested: {}
+                    )
+                    .ignoresSafeArea()
+                }
             }
             if showSTATips {
-                STATipsOverlay(isPresented: $showSTATips, wirelessMode: tipsWirelessMode, anchor: tipsAnchor)
+                ConnectionSceneFadeTimeline(start: celebrationStart) {
+                    STATipsOverlay(isPresented: $showSTATips, wirelessMode: tipsWirelessMode, anchor: tipsAnchor)
                     .ignoresSafeArea()
-                    .opacity(pageFade)
+                }
             }
         }
         .coordinateSpace(name: ZTransferPopupAnchorSpace.name)
@@ -218,6 +213,23 @@ struct ConnectionPage: View {
         UIApplication.shared.open(url, options: [:]) { opened in
             guard !opened, let fallback = URL(string: UIApplication.openSettingsURLString) else { return }
             UIApplication.shared.open(fallback)
+        }
+    }
+}
+
+/// Keeps each non-card branch mounted as a static subtree while updating only
+/// its Android-matched scene opacity from the shared absolute celebration
+/// clock. Independent display callbacks cannot drift because no local clock or
+/// accumulated progress is used.
+private struct ConnectionSceneFadeTimeline<Content: View>: View {
+    let start: Date?
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 120.0, paused: start == nil)) { context in
+            let elapsed = connectionCelebrationElapsed(start: start, now: context.date)
+            let hero = CGFloat(min(1, max(0, elapsed / 620)))
+            content.opacity(1 - connectionCelebrationEase(hero))
         }
     }
 }

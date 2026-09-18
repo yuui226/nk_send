@@ -15,9 +15,7 @@ struct ConnectionMethodCard: View {
     /// celebration clock.  Keeping these values at the card boundary lets
     /// the surrounding page remain static while only the hero layers redraw.
     let selected: Bool
-    let success: Bool
-    let selectionSceneProgress: CGFloat
-    let successEffectProgress: CGFloat
+    let celebrationStart: Date?
     var onWirelessModeChanged: ((WirelessMode) -> Void)?
     var onConnect: (() -> Void)?
     var onResetSTAPairing: (() -> Void)?
@@ -61,11 +59,9 @@ struct ConnectionMethodCard: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            cardSurface
-                // Android keeps the selected mode badge above the card while the
-                // rounded card surface fades away. The flying badge and pulse
-                // layer below are therefore deliberately outside this modifier.
-                .modifier(ConnectionCelebrationModifier(progress: selectionSceneProgress))
+            ConnectionCardSurfaceTimeline(start: celebrationStart) {
+                cardSurface
+            }
             celebrationLayer
         }
         .frame(maxWidth: .infinity)
@@ -80,7 +76,14 @@ struct ConnectionMethodCard: View {
     private var cardSurface: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
-                modeBadge
+                // Match Android: the unique mode badge is rendered by the
+                // independent layer below. Keeping only this 42pt placeholder
+                // prevents a stationary copy from remaining in the card when
+                // the original badge takes off.
+                Color.clear
+                    .frame(width: 42, height: 42)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
                 Text(AppLocalized.resource(mode == .usb ? "USB" : "connection_wifi"))
                     .zTransferTypography(.titleMedium, weight: .bold)
                     .foregroundStyle(ZTransferColors.primaryText)
@@ -134,29 +137,36 @@ struct ConnectionMethodCard: View {
         .allowsHitTesting(!dimmed)
     }
 
-    /// Android's selected badge flies from its card origin to the upper third
-    /// of the screen while the card itself is fading. Keeping the calculation
-    /// in a geometry overlay means the card layout never remeasures during the
-    /// celebration, and the same target works for either side of the HStack.
-    @ViewBuilder
+    /// This is the only mode badge instance. It rests over the card header in
+    /// the idle state, then the very same view flies to the upper third while
+    /// the surface underneath fades. The unselected card's badge fades with
+    /// its card, matching Android's external 42dp flying container.
     private var celebrationLayer: some View {
-        GeometryReader { proxy in
-            let scene = connectionCelebrationEase(selectionSceneProgress)
-            if selected, scene > 0.0001 {
+        TimelineView(.animation(minimumInterval: 1.0 / 120.0,
+                                paused: celebrationStart == nil)) { context in
+            let values = ConnectionCelebrationValues(
+                elapsedMilliseconds: connectionCelebrationElapsed(
+                    start: celebrationStart, now: context.date
+                )
+            )
+            GeometryReader { proxy in
+                let scene = connectionCelebrationEase(values.hero)
                 let cardFrame = proxy.frame(in: .global)
                 let start = CGPoint(x: 14 + 21, y: 16 + 21)
                 let targetX = UIScreen.main.bounds.midX - cardFrame.minX
                 let targetY = UIScreen.main.bounds.height / 3 - cardFrame.minY
                 let travelX = targetX - start.x
                 let travelY = targetY - start.y
-                let arc = sin(scene * .pi) * 10
+                let heroScene = selected ? scene : 0
+                let arc = sin(heroScene * .pi) * 10
                 let translation = CGSize(
-                    width: travelX * scene,
-                    height: travelY * scene - arc
+                    width: travelX * heroScene,
+                    height: travelY * heroScene - arc
                 )
+                let success = values.success > 0 && selected
 
                 if success {
-                    ConnectionSuccessOverlay(progress: successEffectProgress)
+                    ConnectionSuccessOverlay(progress: values.success)
                         .frame(width: 220, height: 220)
                         .position(x: start.x, y: start.y)
                         .offset(translation)
@@ -164,8 +174,9 @@ struct ConnectionMethodCard: View {
 
                 // Android places the free pulse behind the badge so the mode
                 // glyph remains crisp while the rings expand past its edge.
-                modeBadge
-                    .scaleEffect(1 + scene * 1.12)
+                modeBadge(success: success)
+                    .scaleEffect(1 + heroScene * 1.12)
+                    .opacity(selected ? 1 : 1 - scene)
                     .position(x: start.x, y: start.y)
                     .offset(translation)
             }
@@ -192,7 +203,7 @@ struct ConnectionMethodCard: View {
         }
     }
 
-    private var modeBadge: some View {
+    private func modeBadge(success: Bool) -> some View {
         let badgeAccent = success ? ZTransferColors.statusConnected : accent
         return Group {
             if mode == .usb { ClassicUSBIcon(tint: accent) }
@@ -422,6 +433,26 @@ struct ConnectionMethodCard: View {
             return nil
         }
     }
+}
+
+/// Stores the complete static card subtree as content and refreshes only its
+/// three exit properties. The former page-level timeline rebuilt both cards,
+/// GPS and every control on each display tick.
+private struct ConnectionCardSurfaceTimeline<Content: View>: View {
+    let start: Date?
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 120.0, paused: start == nil)) { context in
+            let elapsed = connectionCelebrationElapsed(start: start, now: context.date)
+            let hero = CGFloat(min(1, max(0, elapsed / 620)))
+            content.modifier(ConnectionCelebrationModifier(progress: hero))
+        }
+    }
+}
+
+func connectionCelebrationElapsed(start: Date?, now: Date) -> Double {
+    start.map { max(0, now.timeIntervalSince($0) * 1_000) } ?? 0
 }
 
 /// Mirrors HomeScreen.kt's selected-card exit treatment. Both cards fade and

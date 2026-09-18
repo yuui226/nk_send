@@ -272,17 +272,11 @@ struct RemoteView: View {
         ZStack(alignment: .topTrailing) {
             remoteViewfinder
                 .padding(6)
-            Button {
-                withAnimation(ZTransferMotion.standard) { immersiveFullscreen = false }
-            } label: {
-                Image(systemName: "chevron.backward")
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundStyle(ZTransferColors.primaryText)
-                    .frame(width: 38, height: 38)
-            }
-            .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 19))
+            // Android keeps the original top-right return button mounted in
+            // immersive mode. Only its action changes; no second fullscreen-
+            // specific chevron is drawn over the viewfinder.
+            remoteBackButton
             .padding(12)
-            .accessibilityLabel(AppLocalized.resource("cd_remote_fullscreen_exit"))
         }
     }
 
@@ -308,14 +302,22 @@ struct RemoteView: View {
     }
 
     private var remoteBackButton: some View {
-        Button { dismiss() } label: {
+        Button {
+            if immersiveFullscreen {
+                withAnimation(ZTransferMotion.standard) { immersiveFullscreen = false }
+            } else {
+                dismiss()
+            }
+        } label: {
             Image(systemName: "arrow.right")
                 .font(.system(size: 18, weight: .semibold))
                 .foregroundStyle(ZTransferColors.primaryText)
                 .frame(width: 36, height: 36)
         }
         .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
-        .accessibilityLabel(AppLocalized.resource("cd_back"))
+        .accessibilityLabel(AppLocalized.resource(
+            immersiveFullscreen ? "cd_remote_fullscreen_exit" : "cd_back"
+        ))
     }
 
     private var remoteSignalButton: some View {
@@ -335,7 +337,6 @@ struct RemoteView: View {
                 PhotoListSignalIcon(isUSB: isUSBSession, wirelessMode: wirelessMode,
                                     connected: isSessionConnected,
                                     apSignalPercent: apSignalPercent)
-                    .frame(width: 19, height: 19)
                 if signalExpanded && isUSBSession && isSessionConnected {
                     Text(AppLocalized.resource("connection_usb"))
                         .zTransferTypography(.labelSmall, weight: .medium)

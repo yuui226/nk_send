@@ -41,6 +41,40 @@ enum LocalOriginalPreviewRoute: Equatable {
 
 private let videoFourGiB = UInt64(4) * 1024 * 1024 * 1024
 
+enum PhotoPreviewQueueDragDirection: Equatable {
+    case undecided
+    case upward
+    case rejected
+}
+
+/// Match Android's direction lock: horizontal/downward movement is released
+/// to the pager immediately, while a diagonal drag stays undecided until its
+/// upward component is at least 1.15x the horizontal component.
+func photoPreviewQueueDragDirection(
+    translation: CGSize,
+    touchSlop: CGFloat = 8
+) -> PhotoPreviewQueueDragDirection {
+    guard hypot(translation.width, translation.height) >= touchSlop else {
+        return .undecided
+    }
+    let upwardDistance = -translation.height
+    if translation.height >= 0 || abs(translation.width) > upwardDistance {
+        return .rejected
+    }
+    return upwardDistance >= abs(translation.width) * 1.15 ? .upward : .undecided
+}
+
+func photoPreviewQueueVisualOffset(
+    upwardDistance: CGFloat,
+    triggerDistance: CGFloat = 96
+) -> CGFloat {
+    guard triggerDistance > 0 else { return 0 }
+    let distance = max(0, upwardDistance)
+    let resisted = min(distance, triggerDistance) +
+        max(0, distance - triggerDistance) * 0.22
+    return -min(resisted, triggerDistance * 1.24)
+}
+
 func formatPreviewCaptureDate(_ raw: String?) -> String? {
     guard let raw, raw.count >= 8, raw.prefix(8).allSatisfy(\.isNumber),
           let year = Int(raw.prefix(4)),
@@ -143,6 +177,7 @@ struct PhotoPreviewView: View {
     // survives leaving the preview and reopening the app.
     @AppStorage("preview_histogram_enabled") private var histogramVisible = false
     @State private var histogramBars: [CGFloat] = []
+    @State private var histogramFileID: UInt32?
     // The preview page publishes the bitmap it is already displaying. Keep
     // that reference so enabling the histogram never starts another camera
     // read or decodes the same image a second time.
@@ -158,7 +193,9 @@ struct PhotoPreviewView: View {
     @State private var previousTransfersBusy = false
     @State private var neighborPrefetchTask: Task<Void, Never>?
     @State private var queueDragOffset: CGFloat = 0
+    @State private var queueDragDirection: PhotoPreviewQueueDragDirection = .undecided
     @State private var currentZoomed = false
+    @State private var magnificationActive = false
     @State private var queueFlightTask: Task<Void, Never>?
     @State private var queueFlightActive = false
     @State private var queueFlightStartedAt: Date?
@@ -270,15 +307,33 @@ struct PhotoPreviewView: View {
                                              )
                                              if retained.contains(file.id) { displayedImages[file.id] = image }
                                              guard histogramVisible, currentPhoto?.id == file.id else { return }
-                                             histogramBars = image.map(luminanceHistogram) ?? []
+                                             if let image {
+                                                 showHistogram(for: file, image: image)
+                                             } else {
+                                                 histogramFileID = nil
+                                             }
                                          }, onTap: startClose,
                                          onZoomedChange: { zoomed in if index == itemIndex { currentZoomed = zoomed } },
+                                         onMagnificationChange: { active in
+                                             guard index == itemIndex else { return }
+                                             magnificationActive = active
+                                             if active {
+                                                 queueDragDirection = .rejected
+                                                 settleQueueDrag()
+                                             }
+                                         },
                                          isCurrent: index == itemIndex)
                         case .burst(let group):
                             BurstCollectionPreview(
                                 session: session,
                                 group: group,
                                 stackMotion: animatedBurstID == group.id ? burstStackMotion : 0,
+                                onTransfer: {
+                                    if let first = group.files.first {
+                                        startQueueFlight(for: first, burstFiles: group.files)
+                                    }
+                                },
+                                onExpand: { expandBurst(group) },
                                 onTap: startClose
                             )
                         }
@@ -287,6 +342,10 @@ struct PhotoPreviewView: View {
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
+            // Android's HorizontalPager owns the complete edge-to-edge stage;
+            // only its controls apply system-bar padding. Center the image in
+            // that same full-screen viewport instead of the reduced safe area.
+            .ignoresSafeArea()
             .modifier(PhotoPreviewAnchorTransform(
                 progress: presentationProgress,
                 anchor: closing ? collapseAnchor : initialAnchor,
@@ -297,30 +356,16 @@ struct PhotoPreviewView: View {
             .opacity(burstPagerAlpha)
             .offset(x: UIScreen.main.bounds.width * burstPagerSlide)
             .offset(y: queueDragOffset)
-            .allowsHitTesting(!queueFlightActive && !closing && !burstTransitionBusy)
-            .simultaneousGesture(
-                DragGesture(minimumDistance: 8)
-                    .onChanged { value in
-                        guard !queueFlightActive else { return }
-                        let translation = value.translation
-                        guard currentPhoto != nil, !currentZoomed, !queueFlightActive, translation.height < 0,
-                              -translation.height >= abs(translation.width) * 1.15 else {
-                            return
-                        }
-                        queueDragOffset = max(-180, translation.height)
-                    }
-                    .onEnded { value in
-                        guard !currentZoomed, !queueFlightActive,
-                              previewEntries.indices.contains(index) else { return }
-                        let translation = value.translation
-                        guard translation.height < 0,
-                              -translation.height >= 96,
-                              -translation.height >= abs(translation.width) * 1.15 else {
-                            withAnimation(ZTransferMotion.standard) { queueDragOffset = 0 }
-                            return
-                        }
-                        if let file = currentPhoto { startQueueFlight(for: file) }
-                    }
+            // Once an upward queue drag wins direction arbitration, cancel
+            // the page scroll recognizer for the rest of this touch. A normal
+            // horizontal drag keeps the pager enabled.
+            .scrollDisabled(
+                currentZoomed || magnificationActive || queueDragDirection == .upward ||
+                    queueFlightActive || burstTransitionBusy
+            )
+            .allowsHitTesting(
+                !queueFlightActive && !closing && !burstTransitionBusy &&
+                    queueDragDirection != .upward
             )
             if queueFlightActive, previewEntries.indices.contains(index) {
                 GeometryReader { proxy in
@@ -354,7 +399,7 @@ struct PhotoPreviewView: View {
             if let file = currentPhoto {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 8) {
-                        Text("\(index + 1)/\(previewEntries.count) · \(file.fileName)")
+                        Text(file.fileName)
                             .font(.system(size: 16, weight: .semibold))
                             .lineLimit(1).minimumScaleFactor(0.5).allowsTightening(true)
                         if let task = queueModel.task(for: file.id), task.status != .completed {
@@ -385,51 +430,63 @@ struct PhotoPreviewView: View {
                 .padding(.top, 6).padding(.leading, 12).padding(.trailing, 184)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
-            if let file = currentPhoto {
-                VStack(spacing: 12) {
-                    if photoPreviewCollectionIndex(previewEntries, memberIndex: index) != nil {
-                        PreviewCircleButton(symbol: "chevron.left", accessibilityKey: "cd_collapse") {
-                            collapseCurrentBurst()
-                        }
-                    }
-                    if !isVideo(file) {
-                        PreviewCircleButton(symbol: "chart.bar.fill", accessibilityKey: "cd_preview_histogram", active: histogramVisible) {
-                            histogramVisible.toggle()
-                        }
-                        PreviewCircleButton(symbol: "rotate.left", accessibilityKey: "cd_rotate_photo") {
-                            rotationDegrees -= 90
-                            rotationQuarterTurns = ((Int(-rotationDegrees / 90) % 4) + 4) % 4
-                        }
-                    }
-                    PreviewCircleButton(symbol: "plus", accessibilityKey: "cd_transfer") { startQueueFlight(for: file) }
-                }
-                .padding(.trailing, 20).padding(.bottom, 80)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-            } else if previewEntries.indices.contains(index), case let .burst(group) = previewEntries[index] {
-                HStack(spacing: 22) {
-                    PreviewCircleButton(symbol: "plus", accessibilityKey: "cd_transfer_group", size: 48) {
-                        if let first = group.files.first { startQueueFlight(for: first, burstFiles: group.files) }
-                    }
-                    PreviewCircleButton(symbol: "chevron.right", accessibilityKey: "cd_expand") { expandBurst(group) }
-                }
-                .padding(.bottom, 112)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            if let file = currentPhoto, highResolutionLoading.contains(file.id) {
+                Rectangle()
+                    .fill(ZTransferColors.accentBlue.opacity(0.9))
+                    .frame(height: 2)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .allowsHitTesting(false)
             }
-            if histogramVisible, !histogramBars.isEmpty {
-                HStack(alignment: .bottom, spacing: 2) {
-                    ForEach(Array(histogramBars.enumerated()), id: \.offset) { _, value in
-                        RoundedRectangle(cornerRadius: 1).fill(.white.opacity(0.48)).frame(width: 3, height: max(2, value * 34))
+            ZStack {
+                if let file = currentPhoto {
+                    VStack(spacing: 12) {
+                        if photoPreviewCollectionIndex(previewEntries, memberIndex: index) != nil {
+                            PreviewCircleButton(icon: .collapse, accessibilityKey: "cd_collapse") {
+                                collapseCurrentBurst()
+                            }
+                        }
+                        if !isVideo(file) {
+                            PreviewCircleButton(icon: .histogram, accessibilityKey: "cd_preview_histogram", active: histogramVisible) {
+                                histogramVisible.toggle()
+                            }
+                            PreviewCircleButton(icon: .rotateLeft, accessibilityKey: "cd_rotate_photo") {
+                                let nextDegrees = rotationDegrees - 90
+                                // Match Android's animateFloatAsState(tween(220)):
+                                // keep accumulating the target angle so repeated
+                                // taps always continue counter-clockwise rather
+                                // than snapping across the 0/360-degree boundary.
+                                withAnimation(photoPreviewRotationAnimation) {
+                                    rotationDegrees = nextDegrees
+                                }
+                                rotationQuarterTurns = ((Int(-nextDegrees / 90) % 4) + 4) % 4
+                            }
+                        }
+                        PreviewCircleButton(icon: .add, accessibilityKey: "cd_transfer") {
+                            startQueueFlight(for: file)
+                        }
                     }
+                    .transition(.opacity)
                 }
-                .frame(width: 110, height: 48, alignment: .bottom)
-                .padding(8)
-                .background(.black.opacity(0.35), in: RoundedRectangle(cornerRadius: 12))
-                .transition(.opacity)
-                .padding(.leading, 20).padding(.bottom, 72)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+            }
+            .padding(.trailing, 20).padding(.bottom, 80)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+            .animation(.easeInOut(duration: 0.18), value: currentPhoto == nil)
+            .allowsHitTesting(currentPhoto != nil)
+            if !histogramBars.isEmpty {
+                PreviewHistogramOverlay(values: histogramBars)
+                    .padding(.leading, 20).padding(.bottom, 72)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                    .opacity(histogramOverlayVisible ? 1 : 0)
+                    .animation(.easeInOut(duration: 0.18), value: histogramOverlayVisible)
+                    .transition(.opacity)
+                    .allowsHitTesting(false)
             }
         }
         .allowsHitTesting(!burstTransitionBusy && !closing)
+        // Keep the arbiter on the stable overlay rather than the TabView. The
+        // TabView can therefore be disabled after an upward lock without
+        // cancelling the gesture that owns the queue drag.
+        .simultaneousGesture(previewQueueSwipeGesture)
         .onAppear {
             rotationQuarterTurns = ((rotationQuarterTurns % 4) + 4) % 4
             rotationDegrees = -90 * Double(rotationQuarterTurns)
@@ -460,7 +517,9 @@ struct PhotoPreviewView: View {
                 exif = nil
                 exifLoading = false
                 currentZoomed = false
+                magnificationActive = false
                 trimPreviewState()
+                refreshHistogramForCurrentPhoto()
             }
         }
         .onChange(of: queueModel.snapshot.isTransferring) { busy in
@@ -472,9 +531,7 @@ struct PhotoPreviewView: View {
             neighborPrefetchTask = Task { await prefetchNeighbors(around: currentIndex, allowCameraRequest: true) }
         }
         .onChange(of: histogramVisible) { visible in
-            guard visible, let file = currentPhoto,
-                  let image = displayedImages[file.id] else { return }
-            histogramBars = luminanceHistogram(image)
+            if visible { refreshHistogramForCurrentPhoto() }
         }
         .task {
             await session.setFHDActive(true)
@@ -495,6 +552,79 @@ struct PhotoPreviewView: View {
     private var currentPhoto: CameraFile? {
         guard previewEntries.indices.contains(index) else { return nil }
         return previewEntries[index].file
+    }
+
+    private var histogramOverlayVisible: Bool {
+        photoPreviewHistogramOverlayVisible(
+            enabled: histogramVisible,
+            currentPhotoID: currentPhoto?.id,
+            histogramFileID: histogramFileID,
+            binCount: histogramBars.count
+        )
+    }
+
+    private func refreshHistogramForCurrentPhoto() {
+        guard histogramVisible, let file = currentPhoto else { return }
+        guard let image = displayedImages[file.id] else {
+            histogramFileID = nil
+            return
+        }
+        showHistogram(for: file, image: image)
+    }
+
+    private func showHistogram(for file: CameraFile, image: UIImage) {
+        let bars = previewLuminanceHistogram(image)
+        withAnimation(.easeInOut(duration: 0.18)) {
+            histogramBars = bars
+            histogramFileID = file.id
+        }
+    }
+
+    private var previewQueueSwipeGesture: some Gesture {
+        DragGesture(minimumDistance: 8)
+            .onChanged { value in
+                guard currentPhoto != nil, !currentZoomed, !magnificationActive,
+                      presentationProgress >= 0.99, !queueFlightActive,
+                      !closing, !burstTransitionBusy else {
+                    queueDragDirection = .rejected
+                    return
+                }
+                if queueDragDirection == .undecided {
+                    let resolved = photoPreviewQueueDragDirection(translation: value.translation)
+                    if resolved != .undecided { queueDragDirection = resolved }
+                }
+                guard queueDragDirection == .upward else { return }
+                queueDragOffset = photoPreviewQueueVisualOffset(
+                    upwardDistance: -value.translation.height
+                )
+            }
+            .onEnded { value in
+                let resolved = queueDragDirection == .undecided
+                    ? photoPreviewQueueDragDirection(translation: value.translation)
+                    : queueDragDirection
+                queueDragDirection = .undecided
+                guard resolved == .upward,
+                      !currentZoomed, !magnificationActive, !queueFlightActive,
+                      previewEntries.indices.contains(index) else {
+                    settleQueueDrag()
+                    return
+                }
+                if -value.translation.height >= 96, let file = currentPhoto {
+                    startQueueFlight(for: file)
+                } else {
+                    settleQueueDrag()
+                }
+            }
+    }
+
+    private func settleQueueDrag() {
+        guard abs(queueDragOffset) >= 0.5 else {
+            queueDragOffset = 0
+            return
+        }
+        withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) {
+            queueDragOffset = 0
+        }
     }
 
     private func startClose() {
@@ -527,10 +657,8 @@ struct PhotoPreviewView: View {
         trimPreviewState()
         guard let file = currentPhoto else {
             exif = nil
-            histogramBars = []
             return
         }
-        histogramBars = []
         exif = exifByFile[file.id]
         exifLoading = !exifFinished.contains(file.id)
 
@@ -840,18 +968,88 @@ struct PhotoPreviewView: View {
     }
 }
 
-private func luminanceHistogram(_ image: UIImage) -> [CGFloat] {
+func photoPreviewHistogramOverlayVisible(
+    enabled: Bool,
+    currentPhotoID: UInt32?,
+    histogramFileID: UInt32?,
+    binCount: Int
+) -> Bool {
+    enabled && currentPhotoID != nil && currentPhotoID == histogramFileID && binCount > 0
+}
+
+func previewLuminanceHistogram(_ image: UIImage) -> [CGFloat] {
     guard let cg = image.cgImage else { return [] }
-    let width = min(cg.width, 320), height = min(cg.height, 240)
+    // Android samples roughly 24k pixels, uses the Rec.709 integer weights
+    // (54 + 183 + 19 = 256), and retains all 256 bins. Downsample once during
+    // the existing background task instead of analysing the full-resolution
+    // original or reducing the curve to a visibly different 24-column chart.
+    let sourcePixels = Double(max(1, cg.width * cg.height))
+    let sampleScale = min(1, sqrt(24_000 / sourcePixels))
+    let width = max(1, Int((Double(cg.width) * sampleScale).rounded()))
+    let height = max(1, Int((Double(cg.height) * sampleScale).rounded()))
     guard width > 0, height > 0 else { return [] }
-    var pixels = [UInt8](repeating: 0, count: width * height)
-    guard let context = CGContext(data: &pixels, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width, space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue) else { return [] }
+    var pixels = [UInt8](repeating: 0, count: width * height * 4)
+    let bitmapInfo = CGBitmapInfo.byteOrder32Big.rawValue |
+        CGImageAlphaInfo.premultipliedLast.rawValue
+    guard let context = CGContext(
+        data: &pixels,
+        width: width,
+        height: height,
+        bitsPerComponent: 8,
+        bytesPerRow: width * 4,
+        space: CGColorSpaceCreateDeviceRGB(),
+        bitmapInfo: bitmapInfo
+    ) else { return [] }
     context.interpolationQuality = .low
     context.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
-    var bins = [Int](repeating: 0, count: 24)
-    for pixel in pixels { bins[min(23, Int(pixel) * 24 / 256)] += 1 }
+    var bins = [Int](repeating: 0, count: 256)
+    for offset in stride(from: 0, to: pixels.count, by: 4) {
+        let luminance = (54 * Int(pixels[offset]) +
+                         183 * Int(pixels[offset + 1]) +
+                         19 * Int(pixels[offset + 2])) >> 8
+        bins[luminance] += 1
+    }
     let maxValue = max(1, bins.max() ?? 1)
     return bins.map { CGFloat($0) / CGFloat(maxValue) }
+}
+
+/// Android's shared 118x62 histogram: 256-bin filled luminance curve, bright
+/// outline and a faint baseline. This is intentionally not a bar chart.
+private struct PreviewHistogramOverlay: View {
+    let values: [CGFloat]
+
+    var body: some View {
+        Canvas { context, size in
+            guard values.count > 1 else { return }
+            let left: CGFloat = 7
+            let top: CGFloat = 6
+            let width = max(0, size.width - left * 2)
+            let height = max(0, size.height - top * 2)
+            let bottom = top + height
+            var curve = Path()
+            curve.move(to: CGPoint(x: left, y: bottom))
+            for (index, value) in values.enumerated() {
+                curve.addLine(to: CGPoint(
+                    x: left + width * CGFloat(index) / CGFloat(values.count - 1),
+                    y: top + height * (1 - min(1, max(0, value)))
+                ))
+            }
+            curve.addLine(to: CGPoint(x: left + width, y: bottom))
+            curve.closeSubpath()
+            context.fill(curve, with: .color(.white.opacity(0.28)))
+            context.stroke(
+                curve,
+                with: .color(.white.opacity(0.90)),
+                style: StrokeStyle(lineWidth: 1.05, lineCap: .round)
+            )
+            var baseline = Path()
+            baseline.move(to: CGPoint(x: left, y: bottom))
+            baseline.addLine(to: CGPoint(x: left + width, y: bottom))
+            context.stroke(baseline, with: .color(.white.opacity(0.22)), lineWidth: 0.75)
+        }
+        .frame(width: 118, height: 62)
+        .background(Color.black.opacity(0.48), in: RoundedRectangle(cornerRadius: 8))
+    }
 }
 
 private struct PhotoPreviewQueueFlightView: View {
@@ -947,8 +1145,12 @@ private func photoPreviewQuadraticBezier(
     )
 }
 
+private enum PreviewControlIcon: Equatable {
+    case collapse, expand, histogram, rotateLeft, add
+}
+
 private struct PreviewCircleButton: View {
-    let symbol: String
+    let icon: PreviewControlIcon
     let accessibilityKey: String
     var active = false
     var size: CGFloat = 44
@@ -956,8 +1158,8 @@ private struct PreviewCircleButton: View {
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: symbol == "plus" ? size * 0.5 : 20, weight: .semibold))
+            PreviewControlMark(icon: icon)
+                .frame(width: markSize, height: markSize)
                 .foregroundStyle(ZTransferColors.accentBlue)
                 .frame(width: size, height: size)
         }
@@ -970,6 +1172,123 @@ private struct PreviewCircleButton: View {
         ))
         .accessibilityLabel(AppLocalized.resource(accessibilityKey))
     }
+
+    private var markSize: CGFloat {
+        switch icon {
+        case .collapse, .expand: return 25
+        case .histogram: return 20
+        case .rotateLeft, .add: return size * 0.5
+        }
+    }
+}
+
+/// Code-drawn copies of the Android Material/control marks. SF Symbols use a
+/// different taper, optical width and bar count, which is obvious when the
+/// four controls are stacked together.
+private struct PreviewControlMark: View {
+    let icon: PreviewControlIcon
+
+    var body: some View {
+        Canvas { context, size in
+            let tint = GraphicsContext.Shading.color(ZTransferColors.accentBlue)
+            switch icon {
+            case .histogram:
+                let lineWidth: CGFloat = 1.5
+                let barWidth = (size.width - 7) / 5
+                let gap: CGFloat = 1.5
+                let baseY = size.height - 2
+                let heights: [CGFloat] = [0.38, 0.62, 0.85, 0.55, 0.28]
+                for index in 0..<5 {
+                    let x = 2.5 + CGFloat(index) * (barWidth + gap)
+                    var bar = Path()
+                    bar.move(to: CGPoint(x: x, y: baseY))
+                    bar.addLine(to: CGPoint(x: x, y: baseY - baseY * heights[index]))
+                    context.stroke(
+                        bar,
+                        with: tint,
+                        style: StrokeStyle(lineWidth: lineWidth, lineCap: .round)
+                    )
+                }
+
+            case .add:
+                let scale = min(size.width, size.height) / 24
+                var plus = Path()
+                plus.addRect(CGRect(x: 5 * scale, y: 11 * scale,
+                                    width: 14 * scale, height: 2 * scale))
+                plus.addRect(CGRect(x: 11 * scale, y: 5 * scale,
+                                    width: 2 * scale, height: 14 * scale))
+                context.fill(plus, with: tint)
+
+            case .collapse, .expand:
+                let scale = min(size.width, size.height) / 24
+                var chevron = Path()
+                if icon == .collapse {
+                    chevron.move(to: CGPoint(x: 15.41 * scale, y: 7.41 * scale))
+                    chevron.addLine(to: CGPoint(x: 14 * scale, y: 6 * scale))
+                    chevron.addLine(to: CGPoint(x: 8 * scale, y: 12 * scale))
+                    chevron.addLine(to: CGPoint(x: 14 * scale, y: 18 * scale))
+                    chevron.addLine(to: CGPoint(x: 15.41 * scale, y: 16.59 * scale))
+                    chevron.addLine(to: CGPoint(x: 10.83 * scale, y: 12 * scale))
+                } else {
+                    chevron.move(to: CGPoint(x: 8.59 * scale, y: 16.59 * scale))
+                    chevron.addLine(to: CGPoint(x: 10 * scale, y: 18 * scale))
+                    chevron.addLine(to: CGPoint(x: 16 * scale, y: 12 * scale))
+                    chevron.addLine(to: CGPoint(x: 10 * scale, y: 6 * scale))
+                    chevron.addLine(to: CGPoint(x: 8.59 * scale, y: 7.41 * scale))
+                    chevron.addLine(to: CGPoint(x: 13.17 * scale, y: 12 * scale))
+                }
+                chevron.closeSubpath()
+                context.fill(chevron, with: tint)
+
+            case .rotateLeft:
+                let scale = min(size.width, size.height) / 24
+                let rotation = materialRotateLeftPath(scale: scale)
+                context.fill(rotation, with: tint)
+            }
+        }
+    }
+}
+
+/// `Icons.Default.RotateLeft` from the Android Material icon set, expressed in
+/// its native 24x24 viewport and scaled only at draw time.
+private func materialRotateLeftPath(scale: CGFloat) -> Path {
+    func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+        CGPoint(x: x * scale, y: y * scale)
+    }
+    var path = Path()
+    path.move(to: point(7.11, 8.53))
+    path.addLine(to: point(5.70, 7.11))
+    path.addCurve(to: point(4.07, 11), control1: point(4.80, 8.27), control2: point(4.24, 9.61))
+    path.addLine(to: point(6.09, 11))
+    path.addCurve(to: point(7.11, 8.53), control1: point(6.23, 10.13), control2: point(6.58, 9.28))
+    path.closeSubpath()
+
+    path.move(to: point(6.09, 13))
+    path.addLine(to: point(4.07, 13))
+    path.addCurve(to: point(5.69, 16.89), control1: point(4.24, 14.39), control2: point(4.79, 15.73))
+    path.addLine(to: point(7.10, 15.47))
+    path.addCurve(to: point(6.09, 13), control1: point(6.58, 14.72), control2: point(6.23, 13.88))
+    path.closeSubpath()
+
+    path.move(to: point(7.10, 18.32))
+    path.addCurve(to: point(11, 19.93), control1: point(8.26, 19.22), control2: point(9.61, 19.76))
+    path.addLine(to: point(11, 17.90))
+    path.addCurve(to: point(8.54, 16.87), control1: point(10.13, 17.75), control2: point(9.29, 17.41))
+    path.addLine(to: point(7.10, 18.32))
+    path.closeSubpath()
+
+    path.move(to: point(13, 4.07))
+    path.addLine(to: point(13, 1))
+    path.addLine(to: point(8.45, 5.55))
+    path.addLine(to: point(13, 10))
+    path.addLine(to: point(13, 6.09))
+    path.addCurve(to: point(18, 12), control1: point(15.84, 6.57), control2: point(18, 9.03))
+    path.addCurve(to: point(13, 17.91), control1: point(18, 14.97), control2: point(15.84, 17.43))
+    path.addLine(to: point(13, 19.93))
+    path.addCurve(to: point(20, 12), control1: point(16.95, 19.44), control2: point(20, 16.08))
+    path.addCurve(to: point(13, 4.07), control1: point(20, 7.92), control2: point(16.95, 4.56))
+    path.closeSubpath()
+    return path
 }
 
 /// Android's collapsed burst page: a compact stack of up to three cached
@@ -980,38 +1299,58 @@ private struct BurstCollectionPreview: View {
     let session: CameraSession
     let group: BurstPhotoGroup
     let stackMotion: CGFloat
+    let onTransfer: () -> Void
+    let onExpand: () -> Void
     let onTap: () -> Void
 
     var body: some View {
         GeometryReader { proxy in
             let side = min(proxy.size.width * 0.72, proxy.size.height * 0.46)
             ZStack {
-                ForEach(Array(group.files.prefix(3).reversed().enumerated()), id: \.element.id) { index, file in
-                    let last = min(2, group.files.count - 1)
-                    let spread: CGFloat = index == last ? 0 : (index.isMultiple(of: 2) ? -1 : 1)
-                    CachedBurstThumbnail(session: session, file: file)
-                        .frame(width: side * 0.86, height: side * 0.86)
-                        .rotationEffect(.degrees(index == 0 ? -6 : index == 1 ? 5 : 0))
-                        .offset(x: index == 0 ? -12 : index == 1 ? 12 : 0,
-                                y: index == 2 ? 2 : 5)
-                        .offset(x: spread * 6 * stackMotion)
-                        .scaleEffect(1 + 0.012 * stackMotion)
+                ZStack {
+                    ForEach(Array(group.files.prefix(3).reversed().enumerated()), id: \.element.id) { index, file in
+                        let last = min(2, group.files.count - 1)
+                        let spread: CGFloat = index == last ? 0 : (index.isMultiple(of: 2) ? -1 : 1)
+                        CachedBurstThumbnail(session: session, file: file)
+                            .frame(width: side * 0.86, height: side * 0.86)
+                            .rotationEffect(.degrees(index == 0 ? -6 : index == 1 ? 5 : 0))
+                            .offset(x: index == 0 ? -12 : index == 1 ? 12 : 0,
+                                    y: index == 2 ? 2 : 5)
+                            .offset(x: spread * 6 * stackMotion)
+                            .scaleEffect(1 + 0.012 * stackMotion)
+                    }
+                    HStack(spacing: 4) {
+                        BurstGlyph().frame(width: 23, height: 13)
+                        Text("\(group.files.count)")
+                    }
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(Color.teal.opacity(0.9), in: Capsule())
+                        .frame(width: side, height: side, alignment: .topLeading)
+                        .padding(8)
                 }
-                HStack(spacing: 4) {
-                    BurstGlyph().frame(width: 23, height: 13)
-                    Text("\(group.files.count)")
+                .frame(width: side, height: side)
+                .onTapGesture(perform: onTap)
+
+                HStack(spacing: 22) {
+                    PreviewCircleButton(
+                        icon: .add,
+                        accessibilityKey: "cd_transfer_group",
+                        size: 48,
+                        action: onTransfer
+                    )
+                    PreviewCircleButton(
+                        icon: .expand,
+                        accessibilityKey: "cd_expand",
+                        action: onExpand
+                    )
                 }
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .background(Color.teal.opacity(0.9), in: Capsule())
-                    .frame(width: side, height: side, alignment: .topLeading)
-                    .padding(8)
+                .padding(.bottom, 112 + proxy.safeAreaInsets.bottom)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
             }
-            .frame(width: side, height: side)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .onTapGesture(perform: onTap)
         }
     }
 }
@@ -1054,6 +1393,7 @@ private struct PreviewImage: View {
     let onDisplayImage: (UIImage?) -> Void
     let onTap: () -> Void
     let onZoomedChange: (Bool) -> Void
+    let onMagnificationChange: (Bool) -> Void
     let isCurrent: Bool
     @State private var thumbnail: UIImage?
     @State private var remoteThumbnailUnavailable = false
@@ -1062,83 +1402,104 @@ private struct PreviewImage: View {
     @State private var offset: CGSize = .zero
     @State private var gestureStartScale: CGFloat = 1
     @State private var gestureStartOffset: CGSize = .zero
+    @State private var zoomAnimationTask: Task<Void, Never>?
+    @State private var zoomAnimationActive = false
+    @GestureState private var magnifying = false
 
     var body: some View {
-        ZStack {
-            if let thumbnail {
-                Image(uiImage: thumbnail)
-                    .resizable().scaledToFit()
-                    .opacity(zoomEnabled
-                             ? (highResolutionImage == nil ? 1 : 1 - highResolutionAlpha)
-                             : 0.56)
-            }
-            if let highResolutionImage {
-                Image(uiImage: highResolutionImage)
-                    .resizable().scaledToFit()
-                    .opacity(thumbnail == nil ? 1 : highResolutionAlpha)
-            }
-            if thumbnail == nil && highResolutionImage == nil {
-                if remoteThumbnailUnavailable {
-                    Text(AppLocalized.resource("no_preview"))
-                        .foregroundStyle(.white.opacity(0.8))
-                } else {
-                    ProgressView().tint(.white)
+        GeometryReader { proxy in
+            ZStack {
+                if let thumbnail {
+                    Image(uiImage: thumbnail)
+                        .resizable().scaledToFit()
+                        .opacity(zoomEnabled
+                                 ? (highResolutionImage == nil ? 1 : 1 - highResolutionAlpha)
+                                 : 0.56)
                 }
-            }
-            if !zoomEnabled {
-                VStack(spacing: 6) {
-                    Text(AppLocalized.resource("video_no_preview"))
-                        .font(.system(size: 14, weight: .semibold))
-                    let metadata = videoPreviewMetadata(file: file)
-                    if !metadata.isEmpty {
-                        Text(metadata)
-                            .font(.system(size: 13, weight: .regular))
-                            .foregroundStyle(.white.opacity(0.76))
+                if let highResolutionImage {
+                    Image(uiImage: highResolutionImage)
+                        .resizable().scaledToFit()
+                        .opacity(thumbnail == nil ? 1 : highResolutionAlpha)
+                }
+                if thumbnail == nil && highResolutionImage == nil {
+                    if remoteThumbnailUnavailable {
+                        Text(AppLocalized.resource("no_preview"))
+                            .foregroundStyle(.white.opacity(0.8))
+                    } else {
+                        ProgressView().tint(.white)
                     }
                 }
-                .foregroundStyle(.white)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 20)
-                .padding(.vertical, 12)
-                .background(.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 18))
-                .overlay(RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.22), lineWidth: 1))
+                if !zoomEnabled {
+                    VStack(spacing: 6) {
+                        Text(AppLocalized.resource("video_no_preview"))
+                            .font(.system(size: 14, weight: .semibold))
+                        let metadata = videoPreviewMetadata(file: file)
+                        if !metadata.isEmpty {
+                            Text(metadata)
+                                .font(.system(size: 13, weight: .regular))
+                                .foregroundStyle(.white.opacity(0.76))
+                        }
+                    }
+                    .foregroundStyle(.white)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+                    .background(.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 18))
+                    .overlay(RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.22), lineWidth: 1))
+                }
             }
+            .frame(width: proxy.size.width, height: proxy.size.height)
+            .modifier(PreviewRotationTransform(
+                rotationDegrees: rotationDegrees,
+                imageSize: (highResolutionImage ?? thumbnail)?.size,
+                viewportSize: proxy.size
+            ))
+            .scaleEffect(scale)
+            .offset(offset)
+            .simultaneousGesture(magnificationGesture(
+                viewportSize: proxy.size,
+                imageSize: (highResolutionImage ?? thumbnail)?.size
+            ))
+            .simultaneousGesture(panGesture(
+                viewportSize: proxy.size,
+                imageSize: (highResolutionImage ?? thumbnail)?.size
+            ), including: zoomEnabled && scale > 1.01 ? .all : .none)
+            .simultaneousGesture(tapGesture(
+                viewportSize: proxy.size,
+                viewportFrame: proxy.frame(in: .global),
+                imageSize: (highResolutionImage ?? thumbnail)?.size
+            ))
         }
-        .scaleEffect(scale).offset(offset).rotationEffect(.degrees(rotationDegrees))
-        .gesture(MagnificationGesture().onChanged { value in
-            guard zoomEnabled else { return }
-            scale = min(max(gestureStartScale * value, 1), 4)
-            onZoomedChange(scale > 1.01)
-        }.onEnded { _ in
-            guard zoomEnabled else { return }
-            gestureStartScale = scale
-            if scale <= 1.01 { offset = .zero; gestureStartOffset = .zero }
-        })
-        .simultaneousGesture(DragGesture().onChanged { value in
-            if zoomEnabled, scale > 1.01 {
-                offset = CGSize(width: gestureStartOffset.width + value.translation.width,
-                                height: gestureStartOffset.height + value.translation.height)
-            }
-        }.onEnded { _ in
-            gestureStartOffset = scale > 1.01 ? offset : .zero
-            if scale <= 1.01 { offset = .zero }
-        })
-        .onTapGesture(count: 2) {
-            guard zoomEnabled else { return }
-            withAnimation(.linear(duration: 0.24)) {
-                scale = scale > 1.01 ? 1 : 2.5
-                if scale <= 1.01 { offset = .zero }
-            }
-            gestureStartScale = scale
-            gestureStartOffset = offset
-            onZoomedChange(scale > 1.01)
+        .onChange(of: magnifying) { active in
+            onMagnificationChange(active)
         }
-        .onTapGesture { if scale <= 1.01 { onTap() } }
         .onChange(of: isCurrent) { current in
-            if !current { scale = 1; offset = .zero; gestureStartScale = 1; gestureStartOffset = .zero }
+            if !current {
+                zoomAnimationTask?.cancel()
+                zoomAnimationTask = nil
+                zoomAnimationActive = false
+                scale = 1
+                offset = .zero
+                gestureStartScale = 1
+                gestureStartOffset = .zero
+                onMagnificationChange(false)
+            }
         }
         .onChange(of: rotationDegrees) { _ in
-            scale = 1; offset = .zero; gestureStartScale = 1; gestureStartOffset = .zero
+            // Zoom reset is not part of the rotation tween. Keeping it out of
+            // the inherited transaction prevents a scale jump from looking
+            // like a one-frame image replacement.
+            var transaction = Transaction(animation: nil)
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                zoomAnimationTask?.cancel()
+                zoomAnimationTask = nil
+                zoomAnimationActive = false
+                scale = 1
+                offset = .zero
+                gestureStartScale = 1
+                gestureStartOffset = .zero
+            }
             onZoomedChange(false)
         }
         .onChange(of: highResolutionImage) { image in
@@ -1181,6 +1542,269 @@ private struct PreviewImage: View {
             thumbnail = thumb
             onDisplayImage(thumb)
         }
+        .onDisappear {
+            zoomAnimationTask?.cancel()
+            zoomAnimationTask = nil
+            onMagnificationChange(false)
+        }
+    }
+
+    // These recognizers coexist with PageTabViewStyle's UIScrollView pan.
+    // At 1x the image pan stays dormant so a one-finger horizontal drag belongs
+    // only to the pager; a two-finger gesture explicitly rejects queue swiping.
+    private func magnificationGesture(viewportSize: CGSize, imageSize: CGSize?) -> some Gesture {
+        MagnificationGesture()
+            .updating($magnifying) { _, active, _ in active = true }
+            .onChanged { value in
+                guard zoomEnabled else { return }
+                zoomAnimationTask?.cancel()
+                zoomAnimationTask = nil
+                zoomAnimationActive = false
+                let maximum = photoPreviewMaximumZoom(
+                    imageSize: imageSize,
+                    viewportSize: viewportSize,
+                    rotationDegrees: rotationDegrees
+                )
+                scale = min(max(gestureStartScale * value, 1), maximum)
+                offset = photoPreviewClampedOffset(
+                    offset,
+                    scale: scale,
+                    imageSize: imageSize,
+                    viewportSize: viewportSize,
+                    rotationDegrees: rotationDegrees
+                )
+                onZoomedChange(scale > 1.01)
+            }
+            .onEnded { _ in
+                guard zoomEnabled else { return }
+                gestureStartScale = scale
+                if scale <= 1.01 {
+                    offset = .zero
+                    gestureStartOffset = .zero
+                } else {
+                    gestureStartOffset = offset
+                }
+            }
+    }
+
+    private func panGesture(viewportSize: CGSize, imageSize: CGSize?) -> some Gesture {
+        DragGesture(minimumDistance: photoPreviewZoomPanMinimumDistance)
+            .onChanged { value in
+                guard zoomEnabled, scale > 1.01 else { return }
+                offset = photoPreviewClampedOffset(
+                    CGSize(
+                        width: gestureStartOffset.width + value.translation.width,
+                        height: gestureStartOffset.height + value.translation.height
+                    ),
+                    scale: scale,
+                    imageSize: imageSize,
+                    viewportSize: viewportSize,
+                    rotationDegrees: rotationDegrees
+                )
+            }
+            .onEnded { _ in
+                gestureStartOffset = scale > 1.01 ? offset : .zero
+                if scale <= 1.01 { offset = .zero }
+            }
+    }
+
+    private func tapGesture(
+        viewportSize: CGSize,
+        viewportFrame: CGRect,
+        imageSize: CGSize?
+    ) -> some Gesture {
+        SpatialTapGesture(count: 2, coordinateSpace: CoordinateSpace.global)
+            .exclusively(before: SpatialTapGesture(count: 1, coordinateSpace: CoordinateSpace.global))
+            .onEnded { value in
+                switch value {
+                case .first(let doubleTap):
+                    handleDoubleTap(
+                        at: CGPoint(
+                            x: doubleTap.location.x - viewportFrame.minX,
+                            y: doubleTap.location.y - viewportFrame.minY
+                        ),
+                        viewportSize: viewportSize,
+                        imageSize: imageSize
+                    )
+                case .second:
+                    if scale <= 1.01, !zoomAnimationActive { onTap() }
+                }
+            }
+    }
+
+    private func handleDoubleTap(at location: CGPoint, viewportSize: CGSize, imageSize: CGSize?) {
+        guard zoomEnabled else { return }
+        zoomAnimationTask?.cancel()
+        let restoring = scale > 1.01
+        let targetScale: CGFloat = restoring ? 1 : photoPreviewDoubleTapZoom
+        let targetOffset = restoring ? .zero : photoPreviewDoubleTapOffset(
+            location: location,
+            scale: targetScale,
+            imageSize: imageSize,
+            viewportSize: viewportSize,
+            rotationDegrees: rotationDegrees
+        )
+        zoomAnimationActive = true
+        if !restoring { onZoomedChange(true) }
+        withAnimation(.linear(duration: photoPreviewDoubleTapDuration)) {
+            scale = targetScale
+            offset = targetOffset
+        }
+        gestureStartScale = targetScale
+        gestureStartOffset = targetOffset
+        zoomAnimationTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: UInt64(photoPreviewDoubleTapDuration * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            zoomAnimationActive = false
+            zoomAnimationTask = nil
+            if restoring { onZoomedChange(false) }
+        }
+    }
+}
+
+let photoPreviewRotationDuration = 0.22
+let photoPreviewZoomPanMinimumDistance: CGFloat = 8
+let photoPreviewDoubleTapDuration = 0.24
+let photoPreviewDoubleTapZoom: CGFloat = 2.5
+private let photoPreviewRotationAnimation =
+    Animation.timingCurve(0.4, 0, 0.2, 1, duration: photoPreviewRotationDuration)
+
+/// Continuously recomputed rotation fit used by Android's graphicsLayer.
+/// Calculating it from the interpolated angle keeps portrait and landscape
+/// photos inside the viewport for every frame instead of resizing only after
+/// the quarter turn has finished.
+func photoPreviewRotationFitScale(
+    imageSize: CGSize?,
+    viewportSize: CGSize,
+    rotationDegrees: Double
+) -> CGFloat {
+    guard let imageSize,
+          imageSize.width > 0, imageSize.height > 0,
+          viewportSize.width > 0, viewportSize.height > 0 else { return 1 }
+    let rawAspect = imageSize.width / imageSize.height
+    let viewportAspect = viewportSize.width / viewportSize.height
+    let baseWidth = rawAspect > viewportAspect
+        ? viewportSize.width
+        : viewportSize.height * rawAspect
+    let baseHeight = rawAspect > viewportAspect
+        ? viewportSize.width / rawAspect
+        : viewportSize.height
+    let radians = rotationDegrees * .pi / 180
+    let absoluteCosine = abs(cos(radians))
+    let absoluteSine = abs(sin(radians))
+    let rotatedWidth = baseWidth * absoluteCosine + baseHeight * absoluteSine
+    let rotatedHeight = baseWidth * absoluteSine + baseHeight * absoluteCosine
+    guard rotatedWidth > 0, rotatedHeight > 0 else { return 1 }
+    let fit = min(viewportSize.width / rotatedWidth, viewportSize.height / rotatedHeight)
+    let breathingRoom = rawAspect > 1 ? 1 - 0.08 * absoluteSine : 1
+    return fit * breathingRoom
+}
+
+/// Axis-aligned size of the fitted image at the current quarter-turn target.
+/// Android uses this size when constraining pan so no empty space can be pulled
+/// into the viewport after zooming.
+func photoPreviewDisplaySize(
+    imageSize: CGSize?,
+    viewportSize: CGSize,
+    rotationDegrees: Double
+) -> CGSize {
+    guard let imageSize,
+          imageSize.width > 0, imageSize.height > 0,
+          viewportSize.width > 0, viewportSize.height > 0 else { return viewportSize }
+    let rawAspect = imageSize.width / imageSize.height
+    let quarterTurns = Int((rotationDegrees / 90).rounded())
+    let orientedAspect = abs(quarterTurns) % 2 == 1 ? 1 / rawAspect : rawAspect
+    let viewportAspect = viewportSize.width / viewportSize.height
+    if orientedAspect > viewportAspect {
+        return CGSize(width: viewportSize.width, height: viewportSize.width / orientedAspect)
+    }
+    return CGSize(width: viewportSize.height * orientedAspect, height: viewportSize.height)
+}
+
+func photoPreviewClampedOffset(
+    _ proposed: CGSize,
+    scale: CGFloat,
+    imageSize: CGSize?,
+    viewportSize: CGSize,
+    rotationDegrees: Double
+) -> CGSize {
+    let displaySize = photoPreviewDisplaySize(
+        imageSize: imageSize,
+        viewportSize: viewportSize,
+        rotationDegrees: rotationDegrees
+    )
+    let maximumX = max(0, (displaySize.width * scale - viewportSize.width) / 2)
+    let maximumY = max(0, (displaySize.height * scale - viewportSize.height) / 2)
+    return CGSize(
+        width: min(max(proposed.width, -maximumX), maximumX),
+        height: min(max(proposed.height, -maximumY), maximumY)
+    )
+}
+
+func photoPreviewDoubleTapOffset(
+    location: CGPoint,
+    scale: CGFloat,
+    imageSize: CGSize?,
+    viewportSize: CGSize,
+    rotationDegrees: Double
+) -> CGSize {
+    photoPreviewClampedOffset(
+        CGSize(
+            width: (location.x - viewportSize.width / 2) * (1 - scale),
+            height: (location.y - viewportSize.height / 2) * (1 - scale)
+        ),
+        scale: scale,
+        imageSize: imageSize,
+        viewportSize: viewportSize,
+        rotationDegrees: rotationDegrees
+    )
+}
+
+func photoPreviewMaximumZoom(
+    imageSize: CGSize?,
+    viewportSize: CGSize,
+    rotationDegrees: Double
+) -> CGFloat {
+    guard let imageSize,
+          imageSize.width > 0, imageSize.height > 0,
+          viewportSize.width > 0, viewportSize.height > 0 else { return 4 }
+    let rawAspect = imageSize.width / imageSize.height
+    let viewportAspect = viewportSize.width / viewportSize.height
+    let baseWidth = rawAspect > viewportAspect
+        ? viewportSize.width
+        : viewportSize.height * rawAspect
+    let baseHeight = rawAspect > viewportAspect
+        ? viewportSize.width / rawAspect
+        : viewportSize.height
+    let fit = max(0.01, photoPreviewRotationFitScale(
+        imageSize: imageSize,
+        viewportSize: viewportSize,
+        rotationDegrees: rotationDegrees
+    ))
+    let oneToOne = max(imageSize.width / baseWidth, imageSize.height / baseHeight) / fit
+    return max(4, oneToOne)
+}
+
+@preconcurrency
+private struct PreviewRotationTransform: AnimatableModifier {
+    var rotationDegrees: Double
+    let imageSize: CGSize?
+    let viewportSize: CGSize
+
+    nonisolated var animatableData: Double {
+        get { rotationDegrees }
+        set { rotationDegrees = newValue }
+    }
+
+    func body(content: Content) -> some View {
+        let fit = photoPreviewRotationFitScale(
+            imageSize: imageSize,
+            viewportSize: viewportSize,
+            rotationDegrees: rotationDegrees
+        )
+        content
+            .scaleEffect(fit)
+            .rotationEffect(.degrees(rotationDegrees))
     }
 }
 
