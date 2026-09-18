@@ -20,7 +20,16 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
     var locationAuthorizationStatus: CLAuthorizationStatus {
         locationManager.authorizationStatus
     }
-    private let locationManager = CLLocationManager()
+    private var locationManagerStorage: CLLocationManager?
+    private var locationManager: CLLocationManager {
+        if let locationManagerStorage { return locationManagerStorage }
+        let manager = CLLocationManager()
+        manager.delegate = self
+        manager.desiredAccuracy = frequency.desiredAccuracy
+        manager.distanceFilter = kCLDistanceFilterNone
+        locationManagerStorage = manager
+        return manager
+    }
     private let defaults: UserDefaults
     private var lastWrite: Date?
     private var writeTask: Task<Void, Never>?
@@ -54,9 +63,6 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
         let enabled = storage.bool(forKey: GPSPreferences.enabled)
         state = GPSState(enabled: enabled, status: enabled ? .starting : .off)
         connectionHelpViewed = storage.bool(forKey: GPSPreferences.connectionHelpViewed)
-        locationManager.delegate = self
-        locationManager.desiredAccuracy = frequency.desiredAccuracy
-        locationManager.distanceFilter = kCLDistanceFilterNone
         bluetoothObservation = bluetooth.$state
             .receive(on: RunLoop.main)
             .sink { [weak self] value in self?.applyBluetoothState(value) }
@@ -73,14 +79,14 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
         reconnectTask?.cancel()
         readyTransitionTask?.cancel()
         placeGeocoder?.cancelGeocode()
-        locationManager.stopUpdatingLocation()
+        locationManagerStorage?.stopUpdatingLocation()
     }
 
     func setFrequency(_ value: GPSUpdateFrequency) {
         guard value != frequency else { return }
         frequency = value
         defaults.set(value.rawValue, forKey: GPSPreferences.updateFrequencySeconds)
-        locationManager.desiredAccuracy = value.desiredAccuracy
+        locationManagerStorage?.desiredAccuracy = value.desiredAccuracy
         writeTask?.cancel(); writeTask = nil
         if state.enabled, !geoWriteInFlight { scheduleWriteIfDue() }
         GPSDiagnostics.record("update frequency=\(value.rawValue)s")
@@ -98,8 +104,8 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
         writeGeneration &+= 1
         geoWriteInFlight = false
         guard enabled else {
-            locationManager.stopUpdatingLocation()
-            locationManager.allowsBackgroundLocationUpdates = false
+            locationManagerStorage?.stopUpdatingLocation()
+            locationManagerStorage?.allowsBackgroundLocationUpdates = false
             bluetooth.stop()
             state = GPSState()
             lastWrite = nil
@@ -173,8 +179,8 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
             readyTransitionTask?.cancel(); readyTransitionTask = nil
             writeGeneration &+= 1
             geoWriteInFlight = false
-            locationManager.stopUpdatingLocation()
-            locationManager.allowsBackgroundLocationUpdates = false
+            locationManagerStorage?.stopUpdatingLocation()
+            locationManagerStorage?.allowsBackgroundLocationUpdates = false
             bluetooth.stop()
             guard state.enabled else { return }
             state.status = .apUnavailable

@@ -325,7 +325,9 @@ actor TransferQueue {
     private func removeObserver(_ id: UUID) { continuations[id] = nil }
 
     func progressSnapshots() -> AsyncStream<TransferActiveProgress?> {
-        AsyncStream { continuation in
+        // StateFlow on Android is conflated: a slow UI collector receives the
+        // latest progress, not an unbounded history of obsolete samples.
+        AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
             let id = UUID()
             progressContinuations[id] = continuation
             continuation.yield(activeProgress)

@@ -1,4 +1,5 @@
 import XCTest
+import SwiftUI
 import UIKit
 import ImageIO
 import CryptoKit
@@ -6,6 +7,112 @@ import UniformTypeIdentifiers
 @testable import ZTransfer
 
 final class DomainModelTests: XCTestCase {
+    func testGeniePopupUsesTriggerShortEdgeAndSharedEndpoints() {
+        for button in [CGRect(x: 119, y: 62, width: 40, height: 40),
+                       CGRect(x: 12, y: 68, width: 55, height: 36),
+                       CGRect(x: 20, y: 450, width: 175, height: 50)] {
+            let edge = GeniePopupMotion.attachmentAnchor(for: button, cornerRadius: 20)
+            XCTAssertEqual(edge.midX, button.midX)
+            XCTAssertEqual(edge.maxY, button.maxY)
+            let source = edge.offsetBy(dx: -31, dy: -(button.maxY + 8))
+            for height: CGFloat in [193, 400, 670] {
+                let size = CGSize(width: 340, height: height)
+                for fraction in stride(from: CGFloat(0), through: 1, by: 0.1) {
+                    let collapsed = GeniePopupMotion.row(progress: 0, fraction: fraction, source: source, size: size)
+                    XCTAssertEqual(collapsed.left + 31, edge.minX, accuracy: 0.0001)
+                    XCTAssertEqual(collapsed.right + 31, edge.maxX, accuracy: 0.0001)
+                    XCTAssertEqual(collapsed.y + button.maxY + 8, button.maxY, accuracy: 0.0001)
+                    let expanded = GeniePopupMotion.row(progress: 1, fraction: fraction, source: source, size: size)
+                    XCTAssertEqual(expanded.left, 0, accuracy: 0.0001)
+                    XCTAssertEqual(expanded.right, size.width, accuracy: 0.0001)
+                    XCTAssertEqual(expanded.y, height * fraction, accuracy: 0.0001)
+                }
+            }
+        }
+    }
+
+    func testGeniePopupBendsCrossSectionsAndBandCorners() {
+        let size = CGSize(width: 340, height: 400)
+        let source = CGRect(x: 100, y: -8, width: 20, height: 0)
+        let mouth = GeniePopupMotion.row(progress: 0.5, fraction: 0, source: source, size: size)
+        let tail = GeniePopupMotion.row(progress: 0.5, fraction: 1, source: source, size: size)
+        // A real Genie bends and retains length; a uniform scale + mask fails
+        // these independent mouth/tail width, center and height constraints.
+        XCTAssertLessThan(mouth.right - mouth.left, (tail.right - tail.left) / 2)
+        XCTAssertLessThan((mouth.left + mouth.right) / 2, (tail.left + tail.right) / 2)
+        XCTAssertGreaterThan(tail.y - mouth.y, size.height * 0.7)
+        for p: CGFloat in [0.001, 0.1, 0.5, 0.9, 1] {
+            for band in 0..<48 {
+                let top = GeniePopupMotion.row(progress: p, fraction: CGFloat(band) / 48, source: source, size: size)
+                let bottom = GeniePopupMotion.row(progress: p, fraction: CGFloat(band + 1) / 48, source: source, size: size)
+                let bandSize = CGSize(width: 340, height: 400.0 / 48)
+                let t = GeniePopupMotion.bandTransform(size: bandSize, top: top, bottom: bottom)
+                for (point, expected) in [
+                    (CGPoint.zero, CGPoint(x: top.left, y: top.y)),
+                    (CGPoint(x: bandSize.width, y: 0), CGPoint(x: top.right, y: top.y)),
+                    (CGPoint(x: 0, y: bandSize.height), CGPoint(x: bottom.left, y: bottom.y)),
+                    (CGPoint(x: bandSize.width, y: bandSize.height), CGPoint(x: bottom.right, y: bottom.y))
+                ] {
+                    let denominator = t.m14 * point.x + t.m24 * point.y + t.m44
+                    XCTAssertEqual((t.m11 * point.x + t.m21 * point.y + t.m41) / denominator,
+                                   expected.x, accuracy: 0.0001)
+                    XCTAssertEqual((t.m12 * point.x + t.m22 * point.y + t.m42) / denominator,
+                                   expected.y, accuracy: 0.0001)
+                }
+                XCTAssertGreaterThan(bottom.y, top.y)
+            }
+        }
+    }
+
+    @MainActor
+    func testGeniePopupHostFirstCaptureAndReversal() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let window = UIWindow(windowScene: scene)
+        let root = UIViewController()
+        window.rootViewController = root
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        let popup = GeniePopupHostView(frame: CGRect(x: 31, y: 110, width: 340, height: 400))
+        popup.host.rootView = AnyView(Color.red.frame(width: 340, height: 400))
+        root.view.addSubview(popup)
+        popup.configure(target: 0, anchorX: 108.0 / 340, anchorWidth: 20.0 / 340, anchorGap: 8)
+        root.view.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(60))
+        popup.configure(target: 1, anchorX: 108.0 / 340, anchorWidth: 20.0 / 340, anchorGap: 8)
+        popup.layoutIfNeeded()
+        let layers = try XCTUnwrap(popup.subviews.last?.layer.sublayers)
+        XCTAssertEqual(layers.count, 48)
+        let images = layers.compactMap { $0.contents }.map { $0 as! CGImage }
+        XCTAssertEqual(images.count, 48)
+        // A transparent first capture made the first animation invisible.
+        // Inspect the actual raster used by Core Animation, not a mock image.
+        let bandImage = try XCTUnwrap(images.dropFirst(24).first)
+        var pixel = [UInt8](repeating: 0, count: 4)
+        let context = try XCTUnwrap(CGContext(data: &pixel, width: 1, height: 1,
+            bitsPerComponent: 8, bytesPerRow: 4, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.draw(bandImage, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        XCTAssertGreaterThan(pixel[0], 200)
+        XCTAssertGreaterThan(pixel[3], 200)
+        try await Task.sleep(for: .milliseconds(80))
+        popup.configure(target: 0, anchorX: 108.0 / 340, anchorWidth: 20.0 / 340, anchorGap: 8)
+        popup.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(40))
+        popup.configure(target: 1, anchorX: 108.0 / 340, anchorWidth: 20.0 / 340, anchorGap: 8)
+        popup.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(500))
+        XCTAssertEqual(popup.host.view.layer.opacity, 1)
+        XCTAssertTrue(popup.host.view.isUserInteractionEnabled)
+        XCTAssertTrue(popup.subviews.last?.isHidden == true)
+        XCTAssertTrue(layers.allSatisfy { $0.contents == nil })
+        popup.configure(target: 0, anchorX: 108.0 / 340, anchorWidth: 20.0 / 340, anchorGap: 8)
+        popup.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(400))
+        XCTAssertEqual(popup.host.view.layer.opacity, 0)
+        XCTAssertFalse(popup.host.view.isUserInteractionEnabled)
+        popup.stop()
+    }
+
     @MainActor
     func testSTASequentialScanSurvivesTransferPreviewRemoteAndFilterChanges() async throws {
         let harness = SequentialListHarness()
@@ -166,17 +273,6 @@ final class DomainModelTests: XCTestCase {
             XCTAssertEqual(normalizedSkinPreset("LIQUID_GLASS"), "FROSTED_GLASS")
         }
         XCTAssertEqual(normalizedSkinPreset("retired_skin"), "TITANIUM")
-    }
-
-    func testAPSignalPercentUsesFourAscendingBands() {
-        XCTAssertEqual(apSignalLevel(percent: nil), 0)
-        XCTAssertEqual(apSignalLevel(percent: 0), 0)
-        XCTAssertEqual(apSignalLevel(percent: 1), 1)
-        XCTAssertEqual(apSignalLevel(percent: 24), 1)
-        XCTAssertEqual(apSignalLevel(percent: 25), 2)
-        XCTAssertEqual(apSignalLevel(percent: 50), 3)
-        XCTAssertEqual(apSignalLevel(percent: 75), 4)
-        XCTAssertEqual(apSignalLevel(percent: 100), 4)
     }
 
     @MainActor
@@ -1572,6 +1668,36 @@ extension DomainModelTests {
         XCTAssertEqual(photoEffectsFilterTileRows(sourceWidth: 4_096), 1_024)
         XCTAssertEqual(photoEffectsFilterTileRows(sourceWidth: 6_000), 699)
         XCTAssertEqual(photoEffectsFilterTileRows(sourceWidth: 5_000_000), 1)
+    }
+
+    func testCancelledPreviewFilterReleasesPixelWorkersPromptly() async throws {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        let source = UIGraphicsImageRenderer(
+            size: CGSize(width: 4_096, height: 3_072), format: format
+        ).image { context in
+            UIColor(red: 0.24, green: 0.52, blue: 0.76, alpha: 1).setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 4_096, height: 3_072))
+        }
+        let cgImage = try XCTUnwrap(source.cgImage)
+        let preset = Np3FilterCatalog.presets[0]
+        let task = Task.detached(priority: .userInitiated) {
+            try Np3BitmapFilter.apply(
+                cgImage, parameters: preset.parameters, intensityPercent: 80
+            )
+        }
+        try await Task.sleep(for: .milliseconds(20))
+        let cancelledAt = ContinuousClock.now
+        task.cancel()
+        do {
+            _ = try await task.value
+            XCTFail("Cancelled preview pixel work unexpectedly completed")
+        } catch is CancellationError {}
+        XCTAssertLessThan(
+            cancelledAt.duration(to: .now), .seconds(1),
+            "A stale filter preview must not keep the shared render gate occupied"
+        )
     }
 
     func testPhotoEffectsBorderPreviewUsesAndroid1920PixelLayout() throws {

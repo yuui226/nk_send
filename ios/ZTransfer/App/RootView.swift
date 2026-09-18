@@ -108,7 +108,6 @@ struct RootView: View {
                                   directory: directoryStore,
                                   effectsStore: effectsStore,
                                   isSessionConnected: connectionModel.cameraSession === session,
-                                  apSignalPercent: connectionModel.apSignalPercent,
                                   onRetrySTA: { connectionModel.retrySTAConnection() },
                                   remotePresentation: $monitorPresented,
                                   onTransportLost: { failedSession in
@@ -146,7 +145,6 @@ struct RootView: View {
                 RemoteView(session: session,
                            recordingDirectory: directoryStore.directoryURL,
                            isSessionConnected: connectionModel.cameraSession === session,
-                           apSignalPercent: connectionModel.apSignalPercent,
                            onRetrySTA: { connectionModel.retrySTAConnection() },
                            onPreparing: { await listModel.pauseForRemote() },
                            onStopped: { transportLost in

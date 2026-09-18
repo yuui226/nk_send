@@ -3,9 +3,10 @@ import SwiftUI
 /// Android FileListScreen.FilterOverlay equivalent.  The filter editor is an
 /// anchored, non-dimming popup; every chip commits immediately and the date
 /// editor is a second page inside the same popup rather than a system sheet.
+@MainActor
 struct PhotoFilterPopupOverlay: View {
     @Binding var isPresented: Bool
-    let anchor: CGRect
+    let anchor: Anchor<CGRect>
     let initial: PhotoFilterState
     let availableExtensions: [String]
     let availableStorageSlots: [UInt32]
@@ -16,12 +17,8 @@ struct PhotoFilterPopupOverlay: View {
     @State private var editingDate = false
     @State private var startDate: Date
     @State private var endDate: Date
-    @State private var animationProgress: CGFloat = 0
-    @State private var contentHeight: CGFloat?
-    @State private var dismissalRequested = false
-    @State private var frozenAnchor: CGRect = .zero
 
-    init(isPresented: Binding<Bool>, anchor: CGRect,
+    init(isPresented: Binding<Bool>, anchor: Anchor<CGRect>,
          initial: PhotoFilterState,
          availableExtensions: [String], availableStorageSlots: [UInt32],
          suggestedDate: String?, onChange: @escaping (PhotoFilterState) -> Void) {
@@ -43,83 +40,53 @@ struct PhotoFilterPopupOverlay: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let overlayFrame = proxy.frame(in: .named(ZTransferPopupAnchorSpace.name))
-            let stableAnchor = frozenAnchor == .zero ? anchor : frozenAnchor
-            let localAnchor = stableAnchor.offsetBy(dx: -overlayFrame.minX, dy: -overlayFrame.minY)
+            let localAnchor = proxy[anchor]
             let width = min(340, max(1, proxy.size.width - 24))
-            // Match Android FilterOverlay: the panel starts 8dp below the
-            // measured filter button and clamps only horizontally. The old
-            // bottom-based top clamp made a tall popup jump upward and lose
-            // its relationship with the button.
-            // The popup itself is centered in the viewport. The button anchor
-            // only defines the transform origin; coupling it to panelLeft made
-            // the entire filter form visibly lean toward the leading edge.
-            let left = max(0, (proxy.size.width - width) / 2)
-            let fallbackTop = max(proxy.safeAreaInsets.top + 106, 106)
-            let top = stableAnchor == .zero
-                ? fallbackTop
-                : localAnchor.maxY + 8
-            let availableHeight = max(1, proxy.size.height - top - max(12, proxy.safeAreaInsets.bottom))
-            let panelHeight = min(contentHeight ?? availableHeight, availableHeight)
-            let fallbackButton = CGRect(
-                x: min(max(proxy.size.width * 0.35, 12), proxy.size.width - 52),
-                y: top - 45,
-                width: 40,
-                height: 36
-            )
+            // Android FilterOverlay: final panel is 8pt below the actual
+            // trigger, with only its horizontal placement clamped on screen.
+            let left = min(max(localAnchor.minX, 12),
+                           max(12, proxy.size.width - width - 12))
+            let top = localAnchor.maxY + 8
             let sourceAnchor = GeniePopupMotion.attachmentAnchor(
-                for: stableAnchor == .zero ? fallbackButton : localAnchor,
-                cornerRadius: 22
+                for: localAnchor, cornerRadius: 22
             )
-                .offsetBy(dx: -left, dy: -top)
+            let unitAnchorX = (sourceAnchor.midX - left) / width
             ZStack(alignment: .topLeading) {
                 Color.clear
                     .ignoresSafeArea()
                     .contentShape(Rectangle())
                     .onTapGesture { close() }
 
-                // Reuse the exact same anchored genie container as Settings:
-                // identical mesh geometry, easing, duration, interruption and
-                // collapse-completion semantics. The popup remains centered;
-                // only the mesh mouth follows the filter button.
+                // This shell is intentionally permanent. Presentation state
+                // drives only visual progress, so a late close completion can
+                // never destroy a panel that has already been reopened.
                 GeniePopupPanel(
-                    content: panelContent(width: width) { height in
-                        guard height > 0,
-                              abs((contentHeight ?? 0) - height) > 0.5 else { return }
-                        contentHeight = height
-                        guard !dismissalRequested else { return }
-                        DispatchQueue.main.async {
-                            guard !dismissalRequested,
-                                  contentHeight == height else { return }
-                            animationProgress = 1
-                        }
-                    },
-                    targetProgress: animationProgress,
-                    anchor: sourceAnchor,
-                    panelOrigin: .zero,
-                    viewport: proxy.size,
-                    onCollapsed: { isPresented = false }
+                    content: panelContent(width: width),
+                    trigger: .filter,
+                    targetProgress: isPresented ? 1 : 0,
+                    anchorX: unitAnchorX,
+                    anchorWidth: sourceAnchor.width / width,
+                    anchorGap: top - localAnchor.maxY
                 )
-                .frame(width: width, height: panelHeight, alignment: .top)
+                .frame(width: width, alignment: .top)
                 .padding(.leading, left)
                 .padding(.top, top)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .onAppear {
-                if anchor != .zero { frozenAnchor = anchor }
-                dismissalRequested = false
-                animationProgress = 0
-            }
-            .onChange(of: anchor) { value in
-                if frozenAnchor == .zero, value != .zero { frozenAnchor = value }
-            }
+            .allowsHitTesting(isPresented)
         }
         .ignoresSafeArea()
         .zIndex(150)
+        .onAppear {
+            if isPresented { resetDraft() }
+        }
+        .onChange(of: isPresented) { presented in
+            if presented { resetDraft() }
+        }
     }
 
     @ViewBuilder
-    private func panelContent(width: CGFloat, reportHeight: @escaping (CGFloat) -> Void) -> some View {
+    private func panelContent(width: CGFloat) -> some View {
         Group {
             if editingDate {
                 dateEditor
@@ -134,13 +101,6 @@ struct PhotoFilterPopupOverlay: View {
         .padding(14)
         .background(ZTransferGlassSurface(cornerRadius: 16, kind: .panel))
         .shadow(color: .black.opacity(0.16), radius: 10, y: 5)
-        .background {
-            GeometryReader { geometry in
-                Color.clear
-                    .onAppear { reportHeight(geometry.size.height) }
-                    .onChange(of: geometry.size.height) { reportHeight($0) }
-            }
-        }
         .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.15), value: editingDate)
     }
 
@@ -159,16 +119,20 @@ struct PhotoFilterPopupOverlay: View {
             .padding(.bottom, 14)
 
             section(AppLocalized.resource("filter_section_file_type"))
-            let columns = min(5, max(1, availableExtensions.count + 1))
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: columns), spacing: 8) {
-                FilterChip(label: AppLocalized.resource("filter_all"), selected: working.extensions == nil) {
-                    commit(working.withExtensions(nil))
-                }
-                ForEach(availableExtensions, id: \.self) { ext in
-                    FilterChip(label: ext.dropFirst().uppercased(), selected: working.extensions?.contains(ext) ?? true) {
-                        var selected = working.extensions ?? Set(availableExtensions)
-                        if selected.contains(ext) { selected.remove(ext) } else { selected.insert(ext) }
-                        commit(working.withExtensions(selected.count == availableExtensions.count ? nil : selected.isEmpty ? nil : selected))
+            VStack(spacing: 8) {
+                ForEach(fileTypeRows.indices, id: \.self) { rowIndex in
+                    let row = fileTypeRows[rowIndex]
+                    HStack(spacing: 8) {
+                        ForEach(0..<fileTypeColumnCount, id: \.self) { columnIndex in
+                            Group {
+                                if columnIndex < row.count {
+                                    fileTypeChip(row[columnIndex])
+                                } else {
+                                    Color.clear.frame(minHeight: 38)
+                                }
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
                     }
                 }
             }
@@ -233,8 +197,9 @@ struct PhotoFilterPopupOverlay: View {
                     let cal = Calendar.current
                     let a = cal.startOfDay(for: min(startDate, endDate))
                     let b = cal.startOfDay(for: max(startDate, endDate))
-                    let f = DateFormatter(); f.dateFormat = "yyyyMMdd"
-                    commit(working.withDateRange(PhotoDateRange(start: f.string(from: a), end: f.string(from: b))))
+                    commit(working.withDateRange(PhotoDateRange(
+                        start: Self.dateKey(from: a), end: Self.dateKey(from: b)
+                    )))
                     editingDate = false
                 }
                 .buttonStyle(ZTransferGlassButtonStyle(
@@ -258,6 +223,40 @@ struct PhotoFilterPopupOverlay: View {
         Rectangle().fill(ZTransferColors.secondaryText.opacity(0.16)).frame(height: 1).padding(.vertical, 13)
     }
 
+    private var fileTypeColumnCount: Int {
+        min(5, max(1, availableExtensions.count + 1))
+    }
+
+    private var fileTypeRows: [[String?]] {
+        let choices: [String?] = [nil] + availableExtensions.map(Optional.some)
+        return stride(from: 0, to: choices.count, by: fileTypeColumnCount).map {
+            Array(choices[$0..<min($0 + fileTypeColumnCount, choices.count)])
+        }
+    }
+
+    @ViewBuilder
+    private func fileTypeChip(_ extensionValue: String?) -> some View {
+        if let ext = extensionValue {
+            FilterChip(
+                label: ext.dropFirst().uppercased(),
+                selected: working.extensions?.contains(ext) ?? true
+            ) {
+                var selected = working.extensions ?? Set(availableExtensions)
+                if selected.contains(ext) { selected.remove(ext) } else { selected.insert(ext) }
+                commit(working.withExtensions(
+                    selected.count == availableExtensions.count || selected.isEmpty ? nil : selected
+                ))
+            }
+        } else {
+            FilterChip(
+                label: AppLocalized.resource("filter_all"),
+                selected: working.extensions == nil
+            ) {
+                commit(working.withExtensions(nil))
+            }
+        }
+    }
+
     private func commit(_ next: PhotoFilterState) {
         guard next != working else { return }
         working = next
@@ -279,20 +278,39 @@ struct PhotoFilterPopupOverlay: View {
     }
 
     private func close() {
-        guard isPresented, !dismissalRequested else { return }
-        dismissalRequested = true
-        if contentHeight == nil {
-            isPresented = false
-            return
-        }
-        animationProgress = 0
+        isPresented = false
+    }
+
+    private func resetDraft() {
+        working = initial
+        editingDate = false
+        let fallback = Calendar.current.startOfDay(for: Date())
+        let initialDate = Self.date(from: initial.dateRange?.end)
+            ?? Self.date(from: suggestedDate)
+            ?? fallback
+        startDate = Self.date(from: initial.dateRange?.start) ?? initialDate
+        endDate = Self.date(from: initial.dateRange?.end) ?? initialDate
     }
 
     private static func date(from value: String?) -> Date? {
-        guard let value, value.count >= 8 else { return nil }
-        let formatter = DateFormatter(); formatter.dateFormat = "yyyyMMdd"
-        return formatter.date(from: String(value.prefix(8)))
+        guard let value, value.count >= 8,
+              let year = Int(value.prefix(4)),
+              let month = Int(value.dropFirst(4).prefix(2)),
+              let day = Int(value.dropFirst(6).prefix(2)) else { return nil }
+        return filterCalendar.date(from: DateComponents(year: year, month: month, day: day))
     }
+
+    private static func dateKey(from date: Date) -> String {
+        let components = filterCalendar.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d%02d%02d",
+                      components.year ?? 0, components.month ?? 0, components.day ?? 0)
+    }
+
+    private static let filterCalendar: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .current
+        return calendar
+    }()
 }
 
 private extension PhotoFilterState {

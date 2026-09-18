@@ -14,10 +14,10 @@ func transferCardWaveEligible(status: TransferStatus) -> Bool {
 /// selection remains in Settings.
 struct TransferQueueView: View {
     @ObservedObject var model: TransferQueueViewModel
+    @ObservedObject private var progressModel: TransferQueueProgressViewModel
     @ObservedObject var directory: DirectoryAccessStore
     let session: CameraSession?
     let isSessionConnected: Bool
-    let apSignalPercent: Int?
     let onRetrySTA: () -> Void
     let onNavigateBack: () -> Void
     let showsTopControls: Bool
@@ -32,14 +32,14 @@ struct TransferQueueView: View {
     }
 
     init(model: TransferQueueViewModel, session: CameraSession?, directory: DirectoryAccessStore,
-         isSessionConnected: Bool = true, apSignalPercent: Int? = nil,
+         isSessionConnected: Bool = true,
          onRetrySTA: @escaping () -> Void = {},
          showsTopControls: Bool = true,
          onNavigateBack: @escaping () -> Void) {
         self.model = model
+        _progressModel = ObservedObject(wrappedValue: model.progressModel)
         self.session = session
         self.isSessionConnected = isSessionConnected
-        self.apSignalPercent = apSignalPercent
         self.onRetrySTA = onRetrySTA
         self.showsTopControls = showsTopControls
         self.directory = directory
@@ -57,7 +57,7 @@ struct TransferQueueView: View {
                     LazyVStack(spacing: 8) {
                         ForEach(model.snapshot.items.reversed()) { item in
                             QueueItemView(item: item, session: session,
-                                          activeProgress: model.activeProgress,
+                                          activeProgress: progressModel.activeProgress,
                                           isRemoving: removingItemIDs.contains(item.id),
                                           onRetry: { model.retry(id: item.id) },
                                           onRemove: { beginRemoval(item.id, withdraw: false) },
@@ -99,13 +99,14 @@ struct TransferQueueView: View {
         HStack(spacing: 8) {
             Button(action: onNavigateBack) {
                 Image(systemName: "arrow.left")
-                    .font(.system(size: 16, weight: .bold))
-                    .frame(width: 36, height: 36)
+                    .font(.system(size: 18, weight: .bold))
+                    .frame(width: 40, height: 40)
+                    .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
             }
             .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
             if let session {
                 Button {
-                    if session.isUSB || session.wirelessMode == .ap {
+                    if session.isUSB {
                         guard isSessionConnected else { return }
                         withAnimation(signalExpanded
                                       ? .timingCurve(0.4, 0, 0.2, 1, duration: 0.22)
@@ -118,21 +119,15 @@ struct TransferQueueView: View {
                 } label: {
                     HStack(spacing: signalExpanded ? 5 : 0) {
                         PhotoListSignalIcon(isUSB: session.isUSB, wirelessMode: session.wirelessMode,
-                                            connected: isSessionConnected,
-                                            apSignalPercent: apSignalPercent)
+                                            connected: isSessionConnected)
                         if signalExpanded && session.isUSB && isSessionConnected {
                             Text(AppLocalized.resource("connection_usb"))
                                 .zTransferTypography(.labelSmall, weight: .medium)
                                 .foregroundStyle(ZTransferColors.accentBlue)
-                        } else if signalExpanded && session.wirelessMode == .ap && isSessionConnected {
-                            Text(apSignalPercent.map { "\($0)%" } ?? "--%")
-                                .zTransferTypography(.labelSmall, weight: .medium)
-                                .monospacedDigit()
-                                .foregroundStyle(apSignalTint(percent: apSignalPercent))
                         }
                     }
                         .padding(.horizontal, 10)
-                        .frame(minWidth: 40, minHeight: 36, maxHeight: 36)
+                        .frame(minWidth: 40, minHeight: 40, maxHeight: 40)
                 }
                 .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
             }

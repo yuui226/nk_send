@@ -26,7 +26,7 @@ final class NikonGPSBluetoothClient: NSObject, ObservableObject {
     @Published private(set) var state: NikonGPSBluetoothState = .disconnected
     @Published private(set) var peripheralIdentifier: UUID?
 
-    private var central: CBCentralManager!
+    private var central: CBCentralManager?
     private var peripheral: CBPeripheral?
     private var pairCharacteristic: CBCharacteristic?
     private var idCharacteristic: CBCharacteristic?
@@ -80,19 +80,29 @@ final class NikonGPSBluetoothClient: NSObject, ObservableObject {
         self.savedPeripheralIdentifier = storage.string(forKey: GPSPreferences.bleAddress)
             .flatMap(UUID.init(uuidString:))
         super.init()
+    }
+
+    /// Android creates its Bluetooth stack only when the persisted GPS
+    /// service is actually running. Match that lifecycle so a normal launch
+    /// with GPS off does not open CoreBluetooth's XPC connection.
+    private func ensureCentral() -> CBCentralManager {
+        if let central { return central }
+        let manager: CBCentralManager
         #if targetEnvironment(simulator)
         // CoreBluetooth rejects restoration identifiers in the simulator.
-        central = CBCentralManager(delegate: self, queue: .main)
+        manager = CBCentralManager(delegate: self, queue: .main)
         #else
         // CoreBluetooth validates the state-restoration delegate during
         // initialization, so the delegate must be supplied here rather than
         // assigned afterward.
-        central = CBCentralManager(
+        manager = CBCentralManager(
             delegate: self,
             queue: .main,
             options: [CBCentralManagerOptionRestoreIdentifierKey: "com.ztransfer.nikon-gps"],
         )
         #endif
+        central = manager
+        return manager
     }
 
     func start() {
@@ -100,6 +110,7 @@ final class NikonGPSBluetoothClient: NSObject, ObservableObject {
         GPSDiagnostics.record("BLE start savedIdentity=\(savedDevice != nil && savedNonce != nil)")
         directReconnectTask?.cancel()
         directReconnectTask = nil
+        let central = ensureCentral()
         if central.state == .unknown || central.state == .resetting { return }
         guard central.state == .poweredOn else {
             GPSDiagnostics.record("Bluetooth adapter unavailable")
@@ -124,7 +135,7 @@ final class NikonGPSBluetoothClient: NSObject, ObservableObject {
                 guard let self, let remembered, !Task.isCancelled,
                       self.peripheral?.identifier == rememberedID,
                       self.state == .connecting(remembered.name ?? "Nikon") else { return }
-                self.central.cancelPeripheralConnection(remembered)
+                self.central?.cancelPeripheralConnection(remembered)
                 self.clearConnectionState()
                 self.beginScan()
             }
@@ -134,6 +145,7 @@ final class NikonGPSBluetoothClient: NSObject, ObservableObject {
     }
 
     private func beginScan() {
+        guard let central, central.state == .poweredOn else { return }
         directReconnectTask?.cancel()
         directReconnectTask = nil
         state = .scanning
@@ -147,8 +159,8 @@ final class NikonGPSBluetoothClient: NSObject, ObservableObject {
         directReconnectTask?.cancel()
         directReconnectTask = nil
         pairingTimeout?.cancel(); pairingTimeout = nil
-        central.stopScan()
-        if let peripheral { central.cancelPeripheralConnection(peripheral) }
+        central?.stopScan()
+        if let peripheral { central?.cancelPeripheralConnection(peripheral) }
         clearConnectionState()
         state = .disconnected
     }
@@ -281,7 +293,7 @@ extension NikonGPSBluetoothClient: CBCentralManagerDelegate {
         MainActor.assumeIsolated { [weak self] in
             guard let self, let restored = restoredBox.value else { return }
             guard self.defaults.bool(forKey: GPSPreferences.enabled) else {
-                self.central.cancelPeripheralConnection(restored)
+                central.cancelPeripheralConnection(restored)
                 self.state = .disconnected
                 return
             }
@@ -321,11 +333,11 @@ extension NikonGPSBluetoothClient: CBCentralManagerDelegate {
                                     advertisementData: [String: Any], rssi RSSI: NSNumber) {
         MainActor.assumeIsolated { [weak self] in
             guard let self else { return }
-            self.central.stopScan(); self.peripheral = peripheral; self.peripheralIdentifier = peripheral.identifier
+            central.stopScan(); self.peripheral = peripheral; self.peripheralIdentifier = peripheral.identifier
             self.savedPeripheralIdentifier = peripheral.identifier
             self.defaults.set(peripheral.identifier.uuidString, forKey: GPSPreferences.bleAddress)
             self.state = .connecting(peripheral.name ?? "Nikon")
-            peripheral.delegate = self; self.central.connect(peripheral)
+            peripheral.delegate = self; central.connect(peripheral)
         }
     }
 

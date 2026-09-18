@@ -39,7 +39,6 @@ struct RemoteView: View {
     private let onPreparing: (() async -> Void)?
     private let onTransportLost: (() -> Void)?
     private let isSessionConnected: Bool
-    private let apSignalPercent: Int?
     private let onRetrySTA: () -> Void
     private let isUSBSession: Bool
     private let wirelessMode: WirelessMode?
@@ -82,7 +81,6 @@ struct RemoteView: View {
 
     init(session: CameraSession, recordingDirectory: URL? = nil,
          isSessionConnected: Bool = true,
-         apSignalPercent: Int? = nil,
          onRetrySTA: @escaping () -> Void = {}, onPreparing: (() async -> Void)? = nil,
          onStopped: ((Bool) async -> Void)? = nil,
          onTransportLost: (() -> Void)? = nil) {
@@ -90,7 +88,6 @@ struct RemoteView: View {
         self.onPreparing = onPreparing
         self.onTransportLost = onTransportLost
         self.isSessionConnected = isSessionConnected
-        self.apSignalPercent = apSignalPercent
         self.onRetrySTA = onRetrySTA
         self.isUSBSession = session.isUSB
         self.wirelessMode = session.wirelessMode
@@ -322,7 +319,7 @@ struct RemoteView: View {
 
     private var remoteSignalButton: some View {
         Button {
-            if isUSBSession || wirelessMode == .ap {
+            if isUSBSession {
                 guard isSessionConnected else { return }
                 withAnimation(signalExpanded
                               ? .timingCurve(0.4, 0, 0.2, 1, duration: 0.22)
@@ -335,17 +332,11 @@ struct RemoteView: View {
         } label: {
             HStack(spacing: signalExpanded ? 5 : 0) {
                 PhotoListSignalIcon(isUSB: isUSBSession, wirelessMode: wirelessMode,
-                                    connected: isSessionConnected,
-                                    apSignalPercent: apSignalPercent)
+                                    connected: isSessionConnected)
                 if signalExpanded && isUSBSession && isSessionConnected {
                     Text(AppLocalized.resource("connection_usb"))
                         .zTransferTypography(.labelSmall, weight: .medium)
                         .foregroundStyle(ZTransferColors.accentBlue)
-                } else if signalExpanded && wirelessMode == .ap && isSessionConnected {
-                    Text(apSignalPercent.map { "\($0)%" } ?? "--%")
-                        .zTransferTypography(.labelSmall, weight: .medium)
-                        .monospacedDigit()
-                        .foregroundStyle(apSignalTint(percent: apSignalPercent))
                 }
             }
             .padding(.horizontal, 10)

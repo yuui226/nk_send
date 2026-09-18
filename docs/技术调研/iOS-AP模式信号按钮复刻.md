@@ -8,15 +8,13 @@
 
 ## iOS 平台实现
 
-- 移除 AP 按钮中错误的下拉箭头，照片列表、传输队列和监看页统一复用四段圆角信号柱与展开动画。
-- iOS 不向普通应用提供 Android `WifiInfo.rssi` 对应的原始 dBm；`NEHotspotNetwork` 提供的是 `0...1` 归一化强度。因此界面展开时显示真实百分比，不把归一化值伪造为 dBm。
-- 百分比分为 `1...24 / 25...49 / 50...74 / 75...100` 四档，分别点亮一至四根；颜色语义和木纹专属 palette 与 Android 一致。系统暂时无法返回强度时显示 `--%`，连接图标仍保留一根点亮柱，不误报断线。
-- 四根柱不再根据 18pt 画布按比例生成小数宽度，直接对齐 Android：每根固定宽 `4pt`、间距 `2.5pt`、高度依次 `6/9/12/15pt`、圆角 `1.5pt`，整体宽恒为 `23.5pt`。四个信号档位只改变点亮数量和颜色，不改变柱宽或图标宽度。
-- 连接层每两秒只更新 `apSignalPercent` 这一小段状态，照片网格和传输逻辑不参与测量；仅 AP 已连接时读取，USB、STA 或断开时立即清空。
-- 使用系统公开 `NEHotspotNetwork.fetchCurrent`，工程增加 Access WiFi Information entitlement。系统只有在满足精确定位授权、由应用配置当前热点、活动 VPN 或活动 DNS 配置等条件之一时才返回当前网络；取不到时保持未知态，不调用私有 API。
+- 2026-09-18 最终产品决定：iOS 不提供 AP 信号强度读取和展示，不申请 `Access Wi-Fi Information` capability，不调用 `NetworkExtension` / `NEHotspotNetwork`，也不启动周期轮询。
+- AP 已连接时在照片列表、传输队列和监看页统一显示静态四段圆角信号柱；点击不更改布局、不展开文字、不触发其他操作。
+- 四根柱固定宽 `4pt`、间距 `2.5pt`、高度依次 `6/9/12/15pt`、圆角 `1.5pt`，整体宽恒为 `23.5pt`，保留 Android 按钮的静态外观。
+- USB 点击展开连接类型、STA 未连接时点击重试的原有行为不受影响。
 
 ## 验证
 
-- 代码需通过 iOS 16 最低部署目标的 availability/entitlement 编译，并安装到当前 iOS 模拟器。模拟器无法提供真实 Wi-Fi 强度，真机 AP 热点下的百分比刷新仍需实机确认。
-- 2026-09-18：Debug 模拟器构建 `BUILD SUCCEEDED`；照片列表、队列和监看三个入口均通过同一参数链路编译。已覆盖安装并启动到 iPhone 17 Pro 模拟器（进程 `com.ztransfer.ios`）。模拟器不提供当前 Wi-Fi 强度，因此 `--%` 降级与真机百分比刷新仍需分别观察。
-- 2026-09-18：等宽柱修正后 Debug 模拟器构建通过；照片列表、队列和监看入口仍共用 `PhotoListSignalIcon`，监看页不再用额外 19pt 外框压缩 AP 图标。
+- 检查三个界面的 AP 按钮均只保留空操作，无信号百分比状态、无定时任务、无 `NetworkExtension` 引用。
+- 检查应用 entitlements 不含 `com.apple.developer.networking.wifi-info`，个人开发团队可使用原包名进行 Debug 签名。
+- 2026-09-18：通用 iOS 设备和模拟器 Debug 构建均 `BUILD SUCCEEDED`；已覆盖安装并启动到 iPhone 17 Pro 模拟器和当前连接的 iPhone。实际签名 entitlements 仅有应用/团队标识与 Debug `get-task-allow`，无 Wi-Fi Information 权限。

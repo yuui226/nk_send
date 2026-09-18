@@ -1,10 +1,20 @@
 import Combine
 import Foundation
 
+/// High-frequency transfer progress has its own invalidation scope. Keeping it
+/// on `TransferQueueViewModel.objectWillChange` caused the entire photo grid to
+/// be recomputed for every 200 ms sample even though only one badge and the
+/// queue capsule needed the value.
+@MainActor
+final class TransferQueueProgressViewModel: ObservableObject {
+    @Published fileprivate(set) var activeProgress: TransferActiveProgress?
+}
+
 @MainActor
 final class TransferQueueViewModel: ObservableObject {
     @Published private(set) var snapshot = TransferQueueSnapshot(items: [], isTransferring: false, pauseAfterCurrent: false)
-    @Published private(set) var activeProgress: TransferActiveProgress?
+    let progressModel = TransferQueueProgressViewModel()
+    var activeProgress: TransferActiveProgress? { progressModel.activeProgress }
     private let queue: TransferQueue
     private var observation: Task<Void, Never>?
     private var progressObservation: Task<Void, Never>?
@@ -22,7 +32,7 @@ final class TransferQueueViewModel: ObservableObject {
             let stream = await queue.progressSnapshots()
             for await value in stream {
                 guard !Task.isCancelled else { return }
-                self?.activeProgress = value
+                self?.progressModel.activeProgress = value
             }
         }
     }

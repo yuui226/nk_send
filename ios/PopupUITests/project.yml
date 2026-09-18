@@ -1,0 +1,23 @@
+# Standalone UI runner against the already installed Debug app.
+# Generate outside the workspace; see the popup verification document.
+name: ZTransferPopupUITests
+settings:
+  base:
+    IPHONEOS_DEPLOYMENT_TARGET: '16.0'
+    SWIFT_VERSION: '5.0'
+    GENERATE_INFOPLIST_FILE: YES
+targets:
+  ZTransferPopupUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [PopupAnchorUITests.swift]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.ztransfer.popupuitests
+schemes:
+  ZTransferPopupUITests:
+    build:
+      targets:
+        ZTransferPopupUITests: all
+    test:
+      targets: [ZTransferPopupUITests]

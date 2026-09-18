@@ -176,7 +176,11 @@ private struct PhotoListTopControlsBoundsPreferenceKey: PreferenceKey {
     }
 }
 
-private let photoListTopControlsHeight: CGFloat = 36
+// The floating header is intentionally a little taller than Android's 36dp
+// control. At 40pt it keeps the same compact silhouette on iPhone while the
+// visible material and its hit region no longer feel vertically compressed.
+private let photoListTopControlsHeight: CGFloat = 40
+private let photoListCompactButtonWidth: CGFloat = 40
 
 private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> AnyTransition {
     if burstMember {
@@ -210,7 +214,6 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
     @ObservedObject private var directoryStore: DirectoryAccessStore
     let effectsStore: PhotoEffectsStore
     let isSessionConnected: Bool
-    let apSignalPercent: Int?
     let onRetrySTA: () -> Void
     let onTransportLost: (CameraSession) -> Void
     // RootView creates this workspace with an established session and keeps it
@@ -223,7 +226,6 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
     @State private var previewReturnFileID: UInt32?
     @State private var previewReturnNonce = 0
     @State private var showingFilter = false
-    @State private var filterAnchor: CGRect = .zero
     @State private var showingQueue = false
     @State private var queueTopControlsVisible = false
     @State private var queueWorkspaceTransitionNonce = 0
@@ -272,7 +274,6 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
     @AppStorage("remote_entry_intro_play_count") private var remoteEntryIntroPlayCount = 0
     @State private var showingSettings = false
     @State private var transferDirectoryAttention = false
-    @State private var settingsAnchor: CGRect = .zero
     @State private var signalExpanded = false
     @State private var effectPreviewSource: UIImage?
     @State private var effectPreviewExif: PhotoExif?
@@ -292,13 +293,13 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
     @State private var heldFlightBaselineRemaining: Int?
     @State private var queueImpact = 0
 
-    init(session: CameraSession, queue: TransferQueue, directory: DirectoryAccessStore = DirectoryAccessStore(), effectsStore: PhotoEffectsStore = PhotoEffectsStore(), isSessionConnected: Bool = true, apSignalPercent: Int? = nil, onRetrySTA: @escaping () -> Void = {}, remotePresentation: Binding<Bool>? = nil, onTransportLost: @escaping (CameraSession) -> Void = { _ in }) {
+    init(session: CameraSession, queue: TransferQueue, directory: DirectoryAccessStore = DirectoryAccessStore(), effectsStore: PhotoEffectsStore = PhotoEffectsStore(), isSessionConnected: Bool = true, onRetrySTA: @escaping () -> Void = {}, remotePresentation: Binding<Bool>? = nil, onTransportLost: @escaping (CameraSession) -> Void = { _ in }) {
         _model = StateObject(wrappedValue: PhotoListViewModel.cached(session: session,
                                                                       onTransportLost: { onTransportLost(session) }))
         _queueModel = StateObject(wrappedValue: TransferQueueViewModel(queue: queue))
         _directoryStore = ObservedObject(wrappedValue: directory)
         self.effectsStore = effectsStore; self.isSessionConnected = isSessionConnected
-        self.apSignalPercent = apSignalPercent; self.onRetrySTA = onRetrySTA
+        self.onRetrySTA = onRetrySTA
         self.remotePresentation = remotePresentation
         self.onTransportLost = onTransportLost; self.session = session
     }
@@ -311,12 +312,11 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
     }
 
     var body: some View {
-        ZStack {
+        ZStack(alignment: .top) {
             ZTransferColors.background.ignoresSafeArea()
             if showingQueue {
                 TransferQueueView(model: queueModel, session: session, directory: directoryStore,
                                   isSessionConnected: isSessionConnected,
-                                  apSignalPercent: apSignalPercent,
                                   onRetrySTA: onRetrySTA,
                                   showsTopControls: false,
                                   onNavigateBack: dismissQueuePage)
@@ -427,11 +427,12 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
                                                                        enqueueSection(group.files, source: cellBounds[file.id])
                                                                    })
                                             } else {
-                                                CameraThumbnailView(session: session, file: file,
+                                            CameraThumbnailView(session: session, file: file,
                                                                     allowRemoteThumbnail: selectedFile == nil,
                                                                     transferred: model.transferredFileIDs.contains(file.id),
                                                                     inBurst: model.burstIDByFile[file.id] != nil,
-                                                                    queueTask: queueModel.task(for: file.id), liveProgress: queueModel.activeProgress)
+                                                                    queueTask: queueModel.task(for: file.id),
+                                                                    progressModel: queueModel.progressModel)
                                             }
                                         }
                                         // The grid proposes a width but may let a
@@ -584,11 +585,15 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
                     }
                 }
                 .overlay(alignment: .bottomLeading) { remoteEntryOverlay }
-                // Keep the controls in the safe-area header. This gives them
-                // a stable top position instead of relying on the scroll view
-                // body's proposed height.
+                // Keep a stable viewport slot while the real controls live
+                // outside the ScrollView's gesture arena.
                 .safeAreaInset(edge: .top, spacing: 0) {
-                    photoListTopControls
+                    // Reserve the same list viewport as Android, but never put
+                    // interactive controls inside the ScrollView's gesture
+                    // arena. The actual header is a sibling of both pages.
+                    Color.clear
+                        .frame(height: photoListTopControlsHeight)
+                        .allowsHitTesting(false)
                 }
                 // The two workspace pages are a horizontal pair. The files
                 // page enters from the left when returning from the queue and
@@ -607,15 +612,9 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
             }
             }
             if selectedFile != nil { previewOverlay }
-            if queueTopControlsVisible { queuePageTopControls }
-            // A single workspace-owned control survives both page transitions.
-            queueTopRightControls
-                .padding(.horizontal, 12)
-                .padding(.top, 0)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+            workspaceTopControls
             queueFlightOverlay
         }
-        .coordinateSpace(name: ZTransferPopupAnchorSpace.name)
         .onPreferenceChange(PhotoListQueueTargetPreferenceKey.self) { queueTargetBounds = $0 }
         .task {
             if presentedSections.isEmpty {
@@ -757,7 +756,6 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
             RemoteView(session: session,
                        recordingDirectory: directoryStore.directoryURL,
                        isSessionConnected: isSessionConnected,
-                       apSignalPercent: apSignalPercent,
                        onRetrySTA: onRetrySTA,
                        onPreparing: { await model.pauseForRemote() },
                        onStopped: { transportLost in
@@ -774,36 +772,33 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
                            onTransportLost(session)
                        })
         }
-        .overlay {
-            if showingSettings {
+        .overlayPreferenceValue(GeniePopupAnchorPreferenceKey.self) { anchors in
+            if let anchor = anchors[.settings] {
                 SettingsPopupOverlay(
                     isPresented: $showingSettings,
                     showPhotoEffectsEntry: true,
                     effectsStore: effectsStore,
                     directory: directoryStore,
-                    anchor: settingsAnchor,
+                    anchor: anchor,
                     requestTransferDirectoryAttention: transferDirectoryAttention,
                     effectPreviewSource: effectPreviewSource,
                     effectPreviewExif: effectPreviewExif,
                     onEffectPreviewRequested: requestEffectPreview
                 )
-                .ignoresSafeArea()
             }
-            if showingFilter {
-                let files = model.availableFiles
+            if let anchor = anchors[.filter] {
                 PhotoFilterPopupOverlay(
                     isPresented: $showingFilter,
-                    anchor: filterAnchor,
+                    anchor: anchor,
                     initial: model.filter,
-                    availableExtensions: Array(Set(files.map(\.fileExtension))).sorted().isEmpty
+                    availableExtensions: model.availableFilterExtensions.isEmpty
                         ? [".jpg", ".nef", ".mp4"]
-                        : Array(Set(files.map(\.fileExtension))).sorted(),
+                        : model.availableFilterExtensions,
                     availableStorageSlots: model.availableStorageSlots.count > 1
                         ? model.availableStorageSlots : [],
                     suggestedDate: model.latestKnownCaptureDay,
-                    onChange: applyFilter,
+                    onChange: applyFilter
                 )
-                .ignoresSafeArea()
             }
         }
     }
@@ -874,116 +869,119 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
         }
     }
 
-    private var photoListTopControls: some View {
+    private var photoListTopLeftControls: some View {
         HStack(spacing: 8) {
-            if topControlsVisible {
-                HStack(spacing: 8) {
-                    Button {
-                        transferDirectoryAttention = false
-                        showingSettings = true
-                    } label: {
-                        DoubleZMark(tint: ZTransferColors.primaryText)
-                            .frame(width: 20 * DoubleZMark.aspectRatio, height: 20)
-                            .padding(.horizontal, 12)
-                            .frame(height: 36)
-                    }
-                    .buttonStyle(ZTransferGlassButtonStyle(
-                        cornerRadius: 22,
-                        materialContentColor: ZTransferColors.accentYellow
-                    ))
-                    .background {
-                        GeometryReader { proxy in
-                            Color.clear
-                                .allowsHitTesting(false)
-                                .preference(key: PhotoListSettingsAnchorPreferenceKey.self,
-                                            value: proxy.frame(in: .named(ZTransferPopupAnchorSpace.name)))
-                        }
-                    }
+            Button {
+                ZTransferHaptics.shared.tick()
+                transferDirectoryAttention = false
+                showingSettings = true
+            } label: {
+                DoubleZMark(tint: ZTransferColors.primaryText)
+                    .frame(width: 20 * DoubleZMark.aspectRatio, height: 20)
+                    .padding(.horizontal, 12)
+                    .frame(height: photoListTopControlsHeight)
+            }
+            .buttonStyle(ZTransferGlassButtonStyle(
+                cornerRadius: 22,
+                materialContentColor: ZTransferColors.accentYellow,
+                prominentPressFeedback: true
+            ))
+            .geniePopupAnchor(.settings)
+            .accessibilityIdentifier("popup-trigger-settings")
 
-                    Button {
-                        if session.isUSB || session.wirelessMode == .ap {
-                            guard isSessionConnected else { return }
-                            withAnimation(signalExpanded
-                                          ? .timingCurve(0.4, 0, 0.2, 1, duration: 0.22)
-                                          : .spring(response: 0.42, dampingFraction: 0.72)) {
-                                signalExpanded.toggle()
-                            }
-                        } else if session.wirelessMode == .sta {
-                            if !isSessionConnected { onRetrySTA() }
-                        }
-                    } label: {
-                        HStack(spacing: signalExpanded ? 5 : 0) {
-                            PhotoListSignalIcon(isUSB: session.isUSB,
-                                                wirelessMode: session.wirelessMode,
-                                                connected: isSessionConnected,
-                                                apSignalPercent: apSignalPercent)
-                            if signalExpanded && session.isUSB && isSessionConnected {
-                                Text(AppLocalized.resource("connection_usb"))
-                                    .zTransferTypography(.labelSmall, weight: .medium)
-                                    .foregroundStyle(ZTransferColors.accentBlue)
-                            } else if signalExpanded && session.wirelessMode == .ap && isSessionConnected {
-                                Text(apSignalPercent.map { "\($0)%" } ?? "--%")
-                                    .zTransferTypography(.labelSmall, weight: .medium)
-                                    .monospacedDigit()
-                                    .foregroundStyle(apSignalTint(percent: apSignalPercent))
-                            }
-                        }
-                        .padding(.horizontal, 10)
-                        .frame(minWidth: 40, minHeight: 36, maxHeight: 36)
+            Button {
+                if session.isUSB {
+                    guard isSessionConnected else { return }
+                    withAnimation(signalExpanded
+                                  ? .timingCurve(0.4, 0, 0.2, 1, duration: 0.22)
+                                  : .spring(response: 0.42, dampingFraction: 0.72)) {
+                        signalExpanded.toggle()
                     }
-                    .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
-
-                    let filterPalette = zTransferButtonAccentPalette(
-                        skin: .init(storedValue: skinPreset),
-                        scheme: colorScheme,
-                        active: ZTransferColors.accentYellow
-                    )
-                    Button { showingFilter = true } label: {
-                        PhotoListFilterIcon(
-                            active: model.filter.isActive,
-                            color: model.filter.isActive ? filterPalette.active : filterPalette.inactive
-                        )
-                            .frame(width: 20, height: 20)
-                            .frame(width: 40, height: 36)
-                    }
-                    .buttonStyle(ZTransferGlassButtonStyle(
-                        cornerRadius: 22,
-                        active: model.filter.isActive,
-                        activeColor: filterPalette.material,
-                        activeOutline: true,
-                        materialContentColor: model.filter.isActive
-                            ? filterPalette.active
-                            : filterPalette.inactive
-                    ))
-                    .background {
-                        GeometryReader { proxy in
-                            Color.clear
-                                .allowsHitTesting(false)
-                                .preference(key: PhotoListFilterAnchorPreferenceKey.self,
-                                            value: proxy.frame(in: .named(ZTransferPopupAnchorSpace.name)))
-                        }
+                } else if session.wirelessMode == .sta {
+                    if !isSessionConnected { onRetrySTA() }
+                }
+            } label: {
+                HStack(spacing: signalExpanded ? 5 : 0) {
+                    PhotoListSignalIcon(isUSB: session.isUSB,
+                                        wirelessMode: session.wirelessMode,
+                                        connected: isSessionConnected)
+                    if signalExpanded && session.isUSB && isSessionConnected {
+                        Text(AppLocalized.resource("connection_usb"))
+                            .zTransferTypography(.labelSmall, weight: .medium)
+                            .foregroundStyle(ZTransferColors.accentBlue)
                     }
                 }
-                .transition(.asymmetric(
-                    insertion: .modifier(
-                        active: PhotoListTopControlsTransition(progress: 0, hiddenOffset: -40, hiddenScale: 0.94),
-                        identity: PhotoListTopControlsTransition(progress: 1, hiddenOffset: -40, hiddenScale: 0.94)
-                    ),
-                    removal: .modifier(
-                        active: PhotoListTopControlsTransition(progress: 0, hiddenOffset: -40, hiddenScale: 0.96),
-                        identity: PhotoListTopControlsTransition(progress: 1, hiddenOffset: -40, hiddenScale: 0.96)
-                    )
-                ))
+                // All compact top controls except the Z mark are exactly
+                // 40pt wide, matching Android's compact-button baseline.
+                // Horizontal padding is introduced only for the intentional
+                // expanded USB label state.
+                .padding(.horizontal, signalExpanded ? 10 : 0)
+                .frame(
+                    width: signalExpanded ? nil : photoListCompactButtonWidth,
+                    height: photoListTopControlsHeight
+                )
+            }
+            .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
+
+            let filterPalette = zTransferButtonAccentPalette(
+                skin: .init(storedValue: skinPreset),
+                scheme: colorScheme,
+                active: ZTransferColors.accentYellow
+            )
+            Button {
+                ZTransferHaptics.shared.tick()
+                showingFilter.toggle()
+            } label: {
+                PhotoListFilterIcon(
+                    active: model.filter.isActive,
+                    color: model.filter.isActive ? filterPalette.active : filterPalette.inactive
+                )
+                    .frame(width: 20, height: 20)
+                    .frame(width: photoListCompactButtonWidth,
+                           height: photoListTopControlsHeight)
+            }
+            .buttonStyle(ZTransferGlassButtonStyle(
+                cornerRadius: 22,
+                active: model.filter.isActive,
+                activeColor: filterPalette.material,
+                activeOutline: true,
+                materialContentColor: model.filter.isActive
+                    ? filterPalette.active
+                    : filterPalette.inactive,
+                prominentPressFeedback: true
+            ))
+            .geniePopupAnchor(.filter)
+            .accessibilityIdentifier("popup-trigger-filter")
+        }
+        .transition(.asymmetric(
+            insertion: .modifier(
+                active: PhotoListTopControlsTransition(progress: 0, hiddenOffset: -40, hiddenScale: 0.94),
+                identity: PhotoListTopControlsTransition(progress: 1, hiddenOffset: -40, hiddenScale: 0.94)
+            ),
+            removal: .modifier(
+                active: PhotoListTopControlsTransition(progress: 0, hiddenOffset: -40, hiddenScale: 0.96),
+                identity: PhotoListTopControlsTransition(progress: 1, hiddenOffset: -40, hiddenScale: 0.96)
+            )
+        ))
+    }
+
+    /// The complete workspace header is one fixed-height sibling of the two
+    /// horizontally transitioning pages. Its only interactive descendants are
+    /// the visible controls themselves; no full-screen positioning layer can
+    /// win the gesture arena ahead of a button.
+    private var workspaceTopControls: some View {
+        HStack(spacing: 8) {
+            if queueTopControlsVisible {
+                queuePageTopControls
+            } else if !showingQueue && topControlsVisible {
+                photoListTopLeftControls
             }
 
             Spacer(minLength: 0)
+            queueTopRightControls
         }
         .padding(.horizontal, 12)
-        .padding(.top, 0)
-        // The controls animate inside a stable safe-area slot. Removing this
-        // height while previewing makes ScrollView compensate its content
-        // offset when the controls return, which looks like an unsolicited
-        // list scroll and distorts the target-cell pulse.
+        .frame(maxWidth: .infinity)
         .frame(height: photoListTopControlsHeight, alignment: .top)
         .background {
             GeometryReader { proxy in
@@ -995,12 +993,11 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
                     )
             }
         }
+        .zIndex(3)
         .animation(ZTransferMotion.standard, value: queueModel.snapshot.items.count)
         .onPreferenceChange(PhotoListTopControlsBoundsPreferenceKey.self) {
             photoListTopControlsBounds = $0
         }
-        .onPreferenceChange(PhotoListSettingsAnchorPreferenceKey.self) { settingsAnchor = $0 }
-        .onPreferenceChange(PhotoListFilterAnchorPreferenceKey.self) { filterAnchor = $0 }
     }
 
     /// Android keeps the queue page's back/signal group outside the moving
@@ -1011,13 +1008,15 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
         HStack(spacing: 8) {
             Button(action: dismissQueuePage) {
                 Image(systemName: "arrow.left")
-                    .font(.system(size: 16, weight: .bold))
-                    .frame(width: 36, height: 36)
+                    .font(.system(size: 18, weight: .bold))
+                    .frame(width: photoListCompactButtonWidth,
+                           height: photoListTopControlsHeight)
+                    .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
             }
             .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
 
             Button {
-                if session.isUSB || session.wirelessMode == .ap {
+                if session.isUSB {
                     guard isSessionConnected else { return }
                     withAnimation(signalExpanded
                                   ? .timingCurve(0.4, 0, 0.2, 1, duration: 0.22)
@@ -1031,30 +1030,22 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
                 HStack(spacing: signalExpanded ? 5 : 0) {
                     PhotoListSignalIcon(isUSB: session.isUSB,
                                         wirelessMode: session.wirelessMode,
-                                        connected: isSessionConnected,
-                                        apSignalPercent: apSignalPercent)
+                                        connected: isSessionConnected)
                     if signalExpanded && session.isUSB && isSessionConnected {
                         Text(AppLocalized.resource("connection_usb"))
                             .zTransferTypography(.labelSmall, weight: .medium)
                             .foregroundStyle(ZTransferColors.accentBlue)
-                    } else if signalExpanded && session.wirelessMode == .ap && isSessionConnected {
-                        Text(apSignalPercent.map { "\($0)%" } ?? "--%")
-                            .zTransferTypography(.labelSmall, weight: .medium)
-                            .monospacedDigit()
-                            .foregroundStyle(apSignalTint(percent: apSignalPercent))
                     }
                 }
-                .padding(.horizontal, 10)
-                .frame(minWidth: 40, minHeight: 36, maxHeight: 36)
+                .padding(.horizontal, signalExpanded ? 10 : 0)
+                .frame(
+                    width: signalExpanded ? nil : photoListCompactButtonWidth,
+                    height: photoListTopControlsHeight
+                )
             }
             .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
-
-            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 12)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .transition(.opacity)
-        .zIndex(3)
     }
 
     private func presentQueuePage() {
@@ -1104,8 +1095,8 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
                         Image(systemName: executionMode == .start ? "play.fill" : "pause.fill")
                             // SF Symbols' filled play triangle has more visual
                             // mass than Android's 21dp Material PlayArrow. Use
-                            // 17pt so it sits comfortably in the same 32pt
-                            // control; the pause mark remains 18pt.
+                            // 17pt so it stays visually restrained after the
+                            // top control grows to 40pt; pause remains 18pt.
                             .font(.system(size: executionMode == .start ? 17 : 18, weight: .bold))
                             .foregroundStyle(executionMode == .start
                                              ? ZTransferColors.accentBlue
@@ -1113,7 +1104,9 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
                             .id(executionMode)
                             .transition(.opacity.combined(with: .scale(scale: 0.72)))
                     }
-                    .frame(width: 32, height: 32)
+                    .frame(width: photoListCompactButtonWidth,
+                           height: photoListTopControlsHeight)
+                    .contentShape(Circle())
                 }
                 // Physical Android themes keep the fixed queue material. The
                 // user-approved iOS-only Liquid Glass theme includes every
@@ -1138,9 +1131,12 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
             Button {
                     presentQueuePage()
                 } label: {
-                    QueuePill(snapshot: queueModel.snapshot, activeProgress: queueModel.activeProgress,
-                              heldCount: heldFlightCount,
-                              heldBaselineRemaining: heldFlightBaselineRemaining)
+                    LiveQueuePill(
+                        snapshot: queueModel.snapshot,
+                        progressModel: queueModel.progressModel,
+                        heldCount: heldFlightCount,
+                        heldBaselineRemaining: heldFlightBaselineRemaining
+                    )
                 }
                 .buttonStyle(QueuePillButtonStyle())
                 // Measure the visible capsule itself. Its right edge is fixed
@@ -1157,7 +1153,6 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
                 .accessibilityLabel(AppLocalized.resource("cd_transfer"))
         }
         .modifier(QueueControlsCatchEffect(trigger: queueImpact))
-        .frame(maxWidth: .infinity, alignment: .trailing)
     }
 
     private var queueExecutionMode: QueueExecutionVisualMode? {
@@ -1671,7 +1666,8 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
                 : frame
         } ?? CGRect(x: screen.midX - 22, y: screen.midY - 22, width: 44, height: 44)
         let target = queueTargetBounds.isEmpty || queueTargetBounds.isInfinite || queueTargetBounds.isNull
-            ? CGRect(x: screen.maxX - 13, y: 48, width: 1, height: 36)
+            ? CGRect(x: screen.maxX - 13, y: 48, width: 1,
+                     height: photoListTopControlsHeight)
             : queueTargetBounds
         let id = UUID()
         let flightCount = max(1, count)
@@ -1935,28 +1931,6 @@ func queueFlightEasedProgress(_ linear: CGFloat) -> CGFloat {
     return 3 * remaining * t * t * 0.35 + t * t * t
 }
 
-/// Android uses raw dBm while iOS only exposes a normalized Wi-Fi strength.
-/// Preserve the same four visual bands without presenting an invented RSSI.
-func apSignalLevel(percent: Int?) -> Int {
-    guard let percent else { return 0 }
-    switch min(max(percent, 0), 100) {
-    case 75...: return 4
-    case 50...: return 3
-    case 25...: return 2
-    case 1...: return 1
-    default: return 0
-    }
-}
-
-func apSignalTint(percent: Int?) -> Color {
-    guard let percent else { return ZTransferColors.accentBlue }
-    switch apSignalLevel(percent: percent) {
-    case 4: return ZTransferColors.statusConnected
-    case 2...: return ZTransferColors.accentOrange
-    default: return ZTransferColors.statusError
-    }
-}
-
 private struct PhotoListCellBoundsPreferenceKey: PreferenceKey {
     static let defaultValue: [UInt32: CGRect] = [:]
     static func reduce(value: inout [UInt32: CGRect], nextValue: () -> [UInt32: CGRect]) {
@@ -1976,13 +1950,13 @@ private struct PhotoListQueueTargetPreferenceKey: PreferenceKey {
     static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
 }
 
-/// Android SignalPill family: USB keeps its dedicated mark, STA shows the
-/// topology state, and AP uses four ascending bars driven by Wi-Fi strength.
+/// SignalPill family: USB keeps its dedicated mark, STA shows topology state,
+/// and AP uses a static four-bar connected mark. iOS intentionally does not
+/// request the restricted Access Wi-Fi Information capability.
 struct PhotoListSignalIcon: View {
     let isUSB: Bool
     let wirelessMode: WirelessMode?
     var connected = true
-    var apSignalPercent: Int? = nil
 
     @AppStorage("skin_preset") private var skinPreset = ZTransferButtonSkin.frostedGlass.rawValue
     @Environment(\.colorScheme) private var colorScheme
@@ -2009,12 +1983,11 @@ struct PhotoListSignalIcon: View {
             .accessibilityLabel(AppLocalized.resource(connected ? "sta_signal_connected" : "sta_signal_disconnected_reconnect"))
         } else {
             if connected {
-                let level = apSignalLevel(percent: apSignalPercent)
-                let colors = apBarColors(level: level)
+                let color = apConnectedBarColor
                 HStack(alignment: .bottom, spacing: 2.5) {
                     ForEach(0..<4, id: \.self) { index in
                         RoundedRectangle(cornerRadius: 1.5, style: .continuous)
-                            .fill(index < max(level, 1) ? colors.lit : colors.unlit)
+                            .fill(color)
                             .frame(width: 4, height: CGFloat(6 + index * 3))
                     }
                 }
@@ -2023,10 +1996,7 @@ struct PhotoListSignalIcon: View {
                 // widths at different sub-pixel origins, so equally specified
                 // bars rasterized at visibly different widths on Retina.
                 .frame(width: 23.5, height: 15, alignment: .bottom)
-                .accessibilityLabel(apSignalPercent.map {
-                    AppLocalized.resource("ap_signal_strength_percent")
-                        .replacingOccurrences(of: "%1$d", with: "\($0)")
-                } ?? AppLocalized.resource("ap_signal_strength_unavailable"))
+                .accessibilityLabel(AppLocalized.resource("camera_session_notification_title"))
             } else {
                 Image(systemName: "wifi.slash")
                     .font(.system(size: 17, weight: .semibold))
@@ -2036,31 +2006,17 @@ struct PhotoListSignalIcon: View {
         }
     }
 
-    private func apBarColors(level: Int) -> (lit: Color, unlit: Color) {
+    private var apConnectedBarColor: Color {
         let skin = ZTransferButtonSkin(storedValue: skinPreset)
         let dark = colorScheme == .dark
         if skin == .wood {
-            let lit: Color
             if dark {
-                lit = level >= 4
-                    ? Color(red: 0.659, green: 0.906, blue: 0.737)
-                    : (level >= 2
-                       ? Color(red: 1, green: 0.835, blue: 0.541)
-                       : Color(red: 1, green: 0.616, blue: 0.569))
+                return Color(red: 0.659, green: 0.906, blue: 0.737)
             } else {
-                lit = level >= 4
-                    ? Color(red: 0.086, green: 0.310, blue: 0.196)
-                    : (level >= 2
-                       ? Color(red: 0.294, green: 0.165, blue: 0.071)
-                       : Color(red: 0.541, green: 0.125, blue: 0.145))
+                return Color(red: 0.086, green: 0.310, blue: 0.196)
             }
-            let unlit = dark
-                ? Color(red: 1, green: 0.894, blue: 0.710).opacity(0.34)
-                : Color(red: 0.196, green: 0.114, blue: 0.063).opacity(0.34)
-            return (lit, unlit)
         }
-        return (apSignalTint(percent: apSignalPercent),
-                ZTransferColors.secondaryText.opacity(0.28))
+        return ZTransferColors.accentBlue
     }
 }
 
@@ -2122,16 +2078,6 @@ private struct PhotoListQueueIcon: View {
         }
         .accessibilityLabel(AppLocalized.resource("cd_transfer"))
     }
-}
-
-private struct PhotoListSettingsAnchorPreferenceKey: PreferenceKey {
-    static let defaultValue: CGRect = .zero
-    static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
-}
-
-private struct PhotoListFilterAnchorPreferenceKey: PreferenceKey {
-    static let defaultValue: CGRect = .zero
-    static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
 }
 
 private func formatDateHeader(_ raw: String) -> String {
@@ -2239,6 +2185,22 @@ private func photoGridEntries(_ files: [CameraFile], burstIDByFile: [UInt32: Str
 
 private enum QueuePillVisualMode: Hashable, CaseIterable {
     case icon, done, paused, generating, counting
+}
+
+private struct LiveQueuePill: View {
+    let snapshot: TransferQueueSnapshot
+    @ObservedObject var progressModel: TransferQueueProgressViewModel
+    let heldCount: Int
+    let heldBaselineRemaining: Int?
+
+    var body: some View {
+        QueuePill(
+            snapshot: snapshot,
+            activeProgress: progressModel.activeProgress,
+            heldCount: heldCount,
+            heldBaselineRemaining: heldBaselineRemaining
+        )
+    }
 }
 
 struct QueuePill: View {
@@ -2394,7 +2356,7 @@ struct QueuePill: View {
             .clipped()
             .animation(.easeInOut(duration: 0.18), value: visualMode)
         }
-        .frame(width: renderedWidth, height: 36, alignment: .trailing)
+        .frame(width: renderedWidth, height: photoListTopControlsHeight, alignment: .trailing)
         .compositingGroup()
         .clipShape(Capsule())
         .background {
@@ -2497,7 +2459,7 @@ struct QueuePill: View {
                 // Android's 22dp Material Checklist path. A 20pt viewport
                 // yields the same visible 17–18pt mark inside the 40pt pill.
                 .frame(width: 20, height: 20)
-                .frame(width: 40, height: 36)
+                .frame(width: 40, height: photoListTopControlsHeight)
         case .done:
             Text("Done")
                 .font(.system(size: 14, weight: .bold))
@@ -2531,7 +2493,7 @@ struct QueuePill: View {
     private func measurementContent(for mode: QueuePillVisualMode) -> some View {
         switch mode {
         case .icon:
-            Color.clear.frame(width: 40, height: 36)
+            Color.clear.frame(width: 40, height: photoListTopControlsHeight)
         case .done:
             Text("Done").font(.system(size: 14, weight: .bold)).lineLimit(1)
         case .paused:
@@ -2684,6 +2646,20 @@ private struct QueueControlsCatchEffect: ViewModifier {
     }
 }
 
+private struct LiveTransferStatusBadge: View {
+    let task: TransferQueueItem
+    @ObservedObject var progressModel: TransferQueueProgressViewModel
+
+    var body: some View {
+        let progress = progressModel.activeProgress
+        TransferStatusBadge(
+            status: task.status,
+            progress: progress.flatMap { $0.taskID == task.id ? $0.fraction : nil } ?? task.progress,
+            taskID: task.id
+        )
+    }
+}
+
 private struct CameraThumbnailView: View {
     let session: CameraSession
     var file: CameraFile?
@@ -2692,7 +2668,7 @@ private struct CameraThumbnailView: View {
     var inBurst: Bool = false
     var showsCornerBadges: Bool = true
     var queueTask: TransferQueueItem? = nil
-    var liveProgress: TransferActiveProgress? = nil
+    var progressModel: TransferQueueProgressViewModel? = nil
     @State private var image: UIImage?
 
     init(
@@ -2703,7 +2679,7 @@ private struct CameraThumbnailView: View {
         inBurst: Bool = false,
         showsCornerBadges: Bool = true,
         queueTask: TransferQueueItem? = nil,
-        liveProgress: TransferActiveProgress? = nil
+        progressModel: TransferQueueProgressViewModel? = nil
     ) {
         self.session = session
         self.file = file
@@ -2712,7 +2688,7 @@ private struct CameraThumbnailView: View {
         self.inBurst = inBurst
         self.showsCornerBadges = showsCornerBadges
         self.queueTask = queueTask
-        self.liveProgress = liveProgress
+        self.progressModel = progressModel
         _image = State(initialValue: file.flatMap { session.memoryThumbnailImage(file: $0) })
     }
 
@@ -2763,9 +2739,15 @@ private struct CameraThumbnailView: View {
                 }
                 if let task = queueTask, task.status != .completed {
                     Color.black.opacity(0.35).frame(width: geometry.size.width, height: geometry.size.height)
-                    TransferStatusBadge(status: task.status, progress: liveProgress?.taskID == task.id ? liveProgress!.fraction : task.progress, taskID: task.id)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-                        .padding(4)
+                    Group {
+                        if let progressModel {
+                            LiveTransferStatusBadge(task: task, progressModel: progressModel)
+                        } else {
+                            TransferStatusBadge(status: task.status, progress: task.progress, taskID: task.id)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                    .padding(4)
                 } else if transferred {
                     TransferredPhotoBadge()
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)

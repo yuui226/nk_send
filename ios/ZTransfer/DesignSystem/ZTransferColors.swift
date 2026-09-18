@@ -137,9 +137,10 @@ func zTransferButtonAccentPalette(
     }
 }
 
-/// The iOS counterpart of Android `GlassButton`. Button themes intentionally
-/// stop here: panels, tips and the queue's speed/count/Done capsule continue to
-/// use the invariant glass tokens.
+/// The iOS counterpart of Android `GlassButton`. On iOS 26+, ordinary themed
+/// buttons use native Liquid Glass without flat rims or alpha suppression.
+/// `panel` remains the snapshot-stable embedded variant used inside Genie
+/// popup animation content.
 struct ZTransferGlassButtonStyle: ButtonStyle {
     var tint: Color?
     var cornerRadius: CGFloat
@@ -148,9 +149,10 @@ struct ZTransferGlassButtonStyle: ButtonStyle {
     var active: Bool
     var activeColor: Color
     var activeOutline: Bool
+    var liquidGlassBoundary: Bool
     var materialContentColor: Color?
     var disabledAlpha: CGFloat
-    var suppressFrostedShadowInLight: Bool
+    var prominentPressFeedback: Bool
 
     @AppStorage("skin_preset") private var skinPreset = ZTransferButtonSkin.frostedGlass.rawValue
     @Environment(\.colorScheme) private var colorScheme
@@ -164,9 +166,10 @@ struct ZTransferGlassButtonStyle: ButtonStyle {
         active: Bool = false,
         activeColor: Color = ZTransferColors.accentBlue,
         activeOutline: Bool = false,
+        liquidGlassBoundary: Bool = false,
         materialContentColor: Color? = nil,
         disabledAlpha: CGFloat = 0.45,
-        suppressFrostedShadowInLight: Bool = false
+        prominentPressFeedback: Bool = false
     ) {
         self.tint = tint
         self.cornerRadius = cornerRadius
@@ -175,9 +178,10 @@ struct ZTransferGlassButtonStyle: ButtonStyle {
         self.active = active
         self.activeColor = activeColor
         self.activeOutline = activeOutline
+        self.liquidGlassBoundary = liquidGlassBoundary
         self.materialContentColor = materialContentColor
         self.disabledAlpha = disabledAlpha
-        self.suppressFrostedShadowInLight = suppressFrostedShadowInLight
+        self.prominentPressFeedback = prominentPressFeedback
     }
 
     private var skin: ZTransferButtonSkin {
@@ -188,6 +192,7 @@ struct ZTransferGlassButtonStyle: ButtonStyle {
         let physical = skin != .frostedGlass && skin != .liquidGlass && !panel
         let pressedScale: CGFloat = {
             guard configuration.isPressed && isEnabled else { return 1 }
+            if prominentPressFeedback { return 0.94 }
             switch skin {
             case .liquidGlass: return 1
             case .cameraControls: return 0.982
@@ -200,6 +205,10 @@ struct ZTransferGlassButtonStyle: ButtonStyle {
             : 0
 
         treatedLabel(configuration.label)
+            // Make the complete rendered button surface the hit target. This
+            // is especially important for icon-only Liquid Glass buttons,
+            // whose visible material extends beyond the glyph itself.
+            .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .background {
                 ZTransferButtonMaterialSurface(
                     skin: skin,
@@ -208,12 +217,13 @@ struct ZTransferGlassButtonStyle: ButtonStyle {
                     active: active,
                     activeColor: activeColor,
                     activeOutline: activeOutline,
-                    pressed: configuration.isPressed && isEnabled,
-                    suppressFrostedShadowInLight: suppressFrostedShadowInLight
+                    liquidGlassBoundary: liquidGlassBoundary,
+                    pressed: configuration.isPressed && isEnabled
                 )
             }
             .scaleEffect(pressedScale)
             .offset(y: pressedOffset)
+            .brightness(configuration.isPressed && prominentPressFeedback ? -0.035 : 0)
             .opacity(isEnabled ? 1 : disabledAlpha)
             .animation(configuration.isPressed
                        ? .easeOut(duration: 0.08)
@@ -281,8 +291,8 @@ struct ZTransferButtonMaterialSurface: View {
     var active = false
     var activeColor: Color = ZTransferColors.accentBlue
     var activeOutline = false
+    var liquidGlassBoundary = false
     var pressed = false
-    var suppressFrostedShadowInLight = false
 
     @Environment(\.colorScheme) private var colorScheme
     @ObservedObject private var textureStore = ZTransferMaterialTextureStore.shared
@@ -291,23 +301,16 @@ struct ZTransferButtonMaterialSurface: View {
         RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
     }
     private var shadowSuppressed: Bool {
-        panel || (suppressFrostedShadowInLight && !dark &&
-                  (skin == .frostedGlass || skin == .liquidGlass))
+        panel || (!dark && skin == .frostedGlass)
+    }
+    private var needsFlatLightRim: Bool {
+        !dark && skin == .frostedGlass
     }
 
     var body: some View {
         Group {
             if skin == .liquidGlass && !panel {
-                if suppressFrostedShadowInLight && !dark {
-                    // Native Liquid Glass draws its own drop shadow outside
-                    // the requested shape. The Android Wi-Fi card is flat in
-                    // light mode, so clip only these card-local controls at
-                    // the material boundary while retaining native refraction
-                    // and press behavior inside it.
-                    nativeLiquidGlassMaterial.clipShape(shape)
-                } else {
-                    nativeLiquidGlassMaterial
-                }
+                nativeLiquidGlassMaterial
             } else {
                 material
                     .clipShape(shape)
@@ -323,6 +326,31 @@ struct ZTransferButtonMaterialSurface: View {
                     )
             }
         }
+        .overlay {
+            if skin == .liquidGlass && liquidGlassBoundary {
+                shape.strokeBorder(
+                    ZTransferColors.primaryText.opacity(dark ? 0.18 : 0.10),
+                    lineWidth: 0.75
+                )
+            }
+            if needsFlatLightRim {
+                // Android's flat light frosted button has no exterior drop
+                // shadow, but it remains defined by a broad dark inner edge
+                // and a fine white boundary. Apply that rule to every light
+                // frosted control.
+                shape.strokeBorder(
+                    Color(red: 97 / 255, green: 113 / 255, blue: 123 / 255)
+                        .opacity(0.13),
+                    lineWidth: 3.2
+                )
+                .overlay(shape.strokeBorder(.white.opacity(0.66), lineWidth: 1))
+            }
+        }
+        .shadow(
+            color: needsFlatLightRim ? .black.opacity(0.055) : .clear,
+            radius: needsFlatLightRim ? 2.5 : 0,
+            y: needsFlatLightRim ? 1.25 : 0
+        )
         // Material is purely visual. Keeping it outside hit testing ensures
         // every skin (including native liquid glass) leaves the Button label
         // as the sole interaction owner.
@@ -359,9 +387,22 @@ struct ZTransferButtonMaterialSurface: View {
             let glass = Glass.regular
                 .tint(active ? activeColor.opacity(0.22) : nil)
                 .interactive()
-            shape
-                .fill(.clear)
-                .glassEffect(glass, in: shape)
+            ZStack {
+                // Never derive the replacement shadow from `glassEffect`:
+                // its backdrop-sampling layer has rectangular bounds, which
+                // makes neighbouring controls merge into a grey block. This
+                // layer uses an explicit rounded shadowPath instead.
+                ZTransferRoundedPathShadow(
+                    cornerRadius: cornerRadius,
+                    opacity: dark ? 0.14 : 0.055,
+                    radius: dark ? 2.5 : 1.5,
+                    y: dark ? 1.25 : 0.75
+                )
+                shape
+                    .fill(.clear)
+                    .glassEffect(glass, in: shape)
+                    .clipShape(shape)
+            }
         } else {
             // Preferences can be restored before RootView has normalized
             // them. Keep the material itself safe on older systems as well.
@@ -561,6 +602,55 @@ struct ZTransferButtonMaterialSurface: View {
         case .wood: return 3.5
         case .cameraControls: return 4
         }
+    }
+}
+
+/// A path-backed shadow for Liquid Glass buttons. `glassEffect` owns a larger
+/// rectangular backdrop layer, so applying SwiftUI's `.shadow` to that view
+/// leaks the compositor bounds as a grey rectangle when controls are grouped.
+private struct ZTransferRoundedPathShadow: UIViewRepresentable {
+    let cornerRadius: CGFloat
+    let opacity: CGFloat
+    let radius: CGFloat
+    let y: CGFloat
+
+    func makeUIView(context: Context) -> ZTransferRoundedShadowView {
+        ZTransferRoundedShadowView()
+    }
+
+    func updateUIView(_ view: ZTransferRoundedShadowView, context: Context) {
+        view.configure(cornerRadius: cornerRadius, opacity: opacity, radius: radius, y: y)
+    }
+}
+
+private final class ZTransferRoundedShadowView: UIView {
+    private var configuredCornerRadius: CGFloat = 0
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        isOpaque = false
+        backgroundColor = UIColor.white.withAlphaComponent(0.001)
+        layer.masksToBounds = false
+        layer.shadowColor = UIColor.black.cgColor
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    func configure(cornerRadius: CGFloat, opacity: CGFloat, radius: CGFloat, y: CGFloat) {
+        configuredCornerRadius = cornerRadius
+        layer.shadowOpacity = Float(opacity)
+        layer.shadowRadius = radius
+        layer.shadowOffset = CGSize(width: 0, height: y)
+        setNeedsLayout()
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        layer.shadowPath = UIBezierPath(
+            roundedRect: bounds,
+            cornerRadius: configuredCornerRadius
+        ).cgPath
     }
 }
 

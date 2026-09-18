@@ -9,9 +9,6 @@ struct GPSConnectionControl: View {
     @ObservedObject var coordinator: GPSCoordinator
     @Binding var expanded: Bool
     @Binding var showingResetPairing: Bool
-    @State private var panelMounted = false
-    @State private var panelProgress: CGFloat = 0
-    @State private var headerWidth: CGFloat = 1
     @State private var showHelp = false
     @State private var ambientHigh = false
     @State private var hintText: String?
@@ -74,54 +71,47 @@ struct GPSConnectionControl: View {
                     hintText = AppLocalized.resource("code_copied")
                 },
                 ambientEffectColor: entryAccent,
-                ambientEffectAlpha: ambientAlpha
+                ambientEffectAlpha: ambientAlpha,
+                followsButtonSkin: true,
+                prominentPressFeedback: true
             )
-            .onAppear { updateAmbientPulse() }
+            .onAppear {
+                updateAmbientPulse()
+            }
             .onChange(of: active) { _ in updateAmbientPulse() }
-            .onChange(of: expanded) { _ in updateAmbientPulse() }
+            .onChange(of: expanded) { _ in
+                updateAmbientPulse()
+            }
             .onChange(of: entryError) { _ in updateAmbientPulse() }
         }
-        .background {
-            GeometryReader { proxy in
-                Color.clear
-                    .allowsHitTesting(false)
-                    .preference(key: GPSHeaderWidthPreferenceKey.self,
-                                value: proxy.size.width)
-            }
-        }
-        .onPreferenceChange(GPSHeaderWidthPreferenceKey.self) { width in
-            if width > 0 { headerWidth = width }
-        }
-        .overlay(alignment: .topLeading) {
-            if panelMounted {
-                // Reuse the exact native genie host used by the Z settings
-                // popup. The GPS wheel is expressed in the panel's local
-                // coordinates so expansion and collapse return to the same
-                // physical control instead of fading toward a generic edge.
-                GeniePopupPanel(
-                    content: GPSInlinePanel(
-                        coordinator: coordinator,
-                        showHelp: $showHelp,
-                        showingResetPairing: $showingResetPairing,
-                        hintText: $hintText
-                    ),
-                    targetProgress: panelProgress,
-                    anchor: panelSourceAnchor,
-                    panelOrigin: .zero,
-                    viewport: UIScreen.main.bounds.size,
-                    onCollapsed: {
-                        if !expanded { panelMounted = false }
-                    }
-                )
-                // Android uses a 250dp overflow detail and keeps a 10dp gap
-                // below the 50dp header without remeasuring either card.
-                .frame(width: min(preferredPanelWidth, UIScreen.main.bounds.width - 28))
-                // An overlay inherits the header's 50pt height proposal.
-                // Opt out vertically before applying the visual offset;
-                // padding here used to leave Genie with a zero-height proposal,
-                // so its live content overflowed upward over the GPS button.
-                .fixedSize(horizontal: false, vertical: true)
-                .offset(y: headerHeight + panelGap)
+        .geniePopupAnchor(.gps)
+        .accessibilityIdentifier("popup-trigger-gps")
+        .overlayPreferenceValue(GeniePopupAnchorPreferenceKey.self) { anchors in
+            if let anchor = anchors[.gps] {
+                GeometryReader { proxy in
+                    let button = proxy[anchor]
+                    let panelWidth = min(preferredPanelWidth, UIScreen.main.bounds.width - 28)
+                    let panelTop = button.maxY + panelGap
+                    let source = GeniePopupMotion.attachmentAnchor(
+                        for: button, cornerRadius: 20
+                    ).offsetBy(dx: -button.minX, dy: -panelTop)
+                    GeniePopupPanel(
+                        content: GPSInlinePanel(
+                            coordinator: coordinator,
+                            showHelp: $showHelp,
+                            showingResetPairing: $showingResetPairing,
+                            hintText: $hintText
+                        ),
+                        trigger: .gps,
+                        targetProgress: expanded ? 1 : 0,
+                        anchorX: source.midX / panelWidth,
+                        anchorWidth: source.width / panelWidth,
+                        anchorGap: -source.maxY
+                    )
+                    .frame(width: panelWidth)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .offset(x: button.minX, y: panelTop)
+                }
             }
         }
         .overlay(alignment: .topTrailing) {
@@ -133,7 +123,7 @@ struct GPSConnectionControl: View {
                     .transition(.opacity)
             }
         }
-        .zIndex(panelMounted ? 2 : 0)
+        .zIndex(expanded ? 2 : 0)
         .task(id: hintText) {
             guard hintText != nil else { return }
             try? await Task.sleep(for: .milliseconds(1_800))
@@ -142,34 +132,11 @@ struct GPSConnectionControl: View {
         }
     }
 
-    private var panelSourceAnchor: CGRect {
-        GeniePopupMotion.attachmentAnchor(
-            for: CGRect(
-                x: 0,
-                y: -panelGap - headerHeight,
-                width: headerWidth,
-                height: headerHeight
-            ),
-            cornerRadius: 20
-        )
-    }
-
     private func setExpanded(_ next: Bool) {
-        guard next != expanded || (next && !panelMounted) else { return }
+        guard next != expanded else { return }
         expanded = next
-        if next {
-            panelMounted = true
-            panelProgress = 0
-            // Mount and measure the live panel before starting the same mesh
-            // transition used by Settings. This avoids a provisional-height
-            // flash on the first expansion.
-            DispatchQueue.main.async {
-                guard expanded, panelMounted else { return }
-                panelProgress = 1
-            }
-        } else {
+        if !next {
             showHelp = false
-            panelProgress = 0
         }
     }
 
@@ -189,12 +156,7 @@ struct GPSConnectionControl: View {
     }
 }
 
-private struct GPSHeaderWidthPreferenceKey: PreferenceKey {
-    static let defaultValue: CGFloat = 1
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
-    }
-}
+
 
 private struct GPSHelpAnchorPreferenceKey: PreferenceKey {
     static let defaultValue: CGRect = .zero
@@ -280,11 +242,8 @@ private struct GPSInlinePanel: View {
         }
         .padding(.horizontal, 12)
         .padding(.bottom, 10)
-        // A live system blur and its rasterized animation snapshot resolve the
-        // backdrop at different moments. Swapping them at the final frame used
-        // to look like an extra grey mask flashing over the GPS panel. The
-        // shared panel surface is visually stable in both representations, so
-        // the handoff needs neither a second overlay nor a material crossfade.
+        // Keep the embedded panel surface stable while the shared live-content
+        // transition changes its outline and scale.
         .background(ZTransferGlassSurface(cornerRadius: 24, kind: .panel))
         .coordinateSpace(name: "gps-inline-panel")
         .onPreferenceChange(GPSHelpAnchorPreferenceKey.self) { helpAnchor = $0 }

@@ -175,6 +175,10 @@ enum PhotoEffectsRenderer {
         let rendered = UIGraphicsImageRenderer(size: layout.canvas, format: format).image { renderer in
             let cg = renderer.cgContext
             drawBackdrop(cg, image: backdropImage, layout: layout, preset: settings.photoFramePreset)
+            if Task.isCancelled {
+                renderError = CancellationError()
+                return
+            }
             if settings.photoFramePreset == .galleryMat || settings.photoFramePreset == .filmGallery {
                 let photo = layout.photo
                 let inset = min(photo.width, photo.height) * 0.045
@@ -203,6 +207,10 @@ enum PhotoEffectsRenderer {
                 }
             } else {
                 image.draw(in: layout.photo)
+            }
+            if Task.isCancelled {
+                renderError = CancellationError()
+                return
             }
             let visibleMetadata = presentedPhotoFrameMetadata(
                 metadata, settings: settings.metadata, preview: previewPlaceholders

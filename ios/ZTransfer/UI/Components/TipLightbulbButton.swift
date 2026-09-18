@@ -10,7 +10,6 @@ struct TipLightbulbButton: View {
     let accessibilityLabel: String
     var motionPaused = false
     var embeddedInPanel = false
-    var suppressFrostedShadowInLight = false
     let action: () -> Void
     @AppStorage("skin_preset") private var skinPreset = ZTransferButtonSkin.frostedGlass.rawValue
     @Environment(\.colorScheme) private var colorScheme
@@ -56,8 +55,7 @@ struct TipLightbulbButton: View {
                 tint: iconColor,
                 cornerRadius: 12,
                 panel: embeddedInPanel,
-                materialContentColor: iconColor,
-                suppressFrostedShadowInLight: suppressFrostedShadowInLight
+                materialContentColor: iconColor
             ))
             // Keep the complete glass tile as the physical touch target. The
             // icon and unread-dot overlays are purely visual and must not

@@ -30,13 +30,17 @@ struct DetentWheel<Option: Hashable>: View {
     var favoriteIconColor: Color? = nil
     var ambientEffectColor: Color? = nil
     var ambientEffectAlpha: Double = 0
+    var followsButtonSkin = false
+    var prominentPressFeedback = false
     var contentAnchorSpace: AnyHashable? = nil
     var onContentAnchorChange: ((CGRect) -> Void)? = nil
+    @AppStorage("skin_preset") private var skinPreset = ZTransferButtonSkin.frostedGlass.rawValue
     @State private var position: CGFloat
     @State private var dragStart: CGFloat
     @State private var dragging = false
     @State private var suppressNextTap = false
     @GestureState private var gestureActive = false
+    @GestureState private var pressing = false
 
     init(label: String, options: [Option], selected: Option,
          optionLabel: @escaping (Option) -> String,
@@ -53,6 +57,8 @@ struct DetentWheel<Option: Hashable>: View {
          favoriteOption: @escaping (Option) -> Bool = { _ in false },
          favoriteIconColor: Color? = nil, ambientEffectColor: Color? = nil,
          ambientEffectAlpha: Double = 0,
+         followsButtonSkin: Bool = false,
+         prominentPressFeedback: Bool = false,
          contentAnchorSpace: AnyHashable? = nil,
          onContentAnchorChange: ((CGRect) -> Void)? = nil) {
         precondition(!options.isEmpty, "DetentWheel requires at least one option")
@@ -68,6 +74,8 @@ struct DetentWheel<Option: Hashable>: View {
         self.centerIcon = centerIcon; self.favoriteOption = favoriteOption
         self.favoriteIconColor = favoriteIconColor; self.ambientEffectColor = ambientEffectColor
         self.ambientEffectAlpha = ambientEffectAlpha
+        self.followsButtonSkin = followsButtonSkin
+        self.prominentPressFeedback = prominentPressFeedback
         self.contentAnchorSpace = contentAnchorSpace
         self.onContentAnchorChange = onContentAnchorChange
         let initial = options.firstIndex(of: selected) ?? 0
@@ -78,6 +86,9 @@ struct DetentWheel<Option: Hashable>: View {
     private var canDrag: Bool { options.count > 3 }
     private var accent: Color { accentColor ?? ZTransferColors.accentBlue }
     private var dark: Bool { colorScheme == .dark }
+    private var usesNativeLiquidGlass: Bool {
+        followsButtonSkin && ZTransferButtonSkin(storedValue: skinPreset) == .liquidGlass
+    }
     private var wheelFill: Color {
         dark ? Color(white: emphasized ? 0.22 : 0.16).opacity(0.94)
              : Color.white.opacity(emphasized ? 0.86 : 0.74)
@@ -92,10 +103,19 @@ struct DetentWheel<Option: Hashable>: View {
         GeometryReader { proxy in
             let center = proxy.size.height / 2
             let surface = ZStack {
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(wheelFill)
-                    .overlay(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .stroke(wheelBorder, lineWidth: dragging ? 1.5 : 1))
+                if usesNativeLiquidGlass {
+                    ZTransferButtonMaterialSurface(
+                        skin: .liquidGlass,
+                        cornerRadius: cornerRadius,
+                        active: emphasized,
+                        activeColor: accent
+                    )
+                } else {
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .fill(wheelFill)
+                        .overlay(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                            .stroke(wheelBorder, lineWidth: dragging ? 1.5 : 1))
+                }
                 if let ambientEffectColor, ambientEffectAlpha > 0 {
                     RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                         .fill(ambientEffectColor.opacity(ambientEffectAlpha)).allowsHitTesting(false)
@@ -121,7 +141,7 @@ struct DetentWheel<Option: Hashable>: View {
             // click controls; leaving their surface gesture-free lets a
             // press-and-drag continue into the page pager instead of being
             // trapped by a high-priority tap recognizer.
-            Group {
+            let interactiveSurface = Group {
                 if canDrag {
                     surface.highPriorityGesture(dragGesture)
                 } else {
@@ -133,9 +153,23 @@ struct DetentWheel<Option: Hashable>: View {
             // second high-priority recognizer that can delay the enclosing
             // page's vertical drag.
             .onTapGesture { activate() }
+            .simultaneousGesture(pressGesture)
             .simultaneousGesture(longPressGesture)
+            .scaleEffect(prominentPressFeedback && pressing ? 0.96 : 1)
+            .brightness(prominentPressFeedback && pressing ? -0.035 : 0)
+            .animation(.easeOut(duration: pressing ? 0.07 : 0.16), value: pressing)
             .animation(.easeInOut(duration: dragging ? 0.09 : 0.18), value: dragging)
-            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+
+            if usesNativeLiquidGlass {
+                // Native Liquid Glass intentionally draws refraction and its
+                // ambient edge just outside the requested shape. The regular
+                // wheel clips scrolling rows, but doing that to a button-use
+                // wheel makes the system material look like a flat color.
+                interactiveSurface
+            } else {
+                interactiveSurface
+                    .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            }
         }
         .frame(height: wheelHeight).opacity(enabled ? 1 : 0.48)
         .accessibilityElement(children: .ignore)
@@ -246,6 +280,13 @@ struct DetentWheel<Option: Hashable>: View {
                 suppressNextTap = false
             }
         }
+    }
+
+    private var pressGesture: some Gesture {
+        DragGesture(minimumDistance: 0)
+            .updating($pressing) { _, active, _ in
+                if prominentPressFeedback && enabled && !readOnly { active = true }
+            }
     }
 
     private func sync(value: Option) {

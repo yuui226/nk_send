@@ -1,151 +1,102 @@
-import CoreGraphics
-import Foundation
+import SwiftUI
+import QuartzCore
 
-/// Android `GeniePopupGeometry.kt`, expressed in iOS points. The same progress
-/// drives the inlet width, the bowed body and the distance from the Z button.
+/// Small shared contract for the three popup entrances. Geometry lives in the
+/// SwiftUI transition itself; this type contains only timing and anchor math.
 enum GeniePopupMotion {
-    static let expandDuration: TimeInterval = 0.32
-    static let collapseDuration: TimeInterval = 0.35
-    static let renderBands = 12
+    private static let expandDuration = 0.36
+    private static let collapseDuration = 0.28
+
+    static func progress(_ value: CGFloat) -> CGFloat {
+        guard value.isFinite else { return 0 }
+        return min(max(value, 0), 1)
+    }
+
+    static func duration(expanding: Bool) -> TimeInterval {
+        expanding ? expandDuration : collapseDuration
+    }
+
+    static func timing(_ fraction: Double, expanding: Bool) -> CGFloat {
+        let x = min(1, max(0, fraction))
+        let controls = expanding ? (0.28, 0.15, 0.22, 1.0) : (0.35, 0.10, 0.65, 1.0)
+        func cubic(_ t: Double, _ a: Double, _ b: Double) -> Double {
+            let u = 1 - t
+            return 3 * u * u * t * a + 3 * u * t * t * b + t * t * t
+        }
+        var low = 0.0
+        var high = 1.0
+        for _ in 0..<20 {
+            let t = (low + high) / 2
+            if cubic(t, controls.0, controls.2) < x { low = t } else { high = t }
+        }
+        return CGFloat(cubic((low + high) / 2, controls.1, controls.3))
+    }
 
     struct Row {
         let left: CGFloat
         let right: CGFloat
         let y: CGFloat
-        let tilt: CGFloat
-        var leftY: CGFloat { y + tilt / 2 }
-        var rightY: CGFloat { y - tilt / 2 }
+
+        func padded(by fraction: CGFloat) -> Row {
+            let padding = (right - left) * fraction
+            return Row(left: left - padding, right: right + padding, y: y)
+        }
     }
 
-    static func progress(_ value: CGFloat) -> CGFloat {
-        guard value.isFinite else { return 0 }
-        return min(1, max(0, value))
+    /// Android GeniePopupGeometry: the mouth narrows before the far edge is
+    /// pulled in. Each cross-section has its own width AND horizontal travel,
+    /// so the whole surface bends instead of scaling behind a curved mask.
+    static func row(progress: CGFloat, fraction: CGFloat, source: CGRect, size: CGSize) -> Row {
+        let p = Self.progress(progress)
+        let v = min(1, max(0, fraction))
+        let length = p * (2 - p)
+        let spread = pow(p, 0.85 + 2.1 * (1 - v) * (1 - v))
+        let width = source.width + (size.width - source.width) * spread
+        let center = source.midX + (size.width / 2 - source.midX) * spread
+        let bent = fraction + 0.4 * (1 - p) * (v * v - v)
+        return Row(left: center - width / 2, right: center + width / 2,
+                   y: source.maxY * (1 - length) + size.height * length * bent)
     }
 
-    static func length(_ value: CGFloat) -> CGFloat {
-        let p = progress(value)
-        return p * (2 - p)
-    }
-
-    static func smoothStep(_ value: CGFloat) -> CGFloat {
-        let t = min(1, max(0, value))
+    static func opacity(_ progress: CGFloat) -> CGFloat {
+        let p = Self.progress(progress)
+        let t = min(1, max(0, (p * (2 - p) - 0.002) / 0.028))
         return t * t * (3 - 2 * t)
     }
 
-    static func panelAlpha(_ value: CGFloat) -> CGFloat {
-        smoothStep((length(value) - 0.002) / 0.028)
+    /// Public Core Animation projective transform: map one small rectangular
+    /// texture band onto its two horizontal cross-sections, with no mask or
+    /// overlapping full-size offscreen layers.
+    static func bandTransform(size: CGSize, top: Row, bottom: Row) -> CATransform3D {
+        let topWidth = max(0.0001, top.right - top.left)
+        let bottomWidth = max(0.0001, bottom.right - bottom.left)
+        let ratio = topWidth / bottomWidth
+        let height = max(0.0001, size.height)
+        var transform = CATransform3DIdentity
+        transform.m11 = topWidth / max(0.0001, size.width)
+        transform.m21 = (bottom.left * ratio - top.left) / height
+        transform.m22 = (bottom.y * ratio - top.y) / height
+        transform.m24 = (ratio - 1) / height
+        transform.m41 = top.left
+        transform.m42 = top.y
+        return transform
     }
 
-    static func validAnchor(_ anchor: CGRect, panel: CGRect) -> Bool {
-        let values = [anchor.minX, anchor.minY, anchor.maxX, anchor.maxY,
-                      panel.minX, panel.minY, panel.maxX, panel.maxY]
-        return values.allSatisfy(\.isFinite) && anchor.width > 0 && anchor.height > 0 &&
-            panel.width > 0 && panel.height > 0 && anchor.maxY <= panel.minY
-    }
-
-    /// Central attachment segment of a rounded trigger. Narrow capsules keep
-    /// at least their middle half; wider controls can avoid the complete corner
-    /// radius. The returned segment is always exactly centred on the button.
+    /// The Genie mouth is the straight part of the button's lower edge. The
+    /// two corner radii are excluded so a round filter button converges to its
+    /// bottom centre while a wide GPS capsule retains its long straight edge.
     static func attachmentAnchor(for button: CGRect, cornerRadius: CGFloat) -> CGRect {
         guard button.width > 0, button.height > 0 else { return .zero }
-        let effectiveRadius = min(max(0, cornerRadius), button.height / 2)
-        let inset = min(effectiveRadius, button.width / 4)
-        let width = max(1, button.width - inset * 2)
+        let radius = min(max(0, cornerRadius), button.width / 2, button.height / 2)
+        // "Button width minus the rounded-corner width": one effective radius
+        // in total. For the 40pt round filter control this deliberately leaves
+        // a readable 20pt inlet instead of collapsing it to a 1pt needle.
+        let width = max(1, button.width - radius)
         return CGRect(
             x: button.midX - width / 2,
             y: button.maxY - 1,
             width: width,
             height: 1
         )
-    }
-
-    static func row(progress rawProgress: CGFloat, fraction rawFraction: CGFloat,
-                    anchor: CGRect, panel: CGRect, mouthWidth: CGFloat? = nil) -> Row {
-        let p = progress(rawProgress)
-        let v = progress(rawFraction)
-        if p == 1 { return Row(left: 0, right: panel.width, y: panel.height * v, tilt: 0) }
-
-        // Android mirrors the complete funnel for right-hand buttons. This is
-        // important for Filter: reusing a left-hand bend makes the mesh fold
-        // against its travel direction during the narrow final frames.
-        if anchor.midX > panel.midX {
-            let mirrored = CGRect(
-                x: panel.minX + panel.maxX - anchor.maxX,
-                y: anchor.minY,
-                width: anchor.width,
-                height: anchor.height
-            )
-            let reflected = row(
-                progress: p,
-                fraction: v,
-                anchor: mirrored,
-                panel: panel,
-                mouthWidth: mouthWidth
-            )
-            return Row(
-                left: panel.width - reflected.right,
-                right: panel.width - reflected.left,
-                y: reflected.y,
-                tilt: -reflected.tilt
-            )
-        }
-
-        let dockX = anchor.midX - panel.minX
-        let dockY = anchor.maxY - panel.minY
-        let length = length(p)
-        let requestedWidth = mouthWidth.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
-            ?? anchor.width
-        let seedWidth = min(min(anchor.width, panel.width), max(1, requestedWidth))
-        // Keep width and travel on separate clocks derived from the same
-        // progress, exactly as Android GeniePopupGeometry. The mouth reacts
-        // first while the broad tail follows without a phase discontinuity.
-        let spread = pow(p, 0.85 + 2.1 * pow(1 - v, 2))
-        let width = mix(seedWidth, panel.width, spread)
-        let envelope = 16 * p * p * pow(1 - p, 2)
-        // Keep the complete motion on the straight centre line between the
-        // trigger and the panel. Android's small one-sided drift looks natural
-        // for its fixed left Z mark, but made the three differently positioned
-        // iOS controls appear to expand and collapse from a crooked location.
-        let center = mix(dockX, panel.width / 2, spread)
-        let bowPhase = max(0, sin(.pi * v))
-        let bow = min(
-            min(min(panel.width * 0.075, anchor.width * 0.5), width * 0.2) *
-                envelope * bowPhase * bowPhase,
-            (width - seedWidth) * 0.3
-        )
-        // Apply the bow symmetrically so it changes silhouette, never position.
-        let left = center - width / 2 + bow
-        let right = center + width / 2 - bow
-        let bentV = v + 0.4 * (1 - p) * (v * v - v)
-        let y = dockY * (1 - length) + panel.height * length * bentV
-        return Row(left: left, right: right, y: y, tilt: 0)
-    }
-
-    /// Solve the same cubic Bézier as Compose's CubicBezierEasing. Core
-    /// Animation's timing curve cannot be applied to the custom GPU mesh.
-    static func ease(_ time: CGFloat, expanding: Bool) -> CGFloat {
-        let t = progress(time)
-        let x1: CGFloat = expanding ? 0.16 : 0.30
-        let y1: CGFloat = expanding ? 0.40 : 0.18
-        let x2: CGFloat = expanding ? 0.22 : 0.60
-        let y2: CGFloat = 1
-        var lower: CGFloat = 0
-        var upper: CGFloat = 1
-        for _ in 0..<16 {
-            let mid = (lower + upper) / 2
-            let x = cubic(mid, first: x1, second: x2)
-            if x < t { lower = mid } else { upper = mid }
-        }
-        return cubic((lower + upper) / 2, first: y1, second: y2)
-    }
-
-    private static func cubic(_ t: CGFloat, first: CGFloat, second: CGFloat) -> CGFloat {
-        let inverse = 1 - t
-        return 3 * inverse * inverse * t * first +
-            3 * inverse * t * t * second + t * t * t
-    }
-
-    private static func mix(_ start: CGFloat, _ end: CGFloat, _ amount: CGFloat) -> CGFloat {
-        start + (end - start) * amount
     }
 }

@@ -37,6 +37,11 @@ final class PhotoListViewModel: ObservableObject {
     @Published private(set) var exitingTransferredFileIDs: Set<UInt32> = []
     @Published private(set) var filter = PhotoFilterState()
     @Published private(set) var availableStorageSlots: [UInt32] = []
+    /// Android derives these with `remember(presentedCameraFiles)`. Keep the
+    /// same catalog-scoped cache here so opening Filter is a constant-time
+    /// state change instead of a fresh walk over every camera file.
+    private(set) var availableFilterExtensions: [String] = []
+    private(set) var latestKnownCaptureDay: String?
     /// Mirrors Android's `isLoadingFiles`/`hasCompletedFileScan` pair.  The
     /// view may receive several published batches before the scan completes.
     @Published private(set) var isLoadingFiles = false
@@ -90,10 +95,6 @@ final class PhotoListViewModel: ObservableObject {
 
     var latestEffectPreviewFile: CameraFile? {
         Self.latestEffectPreviewFile(in: allFiles)
-    }
-
-    var latestKnownCaptureDay: String? {
-        allFiles.compactMap { validPhotoCaptureDay($0.captureDate) }.max()
     }
 
     init(session: CameraSession, onTransportLost: (() -> Void)? = nil) {
@@ -354,6 +355,20 @@ final class PhotoListViewModel: ObservableObject {
     private func publishSections() {
         // A refreshed catalog may reuse a handle for another file. Resolve
         // current file identity against the indexes, never a stale handle set.
+        var extensions = Set<String>()
+        var latestDay: String?
+        for file in allFiles {
+            extensions.insert(file.fileExtension.lowercased())
+            if let day = validPhotoCaptureDay(file.captureDate) {
+                if let current = latestDay {
+                    if day > current { latestDay = day }
+                } else {
+                    latestDay = day
+                }
+            }
+        }
+        availableFilterExtensions = extensions.sorted()
+        latestKnownCaptureDay = latestDay
         transferredIDs = indexedTransferredIDs
         availableDayKeys = Set(allFiles.map { file in
             guard let value = file.captureDate, value.count >= 8 else { return PhotoCatalogGrouping.unknownDay }

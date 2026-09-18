@@ -21,7 +21,6 @@ struct ConnectionPage: View {
     @AppStorage("sta_connection_help_viewed") private var staHelpViewed = false
     @AppStorage("ap_connection_help_viewed") private var apHelpViewed = false
     @State private var attentionOrigin = Date()
-    @State private var settingsAnchor: CGRect = .zero
     @State private var connectionHint: PhotoEffectsHint?
 
     var body: some View {
@@ -103,7 +102,10 @@ struct ConnectionPage: View {
 
                     ConnectionSceneFadeTimeline(start: celebrationStart) {
                         HStack(spacing: 8) {
-                            Button { Task { @MainActor in showSettings = true } } label: {
+                            Button {
+                                ZTransferHaptics.shared.tick()
+                                showSettings = true
+                            } label: {
                                 DoubleZMark(tint: ZTransferColors.primaryText)
                                     .frame(width: 20 * DoubleZMark.aspectRatio, height: 20)
                                     .padding(.horizontal, 14)
@@ -111,25 +113,19 @@ struct ConnectionPage: View {
                             }
                             .buttonStyle(ZTransferGlassButtonStyle(
                                 cornerRadius: 22,
-                                materialContentColor: ZTransferColors.accentYellow
+                                materialContentColor: ZTransferColors.accentYellow,
+                                prominentPressFeedback: true
                             ))
-                            .background {
-                                GeometryReader { anchor in
-                                    Color.clear
-                                        .allowsHitTesting(false)
-                                        .preference(
-                                            key: SettingsAnchorPreferenceKey.self,
-                                            value: anchor.frame(in: .named(ZTransferPopupAnchorSpace.name))
-                                        )
-                                }
-                            }
+                            .geniePopupAnchor(.settings)
+                            .accessibilityIdentifier("popup-trigger-settings")
                             #if DEBUG
                             Button { model.connectDebugSimulator() } label: {
                                 Image(systemName: "photo.on.rectangle.angled")
                                     .font(.system(size: 18, weight: .semibold))
-                                    .frame(width: 36, height: 36)
+                                    .frame(width: 40, height: 36)
                             }
                             .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
+                            .accessibilityIdentifier("debug-photo-library")
                             #endif
                         }
                         .padding(.leading, 12)
@@ -145,7 +141,6 @@ struct ConnectionPage: View {
                         .padding(.bottom, 18)
                     }
                 }
-                .onPreferenceChange(SettingsAnchorPreferenceKey.self) { settingsAnchor = $0 }
             }
 
             // Keep the scrim outside the safe-area-constrained page overlay.
@@ -171,21 +166,6 @@ struct ConnectionPage: View {
                     .ignoresSafeArea()
                 }
             }
-            if showSettings {
-                ConnectionSceneFadeTimeline(start: celebrationStart) {
-                    SettingsPopupOverlay(
-                        isPresented: $showSettings,
-                        showPhotoEffectsEntry: false,
-                        effectsStore: effectsStore,
-                        directory: directory,
-                        anchor: settingsAnchor,
-                        effectPreviewSource: nil,
-                        effectPreviewExif: nil,
-                        onEffectPreviewRequested: {}
-                    )
-                    .ignoresSafeArea()
-                }
-            }
             if showSTATips {
                 ConnectionSceneFadeTimeline(start: celebrationStart) {
                     STATipsOverlay(isPresented: $showSTATips, wirelessMode: tipsWirelessMode, anchor: tipsAnchor)
@@ -193,7 +173,23 @@ struct ConnectionPage: View {
                 }
             }
         }
-        .coordinateSpace(name: ZTransferPopupAnchorSpace.name)
+        .overlayPreferenceValue(GeniePopupAnchorPreferenceKey.self) { anchors in
+            if let anchor = anchors[.settings] {
+                ConnectionSceneFadeTimeline(start: celebrationStart) {
+                    SettingsPopupOverlay(
+                        isPresented: $showSettings,
+                        showPhotoEffectsEntry: false,
+                        effectsStore: effectsStore,
+                        directory: directory,
+                        anchor: anchor,
+                        effectPreviewSource: nil,
+                        effectPreviewExif: nil,
+                        onEffectPreviewRequested: {}
+                    )
+                    .ignoresSafeArea()
+                }
+            }
+        }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .photoEffectsHint($connectionHint, duration: 1.8)
         .onChange(of: gpsCoordinator.state.enabled) { enabled in
@@ -319,11 +315,6 @@ struct ConnectionCelebrationValues: Equatable {
         }
         return component((low + high) / 2, 0.0, 1.0)
     }
-}
-
-private struct SettingsAnchorPreferenceKey: PreferenceKey {
-    static let defaultValue: CGRect = .zero
-    static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
 }
 
 struct ConnectionLayout {

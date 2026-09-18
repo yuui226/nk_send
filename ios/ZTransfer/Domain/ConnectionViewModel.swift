@@ -1,7 +1,6 @@
 import Foundation
 import Combine
 import Network
-import NetworkExtension
 
 @MainActor
 final class ConnectionViewModel: ObservableObject {
@@ -32,15 +31,10 @@ final class ConnectionViewModel: ObservableObject {
     @Published private(set) var pairedCameraCount = 0
     @Published private(set) var pairedCameraModels: [String] = []
     private var wifiWatcherTask: Task<Void, Never>?
-    private var apSignalTask: Task<Void, Never>?
     private var wifiPathMonitor: NWPathMonitor?
     private let wifiMonitorQueue = DispatchQueue(label: "com.ztransfer.wifi.path")
     private var wifiPathAvailable = false
     private var wifiGeneration = 0
-    /// iOS exposes Wi-Fi strength as a normalized 0...1 value rather than
-    /// Android's raw RSSI. Keep the published value honest and let the shared
-    /// signal pill render it as a percentage.
-    @Published private(set) var apSignalPercent: Int?
     /// Changes whenever discovery or the selected physical camera changes. A
     /// late ImageCaptureCore callback from an old camera must not publish into
     /// the replacement connection (the Android code checks deviceId for this).
@@ -61,7 +55,6 @@ final class ConnectionViewModel: ObservableObject {
         usbCatalogTask?.cancel()
         wifiConnectTask?.cancel()
         wifiWatcherTask?.cancel()
-        apSignalTask?.cancel()
         wifiRetryTask?.cancel()
         wifiPathMonitor?.cancel()
         usbTransport.stop()
@@ -117,7 +110,6 @@ final class ConnectionViewModel: ObservableObject {
     /// ordinary Wi-Fi from being treated as a camera connection.
     func startWiFiDiscovery() {
         guard wifiPathMonitor == nil else { return }
-        startAPSignalMonitoring()
         let monitor = NWPathMonitor(requiredInterfaceType: .wifi)
         wifiPathMonitor = monitor
         monitor.pathUpdateHandler = { [weak self] path in
@@ -132,51 +124,10 @@ final class ConnectionViewModel: ObservableObject {
     func stopWiFiDiscovery() {
         wifiWatcherTask?.cancel()
         wifiWatcherTask = nil
-        apSignalTask?.cancel()
-        apSignalTask = nil
-        apSignalPercent = nil
         cancelWiFiConnection()
         wifiPathMonitor?.cancel()
         wifiPathMonitor = nil
         wifiPathAvailable = false
-    }
-
-    private func startAPSignalMonitoring() {
-        guard apSignalTask == nil else { return }
-        apSignalTask = Task { [weak self] in
-            guard let self else { return }
-            while !Task.isCancelled {
-                if self.state.wirelessMode == .ap,
-                   let session = self.cameraSession,
-                   !session.isUSB {
-                    self.apSignalPercent = await Self.currentWiFiSignalPercent()
-                } else if self.apSignalPercent != nil {
-                    self.apSignalPercent = nil
-                }
-                do {
-                    try await Task.sleep(nanoseconds: 2_000_000_000)
-                } catch {
-                    return
-                }
-            }
-        }
-    }
-
-    private static func currentWiFiSignalPercent() async -> Int? {
-        await withCheckedContinuation { continuation in
-            NEHotspotNetwork.fetchCurrent { network in
-                guard let network else {
-                    continuation.resume(returning: nil)
-                    return
-                }
-                let strength = network.signalStrength
-                guard strength.isFinite, strength > 0 else {
-                    continuation.resume(returning: nil)
-                    return
-                }
-                continuation.resume(returning: Int((min(max(strength, 0), 1) * 100).rounded()))
-            }
-        }
     }
 
     private func updateWiFiPath(_ available: Bool) {

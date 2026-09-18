@@ -403,9 +403,10 @@ struct PhotoPreviewView: View {
                             .font(.system(size: 16, weight: .semibold))
                             .lineLimit(1).minimumScaleFactor(0.5).allowsTightening(true)
                         if let task = queueModel.task(for: file.id), task.status != .completed {
-                            TransferStatusBadge(status: task.status,
-                                progress: queueModel.activeProgress?.taskID == task.id ? queueModel.activeProgress!.fraction : task.progress,
-                                taskID: task.id)
+                            PhotoPreviewLiveTransferBadge(
+                                task: task,
+                                progressModel: queueModel.progressModel
+                            )
                         } else if transferredOriginal(file) { TransferredPhotoBadge() }
                     }
                     .foregroundStyle(.white.opacity(0.88))
@@ -965,6 +966,20 @@ struct PhotoPreviewView: View {
             queueFlightCount = 0
             queueFlightTask = nil
         }
+    }
+}
+
+private struct PhotoPreviewLiveTransferBadge: View {
+    let task: TransferQueueItem
+    @ObservedObject var progressModel: TransferQueueProgressViewModel
+
+    var body: some View {
+        let progress = progressModel.activeProgress
+        TransferStatusBadge(
+            status: task.status,
+            progress: progress.flatMap { $0.taskID == task.id ? $0.fraction : nil } ?? task.progress,
+            taskID: task.id
+        )
     }
 }
 

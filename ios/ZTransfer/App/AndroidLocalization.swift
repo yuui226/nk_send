@@ -1039,8 +1039,6 @@ enum AndroidLocalization {
         "sta_reset_pairing_title": ["zh": "重置 STA 配对？", "en": "Reset STA pairing?", "hant": "重設 STA 配對？"],
         "sta_signal_connected": ["zh": "STA 相机已连接", "en": "STA camera connected", "hant": "STA 相機已連線"],
         "sta_signal_disconnected_reconnect": ["zh": "STA 相机已断开，点击重新连接。", "en": "STA camera disconnected. Tap to reconnect.", "hant": "STA 相機已斷線，點擊重新連線。"],
-        "ap_signal_strength_percent": ["zh": "AP 信号强度 %1$d%", "en": "AP signal strength %1$d%", "hant": "AP 訊號強度 %1$d%"],
-        "ap_signal_strength_unavailable": ["zh": "AP 信号强度暂不可用", "en": "AP signal strength unavailable", "hant": "AP 訊號強度暫不可用"],
         "sta_status_connected": ["zh": "连接成功", "en": "Connected", "hant": "連線成功"],
         "sta_status_connecting": ["zh": "正在连接", "en": "Connecting", "hant": "正在連線"],
         "sta_status_pairing": ["zh": "正在配对", "en": "Pairing", "hant": "正在配對"],
