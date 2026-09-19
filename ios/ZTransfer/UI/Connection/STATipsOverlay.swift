@@ -6,27 +6,22 @@ import SwiftUI
 struct STATipsOverlay: View {
     @Binding var isPresented: Bool
     let wirelessMode: WirelessMode
-    let anchor: CGRect
-    @State private var progress: CGFloat = 1
+    let anchor: Anchor<CGRect>
 
     var body: some View {
-        GeometryReader { proxy in
-            let frame = proxy.frame(in: .global)
-            let localAnchor = anchor.offsetBy(dx: -frame.minX, dy: -frame.minY)
+        GeometryReader { _ in
             ZStack(alignment: .topLeading) {
                 // Android TipsBubble is a non-dimming AnchorPopup. The clear
                 // hit target dismisses it without changing the page colors.
                 Color.clear
                     .ignoresSafeArea()
                     .contentShape(Rectangle())
-                    .onTapGesture { dismiss() }
-                AdaptiveTipPanel(anchor: localAnchor, maxWidth: 360, gap: 8) {
-                    TipBubbleSurface(padding: 18) {
+                    .onTapGesture { isPresented = false }
+                AdaptiveTipPanel(anchor: anchor, maxWidth: 360, gap: 8) {
+                    TipBubbleContent(padding: 18) {
                         tipContent
                     }
-                        .scaleEffect(0.94 + progress * 0.06, anchor: .topLeading)
                 }
-                    .opacity(progress)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
@@ -74,8 +69,4 @@ struct STATipsOverlay: View {
         }
     }
 
-    private func dismiss() {
-        withAnimation(.timingCurve(0.4, 0, 1, 1, duration: 0.18)) { progress = 0 }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) { isPresented = false }
-    }
 }

@@ -9,6 +9,8 @@ struct GPSConnectionControl: View {
     @ObservedObject var coordinator: GPSCoordinator
     @Binding var expanded: Bool
     @Binding var showingResetPairing: Bool
+    /// Page space below this control, measured by ConnectionPage's layout.
+    let availableHeight: CGFloat
     @State private var showHelp = false
     @State private var ambientHigh = false
     @State private var hintText: String?
@@ -100,7 +102,8 @@ struct GPSConnectionControl: View {
                             coordinator: coordinator,
                             showHelp: $showHelp,
                             showingResetPairing: $showingResetPairing,
-                            hintText: $hintText
+                            hintText: $hintText,
+                            helpViewportHeight: max(1, availableHeight - panelTop)
                         ),
                         trigger: .gps,
                         targetProgress: expanded ? 1 : 0,
@@ -158,12 +161,6 @@ struct GPSConnectionControl: View {
 
 
 
-private struct GPSHelpAnchorPreferenceKey: PreferenceKey {
-    static let defaultValue: CGRect = .zero
-    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
-        value = nextValue()
-    }
-}
 
 @MainActor
 private func gpsDiagnosticsSnapshot() -> String {
@@ -177,6 +174,7 @@ private struct GPSInlinePanel: View {
     @Binding var showHelp: Bool
     @Binding var showingResetPairing: Bool
     @Binding var hintText: String?
+    let helpViewportHeight: CGFloat
     @State private var holdPressed = false
     @State private var holdConsumedTap = false
     @State private var holdCompleted = false
@@ -185,7 +183,6 @@ private struct GPSInlinePanel: View {
     @State private var placeBubbleRequestID = 0
     @State private var previousStatusRank = 0
     @State private var statusTransitionDirection = 1
-    @State private var helpAnchor: CGRect = .zero
     @State private var updateBurstID = 0
     @State private var updateBurstProgress: CGFloat = 0
     @Environment(\.colorScheme) private var colorScheme
@@ -246,19 +243,20 @@ private struct GPSInlinePanel: View {
         // transition changes its outline and scale.
         .background(ZTransferGlassSurface(cornerRadius: 24, kind: .panel))
         .coordinateSpace(name: "gps-inline-panel")
-        .onPreferenceChange(GPSHelpAnchorPreferenceKey.self) { helpAnchor = $0 }
-        .overlay {
-            if showHelp {
-                ZStack(alignment: .topLeading) {
-                    Color.clear
-                        .contentShape(Rectangle())
-                        .onTapGesture { showHelp = false }
-                    AdaptiveTipPanel(anchor: helpAnchor, maxWidth: 244, gap: 8) {
-                        gpsHelpBubble
+        .overlayPreferenceValue(TipPopupAnchorPreferenceKey.self) { anchors in
+            TipPopupLayer(isPresented: showHelp) {
+                if let anchor = anchors[.gps] {
+                    ZStack(alignment: .topLeading) {
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .onTapGesture { showHelp = false }
+                        AdaptiveTipPanel(anchor: anchor, maxWidth: 244, gap: 8,
+                                         availableHeight: helpViewportHeight) {
+                            gpsHelpBubble
+                        }
                     }
+                    .zIndex(3)
                 }
-                .transition(.opacity)
-                .zIndex(3)
             }
         }
         .onAppear { updateSessionEvidence() }
@@ -414,20 +412,13 @@ private struct GPSInlinePanel: View {
             .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.16),
                        value: coordinator.state.enabled)
             .allowsHitTesting(!coordinator.state.enabled)
-            .background {
-                GeometryReader { proxy in
-                    Color.clear.preference(
-                        key: GPSHelpAnchorPreferenceKey.self,
-                        value: proxy.frame(in: .named("gps-inline-panel"))
-                    )
-                }
-            }
+            .tipPopupAnchor(.gps)
         }
         .padding(.top, 12)
     }
 
     private var gpsHelpBubble: some View {
-        TipBubbleSurface {
+        TipBubbleContent {
             VStack(alignment: .leading, spacing: 10) {
                 Text(AppLocalized.resource("gps_detail_description"))
                     .zTransferText(size: 14, weight: .semibold)

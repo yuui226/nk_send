@@ -17,7 +17,6 @@ struct LocalPhotoEffectsView: View {
     @State private var filterChooser = PhotoFilterChooserState()
     @State private var effectsHint: PhotoEffectsHint?
     @State private var scrollOffset: CGFloat = 0
-    @State private var helpAnchor: CGRect = .zero
     @FocusState private var watermarkTextFocused: Bool
 
     var body: some View {
@@ -45,7 +44,6 @@ struct LocalPhotoEffectsView: View {
         }
         .coordinateSpace(name: "workbenchScroll")
         .coordinateSpace(name: "local-effects-page")
-        .onPreferenceChange(LocalEffectsHelpAnchorPreferenceKey.self) { helpAnchor = $0 }
         .onPreferenceChange(WorkbenchScrollOffsetKey.self) { scrollOffset = $0 }
         // The Android pager takes over when the workbench is at its top edge.
         // Keeping this simultaneous avoids stealing vertical scrolling inside
@@ -66,25 +64,26 @@ struct LocalPhotoEffectsView: View {
             onNavigateUp()
         })
         .background(ZTransferColors.background.ignoresSafeArea())
-        .overlay {
+        .overlayPreferenceValue(TipPopupAnchorPreferenceKey.self) { anchors in
             ZStack(alignment: .topLeading) {
                 if filterChooser.isPresented {
                     PhotoFilterChooserOverlay(draft: effectsBinding, state: $filterChooser)
                 }
-                if showingHelp {
-                    Color.clear
-                        .contentShape(Rectangle())
-                        .onTapGesture { showingHelp = false }
-                        .zIndex(1)
-                    AdaptiveTipPanel(anchor: helpAnchor, maxWidth: 300, gap: 8) {
-                        localHelpBubble
+                TipPopupLayer(isPresented: showingHelp) {
+                    if let anchor = anchors[.localEffects] {
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .onTapGesture { showingHelp = false }
+                            .zIndex(1)
+                        AdaptiveTipPanel(anchor: anchor, maxWidth: 300, gap: 8) {
+                            localHelpBubble
+                        }
+                        .zIndex(2)
                     }
-                    .transition(.opacity)
-                    .zIndex(2)
                 }
+                .zIndex(1)
             }
         }
-        .animation(.easeInOut(duration: 0.18), value: showingHelp)
         .photoEffectsHint($effectsHint, duration: 2)
         .photosPicker(isPresented: $showingPicker, selection: $pickerItems,
                       matching: .images, preferredItemEncoding: .current)
@@ -170,20 +169,13 @@ struct LocalPhotoEffectsView: View {
                 localPhotoEffectsHelpViewed = true
                 showingHelp = true
             }
-            .background {
-                GeometryReader { proxy in
-                    Color.clear.preference(
-                        key: LocalEffectsHelpAnchorPreferenceKey.self,
-                        value: proxy.frame(in: .named("local-effects-page"))
-                    )
-                }
-            }
+            .tipPopupAnchor(.localEffects)
         }
         .foregroundStyle(ZTransferColors.primaryText)
     }
 
     private var localHelpBubble: some View {
-        TipBubbleSurface {
+        TipBubbleContent {
             VStack(alignment: .leading, spacing: 10) {
                 Text(AppLocalized.resource("photo_effects_info_title")).font(.headline)
                 Text([
@@ -270,12 +262,6 @@ private struct WorkbenchScrollOffsetKey: PreferenceKey {
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
-private struct LocalEffectsHelpAnchorPreferenceKey: PreferenceKey {
-    static let defaultValue: CGRect = .zero
-    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
-        value = nextValue()
-    }
-}
 
 private struct WorkbenchScrollTracker: View {
     var body: some View {

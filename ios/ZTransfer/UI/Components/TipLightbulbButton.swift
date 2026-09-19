@@ -90,38 +90,99 @@ struct TipLightbulbButton: View {
 /// Android AnchorPopup content stays below and clear of its bulb. Measure the
 /// natural height and scroll only when the space below cannot fit the text.
 struct AdaptiveTipPanel<Content: View>: View {
-    let anchor: CGRect
+    let anchor: Anchor<CGRect>
     var maxWidth: CGFloat = 300
     var gap: CGFloat = 8
+    /// Space from this overlay's origin to the page bottom, when its parent
+    /// is a small card whose bounds do not represent the available viewport.
+    var availableHeight: CGFloat? = nil
     @ViewBuilder let content: Content
 
     var body: some View {
         GeometryReader { proxy in
-            AdaptiveTipPlacementLayout(anchor: anchor, maxWidth: maxWidth, gap: gap) {
-                // Layout measures this copy synchronously, then places only
-                // the ScrollView below. Unlike a PreferenceKey round trip,
-                // the visible viewport can never be left at zero height.
-                content
-                    .fixedSize(horizontal: false, vertical: true)
-                    .hidden()
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
-
-                ScrollView(.vertical, showsIndicators: false) {
-                    content
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            .frame(width: proxy.size.width, height: proxy.size.height)
+            let viewportHeight = availableHeight ?? proxy.size.height
+            TipPanelViewport(openingAnchor: proxy[anchor], maxWidth: maxWidth,
+                             gap: gap, content: content)
+                .frame(width: proxy.size.width, height: viewportHeight)
+                // A real viewport resize starts a fresh placement. Breathing
+                // changes only the live anchor, not this presentation identity.
+                .id(proxy.size.width)
+                .id(viewportHeight)
         }
     }
 }
 
-/// One shared visual shell for every lightbulb help panel. Callers may vary
-/// their copy and maximum width, but never their presentation material,
-/// corner shape, border or shadow.
-struct TipBubbleSurface<Content: View>: View {
+/// Capture real geometry once per presentation, before the first visible layout.
+/// The card may keep breathing without dragging its independent tooltip along.
+private struct TipPanelViewport<Content: View>: View {
+    @State private var openingAnchor: CGRect
+    let maxWidth: CGFloat
+    let gap: CGFloat
+    let content: Content
+
+    init(openingAnchor: CGRect, maxWidth: CGFloat, gap: CGFloat, content: Content) {
+        _openingAnchor = State(initialValue: openingAnchor)
+        self.maxWidth = maxWidth
+        self.gap = gap
+        self.content = content
+    }
+
+    var body: some View {
+        AdaptiveTipPlacementLayout(anchor: openingAnchor, maxWidth: maxWidth, gap: gap) {
+            // Layout measures this copy synchronously, then places only
+            // the ScrollView below. Unlike a PreferenceKey round trip,
+            // the visible viewport can never be left at zero height.
+            content
+                .fixedSize(horizontal: false, vertical: true)
+                .hidden()
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+
+            ScrollView(.vertical, showsIndicators: false) {
+                content
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            // The viewport owns the rounded shell. A shadow inside the
+            // ScrollView is cut to its rectangular bounds, and a tall
+            // content-sized shell loses its bottom corners while scrolling.
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .background {
+                ZTransferGlassSurface(cornerRadius: 18, kind: .panel)
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .strokeBorder(ZTransferColors.primaryText.opacity(0.12), lineWidth: 1)
+                    }
+                    .compositingGroup()
+                    .shadow(color: .black.opacity(0.16), radius: 14, y: 7)
+            }
+            .accessibilityIdentifier("tip-panel")
+        }
+    }
+}
+
+/// A persistent owner drives both insertion and removal for every bulb.
+/// Android Motion.overlayExpand/Collapse: 340/260ms, FastOutSlowIn.
+/// The user's tooltip rule uses opacity only, without scaling or movement.
+struct TipPopupLayer<Content: View>: View {
+    let isPresented: Bool
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            if isPresented {
+                content.transition(.opacity)
+            }
+        }
+        .animation(.timingCurve(0.4, 0, 0.2, 1,
+                               duration: isPresented ? 0.34 : 0.26), value: isPresented)
+    }
+}
+
+/// Content padding shared by the bulbs. The visible shell and shadow belong
+/// to AdaptiveTipPanel's viewport, outside the scrolling content.
+struct TipBubbleContent<Content: View>: View {
     var padding: CGFloat = 16
     @ViewBuilder let content: Content
 
@@ -130,12 +191,6 @@ struct TipBubbleSurface<Content: View>: View {
             .foregroundStyle(ZTransferColors.primaryText)
             .padding(padding)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(ZTransferGlassSurface(cornerRadius: 18, kind: .panel))
-            .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(ZTransferColors.primaryText.opacity(0.12), lineWidth: 1)
-            )
-            .shadow(color: .black.opacity(0.16), radius: 14, y: 7)
     }
 }
 
@@ -178,5 +233,26 @@ private struct AdaptiveTipPlacementLayout: Layout {
             anchor: .topLeading,
             proposal: ProposedViewSize(width: width, height: height)
         )
+    }
+}
+
+/// Keep each bulb's real layout anchor through the same SwiftUI hierarchy.
+/// Resolve it inside the tooltip; no asynchronous CGRect state or zero fallback.
+enum TipPopupTrigger: String, Hashable {
+    case settings, photoEffects, gps, sta, ap, localEffects
+}
+
+struct TipPopupAnchorPreferenceKey: PreferenceKey {
+    static var defaultValue: [TipPopupTrigger: Anchor<CGRect>] { [:] }
+    static func reduce(value: inout [TipPopupTrigger: Anchor<CGRect>],
+                       nextValue: () -> [TipPopupTrigger: Anchor<CGRect>]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, latest in latest })
+    }
+}
+
+extension View {
+    func tipPopupAnchor(_ trigger: TipPopupTrigger) -> some View {
+        anchorPreference(key: TipPopupAnchorPreferenceKey.self, value: .bounds) { [trigger: $0] }
+            .accessibilityIdentifier("tip-trigger-\(trigger.rawValue)")
     }
 }

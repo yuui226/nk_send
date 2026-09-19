@@ -34,7 +34,6 @@ struct SettingsView: View {
     @FocusState private var watermarkTextFocused: Bool
     @State private var showingHelp = false
     @State private var showingEffectsHelp = false
-    @State private var helpAnchor: CGRect = .zero
     @State private var settingsTransitionDirection: CGFloat = 1
     @State private var directoryAttentionProgress: CGFloat = 0
     @AppStorage("organize_transfers_by_date") private var organizeByDate = false
@@ -154,23 +153,21 @@ struct SettingsView: View {
                 }
             }
 
-            if showingHelp && settingsPage == .main {
-                Color.clear
-                    .contentShape(Rectangle())
-                    .onTapGesture { dismissHelp() }
-                    .zIndex(1)
-                AdaptiveTipPanel(anchor: helpAnchor) { SettingsHelpBubble() }
-                    .transition(.opacity)
-                    .zIndex(2)
-            }
-            if showingEffectsHelp && settingsPage == .effects {
-                Color.clear
-                    .contentShape(Rectangle())
-                    .onTapGesture { dismissEffectsHelp() }
-                    .zIndex(1)
-                AdaptiveTipPanel(anchor: helpAnchor) { PhotoEffectsHelpBubble() }
-                    .transition(.opacity)
-                    .zIndex(2)
+        }
+        .overlayPreferenceValue(TipPopupAnchorPreferenceKey.self) { anchors in
+            ZStack(alignment: .topLeading) {
+                TipPopupLayer(isPresented: showingHelp && settingsPage == .main) {
+                    if let anchor = anchors[.settings] {
+                        Color.clear.contentShape(Rectangle()).onTapGesture { dismissHelp() }
+                        AdaptiveTipPanel(anchor: anchor) { SettingsHelpBubble() }
+                    }
+                }
+                TipPopupLayer(isPresented: showingEffectsHelp && settingsPage == .effects) {
+                    if let anchor = anchors[.photoEffects] {
+                        Color.clear.contentShape(Rectangle()).onTapGesture { dismissEffectsHelp() }
+                        AdaptiveTipPanel(anchor: anchor) { PhotoEffectsHelpBubble() }
+                    }
+                }
             }
         }
         .onPreferenceChange(SettingsContentHeightKey.self) { heights in
@@ -222,9 +219,6 @@ struct SettingsView: View {
             if closing && settingsPage == .effects { commitEffectsDraft() }
         }
         .coordinateSpace(name: "settings-panel")
-        .onPreferenceChange(SettingsHelpAnchorPreferenceKey.self) { helpAnchor = $0 }
-        .animation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.24), value: showingHelp)
-        .animation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.24), value: showingEffectsHelp)
         .animation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.24), value: settingsPage)
         .onAppear {
             // Migrate the early preview value ("自动") to the same BCP-47
@@ -295,16 +289,7 @@ struct SettingsView: View {
                 photoEffectsHelpViewed = true
                 showingEffectsHelp.toggle()
             }
-            .background {
-                GeometryReader { proxy in
-                    Color.clear
-                        .allowsHitTesting(false)
-                        .preference(
-                            key: SettingsHelpAnchorPreferenceKey.self,
-                            value: proxy.frame(in: .named("settings-panel"))
-                        )
-                }
-            }
+            .tipPopupAnchor(.photoEffects)
         }
         .padding(.horizontal, 16)
         .padding(.top, 12)
@@ -362,16 +347,7 @@ struct SettingsView: View {
                 mainSettingsHelpViewed = true
                 showingHelp.toggle()
             }
-            .background {
-                GeometryReader { proxy in
-                    Color.clear
-                        .allowsHitTesting(false)
-                        .preference(
-                            key: SettingsHelpAnchorPreferenceKey.self,
-                            value: proxy.frame(in: .named("settings-panel"))
-                        )
-                }
-            }
+            .tipPopupAnchor(.settings)
             Spacer()
             Button { onClose?() } label: {
                 Image(systemName: "xmark")
@@ -541,15 +517,11 @@ struct SettingsView: View {
     }
 
     private func dismissHelp() {
-        withAnimation(.timingCurve(0.4, 0, 1, 1, duration: 0.18)) {
-            showingHelp = false
-        }
+        showingHelp = false
     }
 
     private func dismissEffectsHelp() {
-        withAnimation(.timingCurve(0.4, 0, 1, 1, duration: 0.18)) {
-            showingEffectsHelp = false
-        }
+        showingEffectsHelp = false
     }
 }
 
@@ -579,10 +551,6 @@ private struct PhotoEffectsSummaryTile: View {
     }
 }
 
-private struct SettingsHelpAnchorPreferenceKey: PreferenceKey {
-    static let defaultValue: CGRect = .zero
-    static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
-}
 
 /// Android MainSettingsInfoBubble equivalent. The four label/summary pairs
 /// and their order are copied from SettingsScreen; no iOS-only help text is
@@ -596,7 +564,7 @@ private struct SettingsHelpBubble: View {
     ]
 
     var body: some View {
-        TipBubbleSurface {
+        TipBubbleContent {
             VStack(alignment: .leading, spacing: 10) {
                 Text(AppLocalized.resource("settings_help_title"))
                     .zTransferTypography(.titleMedium, weight: .bold)
@@ -620,7 +588,7 @@ private struct SettingsHelpBubble: View {
 /// sourced from the same Android resource keys used by the detail page.
 private struct PhotoEffectsHelpBubble: View {
     var body: some View {
-        TipBubbleSurface {
+        TipBubbleContent {
             VStack(alignment: .leading, spacing: 9) {
                 Text(AppLocalized.resource("photo_effects_info_title"))
                     .zTransferTypography(.titleMedium, weight: .bold)

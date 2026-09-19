@@ -17,7 +17,6 @@ struct ConnectionPage: View {
     @State private var showGPSReset = false
     @State private var showSTATips = false
     @State private var tipsWirelessMode: WirelessMode = .sta
-    @State private var tipsAnchor: CGRect = .zero
     @AppStorage("sta_connection_help_viewed") private var staHelpViewed = false
     @AppStorage("ap_connection_help_viewed") private var apHelpViewed = false
     @State private var attentionOrigin = Date()
@@ -52,7 +51,8 @@ struct ConnectionPage: View {
                             GPSConnectionControl(
                                 coordinator: gpsCoordinator,
                                 expanded: $gpsPanelPresented,
-                                showingResetPairing: $showGPSReset
+                                showingResetPairing: $showGPSReset,
+                                availableHeight: max(1, proxy.size.height - layout.gpsTop)
                             )
                         }
                     }
@@ -69,8 +69,7 @@ struct ConnectionPage: View {
                         onWirelessModeChanged: model.select(wirelessMode:),
                         onConnect: { Task { await model.connectSelectedWiFi() } },
                         onResetSTAPairing: { Task { await model.refreshSTAProfiles(); showSTAReset = true } },
-                        onSTAHelpRequested: { anchor in
-                            tipsAnchor = anchor
+                        onSTAHelpRequested: {
                             tipsWirelessMode = .sta
                             staHelpViewed = true
                             showSTATips = true
@@ -79,8 +78,7 @@ struct ConnectionPage: View {
                             model.cancelWiFiConnection()
                             openWirelessSettings(.sta)
                         },
-                        onAPHelpRequested: { anchor in
-                            tipsAnchor = anchor
+                        onAPHelpRequested: {
                             tipsWirelessMode = .ap
                             apHelpViewed = true
                             showSTATips = true
@@ -166,10 +164,14 @@ struct ConnectionPage: View {
                     .ignoresSafeArea()
                 }
             }
-            if showSTATips {
-                ConnectionSceneFadeTimeline(start: celebrationStart) {
-                    STATipsOverlay(isPresented: $showSTATips, wirelessMode: tipsWirelessMode, anchor: tipsAnchor)
-                    .ignoresSafeArea()
+        }
+        .overlayPreferenceValue(TipPopupAnchorPreferenceKey.self) { anchors in
+            TipPopupLayer(isPresented: showSTATips) {
+                if let anchor = anchors[tipsWirelessMode == .sta ? .sta : .ap] {
+                    ConnectionSceneFadeTimeline(start: celebrationStart) {
+                        STATipsOverlay(isPresented: $showSTATips, wirelessMode: tipsWirelessMode, anchor: anchor)
+                            .ignoresSafeArea()
+                    }
                 }
             }
         }
@@ -329,6 +331,7 @@ struct ConnectionLayout {
     // screenshot scale; this keeps the measured physical card height equal.
     let wifiHeight: CGFloat = 310
     var usbHeight: CGFloat { wifiHeight - Self.gpsSpacing - Self.gpsHeight }
+    var gpsTop: CGFloat { cardsTop + usbHeight + Self.gpsSpacing }
 
     init(size: CGSize) {
         horizontalPadding = size.width < 360 ? 14 : 20

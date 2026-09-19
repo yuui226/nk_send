@@ -19,14 +19,12 @@ struct ConnectionMethodCard: View {
     var onWirelessModeChanged: ((WirelessMode) -> Void)?
     var onConnect: (() -> Void)?
     var onResetSTAPairing: (() -> Void)?
-    var onSTAHelpRequested: ((CGRect) -> Void)?
+    var onSTAHelpRequested: (() -> Void)?
     var onSTAHotspotSettings: (() -> Void)?
-    var onAPHelpRequested: ((CGRect) -> Void)?
+    var onAPHelpRequested: (() -> Void)?
     var onAPHotspotSettings: (() -> Void)?
     var staHelpViewed = false
     var apHelpViewed = false
-    @State private var staHelpButtonFrame: CGRect = .zero
-    @State private var apHelpButtonFrame: CGRect = .zero
     @AppStorage("skin_preset") private var skinPreset = ZTransferButtonSkin.frostedGlass.rawValue
     @Environment(\.colorScheme) private var colorScheme
 
@@ -334,16 +332,9 @@ struct ConnectionMethodCard: View {
                         attention: !staHelpViewed, size: 34,
                         accessibilityLabel: AppLocalized.resource("tip_sta_title")
                     ) {
-                        onSTAHelpRequested?(staHelpButtonFrame)
+                        onSTAHelpRequested?()
                     }
-                    .background(GeometryReader { proxy in
-                        Color.clear
-                            .allowsHitTesting(false)
-                            .onAppear { staHelpButtonFrame = proxy.frame(in: .global) }
-                            .onChange(of: proxy.frame(in: .global)) {
-                                staHelpButtonFrame = $0
-                            }
-                    })
+                    .tipPopupAnchor(.sta)
                     Spacer(minLength: 0)
                     Button { onResetSTAPairing?() } label: {
                       ZStack {
@@ -380,16 +371,9 @@ struct ConnectionMethodCard: View {
                     attention: !apHelpViewed, size: 36,
                     accessibilityLabel: AppLocalized.resource("tip_title")
                 ) {
-                    onAPHelpRequested?(apHelpButtonFrame)
+                    onAPHelpRequested?()
                 }
-                .background(GeometryReader { proxy in
-                    Color.clear
-                        .allowsHitTesting(false)
-                        .onAppear { apHelpButtonFrame = proxy.frame(in: .global) }
-                        .onChange(of: proxy.frame(in: .global)) {
-                            apHelpButtonFrame = $0
-                        }
-                })
+                .tipPopupAnchor(.ap)
                 Button { onAPHotspotSettings?() } label: {
                     Text(AppLocalized.resource("open_wifi_settings"))
                         .zTransferTypography(.labelSmall, weight: .semibold)
