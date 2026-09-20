@@ -10,6 +10,7 @@ import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.net.Uri
 import android.os.SystemClock
+import android.widget.Toast
 import android.provider.DocumentsContract
 import android.view.OrientationEventListener
 import androidx.activity.compose.BackHandler
@@ -35,6 +36,8 @@ import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -68,6 +71,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -107,6 +111,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.ztransfer.BuildConfig
 import com.ztransfer.R
 import com.ztransfer.license.LicenseManager
 import com.ztransfer.protocol.CameraConnectionType
@@ -262,8 +267,10 @@ internal fun shouldPrepareUsbMovieSessionForRecord(
 
 internal fun shouldReturnUsbMovieSessionToStandby(
     connectionType: CameraConnectionType,
-    remoteControlModeSet: Boolean
-): Boolean = connectionType == CameraConnectionType.USB && remoteControlModeSet
+    remoteControlModeSet: Boolean,
+    diagnosticControlModeSet: Boolean = false
+): Boolean = connectionType == CameraConnectionType.USB && remoteControlModeSet &&
+    !diagnosticControlModeSet
 
 /**
  * A single GetEvent can repeat the same property change many times while Live View starts.
@@ -582,7 +589,7 @@ private fun RemoteContent(
     var batteryParam by remember { mutableStateOf<RcParam?>(null) }
     val params = remember { mutableStateMapOf<Int, RcParam>() }
     // 每个参数一个待发送任务：乐观更新后合并发送最终值（声明在前，事件循环要引用）
-    val pendingSets = remember { mutableMapOf<Int, Job>() }
+    val pendingSets = remember { mutableStateMapOf<Int, Job>() }
     var autoIsoProp by remember { mutableStateOf<Int?>(null) }
     var autoIsoPropMovieMode by remember { mutableStateOf<Boolean?>(null) }
     var autoIsoBusy by remember { mutableStateOf(false) }
@@ -603,9 +610,24 @@ private fun RemoteContent(
     var listProp by remember { mutableStateOf<Int?>(null) }
 
     // ---------- 开发者面板 ----------
-    val logLines = remember { mutableStateListOf<String>() }
+    val diagnosticPreferences = remember(context) {
+        context.getSharedPreferences("remote_diagnostics", Context.MODE_PRIVATE)
+    }
+    val logLines = remember {
+        mutableStateListOf<String>().apply {
+            diagnosticPreferences.getString("last_report", null)?.lineSequence()
+                ?.filter { it.isNotBlank() }?.forEach { appendRemoteDiagnosticLine(this, it) }
+        }
+    }
+    var diagnosticReportStarted by remember { mutableStateOf(false) }
     var diagnosticCapture by remember { mutableStateOf(false) }
     var devPanel by remember { mutableStateOf(false) }
+    var diagnosticControlEnabled by remember { mutableStateOf(false) }
+    var diagnosticControlBusy by remember { mutableStateOf(false) }
+    var diagnosticControlJob by remember { mutableStateOf<Job?>(null) }
+    var diagnosticControlStatus by remember { mutableStateOf<String?>(null) }
+    // 切换后关掉调试窗仍记录快门写入和回读，方便实际调节后复制整份反馈。
+    var diagnosticControlLogging by remember { mutableStateOf(false) }
     // 开发者入口默认隐藏：1.5s 内连按 4 次 FPS 键才现身（FPS 连按 4 次开关状态
     // 恰好复原，不留副作用）。仅本次进页有效，退页复位——这是诊断后门不是常驻功能。
     var devUnlocked by remember { mutableStateOf(false) }
@@ -653,6 +675,7 @@ private fun RemoteContent(
     BackHandler(enabled = immersiveFullscreen) {
         immersiveFullscreen = false
     }
+    BackHandler(enabled = devPanel) { devPanel = false }
     var viewfinderRecorder by remember { mutableStateOf<ViewfinderRecorder?>(null) }
     var recElapsed by remember { mutableIntStateOf(0) }
     var recJob by remember { mutableStateOf<Job?>(null) }
@@ -663,19 +686,25 @@ private fun RemoteContent(
     // 直接读它不会触发重组，暂停/继续按钮图标会卡住不切换。
     var recPaused by remember { mutableStateOf(false) }
     fun devLog(line: String) {
-        if (!diagnosticCapture) return
-        // 监看页调试窗专用于快门兼容反馈；其余高频取帧/对焦/录像日志会淹没
-        // 用户真正需要复制的属性能力信息。
-        val lower = line.lowercase()
-        val diagnosticLine =
-            "capability" in lower || "selected=" in lower || " write " in lower ||
-                "probe complete" in lower || "0xD100" in line || "0x500D" in line ||
-                "0x5007" in line || "0x5001" in line || "0xD100" in line
-        if (!diagnosticLine) return
-        logLines.add(line)
-        // 全量能力探测会为每个属性保留 DESC/VALUE 原始载荷，通常有数百行。
-        // 留足容量，确保用户点“复制日志”时开头的机型与完整码表没有被环形淘汰。
-        if (logLines.size > 5_000) logLines.removeAt(0)
+        if (!diagnosticCapture && !diagnosticControlLogging) return
+        if (!isRemoteDiagnosticLine(line)) return
+        val stamp = java.time.LocalTime.now().toString().take(12)
+        appendRemoteDiagnosticLine(logLines, "[$stamp] $line")
+        // apply 在内存立即更新并异步落盘；退出清理也走此路径，重进页仍能复制失败报告。
+        diagnosticPreferences.edit().putString("last_report", logLines.joinToString("\n")).apply()
+    }
+
+    fun beginDiagnosticReport(cam: NikonCamera) {
+        diagnosticControlLogging = true
+        if (diagnosticReportStarted) return
+        diagnosticReportStarted = true
+        logLines.clear()
+        devLog("diagnostic report v2 date=${java.time.OffsetDateTime.now()} " +
+            "app=${BuildConfig.VERSION_NAME}(${BuildConfig.VERSION_CODE}) " +
+            "android=${android.os.Build.VERSION.RELEASE}")
+        devLog("diagnostic camera=${cam.deviceModel ?: "unknown"} " +
+            "firmware=${cam.cachedDeviceInfo?.deviceVersion ?: "unknown"} " +
+            "transport=${cam.connectionType} wifiMode=${if (cam.connectionType == CameraConnectionType.USB) "n/a" else if (camState.isStaConnection) "STA" else "AP"}")
     }
 
     // 事件总线：单一轮询协程独占 GetEvent（事件是取走即消费的，多处轮询会互相偷事件），
@@ -739,32 +768,19 @@ private fun RemoteContent(
             Lab.PROP_NK_MOVIE_SHUTTER, Lab.PROP_NK_MOVIE_F_NUMBER,
             Lab.PROP_NK_MOVIE_EXP_COMP, Lab.PROP_NK_MOVIE_ISO
         )
-        if (diagnosticCapture && exposureDiagnostic && prop != Lab.PROP_NK_SHUTTER) {
+        if ((diagnosticCapture || diagnosticControlLogging) && exposureDiagnostic && prop != Lab.PROP_NK_SHUTTER) {
             devLog("exposure capability logical=0x%04X: querying".format(prop))
         }
         val shutterLogical = prop == Lab.PROP_NK_SHUTTER || prop == Lab.PROP_NK_MOVIE_SHUTTER
-        if (shutterLogical) {
-            val candidates = if (prop == Lab.PROP_NK_MOVIE_SHUTTER) {
-                intArrayOf(Lab.PROP_NK_MOVIE_SHUTTER)
-            } else intArrayOf(Lab.PROP_NK_SHUTTER, Lab.PROP_EXPOSURE_TIME_STD)
-            candidates.forEach { actual ->
-                val candidate = runCatching { cam.rcGetParam(actual) }.getOrNull()
-                devLog(
-                    "shutter capability prop=0x%04X %s".format(
-                        actual,
-                        candidate?.let {
-                            "writable=${it.writable} type=0x%04X current=%d values=%d first=%s last=%s".format(
-                                it.dataType, it.current, it.values.size,
-                                it.values.firstOrNull()?.toString() ?: "-",
-                                it.values.lastOrNull()?.toString() ?: "-"
-                            )
-                        } ?: "unavailable"
-                    )
-                )
-            }
+        val selected = try {
+            cam.rcGetCompatibleParam(prop, if (diagnosticCapture || diagnosticControlLogging) ::devLog else null)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            devLog("!! capability logical=0x%04X error=%s: %s".format(prop, e.javaClass.simpleName, e.message))
+            null
         }
-        val selected = runCatching { cam.rcGetCompatibleParam(prop) }.getOrNull()
-        if (diagnosticCapture && exposureDiagnostic && prop != Lab.PROP_NK_SHUTTER) {
+        if ((diagnosticCapture || diagnosticControlLogging) && exposureDiagnostic && prop != Lab.PROP_NK_SHUTTER) {
             devLog(
                 "exposure selected logical=0x%04X %s".format(
                     prop,
@@ -951,6 +967,7 @@ private fun RemoteContent(
         adoptActiveLiveView: NikonCamera? = null,
         suppressStartupPropertyEvents: Boolean = false
     ) {
+        if (diagnosticControlBusy) return
         val prev = lvJob
         lvJob = scope.launch {
             prev?.cancelAndJoin()
@@ -958,6 +975,7 @@ private fun RemoteContent(
             liveViewStable = false
             startupEventBaselinePending = suppressStartupPropertyEvents
             var adoptedCamera = adoptActiveLiveView
+            var liveViewCamera: NikonCamera? = null
             fps = 0f   // 换会话（HD 切换/重启）时清掉上一会话的陈旧读数
             // 解码流水线：取帧（网络 IO）与解码（Default 线程）并行——取下一帧的同时
             // 解上一帧；CONFLATED 只留最新帧，解码偶尔跟不上时丢旧帧而不排队积压。
@@ -977,6 +995,7 @@ private fun RemoteContent(
                     // 每轮现取相机实例：断线重连后拿到的是新连接，旧会话自然淘汰
                     val cam = cameraViewModel.getCamera()
                     if (cam == null) { delay(2000); continue }
+                    liveViewCamera = cam
                     // 录像兼容恢复可能已经按“应用模式 → StartLiveView → StartMovie”
                     // 完成了相机侧启动；首轮直接接管这个 LV，不能重复发送 StartLiveView。
                     val started = if (cam === adoptedCamera) {
@@ -1010,6 +1029,8 @@ private fun RemoteContent(
                     var frameIntervals = 0
                     var windowStart = 0L
                     var errStreak = 0
+                    var firstFrameLogged = false
+                    var noFrameLogged = false
                     val startupDiagnosticsEndAt =
                         SystemClock.elapsedRealtime() + if (requiresUsbStabilization) 15_000L else 0L
                     var diagnosticWindowStart = SystemClock.elapsedRealtime()
@@ -1080,6 +1101,12 @@ private fun RemoteContent(
                         val pollElapsedNanos =
                             SystemClock.elapsedRealtimeNanos() - pollStartedAtNanos
                         if (grabbed == null) {
+                            if (!firstFrameLogged && !noFrameLogged &&
+                                SystemClock.elapsedRealtime() - stabilizationStartedAt >= 10_000L
+                            ) {
+                                noFrameLogged = true
+                                devLog("!! LiveView no frame for 10s after start; camera remains busy")
+                            }
                             recordStartupPoll(elapsedNanos = pollElapsedNanos, busy = true)
                             if (!liveViewStable) startupBusyResponses++
                             delay(40)
@@ -1087,6 +1114,10 @@ private fun RemoteContent(
                         }
                         recordStartupPoll(elapsedNanos = pollElapsedNanos, success = true)
                         errStreak = 0
+                        if (!firstFrameLogged) {
+                            firstFrameLogged = true
+                            devLog("LiveView first frame received after ${SystemClock.elapsedRealtime() - stabilizationStartedAt}ms")
+                        }
                         frameCh.trySend(grabbed)
                         val now = SystemClock.elapsedRealtime()
                         if (!liveViewStable && requiresUsbStabilization) {
@@ -1125,7 +1156,9 @@ private fun RemoteContent(
             } finally {
                 liveViewStable = false
                 withContext(NonCancellable) {
-                    runCatching { cameraViewModel.getCamera()?.labEndLiveView() }
+                    runCatching { liveViewCamera?.labEndLiveView() }
+                        .onSuccess { rc -> if (rc != null) devLog("EndLiveView resp=0x%04X".format(rc and 0xFFFF)) }
+                        .onFailure { devLog("!! EndLiveView error=${it.javaClass.simpleName}: ${it.message}") }
                 }
                 subjectTrackingActive = false
             }
@@ -1209,6 +1242,8 @@ private fun RemoteContent(
     }
 
     suspend fun returnUsbMovieSessionToStandby(cam: NikonCamera) {
+        // 恢复分支可能已在 delay 中，必须在真正执行前再检查调试模式的所有权。
+        if (diagnosticControlBusy || cam.remoteDiagnosticControlModeSet) return
         initialLoaded = false
         val rebuildLiveView = releaseUsbMovieSession(cam)
         if (cameraViewModel.getCamera() === cam) {
@@ -1220,8 +1255,10 @@ private fun RemoteContent(
     }
 
     suspend fun refreshMovieMode(refreshExposureOnChange: Boolean = true) {
+        if (diagnosticControlBusy) return
         val cam = cameraViewModel.getCamera() ?: return
         val mv = runCatching { cam.rcGetMovieMode() }.getOrNull() ?: return
+        if (diagnosticControlBusy) return
         val was = movieMode
         movieMode = mv
         if (refreshExposureOnChange && mv && !was) {
@@ -1281,6 +1318,9 @@ private fun RemoteContent(
                 // 避免重进页面时先按错误模式加载整套参数。
                 refreshMovieMode(refreshExposureOnChange = false)
             }
+            diagnosticControlEnabled = sessionCamera.remoteDiagnosticControlModeSet &&
+                sessionCamera.remoteControlModeSet
+            if (diagnosticControlEnabled) diagnosticControlLogging = true
             val initialExposureProps =
                 if (movieMode) MOVIE_EXPOSURE_PROPS else EXPOSURE_PROPS
             initialExposureProps.forEach { refreshParam(it) }
@@ -1293,11 +1333,15 @@ private fun RemoteContent(
             startSession(hdLiveView)
             awaitCancellation()
         } finally {
-            if (sessionCamera.connectionType == CameraConnectionType.USB &&
-                sessionCamera.remoteControlModeSet
-            ) {
-                withContext(NonCancellable) {
-                    // 异常退出兜底：正常停录已经归还控制，这里只处理页面在录像中退出。
+            withContext(NonCancellable) {
+                // 先等调试切换完成记账，防止退页清理后才迟到地开启 PC 控制。
+                diagnosticControlJob?.cancelAndJoin()
+                initialLoaded = false
+                if ((sessionCamera.connectionType == CameraConnectionType.USB ||
+                        sessionCamera.remoteDiagnosticControlModeSet) &&
+                    sessionCamera.remoteControlModeSet
+                ) {
+                    // USB 录像与手动调试（含 Wi-Fi）都必须成对归还机身控制。
                     if (recording) {
                         runCatching { sessionCamera.rcEndMovie() }
                         recording = false
@@ -1305,12 +1349,22 @@ private fun RemoteContent(
                     val oldLvJob = lvJob
                     oldLvJob?.cancelAndJoin()
                     if (lvJob === oldLvJob) lvJob = null
+                    if (oldLvJob == null) runCatching { sessionCamera.labEndLiveView() }
                     clearAppMode(sessionCamera, force = true)
-                    val rc = runCatching {
-                        sessionCamera.rcSetControlMode(false)
-                    }.getOrDefault(-1)
-                    devLog("SetControlMode(0) resp=0x%04X".format(rc and 0xFFFF))
+                    for (attempt in 0 until 3) {
+                        val rc = runCatching {
+                            sessionCamera.rcSetControlMode(false)
+                        }.getOrDefault(-1)
+                        devLog("control mode exit SetControlMode(0) resp=0x%04X".format(rc and 0xFFFF))
+                        if (rc == Lab.OK) break
+                        if (attempt < 2) delay(300L)
+                    }
+                    if (sessionCamera.remoteControlModeSet) {
+                        devLog("!! control mode release unconfirmed; reconnect or restart camera if body remains locked")
+                    }
                 }
+                devLog("diagnostic monitor session ended connected=$connected")
+                diagnosticControlEnabled = false
             }
         }
     }
@@ -1426,7 +1480,7 @@ private fun RemoteContent(
         var pollTick = 0
         while (isActive) {
             // 让初始参数先加载完再开始轮询，避免抢锁拖慢进页
-            if (!initialLoaded) { delay(150); continue }
+            if (!initialLoaded || diagnosticControlBusy) { delay(150); continue }
             val cam = cameraViewModel.getCamera()
             if (cam == null) { delay(1500); continue }
             if (!liveViewStable) {
@@ -1434,7 +1488,8 @@ private fun RemoteContent(
                 // 一旦成功便重建普通 LV，避免一次瞬时忙永久锁住机身拨杆。
                 if (!recording && !recBusy && shouldReturnUsbMovieSessionToStandby(
                         cam.connectionType,
-                        cam.remoteControlModeSet
+                        cam.remoteControlModeSet,
+                        cam.remoteDiagnosticControlModeSet
                     )
                 ) {
                     delay(600)
@@ -1455,6 +1510,8 @@ private fun RemoteContent(
                 continue
             }
             val polledEvents = runCatching { cam.rcPollEvents() }
+            // 切换开始前已发出的事件读取也不能在模式转换中触发 USB 自动恢复。
+            if (diagnosticControlBusy) continue
             if (polledEvents.isFailure) {
                 // GetEvent 异常不能连带禁用拨杆兜底；否则部分 USB 会话虽然仍能读取
                 // D1A6，却会因为事件通道暂时失败而永远停留在旧模式界面。
@@ -1473,6 +1530,7 @@ private fun RemoteContent(
             )
             var movieModeRefreshRequested = false
             for (e in events) {
+                if (diagnosticControlBusy) break
                 eventFlow.emit(e)
                 when (e.first) {
                     // 录像状态以相机事件为准（卡满/过热等相机自行停录也能收到）。
@@ -1489,7 +1547,8 @@ private fun RemoteContent(
                         if (!recBusy) {
                             if (shouldReturnUsbMovieSessionToStandby(
                                     cam.connectionType,
-                                    cam.remoteControlModeSet
+                                    cam.remoteControlModeSet,
+                                    cam.remoteDiagnosticControlModeSet
                                 )
                             ) {
                                 returnUsbMovieSessionToStandby(cam)
@@ -1559,11 +1618,12 @@ private fun RemoteContent(
     // 步进采用"乐观更新 + 尾值合并"：本地值立即跟手（长按连调不卡），停手 160ms 后
     // 只把最终值发给相机——逐档发送会在 ioMutex 上排队，连调十几档要追几秒。
     fun sendValue(prop: Int, value: Long, immediate: Boolean) {
+        if (diagnosticControlBusy) return
         val p = params[prop] ?: return
         params[prop] = p.copy(current = value)
         haptics.tick()
         pendingSets[prop]?.cancel()
-        pendingSets[prop] = scope.launch {
+        val job = scope.launch {
             if (!immediate) delay(160)
             val cam = cameraViewModel.getCamera() ?: return@launch
             val result = try {
@@ -1571,6 +1631,7 @@ private fun RemoteContent(
             } catch (e: CancellationException) {
                 throw e   // 被更新一步的 sendValue 顶掉，不是写失败：别记日志、别回读
             } catch (e: Exception) {
+                devLog("!! shutter write prop=0x%04X error=%s: %s".format(p.prop, e.javaClass.simpleName, e.message))
                 null
             }
             result?.actual?.let { params[prop] = it }
@@ -1593,6 +1654,10 @@ private fun RemoteContent(
                 // 包括返回 OK 但机身没有采用的情况：重新读取描述和值域，显示真实状态。
                 refreshParam(prop)
             }
+        }
+        pendingSets[prop] = job
+        job.invokeOnCompletion {
+            if (pendingSets[prop] === job) pendingSets.remove(prop)
         }
     }
 
@@ -1744,19 +1809,148 @@ private fun RemoteContent(
         }
     }
 
-    fun runProbe() {
-        if (probing) return
-        if (cameraViewModel.getCamera() == null) return
-        scope.launch {
-            probing = true
-            diagnosticCapture = true
-            // 一次探测对应一份可直接回传的完整报告，避免混入旧会话日志。
-            logLines.clear()
+    fun setDiagnosticControlMode(enabled: Boolean) {
+        val cam = cameraViewModel.getCamera() ?: return
+        if (!connected || !initialLoaded || probing || diagnosticControlBusy ||
+            capturing || recording || recBusy || autoIsoBusy || afHeld || tapFocusBusy ||
+            afJob?.isActive == true || pendingSets.values.any { it.isActive }
+        ) return
+        // 不能用调试开关接管录像流程已持有的控制模式。
+        if (enabled && cam.remoteControlModeSet && !cam.remoteDiagnosticControlModeSet) return
+        diagnosticControlBusy = true
+        probing = true
+        initialLoaded = false
+        beginDiagnosticReport(cam)
+        devLog("control mode request enabled=$enabled")
+        diagnosticControlStatus = context.getString(R.string.remote_pc_control_switching)
+        diagnosticControlJob = scope.launch {
+            var adoptedCamera: NikonCamera? = null
+            suspend fun snapshot(stage: String) {
+                if (cameraViewModel.getCamera() !== cam) return
+                modeText = "?"
+                refreshMode()
+                devLog(
+                    "control mode $stage model=${cam.deviceModel ?: "unknown"} " +
+                        "connection=${cam.connectionType} exposure=$modeText " +
+                        "movie=$movieMode enabled=${cam.remoteControlModeSet} " +
+                        "applicationProp=${cam.remoteMovieApplicationPropSet} " +
+                        "applicationOp=${cam.remoteMovieApplicationOpSet}"
+                )
+                val activeProps = if (movieMode) MOVIE_EXPOSURE_PROPS else EXPOSURE_PROPS
+                activeProps.forEach {
+                    // 查询失败时不能沿用切换前的可写状态和值域。
+                    params.remove(it)
+                    refreshParam(it)
+                }
+            }
             try {
+                snapshot("before")
+                if (!isActive || cameraViewModel.getCamera() !== cam) return@launch
+                val oldLvJob = lvJob
+                oldLvJob?.cancelAndJoin()
+                if (lvJob === oldLvJob) lvJob = null
+                if (oldLvJob == null) {
+                    val endRc = cam.labEndLiveView()
+                    devLog("control mode EndLiveView resp=0x%04X".format(endRc and 0xFFFF))
+                }
+                if (cameraViewModel.getCamera() !== cam) return@launch
+
+                // 命令和所有权记账不可被退页取消拆开；退出清理先 join 本任务。
+                val rc = withContext(NonCancellable) {
+                    // 调试开关本身不启用 ApplicationMode；若期间录过视频，关闭时
+                    // 先成对清理录像流程持有的应用模式，避免留下半套远控状态。
+                    if (!enabled &&
+                        (cam.remoteMovieApplicationPropSet || cam.remoteMovieApplicationOpSet)
+                    ) {
+                        devLog("control mode releasing movie application mode before disable")
+                        clearAppMode(cam, force = true)
+                        check(!cam.remoteMovieApplicationPropSet && !cam.remoteMovieApplicationOpSet) {
+                            "Movie application mode release failed"
+                        }
+                    }
+                    cam.rcSetControlMode(enabled).also { response ->
+                        if (response == Lab.OK) cam.remoteDiagnosticControlModeSet = enabled
+                    }
+                }
+                diagnosticControlEnabled = cam.remoteDiagnosticControlModeSet && cam.remoteControlModeSet
+                devLog(
+                    "control mode SetControlMode(${if (enabled) 1 else 0}) " +
+                        "resp=0x%04X enabled=%s; no ApplicationMode enable requested".format(
+                            rc and 0xFFFF, cam.remoteControlModeSet
+                        )
+                )
+                diagnosticControlStatus = if (rc == Lab.OK) {
+                    context.getString(
+                        if (enabled) R.string.remote_pc_control_on else R.string.remote_pc_control_off
+                    )
+                } else {
+                    context.getString(R.string.remote_pc_control_failed, "0x%04X".format(rc and 0xFFFF))
+                }
+                if (!isActive || cameraViewModel.getCamera() !== cam) return@launch
+                snapshot("after-command")
+                val sizeRc = cam.rcSetLvSize(if (hdLiveView) 3 else 2)
+                devLog("control mode SetLiveViewSize resp=0x%04X".format(sizeRc and 0xFFFF))
+                // 完成启动后才查询最终能力，随后让常规取帧任务接管同一个 LV。
+                withContext(NonCancellable) {
+                    if (cam.labStartLiveView { devLog(it) }) adoptedCamera = cam
+                }
+                if (adoptedCamera == null) {
+                    diagnosticControlStatus = context.getString(R.string.remote_pc_control_failed, "LiveView")
+                }
+                if (!isActive || cameraViewModel.getCamera() !== cam) return@launch
+                snapshot("after-liveview")
+                refreshAutoIso()
+                refreshFocusMode()
+                val shutter = params[if (movieMode) Lab.PROP_NK_MOVIE_SHUTTER else Lab.PROP_NK_SHUTTER]
+                val canTry = canTryRemoteShutter(shutter)
+                devLog("probe complete: control mode=$diagnosticControlEnabled " +
+                    "shutterCanTry=$canTry writable=${shutter?.writable} values=${shutter?.values?.size} " +
+                    "liveViewStarted=${adoptedCamera != null}; copy log even if still locked")
+                if (rc == Lab.OK && enabled && adoptedCamera != null && !canTry) {
+                    diagnosticControlStatus = context.getString(R.string.remote_pc_control_locked)
+                }
+            } catch (e: CancellationException) {
+                devLog("!! control mode switch cancelled; lastConfirmed=${cam.remoteControlModeSet}")
+                throw e
+            } catch (e: Exception) {
+                diagnosticControlStatus = context.getString(
+                    R.string.remote_pc_control_failed, e.javaClass.simpleName
+                )
+                devLog("!! control mode error=${e.javaClass.simpleName}: ${e.message} enabled=${cam.remoteControlModeSet}")
+                if (e is SocketTimeoutException) cameraViewModel.onCameraTransportLost(cam)
+            } finally {
+                diagnosticControlEnabled = cameraViewModel.getCamera() === cam &&
+                    cam.remoteDiagnosticControlModeSet && cam.remoteControlModeSet
+                diagnosticControlBusy = false
+                probing = false
+                if (isActive && cameraViewModel.getCamera() === cam) {
+                    initialLoaded = true
+                    startSession(hdLiveView, adoptActiveLiveView = adoptedCamera)
+                } else if (adoptedCamera != null) {
+                    withContext(NonCancellable) { runCatching { cam.labEndLiveView() } }
+                }
+            }
+        }
+    }
+
+    fun runProbe() {
+        if (probing || diagnosticControlBusy) return
+        val cam = cameraViewModel.getCamera() ?: return
+        probing = true
+        beginDiagnosticReport(cam)
+        scope.launch {
+            diagnosticCapture = true
+            try {
+                modeText = "?"
+                refreshMode()
+                devLog("diagnostic probe exposure=$modeText movie=$movieMode controlMode=${cam.remoteControlModeSet}")
                 // 只读取当前模式下的曝光能力，不停止监看、不执行全量协议探测。
                 val props = if (movieMode) MOVIE_EXPOSURE_PROPS else EXPOSURE_PROPS
                 props.forEach { refreshParam(it) }
                 devLog("probe complete: 请点击复制按钮反馈以上日志")
+            } catch (e: CancellationException) {
+                devLog("!! diagnostic probe cancelled")
+                throw e
             } catch (e: Exception) {
                 devLog("probe capability error: $e")
             } finally {
@@ -1988,6 +2182,7 @@ private fun RemoteContent(
     }
 
     fun setAutoIso(enabled: Boolean) {
+        if (diagnosticControlBusy) return
         val p = autoIsoProp?.let { params[it] } ?: return
         if (!p.writable || autoIsoBusy) return
         val target = if (enabled) {
@@ -2154,7 +2349,8 @@ private fun RemoteContent(
                         devLog("!! movie start resp=0x%04X".format(rc and 0xFFFF))
                         if (shouldReturnUsbMovieSessionToStandby(
                                 cam.connectionType,
-                                cam.remoteControlModeSet
+                                cam.remoteControlModeSet,
+                                cam.remoteDiagnosticControlModeSet
                             )
                         ) {
                             // 开录失败也必须立即归还机身；否则录像待机仍会锁住拨杆。
@@ -2206,7 +2402,8 @@ private fun RemoteContent(
                         // 再按需进入电脑远控，不在两次录像之间长期锁住机身。
                         if (shouldReturnUsbMovieSessionToStandby(
                                 cam.connectionType,
-                                cam.remoteControlModeSet
+                                cam.remoteControlModeSet,
+                                cam.remoteDiagnosticControlModeSet
                             )
                         ) {
                             returnUsbMovieSessionToStandby(cam)
@@ -3286,6 +3483,7 @@ private fun RemoteContent(
                         GlassButton(
                             onClick = {
                                 clipboard.setText(AnnotatedString(logLines.joinToString("\n")))
+                                Toast.makeText(context, R.string.code_copied, Toast.LENGTH_SHORT).show()
                             },
                             contentPadding = PaddingValues(8.dp)
                         ) {
@@ -3307,50 +3505,86 @@ private fun RemoteContent(
                             )
                         }
                     }
-                    Spacer(Modifier.height(8.dp))
-                    // HD / FPS 开关已移到顶栏；此处只保留探测与日志。
-                    GlassButton(onClick = ::runProbe, enabled = connected && !probing) {
-                        Text(
-                            stringResource(R.string.lab_run_probe),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = colors.onBackground
-                        )
-                    }
-                    Text(
-                        text = stringResource(R.string.lab_tracking_probe_hint),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = colors.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 6.dp, bottom = 8.dp)
-                    )
-                    // 日志跟尾：面板刚打开（尚无布局信息）直接跳到底；此后新行到来时，
-                    // 停在底部附近才跟到底，用户上翻查看时不打扰。
-                    val logState = rememberLazyListState()
-                    LaunchedEffect(logLines.size) {
-                        if (logLines.isEmpty()) return@LaunchedEffect
-                        val lastVisible =
-                            logState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
-                        if (lastVisible == -1 || lastVisible >= logLines.size - 3) {
-                            logState.scrollToItem(logLines.size - 1)
-                        }
-                    }
-                    LazyColumn(
-                        state = logState,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(170.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(Color.Black.copy(alpha = 0.35f))
-                            .padding(horizontal = 8.dp, vertical = 6.dp)
-                    ) {
-                        items(logLines) { line ->
-                            Text(
-                                line,
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = 10.sp,
-                                lineHeight = 14.sp,
-                                color = if (line.startsWith("!!")) colors.accentOrange
-                                else Color.White.copy(alpha = 0.76f)
+                    Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(stringResource(R.string.remote_diagnostic_saved_hint), style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f).padding(end = 12.dp)) {
+                                Text(
+                                    stringResource(R.string.remote_pc_control_title),
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = colors.onBackground
+                                )
+                                Text(
+                                    stringResource(R.string.remote_pc_control_hint),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = colors.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = diagnosticControlEnabled,
+                                onCheckedChange = ::setDiagnosticControlMode,
+                                enabled = connected && initialLoaded && !probing && !diagnosticControlBusy &&
+                                    !capturing && !recording && !recBusy && !autoIsoBusy &&
+                                    !afHeld && !tapFocusBusy && afJob?.isActive != true &&
+                                    pendingSets.values.none { it.isActive } &&
+                                    (diagnosticControlEnabled || cameraViewModel.getCamera()?.remoteControlModeSet != true),
+                                modifier = Modifier.semantics {
+                                    contentDescription = context.getString(R.string.remote_pc_control_title)
+                                }
                             )
+                        }
+                        diagnosticControlStatus?.let { status ->
+                            Text(
+                                status,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = colors.onSurfaceVariant,
+                                modifier = Modifier.padding(bottom = 8.dp)
+                            )
+                        }
+                        GlassButton(onClick = ::runProbe, enabled = connected && !probing) {
+                            Text(
+                                stringResource(R.string.lab_run_probe),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = colors.onBackground
+                            )
+                        }
+                        Text(
+                            text = stringResource(R.string.remote_shutter_probe_hint),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 6.dp, bottom = 8.dp)
+                        )
+                        // 日志跟尾：面板刚打开（尚无布局信息）直接跳到底；此后新行到来时，
+                        // 停在底部附近才跟到底，用户上翻查看时不打扰。
+                        val logState = rememberLazyListState()
+                        LaunchedEffect(logLines.size) {
+                            if (logLines.isEmpty()) return@LaunchedEffect
+                            val lastVisible =
+                                logState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+                            if (lastVisible == -1 || lastVisible >= logLines.size - 3) {
+                                logState.scrollToItem(logLines.size - 1)
+                            }
+                        }
+                        LazyColumn(
+                            state = logState,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(170.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color.Black.copy(alpha = 0.35f))
+                                .padding(horizontal = 8.dp, vertical = 6.dp)
+                        ) {
+                            items(logLines) { line ->
+                                Text(
+                                    line,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 10.sp,
+                                    lineHeight = 14.sp,
+                                    color = if ("!!" in line) colors.accentOrange
+                                    else Color.White.copy(alpha = 0.76f)
+                                )
+                            }
                         }
                     }
                 }

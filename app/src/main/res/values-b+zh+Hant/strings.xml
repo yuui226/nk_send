@@ -376,6 +376,13 @@
     <string name="remote_tap_focus_manual">請將相機切換到自動對焦後使用點按對焦</string>
     <string name="remote_tracking_area_mode_required">請將相機切換到自動區域 AF 或主體追蹤 AF 後重試</string>
     <string name="dev_panel_title">開發者</string>
+    <string name="remote_pc_control_title">完整 PC 控制模式</string>
+    <string name="remote_pc_control_hint">用於測試快門調節相容性，可能使相機螢幕和機身操作不可用。關閉或退出監看時釋放，不儲存此設定。</string>
+    <string name="remote_pc_control_switching">正在切換模式並重新讀取相機能力…</string>
+    <string name="remote_pc_control_on">PC 控制已開啟。請嘗試調節快門，再複製日誌回報。</string>
+    <string name="remote_pc_control_off">PC 控制已釋放，已重新讀取相機能力。</string>
+    <string name="remote_pc_control_failed">模式切換或重新讀取失敗（%1$s）。開關顯示最後確認的模式，請查看日誌。</string>
+    <string name="remote_shutter_probe_hint">讀取曝光參數能力。進行 PC 模式測試後，日誌還會保留模式回應和快門寫入回讀結果。</string>
     <string name="dev_hd_liveview">高清監看 (XGA)</string>
     <string name="cd_remote_histogram">監看直方圖</string>
     <string name="cd_preview_histogram">照片直方圖</string>
@@ -594,4 +601,6 @@
     <string name="gps_permission_required">請允許藍牙和定位權限</string>
     <string name="gps_bluetooth_required">請開啟手機藍牙以啟用 GPS</string>
     <string name="gps_close_before_connect">請先關閉 GPS</string>
+    <string name="remote_pc_control_locked">相機已接受 PC 控制，但快門仍無可調檔位。請複製日誌回報，再關閉開關。</string>
+    <string name="remote_diagnostic_saved_hint">最近一次日誌保存在本機，退出監看後重新進入仍可複製；新測試會取代舊報告。開關無法使用時，請等待載入、錄影或對焦結束。</string>
 </resources>

@@ -380,6 +380,13 @@
     <string name="remote_tap_focus_manual">Switch the camera to autofocus to use tap focus</string>
     <string name="remote_tracking_area_mode_required">Use Auto-area AF or Subject-tracking AF on the camera, then try again</string>
     <string name="dev_panel_title">Developer</string>
+    <string name="remote_pc_control_title">Full PC control mode</string>
+    <string name="remote_pc_control_hint">Test shutter control compatibility. May disable the camera screen and body controls. Released when turned off or when leaving the monitor; not saved.</string>
+    <string name="remote_pc_control_switching">Switching mode and refreshing camera capabilities…</string>
+    <string name="remote_pc_control_on">PC control enabled. Try adjusting shutter speed, then copy the log.</string>
+    <string name="remote_pc_control_off">PC control released. Camera capabilities refreshed.</string>
+    <string name="remote_pc_control_failed">Mode switch or refresh failed (%1$s). The switch reflects the last confirmed mode; see the log.</string>
+    <string name="remote_shutter_probe_hint">Reads exposure capabilities. After a PC mode test, the log also retains mode responses and shutter write verification.</string>
     <string name="dev_hd_liveview">XGA live view</string>
     <string name="cd_remote_histogram">Live view histogram</string>
     <string name="cd_preview_histogram">Photo histogram</string>
@@ -600,4 +607,6 @@
     <string name="gps_permission_required">Allow Bluetooth and location to enable GPS</string>
     <string name="gps_bluetooth_required">Turn on Bluetooth to enable GPS</string>
     <string name="gps_close_before_connect">Turn off GPS before connecting</string>
+    <string name="remote_pc_control_locked">PC control was accepted, but shutter adjustment is still unavailable. Copy the log, then turn the switch off.</string>
+    <string name="remote_diagnostic_saved_hint">The last report is kept locally, including after leaving the monitor. New tests replace the previous report. If the switch is unavailable, wait for loading, recording, or focus to finish.</string>
 </resources>

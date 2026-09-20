@@ -380,6 +380,13 @@
     <string name="remote_tap_focus_manual">请将相机切换到自动对焦后使用点按对焦</string>
     <string name="remote_tracking_area_mode_required">请将相机切换到自动区域 AF 或主体跟踪 AF 后重试</string>
     <string name="dev_panel_title">开发者</string>
+    <string name="remote_pc_control_title">完整 PC 控制模式</string>
+    <string name="remote_pc_control_hint">用于测试快门调节兼容性，可能使相机屏幕和机身操作不可用。关闭或退出监看时释放，不保存此设置。</string>
+    <string name="remote_pc_control_switching">正在切换模式并刷新相机能力…</string>
+    <string name="remote_pc_control_on">PC 控制已开启。请尝试调节快门，再复制日志反馈。</string>
+    <string name="remote_pc_control_off">PC 控制已释放，相机能力已刷新。</string>
+    <string name="remote_pc_control_failed">模式切换或刷新失败（%1$s）。开关显示最后确认的模式，请查看日志。</string>
+    <string name="remote_shutter_probe_hint">读取曝光参数能力。进行 PC 模式测试后，日志还会保留模式响应和快门写入回读结果。</string>
     <string name="dev_hd_liveview">高清监看 (XGA)</string>
     <string name="cd_remote_histogram">监看直方图</string>
     <string name="cd_preview_histogram">照片直方图</string>
@@ -598,4 +605,6 @@
     <string name="gps_permission_required">请允许蓝牙和定位权限</string>
     <string name="gps_bluetooth_required">请打开手机蓝牙以开启 GPS</string>
     <string name="gps_close_before_connect">请先关闭 GPS</string>
+    <string name="remote_pc_control_locked">相机已接受 PC 控制，但快门仍无可调档位。请复制日志反馈，再关闭开关。</string>
+    <string name="remote_diagnostic_saved_hint">最近一次日志保存在本机，退出监看后重新进入仍可复制；新测试会替换旧报告。开关不可用时，请等待加载、录像或对焦结束。</string>
 </resources>

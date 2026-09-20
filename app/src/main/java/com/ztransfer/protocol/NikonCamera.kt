@@ -1390,6 +1390,9 @@ class NikonCamera(private val context: Context) {
     // USB 录像期间持有的尼康完整远控模式（0x90C2）。开录前设 1，停录回待机时
     // 成对清 0；放在连接对象上可跨横竖屏重建记账，断线换实例则自然清空。
     @Volatile internal var remoteControlModeSet = false
+    // 调试窗手动持有的 PC 控制模式；普通 USB 录像恢复不能提前释放它。
+    // 仅当前连接有效，退监看时与 remoteControlModeSet 一起清理。
+    @Volatile internal var remoteDiagnosticControlModeSet = false
     /** Identity reported by PTP DeviceInfo for the current camera session. */
     @Volatile var deviceManufacturer: String? = null
         private set
@@ -1902,6 +1905,7 @@ class NikonCamera(private val context: Context) {
 
                         transport.readTimeoutMs = SO_TIMEOUT_MS
                         remoteControlModeSet = false
+                        remoteDiagnosticControlModeSet = false
                         remoteMovieApplicationPropSet = false
                         remoteMovieApplicationOpSet = false
                         return@withContext buildString {

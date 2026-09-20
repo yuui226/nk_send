@@ -717,13 +717,24 @@ fun rcFormat(prop: Int, raw: Long): String = when (prop) {
     else -> fmtVal(prop, raw)
 }
 
-suspend fun NikonCamera.rcGetParam(prop: Int): RcParam? {
+suspend fun NikonCamera.rcGetParam(prop: Int, diagnosticLog: ((String) -> Unit)? = null): RcParam? {
     val (rc, d) = labCommand(Lab.GET_DEVICE_PROP_DESC, prop)
+    diagnosticLog?.invoke("capability GetDevicePropDesc prop=${hex4(prop)} resp=${hex4(rc)} bytes=${d?.size ?: 0}")
     if (rc != Lab.OK || d == null) return null
-    val desc = runCatching { parsePropDescData(d) }.getOrNull() ?: return null
+    val desc = runCatching { parsePropDescData(d) }.getOrElse {
+        diagnosticLog?.invoke("!! capability parse prop=${hex4(prop)} error=${it.javaClass.simpleName}: ${it.message}")
+        return null
+    }
     val values = if (desc.enumValues.isNotEmpty()) desc.enumValues
     else if (prop == Lab.PROP_NK_SHUTTER || prop == Lab.PROP_EXPOSURE_TIME_STD)
         shutterRangeValues(desc) else emptyList()
+    diagnosticLog?.invoke(
+        "capability prop=${hex4(prop)} writable=${desc.writable} type=${hex4(desc.dataType)} " +
+            "current=${desc.current} values=${values.size} first=${values.firstOrNull()} last=${values.lastOrNull()}"
+    )
+    if (prop in listOf(Lab.PROP_NK_SHUTTER, Lab.PROP_EXPOSURE_TIME_STD, Lab.PROP_NK_MOVIE_SHUTTER)) {
+        diagnosticLog?.invoke("shutter capability prop=${hex4(prop)} valuesRaw=${values.take(300)}")
+    }
     return RcParam(prop, desc.dataType, desc.writable, desc.current, values)
 }
 
@@ -750,14 +761,34 @@ private fun compatibleExposureProps(logicalProp: Int): IntArray = when (logicalP
  * 按机身实际 DevicePropDesc 选择可写曝光属性。优先使用有枚举值的可写属性，
  * 兼容仅暴露标准 PTP 属性或仅暴露 Nikon 厂商属性的机型。
  */
-suspend fun NikonCamera.rcGetCompatibleParam(logicalProp: Int): RcParam? {
+suspend fun NikonCamera.rcGetCompatibleParam(logicalProp: Int, diagnosticLog: ((String) -> Unit)? = null): RcParam? {
+    return readCompatibleExposureParam(logicalProp, diagnosticLog) { rcGetParam(it, diagnosticLog) }
+}
+
+internal suspend fun readCompatibleExposureParam(
+    logicalProp: Int,
+    diagnosticLog: ((String) -> Unit)?,
+    read: suspend (Int) -> RcParam?
+): RcParam? {
     var readableFallback: RcParam? = null
+    var writableSelection: RcParam? = null
     for (actualProp in compatibleExposureProps(logicalProp)) {
-        val param = rcGetParam(actualProp) ?: continue
-        if (param.writable && param.values.isNotEmpty()) return param
+        val param = try {
+            read(actualProp)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            if (diagnosticLog == null) throw e
+            diagnosticLog("!! capability prop=${hex4(actualProp)} error=${e.javaClass.simpleName}: ${e.message}")
+            null
+        } ?: continue
+        if (param.writable && param.values.isNotEmpty() && writableSelection == null) {
+            if (diagnosticLog == null) return param
+            writableSelection = param
+        }
         if (readableFallback == null) readableFallback = param
     }
-    return readableFallback
+    return writableSelection ?: readableFallback
 }
 
 /** 只刷新标量属性的当前值，复用已取得的数据类型与值域，避免实时状态轮询重复拉描述。 */
@@ -1496,14 +1527,18 @@ internal suspend fun NikonCamera.rcPrepareAndStartMovieDetailed(
 suspend fun NikonCamera.rcEndMovie(): Int = cmdBusyRetry(Lab.NK_END_MOVIE_REC)
 
 /**
- * 尼康完整远控模式。USB 开录前设 1，停录回普通待机时清 0；模式切换成功后，
- * 录制期间的 Live View、参数控制和录像命令始终复用同一个 PTP 会话。
+ * 尼康完整远控模式。USB 录像或调试窗手动测试时设 1，释放时清 0；模式切换后，
+ * Live View、参数控制和录像命令始终复用同一个 PTP 会话。
  */
 suspend fun NikonCamera.rcSetControlMode(enabled: Boolean): Int {
-    if (enabled == remoteControlModeSet) return Lab.OK
+    if (enabled == remoteControlModeSet) {
+        if (!enabled) remoteDiagnosticControlModeSet = false
+        return Lab.OK
+    }
     val rc = cmdBusyRetry(Lab.NK_SET_CONTROL_MODE, if (enabled) 1 else 0)
     if (rc != Lab.OK) return rc
     remoteControlModeSet = enabled
+    if (!enabled) remoteDiagnosticControlModeSet = false
     return Lab.OK
 }
 
@@ -2616,4 +2651,3 @@ suspend fun NikonCamera.runLabProbe(
     log("event polling:  ${if (Lab.NK_GET_EVENT in ops || Lab.NK_GET_EVENT_EX in ops) "advertised" else "MISSING"}")
     log("=== probe done in ${System.currentTimeMillis() - t0}ms ===")
 }
-
