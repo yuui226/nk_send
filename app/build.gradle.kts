@@ -37,6 +37,9 @@ android {
         targetSdk = 35
         versionCode = 56
         versionName = "1.83"
+        // Keep the default explicit: AGP otherwise rewrites the first manifest entry when several
+        // standalone instrumentation suites are registered.
+        testInstrumentationRunner = "com.ztransfer.frame.FramePlaceLayoutInstrumentation"
 
         // The app exposes exactly English, Simplified Chinese and Traditional
         // Chinese. Do not package translations contributed by AndroidX for

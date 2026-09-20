@@ -1312,6 +1312,7 @@ class NikonCamera(private val context: Context) {
     private val staDirectNoThumbnail = HashSet<Int>()
     private val staDirectFiles = HashMap<Int, FileInfo>()
     private val staDirectJpegMpfPreviews = HashMap<Int, List<JpegMpfPreviewReference>>()
+    private val staDirectJpegThumbnailChecked = HashSet<Int>()
     private val staDirectRawPreviews = HashMap<Int, List<NefPreviewReference>>()
     // Same-camera NEFs usually place their grid JPEG at a stable offset. This session-only hint is
     // always JPEG-validated and falls back to the full prefix parser on the first mismatch.
@@ -1641,6 +1642,7 @@ class NikonCamera(private val context: Context) {
             staDirectNoThumbnail.clear()
             staDirectFiles.clear()
             staDirectJpegMpfPreviews.clear()
+            staDirectJpegThumbnailChecked.clear()
             staDirectRawPreviews.clear()
             staDirectRawThumbnailHint = null
             staDirectRawIndexedPreviews.clear()
@@ -2145,6 +2147,9 @@ class NikonCamera(private val context: Context) {
     suspend fun getThumbnail(handle: Int): ByteArray? = ioMutex.withLock {
         withContext(Dispatchers.IO) {
             if (staDirectObjectReadValidated) {
+                if ((staDirectFiles[handle]?.extension ?: staDirectExtensionFromHandle(handle)) == ".jpg") {
+                    return@withContext readStaDirectJpegThumbnailInternal(handle)
+                }
                 staDirectThumbnails[handle]?.let { return@withContext it }
                 if (handle in staDirectNoThumbnail) return@withContext null
                 val file = staDirectFiles[handle]
@@ -2727,7 +2732,10 @@ class NikonCamera(private val context: Context) {
     private fun cacheStaDirectObjectHeader(handle: Int, result: StaDirectObjectHeader) {
         result.file?.let { file ->
             staDirectFiles[handle] = file
-            result.thumbnail?.let { bytes -> rememberStaDirectThumbnail(handle, bytes) }
+            // A later EXIF/FHD header read must not replace the enhanced grid JPEG with its tiny EXIF image.
+            if (handle !in staDirectJpegThumbnailChecked || handle !in staDirectThumbnails) {
+                result.thumbnail?.let { bytes -> rememberStaDirectThumbnail(handle, bytes) }
+            }
             // RAW/video bounded probes are lazy and non-authoritative. JPEG's parsed EXIF envelope is
             // authoritative, so a missing thumbnail can retain the existing session negative cache.
             if (result.thumbnailChecked && result.thumbnail == null && file.extension == ".jpg") {
@@ -2739,6 +2747,7 @@ class NikonCamera(private val context: Context) {
     /** Keeps recent encoded thumbnails under a strict byte budget; STA PTP IO serializes access. */
     private fun rememberStaDirectThumbnail(handle: Int, bytes: ByteArray) {
         if (bytes.size > STA_DIRECT_THUMBNAIL_CACHE_BYTES) {
+            staDirectJpegThumbnailChecked.remove(handle)
             staDirectThumbnails.remove(handle)?.let { previous ->
                 staDirectThumbnailBytes -= previous.size
             }
@@ -2751,6 +2760,7 @@ class NikonCamera(private val context: Context) {
         ) {
             val eldest = staDirectThumbnails.entries.iterator().next()
             staDirectThumbnailBytes -= eldest.value.size
+            staDirectJpegThumbnailChecked.remove(eldest.key)
             staDirectThumbnails.remove(eldest.key)
         }
     }
@@ -3214,7 +3224,57 @@ class NikonCamera(private val context: Context) {
         return null
     }
 
-    /** Must be called while [ioMutex] is held; invoked only for a visible RAW thumbnail. */
+    /** One bounded MPF preview per JPG; absence/oversize/invalid JPEG keeps the EXIF thumbnail. */
+    private fun readStaDirectJpegThumbnailInternal(handle: Int): ByteArray? {
+        val cached = staDirectThumbnails[handle]
+        if (handle in staDirectJpegThumbnailChecked && cached != null) return cached
+        val startedAt = SystemClock.elapsedRealtime()
+        // Complete only the 128 KiB header/index, not the primary JPEG image stream.
+        val header = readStaDirectObjectHeaderInternal(handle, requireJpegPreviewIndex = true)
+        cacheStaDirectObjectHeader(handle, header)
+        val fallback = header.thumbnail ?: cached
+        val fallbackEdge = jpegThumbnailLongEdge(fallback)
+        val reference = if (fallbackEdge < STA_JPEG_THUMBNAIL_EDGE) {
+            selectStaJpegThumbnailPreview(staDirectJpegMpfPreviews[handle].orEmpty())
+        } else null
+        var readBytes = 0
+        var reason = if (fallbackEdge >= STA_JPEG_THUMBNAIL_EDGE) "already-large" else "no-bounded-preview"
+        val enhanced = reference?.let {
+            val bytes = readStaDirectPartialInternal(handle, it.offset, it.length)
+            readBytes = bytes?.size ?: 0
+            if (bytes == null || bytes.size != it.length) {
+                reason = "preview-read-incomplete"
+                null
+            } else {
+                try {
+                    createStaJpegThumbnail(bytes, fallbackEdge).also { result ->
+                        reason = if (result != null) "enhanced" else "invalid-or-not-larger"
+                    }
+                } catch (error: Exception) {
+                    reason = "decode-${error.javaClass.simpleName}"
+                    null
+                }
+            }
+        }
+        val result = enhanced ?: fallback
+        if (result != null) {
+            rememberStaDirectThumbnail(handle, result)
+            staDirectJpegThumbnailChecked += handle
+            staDirectNoThumbnail.remove(handle)
+        }
+        if (PhotoGenerationProbe.enabled) {
+            PhotoGenerationProbe.note(
+                "STA-THUMB",
+                "JPG handle=0x%08X source=%s reason=%s originalEdge=%d outputEdge=%d previewBytes=%d totalMs=%d".format(
+                    handle, if (enhanced != null) "mpf" else "exif", reason, fallbackEdge,
+                    jpegThumbnailLongEdge(result), readBytes, SystemClock.elapsedRealtime() - startedAt,
+                ),
+            )
+        }
+        return result
+    }
+
+    /** Must be called while [ioMutex] is held; used by visible cells and sequential batch loading. */
     private fun readStaDirectRawThumbnailInternal(file: FileInfo): ByteArray? {
         fun readReference(reference: NefPreviewReference): ByteArray? =
             readStaDirectPartialInternal(

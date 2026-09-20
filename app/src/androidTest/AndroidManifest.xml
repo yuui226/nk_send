@@ -1,4 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <instrumentation android:name="com.ztransfer.frame.FramePlaceLayoutInstrumentation"
         android:targetPackage="com.ztransfer.debug" />
+    <instrumentation android:name="com.ztransfer.protocol.StaJpegThumbnailInstrumentation"
+        android:targetPackage="com.ztransfer.debug" />
 </manifest>

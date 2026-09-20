@@ -3627,9 +3627,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             if (cached != null) staScanThumbnailDiskHits++ else staScanThumbnailDiskMisses++
         }
         if (cached != null) return true
-        // Direct STA RAW/video thumbnails need bounded multi-MiB partial reads. Treat them as lazy-visible
-        // work instead of blocking the progressive 829-object catalog with background prefetch.
-        if (expectedCamera.staDirectObjectReadValidated && file.extension != ".jpg") return true
+        // 所有格式都随当前批次取图；STA 的 NEF/视频同样走有界读取，不跳过或假报完成。
         if (thumbnailDiskWritesBlocked) return false
         // 可见格子正在取同一张：共乘同一次请求（结果会自动落盘）。作为共同等待者，
         // 即使格子滚出屏幕取消了自己的等待，本次共乘也会把请求保活到完成——
@@ -3644,7 +3642,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             val result = fetchThumbnailToDisk(
                 expectedCamera,
                 expectedCacheGeneration,
-                handle,
+                file,
                 diskCache,
                 cacheFileName,
             )
@@ -3696,10 +3694,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private suspend fun fetchThumbnailToDisk(
         expectedCamera: NikonCamera,
         expectedCacheGeneration: Long,
-        handle: Int,
+        file: NikonCamera.FileInfo,
         diskCache: ThumbnailDiskCache.CameraCache,
         cacheFileName: String,
     ): Boolean {
+        val handle = file.handle
         val bytes = remoteThumbGate.withPermit {
             if (camera !== expectedCamera) return@withPermit null
             if (FileOrderProbe.enabled) {
@@ -3712,6 +3711,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             thumbnailCacheSessionGeneration != expectedCacheGeneration
         ) return false
         if (bytes == null || bytes.isEmpty()) {
+            // 与可见格子的取图规则一致：STA RAW/视频的有界探测可能只是暂未取到，
+            // 不能写入“确认无图”缓存或标记完成；保留后续补漏/可见加载的重试机会。
+            if (expectedCamera.staDirectObjectReadValidated && file.extension != ".jpg") {
+                return false
+            }
             noThumbHandles.add(handle)
             return true
         }
@@ -4358,7 +4362,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         useStaKeys: Boolean = activeThumbnailDiskCacheUsesStaKeys,
     ): String =
         if (useStaKeys) {
-            staThumbnailCacheFileName(file.handle, file.size)
+            if (file.extension == ".jpg") staJpegThumbnailCacheFileName(file.handle, file.size)
+            else staThumbnailCacheFileName(file.handle, file.size)
         } else {
             thumbnailCacheFileName(file.fileName, file.size, file.captureDate)
         }
@@ -4367,14 +4372,15 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         file: NikonCamera.FileInfo,
         useStaKeys: Boolean = activeThumbnailDiskCacheUsesStaKeys,
     ): String? =
-        if (useStaKeys) {
+        if (useStaKeys && file.extension != ".jpg") {
             thumbnailCacheFileName(file.fileName, file.size, file.captureDate)
         } else {
             null
         }
 
-    private fun legacyThumbnailDiskCacheFileName(file: NikonCamera.FileInfo): String =
-        legacyThumbnailCacheFileName(file.fileName, file.size, file.captureDate)
+    private fun legacyThumbnailDiskCacheFileName(file: NikonCamera.FileInfo): String? =
+        if (activeThumbnailDiskCacheUsesStaKeys && file.extension == ".jpg") null
+        else legacyThumbnailCacheFileName(file.fileName, file.size, file.captureDate)
 
     private suspend fun reconcileThumbnailCache(
         diskCache: ThumbnailDiskCache.CameraCache,
