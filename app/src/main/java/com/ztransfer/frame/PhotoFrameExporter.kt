@@ -119,6 +119,7 @@ enum class PhotoFramePreset(internal val fileSuffix: String) {
     COLOR_ARCHIVE("color_archive"),
     FILM_GALLERY("film_gallery"),
     FILM_EDGE("film_edge"),
+    PARAMETER_POSTER("parameter_poster"),
 }
 
 /** 自定义水印选项。枚举名称会直接持久化，新增档位可以，已有名称不要修改。 */
@@ -1727,7 +1728,8 @@ object PhotoFrameExporter {
                 PhotoFramePreset.GALLERY_MAT,
                 PhotoFramePreset.COLOR_ARCHIVE,
                 PhotoFramePreset.FILM_GALLERY,
-                PhotoFramePreset.FILM_EDGE ->
+                PhotoFramePreset.FILM_EDGE,
+                PhotoFramePreset.PARAMETER_POSTER ->
                     calculateEditorialFrameLayout(source.width, source.height, preset, longEdge)
                 else -> calculatePhotoFrameLayout(source.width, source.height, longEdge)
             }
@@ -1752,7 +1754,8 @@ object PhotoFrameExporter {
                 PhotoFramePreset.GALLERY_MAT,
                 PhotoFramePreset.COLOR_ARCHIVE,
                 PhotoFramePreset.FILM_GALLERY,
-                PhotoFramePreset.FILM_EDGE ->
+                PhotoFramePreset.FILM_EDGE,
+                PhotoFramePreset.PARAMETER_POSTER ->
                     calculateOriginalQualityEditorialFrameLayout(
                         source.width,
                         source.height,
@@ -1883,6 +1886,7 @@ object PhotoFrameExporter {
             PhotoFramePreset.GALLERY_MAT,
             PhotoFramePreset.FILM_GALLERY,
             PhotoFramePreset.FILM_EDGE -> 0f
+            PhotoFramePreset.PARAMETER_POSTER -> 1f
         }
         // ShadowLayer 在原尺寸高像素画布上直接做两次软件模糊代价很高。阴影本身没有
         // 高频细节，先在 1/4 尺寸透明代理图渲染，再双线性放大，视觉一致而参与
@@ -2076,7 +2080,8 @@ object PhotoFrameExporter {
                     PhotoFramePreset.CLASSIC_SIGNATURE,
                     PhotoFramePreset.GALLERY_MAT,
                     PhotoFramePreset.COLOR_ARCHIVE,
-                    PhotoFramePreset.FILM_EDGE -> Unit
+                    PhotoFramePreset.FILM_EDGE,
+                    PhotoFramePreset.PARAMETER_POSTER -> Unit
                 }
             }
             PhotoFramePreset.PLAQUE -> canvas.drawColor(Color.WHITE)
@@ -2087,6 +2092,7 @@ object PhotoFrameExporter {
             PhotoFramePreset.GALLERY_MAT,
             PhotoFramePreset.COLOR_ARCHIVE -> canvas.drawColor(Color.WHITE)
             PhotoFramePreset.FILM_EDGE -> canvas.drawColor(Color.rgb(8, 8, 9))
+            PhotoFramePreset.PARAMETER_POSTER -> drawBackdrop(canvas, source, PhotoFramePreset.CINEMA)
         }
     }
 
@@ -2500,7 +2506,8 @@ object PhotoFrameExporter {
                     PhotoFramePreset.GALLERY_MAT,
                     PhotoFramePreset.COLOR_ARCHIVE -> Color.rgb(24, 27, 30)
                     PhotoFramePreset.FILM_GALLERY,
-                    PhotoFramePreset.FILM_EDGE -> Color.rgb(250, 249, 246)
+                    PhotoFramePreset.FILM_EDGE,
+                    PhotoFramePreset.PARAMETER_POSTER -> Color.rgb(250, 249, 246)
                 }
             }
             alpha = watermarkAlpha(watermark.opacityPercent)
@@ -3203,7 +3210,8 @@ object PhotoFrameExporter {
             PhotoFramePreset.CLASSIC_SIGNATURE,
             PhotoFramePreset.GALLERY_MAT,
             PhotoFramePreset.FILM_GALLERY,
-            PhotoFramePreset.FILM_EDGE ->
+            PhotoFramePreset.FILM_EDGE,
+            PhotoFramePreset.PARAMETER_POSTER ->
                 calculateOriginalQualityEditorialFrameLayout(
                     orientedSize.width,
                     orientedSize.height,
@@ -3287,7 +3295,8 @@ object PhotoFrameExporter {
             if (preset.isEditorialFrame()) {
                 val basePreview = when (preset) {
                     PhotoFramePreset.FILM_GALLERY,
-                    PhotoFramePreset.COLOR_ARCHIVE -> decodeRegionPreview(decoder, orientation)
+                    PhotoFramePreset.COLOR_ARCHIVE,
+                    PhotoFramePreset.PARAMETER_POSTER -> decodeRegionPreview(decoder, orientation)
                     else -> null
                 }
                 val preview = if (
@@ -3308,8 +3317,10 @@ object PhotoFrameExporter {
                 } finally {
                     preview?.recycle()
                 }
-                if (preset == PhotoFramePreset.COLOR_ARCHIVE) {
-                    val radius = colorArchiveCornerRadius(layout)
+                if (preset == PhotoFramePreset.COLOR_ARCHIVE || preset == PhotoFramePreset.PARAMETER_POSTER) {
+                    val radius = if (preset == PhotoFramePreset.PARAMETER_POSTER) {
+                        parameterPosterCornerRadius(layout)
+                    } else colorArchiveCornerRadius(layout)
                     val clip = Path().apply {
                         addRoundRect(photoRect, radius, radius, Path.Direction.CW)
                     }
@@ -3741,8 +3752,10 @@ object PhotoFrameExporter {
         val photoPaint = Paint(
             Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG
         )
-        if (preset == PhotoFramePreset.COLOR_ARCHIVE) {
-            val radius = colorArchiveCornerRadius(layout)
+        if (preset == PhotoFramePreset.COLOR_ARCHIVE || preset == PhotoFramePreset.PARAMETER_POSTER) {
+            val radius = if (preset == PhotoFramePreset.PARAMETER_POSTER) {
+                parameterPosterCornerRadius(layout)
+            } else colorArchiveCornerRadius(layout)
             val clip = Path().apply {
                 addRoundRect(photo, radius, radius, Path.Direction.CW)
             }
@@ -3798,6 +3811,10 @@ object PhotoFrameExporter {
                     color = Color.rgb(13, 14, 16)
                 })
             }
+            PhotoFramePreset.PARAMETER_POSTER -> {
+                drawBackdrop(canvas, requireNotNull(backdropSource), PhotoFramePreset.CINEMA)
+                drawPhotoElevation(canvas, photo, parameterPosterCornerRadius(layout), preset)
+            }
             PhotoFramePreset.FILM_EDGE -> canvas.drawColor(Color.rgb(7, 7, 8))
             else -> error("Not an editorial frame")
         }
@@ -3825,6 +3842,7 @@ object PhotoFrameExporter {
                 drawFilmStripDecoration(canvas, layout, metadata)
                 drawFilmGalleryInformation(context, canvas, layout, metadata, watermark)
             }
+            PhotoFramePreset.PARAMETER_POSTER -> drawParameterPosterMetadata(canvas, layout, metadata)
             PhotoFramePreset.FILM_EDGE -> drawFilmEdgeDecoration(canvas, layout, metadata)
             else -> error("Not an editorial frame")
         }
@@ -5799,6 +5817,7 @@ internal fun calculateOriginalQualityEditorialFrameLayout(
     require(preset.isEditorialFrame())
     fun px(ratio: Float): Int = (sourceWidth * ratio).roundToInt().coerceAtLeast(1)
     return when (preset) {
+        PhotoFramePreset.PARAMETER_POSTER -> calculateOriginalParameterPosterLayout(sourceWidth, sourceHeight)
         PhotoFramePreset.CLASSIC_SIGNATURE -> {
             val side = px(CLASSIC_SIGNATURE_SIDE_TO_PHOTO_WIDTH)
             val top = px(CLASSIC_SIGNATURE_TOP_TO_PHOTO_WIDTH)
@@ -5892,7 +5911,8 @@ internal fun PhotoFramePreset.isEditorialFrame(): Boolean = when (this) {
     PhotoFramePreset.GALLERY_MAT,
     PhotoFramePreset.COLOR_ARCHIVE,
     PhotoFramePreset.FILM_GALLERY,
-    PhotoFramePreset.FILM_EDGE -> true
+    PhotoFramePreset.FILM_EDGE,
+    PhotoFramePreset.PARAMETER_POSTER -> true
     else -> false
 }
 
@@ -6010,7 +6030,8 @@ private fun PhotoFrameWatermark.forEditorialPhoto(
         PhotoFramePreset.COLOR_ARCHIVE -> true
         PhotoFramePreset.GALLERY_MAT,
         PhotoFramePreset.FILM_GALLERY -> content == PhotoFrameWatermarkContent.IMAGE
-        PhotoFramePreset.FILM_EDGE -> true
+        PhotoFramePreset.FILM_EDGE,
+        PhotoFramePreset.PARAMETER_POSTER -> true
         else -> false
     }
     return if (shouldUsePhoto) copy(position = mappedPosition) else copy(enabled = false)

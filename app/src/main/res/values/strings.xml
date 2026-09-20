@@ -617,4 +617,5 @@
     <string name="remote_grid_center">Center cross</string>
     <string name="remote_grid_golden">Golden ratio</string>
     <string name="remote_grid_cycle">Framing grid: %1$s. Tap to cycle.</string>
+    <string name="photo_frame_parameter_poster">Parameter Poster</string>
 </resources>

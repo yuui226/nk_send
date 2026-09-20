@@ -1083,6 +1083,8 @@ fun SettingsOverlay(
                     stringResource(R.string.photo_frame_film_gallery),
                 PhotoFramePreset.FILM_EDGE to
                     stringResource(R.string.photo_frame_film_edge),
+                PhotoFramePreset.PARAMETER_POSTER to
+                    stringResource(R.string.photo_frame_parameter_poster),
             )
             val selectedFrameChoice = frameChoices.first { it.first == state.photoFramePreset }
             val visibleWatermark = if (state.photoFrameEnabled) {
@@ -1959,6 +1961,7 @@ internal fun PhotoFrameWatermarkEditor(
         PhotoFramePreset.COLOR_ARCHIVE to stringResource(R.string.photo_frame_color_archive),
         PhotoFramePreset.FILM_GALLERY to stringResource(R.string.photo_frame_film_gallery),
         PhotoFramePreset.FILM_EDGE to stringResource(R.string.photo_frame_film_edge),
+        PhotoFramePreset.PARAMETER_POSTER to stringResource(R.string.photo_frame_parameter_poster),
     )
     val frameLabels = frameChoicesInCatalogOrder.toMap()
     val favoriteByPreset = favoriteEffects.associateBy { it.framePreset }

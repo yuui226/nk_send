@@ -1028,6 +1028,7 @@ private fun photoFramePresetLabel(preset: PhotoFramePreset): String = stringReso
         PhotoFramePreset.COLOR_ARCHIVE -> R.string.photo_frame_color_archive
         PhotoFramePreset.FILM_GALLERY -> R.string.photo_frame_film_gallery
         PhotoFramePreset.FILM_EDGE -> R.string.photo_frame_film_edge
+        PhotoFramePreset.PARAMETER_POSTER -> R.string.photo_frame_parameter_poster
     }
 )
 

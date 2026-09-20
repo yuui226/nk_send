@@ -3,4 +3,6 @@
         android:targetPackage="com.ztransfer.debug" />
     <instrumentation android:name="com.ztransfer.protocol.StaJpegThumbnailInstrumentation"
         android:targetPackage="com.ztransfer.debug" />
+    <instrumentation android:name="com.ztransfer.frame.ParameterPosterInstrumentation"
+        android:targetPackage="com.ztransfer.debug" />
 </manifest>

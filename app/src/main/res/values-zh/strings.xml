@@ -615,4 +615,5 @@
     <string name="remote_grid_center">中心十字</string>
     <string name="remote_grid_golden">黄金分割</string>
     <string name="remote_grid_cycle">构图参考线：%1$s，点击切换</string>
+    <string name="photo_frame_parameter_poster">参数海报</string>
 </resources>
