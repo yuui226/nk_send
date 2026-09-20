@@ -4734,6 +4734,7 @@ internal fun FilterChip(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     icon: ImageVector? = null,
+    fitLabel: Boolean = false,
     // 自定义前导内容（如连拍的 BurstGlyph）；给定内容色，优先于 [icon]。
     leading: (@Composable (Color) -> Unit)? = null
 ) {
@@ -4756,7 +4757,32 @@ internal fun FilterChip(
                 leading != null -> leading(contentColor)
                 icon != null -> Icon(icon, contentDescription = null, tint = contentColor, modifier = Modifier.size(14.dp))
             }
-            if (label != null) {
+            if (label != null && fitLabel) {
+                val textMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
+                val density = LocalDensity.current
+                val labelStyle = MaterialTheme.typography.labelLarge.copy(
+                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                )
+                BoxWithConstraints(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    val measuredWidth = textMeasurer.measure(
+                        text = label,
+                        style = labelStyle,
+                        softWrap = false,
+                        maxLines = 1,
+                    ).size.width
+                    val availableWidth = with(density) { maxWidth.toPx() }
+                    val scale = if (measuredWidth > 0) (availableWidth / measuredWidth).coerceAtMost(1f) else 1f
+                    Text(
+                        text = label,
+                        style = labelStyle,
+                        fontSize = labelStyle.fontSize * scale,
+                        maxLines = 1,
+                        softWrap = false,
+                        color = contentColor,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+            } else if (label != null) {
                 Text(
                     label,
                     style = MaterialTheme.typography.labelLarge,

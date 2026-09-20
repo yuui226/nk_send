@@ -23,9 +23,8 @@ internal const val PREVIEW_FAKE_LATITUDE = 66.6666
 internal const val PREVIEW_FAKE_LONGITUDE = 66.6666
 internal const val PREVIEW_FAKE_ALTITUDE_METERS = 23333.0
 /**
- * Address reverse-geocoding in exported borders is intentionally disabled for now.  The setting
- * field remains source-compatible for a future offline/online policy, but it is never restored
- * from persisted data or used by the border pipeline.
+ * The legacy full street-address field stays disabled. City/district have separate opt-in flags
+ * and pass through the shared connection policy before presentation.
  */
 internal const val PHOTO_FRAME_ADDRESS_METADATA_ENABLED = false
 internal val PHOTO_FRAME_DATE_PATTERNS = listOf("yyyy-MM-dd", "yyyy/MM/dd", "yyyy.MM.dd", "MM-dd-yyyy")
@@ -45,6 +44,8 @@ data class PhotoFrameMetadataSettings(
     val showAddress: Boolean = false,
     val showCoordinates: Boolean = false,
     val showAltitude: Boolean = false,
+    val showCity: Boolean = false,
+    val showRegion: Boolean = false,
 )
 
 internal fun defaultPhotoFrameMetadataSettings(
@@ -109,7 +110,7 @@ internal fun resolvedPhotoFrameMetadataSettings(
 internal fun normalizePhotoFrameMetadataSettings(
     settings: PhotoFrameMetadataSettings,
 ): PhotoFrameMetadataSettings = settings.copy(
-    // Reserved for a future address policy; never trigger reverse geocoding during export.
+    // Never restore the old full street-address option.
     showAddress = settings.showAddress && PHOTO_FRAME_ADDRESS_METADATA_ENABLED,
     datePattern = normalizePhotoFrameDatePattern(settings.datePattern),
     timePattern = normalizePhotoFrameTimePattern(settings.timePattern),
@@ -121,6 +122,8 @@ internal fun normalizePhotoFrameMetadataSettings(
  */
 internal fun PhotoFrameMetadataSettings.withoutLocationFields(): PhotoFrameMetadataSettings = copy(
     showAddress = false,
+    showCity = false,
+    showRegion = false,
     showCoordinates = false,
     showAltitude = false,
 )
@@ -157,21 +160,15 @@ internal fun PhotoFrameMetadata.withPresentation(
     val inferredBrand = cameraBrandLabel(make, model).takeIf(String::isNotBlank)
     val sourceNormalizedModel = normalizeCameraModel(make, model)
         .takeIf(String::isNotBlank)
-    val hasCoordinates = latitude?.isFinite() == true && longitude?.isFinite() == true &&
-        latitude != 0.0 && longitude != 0.0 &&
-        latitude in -90.0..90.0 && longitude in -180.0..180.0
-    val locationAddress = address?.trim()?.takeIf(String::isNotEmpty)
-    val addressValue = when {
-        !normalized.showAddress -> null
-        locationAddress != null -> locationAddress
-        !preview -> null
-        previewLocale.language.equals("zh", ignoreCase = true) &&
-            (previewLocale.script.equals("Hant", ignoreCase = true) ||
-                previewLocale.country.uppercase(Locale.ROOT) in setOf("TW", "HK", "MO")) ->
-            "一個非常好的地方"
-        previewLocale.language.equals("zh", ignoreCase = true) -> "一个非常好的地方"
-        else -> "A very good place"
-    }
+    val hasCoordinates = validFrameCoordinates(latitude, longitude)
+    val previewPlace = if (preview) {
+        when {
+            previewLocale.language != "zh" -> "Light & Shadow City" to "Blue Hour District"
+            previewLocale.script == "Hant" || previewLocale.country in setOf("TW", "HK", "MO") ->
+                "光影市" to "藍調區"
+            else -> "光影市" to "蓝调区"
+        }
+    } else null
     return copy(
         make = when {
             !normalized.showBrand -> null
@@ -223,7 +220,13 @@ internal fun PhotoFrameMetadata.withPresentation(
             preview -> PREVIEW_FAKE_LENS_MODEL
             else -> null
         },
-        address = addressValue,
+        address = null,
+        city = if (normalized.showCity) {
+            city?.trim()?.takeIf(String::isNotEmpty) ?: previewPlace?.first
+        } else null,
+        region = if (normalized.showRegion) {
+            region?.trim()?.takeIf(String::isNotEmpty) ?: previewPlace?.second
+        } else null,
         latitude = when {
             !normalized.showCoordinates -> null
             hasCoordinates -> latitude
@@ -337,7 +340,10 @@ internal fun encodePhotoFrameMetadataSettings(
         value.showAltitude,
         value.datePattern,
         value.timePattern,
-    ).joinToString(FIELD_SEPARATOR)
+    ).let { fields ->
+        if (value.showCity || value.showRegion) fields + listOf(value.showCity, value.showRegion)
+        else fields
+    }.joinToString(FIELD_SEPARATOR)
 }.joinToString(ENTRY_SEPARATOR)
 
 internal fun decodePhotoFrameMetadataSettings(
@@ -349,19 +355,19 @@ internal fun decodePhotoFrameMetadataSettings(
         val fields = entry.split(FIELD_SEPARATOR)
         // Older versions stored six or seven visibility flags. Accept those entries forever;
         // the former 13-field location format had an address slot which is deliberately skipped.
-        // The current location format is 12 fields and contains only coordinates + altitude.
-        if (fields.size != 9 && fields.size != 10 && fields.size != 12 && fields.size != 13) {
+        // 14-field entries append city/district after the unchanged 12-field layout.
+        if (fields.size != 9 && fields.size != 10 && fields.size != 12 && fields.size != 13 && fields.size != 14) {
             return@forEach
         }
         val preset = PhotoFramePreset.entries.firstOrNull { it.name == fields[0] }
             ?: return@forEach
         if (preset in restored) return@forEach
         val hasLensModel = fields.size >= 10
-        val hasLocation = fields.size == 12 || fields.size == 13
+        val hasLocation = fields.size >= 12
         val hasLegacyAddressSlot = fields.size == 13
         val booleanEnd = when {
             fields.size == 13 -> 11
-            fields.size == 12 -> 10
+            fields.size == 12 || fields.size == 14 -> 10
             hasLensModel -> 8
             else -> 7
         }
@@ -385,6 +391,8 @@ internal fun decodePhotoFrameMetadataSettings(
                 showLensModel = if (hasLensModel) checkNotNull(booleans[6]) else false,
                 // Address was removed from the border feature; retain only coordinate/altitude.
                 showAddress = false,
+                showCity = if (fields.size == 14) fields[12].toBooleanStrictOrNull() ?: return@forEach else false,
+                showRegion = if (fields.size == 14) fields[13].toBooleanStrictOrNull() ?: return@forEach else false,
                 showCoordinates = if (hasLocation) {
                     checkNotNull(booleans[7])
                 } else false,

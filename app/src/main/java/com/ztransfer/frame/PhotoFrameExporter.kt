@@ -5,7 +5,6 @@ import android.content.ContentResolver
 import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
-import android.location.Geocoder
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.BitmapRegionDecoder
@@ -39,7 +38,7 @@ import com.ztransfer.protocol.NefPreviewReference
 import com.ztransfer.protocol.largestEmbeddedJpegRange
 import com.ztransfer.protocol.parseNefHeaderMetadata
 import com.ztransfer.util.applyExifOrientation
-import com.ztransfer.util.formatDecimalDegreeCoordinates
+import com.ztransfer.util.formatDegreesMinutesCoordinates
 import java.io.ByteArrayInputStream
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
@@ -515,6 +514,8 @@ internal data class PhotoFrameMetadata(
     val longitude: Double? = null,
     val altitudeMeters: Double? = null,
     val address: String? = null,
+    val city: String? = null,
+    val region: String? = null,
 )
 
 internal data class FrameTextVisualBounds(
@@ -620,16 +621,6 @@ object PhotoFrameExporter {
         PhotoFrameMetadata(null, null, null, null, null, null)
     private val bundledTypefaceCache = mutableMapOf<PhotoFrameWatermarkFont, Typeface>()
     private val watermarkImageCache = linkedMapOf<String, Bitmap>()
-    private data class GeocodeCacheEntry(val address: String?, val cachedAtMs: Long)
-
-    private val geocodeCache =
-        object : LinkedHashMap<String, GeocodeCacheEntry>(8, 0.75f, true) {
-        override fun removeEldestEntry(
-            eldest: MutableMap.MutableEntry<String, GeocodeCacheEntry>,
-        ): Boolean =
-            size > 8
-    }
-
     private class RegionDecodeUnavailableException(cause: Throwable?) :
         Exception("Source provider does not support region decoding", cause)
 
@@ -655,9 +646,7 @@ object PhotoFrameExporter {
             ) {
                 "Only JPG/JPEG/PNG supports borders or watermarks"
             }
-            // Normalize legacy preferences before any metadata read.  Address is a reserved
-            // field and is currently disabled, so an old saved=true value cannot trigger
-            // reverse-geocoding during export.
+            // Normalize legacy preferences before any metadata read. Legacy full addresses stay off.
             val effectiveMetadataSettings = normalizePhotoFrameMetadataSettings(metadataSettings)
             val renderedWatermark = watermark.forBorderMode(borderEnabled)
             val renderStartedAtMs = generationProbeClock()
@@ -1075,43 +1064,20 @@ object PhotoFrameExporter {
                     )
                 }
         }
-        fun resolveAddress(metadata: PhotoFrameMetadata): PhotoFrameMetadata {
-            // Kept as a small extension point for a future offline/online address policy.  The
-            // current border pipeline never performs reverse-geocoding.
-            if (!PHOTO_FRAME_ADDRESS_METADATA_ENABLED || !metadataSettings.showAddress ||
-                !metadata.address.isNullOrBlank() ||
-                metadata.latitude?.isFinite() != true ||
-                metadata.longitude?.isFinite() != true ||
-                metadata.latitude == 0.0 || metadata.longitude == 0.0
-            ) {
-                return metadata
-            }
-            val latitude = checkNotNull(metadata.latitude)
-            val longitude = checkNotNull(metadata.longitude)
-            metadataTrace?.invoke(
-                "reverseGeocode=request coords=" +
-                    String.format(Locale.US, "%.6f,%.6f", latitude, longitude),
-            )
-            return metadata.copy(
-                address = reverseGeocode(context, latitude, longitude).also { result ->
-                    metadataTrace?.invoke(
-                        "reverseGeocode=result=${result?.take(80) ?: "none"}",
-                    )
-                },
-            )
-        }
+        suspend fun resolvePlace(metadata: PhotoFrameMetadata): PhotoFrameMetadata =
+            PhotoFrameLocationResolver.resolve(context, metadata, metadataSettings, metadataTrace)
         val metadata = if (borderEnabled) {
             if (metadataSnapshot != null || !allowLocalMetadataRead) {
                 val authoritativeMetadata = metadataSnapshot ?: EMPTY_METADATA
-                val snapshotWithAddress = resolveAddress(authoritativeMetadata)
+                val snapshotWithPlace = resolvePlace(authoritativeMetadata)
                 metadataTrace?.invoke(
-                    "source=camera-header result=${snapshotWithAddress.debugSummary()} " +
-                        "fields=${metadataSettings.showAddress}/" +
+                    "source=camera-header result=${snapshotWithPlace.debugSummary()} " +
+                        "fields=${metadataSettings.showCity}/${metadataSettings.showRegion}/" +
                         "${metadataSettings.showCoordinates}/${metadataSettings.showAltitude}",
                 )
-                snapshotWithAddress.withPresentation(metadataSettings)
+                snapshotWithPlace.withPresentation(metadataSettings)
             } else {
-                val requireLocation = metadataSettings.showAddress ||
+                val requireLocation = (metadataSettings.showCity || metadataSettings.showRegion) ||
                     metadataSettings.showCoordinates || metadataSettings.showAltitude
                 val metadataUris = buildList {
                     add(metadataSourceUri)
@@ -1129,7 +1095,7 @@ object PhotoFrameExporter {
                 }.distinct()
                 metadataTrace?.invoke(
                     "source=local candidates=${metadataUris.joinToString(", ", transform = ::debugUri)} " +
-                        "requireLocation=$requireLocation fields=${metadataSettings.showAddress}/" +
+                        "requireLocation=$requireLocation fields=${metadataSettings.showCity}/${metadataSettings.showRegion}/" +
                         "${metadataSettings.showCoordinates}/${metadataSettings.showAltitude}",
                 )
                 // Providers can split EXIF between descriptor and stream (or between the picker and
@@ -1139,7 +1105,7 @@ object PhotoFrameExporter {
                     readMetadata(
                         resolver,
                         metadataUris.first(),
-                        context.takeIf { metadataSettings.showAddress },
+                        null,
                         requireLocation = requireLocation,
                         trace = metadataTrace,
                     ),
@@ -1148,20 +1114,20 @@ object PhotoFrameExporter {
                         readMetadata(
                             resolver,
                             uri,
-                            context.takeIf { metadataSettings.showAddress },
+                            null,
                             requireLocation = true,
                             trace = metadataTrace,
                         ),
                     )
                 }
-                val presented = resolveAddress(merged).withPresentation(metadataSettings)
+                val presented = resolvePlace(merged).withPresentation(metadataSettings)
                 PhotoGenerationProbe.frameNote(
                     sessionId = probeSessionId,
                     category = "FRAME-EXPORT",
                     message = "metadata " +
                         "raw=${merged.debugSummary()} " +
                         "gpsValid=${merged.hasValidCoordinates()} " +
-                        "fields=${metadataSettings.showAddress}/${metadataSettings.showCoordinates}/" +
+                        "fields=${metadataSettings.showCity}/${metadataSettings.showRegion}/${metadataSettings.showCoordinates}/" +
                         metadataSettings.showAltitude +
                         " visibleRows=${frameLocationRows(presented).size} uriCount=${metadataUris.size}",
                 )
@@ -1431,12 +1397,12 @@ object PhotoFrameExporter {
             longitude = if (hasValidCoordinates()) longitude else fallback.longitude,
             altitudeMeters = altitudeMeters ?: fallback.altitudeMeters,
             address = address ?: fallback.address,
+            city = city ?: fallback.city,
+            region = region ?: fallback.region,
         )
 
     private fun PhotoFrameMetadata.hasValidCoordinates(): Boolean =
-        latitude != null && longitude != null &&
-            latitude.isFinite() && longitude.isFinite() &&
-            latitude != 0.0 && longitude != 0.0
+        validFrameCoordinates(latitude, longitude)
 
     private fun PhotoFrameMetadata.debugSummary(): String = buildString {
         append("make=").append(make?.trim().orEmpty().ifEmpty { "none" })
@@ -1489,18 +1455,18 @@ object PhotoFrameExporter {
                     ExifInterface.TAG_SHUTTER_SPEED_VALUE,
                     Double.NaN,
                 ).takeIf { it.isFinite() }?.let { 2.0.pow(-it) }
-        val coordinates = exif.latLong
+        val coordinates = exif.latLong?.takeIf { validFrameCoordinates(it.getOrNull(0), it.getOrNull(1)) }
         // ExifInterface may expose a present-but-zero latLong pair when the GPS IFD contains
         // malformed/placeholder values.  Do not let that suppress valid raw DMS tags.
         val latitude = (coordinates?.getOrNull(0)
-            ?.takeIf { it.isFinite() && it != 0.0 && it in -90.0..90.0 }
+            ?.takeIf { it.isFinite() && it in -90.0..90.0 }
             ?: parseExifCoordinate(
                 exif.getAttribute(ExifInterface.TAG_GPS_LATITUDE),
                 exif.getAttribute(ExifInterface.TAG_GPS_LATITUDE_REF),
             ))
             ?.takeIf { it.isFinite() && it in -90.0..90.0 }
         val longitude = (coordinates?.getOrNull(1)
-            ?.takeIf { it.isFinite() && it != 0.0 && it in -180.0..180.0 }
+            ?.takeIf { it.isFinite() && it in -180.0..180.0 }
             ?: parseExifCoordinate(
                 exif.getAttribute(ExifInterface.TAG_GPS_LONGITUDE),
                 exif.getAttribute(ExifInterface.TAG_GPS_LONGITUDE_REF),
@@ -1514,20 +1480,6 @@ object PhotoFrameExporter {
                     if (exif.getAttributeInt(ExifInterface.TAG_GPS_ALTITUDE_REF, 0) == 1) -value
                     else value
                 }
-        // Address reverse-geocoding is intentionally disabled for border metadata.  Keep this
-        // guarded branch for a future policy that can provide deterministic offline behavior.
-        val address = if (PHOTO_FRAME_ADDRESS_METADATA_ENABLED && context != null &&
-            latitude != null && longitude != null &&
-            latitude != 0.0 && longitude != 0.0
-        ) {
-            trace?.invoke(
-                "reverseGeocode=request coords=" +
-                    String.format(Locale.US, "%.6f,%.6f", latitude, longitude),
-            )
-            reverseGeocode(context, latitude, longitude).also { result ->
-                trace?.invoke("reverseGeocode=result=${result?.take(80) ?: "none"}")
-            }
-        } else null
         return PhotoFrameMetadata(
             make = exif.getAttribute(ExifInterface.TAG_MAKE),
             model = exif.getAttribute(ExifInterface.TAG_MODEL),
@@ -1554,7 +1506,6 @@ object PhotoFrameExporter {
             latitude = latitude,
             longitude = longitude,
             altitudeMeters = altitude,
-            address = address,
         )
     }
 
@@ -1596,37 +1547,6 @@ object PhotoFrameExporter {
         val numerator = pieces[0].toDoubleOrNull() ?: return null
         val denominator = pieces[1].toDoubleOrNull()?.takeIf { it != 0.0 } ?: return null
         return numerator / denominator
-    }
-
-    private fun reverseGeocode(context: Context, latitude: Double, longitude: Double): String? {
-        if (!Geocoder.isPresent()) return null
-        val key = String.format(Locale.US, "%.4f,%.4f", latitude, longitude)
-        val now = android.os.SystemClock.elapsedRealtime()
-        synchronized(geocodeCache) {
-            val cached = geocodeCache[key]
-            if (cached != null &&
-                (cached.address != null || now - cached.cachedAtMs < 60_000L)
-            ) {
-                return cached.address
-            }
-            if (cached != null) geocodeCache.remove(key)
-        }
-        val result = runCatching {
-            Geocoder(context, Locale.getDefault())
-                .getFromLocation(latitude, longitude, 1)
-                ?.firstOrNull()
-                ?.let { address ->
-                    address.getAddressLine(0)?.takeIf(String::isNotBlank)
-                        ?: address.featureName?.takeIf(String::isNotBlank)
-                        ?: address.thoroughfare?.takeIf(String::isNotBlank)
-                        ?: address.locality?.takeIf(String::isNotBlank)
-                        ?: address.adminArea?.takeIf(String::isNotBlank)
-                }
-        }.getOrNull()
-        synchronized(geocodeCache) {
-            geocodeCache[key] = GeocodeCacheEntry(result, now)
-        }
-        return result
     }
 
     private fun decodeBounded(
@@ -6392,21 +6312,22 @@ internal fun frameDetailLine(metadata: PhotoFrameMetadata): String =
     ).joinToString("   ")
 
 /**
- * Location metadata is deliberately compact: standard decimal degrees with hemisphere directions
- * and altitude share one row. Address reverse-geocoding is intentionally not rendered in borders
- * because it is network-dependent and would make AP/STA exports diverge. Display precision is
- * limited to four decimals (roughly ten-metre-level); the original EXIF values are never changed.
+ * Location metadata is deliberately compact: camera-style degrees and decimal minutes
+ * and altitude share one row. City and district share a separate row above them. Display precision is
+ * limited to three decimals in the minutes; the original EXIF and lookup coordinates are unchanged.
  */
 internal fun frameLocationRows(metadata: PhotoFrameMetadata): List<String> = buildList {
+    // One short place row follows the camera/date rows in every preset. Coordinates keep their
+    // own row, so the three-row plaque and narrow film band never gain a fourth detail row.
+    listOfNotNull(metadata.city, metadata.region)
+        .map(String::trim).filter(String::isNotEmpty).distinct()
+        .joinToString(" · ").takeIf(String::isNotEmpty)?.let(::add)
     val coordinates = if (
-        metadata.latitude?.isFinite() == true && metadata.longitude?.isFinite() == true &&
-        metadata.latitude != 0.0 && metadata.longitude != 0.0 &&
-        metadata.latitude in -90.0..90.0 && metadata.longitude in -180.0..180.0
+        validFrameCoordinates(metadata.latitude, metadata.longitude)
     ) {
-        formatDecimalDegreeCoordinates(
-            latitude = metadata.latitude,
-            longitude = metadata.longitude,
-            fractionDigits = 4,
+        formatDegreesMinutesCoordinates(
+            latitude = checkNotNull(metadata.latitude),
+            longitude = checkNotNull(metadata.longitude),
         )
     } else {
         null
@@ -6481,7 +6402,8 @@ private val PHOTO_FRAME_OUTPUT_PATTERN = Regex(
 private const val PHOTO_FRAME_WATERMARK_RENDER_VERSION = 2
 // GPS rows were added after the original frame renderer. Include a dedicated version token so
 // an already-generated frame without those rows is never treated as the current export.
-private const val PHOTO_FRAME_LOCATION_RENDER_VERSION = 1
+// Version 2 uses camera-style degrees/minutes instead of decimal degrees.
+private const val PHOTO_FRAME_LOCATION_RENDER_VERSION = 2
 private const val BRAND_FRAME_RENDER_VERSION = 4
 private const val EDITORIAL_FRAME_RENDER_VERSION = 2
 // Film-gallery typography evolves independently. Transfer-side deduplication uses this token,
@@ -6587,6 +6509,7 @@ internal fun photoFrameWatermarkFingerprint(
         "$baseIdentity\u0000metadata=$metadataToken"
     }
     val versionedIdentity = if (
+        effectiveMetadataSettings.showCity || effectiveMetadataSettings.showRegion ||
         effectiveMetadataSettings.showCoordinates ||
         effectiveMetadataSettings.showAltitude
     ) {
@@ -6664,6 +6587,9 @@ internal fun PhotoFrameDestination.hasFrameFor(
     metadataSettings: PhotoFrameMetadataSettings = defaultPhotoFrameMetadataSettings(preset),
     filter: PhotoFilterSelection? = null,
 ): Boolean {
+    // A filename only records selected fields, not whether an earlier geocoder succeeded.
+    // Explicit re-export must be allowed to fill in a place missing from an offline export.
+    if (borderEnabled && (metadataSettings.showCity || metadataSettings.showRegion)) return false
     val pattern = photoFrameOutputPattern(
         sourceName,
         preset,

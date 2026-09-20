@@ -2915,7 +2915,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             sessionId = probeSession,
             category = "FRAME-PIPE",
             message = "start source=$sourceName uri=$sourceUri preset=${preset.name} " +
-                "border=$borderEnabled fields=${metadataSettings.showAddress}/" +
+                "border=$borderEnabled fields=${metadataSettings.showCity}/${metadataSettings.showRegion}/" +
                 "${metadataSettings.showCoordinates}/${metadataSettings.showAltitude} " +
                 "filter=${filterRequested?.preset?.name ?: "none"} " +
                 "cameraMetadata=${cameraMetadata != null}",
@@ -2987,12 +2987,12 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         sessionId = probeSession,
                         category = "FRAME-EXPORT",
                         message = "begin source=$sourceName " +
-                            "fields=${metadataSettings.showAddress}/" +
+                            "fields=${metadataSettings.showCity}/${metadataSettings.showRegion}/" +
                             "${metadataSettings.showCoordinates}/${metadataSettings.showAltitude}",
                     )
                     log {
                         "DERIVATIVE_BEGIN: $sourceName source=$sourceUri " +
-                            "fields=${metadataSettings.showAddress}/" +
+                            "fields=${metadataSettings.showCity}/${metadataSettings.showRegion}/" +
                             "${metadataSettings.showCoordinates}/${metadataSettings.showAltitude}"
                     }
                     PhotoFrameExporter.export(
@@ -3035,13 +3035,13 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         sessionId = probeSession,
                         category = "FRAME-EXPORT",
                         message = "skipped existing source=$sourceName " +
-                            "fields=${metadataSettings.showAddress}/" +
+                            "fields=${metadataSettings.showCity}/${metadataSettings.showRegion}/" +
                             "${metadataSettings.showCoordinates}/${metadataSettings.showAltitude}",
                     )
                     log {
                         "DERIVATIVE_SKIP existing: $sourceName " +
                             "border=$borderEnabled preset=${preset.name} " +
-                            "fields=${metadataSettings.showAddress}/" +
+                            "fields=${metadataSettings.showCity}/${metadataSettings.showRegion}/" +
                             "${metadataSettings.showCoordinates}/${metadataSettings.showAltitude}"
                     }
                     updateTask(taskId) { task ->

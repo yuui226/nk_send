@@ -1205,6 +1205,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     init {
+        viewModelScope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            state.collect { current ->
+                com.ztransfer.frame.PhotoFrameLocationResolver.apBlocked.value =
+                    current.connectionType != CameraConnectionType.USB && current.wirelessMode == WirelessMode.AP
+            }
+        }
         registerUsbReceiver()
         scanAttachedUsbCamera()
         if (!gpsConnectionPaused &&
@@ -1362,8 +1368,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     }
                     // Fetch EXIF only after the FHD succeeds. If a foreground task cancels this
                     // step, do not latch the attempt: the same photo can retry when IO is idle.
-                    // Border address metadata is intentionally disabled.  Keep the preview
-                    // camera-header read limited to local EXIF fields; never geocode here.
+                    // Keep camera-header prefetch local; place lookup is opt-in during rendering.
                     val exif = loadExif(latest)
                     effectPreviewAttemptKey = key
                     if (_state.value.isConnectedToCamera &&
@@ -1685,6 +1690,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     fun selectApMode() {
         val current = _state.value
         if (current.isConnectedToCamera || current.connectionType == CameraConnectionType.USB) return
+        com.ztransfer.frame.PhotoFrameLocationResolver.apBlocked.value = true
         persistWirelessMode(WirelessMode.AP)
         if (current.wirelessMode == WirelessMode.AP) {
             resumeApDiscovery()
@@ -4392,6 +4398,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     override fun onCleared() {
+        com.ztransfer.frame.PhotoFrameLocationResolver.apBlocked.value = true
         super.onCleared()
         CameraSessionService.stop(getApplication())
         releaseSessionWifiLock()

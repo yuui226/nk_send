@@ -108,6 +108,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
@@ -166,9 +167,9 @@ import com.ztransfer.update.AppUpdateManager
 import com.ztransfer.ui.theme.*
 import com.ztransfer.ui.util.PROGRESSIVE_HOLD_HAPTIC_DURATION_MS
 import com.ztransfer.ui.util.rememberHaptics
-import com.ztransfer.util.formatDecimalDegreeCoordinates
-import com.ztransfer.util.formatDecimalDegreeLatitude
-import com.ztransfer.util.formatDecimalDegreeLongitude
+import com.ztransfer.util.formatDegreesMinutesCoordinates
+import com.ztransfer.util.formatDegreesMinutesLatitude
+import com.ztransfer.util.formatDegreesMinutesLongitude
 import com.ztransfer.viewmodel.TransferViewModel
 import com.ztransfer.gps.GpsState
 import com.ztransfer.gps.GpsStatus
@@ -2505,28 +2506,32 @@ private fun PhotoFrameMetadataInlineSettings(
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         val choices = listOfNotNull(
-            Triple(R.string.photo_frame_metadata_focal_length, settings.showFocalLength) {
-                settings.copy(showFocalLength = !settings.showFocalLength)
-            },
-            Triple(R.string.photo_frame_metadata_exposure, settings.showExposure) {
-                settings.copy(showExposure = !settings.showExposure)
-            },
-            Triple(R.string.photo_frame_metadata_lens_model, settings.showLensModel) {
-                settings.copy(showLensModel = !settings.showLensModel)
-            },
             Triple(R.string.photo_frame_metadata_brand, settings.showBrand) {
                 settings.copy(showBrand = !settings.showBrand)
             },
             Triple(R.string.photo_frame_metadata_model, settings.showModel) {
                 settings.copy(showModel = !settings.showModel)
             },
-            // Address reverse-geocoding is reserved for a future offline/online policy.  It is
-            // intentionally not exposed in the border editor so AP and STA exports stay equal.
+            Triple(R.string.photo_frame_metadata_lens_model, settings.showLensModel) {
+                settings.copy(showLensModel = !settings.showLensModel)
+            },
+            Triple(R.string.photo_frame_metadata_focal_length, settings.showFocalLength) {
+                settings.copy(showFocalLength = !settings.showFocalLength)
+            },
+            Triple(R.string.photo_frame_metadata_exposure, settings.showExposure) {
+                settings.copy(showExposure = !settings.showExposure)
+            },
             Triple(R.string.photo_frame_metadata_coordinates, settings.showCoordinates) {
                 settings.copy(showCoordinates = !settings.showCoordinates)
             }.takeIf { showLocationFields },
             Triple(R.string.photo_frame_metadata_altitude, settings.showAltitude) {
                 settings.copy(showAltitude = !settings.showAltitude)
+            }.takeIf { showLocationFields },
+            Triple(R.string.photo_frame_metadata_city, settings.showCity) {
+                settings.copy(showCity = !settings.showCity)
+            }.takeIf { showLocationFields },
+            Triple(R.string.photo_frame_metadata_region, settings.showRegion) {
+                settings.copy(showRegion = !settings.showRegion)
             }.takeIf { showLocationFields },
         )
         choices.chunked(3).forEach { rowChoices ->
@@ -2538,6 +2543,7 @@ private fun PhotoFrameMetadataInlineSettings(
                     FilterChip(
                         label = stringResource(label),
                         selected = selected,
+                        fitLabel = true,
                         onClick = {
                             onDetent()
                             onSettingsChanged(update())
@@ -2545,6 +2551,7 @@ private fun PhotoFrameMetadataInlineSettings(
                         modifier = Modifier.weight(1f),
                     )
                 }
+                repeat(3 - rowChoices.size) { Spacer(Modifier.weight(1f)) }
             }
         }
 
@@ -2785,6 +2792,10 @@ internal fun PhotoEffectsRenderedPreview(
 ) {
     val colors = AppTheme.colors
     val context = LocalContext.current
+    val placeLookupAllowed by remember(context) {
+        com.ztransfer.frame.PhotoFrameLocationResolver.availability(context)
+    }.collectAsState(initial = false)
+
     // 相机缩略图升级为 FHD 时保留旧效果帧；本地工作台换照片则按源重置，避免串图。
     // 两种入口在首张效果帧完成前都不直接绘制原图。
     val sourceRenderIdentity: Any = if (resetOnSourceChange) source else Unit
@@ -2807,6 +2818,7 @@ internal fun PhotoEffectsRenderedPreview(
         borderEnabled,
         preset,
         metadataSettings,
+        placeLookupAllowed.takeIf { metadataSettings.showCity || metadataSettings.showRegion },
         previewPlaceholders,
         watermark,
     ) {
@@ -2833,6 +2845,7 @@ internal fun PhotoEffectsRenderedPreview(
         borderEnabled,
         preset,
         metadataSettings,
+        placeLookupAllowed.takeIf { metadataSettings.showCity || metadataSettings.showRegion },
         previewPlaceholders,
         watermark,
     ) { PhotoEffectsPreviewCache() }
@@ -2885,7 +2898,9 @@ internal fun PhotoEffectsRenderedPreview(
                 output = PhotoFrameExporter.renderPreview(
                     context = context,
                     source = input,
-                    metadata = metadata,
+                    metadata = if (borderEnabled) com.ztransfer.frame.PhotoFrameLocationResolver.resolve(
+                        context, metadata, metadataSettings,
+                    ) else metadata,
                     preset = preset,
                     watermark = watermark,
                     borderEnabled = borderEnabled,
@@ -3913,10 +3928,9 @@ internal fun GpsConnectionControl(
         val requestId = placeBubbleRequestId
         when (lookup.status) {
             GpsPlaceLookupStatus.SUCCESS -> {
-                val coordinateText = formatDecimalDegreeCoordinates(
+                val coordinateText = formatDegreesMinutesCoordinates(
                     requestedCoordinates.first,
                     requestedCoordinates.second,
-                    fractionDigits = 5,
                 )
                 clipboard.setText(
                     AnnotatedString(
@@ -4086,18 +4100,15 @@ internal fun GpsConnectionControl(
                             val displayLatitude = presentation.latitude
                             val displayLongitude = presentation.longitude
                             if (displayLatitude != null && displayLongitude != null) {
-                                val coordinates = formatDecimalDegreeCoordinates(
+                                val coordinates = formatDegreesMinutesCoordinates(
                                     displayLatitude,
                                     displayLongitude,
-                                    fractionDigits = 5,
                                 )
-                                val latitudeText = formatDecimalDegreeLatitude(
+                                val latitudeText = formatDegreesMinutesLatitude(
                                     displayLatitude,
-                                    fractionDigits = 5,
                                 )
-                                val longitudeText = formatDecimalDegreeLongitude(
+                                val longitudeText = formatDegreesMinutesLongitude(
                                     displayLongitude,
-                                    fractionDigits = 5,
                                 )
                                 Column(
                                     modifier = Modifier
@@ -4585,24 +4596,41 @@ private fun GpsCoordinateValueSurface(
     modifier: Modifier = Modifier,
 ) {
     val colors = AppTheme.colors
+    val density = LocalDensity.current
+    val textMeasurer = rememberTextMeasurer()
+    val coordinateStyle = LocalTextStyle.current.copy(
+        fontSize = GPS_VALUE_FONT_SIZE,
+        lineHeight = GPS_VALUE_LINE_HEIGHT,
+        fontWeight = FontWeight.SemiBold,
+    )
     GpsDetailItemSurface(
         modifier = modifier,
         onClick = onClick,
         horizontalPadding = 8.dp,
         tintColor = tintColor,
     ) {
-        Box(
+        BoxWithConstraints(
             modifier = Modifier.fillMaxWidth(),
             contentAlignment = Alignment.Center,
         ) {
+            val textWidth = textMeasurer.measure(
+                text = value,
+                style = coordinateStyle,
+                softWrap = false,
+                maxLines = 1,
+            ).size.width
+            val availableWidth = with(density) { maxWidth.toPx() }
+            val fontScale = if (textWidth > 0) (availableWidth / textWidth).coerceAtMost(1f) else 1f
             Text(
                 text = value,
-                fontSize = GPS_VALUE_FONT_SIZE,
+                style = coordinateStyle,
+                fontSize = GPS_VALUE_FONT_SIZE * fontScale,
                 lineHeight = GPS_VALUE_LINE_HEIGHT,
                 fontWeight = FontWeight.SemiBold,
                 color = colors.onBackground,
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+                softWrap = false,
+                overflow = TextOverflow.Clip,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth(),
             )

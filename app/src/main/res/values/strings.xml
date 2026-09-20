@@ -203,6 +203,8 @@
     <string name="photo_frame_metadata_model">Model</string>
     <string name="photo_frame_metadata_date_format">Date format</string>
     <string name="photo_frame_metadata_time_format">Time format</string>
+    <string name="photo_frame_metadata_city">City</string>
+    <string name="photo_frame_metadata_region">District</string>
     <string name="photo_frame_metadata_address">Address</string>
     <string name="photo_frame_metadata_coordinates">Coordinates</string>
     <string name="photo_frame_metadata_altitude">Altitude</string>
