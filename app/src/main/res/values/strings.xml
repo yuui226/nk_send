@@ -609,4 +609,10 @@
     <string name="gps_close_before_connect">Turn off GPS before connecting</string>
     <string name="remote_pc_control_locked">PC control was accepted, but shutter adjustment is still unavailable. Copy the log, then turn the switch off.</string>
     <string name="remote_diagnostic_saved_hint">The last report is kept locally, including after leaving the monitor. New tests replace the previous report. If the switch is unavailable, wait for loading, recording, or focus to finish.</string>
+    <string name="remote_grid_off">Grid off</string>
+    <string name="remote_grid_thirds">Rule of thirds (3×3)</string>
+    <string name="remote_grid_fourths">4×4 grid</string>
+    <string name="remote_grid_center">Center cross</string>
+    <string name="remote_grid_golden">Golden ratio</string>
+    <string name="remote_grid_cycle">Framing grid: %1$s. Tap to cycle.</string>
 </resources>

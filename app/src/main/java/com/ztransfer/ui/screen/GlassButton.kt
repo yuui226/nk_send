@@ -33,6 +33,7 @@ import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.Path
@@ -60,6 +61,62 @@ private fun Outline.toMaterialPath(): Path = when (this) {
     is Outline.Generic -> path
     is Outline.Rectangle -> Path().apply { addRect(rect) }
     is Outline.Rounded -> Path().apply { addRoundRect(roundRect) }
+}
+
+/** 各种主题共享低矮的连续弧面；纹理和底色仍来自主题，不绘制描边、倒角或底座。 */
+private fun Modifier.pebbleMaterial(
+    shape: Shape,
+    base: Color,
+    texture: Brush?,
+    skin: SkinPreset,
+    activeColor: Color,
+    active: Float,
+    press: Float
+): Modifier = drawWithCache {
+    val path = shape.createOutline(size, layoutDirection, this).toMaterialPath()
+    val dark = base.luminance() < 0.35f
+    val volume = 1f - 0.32f * press
+    val light = when (skin) {
+        SkinPreset.WOOD -> Color(0xFFFFE8CA)
+        SkinPreset.TITANIUM -> Color(0xFFE9F1F6)
+        else -> Color.White
+    }
+    val strength = when (skin) {
+        SkinPreset.FROSTED_GLASS -> if (dark) 0.13f else 0.36f
+        SkinPreset.TITANIUM -> if (dark) 0.16f else 0.23f
+        SkinPreset.WOOD -> 0.20f
+        SkinPreset.CAMERA_CONTROLS -> 0.09f
+    }
+    val crown = Brush.radialGradient(
+        0f to light.copy(alpha = strength * volume),
+        0.38f to light.copy(alpha = strength * 0.60f * volume),
+        0.80f to Color.Transparent,
+        1f to Color.Transparent,
+        center = Offset(size.width * 0.33f, size.height * 0.20f),
+        radius = max(size.width, size.height) * 0.95f
+    )
+    val curvature = Brush.radialGradient(
+        0f to Color.Transparent,
+        0.48f to Color.Transparent,
+        0.76f to Color.Black.copy(alpha = 0.025f * volume),
+        1f to Color.Black.copy(alpha = (if (dark) 0.18f else 0.105f) * volume),
+        center = Offset(size.width * 0.43f, size.height * 0.34f),
+        radius = max(size.width, size.height) * 0.76f
+    )
+    val lowerCurve = Brush.verticalGradient(
+        0f to Color.Transparent,
+        0.60f to Color.Transparent,
+        1f to Color.Black.copy(alpha = (if (dark) 0.07f else 0.04f) * volume)
+    )
+    onDrawBehind {
+        drawPath(path, base)
+        texture?.let { drawPath(path, it, alpha = if (skin == SkinPreset.WOOD) 0.75f else 0.60f) }
+        drawPath(path, crown)
+        drawPath(path, curvature)
+        drawPath(path, lowerCurve)
+        if (active > 0f) drawPath(path, activeColor.copy(alpha = 0.025f * active))
+        if (press > 0f) drawPath(path, Color.Black.copy(alpha = 0.025f * press))
+    }
 }
 
 /**
@@ -881,6 +938,7 @@ internal fun materialBadgeContentColor(
  * 适合品牌标志等需要成为视觉焦点的内容；未指定时使用各材质的默认印记。
  * [enforceMinimumTouchTarget]：实体材质默认遵循 Material 的 48dp 最小触点；少量已有
  * 独立尺寸与外围布局保护的紧凑控件可关闭，毛玻璃分支的尺寸不受该开关影响。
+ * [raised]：监看工具栏的棋子式微凸表面，保留主题材质，以连续弧面代替轮廓描边。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -901,6 +959,7 @@ fun GlassButton(
     materialContentColor: Color? = null,
     activeOutline: Boolean = false,
     enforceMinimumTouchTarget: Boolean = true,
+    raised: Boolean = false,
     content: @Composable RowScope.() -> Unit
 ) {
     val colors = AppTheme.colors
@@ -919,6 +978,7 @@ fun GlassButton(
     val pressScale by animateFloatAsState(
         targetValue = if (pressed && enabled) {
             when {
+                raised -> 0.985f
                 isCameraControlButton -> 0.982f
                 isTitaniumButton -> 0.970f
                 else -> 0.965f
@@ -928,6 +988,7 @@ fun GlassButton(
         },
         animationSpec = when {
             pressed -> tween(80)
+            raised -> tween(160)
             isCameraControlButton -> tween(140)
             else -> Motion.bouncy()
         },
@@ -935,7 +996,7 @@ fun GlassButton(
     )
     val pressLight by animateFloatAsState(
         targetValue = if (pressed && enabled) 1f else 0f,
-        animationSpec = tween(if (pressed) 90 else 220),
+        animationSpec = tween(if (pressed) 90 else if (raised) 160 else 220),
         label = "glassPressLight"
     )
     // 保持原有 Surface → Row 测量层级；照片列表、续费等既有按钮依赖这套布局。
@@ -965,14 +1026,15 @@ fun GlassButton(
     // 只有实体材质使用可平铺位图画刷；毛玻璃的非平铺微颗粒由绘制层直接生成。
     val baseElevation = shadowElevation ?: when {
         panel -> 0.dp
+        raised -> 4.dp
         isCameraControlButton -> (9f + 2f * activeProgress).dp
         isWoodButton -> (8f + 2f * activeProgress).dp
         isTitaniumButton -> (7f + 2f * activeProgress).dp
         else -> (4f + 3f * activeProgress).dp
     }
     // 钛合金与木头都是实体材质；按下时投影与键程同时收紧。
-    val elevation = if (isSolidMaterial && !panel) {
-        val collapse = if (isCameraControlButton) 0.82f else 0.66f
+    val elevation = if ((isSolidMaterial || raised) && !panel) {
+        val collapse = if (raised) 0.70f else if (isCameraControlButton) 0.82f else 0.66f
         (baseElevation.value * (1f - collapse * pressLight)).dp
     } else {
         baseElevation
@@ -1006,10 +1068,11 @@ fun GlassButton(
         modifier.graphicsLayer {
             scaleX = pressScale
             scaleY = pressScale
-            translationY = if (isSolidMaterial && !panel) {
-                (if (isCameraControlButton) 2.1.dp else 1.6.dp).toPx() * pressLight
-            } else {
-                0f
+            translationY = when {
+                raised && !panel -> 0.8.dp.toPx() * pressLight
+                isSolidMaterial && !panel ->
+                    (if (isCameraControlButton) 2.1.dp else 1.6.dp).toPx() * pressLight
+                else -> 0f
             }
             // 禁用态整体压淡：M3 Surface 的 enabled 只拦点击不改视觉，
             // 不加这行会出现"看起来可点、点了没反应"的假活按钮。
@@ -1017,7 +1080,51 @@ fun GlassButton(
         }
     }
 
-    if (isFrostedGlass) {
+    if (raised && !panel) {
+        // 棋子表面复用主题底色/纹理；与普通顶部按钮共享状态和触控逻辑。
+        // 立体感只由表面弧度形成，不在按钮外绘制投影。
+        Box(
+            modifier = transformedModifier
+                .clip(shape)
+                .pebbleMaterial(
+                    shape = shape,
+                    base = containerColor.compositeOver(colors.background),
+                    texture = appliedSkinTexture,
+                    skin = texturePalette?.skin ?: SkinPreset.FROSTED_GLASS,
+                    activeColor = resolvedActiveColor,
+                    active = activeProgress,
+                    press = pressLight
+                )
+                .clickable(
+                    enabled = enabled,
+                    role = Role.Button,
+                    interactionSource = interactionSource,
+                    indication = null,
+                    onClick = onClick
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Row(
+                modifier = Modifier
+                    .padding(contentPadding)
+                    .titaniumStampedContent(
+                        enabled = isTitaniumButton,
+                        dark = dark,
+                        pressProgress = pressLight,
+                        stampColor = materialContentColor
+                    )
+                    .cameraPrintedContent(
+                        enabled = isCameraControlCap,
+                        activeColor = resolvedActiveColor,
+                        activeProgress = activeProgress,
+                        printColor = materialContentColor
+                    ),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
+                content = content
+            )
+        }
+    } else if (isFrostedGlass) {
         // 毛玻璃不再经过 Material Surface。它的 elevation、默认 indication 和半透明
         // 背景会分层缓存，正是圆形入口及更新按钮上残余矩形框的来源。
         Box(

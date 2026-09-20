@@ -607,4 +607,10 @@
     <string name="gps_close_before_connect">请先关闭 GPS</string>
     <string name="remote_pc_control_locked">相机已接受 PC 控制，但快门仍无可调档位。请复制日志反馈，再关闭开关。</string>
     <string name="remote_diagnostic_saved_hint">最近一次日志保存在本机，退出监看后重新进入仍可复制；新测试会替换旧报告。开关不可用时，请等待加载、录像或对焦结束。</string>
+    <string name="remote_grid_off">参考线关闭</string>
+    <string name="remote_grid_thirds">九宫格</string>
+    <string name="remote_grid_fourths">4×4 网格</string>
+    <string name="remote_grid_center">中心十字</string>
+    <string name="remote_grid_golden">黄金分割</string>
+    <string name="remote_grid_cycle">构图参考线：%1$s，点击切换</string>
 </resources>

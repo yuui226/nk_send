@@ -1974,6 +1974,9 @@ private fun RemoteContent(
         hintVisible = true
         hintNonce++
     }
+    fun cycleFramingGrid() {
+        framingGrid = framingGrid.next()
+    }
     LaunchedEffect(hintNonce) {
         if (hintVisible) {
             delay(hintDurationMs)
@@ -2753,10 +2756,8 @@ private fun RemoteContent(
             // Row 不会自动折行，窄屏上这排按钮会直接顶出屏幕外。这里做一次「量宽再
             // 分行」：右端永久留给【进全屏 / 转屏】两颗，监看工具从左往右填第一行，
             // 填不下的整颗挪到第二行左对齐（仍与取景器同一左边界）。
-            // 按钮宽度不能靠查表估算——GlassButton 底层的 M3 Surface 会把可点击
-            // 宽度撑到至少 48dp 的无障碍下限，HD/FPS 又是文字标（宽度随系统字体
-            // 缩放变化），估宽在部分机型上必然偏小、把右端两颗挤出屏幕。下面改用
-            // 自定义 Layout 拿每颗按钮的真实测量宽度分行，任何字号/密度下都精确装填。
+            // HD/FPS 等文字键随系统字号变化，录像控件也有不同宽度。
+            // 自定义 Layout 按每颗按钮的真实测量宽度分行，避免右端两颗被挤出屏幕。
             val toolGap = 6.dp
             val overlayTools: List<@Composable () -> Unit> = buildList {
                 if (devUnlocked) {
@@ -2806,13 +2807,7 @@ private fun RemoteContent(
                     ) { HistogramMark(Modifier.size(19.dp)) }
                 })
                 add(@Composable {
-                    TopIconToggle(
-                        active = framingGrid != ViewfinderGrid.OFF,
-                        contentDescription = stringResource(R.string.cd_remote_grid),
-                        onClick = { framingGrid = framingGrid.next() }
-                    ) {
-                        GridMark(Modifier.size(18.dp))
-                    }
+                    FramingGridToolButton(framingGrid, ::cycleFramingGrid)
                 })
                 add(@Composable {
                     TopIconToggle(
@@ -3147,11 +3142,7 @@ private fun RemoteContent(
                                     contentDescription = stringResource(R.string.cd_remote_histogram),
                                     onClick = { showHistogram = !showHistogram }
                                 ) { HistogramMark(Modifier.size(19.dp)) }
-                                TopIconToggle(
-                                    active = framingGrid != ViewfinderGrid.OFF,
-                                    contentDescription = stringResource(R.string.cd_remote_grid),
-                                    onClick = { framingGrid = framingGrid.next() }
-                                ) { GridMark(Modifier.size(18.dp)) }
+                                FramingGridToolButton(framingGrid, ::cycleFramingGrid)
                                 TopIconToggle(
                                     active = showZebra,
                                     contentDescription = stringResource(R.string.cd_remote_zebra),
@@ -4102,6 +4093,7 @@ private fun ViewfinderImage(
                     .pointerInput(
                         imageWidth,
                         imageHeight,
+                        displayAspectRatio,
                         trackingCoordinateWidth,
                         trackingCoordinateHeight,
                         focusCoordinateWidth,
@@ -4143,14 +4135,16 @@ private fun ViewfinderImage(
                                 )
                             }
                         }
-                    }
+                    },
+                contentAlignment = Alignment.Center
             ) {
                 Image(
                     bitmap = liveFrame.image,
                     contentDescription = null,
                     contentScale = ContentScale.Fit,
                     modifier = Modifier
-                        .fillMaxWidth()
+                        // 与参考线共用 Fit 居中规则。尺寸动画期间也允许按高度适配，
+                        // 不强制占满宽度，避免宽幅反挤压画面溢出或与网格错位。
                         .aspectRatio(displayAspectRatio)
                         .graphicsLayer {
                             // An anamorphic frame is encoded horizontally compressed. Fit it
@@ -4247,6 +4241,12 @@ private fun ViewfinderImage(
                 Icons.Default.Videocam, contentDescription = null,
                 tint = Color.White.copy(alpha = 0.18f),
                 modifier = Modifier.size(44.dp)
+            )
+            // 首帧到达前也可预览参考线，比例与外层占位取景器及反挤压保持一致。
+            FramingGridOverlay(
+                grid = grid,
+                imageAspectRatio = DEFAULT_VIEWFINDER_ASPECT * desqueezeMultiplier,
+                modifier = Modifier.matchParentSize()
             )
         }
     }
@@ -4962,7 +4962,18 @@ private fun AdaptiveRemoteToolBar(
     }
 }
 
-/** 视频模式专属的音频电平显示开关；横向展开让其后的工具自然平滑让位。 */
+@Composable
+private fun FramingGridToolButton(grid: ViewfinderGrid, onClick: () -> Unit) {
+    TopIconToggle(
+        active = grid != ViewfinderGrid.OFF,
+        contentDescription = stringResource(R.string.remote_grid_cycle, stringResource(grid.labelRes)),
+        onClick = onClick
+    ) {
+        GridMark(grid, Modifier.size(18.dp))
+    }
+}
+
+/** 反挤压倍率：单击循环切换，1× 表示关闭。 */
 @Composable
 private fun DesqueezeToolButton(multiplier: Float, onSelect: (Float) -> Unit) {
     val currentIndex = REMOTE_DESQUEEZE_OPTIONS.indices.minByOrNull { index ->
@@ -5022,7 +5033,7 @@ private fun AudioLevelsToolButton(
     }
 }
 
-/** 顶栏紧凑切换按钮：保持最小点击尺寸，文字类标记可按固有宽度自然扩展。 */
+/** 棋子式圆润工具按钮：沿用主题材质，以低矮弧面表达微凸。 */
 @Composable
 internal fun TopIconToggle(
     active: Boolean,
@@ -5036,8 +5047,9 @@ internal fun TopIconToggle(
         onClick = onClick,
         active = active,
         shape = CircleShape,
-        showSheen = false,
-        shadowElevation = 0.dp,
+        raised = true,
+        showSheen = true,
+        enforceMinimumTouchTarget = false,
         contentPadding = PaddingValues(8.dp),
         modifier = modifier
             .defaultMinSize(minWidth = 36.dp, minHeight = 36.dp)
@@ -5049,9 +5061,7 @@ internal fun TopIconToggle(
             Box(
                 modifier = Modifier.defaultMinSize(minWidth = 20.dp, minHeight = 20.dp),
                 contentAlignment = Alignment.Center
-            ) {
-                content()
-            }
+            ) { content() }
         }
     }
 }

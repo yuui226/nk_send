@@ -27,6 +27,7 @@ import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.ztransfer.R
 import com.ztransfer.ui.theme.AppTheme
 import kotlin.math.abs
 import kotlin.math.ceil
@@ -36,13 +37,41 @@ import kotlin.math.sqrt
 
 private val ToolMarkStrokeWidth = 1.5.dp
 
-internal enum class ViewfinderGrid(val divisions: Int) {
-    OFF(0), THIRDS(3), FOURTHS(4);
+internal enum class ViewfinderGrid(val fractions: List<Float>, val labelRes: Int) {
+    OFF(emptyList(), R.string.remote_grid_off),
+    THIRDS(listOf(1f / 3f, 2f / 3f), R.string.remote_grid_thirds),
+    FOURTHS(listOf(0.25f, 0.5f, 0.75f), R.string.remote_grid_fourths),
+    CENTER(listOf(0.5f), R.string.remote_grid_center),
+    GOLDEN(listOf(0.38196602f, 0.618034f), R.string.remote_grid_golden);
 
     fun next(): ViewfinderGrid = when (this) {
         OFF -> THIRDS
         THIRDS -> FOURTHS
-        FOURTHS -> OFF
+        FOURTHS -> CENTER
+        CENTER -> GOLDEN
+        GOLDEN -> OFF
+    }
+}
+
+internal data class FramingGridLine(val start: Offset, val end: Offset)
+
+/** Fractions are measured in the displayed image, after de-squeeze, excluding letterboxing. */
+internal fun framingGridLines(
+    grid: ViewfinderGrid,
+    containerWidth: Float,
+    containerHeight: Float,
+    imageAspectRatio: Float
+): List<FramingGridLine> {
+    if (grid == ViewfinderGrid.OFF) return emptyList()
+    val rect = fitCenterRect(containerWidth, containerHeight, imageAspectRatio)
+    if (rect.width <= 0f || rect.height <= 0f) return emptyList()
+    return grid.fractions.flatMap { fraction ->
+        val x = rect.left + rect.width * fraction
+        val y = rect.top + rect.height * fraction
+        listOf(
+            FramingGridLine(Offset(x, rect.top), Offset(x, rect.bottom)),
+            FramingGridLine(Offset(rect.left, y), Offset(rect.right, y))
+        )
     }
 }
 
@@ -231,26 +260,14 @@ internal fun FramingGridOverlay(
     modifier: Modifier = Modifier
 ) {
     if (grid == ViewfinderGrid.OFF) return
-    Canvas(modifier) {
+    Box(modifier.drawWithCache {
+        val lines = framingGridLines(grid, size.width, size.height, imageAspectRatio)
         val color = Color.White.copy(alpha = 0.42f)
         val stroke = 0.75.dp.toPx()
-        val rect = fitCenterRect(size.width, size.height, imageAspectRatio)
-        for (i in 1 until grid.divisions) {
-            val fraction = i.toFloat() / grid.divisions
-            drawLine(
-                color,
-                Offset(rect.left + rect.width * fraction, rect.top),
-                Offset(rect.left + rect.width * fraction, rect.bottom),
-                stroke
-            )
-            drawLine(
-                color,
-                Offset(rect.left, rect.top + rect.height * fraction),
-                Offset(rect.right, rect.top + rect.height * fraction),
-                stroke
-            )
+        onDrawBehind {
+            lines.forEach { drawLine(color, it.start, it.end, stroke) }
         }
-    }
+    })
 }
 
 // ── 所有工具按钮图标：统一线宽 = ToolMarkStrokeWidth(1.5dp)，风格克制简洁 ──
@@ -273,14 +290,14 @@ internal fun HistogramMark(modifier: Modifier = Modifier) {
     }
 }
 
-/** 构图参考线——标准九宫格（”井”字），固定不随实际网格档位变形。 */
+/** 按当前档位绘制参考线图标；关闭时保留九宫格入口，以按钮的非激活色区分。 */
 @Composable
-internal fun GridMark(modifier: Modifier = Modifier) {
+internal fun GridMark(grid: ViewfinderGrid, modifier: Modifier = Modifier) {
     val c = LocalContentColor.current
     Canvas(modifier) {
         val sw = ToolMarkStrokeWidth.toPx()
         val inset = 2.dp.toPx()
-        for (f in floatArrayOf(0.30f, 0.70f)) {
+        for (f in (if (grid == ViewfinderGrid.OFF) ViewfinderGrid.THIRDS else grid).fractions) {
             val x = inset + (size.width - inset * 2f) * f
             val y = inset + (size.height - inset * 2f) * f
             drawLine(c, Offset(x, inset), Offset(x, size.height - inset), sw, StrokeCap.Round)

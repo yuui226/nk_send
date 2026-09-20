@@ -603,4 +603,10 @@
     <string name="gps_close_before_connect">請先關閉 GPS</string>
     <string name="remote_pc_control_locked">相機已接受 PC 控制，但快門仍無可調檔位。請複製日誌回報，再關閉開關。</string>
     <string name="remote_diagnostic_saved_hint">最近一次日誌保存在本機，退出監看後重新進入仍可複製；新測試會取代舊報告。開關無法使用時，請等待載入、錄影或對焦結束。</string>
+    <string name="remote_grid_off">參考線關閉</string>
+    <string name="remote_grid_thirds">九宮格</string>
+    <string name="remote_grid_fourths">4×4 網格</string>
+    <string name="remote_grid_center">中心十字</string>
+    <string name="remote_grid_golden">黃金分割</string>
+    <string name="remote_grid_cycle">構圖參考線：%1$s，點擊切換</string>
 </resources>
