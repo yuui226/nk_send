@@ -1,5 +1,5 @@
-﻿# ZTransfer 激活码管理(在你自己的 Windows 电脑上运行)。
-# 双击同目录的《激活码管理.bat》进入交互菜单;也可以命令行调用:
+﻿# ZTransfer 激活码管理(在你自己的 Windows / Mac 电脑上运行)。
+# Windows 双击《激活码管理.bat》，Mac 双击《激活码管理.command》进入交互菜单;也可以命令行调用:
 #   .\admin.ps1 new 5 "7月QQ群批次"           生成 5 个永久激活码
 #   .\admin.ps1 new 5 "年费补发" 365          生成 5 个 365 天激活码(第三个参数是有效期天数)
 #   .\admin.ps1 list                          台账(码 + 绑定)
@@ -23,6 +23,9 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$AdminIsMac = [Environment]::OSVersion.Platform -eq [PlatformID]::Unix -and (Test-Path /System/Library/CoreServices)
+$CurlExecutable = if ($AdminIsMac) { '/usr/bin/curl' } else { 'curl.exe' }
+if ($AdminIsMac) { $OutputEncoding = [System.Text.UTF8Encoding]::new($false) }
 # curl 输出是 UTF-8(备注可能含中文),让 PowerShell 按 UTF-8 解码
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
@@ -37,7 +40,8 @@ $OssLatestObjectKey = "ZTransfer.apk"
 $ExpectedApkSignerSha256 = "388c6ea56aa0b3fc0cc78ab878285d6223763b822a55514b6eb267058829072b"
 $OssUtilBundled = Join-Path (Split-Path $PSScriptRoot -Parent) "tools\ossutil\2.3.0\ossutil-2.3.0-windows-amd64\ossutil.exe"
 $OssSetupDoc = Join-Path $PSScriptRoot "OSS发布设置.md"
-$OssCredentialDir = Join-Path $env:LOCALAPPDATA "ZTransfer"
+$OssCredentialDir = if ($AdminIsMac) { Join-Path $HOME "Library/Application Support/ZTransfer" } else { Join-Path $env:LOCALAPPDATA "ZTransfer" }
+$OssKeychainService = "com.ztransfer.admin.oss-upload"
 $OssCredentialFile = Join-Path $OssCredentialDir "oss-upload-credential.json"
 
 # 与 Android App 的 CERT_PIN_B64 相同：curl -k 仅跳过自签名证书链/主机名校验，
@@ -67,6 +71,7 @@ function Request-Token {
     $t = (Read-Host "adminToken").Trim()
     if (-not $t) { return $null }
     [IO.File]::WriteAllText($TokenFile, $t, (New-Object System.Text.UTF8Encoding($false)))
+    if ($AdminIsMac) { & /bin/chmod 600 $TokenFile }
     Write-Host "已保存到 $TokenFile(此文件等同密码,不要发给别人)" -ForegroundColor DarkGray
     return $t
 }
@@ -105,7 +110,7 @@ function Call($method, $path, $bodyObj) {
     }
     $curlExit = 0
     try {
-        $out = & curl.exe @curlArgs
+        $out = & $CurlExecutable @curlArgs
         $curlExit = $LASTEXITCODE
     }
     finally { if ($tmp) { Remove-Item $tmp -Force -ErrorAction SilentlyContinue } }
@@ -308,7 +313,12 @@ function Invoke-NewCodes {
     Write-Host ("生成了 {0} 个激活码({1}):" -f @($resp.codes).Count, $kind) -ForegroundColor Green
     foreach ($c in $resp.codes) { Write-Host "  $c" -ForegroundColor Green }
     try {
-        Set-Clipboard -Value (@($resp.codes) -join "`r`n")
+        if ($AdminIsMac) {
+            (@($resp.codes) -join "`n") | & /usr/bin/pbcopy
+            if ($LASTEXITCODE -ne 0) { throw "无法写入剪贴板" }
+        } else {
+            Set-Clipboard -Value (@($resp.codes) -join "`r`n")
+        }
         Write-Host "(已复制到剪贴板)" -ForegroundColor DarkGray
     } catch {}
     Write-Host ""
@@ -705,12 +715,19 @@ function Invoke-UpdateStats([switch]$ShowAll) {
 }
 
 function Find-AndroidTool($fileNames, $relativePatterns) {
+    if ($AdminIsMac) {
+        $fileNames = @($fileNames | ForEach-Object { $_ -replace '\.(exe|bat)$', '' } | Select-Object -Unique)
+        $relativePatterns = @($relativePatterns | ForEach-Object { ($_ -replace '\.(exe|bat)$', '') -replace '\\', '/' } | Select-Object -Unique)
+    }
     foreach ($name in $fileNames) {
         $cmd = Get-Command $name -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($cmd) { return $cmd.Source }
     }
-    $roots = @($env:ANDROID_HOME, $env:ANDROID_SDK_ROOT, (Join-Path $env:LOCALAPPDATA "Android\Sdk")) |
-        Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -Unique
+    $platformRoots = if ($AdminIsMac) {
+        @((Join-Path $HOME "Library/Android/sdk"), "/opt/homebrew/share/android-commandlinetools", "/usr/local/share/android-commandlinetools")
+    } else { @((Join-Path $env:LOCALAPPDATA "Android\Sdk")) }
+    $roots = @($env:ANDROID_HOME, $env:ANDROID_SDK_ROOT) + $platformRoots
+    $roots = $roots | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -Unique
     foreach ($root in $roots) {
         foreach ($pattern in $relativePatterns) {
             $found = Get-ChildItem -Path (Join-Path $root $pattern) -File -ErrorAction SilentlyContinue |
@@ -773,6 +790,12 @@ function Read-ApkSignerSha256($apkPath) {
 }
 
 function Get-OssUtilPath {
+    if ($AdminIsMac) {
+        # 与 Windows 内置工具固定在同一版本，首次使用才下载，普通发码不依赖 OSS。
+        $toolPath = & /bin/bash (Join-Path $PSScriptRoot "mac-admin-tools.sh") ossutil
+        if ($LASTEXITCODE -eq 0 -and $toolPath -and (Test-Path -LiteralPath $toolPath)) { return [string]$toolPath }
+        return $null
+    }
     if (Test-Path -LiteralPath $OssUtilBundled) { return $OssUtilBundled }
     $cmd = Get-Command "ossutil.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $cmd) { $cmd = Get-Command "ossutil" -ErrorAction SilentlyContinue | Select-Object -First 1 }
@@ -790,6 +813,15 @@ function Convert-SecureStringToPlainText($secureValue) {
 }
 
 function Get-OssCredentials {
+    if ($AdminIsMac) {
+        try {
+            $value = & /usr/bin/security find-generic-password -s $OssKeychainService -a "oss-upload" -w 2>$null
+            if ($LASTEXITCODE -ne 0) { return $null }
+            $saved = ($value -join "`n") | ConvertFrom-Json
+            if (-not $saved.accessKeyId -or -not $saved.accessKeySecret) { return $null }
+            return @{ AccessKeyId = [string]$saved.accessKeyId; AccessKeySecret = [string]$saved.accessKeySecret }
+        } catch { return $null }
+    }
     if (-not (Test-Path -LiteralPath $OssCredentialFile -PathType Leaf)) { return $null }
     try {
         $saved = Get-Content -LiteralPath $OssCredentialFile -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -827,7 +859,8 @@ function Invoke-OssUtilAuthenticated($ossutil, $commandArgs) {
 function Invoke-OssSetup {
     $ossutil = Get-OssUtilPath
     if (-not $ossutil) {
-        Write-Host "项目内未找到 ossutil.exe，请重新下载项目工具包。" -ForegroundColor Red
+        $message = if ($AdminIsMac) { "OSS 工具准备失败，请检查网络后重新选择此项。" } else { "项目内未找到 ossutil.exe，请重新下载项目工具包。" }
+        Write-Host $message -ForegroundColor Red
         return $false
     }
     Write-Host ""
@@ -844,16 +877,26 @@ function Invoke-OssSetup {
         Write-Host "AccessKey Secret 不能为空。" -ForegroundColor Red
         return $false
     }
-    # 从网页或 CSV 复制时常会带首尾空白；统一清理后再交给 OSS 签名。
-    $secureSecret = ConvertTo-SecureString $plainSecret -AsPlainText -Force
-    New-Item -ItemType Directory -Path $OssCredentialDir -Force | Out-Null
-    $saved = @{
-        version = 1
-        accessKeyId = $accessKeyId
-        encryptedAccessKeySecret = ConvertFrom-SecureString $secureSecret
-    } | ConvertTo-Json -Compress
-    [IO.File]::WriteAllText($OssCredentialFile, $saved, (New-Object System.Text.UTF8Encoding($false)))
-    Write-Host "凭证已由 Windows 当前账号加密保存，不会写入项目。" -ForegroundColor DarkGray
+    if ($AdminIsMac) {
+        $saved = @{ accessKeyId = $accessKeyId; accessKeySecret = $plainSecret } | ConvertTo-Json -Compress
+        & /usr/bin/security add-generic-password -U -s $OssKeychainService -a "oss-upload" -w $saved 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "无法保存到 Mac 钥匙串，请解锁登录钥匙串后重试。" -ForegroundColor Red
+            return $false
+        }
+        Write-Host "凭证已保存到 Mac 系统钥匙串，不会写入项目。" -ForegroundColor DarkGray
+    } else {
+        # 从网页或 CSV 复制时常会带首尾空白；统一清理后再交给 OSS 签名。
+        $secureSecret = ConvertTo-SecureString $plainSecret -AsPlainText -Force
+        New-Item -ItemType Directory -Path $OssCredentialDir -Force | Out-Null
+        $saved = @{
+            version = 1
+            accessKeyId = $accessKeyId
+            encryptedAccessKeySecret = ConvertFrom-SecureString $secureSecret
+        } | ConvertTo-Json -Compress
+        [IO.File]::WriteAllText($OssCredentialFile, $saved, (New-Object System.Text.UTF8Encoding($false)))
+        Write-Host "凭证已由 Windows 当前账号加密保存，不会写入项目。" -ForegroundColor DarkGray
+    }
     Write-Host "正在测试 releases/ 目录访问权限..." -ForegroundColor DarkGray
     $testArgs = @(
         "ls", "oss://$OssBucket/releases/",
@@ -872,6 +915,30 @@ function Invoke-OssSetup {
 }
 
 function Select-ApkFile($dialogTitle = "选择要发布的 ZTransfer APK") {
+    if ($AdminIsMac) {
+        $chooser = @'
+on run argv
+    try
+        return POSIX path of (choose file with prompt (item 1 of argv))
+    on error number -128
+        return ""
+    end try
+end run
+'@
+        $selected = & /usr/bin/osascript -e $chooser -- $dialogTitle 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            $path = ($selected -join "`n").TrimEnd("`r", "`n")
+            if ($path -and (Test-Path -LiteralPath $path -PathType Leaf)) { return $path }
+            return $null
+        }
+        $path = (Read-Host "请输入 APK 完整路径（可把文件拖到窗口）").Trim().Trim('"').Trim("'")
+        # Terminal 拖入文件会使用反斜杠转义空格、括号等；仅在原路径不存在时解码。
+        if ($path -and -not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            $path = [regex]::Replace($path, '\\(.)', '$1')
+        }
+        if ($path -and (Test-Path -LiteralPath $path -PathType Leaf)) { return (Resolve-Path -LiteralPath $path).Path }
+        return $null
+    }
     try {
         Add-Type -AssemblyName System.Windows.Forms
         $dialog = New-Object System.Windows.Forms.OpenFileDialog
@@ -983,7 +1050,8 @@ function Upload-ApkToOss(
 ) {
     $ossutil = Get-OssUtilPath
     if (-not $ossutil) {
-        Write-Host "项目内未找到 ossutil.exe，请重新下载项目工具包。" -ForegroundColor Red
+        $message = if ($AdminIsMac) { "OSS 工具准备失败，请检查网络后重新选择此项。" } else { "项目内未找到 ossutil.exe，请重新下载项目工具包。" }
+        Write-Host $message -ForegroundColor Red
         return $false
     }
     if (-not (Get-OssCredentials)) {
@@ -1072,7 +1140,7 @@ function Test-PublicOssApkFull($url, $expectedMeta) {
         $previousErrorAction = $ErrorActionPreference
         try {
             $ErrorActionPreference = "Continue"
-            & curl.exe -f -sS -L --max-time 300 -H "Cache-Control: no-cache" -o $tmp -- $url
+            & $CurlExecutable -f -sS -L --max-time 300 -H "Cache-Control: no-cache" -o $tmp -- $url
             $curlExit = $LASTEXITCODE
         } finally {
             $ErrorActionPreference = $previousErrorAction
@@ -1109,7 +1177,7 @@ function Test-PublicOssApk($url, $expectedMeta) {
         $previousErrorAction = $ErrorActionPreference
         try {
             $ErrorActionPreference = "Continue"
-            & curl.exe -f -sS -L --head --max-time 60 `
+            & $CurlExecutable -f -sS -L --head --max-time 60 `
                 -H "Cache-Control: no-cache" -o $tmp -- $url
             $curlExit = $LASTEXITCODE
         } finally {
@@ -1222,6 +1290,29 @@ function Invoke-UpdateStage {
     Write-Host "服务端当前版本、App 更新地址和 ZTransfer.apk 均未改变。" -ForegroundColor Green
 }
 
+function Read-UpdateNotes {
+    if (-not $AdminIsMac) {
+        return @{ Accepted = $true; Text = [string](Read-Host "更新说明(可留空)") }
+    }
+    $resultFile = [IO.Path]::GetTempFileName()
+    try {
+        & /bin/chmod 600 $resultFile
+        Write-Host '请在弹出的“更新说明”窗口中输入或粘贴内容...' -ForegroundColor Cyan
+        & /usr/bin/osascript -l JavaScript (Join-Path $PSScriptRoot "mac-update-notes.js") $resultFile | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "更新说明编辑窗口启动失败" }
+        $result = [IO.File]::ReadAllText($resultFile, [Text.Encoding]::UTF8) | ConvertFrom-Json
+        if ($null -eq $result -or $result.accepted -isnot [bool] -or $result.text -isnot [string]) {
+            throw "更新说明编辑窗口未返回有效内容"
+        }
+        return @{ Accepted = $result.accepted; Text = $result.text }
+    } catch {
+        Write-Host "无法读取更新说明，本次发布已停止：$_" -ForegroundColor Red
+        return @{ Accepted = $false; Text = "" }
+    } finally {
+        Remove-Item -LiteralPath $resultFile -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Invoke-UpdatePublish {
     $publishState = Get-UpdatePublishState
     if (-not $publishState) { return }
@@ -1242,7 +1333,9 @@ function Invoke-UpdatePublish {
 
     $target = New-OssReleaseTarget $meta
     Write-Host ("已读取版本: {0} (versionCode {1})" -f $versionName, $versionCode) -ForegroundColor Green
-    $notes = Read-Host "更新说明(可留空)"
+    $notesInput = Read-UpdateNotes
+    if (-not $notesInput.Accepted) { Write-Host "已取消"; return }
+    $notes = $notesInput.Text
     Write-Host ""
     Write-Host "更新策略:" -ForegroundColor Cyan
     Write-Host "  [1] 软更新：用户可以稍后或忽略(推荐)"
@@ -1389,7 +1482,7 @@ if ($Cmd) {
     exit 0
 }
 
-# 交互模式(双击 bat 进入)
+# 交互模式(双击 bat / command 进入)
 if (-not $script:Token) {
     $script:Token = Request-Token
     if (-not $script:Token) { Write-Host "没有令牌,无法继续" -ForegroundColor Red; Read-Host "回车退出"; exit 1 }

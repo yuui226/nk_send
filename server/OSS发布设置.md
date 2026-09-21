@@ -75,7 +75,7 @@ https://apk.ztransfer.top/ZTransfer.apk
 
 ## 3. 在管理工具录入凭证
 
-1. 双击 `激活码管理.bat`。
+1. Windows 双击 `激活码管理.bat`；Mac 双击 `激活码管理.command`。
 2. 进入“App 更新管理”。
 3. 选择“配置 / 测试 OSS 上传”。
 4. 输入专用 RAM 用户的 AccessKey ID 和 AccessKey Secret。
@@ -86,7 +86,9 @@ https://apk.ztransfer.top/ZTransfer.apk
 %LOCALAPPDATA%\ZTransfer\oss-upload-credential.json
 ```
 
-它不会写入项目。换电脑或轮换 AccessKey 后需要重新录入。
+Mac 版保存在系统钥匙串中（服务名 `com.ztransfer.admin.oss-upload`），不会生成上述 Windows 凭证文件。
+
+两种方式都不会把凭证写入项目。换电脑或轮换 AccessKey 后需要重新录入。
 
 ## 4. 发布流程
 

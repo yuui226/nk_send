@@ -36,6 +36,7 @@ private data class PosterRow(
     val size: Float,
     val label: String? = null,
     val bold: Boolean = false,
+    val medium: Boolean = false,
     val italic: Boolean = false,
     val alpha: Int = 255,
     val gapAfter: Float = 0f,
@@ -52,7 +53,9 @@ internal fun drawParameterPosterMetadata(canvas: Canvas, layout: PhotoFrameLayou
             add(PosterRow(it, width * if (portrait) 0.112f else 0.078f, bold = true, italic = true, gapAfter = width * 0.012f))
         }
         normalizeCameraModel(metadata.make, metadata.model).takeIf(String::isNotBlank)?.let {
-            add(PosterRow(it, bodySize * 1.12f, alpha = 235, gapAfter = width * 0.008f))
+            // Treat the model as a secondary headline; keep lens details visually quieter.
+            add(PosterRow(it, width * if (portrait) 0.068f else 0.047f,
+                medium = true, alpha = 245, gapAfter = width * 0.016f))
         }
         metadata.lensModel?.takeIf(String::isNotBlank)?.let {
             add(PosterRow(it, bodySize * 0.88f, alpha = 205))
@@ -120,7 +123,11 @@ private fun posterPaint(row: PosterRow) = Paint(Paint.ANTI_ALIAS_FLAG).apply {
     color = Color.WHITE
     alpha = row.alpha
     textSize = row.size
-    typeface = Typeface.create(if (row.bold) "sans-serif-black" else "sans-serif", when {
+    typeface = Typeface.create(when {
+        row.bold -> "sans-serif-black"
+        row.medium -> "sans-serif-medium"
+        else -> "sans-serif"
+    }, when {
         row.bold && row.italic -> Typeface.BOLD_ITALIC
         row.bold -> Typeface.BOLD
         else -> Typeface.NORMAL
@@ -131,7 +138,7 @@ private fun posterPaint(row: PosterRow) = Paint(Paint.ANTI_ALIAS_FLAG).apply {
 private fun drawPosterRows(canvas: Canvas, rows: List<PosterRow>, area: RectF) {
     if (rows.isEmpty() || area.width() <= 0 || area.height() <= 0) return
     val wrapped = rows.flatMap { row ->
-        if (row.label != null) listOf(row) else if (row.bold) {
+        if (row.label != null) listOf(row) else if (row.bold || row.medium) {
             val measured = posterPaint(row).measureText(row.text)
             listOf(row.copy(size = row.size * minOf(1f, area.width() * 0.96f / measured.coerceAtLeast(1f))))
         } else {

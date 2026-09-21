@@ -63,6 +63,10 @@ import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.CenterFocusStrong
+import androidx.compose.material.icons.filled.LockOpen
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.outlined.AspectRatio
@@ -124,6 +128,7 @@ import com.ztransfer.protocol.LiveViewSoundLevels
 import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.protocol.PtpConstants
 import com.ztransfer.protocol.RcParam
+import com.ztransfer.protocol.RemoteCameraTool
 import com.ztransfer.protocol.labEndLiveView
 import com.ztransfer.protocol.labGrabFrame
 import com.ztransfer.protocol.labStartLiveView
@@ -298,6 +303,7 @@ private data class RemoteLiveFrame(
     val histogram: LuminanceHistogram?,
     /** 过曝斑马掩码；斑马纹关闭或尚未计算时为 null，叠加层一笔不画。 */
     val zebraMask: ZebraMask?,
+    val analysis: MonitorAnalysis?,
     val metadata: LiveViewMetadata?,
     val receivedAtElapsedMs: Long
 )
@@ -354,7 +360,6 @@ fun RemoteScreen(
     onNavigateBack: () -> Unit
 ) {
     val backgroundBrush = rememberAppBackgroundBrush()
-    val transferState by transferViewModel.state.collectAsState()
     val context = LocalContext.current
     val activity = context.findActivity()
     val originalOrientation = remember(activity) {
@@ -362,8 +367,10 @@ fun RemoteScreen(
     }
     val lifecycleOwner = LocalLifecycleOwner.current
     val screenScope = rememberCoroutineScope()
-    // 每次进入监看页都从竖向布局开始；横向只由本次会话中的手动旋转或陀螺仪触发。
-    var rotation by remember { mutableIntStateOf(0) }
+    val tools = remember(context) { RemoteToolPreferences(context.getSharedPreferences("ztransfer", Context.MODE_PRIVATE)) }
+    var rotation by remember { mutableIntStateOf(if (tools.locked.value) tools.lockedRotation.value else 0) }
+    val orientationLocked by tools.locked
+    val currentOrientationLocked by rememberUpdatedState(orientationLocked)
     var switchingRotation by remember { mutableStateOf(false) }
     val rotationFade = remember { Animatable(1f) }
     val rotationRequests = remember { Channel<RemoteRotationRequest>(Channel.CONFLATED) }
@@ -381,14 +388,14 @@ fun RemoteScreen(
 
     LaunchedEffect(rotationRequests) {
         for (request in rotationRequests) {
-            if (request.rotation == rotation) continue
+            if (currentOrientationLocked || request.rotation == rotation) continue
             switchingRotation = true
             try {
                 rotationFade.animateTo(
                     targetValue = 0f,
                     animationSpec = tween(REMOTE_ROTATION_FADE_OUT_MS),
                 )
-                rotation = request.rotation
+                if (!currentOrientationLocked) rotation = request.rotation
                 // Let the new constraints/layout reach composition while the host is invisible.
                 withFrameNanos { }
                 rotationFade.animateTo(
@@ -401,9 +408,10 @@ fun RemoteScreen(
         }
     }
 
-    DisposableEffect(context, lifecycleOwner, orientationSession, rotationRequests) {
+    DisposableEffect(context, lifecycleOwner, orientationSession, rotationRequests, orientationLocked) {
         val listener = object : OrientationEventListener(context, SensorManager.SENSOR_DELAY_NORMAL) {
             override fun onOrientationChanged(orientation: Int) {
+                if (currentOrientationLocked) return
                 val candidate = remoteRotationForDeviceOrientation(orientation)
                 if (candidate == orientationSession.candidateRotation) return
 
@@ -426,7 +434,7 @@ fun RemoteScreen(
         val canDetectOrientation = listener.canDetectOrientation()
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_RESUME -> if (canDetectOrientation) listener.enable()
+                Lifecycle.Event.ON_RESUME -> if (canDetectOrientation && !currentOrientationLocked) listener.enable()
                 Lifecycle.Event.ON_PAUSE -> {
                     listener.disable()
                     orientationSession.pause()
@@ -435,6 +443,11 @@ fun RemoteScreen(
             }
         }
 
+        if (orientationLocked) {
+            listener.disable()
+            orientationSession.pause()
+            while (rotationRequests.tryReceive().isSuccess) { /* discard queued rotations */ }
+        }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
             listener.disable()
@@ -444,7 +457,7 @@ fun RemoteScreen(
     }
 
     fun cycleRotation() {
-        if (switchingRotation) return
+        if (switchingRotation || currentOrientationLocked) return
         orientationSession.suppressCurrentDirection()
         rotationRequests.trySend(
             RemoteRotationRequest(rotation = (rotation + 1) % 3)
@@ -511,6 +524,13 @@ fun RemoteScreen(
                         transferViewModel = transferViewModel,
                         onNavigateBack = onNavigateBack,
                         rotation = rotation,
+                        tools = tools,
+                        onLockRotation = { lock ->
+                            orientationSession.pause()
+                            while (rotationRequests.tryReceive().isSuccess) { }
+                            if (lock) tools.lockedRotation.value = rotation
+                            tools.locked.value = lock
+                        },
                         onCycleRotation = ::cycleRotation,
                         onReady = { trialArmed = true },
                         trialLeftSeconds = if (!isPro) ((trialLeftMs / 1000).coerceAtLeast(0)).toInt() else null,
@@ -534,8 +554,6 @@ object RemoteTrialNotice {
 /** 首帧到达前的取景器占位宽高比（尼康监看常见 3:2）；有帧后一律用帧的真实比例。 */
 private const val DEFAULT_VIEWFINDER_ASPECT = 3f / 2f
 private const val BATTERY_REFRESH_INTERVAL_MS = 120_000L
-private const val REMOTE_AUDIO_LEVELS_VISIBLE_KEY = "remote_audio_levels_visible"
-private const val REMOTE_DESQUEEZE_MULTIPLIER_KEY = "remote_desqueeze_multiplier"
 private val REMOTE_DESQUEEZE_OPTIONS = listOf(1f, 1.33f, 1.5f, 1.8f, 2f)
 
 private fun desqueezeDisplayValue(value: Float): String =
@@ -547,6 +565,8 @@ private fun RemoteContent(
     transferViewModel: TransferViewModel,
     onNavigateBack: () -> Unit,
     rotation: Int,
+    tools: RemoteToolPreferences,
+    onLockRotation: (Boolean) -> Unit,
     onCycleRotation: () -> Unit,
     onReady: () -> Unit = {},
     trialLeftSeconds: Int? = null,
@@ -633,33 +653,21 @@ private fun RemoteContent(
     var devUnlocked by remember { mutableStateOf(false) }
     var fpsTaps by remember { mutableIntStateOf(0) }
     var lastFpsTapAt by remember { mutableLongStateOf(0L) }
-    var showFps by remember { mutableStateOf(true) }    // 帧率覆盖默认显示（右下角）
-    var hdLiveView by remember { mutableStateOf(false) } // 高清监看(XGA)开关
-    var showHistogram by remember { mutableStateOf(false) }
-    var framingGrid by remember { mutableStateOf(ViewfinderGrid.OFF) }
-    var showZebra by remember { mutableStateOf(false) }
-    var showLevel by remember { mutableStateOf(false) }
-    val remotePreferences = remember(context) {
-        context.getSharedPreferences("ztransfer", Context.MODE_PRIVATE)
-    }
-    var showAudioLevels by remember {
-        mutableStateOf(
-            remotePreferences.getBoolean(REMOTE_AUDIO_LEVELS_VISIBLE_KEY, true)
-        )
-    }
-    var desqueezeMultiplier by remember {
-        mutableFloatStateOf(remotePreferences.getFloat(REMOTE_DESQUEEZE_MULTIPLIER_KEY, 1f).coerceIn(1f, 2f))
-    }
-    fun setDesqueezeMultiplier(value: Float) {
-        desqueezeMultiplier = value
-        remotePreferences.edit().putFloat(REMOTE_DESQUEEZE_MULTIPLIER_KEY, value).apply()
-    }
-    fun toggleAudioLevels() {
-        showAudioLevels = !showAudioLevels
-        remotePreferences.edit()
-            .putBoolean(REMOTE_AUDIO_LEVELS_VISIBLE_KEY, showAudioLevels)
-            .apply()
-    }
+    var showFps by tools.fps
+    var hdLiveView by tools.hd
+    var showHistogram by tools.histogram
+    var framingGrid by tools.grid
+    var exposureAssist by tools.exposure
+    val showZebra = exposureAssist == ExposureAssist.ZEBRA
+    var showLevel by tools.level
+    var showAudioLevels by tools.audio
+    var desqueezeMultiplier by tools.desqueeze
+    var showWaveform by tools.waveform
+    var toolManagerVisible by remember { mutableStateOf(false) }
+    var cameraToolPanel by remember { mutableStateOf<RemoteCameraTool?>(null) }
+    var hidingRecorder by remember { mutableStateOf(false) }
+    fun setDesqueezeMultiplier(value: Float) { desqueezeMultiplier = value }
+    fun toggleAudioLevels() { showAudioLevels = !showAudioLevels }
     // 相机机身的滚转角（0xD067），null=还没读到/机身不支持，此时水平仪一笔都不画
     var levelRoll by remember { mutableStateOf<Float?>(null) }
     var probing by remember { mutableStateOf(false) }
@@ -667,7 +675,7 @@ private fun RemoteContent(
     var immersiveFullscreen by remember { mutableStateOf(false) }
     fun enterFullscreen() {
         // 竖屏入口先沿用页面现有的转屏动画进入横屏；退出全屏后停留在横屏常规布局。
-        if (rotation == 0) onCycleRotation()
+        if (rotation == 0 && !tools.locked.value) onCycleRotation()
         listProp = null
         devPanel = false
         immersiveFullscreen = true
@@ -714,6 +722,9 @@ private fun RemoteContent(
     val currentHistogramEnabled = rememberUpdatedState(showHistogram)
     val histogramThrottle = remember { HistogramThrottle() }
     val currentZebraEnabled = rememberUpdatedState(showZebra)
+    val currentFalseColorEnabled = rememberUpdatedState(exposureAssist == ExposureAssist.FALSE_COLOR)
+    val currentWaveformEnabled = rememberUpdatedState(showWaveform)
+    val analysisThrottle = remember { MonitorAnalysisThrottle() }
     val zebraThrottle = remember { ZebraThrottle() }
     suspend fun decode(
         bytes: ByteArray,
@@ -750,10 +761,14 @@ private fun RemoteContent(
                     zebraThrottle.cached = null
                     null
                 }
+                val falseColor = currentFalseColorEnabled.value
+                val waveform = currentWaveformEnabled.value
+                val analysis = analysisThrottle.analyze(bitmap, falseColor, waveform, SystemClock.elapsedRealtime())
                 RemoteLiveFrame(
                     image = bitmap.asImageBitmap(),
                     histogram = histogram,
                     zebraMask = zebraMask,
+                    analysis = analysis,
                     metadata = metadata,
                     receivedAtElapsedMs = receivedAtElapsedMs
                 )
@@ -1423,7 +1438,7 @@ private fun RemoteContent(
     // 角度取自【相机机身】而非手机传感器：相机在架子上、手机在手里，只有相机自身姿态
     // 对构图有意义。只在水平仪打开时轮询，关掉就一条命令都不发——本页所有相机 I/O
     // 共用 ioMutex，多一个常驻轮询就是白占取帧通道。250ms 对水平指示足够跟手。
-    // 机身不支持该属性（GetDevicePropDesc 失败）时把开关弹回去，绝不显示假角度。
+    // 机身不支持时停止轮询、不显示假角度，保留用户偏好供下次连接使用。
     LaunchedEffect(showLevel, connected) {
         if (!showLevel || !connected) {
             levelRoll = null
@@ -1435,7 +1450,6 @@ private fun RemoteContent(
         val described = runCatching { cam.rcGetAngleLevel() }.getOrNull()
         if (described == null) {
             levelRoll = null
-            showLevel = false
             devLog("!! angle level unavailable (0xD067 poll)")
             return@LaunchedEffect
         }
@@ -2457,6 +2471,7 @@ private fun RemoteContent(
 
     // ---------- 取景器录像（画面录制为 MP4）----------
     val recOutputDir = File(context.filesDir, "recordings")
+    val recordingDesqueeze = rememberUpdatedState(desqueezeMultiplier)
 
     fun stopRecorder() {
         val r = viewfinderRecorder ?: return
@@ -2467,13 +2482,17 @@ private fun RemoteContent(
         recJob?.cancel()
         recJob = null
         recFinalizing = true
-        scope.launch {
+        scope.launch(NonCancellable) {
             // NonCancellable：用户停录后立刻退出页面时也要把 muxer 收尾写完，
             // 否则 mp4 缺 moov 无法播放。
             val name = withContext(Dispatchers.IO + NonCancellable) {
                 runCatching { r.stop() }.getOrNull()
             }
             recFinalizing = false
+            if (hidingRecorder) {
+                if (name != null) tools.setVisible(RemoteTool.RECORD, false)
+                hidingRecorder = false
+            }
             if (name != null) {
                 // 保存成功不再弹系统 Toast：对号与“已保存”短标签留在用户刚操作的
                 // 胶囊上，配合成功触感短暂停留后再自动收回。
@@ -2499,7 +2518,7 @@ private fun RemoteContent(
     // 真正开录（麦克风权限结果已知）。录像优先落到用户配置的 SAF 传输目录
     // （相册/文件管理器可见）；未配置或建档失败回退应用私有目录，录制照常。
     fun startRecorderResolved(withAudio: Boolean) {
-        if (viewfinderRecorder != null) return   // 已在录制，忽略重复触发
+        if (viewfinderRecorder != null || recFinalizing || !tools.visible(RemoteTool.RECORD)) return
         val f = frame
         if (f == null) {
             // 还没有取景画面（尺寸未知）就不开录，给提示而不是静默失败。
@@ -2555,7 +2574,8 @@ private fun RemoteContent(
             srcWidth = w,
             srcHeight = h,
             withAudio = withAudio,
-            preferredAudioInput = builtInMic
+            preferredAudioInput = builtInMic,
+            desqueezeMultiplier = desqueezeMultiplier
         )
         if (!recorder.start()) {
             // 开录失败：SAF 模式下把刚建的空文档删掉，别在用户目录留 0 字节垃圾。
@@ -2581,14 +2601,14 @@ private fun RemoteContent(
                 if (currentFrame != null && currentFrame !== lastEncoded && !recorder.isPaused) {
                     if (recorder.encodeFrame(
                             currentFrame.image,
-                            currentFrame.receivedAtElapsedMs * 1_000_000L
+                            currentFrame.receivedAtElapsedMs * 1_000_000L,
+                            recordingDesqueeze.value
                         )
                     ) {
                         lastEncoded = currentFrame
                         failStreak = 0
                     } else if (++failStreak >= 30) {
-                        // 连续编码失败（典型：录制中切换 HD 监看导致帧尺寸变化，编码器
-                        // 从此整段拒收）——自动停录保存已有片段，避免"看着在录、
+                        // 连续编码失败时自动停录保存已有片段，避免"看着在录、
                         // 实际一帧没写"的死录制。注意只有真正的编码失败会累计，
                         // "暂无新帧"的空转轮询不进这个计数。
                         withContext(Dispatchers.Main) { stopRecorder() }
@@ -2617,7 +2637,7 @@ private fun RemoteContent(
             showHint(context.getString(R.string.remote_rec_pro_only))
             return
         }
-        if (viewfinderRecorder != null) return   // 已在录制，忽略重复触发
+        if (viewfinderRecorder != null || recFinalizing || !tools.visible(RemoteTool.RECORD)) return
         val granted = ContextCompat.checkSelfPermission(
             context, Manifest.permission.RECORD_AUDIO
         ) == PackageManager.PERMISSION_GRANTED
@@ -2652,6 +2672,86 @@ private fun RemoteContent(
             val r = viewfinderRecorder
             viewfinderRecorder = null
             if (r != null) Thread { runCatching { r.stop() } }.start()
+        }
+    }
+
+    fun setToolVisible(tool: RemoteTool, visible: Boolean) {
+        if (!visible) {
+            when (tool) {
+                RemoteTool.RECORD -> if (viewfinderRecorder != null || recFinalizing) {
+                    hidingRecorder = true
+                    if (viewfinderRecorder != null) stopRecorder()
+                    return
+                }
+                RemoteTool.HD -> if (hdLiveView) {
+                    hdLiveView = false
+                    startSession(false)
+                }
+                RemoteTool.LOCK -> onLockRotation(false)
+                RemoteTool.FULLSCREEN -> immersiveFullscreen = false
+                RemoteTool.WHITE_BALANCE -> if (cameraToolPanel == RemoteCameraTool.WHITE_BALANCE) cameraToolPanel = null
+                RemoteTool.FOCUS_AREA -> if (cameraToolPanel == RemoteCameraTool.FOCUS_AREA) cameraToolPanel = null
+                else -> Unit
+            }
+        }
+        tools.setVisible(tool, visible)
+    }
+    val renderTools: @Composable (androidx.compose.ui.unit.Dp, Modifier) -> Unit = { gap, modifier ->
+        val fixed = listOf(RemoteTool.FULLSCREEN, RemoteTool.ROTATE).filter(tools::visible)
+        AdaptiveRemoteToolBar(modifier.fillMaxWidth(), horizontalGap = gap, verticalGap = 4.dp, pinnedEndCount = fixed.size) {
+            if (devUnlocked) TopIconToggle(false, stringResource(R.string.cd_dev_panel), { devPanel = true }) {
+                Icon(Icons.Default.BugReport, null, Modifier.size(18.dp))
+            }
+            (tools.order.filter { tools.visible(it) && (it != RemoteTool.AUDIO || movieMode) } + listOf(null) + fixed).forEach { tool ->
+                key(tool?.id ?: "manage") {
+                    if (tool == RemoteTool.RECORD) {
+                        RecControlBar(viewfinderRecorder != null, recPaused, recElapsed,
+                            { startRecorder() }, { togglePauseRecorder() }, { stopRecorder() },
+                            modifier = Modifier.height(36.dp), enabled = isPro,
+                            isFinalizing = recFinalizing, showDone = recSaveSuccess)
+                    } else {
+                        val active = when (tool) {
+                            RemoteTool.HD -> hdLiveView
+                            RemoteTool.FPS -> showFps
+                            RemoteTool.AUDIO -> showAudioLevels
+                            RemoteTool.HISTOGRAM -> showHistogram
+                            RemoteTool.GRID -> framingGrid != ViewfinderGrid.OFF
+                            RemoteTool.EXPOSURE -> exposureAssist != ExposureAssist.OFF
+                            RemoteTool.DESQUEEZE -> desqueezeMultiplier > 1.001f
+                            RemoteTool.LEVEL -> showLevel
+                            RemoteTool.WAVEFORM -> showWaveform
+                            RemoteTool.LOCK -> tools.locked.value
+                            else -> false
+                        }
+                        val disabled = tool == RemoteTool.ROTATE && tools.locked.value
+                        TopIconToggle(active, stringResource(tool?.title ?: R.string.remote_tool_manage), {
+                            when (tool) {
+                                RemoteTool.HD -> { hdLiveView = !hdLiveView; startSession(hdLiveView) }
+                                RemoteTool.FPS -> toggleFpsControl()
+                                RemoteTool.AUDIO -> toggleAudioLevels()
+                                RemoteTool.HISTOGRAM -> showHistogram = !showHistogram
+                                RemoteTool.GRID -> cycleFramingGrid()
+                                RemoteTool.EXPOSURE -> exposureAssist = exposureAssist.next()
+                                RemoteTool.DESQUEEZE -> {
+                                    val i = REMOTE_DESQUEEZE_OPTIONS.indices.minByOrNull { abs(REMOTE_DESQUEEZE_OPTIONS[it] - desqueezeMultiplier) } ?: 0
+                                    setDesqueezeMultiplier(REMOTE_DESQUEEZE_OPTIONS[(i + 1) % REMOTE_DESQUEEZE_OPTIONS.size])
+                                }
+                                RemoteTool.LEVEL -> showLevel = !showLevel
+                                RemoteTool.WAVEFORM -> showWaveform = !showWaveform
+                                RemoteTool.LOCK -> onLockRotation(!tools.locked.value)
+                                RemoteTool.FULLSCREEN -> enterFullscreen()
+                                RemoteTool.ROTATE -> if (!disabled) onCycleRotation()
+                                RemoteTool.WHITE_BALANCE -> { listProp = null; devPanel = false; cameraToolPanel = RemoteCameraTool.WHITE_BALANCE }
+                                RemoteTool.FOCUS_AREA -> { listProp = null; devPanel = false; cameraToolPanel = RemoteCameraTool.FOCUS_AREA }
+                                else -> toolManagerVisible = true
+                            }
+                        }, enabled = !disabled) {
+                            if (tool == null) Icon(Icons.Default.Settings, null, Modifier.size(19.dp))
+                            else RemoteToolMark(tool, tools)
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -2746,6 +2846,8 @@ private fun RemoteContent(
                 fps = fps,
                 connected = connected,
                 showZebra = showZebra,
+                    showFalseColor = exposureAssist == ExposureAssist.FALSE_COLOR,
+                    showWaveform = showWaveform,
                 showLevel = showLevel,
                 levelRoll = levelRoll,
                 desqueezeMultiplier = desqueezeMultiplier,
@@ -2758,111 +2860,7 @@ private fun RemoteContent(
             // 填不下的整颗挪到第二行左对齐（仍与取景器同一左边界）。
             // HD/FPS 等文字键随系统字号变化，录像控件也有不同宽度。
             // 自定义 Layout 按每颗按钮的真实测量宽度分行，避免右端两颗被挤出屏幕。
-            val toolGap = 6.dp
-            val overlayTools: List<@Composable () -> Unit> = buildList {
-                if (devUnlocked) {
-                    add(@Composable {
-                        TopIconToggle(
-                            active = false,
-                            contentDescription = stringResource(R.string.cd_dev_panel),
-                            onClick = { devPanel = true }
-                        ) {
-                            Icon(
-                                Icons.Default.BugReport,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    })
-                }
-                add(@Composable {
-                    TopIconToggle(
-                        active = hdLiveView,
-                        contentDescription = stringResource(R.string.dev_hd_liveview),
-                        onClick = {
-                            hdLiveView = !hdLiveView
-                            startSession(hdLiveView)
-                        }
-                    ) { HdMark() }
-                })
-                add(@Composable {
-                    TopIconToggle(
-                        active = showFps,
-                        contentDescription = stringResource(R.string.dev_fps_overlay),
-                        onClick = { toggleFpsControl() }
-                    ) { FpsMark() }
-                })
-                add(@Composable {
-                    AudioLevelsToolButton(
-                        visible = movieMode,
-                        active = showAudioLevels,
-                        onClick = ::toggleAudioLevels
-                    )
-                })
-                add(@Composable {
-                    TopIconToggle(
-                        active = showHistogram,
-                        contentDescription = stringResource(R.string.cd_remote_histogram),
-                        onClick = { showHistogram = !showHistogram }
-                    ) { HistogramMark(Modifier.size(19.dp)) }
-                })
-                add(@Composable {
-                    FramingGridToolButton(framingGrid, ::cycleFramingGrid)
-                })
-                add(@Composable {
-                    TopIconToggle(
-                        active = showZebra,
-                        contentDescription = stringResource(R.string.cd_remote_zebra),
-                        onClick = { showZebra = !showZebra }
-                    ) { ZebraMark(Modifier.size(18.dp)) }
-                })
-                add(@Composable {
-                    DesqueezeToolButton(desqueezeMultiplier, ::setDesqueezeMultiplier)
-                })
-                add(@Composable {
-                    TopIconToggle(
-                        active = showLevel,
-                        contentDescription = stringResource(R.string.cd_remote_level),
-                        onClick = { showLevel = !showLevel }
-                    ) { LevelMark(Modifier.size(18.dp)) }
-                })
-                add(@Composable {
-                    RecControlBar(
-                        isRecording = viewfinderRecorder != null,
-                        isPaused = recPaused,
-                        elapsedSeconds = recElapsed,
-                        onStart = { startRecorder() },
-                        onPauseResume = { togglePauseRecorder() },
-                        onStop = { stopRecorder() },
-                        modifier = Modifier.height(36.dp),
-                        enabled = isPro,
-                        isFinalizing = recFinalizing,
-                        showDone = recSaveSuccess
-                    )
-                })
-            }
-            // 所有按钮按真实固有宽度顺序折行；窄屏/大字体下宁可增加一行，
-            // 也绝不压窄按钮或让文字换行。
-            val toolRowGap = 4.dp
-            AdaptiveRemoteToolBar(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalGap = toolGap,
-                verticalGap = toolRowGap,
-                pinnedEndCount = 2,
-                content = {
-                    overlayTools.forEach { tool -> tool() }
-                    TopIconToggle(
-                        active = false,
-                        contentDescription = stringResource(R.string.cd_remote_fullscreen_enter),
-                        onClick = { enterFullscreen() }
-                    ) { FullscreenEnterMark(Modifier.size(17.dp)) }
-                    TopIconToggle(
-                        active = false,
-                        contentDescription = stringResource(R.string.cd_remote_rotate),
-                        onClick = onCycleRotation
-                    ) { RotateMark(Modifier.size(20.dp)) }
-                }
-            )
+            renderTools(6.dp, Modifier)
             Spacer(Modifier.height(12.dp))
 
             // 2×2 数值拨轮微调：读数即控件——在数值上【上下拖动】，数值列随手指 1:1
@@ -3044,6 +3042,8 @@ private fun RemoteContent(
                     fps = fps,
                     connected = connected,
                     showZebra = showZebra,
+                    showFalseColor = exposureAssist == ExposureAssist.FALSE_COLOR,
+                    showWaveform = showWaveform,
                     showLevel = showLevel,
                     levelRoll = levelRoll,
                     showEmbeddedAudioMeter = !audioMeterOutside,
@@ -3094,90 +3094,9 @@ private fun RemoteContent(
                         Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
                             Spacer(Modifier.weight(1f))
                             Spacer(Modifier.height(toolRowGap))
-                            AdaptiveRemoteToolBar(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .onSizeChanged {
-                                        if (landscapeToolBarHeightPx != it.height) {
-                                            landscapeToolBarHeightPx = it.height
-                                        }
-                                },
-                                horizontalGap = 5.dp,
-                                verticalGap = 4.dp,
-                                pinnedEndCount = 2
-                            ) {
-                                if (devUnlocked) {
-                                    TopIconToggle(
-                                        active = false,
-                                        contentDescription = stringResource(R.string.cd_dev_panel),
-                                        onClick = { devPanel = true }
-                                    ) {
-                                        Icon(
-                                            Icons.Default.BugReport,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
-                                }
-                                TopIconToggle(
-                                    active = hdLiveView,
-                                    contentDescription = stringResource(R.string.dev_hd_liveview),
-                                    onClick = {
-                                        hdLiveView = !hdLiveView
-                                        startSession(hdLiveView)
-                                    }
-                                ) { HdMark() }
-                                TopIconToggle(
-                                    active = showFps,
-                                    contentDescription = stringResource(R.string.dev_fps_overlay),
-                                    onClick = { toggleFpsControl() }
-                                ) { FpsMark() }
-                                AudioLevelsToolButton(
-                                    visible = movieMode,
-                                    active = showAudioLevels,
-                                    onClick = ::toggleAudioLevels
-                                )
-                                TopIconToggle(
-                                    active = showHistogram,
-                                    contentDescription = stringResource(R.string.cd_remote_histogram),
-                                    onClick = { showHistogram = !showHistogram }
-                                ) { HistogramMark(Modifier.size(19.dp)) }
-                                FramingGridToolButton(framingGrid, ::cycleFramingGrid)
-                                TopIconToggle(
-                                    active = showZebra,
-                                    contentDescription = stringResource(R.string.cd_remote_zebra),
-                                    onClick = { showZebra = !showZebra }
-                                ) { ZebraMark(Modifier.size(18.dp)) }
-                                DesqueezeToolButton(desqueezeMultiplier, ::setDesqueezeMultiplier)
-                                TopIconToggle(
-                                    active = showLevel,
-                                    contentDescription = stringResource(R.string.cd_remote_level),
-                                    onClick = { showLevel = !showLevel }
-                                ) { LevelMark(Modifier.size(18.dp)) }
-                                RecControlBar(
-                                    isRecording = viewfinderRecorder != null,
-                                    isPaused = recPaused,
-                                    elapsedSeconds = recElapsed,
-                                    onStart = { startRecorder() },
-                                    onPauseResume = { togglePauseRecorder() },
-                                    onStop = { stopRecorder() },
-                                    modifier = Modifier.height(36.dp),
-                                    enabled = isPro,
-                                    isFinalizing = recFinalizing,
-                                    showDone = recSaveSuccess
-                                )
-                                TopIconToggle(
-                                    active = false,
-                                    contentDescription =
-                                        stringResource(R.string.cd_remote_fullscreen_enter),
-                                    onClick = { enterFullscreen() }
-                                ) { FullscreenEnterMark(Modifier.size(17.dp)) }
-                                TopIconToggle(
-                                    active = false,
-                                    contentDescription = stringResource(R.string.cd_remote_rotate),
-                                    onClick = onCycleRotation
-                                ) { RotateMark(Modifier.size(20.dp)) }
-                            }
+                            renderTools(5.dp, Modifier.onSizeChanged {
+                                if (landscapeToolBarHeightPx != it.height) landscapeToolBarHeightPx = it.height
+                            })
                         }
 
                         Column(
@@ -3581,6 +3500,34 @@ private fun RemoteContent(
                 }
             }
             }
+    cameraToolPanel?.let { selectedTool ->
+        val panelCamera = cameraViewModel.getCamera()
+        RemoteCameraToolPanel(panelCamera, movieMode, selectedTool,
+            canWrite = connected && initialLoaded && !probing && !diagnosticControlBusy && !capturing && !recBusy && !afHeld && !tapFocusBusy && afJob?.isActive != true,
+            isCurrentCamera = { panelCamera != null && cameraViewModel.getCamera() === panelCamera },
+            beforeWrite = {
+                if (selectedTool == RemoteCameraTool.FOCUS_AREA && subjectTrackingActive && panelCamera != null) {
+                    val rc = panelCamera.rcEndSubjectTracking()
+                    devLog("focus area EndTracking resp=${rc?.let { "0x%04X".format(it and 0xFFFF) } ?: "unavailable"}")
+                    if (rc != null && rc != Lab.OK && rc != PtpConstants.OPERATION_NOT_SUPPORTED && rc != Lab.NK_INVALID_STATUS) false else {
+                        subjectTrackingActive = false
+                        confirmedFocusMarker = null
+                        true
+                    }
+                } else true
+            },
+            onApplied = {
+                if (selectedTool == RemoteCameraTool.FOCUS_AREA) {
+                    confirmedFocusMarker = null
+                    tapFocusFeedback = TapFocusFeedback.IDLE
+                    afLocked = false
+                    refreshFocusMode()
+                }
+            }, log = { devLog(it) }, onDismiss = { cameraToolPanel = null })
+    }
+    if (toolManagerVisible) RemoteToolManager(tools,
+        if (hidingRecorder || recFinalizing) setOf(RemoteTool.RECORD) else emptySet(),
+        ::setToolVisible, { toolManagerVisible = false })
         }
     }
 
@@ -3773,6 +3720,8 @@ private fun RemoteViewfinderPanel(
     fps: Float,
     connected: Boolean,
     showZebra: Boolean = false,
+    showFalseColor: Boolean = false,
+    showWaveform: Boolean = false,
     showLevel: Boolean = false,
     /** 相机机身滚转角；null=没有可用角度，水平仪什么都不画。 */
     levelRoll: Float? = null,
@@ -3801,6 +3750,8 @@ private fun RemoteViewfinderPanel(
             subjectTrackingActive = subjectTrackingActive,
             onTapFocus = onTapFocus,
             showZebra = showZebra,
+            showFalseColor = showFalseColor,
+            showWaveform = showWaveform,
             desqueezeMultiplier = desqueezeMultiplier
         )
 
@@ -3808,7 +3759,7 @@ private fun RemoteViewfinderPanel(
             ViewfinderSoundMeterOverlay(
                 enabled = soundMeterEnabled,
                 frameProvider = frameProvider,
-                bottomInset = if (showHistogram) 78.dp else 8.dp,
+                bottomInset = if (showWaveform || showFalseColor) 8.dp else if (showHistogram) 86.dp else 8.dp,
                 modifier = Modifier.matchParentSize()
             )
         }
@@ -4068,6 +4019,8 @@ private fun ViewfinderImage(
     subjectTrackingActive: Boolean,
     onTapFocus: (ViewfinderTap) -> Unit,
     showZebra: Boolean,
+    showFalseColor: Boolean,
+    showWaveform: Boolean,
     desqueezeMultiplier: Float = 1f
 ) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -4170,6 +4123,9 @@ private fun ViewfinderImage(
                         onDrawBehind { drawRect(brush) }
                     }
             )
+            if (showFalseColor) liveFrame.analysis?.falseColor?.let {
+                FalseColorOverlay(it, displayAspectRatio, Modifier.matchParentSize())
+            }
             FramingGridOverlay(
                 grid = grid,
                 imageAspectRatio = displayAspectRatio,
@@ -4228,14 +4184,16 @@ private fun ViewfinderImage(
                     modifier = Modifier.matchParentSize()
                 )
             }
-            if (showHistogram) {
-                liveFrame.histogram?.let {
-                    HistogramOverlay(
-                        histogram = it,
-                        modifier = Modifier.align(Alignment.BottomStart).padding(8.dp)
-                    )
-                }
+            if (showWaveform || showFalseColor) {
+                MonitorAnalysisOverlays(
+                    histogram = liveFrame.histogram.takeIf { showHistogram },
+                    waveform = liveFrame.analysis?.waveform.takeIf { showWaveform },
+                    falseColor = showFalseColor, modifier = Modifier.matchParentSize(),
+                )
+            } else if (showHistogram) {
+                liveFrame.histogram?.let { HistogramOverlay(it, Modifier.align(Alignment.BottomStart).padding(8.dp)) }
             }
+
         } else {
             Icon(
                 Icons.Default.Videocam, contentDescription = null,
@@ -4860,7 +4818,7 @@ private fun ConfirmedFocusReticleOverlay(
  * 空间不足时整颗按钮移到下一行，行数不设上限；任何一项都不会被 weight 或父级约束压窄。
  */
 @Composable
-private fun AdaptiveRemoteToolBar(
+internal fun AdaptiveRemoteToolBar(
     modifier: Modifier = Modifier,
     horizontalGap: androidx.compose.ui.unit.Dp = 6.dp,
     verticalGap: androidx.compose.ui.unit.Dp = 4.dp,
@@ -4888,7 +4846,7 @@ private fun AdaptiveRemoteToolBar(
             gapPx * (pinnedIndices.size - 1).coerceAtLeast(0)
 
         // 第一行先为尾部固定项预留真实宽度，因此全屏和旋转永远处在第一行按钮组的
-        // 最右端。这里是“紧跟普通工具后的行内尾部”，不是用空白把按钮撑到屏幕右缘。
+        // 最右端。普通工具不足一行时仍通过剩余空白将固定按钮对齐右侧边界。
         // 普通工具只使用剩余空间，放不下就整颗移到后续行。
         val firstRowCapacity = if (pinnedIndices.isEmpty()) {
             maxWidth
@@ -4946,7 +4904,7 @@ private fun AdaptiveRemoteToolBar(
                     x += placeable.width + gapPx
                 }
                 if (rowIndex == 0 && pinnedIndices.isNotEmpty()) {
-                    var pinnedX = if (row.isEmpty()) 0 else x
+                    var pinnedX = (maxWidth - pinnedWidth).coerceAtLeast(0)
                     pinnedIndices.forEach { index ->
                         val placeable = placeables[index]
                         placeable.placeRelative(
@@ -4962,77 +4920,6 @@ private fun AdaptiveRemoteToolBar(
     }
 }
 
-@Composable
-private fun FramingGridToolButton(grid: ViewfinderGrid, onClick: () -> Unit) {
-    TopIconToggle(
-        active = grid != ViewfinderGrid.OFF,
-        contentDescription = stringResource(R.string.remote_grid_cycle, stringResource(grid.labelRes)),
-        onClick = onClick
-    ) {
-        GridMark(grid, Modifier.size(18.dp))
-    }
-}
-
-/** 反挤压倍率：单击循环切换，1× 表示关闭。 */
-@Composable
-private fun DesqueezeToolButton(multiplier: Float, onSelect: (Float) -> Unit) {
-    val currentIndex = REMOTE_DESQUEEZE_OPTIONS.indices.minByOrNull { index ->
-        kotlin.math.abs(REMOTE_DESQUEEZE_OPTIONS[index] - multiplier)
-    } ?: 0
-    val nextMultiplier = REMOTE_DESQUEEZE_OPTIONS[(currentIndex + 1) % REMOTE_DESQUEEZE_OPTIONS.size]
-    TopIconToggle(
-        active = multiplier > 1.001f,
-        contentDescription = "反挤压倍率 ${desqueezeDisplayValue(multiplier)}，点击切换",
-        onClick = { onSelect(nextMultiplier) },
-        modifier = Modifier.size(36.dp),
-    ) {
-        if (multiplier > 1.001f) {
-            Text(desqueezeDisplayValue(multiplier), fontSize = 12.sp, fontWeight = FontWeight.Bold)
-        } else {
-            Icon(
-                imageVector = Icons.Outlined.AspectRatio,
-                contentDescription = null,
-                modifier = Modifier.size(18.dp),
-            )
-        }
-    }
-}
-
-/** 视频模式专属的音频电平显示开关；横向展开让其后的工具自然平滑让位。 */
-@Composable
-private fun AudioLevelsToolButton(
-    visible: Boolean,
-    active: Boolean,
-    onClick: () -> Unit
-) {
-    AnimatedVisibility(
-        visible = visible,
-        enter = fadeIn(tween(150, easing = FastOutSlowInEasing)) +
-            expandHorizontally(
-                animationSpec = tween(220, easing = FastOutSlowInEasing),
-                expandFrom = Alignment.Start
-            ),
-        exit = fadeOut(tween(130, easing = FastOutSlowInEasing)) +
-            shrinkHorizontally(
-                animationSpec = tween(200, easing = FastOutSlowInEasing),
-                shrinkTowards = Alignment.Start
-            )
-    ) {
-        TopIconToggle(
-            active = active,
-            contentDescription = stringResource(R.string.cd_remote_audio_levels),
-            onClick = onClick
-        ) {
-            // 灰/蓝只表示“隐藏/显示电平”，始终使用有声图标，避免误解为关闭相机录音。
-            Icon(
-                Icons.Default.VolumeUp,
-                contentDescription = null,
-                modifier = Modifier.size(18.dp)
-            )
-        }
-    }
-}
-
 /** 棋子式圆润工具按钮：沿用主题材质，以低矮弧面表达微凸。 */
 @Composable
 internal fun TopIconToggle(
@@ -5040,11 +4927,13 @@ internal fun TopIconToggle(
     contentDescription: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
     content: @Composable () -> Unit
 ) {
     val colors = AppTheme.colors
     GlassButton(
         onClick = onClick,
+        enabled = enabled,
         active = active,
         shape = CircleShape,
         raised = true,
@@ -5063,5 +4952,31 @@ internal fun TopIconToggle(
                 contentAlignment = Alignment.Center
             ) { content() }
         }
+    }
+}
+
+
+/** Shared by the actual toolbar and its manager; there is no second icon set. */
+@Composable
+internal fun RemoteToolMark(tool: RemoteTool, preferences: RemoteToolPreferences) {
+    val mark = Modifier.size(19.dp)
+    when (tool) {
+        RemoteTool.HD -> HdMark()
+        RemoteTool.FPS -> FpsMark()
+        RemoteTool.AUDIO -> Icon(Icons.Default.VolumeUp, null, mark)
+        RemoteTool.HISTOGRAM -> HistogramMark(mark)
+        RemoteTool.GRID -> GridMark(preferences.grid.value.takeUnless { it == ViewfinderGrid.OFF } ?: ViewfinderGrid.THIRDS, mark)
+        RemoteTool.EXPOSURE -> if (preferences.exposure.value == ExposureAssist.FALSE_COLOR) FalseColorMark(mark) else ZebraMark(mark)
+        RemoteTool.DESQUEEZE -> if (preferences.desqueeze.value > 1.001f) {
+            Text(desqueezeDisplayValue(preferences.desqueeze.value), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        } else Icon(Icons.Outlined.AspectRatio, null, mark)
+        RemoteTool.LEVEL -> LevelMark(mark)
+        RemoteTool.RECORD -> Icon(Icons.Default.Videocam, null, mark)
+        RemoteTool.FULLSCREEN -> FullscreenEnterMark(mark)
+        RemoteTool.ROTATE -> RotateMark(mark)
+        RemoteTool.LOCK -> Icon(if (preferences.locked.value) Icons.Default.Lock else Icons.Default.LockOpen, null, mark)
+        RemoteTool.WHITE_BALANCE -> Text("WB", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        RemoteTool.FOCUS_AREA -> Icon(Icons.Default.CenterFocusStrong, null, mark)
+        RemoteTool.WAVEFORM -> WaveformMark(mark)
     }
 }

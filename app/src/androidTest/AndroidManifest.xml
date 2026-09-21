@@ -5,4 +5,6 @@
         android:targetPackage="com.ztransfer.debug" />
     <instrumentation android:name="com.ztransfer.frame.ParameterPosterInstrumentation"
         android:targetPackage="com.ztransfer.debug" />
+    <instrumentation android:name="com.ztransfer.ui.screen.RemoteToolsInstrumentation"
+        android:targetPackage="com.ztransfer.debug" />
 </manifest>
