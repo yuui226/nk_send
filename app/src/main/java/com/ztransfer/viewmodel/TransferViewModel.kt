@@ -1,5 +1,7 @@
 package com.ztransfer.viewmodel
 
+import com.ztransfer.util.HistogramMode
+
 import android.app.Application
 import android.content.Context
 import android.net.Uri
@@ -430,7 +432,7 @@ data class TransferState(
     // 预览大图的全局逆时针旋转方向（0..3 个 90°）。跨照片、跨会话持久化。
     val previewRotationQuarterTurns: Int = 0,
     // 照片预览直方图的可见状态。跨照片、跨预览会话与 App 重启持久化。
-    val previewHistogramEnabled: Boolean = false,
+    val previewHistogramMode: HistogramMode = HistogramMode.OFF,
     // 开启后：受支持的原图落盘成功，再派生一张保留原片细节的边框/水印效果图。
     val photoFrameEnabled: Boolean = false,
     // 总开关开启时，边框与水印可以独立组合；false 允许只在原照片上叠水印。
@@ -1082,9 +1084,9 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 previewRotationQuarterTurns = Math.floorMod(
                     prefs.getInt("preview_rotation_quarter_turns", 0), 4
                 ),
-                previewHistogramEnabled = prefs.getBoolean(
-                    "preview_histogram_enabled",
-                    false,
+                previewHistogramMode = HistogramMode.restore(
+                    prefs.getString("preview_histogram_mode", null),
+                    prefs.getBoolean("preview_histogram_enabled", false),
                 ),
                 photoFrameEnabled = prefs.getBoolean("photo_frame_enabled", false),
                 photoFrameBorderEnabled = prefs.getBoolean("photo_frame_border_enabled", true),
@@ -1258,10 +1260,10 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         _state.update { it.copy(previewRotationQuarterTurns = normalized) }
     }
 
-    /** 保存照片预览直方图开关；退出预览或重启 App 后继续沿用。 */
-    fun setPreviewHistogramEnabled(enabled: Boolean) {
-        prefs.edit().putBoolean("preview_histogram_enabled", enabled).apply()
-        _state.update { it.copy(previewHistogramEnabled = enabled) }
+    /** 保存照片预览直方图档位；退出预览或重启 App 后继续沿用。 */
+    fun setPreviewHistogramMode(mode: HistogramMode) {
+        prefs.edit().putString("preview_histogram_mode", mode.name).apply()
+        _state.update { it.copy(previewHistogramMode = mode) }
     }
 
     fun setPhotoFrameEnabled(enabled: Boolean) {

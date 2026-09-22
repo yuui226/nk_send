@@ -138,18 +138,19 @@ internal fun DrawScope.drawFocusCornerReticle(
     drawLine(color, Offset(x1 - cornerLength, y1), Offset(x1, y1), strokeWidth, StrokeCap.Round)
 }
 
-/** 抽样 RGB 直方图。每通道已归一化并用 log1p 压缩尖峰，绘制层不再做统计。 */
-internal data class LuminanceHistogram(val bins: FloatArray)
+/** 线性归一化的亮度统计，以及按需附带的 RGB 三通道统计；绘制层不再读取源图。 */
+internal data class LuminanceHistogram(val bins: FloatArray, val rgb: List<FloatArray>? = null)
 
 /**
  * 从已经解码的 Live View Bitmap 抽样统计，不再解一遍 JPEG。目标约 24k 像素，
  * VGA/XGA 都有稳定上限；按行复用一个 IntArray，避免每帧分配整图像素数组。
  */
-internal fun calculateLuminanceHistogram(bitmap: Bitmap): LuminanceHistogram {
+internal fun calculateLuminanceHistogram(bitmap: Bitmap, includeRgb: Boolean = false): LuminanceHistogram {
     val width = bitmap.width.coerceAtLeast(1)
     val height = bitmap.height.coerceAtLeast(1)
     val step = ceil(sqrt(width.toDouble() * height / 24_000.0)).toInt().coerceAtLeast(1)
     val counts = IntArray(256)
+    val channels = if (includeRgb) List(3) { IntArray(256) } else null
     val row = IntArray(width)
     var y = 0
     while (y < height) {
@@ -162,13 +163,17 @@ internal fun calculateLuminanceHistogram(bitmap: Bitmap): LuminanceHistogram {
             val blue = px and 0xFF
             // Rec.709 亮度权重的整数近似（54 + 183 + 19 = 256）。
             counts[(54 * red + 183 * green + 19 * blue) ushr 8]++
+            channels?.let { it[0][red]++; it[1][green]++; it[2][blue]++ }
             x += step
         }
         y += step
     }
     // 线性归一化保留“纵轴 = 像素数量”的直方图语义；0/255 两端尖峰不会被对数压平。
     val peak = counts.maxOrNull()?.coerceAtLeast(1) ?: 1
-    return LuminanceHistogram(FloatArray(256) { i -> counts[i].toFloat() / peak })
+    // One shared RGB scale preserves relative channel counts; never normalize each separately.
+    val rgbPeak = channels?.maxOf { it.maxOrNull() ?: 0 }?.coerceAtLeast(1) ?: 1
+    return LuminanceHistogram(FloatArray(256) { i -> counts[i].toFloat() / peak },
+        channels?.map { channel -> FloatArray(256) { channel[it].toFloat() / rgbPeak } })
 }
 
 /** 过曝斑马掩码：cols×rows 粗网格按行优先排列，true = 该格抽样亮度达到过曝阈值。 */
@@ -274,7 +279,7 @@ internal fun FramingGridOverlay(
 
 /** 直方图——5 根竖条，中间高两端低，经典”色阶分布”形状。 */
 @Composable
-internal fun HistogramMark(modifier: Modifier = Modifier) {
+internal fun HistogramMark(modifier: Modifier = Modifier, rgb: Boolean = false) {
     val c = LocalContentColor.current
     Canvas(modifier) {
         val sw = ToolMarkStrokeWidth.toPx()
@@ -285,7 +290,8 @@ internal fun HistogramMark(modifier: Modifier = Modifier) {
         for (i in 0..4) {
             val x = 2.5.dp.toPx() + i * barW + i * gap
             val barH = baseY * heights[i]
-            drawLine(c, Offset(x, baseY), Offset(x, baseY - barH), sw, StrokeCap.Round)
+            val color = if (rgb) ScopeRgbColors[minOf(i * 3 / 5, 2)] else c
+            drawLine(color, Offset(x, baseY), Offset(x, baseY - barH), sw, StrokeCap.Round)
         }
     }
 }

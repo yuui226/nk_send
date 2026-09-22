@@ -1,5 +1,7 @@
 package com.ztransfer.ui.screen
 
+import com.ztransfer.util.HistogramMode
+
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
@@ -236,7 +238,7 @@ internal data class FileListTransferUiState(
     val filterStorageSlot: Int?,
     val filterDateRange: PhotoDateRange?,
     val previewRotationQuarterTurns: Int,
-    val previewHistogramEnabled: Boolean,
+    val previewHistogramMode: HistogramMode,
 )
 
 internal fun TransferState.toFileListTransferUiState(): FileListTransferUiState =
@@ -259,7 +261,7 @@ internal fun TransferState.toFileListTransferUiState(): FileListTransferUiState 
         filterStorageSlot = filterStorageSlot,
         filterDateRange = filterDateRange,
         previewRotationQuarterTurns = previewRotationQuarterTurns,
-        previewHistogramEnabled = previewHistogramEnabled,
+        previewHistogramMode = previewHistogramMode,
     )
 
 internal data class FileListSignalUiState(
@@ -2056,7 +2058,7 @@ fun FileListScreen(
                     hapticsEnabled = transferState.hapticsEnabled,
                     transfersBusy = transfersBusy,
                     initialRotationQuarterTurns = transferState.previewRotationQuarterTurns,
-                    histogramVisible = transferState.previewHistogramEnabled,
+                    histogramMode = transferState.previewHistogramMode,
                     burstHandles = burstHandles,
                     queueTaskFor = { file ->
                         queuedIndexByHandle[file.handle]
@@ -2084,8 +2086,8 @@ fun FileListScreen(
                         else expandedBurstCollections.remove(id)
                     },
                     onRotationChanged = transferViewModel::setPreviewRotationQuarterTurns,
-                    onHistogramVisibleChanged =
-                        transferViewModel::setPreviewHistogramEnabled,
+                    onHistogramModeChanged =
+                        transferViewModel::setPreviewHistogramMode,
                     prepareDismissTarget = preparePreviewDismissTarget,
                     onDismiss = { returnFile ->
                         updatePreviewIndex(null)

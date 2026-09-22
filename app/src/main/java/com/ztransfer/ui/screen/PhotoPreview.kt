@@ -1,5 +1,7 @@
 package com.ztransfer.ui.screen
 
+import com.ztransfer.util.HistogramMode
+
 import android.net.Uri
 import android.os.SystemClock
 import androidx.activity.compose.BackHandler
@@ -316,8 +318,8 @@ internal fun PhotoPreviewOverlay(
     // 全局持久化方向：0..3 个逆时针 90°。只用作本次 overlay 初始值；
     // overlay 内部保留不取模的连续角度，保证 270°→0° 时仍是向左短转 90°。
     initialRotationQuarterTurns: Int = 0,
-    // 由传输 ViewModel 持久化；所有连接方式和后续预览共用同一个开关状态。
-    histogramVisible: Boolean = false,
+    // 由传输 ViewModel 持久化；所有连接方式和后续预览共用同一个档位。
+    histogramMode: HistogramMode = HistogramMode.OFF,
     // 连拍成员 handle 集(列表页的检测结果):预览左上角展示连拍角标用;空集即不展示。
     burstHandles: Set<Int> = emptySet(),
     // 复用列表的任务索引与完成判定，预览不维护第二套传输状态。
@@ -340,7 +342,7 @@ internal fun PhotoPreviewOverlay(
     onBurstExpandedChange: (String, Boolean) -> Unit = { _, _ -> },
     // 每次旋转后回传归一化方向，父层写入全局偏好。
     onRotationChanged: (Int) -> Unit = {},
-    onHistogramVisibleChanged: (Boolean) -> Unit = {},
+    onHistogramModeChanged: (HistogramMode) -> Unit = {},
     // 关闭前让底层列表把当前照片准备到可见位置，并返回它最新的根坐标。
     prepareDismissTarget: suspend (NikonCamera.FileInfo) -> Rect? = { null },
     // 非空表示当前照片已在底层列表找到，可在预览消失后播放定位脉冲。
@@ -443,6 +445,7 @@ internal fun PhotoPreviewOverlay(
     val currentOnQueueFlightFinished by rememberUpdatedState(onQueueFlightFinished)
     val currentOnQueueFlightsCancelled by rememberUpdatedState(onQueueFlightsCancelled)
     val currentOnQueueFlightCaught by rememberUpdatedState(onQueueFlightCaught)
+    val histogramVisible = histogramMode != HistogramMode.OFF
     val histogramSource = currentHandle?.let(displayedBitmaps::get)
     val previewHistogram by produceState<LuminanceHistogram?>(
         initialValue = null,
@@ -455,7 +458,7 @@ internal fun PhotoPreviewOverlay(
             currentFile.extension !in VIDEO_EXTENSIONS
         ) {
             value = withContext(Dispatchers.Default) {
-                calculateLuminanceHistogram(histogramSource.asAndroidBitmap())
+                calculateLuminanceHistogram(histogramSource.asAndroidBitmap(), includeRgb = true)
             }
         }
     }
@@ -1237,8 +1240,9 @@ internal fun PhotoPreviewOverlay(
             currentFile.extension !in VIDEO_EXTENSIONS
         ) {
             previewHistogram?.let { histogram ->
-                HistogramOverlay(
+                SelectablePreviewHistogram(
                     histogram = histogram,
+                    mode = histogramMode,
                     modifier = Modifier
                         .align(Alignment.BottomStart)
                         .navigationBarsPadding()
@@ -1487,9 +1491,9 @@ internal fun PhotoPreviewOverlay(
                     }
                     if (current.extension !in VIDEO_EXTENSIONS) {
                         PreviewHistogramButton(
-                            active = histogramVisible,
+                            mode = histogramMode,
                             onClick = {
-                                onHistogramVisibleChanged(!histogramVisible)
+                                onHistogramModeChanged(histogramMode.next())
                             },
                         )
                         PreviewRotationButton(onClick = {
@@ -1980,7 +1984,7 @@ private fun PreviewInfoText(
 /** Preview-styled switch around the monitor page's shared histogram icon and analysis overlay. */
 @Composable
 private fun PreviewHistogramButton(
-    active: Boolean,
+    mode: HistogramMode,
     onClick: () -> Unit,
 ) {
     val colors = AppTheme.colors
@@ -1990,7 +1994,7 @@ private fun PreviewHistogramButton(
         modifier = Modifier.size(44.dp),
         shape = CircleShape,
         contentPadding = PaddingValues(0.dp),
-        active = active,
+        active = mode != HistogramMode.OFF,
     ) {
         Box(
             modifier = Modifier
@@ -2001,7 +2005,7 @@ private fun PreviewHistogramButton(
             contentAlignment = Alignment.Center,
         ) {
             CompositionLocalProvider(LocalContentColor provides colors.accentBlue) {
-                HistogramMark(Modifier.size(20.dp))
+                HistogramMark(Modifier.size(20.dp), rgb = mode == HistogramMode.RGB)
             }
         }
     }

@@ -1,5 +1,7 @@
 package com.ztransfer.ui.screen
 
+import com.ztransfer.util.HistogramMode
+
 import android.Manifest
 import android.content.Context
 import android.content.pm.ActivityInfo
@@ -63,6 +65,7 @@ import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.CenterFocusStrong
 import androidx.compose.material.icons.filled.LockOpen
@@ -97,6 +100,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.layoutId
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -370,7 +374,9 @@ fun RemoteScreen(
     val tools = remember(context) { RemoteToolPreferences(context.getSharedPreferences("ztransfer", Context.MODE_PRIVATE)) }
     var rotation by remember { mutableIntStateOf(if (tools.locked.value) tools.lockedRotation.value else 0) }
     val orientationLocked by tools.locked
-    val currentOrientationLocked by rememberUpdatedState(orientationLocked)
+    var editingTools by remember { mutableStateOf(false) }
+    val orientationFrozen = orientationLocked || editingTools
+    val currentOrientationLocked by rememberUpdatedState(orientationFrozen)
     var switchingRotation by remember { mutableStateOf(false) }
     val rotationFade = remember { Animatable(1f) }
     val rotationRequests = remember { Channel<RemoteRotationRequest>(Channel.CONFLATED) }
@@ -408,7 +414,7 @@ fun RemoteScreen(
         }
     }
 
-    DisposableEffect(context, lifecycleOwner, orientationSession, rotationRequests, orientationLocked) {
+    DisposableEffect(context, lifecycleOwner, orientationSession, rotationRequests, orientationFrozen) {
         val listener = object : OrientationEventListener(context, SensorManager.SENSOR_DELAY_NORMAL) {
             override fun onOrientationChanged(orientation: Int) {
                 if (currentOrientationLocked) return
@@ -443,7 +449,7 @@ fun RemoteScreen(
             }
         }
 
-        if (orientationLocked) {
+        if (orientationFrozen) {
             listener.disable()
             orientationSession.pause()
             while (rotationRequests.tryReceive().isSuccess) { /* discard queued rotations */ }
@@ -522,9 +528,15 @@ fun RemoteScreen(
                     RemoteContent(
                         cameraViewModel = cameraViewModel,
                         transferViewModel = transferViewModel,
-                        onNavigateBack = onNavigateBack,
+                        onNavigateBack = { if (editingTools) editingTools = false else onNavigateBack() },
                         rotation = rotation,
                         tools = tools,
+                        editingTools = editingTools,
+                        onEditingTools = { editing ->
+                            orientationSession.pause()
+                            while (rotationRequests.tryReceive().isSuccess) { }
+                            editingTools = editing
+                        },
                         onLockRotation = { lock ->
                             orientationSession.pause()
                             while (rotationRequests.tryReceive().isSuccess) { }
@@ -566,6 +578,8 @@ private fun RemoteContent(
     onNavigateBack: () -> Unit,
     rotation: Int,
     tools: RemoteToolPreferences,
+    editingTools: Boolean,
+    onEditingTools: (Boolean) -> Unit,
     onLockRotation: (Boolean) -> Unit,
     onCycleRotation: () -> Unit,
     onReady: () -> Unit = {},
@@ -573,12 +587,9 @@ private fun RemoteContent(
     isPro: Boolean = false
 ) {
     val colors = AppTheme.colors
-    val scope = rememberCoroutineScope()
-    val context = LocalContext.current
-    val clipboard = LocalClipboardManager.current
     val camState by cameraViewModel.state.collectAsState()
     val transferState by transferViewModel.state.collectAsState()
-    val haptics = rememberHaptics(transferState.hapticsEnabled)
+    val services = rememberRemoteScreenServices(transferState.hapticsEnabled)
     val connected = camState.isConnectedToCamera
 
     // ---------- 会话状态 ----------
@@ -630,8 +641,8 @@ private fun RemoteContent(
     var listProp by remember { mutableStateOf<Int?>(null) }
 
     // ---------- 开发者面板 ----------
-    val diagnosticPreferences = remember(context) {
-        context.getSharedPreferences("remote_diagnostics", Context.MODE_PRIVATE)
+    val diagnosticPreferences = remember(services.context) {
+        services.context.getSharedPreferences("remote_diagnostics", Context.MODE_PRIVATE)
     }
     val logLines = remember {
         mutableStateListOf<String>().apply {
@@ -655,17 +666,17 @@ private fun RemoteContent(
     var lastFpsTapAt by remember { mutableLongStateOf(0L) }
     var showFps by tools.fps
     var hdLiveView by tools.hd
-    var showHistogram by tools.histogram
+    var histogramMode by tools.histogram
+    val showHistogram = histogramMode != HistogramMode.OFF
     var framingGrid by tools.grid
     var exposureAssist by tools.exposure
     val showZebra = exposureAssist == ExposureAssist.ZEBRA
     var showLevel by tools.level
     var showAudioLevels by tools.audio
     var desqueezeMultiplier by tools.desqueeze
-    var showWaveform by tools.waveform
-    var toolManagerVisible by remember { mutableStateOf(false) }
+    var waveformMode by tools.waveform
+    val showWaveform = waveformMode != WaveformMode.OFF
     var cameraToolPanel by remember { mutableStateOf<RemoteCameraTool?>(null) }
-    var hidingRecorder by remember { mutableStateOf(false) }
     fun setDesqueezeMultiplier(value: Float) { desqueezeMultiplier = value }
     fun toggleAudioLevels() { showAudioLevels = !showAudioLevels }
     // 相机机身的滚转角（0xD067），null=还没读到/机身不支持，此时水平仪一笔都不画
@@ -723,7 +734,7 @@ private fun RemoteContent(
     val histogramThrottle = remember { HistogramThrottle() }
     val currentZebraEnabled = rememberUpdatedState(showZebra)
     val currentFalseColorEnabled = rememberUpdatedState(exposureAssist == ExposureAssist.FALSE_COLOR)
-    val currentWaveformEnabled = rememberUpdatedState(showWaveform)
+    val currentWaveformMode = rememberUpdatedState(waveformMode)
     val analysisThrottle = remember { MonitorAnalysisThrottle() }
     val zebraThrottle = remember { ZebraThrottle() }
     suspend fun decode(
@@ -739,7 +750,7 @@ private fun RemoteContent(
                     if (histogramThrottle.cached == null ||
                         now - histogramThrottle.lastCalculatedAtMs >= 250L
                     ) {
-                        histogramThrottle.cached = calculateLuminanceHistogram(bitmap)
+                        histogramThrottle.cached = calculateLuminanceHistogram(bitmap, includeRgb = true)
                         histogramThrottle.lastCalculatedAtMs = now
                     }
                     histogramThrottle.cached
@@ -762,8 +773,8 @@ private fun RemoteContent(
                     null
                 }
                 val falseColor = currentFalseColorEnabled.value
-                val waveform = currentWaveformEnabled.value
-                val analysis = analysisThrottle.analyze(bitmap, falseColor, waveform, SystemClock.elapsedRealtime())
+                val waveform = currentWaveformMode.value
+                val analysis = analysisThrottle.analyze(bitmap, falseColor, waveform != WaveformMode.OFF, SystemClock.elapsedRealtime(), rgb = waveform == WaveformMode.RGB)
                 RemoteLiveFrame(
                     image = bitmap.asImageBitmap(),
                     histogram = histogram,
@@ -984,7 +995,7 @@ private fun RemoteContent(
     ) {
         if (diagnosticControlBusy) return
         val prev = lvJob
-        lvJob = scope.launch {
+        lvJob = services.scope.launch {
             prev?.cancelAndJoin()
             subjectTrackingActive = false
             liveViewStable = false
@@ -1635,9 +1646,9 @@ private fun RemoteContent(
         if (diagnosticControlBusy) return
         val p = params[prop] ?: return
         params[prop] = p.copy(current = value)
-        haptics.tick()
+        services.haptics.tick()
         pendingSets[prop]?.cancel()
-        val job = scope.launch {
+        val job = services.scope.launch {
             if (!immediate) delay(160)
             val cam = cameraViewModel.getCamera() ?: return@launch
             val result = try {
@@ -1694,7 +1705,7 @@ private fun RemoteContent(
         // 在 launch 前同步置位，消除两次快速点按同时通过 capturing=false
         // 而启动两个拍摄事务的小窗口。
         capturing = true
-        scope.launch {
+        services.scope.launch {
             try {
                 // 快速松手时 AF 可能仍在轮询 DeviceReady。先收完对焦事务，
                 // 再开始 ObjectAdded 的 12s 倒计，避免把 AF 等待时间错算进拍摄超时。
@@ -1702,7 +1713,7 @@ private fun RemoteContent(
                 // 等待期间若发生了断线/重连，绝不把旧手势意外发给新会话。
                 if (cameraViewModel.getCamera() !== expectedCamera) return@launch
                 val cam = expectedCamera
-                haptics.longPress()   // 快门触发反馈（经全局震动设置门控）
+                services.haptics.longPress()   // 快门触发反馈（经全局震动设置门控）
                 // 先挂事件等待、再触发拍摄：ObjectAdded 是取走即消费的，
                 // 订阅晚于轮询取走就永远等不到了。
                 val pending = async {
@@ -1755,9 +1766,9 @@ private fun RemoteContent(
         afHeld = true
         afLocked = false
         val requestedPoint = focusAreaPoint
-        haptics.tick()   // 开始半按的轻反馈
+        services.haptics.tick()   // 开始半按的轻反馈
         afJob?.cancel()
-        afJob = scope.launch {
+        afJob = services.scope.launch {
             val cam = cameraViewModel.getCamera() ?: return@launch
             val result = try {
                 cam.rcAfDriveAndWait()
@@ -1780,7 +1791,7 @@ private fun RemoteContent(
                     )
                     // 用户已松手/滑出时仍把协议终态收完，但不再给迟到的
                     // 合焦震动，避免“取消后手机又震一下”。
-                    if (stillHeld) haptics.tick()
+                    if (stillHeld) services.haptics.tick()
                 }
                 result.responseCode == Lab.NK_OUT_OF_FOCUS ->
                     devLog("!! AF out of focus ($suffix)")
@@ -1836,8 +1847,8 @@ private fun RemoteContent(
         initialLoaded = false
         beginDiagnosticReport(cam)
         devLog("control mode request enabled=$enabled")
-        diagnosticControlStatus = context.getString(R.string.remote_pc_control_switching)
-        diagnosticControlJob = scope.launch {
+        diagnosticControlStatus = services.context.getString(R.string.remote_pc_control_switching)
+        diagnosticControlJob = services.scope.launch {
             var adoptedCamera: NikonCamera? = null
             suspend fun snapshot(stage: String) {
                 if (cameraViewModel.getCamera() !== cam) return
@@ -1894,11 +1905,11 @@ private fun RemoteContent(
                         )
                 )
                 diagnosticControlStatus = if (rc == Lab.OK) {
-                    context.getString(
+                    services.context.getString(
                         if (enabled) R.string.remote_pc_control_on else R.string.remote_pc_control_off
                     )
                 } else {
-                    context.getString(R.string.remote_pc_control_failed, "0x%04X".format(rc and 0xFFFF))
+                    services.context.getString(R.string.remote_pc_control_failed, "0x%04X".format(rc and 0xFFFF))
                 }
                 if (!isActive || cameraViewModel.getCamera() !== cam) return@launch
                 snapshot("after-command")
@@ -1909,7 +1920,7 @@ private fun RemoteContent(
                     if (cam.labStartLiveView { devLog(it) }) adoptedCamera = cam
                 }
                 if (adoptedCamera == null) {
-                    diagnosticControlStatus = context.getString(R.string.remote_pc_control_failed, "LiveView")
+                    diagnosticControlStatus = services.context.getString(R.string.remote_pc_control_failed, "LiveView")
                 }
                 if (!isActive || cameraViewModel.getCamera() !== cam) return@launch
                 snapshot("after-liveview")
@@ -1921,13 +1932,13 @@ private fun RemoteContent(
                     "shutterCanTry=$canTry writable=${shutter?.writable} values=${shutter?.values?.size} " +
                     "liveViewStarted=${adoptedCamera != null}; copy log even if still locked")
                 if (rc == Lab.OK && enabled && adoptedCamera != null && !canTry) {
-                    diagnosticControlStatus = context.getString(R.string.remote_pc_control_locked)
+                    diagnosticControlStatus = services.context.getString(R.string.remote_pc_control_locked)
                 }
             } catch (e: CancellationException) {
                 devLog("!! control mode switch cancelled; lastConfirmed=${cam.remoteControlModeSet}")
                 throw e
             } catch (e: Exception) {
-                diagnosticControlStatus = context.getString(
+                diagnosticControlStatus = services.context.getString(
                     R.string.remote_pc_control_failed, e.javaClass.simpleName
                 )
                 devLog("!! control mode error=${e.javaClass.simpleName}: ${e.message} enabled=${cam.remoteControlModeSet}")
@@ -1952,7 +1963,7 @@ private fun RemoteContent(
         val cam = cameraViewModel.getCamera() ?: return
         probing = true
         beginDiagnosticReport(cam)
-        scope.launch {
+        services.scope.launch {
             diagnosticCapture = true
             try {
                 modeText = "?"
@@ -2023,16 +2034,16 @@ private fun RemoteContent(
             tapFocusFeedback = TapFocusFeedback.IDLE
             tapFocusNonce++
             tapFocusBusy = true
-            haptics.tick()
+            services.haptics.tick()
             devLog("subject tracking cancel requested")
             val cancelNonce = tapFocusNonce
-            tapFocusHideJob = scope.launch {
+            tapFocusHideJob = services.scope.launch {
                 delay(TRACKING_CANCEL_EXIT_MS)
                 if (tapFocusNonce == cancelNonce && !subjectTrackingActive) {
                     confirmedFocusMarker = null
                 }
             }
-            tapFocusJob = scope.launch {
+            tapFocusJob = services.scope.launch {
                 try {
                     val rc = cam.rcEndSubjectTracking()
                     if (
@@ -2061,14 +2072,14 @@ private fun RemoteContent(
         tapFocusFeedback = TapFocusFeedback.FOCUSING
         tapFocusNonce++
         tapFocusBusy = true
-        haptics.tick()
+        services.haptics.tick()
         devLog(
             "tap tracking=(${tap.trackingX},${tap.trackingY})/" +
                 "${tap.trackingCoordinateWidth}x${tap.trackingCoordinateHeight} " +
                 "focus=(${tap.focusX},${tap.focusY})/" +
                 "${tap.focusCoordinateWidth}x${tap.focusCoordinateHeight}"
         )
-        tapFocusJob = scope.launch {
+        tapFocusJob = services.scope.launch {
             try {
                 val result = cam.rcFocusAt(
                     trackingX = tap.trackingX,
@@ -2085,7 +2096,7 @@ private fun RemoteContent(
                     val suffix = af?.let { "polls=${it.polls} elapsed=${it.elapsedMs}ms" }
                     if (af?.responseCode == Lab.OK) {
                         devLog("subject tracking focused ($suffix)")
-                        haptics.tick()
+                        services.haptics.tick()
                         confirmedFocusMarker = ConfirmedFocusMarker(
                             fallbackPoint = tap.normalized,
                             confirmedAtElapsedMs = SystemClock.elapsedRealtime(),
@@ -2136,7 +2147,7 @@ private fun RemoteContent(
                     when {
                         af.responseCode == Lab.OK -> {
                             devLog("tap AF locked ($suffix)")
-                            haptics.tick()
+                            services.haptics.tick()
                             confirmedFocusMarker = ConfirmedFocusMarker(
                                 fallbackPoint = tap.normalized,
                                 confirmedAtElapsedMs = SystemClock.elapsedRealtime()
@@ -2164,7 +2175,7 @@ private fun RemoteContent(
                 val completedNonce = tapFocusNonce
                 val focusLocked = tapFocusFeedback == TapFocusFeedback.LOCKED
                 val trackingStarted = result.trackingStarted
-                tapFocusHideJob = scope.launch {
+                tapFocusHideJob = services.scope.launch {
                     delay(if (focusLocked) TAP_FOCUS_LOCKED_FEEDBACK_MS else 1_300L)
                     if (tapFocusNonce == completedNonce) {
                         tapFocusFeedback = TapFocusFeedback.IDLE
@@ -2185,7 +2196,7 @@ private fun RemoteContent(
                 subjectTrackingActive = false
                 devLog("!! tap AF exception: ${e.message}")
                 val completedNonce = tapFocusNonce
-                tapFocusHideJob = scope.launch {
+                tapFocusHideJob = services.scope.launch {
                     delay(1_300)
                     if (tapFocusNonce == completedNonce) {
                         tapFocusFeedback = TapFocusFeedback.IDLE
@@ -2213,8 +2224,8 @@ private fun RemoteContent(
         autoIsoBusy = true
         params[p.prop] = p.copy(current = target)
         params.remove(Lab.PROP_NK_ISO_CONTROL_SENSITIVITY)
-        haptics.tick()
-        scope.launch {
+        services.haptics.tick()
+        services.scope.launch {
             try {
                 val cam = cameraViewModel.getCamera()
                 if (cam == null) {
@@ -2286,12 +2297,12 @@ private fun RemoteContent(
         if (recBusy || probing) return
         val expectedCamera = cameraViewModel.getCamera() ?: return
         recBusy = true
-        scope.launch {
+        services.scope.launch {
             try {
                 waitForFocus?.join()
                 if (cameraViewModel.getCamera() !== expectedCamera) return@launch
                 val cam = expectedCamera
-                haptics.longPress()   // 与拍照同级的触发反馈（经全局震动设置门控）
+                services.haptics.longPress()   // 与拍照同级的触发反馈（经全局震动设置门控）
                 if (!recording) {
                     var restartedLiveView = false
                     var adoptedLiveView: NikonCamera? = null
@@ -2470,7 +2481,7 @@ private fun RemoteContent(
     }
 
     // ---------- 取景器录像（画面录制为 MP4）----------
-    val recOutputDir = File(context.filesDir, "recordings")
+    val recOutputDir = File(services.context.filesDir, "recordings")
     val recordingDesqueeze = rememberUpdatedState(desqueezeMultiplier)
 
     fun stopRecorder() {
@@ -2482,24 +2493,20 @@ private fun RemoteContent(
         recJob?.cancel()
         recJob = null
         recFinalizing = true
-        scope.launch(NonCancellable) {
+        services.scope.launch(NonCancellable) {
             // NonCancellable：用户停录后立刻退出页面时也要把 muxer 收尾写完，
             // 否则 mp4 缺 moov 无法播放。
             val name = withContext(Dispatchers.IO + NonCancellable) {
                 runCatching { r.stop() }.getOrNull()
             }
             recFinalizing = false
-            if (hidingRecorder) {
-                if (name != null) tools.setVisible(RemoteTool.RECORD, false)
-                hidingRecorder = false
-            }
             if (name != null) {
                 // 保存成功不再弹系统 Toast：对号与“已保存”短标签留在用户刚操作的
                 // 胶囊上，配合成功触感短暂停留后再自动收回。
                 recSaveFeedbackJob?.cancel()
-                haptics.success()
+                services.haptics.success()
                 recSaveSuccess = true
-                recSaveFeedbackJob = scope.launch {
+                recSaveFeedbackJob = services.scope.launch {
                     delay(1_800)
                     recSaveSuccess = false
                 }
@@ -2507,8 +2514,8 @@ private fun RemoteContent(
                 recSaveFeedbackJob?.cancel()
                 recSaveSuccess = false
                 android.widget.Toast.makeText(
-                    context,
-                    context.getString(R.string.cd_remote_rec_toast_failed),
+                    services.context,
+                    services.context.getString(R.string.cd_remote_rec_toast_failed),
                     android.widget.Toast.LENGTH_SHORT
                 ).show()
             }
@@ -2518,11 +2525,11 @@ private fun RemoteContent(
     // 真正开录（麦克风权限结果已知）。录像优先落到用户配置的 SAF 传输目录
     // （相册/文件管理器可见）；未配置或建档失败回退应用私有目录，录制照常。
     fun startRecorderResolved(withAudio: Boolean) {
-        if (viewfinderRecorder != null || recFinalizing || !tools.visible(RemoteTool.RECORD)) return
+        if (viewfinderRecorder != null || recFinalizing || !tools.layout(movieMode).visible(RemoteTool.RECORD)) return
         val f = frame
         if (f == null) {
             // 还没有取景画面（尺寸未知）就不开录，给提示而不是静默失败。
-            showHint(context.getString(R.string.remote_rec_start_failed), durationMs = 3000L)
+            showHint(services.context.getString(R.string.remote_rec_start_failed), durationMs = 3000L)
             return
         }
         val w = f.image.width
@@ -2541,17 +2548,17 @@ private fun RemoteContent(
                 )
                 val name = ViewfinderRecorder.newFileName()
                 val docUri = DocumentsContract.createDocument(
-                    context.contentResolver, parentUri, "video/mp4", name
+                    services.context.contentResolver, parentUri, "video/mp4", name
                 )
                 if (docUri != null) {
-                    val pfd = context.contentResolver.openFileDescriptor(docUri, "rw")
+                    val pfd = services.context.contentResolver.openFileDescriptor(docUri, "rw")
                     if (pfd != null) {
                         // pfd 所有权自此归 recorder：start 失败或 stop 收尾都由它关闭。
                         sink = RecordingSink.Saf(pfd, name)
                         createdDocUri = docUri
                     } else {
                         runCatching {
-                            DocumentsContract.deleteDocument(context.contentResolver, docUri)
+                            DocumentsContract.deleteDocument(services.context.contentResolver, docUri)
                         }
                     }
                 }
@@ -2563,7 +2570,7 @@ private fun RemoteContent(
             "录像输出：${if (sink is RecordingSink.Saf) "SAF 传输目录" else "应用私有目录"}")
 
         val builtInMic = if (withAudio) {
-            context.getSystemService(AudioManager::class.java)
+            services.context.getSystemService(AudioManager::class.java)
                 ?.getDevices(AudioManager.GET_DEVICES_INPUTS)
                 ?.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_MIC }
         } else {
@@ -2580,9 +2587,9 @@ private fun RemoteContent(
         if (!recorder.start()) {
             // 开录失败：SAF 模式下把刚建的空文档删掉，别在用户目录留 0 字节垃圾。
             createdDocUri?.let { uri ->
-                runCatching { DocumentsContract.deleteDocument(context.contentResolver, uri) }
+                runCatching { DocumentsContract.deleteDocument(services.context.contentResolver, uri) }
             }
-            showHint(context.getString(R.string.remote_rec_start_failed), durationMs = 3000L)
+            showHint(services.context.getString(R.string.remote_rec_start_failed), durationMs = 3000L)
             return
         }
         recSaveFeedbackJob?.cancel()
@@ -2591,7 +2598,7 @@ private fun RemoteContent(
         viewfinderRecorder = recorder
         recPaused = false
         recElapsed = 0
-        recJob = scope.launch(Dispatchers.Default) {
+        recJob = services.scope.launch(Dispatchers.Default) {
             var failStreak = 0
             // 帧驱动 VFR：同一帧只编一次（按对象身份判新），PTS 用帧的真实到达
             // 时刻——有线 ~70fps 全收，无线 ~20fps 不再重复编码同帧浪费码率。
@@ -2625,7 +2632,7 @@ private fun RemoteContent(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (!granted) {
-            showHint(context.getString(R.string.remote_rec_no_audio), durationMs = 3000L)
+            showHint(services.context.getString(R.string.remote_rec_no_audio), durationMs = 3000L)
         }
         startRecorderResolved(withAudio = granted)
     }
@@ -2634,12 +2641,12 @@ private fun RemoteContent(
         // isPro 门控：免费版绝无可能进入录制路径（RecControlBar 已压暗 + 拦截点击，
         // 此处为防御纵深——任何跳过 UI 直调本函数的路径仍被拦截）。
         if (!isPro) {
-            showHint(context.getString(R.string.remote_rec_pro_only))
+            showHint(services.context.getString(R.string.remote_rec_pro_only))
             return
         }
-        if (viewfinderRecorder != null || recFinalizing || !tools.visible(RemoteTool.RECORD)) return
+        if (viewfinderRecorder != null || recFinalizing || !tools.layout(movieMode).visible(RemoteTool.RECORD)) return
         val granted = ContextCompat.checkSelfPermission(
-            context, Manifest.permission.RECORD_AUDIO
+            services.context, Manifest.permission.RECORD_AUDIO
         ) == PackageManager.PERMISSION_GRANTED
         if (granted) {
             startRecorderResolved(withAudio = true)
@@ -2665,7 +2672,7 @@ private fun RemoteContent(
     }
 
     // 离开页面自动停录：不停会泄漏 MediaCodec/MediaMuxer，且 mp4 不收尾无法播放。
-    // 此时 scope 已随组合取消，收尾放到普通线程做（muxer 收尾不能在主线程）。
+    // 此时 services.scope 已随组合取消，收尾放到普通线程做（muxer 收尾不能在主线程）。
     DisposableEffect(Unit) {
         onDispose {
             recJob?.cancel()
@@ -2678,11 +2685,7 @@ private fun RemoteContent(
     fun setToolVisible(tool: RemoteTool, visible: Boolean) {
         if (!visible) {
             when (tool) {
-                RemoteTool.RECORD -> if (viewfinderRecorder != null || recFinalizing) {
-                    hidingRecorder = true
-                    if (viewfinderRecorder != null) stopRecorder()
-                    return
-                }
+                RemoteTool.RECORD -> if (viewfinderRecorder != null) stopRecorder()
                 RemoteTool.HD -> if (hdLiveView) {
                     hdLiveView = false
                     startSession(false)
@@ -2694,16 +2697,18 @@ private fun RemoteContent(
                 else -> Unit
             }
         }
-        tools.setVisible(tool, visible)
+        tools.layout(movieMode).setVisible(tool, visible)
     }
+    val changeToolVisibility: (RemoteTool, Boolean) -> Unit = ::setToolVisible
+    ApplyRemoteToolLayout(tools.layout(movieMode), changeToolVisibility)
     val renderTools: @Composable (androidx.compose.ui.unit.Dp, Modifier) -> Unit = { gap, modifier ->
-        val fixed = listOf(RemoteTool.FULLSCREEN, RemoteTool.ROTATE).filter(tools::visible)
-        AdaptiveRemoteToolBar(modifier.fillMaxWidth(), horizontalGap = gap, verticalGap = 4.dp, pinnedEndCount = fixed.size) {
-            if (devUnlocked) TopIconToggle(false, stringResource(R.string.cd_dev_panel), { devPanel = true }) {
-                Icon(Icons.Default.BugReport, null, Modifier.size(18.dp))
-            }
-            (tools.order.filter { tools.visible(it) && (it != RemoteTool.AUDIO || movieMode) } + listOf(null) + fixed).forEach { tool ->
-                key(tool?.id ?: "manage") {
+        RemoteToolBar(tools, editingTools, movieMode, changeToolVisibility,
+            modifier.fillMaxWidth(), gap,
+            leading = {
+                if (devUnlocked && !editingTools) TopIconToggle(false, stringResource(R.string.cd_dev_panel), { devPanel = true }) {
+                    Icon(Icons.Default.BugReport, null, Modifier.size(18.dp))
+                }
+            }) { tool ->
                     if (tool == RemoteTool.RECORD) {
                         RecControlBar(viewfinderRecorder != null, recPaused, recElapsed,
                             { startRecorder() }, { togglePauseRecorder() }, { stopRecorder() },
@@ -2723,13 +2728,13 @@ private fun RemoteContent(
                             RemoteTool.LOCK -> tools.locked.value
                             else -> false
                         }
-                        val disabled = tool == RemoteTool.ROTATE && tools.locked.value
-                        TopIconToggle(active, stringResource(tool?.title ?: R.string.remote_tool_manage), {
+                        val disabled = (tool?.fixed == true && editingTools) || (tool == RemoteTool.ROTATE && tools.locked.value)
+                        TopIconToggle(active, stringResource(tool?.title ?: if (editingTools) R.string.remote_tool_done else R.string.remote_tool_manage), {
                             when (tool) {
                                 RemoteTool.HD -> { hdLiveView = !hdLiveView; startSession(hdLiveView) }
                                 RemoteTool.FPS -> toggleFpsControl()
                                 RemoteTool.AUDIO -> toggleAudioLevels()
-                                RemoteTool.HISTOGRAM -> showHistogram = !showHistogram
+                                RemoteTool.HISTOGRAM -> histogramMode = histogramMode.next()
                                 RemoteTool.GRID -> cycleFramingGrid()
                                 RemoteTool.EXPOSURE -> exposureAssist = exposureAssist.next()
                                 RemoteTool.DESQUEEZE -> {
@@ -2737,21 +2742,24 @@ private fun RemoteContent(
                                     setDesqueezeMultiplier(REMOTE_DESQUEEZE_OPTIONS[(i + 1) % REMOTE_DESQUEEZE_OPTIONS.size])
                                 }
                                 RemoteTool.LEVEL -> showLevel = !showLevel
-                                RemoteTool.WAVEFORM -> showWaveform = !showWaveform
+                                RemoteTool.WAVEFORM -> waveformMode = waveformMode.next()
                                 RemoteTool.LOCK -> onLockRotation(!tools.locked.value)
                                 RemoteTool.FULLSCREEN -> enterFullscreen()
                                 RemoteTool.ROTATE -> if (!disabled) onCycleRotation()
                                 RemoteTool.WHITE_BALANCE -> { listProp = null; devPanel = false; cameraToolPanel = RemoteCameraTool.WHITE_BALANCE }
                                 RemoteTool.FOCUS_AREA -> { listProp = null; devPanel = false; cameraToolPanel = RemoteCameraTool.FOCUS_AREA }
-                                else -> toolManagerVisible = true
+                                else -> {
+                                    listProp = null
+                                    devPanel = false
+                                    cameraToolPanel = null
+                                    onEditingTools(!editingTools)
+                                }
                             }
                         }, enabled = !disabled) {
-                            if (tool == null) Icon(Icons.Default.Settings, null, Modifier.size(19.dp))
+                            if (tool == null) Icon(if (editingTools) Icons.Default.Check else Icons.Default.Settings, null, Modifier.size(19.dp))
                             else RemoteToolMark(tool, tools)
                         }
                     }
-                }
-            }
         }
     }
 
@@ -2826,7 +2834,7 @@ private fun RemoteContent(
             RemoteViewfinderPanel(
                 frameProvider = { frame },
                 grid = framingGrid,
-                showHistogram = showHistogram,
+                histogramMode = histogramMode,
                 modeText = modeText,
                 focusModeText = focusModeText,
                 movieMode = movieMode,
@@ -3022,7 +3030,7 @@ private fun RemoteContent(
                 RemoteViewfinderPanel(
                     frameProvider = { frame },
                     grid = framingGrid,
-                    showHistogram = showHistogram,
+                    histogramMode = histogramMode,
                     modeText = modeText,
                     focusModeText = focusModeText,
                     movieMode = movieMode,
@@ -3392,8 +3400,8 @@ private fun RemoteContent(
                         Spacer(Modifier.weight(1f))
                         GlassButton(
                             onClick = {
-                                clipboard.setText(AnnotatedString(logLines.joinToString("\n")))
-                                Toast.makeText(context, R.string.code_copied, Toast.LENGTH_SHORT).show()
+                                services.clipboard.setText(AnnotatedString(logLines.joinToString("\n")))
+                                Toast.makeText(services.context, R.string.code_copied, Toast.LENGTH_SHORT).show()
                             },
                             contentPadding = PaddingValues(8.dp)
                         ) {
@@ -3440,7 +3448,7 @@ private fun RemoteContent(
                                     pendingSets.values.none { it.isActive } &&
                                     (diagnosticControlEnabled || cameraViewModel.getCamera()?.remoteControlModeSet != true),
                                 modifier = Modifier.semantics {
-                                    contentDescription = context.getString(R.string.remote_pc_control_title)
+                                    contentDescription = services.context.getString(R.string.remote_pc_control_title)
                                 }
                             )
                         }
@@ -3525,9 +3533,7 @@ private fun RemoteContent(
                 }
             }, log = { devLog(it) }, onDismiss = { cameraToolPanel = null })
     }
-    if (toolManagerVisible) RemoteToolManager(tools,
-        if (hidingRecorder || recFinalizing) setOf(RemoteTool.RECORD) else emptySet(),
-        ::setToolVisible, { toolManagerVisible = false })
+    BackHandler(enabled = editingTools) { onEditingTools(false) }
         }
     }
 
@@ -3700,7 +3706,7 @@ private fun ViewfinderStatusBadge(text: String, weight: FontWeight) {
 private fun RemoteViewfinderPanel(
     frameProvider: () -> RemoteLiveFrame?,
     grid: ViewfinderGrid,
-    showHistogram: Boolean,
+    histogramMode: HistogramMode,
     modeText: String?,
     focusModeText: String?,
     movieMode: Boolean,
@@ -3739,7 +3745,7 @@ private fun RemoteViewfinderPanel(
         ViewfinderImage(
             frameProvider = frameProvider,
             grid = grid,
-            showHistogram = showHistogram,
+            histogramMode = histogramMode,
             tapFocusFeedback = tapFocusFeedback,
             tapFocusPoint = tapFocusPoint,
             tapFocusNonce = tapFocusNonce,
@@ -3752,6 +3758,7 @@ private fun RemoteViewfinderPanel(
             showZebra = showZebra,
             showFalseColor = showFalseColor,
             showWaveform = showWaveform,
+            scopeStartInset = if (soundMeterEnabled && showEmbeddedAudioMeter) 48.dp else 8.dp,
             desqueezeMultiplier = desqueezeMultiplier
         )
 
@@ -3759,7 +3766,7 @@ private fun RemoteViewfinderPanel(
             ViewfinderSoundMeterOverlay(
                 enabled = soundMeterEnabled,
                 frameProvider = frameProvider,
-                bottomInset = if (showWaveform || showFalseColor) 8.dp else if (showHistogram) 86.dp else 8.dp,
+                bottomInset = 8.dp,
                 modifier = Modifier.matchParentSize()
             )
         }
@@ -4008,7 +4015,7 @@ private fun SoundMeterChannel(
 private fun ViewfinderImage(
     frameProvider: () -> RemoteLiveFrame?,
     grid: ViewfinderGrid,
-    showHistogram: Boolean,
+    histogramMode: HistogramMode,
     tapFocusFeedback: TapFocusFeedback,
     tapFocusPoint: Offset,
     tapFocusNonce: Int,
@@ -4021,6 +4028,7 @@ private fun ViewfinderImage(
     showZebra: Boolean,
     showFalseColor: Boolean,
     showWaveform: Boolean,
+    scopeStartInset: androidx.compose.ui.unit.Dp = 8.dp,
     desqueezeMultiplier: Float = 1f
 ) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -4184,15 +4192,16 @@ private fun ViewfinderImage(
                     modifier = Modifier.matchParentSize()
                 )
             }
-            if (showWaveform || showFalseColor) {
-                MonitorAnalysisOverlays(
-                    histogram = liveFrame.histogram.takeIf { showHistogram },
-                    waveform = liveFrame.analysis?.waveform.takeIf { showWaveform },
-                    falseColor = showFalseColor, modifier = Modifier.matchParentSize(),
-                )
-            } else if (showHistogram) {
-                liveFrame.histogram?.let { HistogramOverlay(it, Modifier.align(Alignment.BottomStart).padding(8.dp)) }
-            }
+            // Stable composition keeps the outgoing scope alive for its exit animation and
+            // lets a surviving waveform slide to the same left anchor used by a lone histogram.
+            MonitorAnalysisOverlays(
+                histogram = liveFrame.histogram.takeIf { histogramMode != HistogramMode.OFF },
+                waveform = liveFrame.analysis?.waveform.takeIf { showWaveform },
+                falseColor = showFalseColor, modifier = Modifier.matchParentSize(),
+                histogramMode = histogramMode,
+                waveformMode = liveFrame.analysis?.waveformMode ?: WaveformMode.LUMA,
+                startInset = scopeStartInset,
+            )
 
         } else {
             Icon(
@@ -4813,108 +4822,74 @@ private fun ConfirmedFocusReticleOverlay(
     }
 }
 
-/**
- * 监看工具栏：所有按钮按真实固有尺寸从左向右排列，按钮间距始终一致。
- * 空间不足时整颗按钮移到下一行，行数不设上限；任何一项都不会被 weight 或父级约束压窄。
- */
+/** Shared column tracks distribute spare width evenly and align all toolbar rows. */
 @Composable
 internal fun AdaptiveRemoteToolBar(
     modifier: Modifier = Modifier,
     horizontalGap: androidx.compose.ui.unit.Dp = 6.dp,
     verticalGap: androidx.compose.ui.unit.Dp = 4.dp,
     pinnedEndCount: Int = 0,
+    secondRowFirstId: String? = null,
     content: @Composable () -> Unit
 ) {
     Layout(modifier = modifier, content = content) { measurables, constraints ->
         val gapPx = horizontalGap.roundToPx()
         val rowGapPx = verticalGap.roundToPx()
         val maxWidth = constraints.maxWidth
-        // 无最小/最大宽度测量得到按钮真实固有宽度；TopIconToggle 只设最小尺寸，
-        // HD/FPS 在字体放大后会自然变宽，然后由这里决定是否整颗换行。
         val placeables = measurables.map { it.measure(Constraints()) }
-        val pinnedCount = pinnedEndCount.coerceIn(0, placeables.size)
-        val regularEnd = placeables.size - pinnedCount
-        // AnimatedVisibility 完全收起后会留下 0×0 measurable。它不能占按钮间距，
-        // 否则照片模式仍会被视频专属音频按钮暗中撑开 1 个 gap。
-        val regularIndices = (0 until regularEnd).filter {
-            placeables[it].width > 0 && placeables[it].height > 0
+        val regularEnd = placeables.size - pinnedEndCount.coerceIn(0, placeables.size)
+        val visibleIndices = placeables.indices.filter { placeables[it].width > 0 && placeables[it].height > 0 }
+        val regular = visibleIndices.filter { it < regularEnd }.toMutableList()
+        val pinned = visibleIndices.filter { it >= regularEnd }
+        // Wide recording capsules and enlarged text occupy whole columns, without shrinking.
+        val cellWidth = maxOf(36.dp.roundToPx(), visibleIndices.minOfOrNull { placeables[it].width } ?: 0)
+        val capacity = ((maxWidth + gapPx) / (cellWidth + gapPx)).coerceAtLeast(1)
+        fun span(index: Int) = ((placeables[index].width + gapPx + cellWidth + gapPx - 1) /
+            (cellWidth + gapPx)).coerceIn(1, capacity)
+        val columns = minOf(capacity, visibleIndices.sumOf(::span).coerceAtLeast(1))
+        val pitch = if (columns > 1) ((maxWidth - cellWidth).toFloat() / (columns - 1)) else 0f
+        val pinnedSpans = pinned.sumOf(::span)
+        val firstCapacity = (columns - pinnedSpans).coerceAtLeast(0)
+        val defaultLock = regular.firstOrNull { secondRowFirstId != null && measurables[it].layoutId == secondRowFirstId }
+        // If visible tools fit on the first row, leave the lock in their normal sequence;
+        // never put hidden tools ahead of it just to force the default second-row position.
+        val rowTwoLock = defaultLock?.takeIf { regular.takeWhile { index -> index != it }.sumOf(::span) >= firstCapacity }
+        if (rowTwoLock != null) regular.remove(rowTwoLock)
+        val rows = mutableListOf<MutableList<Pair<Int, Int>>>(mutableListOf())
+        var next = 0
+        var used = 0
+        while (next < regular.size && used + span(regular[next]) <= firstCapacity) {
+            val index = regular[next++]
+            rows[0] += index to used
+            used += span(index)
         }
-        val pinnedIndices = (regularEnd until placeables.size).filter {
-            placeables[it].width > 0 && placeables[it].height > 0
-        }
-        val pinnedWidth = pinnedIndices.sumOf { placeables[it].width } +
-            gapPx * (pinnedIndices.size - 1).coerceAtLeast(0)
-
-        // 第一行先为尾部固定项预留真实宽度，因此全屏和旋转永远处在第一行按钮组的
-        // 最右端。普通工具不足一行时仍通过剩余空白将固定按钮对齐右侧边界。
-        // 普通工具只使用剩余空间，放不下就整颗移到后续行。
-        val firstRowCapacity = if (pinnedIndices.isEmpty()) {
-            maxWidth
-        } else {
-            (maxWidth - pinnedWidth - gapPx).coerceAtLeast(0)
-        }
-        val firstRow = mutableListOf<Int>()
-        var nextTool = 0
-        var firstRowWidth = 0
-        while (nextTool < regularIndices.size) {
-            val index = regularIndices[nextTool]
-            val placeable = placeables[index]
-            val candidateWidth =
-                firstRowWidth + (if (firstRow.isEmpty()) 0 else gapPx) + placeable.width
-            if (candidateWidth > firstRowCapacity) break
-            firstRow += index
-            firstRowWidth = candidateWidth
-            nextTool++
-        }
-
-        val rows = mutableListOf<MutableList<Int>>(firstRow)
-        while (nextTool < regularIndices.size) {
-            val row = mutableListOf<Int>()
-            var rowWidth = 0
-            while (nextTool < regularIndices.size) {
-                val index = regularIndices[nextTool]
-                val placeable = placeables[index]
-                val candidateWidth =
-                    rowWidth + (if (row.isEmpty()) 0 else gapPx) + placeable.width
-                if (row.isNotEmpty() && candidateWidth > maxWidth) break
-                row += index
-                rowWidth = candidateWidth
-                nextTool++
-                // 单颗按钮理论上比整个窗口还宽时仍保持固有宽度，只独占一行。
-                if (rowWidth > maxWidth) break
+        var pinnedColumn = (columns - pinnedSpans).coerceAtLeast(0)
+        pinned.forEach { index -> rows[0] += index to pinnedColumn; pinnedColumn += span(index) }
+        val remaining = (if (rowTwoLock != null) listOf(rowTwoLock) else emptyList()) + regular.drop(next)
+        var row: MutableList<Pair<Int, Int>>? = null
+        used = columns
+        for (index in remaining) {
+            val size = span(index)
+            if (row == null || used + size > columns) {
+                row = mutableListOf()
+                rows += row
+                used = 0
             }
-            rows += row
+            row += index to used
+            used += size
         }
-
-        val rowHeights = rows.mapIndexed { rowIndex, row ->
-            val indices = if (rowIndex == 0) row + pinnedIndices else row
-            indices.maxOfOrNull { placeables[it].height } ?: 0
-        }
+        val rowHeights = rows.map { r -> r.maxOfOrNull { placeables[it.first].height } ?: 0 }
         val naturalHeight = rowHeights.sum() + rowGapPx * (rows.size - 1).coerceAtLeast(0)
-        val layoutHeight = naturalHeight.coerceIn(constraints.minHeight, constraints.maxHeight)
-
-        layout(maxWidth, layoutHeight) {
+        layout(maxWidth, naturalHeight.coerceIn(constraints.minHeight, constraints.maxHeight)) {
             var y = 0
-            rows.forEachIndexed { rowIndex, row ->
-                val rowHeight = rowHeights[rowIndex]
-                var x = 0
-                row.forEach { index ->
-                    val placeable = placeables[index]
-                    placeable.placeRelative(x, y + (rowHeight - placeable.height) / 2)
-                    x += placeable.width + gapPx
+            rows.forEachIndexed { rowIndex, items ->
+                items.forEach { (index, column) ->
+                    val item = placeables[index]
+                    val slotWidth = cellWidth + (span(index) - 1) * pitch
+                    val x = (column * pitch + (slotWidth - item.width) / 2).roundToInt().coerceAtLeast(0)
+                    item.placeRelative(x, y + (rowHeights[rowIndex] - item.height) / 2)
                 }
-                if (rowIndex == 0 && pinnedIndices.isNotEmpty()) {
-                    var pinnedX = (maxWidth - pinnedWidth).coerceAtLeast(0)
-                    pinnedIndices.forEach { index ->
-                        val placeable = placeables[index]
-                        placeable.placeRelative(
-                            pinnedX,
-                            y + (rowHeight - placeable.height) / 2
-                        )
-                        pinnedX += placeable.width + gapPx
-                    }
-                }
-                y += rowHeight + rowGapPx
+                y += rowHeights[rowIndex] + rowGapPx
             }
         }
     }
@@ -4964,7 +4939,7 @@ internal fun RemoteToolMark(tool: RemoteTool, preferences: RemoteToolPreferences
         RemoteTool.HD -> HdMark()
         RemoteTool.FPS -> FpsMark()
         RemoteTool.AUDIO -> Icon(Icons.Default.VolumeUp, null, mark)
-        RemoteTool.HISTOGRAM -> HistogramMark(mark)
+        RemoteTool.HISTOGRAM -> HistogramMark(mark, rgb = preferences.histogram.value == HistogramMode.RGB)
         RemoteTool.GRID -> GridMark(preferences.grid.value.takeUnless { it == ViewfinderGrid.OFF } ?: ViewfinderGrid.THIRDS, mark)
         RemoteTool.EXPOSURE -> if (preferences.exposure.value == ExposureAssist.FALSE_COLOR) FalseColorMark(mark) else ZebraMark(mark)
         RemoteTool.DESQUEEZE -> if (preferences.desqueeze.value > 1.001f) {
@@ -4977,6 +4952,6 @@ internal fun RemoteToolMark(tool: RemoteTool, preferences: RemoteToolPreferences
         RemoteTool.LOCK -> Icon(if (preferences.locked.value) Icons.Default.Lock else Icons.Default.LockOpen, null, mark)
         RemoteTool.WHITE_BALANCE -> Text("WB", fontSize = 11.sp, fontWeight = FontWeight.Bold)
         RemoteTool.FOCUS_AREA -> Icon(Icons.Default.CenterFocusStrong, null, mark)
-        RemoteTool.WAVEFORM -> WaveformMark(mark)
+        RemoteTool.WAVEFORM -> WaveformMark(mark, rgb = preferences.waveform.value == WaveformMode.RGB)
     }
 }

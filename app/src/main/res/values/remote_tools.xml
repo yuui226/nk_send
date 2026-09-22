@@ -47,4 +47,5 @@
     <string name="remote_af_wide_l">Wide-area AF (L)</string>
     <string name="remote_af_wide_c1">Wide-area AF (C1)</string>
     <string name="remote_af_wide_c2">Wide-area AF (C2)</string>
+    <string name="remote_tool_done">Done editing</string>
 </resources>

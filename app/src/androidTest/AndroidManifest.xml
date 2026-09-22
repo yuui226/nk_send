@@ -7,4 +7,10 @@
         android:targetPackage="com.ztransfer.debug" />
     <instrumentation android:name="com.ztransfer.ui.screen.RemoteToolsInstrumentation"
         android:targetPackage="com.ztransfer.debug" />
+    <instrumentation android:name="com.ztransfer.ui.screen.RemoteToolEditorInstrumentation"
+        android:targetPackage="com.ztransfer.debug" />
+    <instrumentation android:name="com.ztransfer.ui.screen.RemoteScopeInstrumentation"
+        android:targetPackage="com.ztransfer.debug" />
+    <instrumentation android:name="com.ztransfer.ui.screen.RemotePreviewHistogramInstrumentation"
+        android:targetPackage="com.ztransfer.debug" />
 </manifest>

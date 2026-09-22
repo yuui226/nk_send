@@ -2,7 +2,6 @@ package com.ztransfer.ui.screen
 
 import android.graphics.Bitmap
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -19,7 +18,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -42,18 +41,21 @@ internal fun falseColorForLuma(luma: Int): Int = when {
     else -> 0xFFF14D4D.toInt() // >=95%
 }
 
-internal data class MonitorAnalysis(val falseColor: ImageBitmap?, val waveform: ImageBitmap?)
+internal data class MonitorAnalysis(
+    val falseColor: ImageBitmap?, val waveform: ImageBitmap?,
+    val waveformMode: WaveformMode = WaveformMode.LUMA,
+)
 
 /** Decoder-owned cache: no Compose state writes for analysis bookkeeping. */
 internal class MonitorAnalysisThrottle {
     private var cached: MonitorAnalysis? = null
     private var key: List<Int> = emptyList()
     private var lastAt = 0L
-    fun analyze(bitmap: Bitmap, falseColor: Boolean, waveform: Boolean, now: Long): MonitorAnalysis? {
+    fun analyze(bitmap: Bitmap, falseColor: Boolean, waveform: Boolean, now: Long, rgb: Boolean = false): MonitorAnalysis? {
         if (!falseColor && !waveform) { cached = null; key = emptyList(); return null }
-        val nextKey = listOf(bitmap.width, bitmap.height, if (falseColor) 1 else 0, if (waveform) 1 else 0)
+        val nextKey = listOf(bitmap.width, bitmap.height, if (falseColor) 1 else 0, if (waveform) 1 else 0, if (waveform && rgb) 1 else 0)
         if (cached == null || key != nextKey || now - lastAt >= 125L) {
-            cached = analyzeMonitorFrame(bitmap, falseColor, waveform)
+            cached = analyzeMonitorFrame(bitmap, falseColor, waveform, rgb)
             key = nextKey
             lastAt = now
         }
@@ -61,32 +63,50 @@ internal class MonitorAnalysisThrottle {
     }
 }
 
+internal const val WaveformWidth = 256
+internal const val WaveformHeight = 128
+
 /** Bounded to 256×192 samples; both tools share sampling and never decode JPEG again. */
-internal fun analyzeMonitorFrame(bitmap: Bitmap, falseColor: Boolean, waveform: Boolean): MonitorAnalysis {
+internal fun analyzeMonitorFrame(bitmap: Bitmap, falseColor: Boolean, waveform: Boolean, rgb: Boolean = false): MonitorAnalysis {
     if (!falseColor && !waveform) return MonitorAnalysis(null, null)
     val w = minOf(bitmap.width, 256)
     val h = minOf(bitmap.height, 192)
     val row = IntArray(bitmap.width)
     val colors = if (falseColor) IntArray(w * h) else null
-    val bins = if (waveform) IntArray(128 * 64) else null
+    val bins = if (waveform) List(if (rgb) 3 else 1) { IntArray(WaveformWidth * WaveformHeight) } else null
     for (y in 0 until h) {
         bitmap.getPixels(row, 0, bitmap.width, 0, y * bitmap.height / h, bitmap.width, 1)
         for (x in 0 until w) {
-            val luma = monitorLuma(row[x * bitmap.width / w])
+            val pixel = row[x * bitmap.width / w]
+            val luma = monitorLuma(pixel)
             colors?.set(y * w + x, falseColorForLuma(luma))
-            if (bins != null) bins[(63 - luma * 63 / 255) * 128 + x * 128 / w]++
+            if (bins != null) {
+                for (channel in bins.indices) {
+                    val value = if (rgb) (pixel ushr (16 - channel * 8)) and 255 else luma
+                    bins[channel][(WaveformHeight - 1 - value * (WaveformHeight - 1) / 255) * WaveformWidth + x * WaveformWidth / w]++
+                }
+            }
         }
     }
     val heat = bins?.let { counts ->
-        val max = counts.maxOrNull()?.coerceAtLeast(1) ?: 1
-        IntArray(counts.size) { i ->
-            if (counts[i] == 0) 0 else {
-                val alpha = (60 + 195 * ln(1.0 + counts[i]) / ln(1.0 + max)).roundToInt().coerceIn(0, 255)
-                (alpha shl 24) or 0x00A3E8BA
+        // Density controls trace intensity, not its height. Use one fixed scale for all RGB
+        // channels to avoid pumping brightness or hiding relative channel density each frame.
+        val denominator = ln(1.0 + h)
+        val intensities = IntArray(h + 1) { (255 * ln(1.0 + it) / denominator).roundToInt().coerceIn(0, 255) }
+        IntArray(WaveformWidth * WaveformHeight) { i ->
+            if (!rgb) {
+                val alpha = intensities[counts[0][i]]
+                if (alpha == 0) 0 else (alpha shl 24) or 0x00DCEBE3
+            } else {
+                val r = intensities[counts[0][i]]; val g = intensities[counts[1][i]]; val b = intensities[counts[2][i]]
+                val alpha = maxOf(r, g, b)
+                if (alpha == 0) 0 else (alpha shl 24) or ((r * 255 / alpha) shl 16) or
+                    ((g * 255 / alpha) shl 8) or (b * 255 / alpha)
             }
-        }.let { Bitmap.createBitmap(it, 128, 64, Bitmap.Config.ARGB_8888).asImageBitmap() }
+        }.let { Bitmap.createBitmap(it, WaveformWidth, WaveformHeight, Bitmap.Config.ARGB_8888).asImageBitmap() }
     }
-    return MonitorAnalysis(colors?.let { Bitmap.createBitmap(it, w, h, Bitmap.Config.ARGB_8888).asImageBitmap() }, heat)
+    return MonitorAnalysis(colors?.let { Bitmap.createBitmap(it, w, h, Bitmap.Config.ARGB_8888).asImageBitmap() },
+        heat, if (rgb) WaveformMode.RGB else WaveformMode.LUMA)
 }
 
 @Composable
@@ -118,39 +138,6 @@ internal fun FalseColorLegend(modifier: Modifier = Modifier) {
 }
 
 @Composable
-internal fun WaveformOverlay(image: ImageBitmap, modifier: Modifier = Modifier, compact: Boolean = false) {
-    Column(modifier.size(154.dp, 78.dp).background(Color.Black.copy(alpha = 0.68f), RoundedCornerShape(8.dp)).padding(4.dp)) {
-        if (!compact) Text("Y′  0–100%", color = Color.White.copy(alpha = 0.7f), fontSize = 9.sp, lineHeight = 10.sp)
-        Box(Modifier.fillMaxWidth().weight(1f)) {
-            Canvas(Modifier.matchParentSize()) {
-                for (fraction in listOf(0f, 0.5f, 1f)) drawLine(Color.White.copy(alpha = 0.14f),
-                    Offset(0f, fraction * size.height), Offset(size.width, fraction * size.height), 1.dp.toPx())
-            }
-            Image(image, null, contentScale = ContentScale.FillBounds, modifier = Modifier.matchParentSize())
-        }
-    }
-}
-
-/** New analyses share one compact bottom row, leaving the left meter and bottom FPS clear. */
-@Composable
-internal fun MonitorAnalysisOverlays(
-    histogram: LuminanceHistogram?, waveform: ImageBitmap?, falseColor: Boolean, modifier: Modifier = Modifier,
-) {
-    BoxWithConstraints(modifier) {
-        val chartHeight = (maxHeight * 0.27f).coerceIn(24.dp, 62.dp)
-        val usableWidth = (maxWidth - 60.dp).coerceAtLeast(1.dp)
-        Row(Modifier.align(Alignment.BottomStart).padding(start = 48.dp, bottom = 26.dp)
-            .widthIn(max = usableWidth), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            val count = (if (histogram != null) 1 else 0) + (if (waveform != null) 1 else 0)
-            val chartWidth = ((usableWidth - 4.dp * (count - 1).coerceAtLeast(0)) / count.coerceAtLeast(1)).coerceAtMost(134.dp)
-            if (histogram != null) HistogramOverlay(histogram, Modifier.size(chartWidth, chartHeight))
-            if (waveform != null) WaveformOverlay(waveform, Modifier.size(chartWidth, chartHeight), compact = chartHeight < 42.dp)
-        }
-        if (falseColor) FalseColorLegend(Modifier.align(Alignment.TopCenter).padding(top = 22.dp))
-    }
-}
-
-@Composable
 internal fun FalseColorMark(modifier: Modifier = Modifier) {
     Canvas(modifier) {
         for (i in 0..2) drawRoundRect(Color(falseColorForLuma(listOf(25, 108, 250)[i])),
@@ -161,13 +148,20 @@ internal fun FalseColorMark(modifier: Modifier = Modifier) {
 }
 
 @Composable
-internal fun WaveformMark(modifier: Modifier = Modifier) {
+internal fun WaveformMark(modifier: Modifier = Modifier, rgb: Boolean = false) {
     val color = LocalContentColor.current
     Canvas(modifier) {
         val path = Path()
         listOf(0.7f, 0.3f, 0.6f, 0.15f, 0.8f, 0.4f, 0.65f).forEachIndexed { i, value ->
             if (i == 0) path.moveTo(0f, size.height * value) else path.lineTo(size.width * i / 6, size.height * value)
         }
-        drawPath(path, color, style = Stroke(1.7.dp.toPx(), cap = StrokeCap.Round))
+        if (rgb) {
+            for (i in 0..2) {
+                val x = size.width * i / 3
+                clipRect(x, 0f, x + size.width / 3, size.height) {
+                    drawPath(path, ScopeRgbColors[i], style = Stroke(1.7.dp.toPx(), cap = StrokeCap.Round))
+                }
+            }
+        } else drawPath(path, color, style = Stroke(1.7.dp.toPx(), cap = StrokeCap.Round))
     }
 }
