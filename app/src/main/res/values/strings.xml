@@ -69,6 +69,8 @@
     <string name="loading_file_list">Loading file list…</string>
     <string name="connection_lost">Connection lost</string>
     <string name="usb_connection_lost">USB connection lost</string>
+    <string name="reconnect_camera_sta">Keep the camera connected to your phone hotspot or the same local network</string>
+    <string name="reconnect_camera">Reconnect</string>
     <string name="reconnect_camera_usb">Turn on the camera and check the USB cable</string>
     <string name="no_photos_on_camera">No photos on the camera</string>
     <string name="usb_turn_on_camera_hint">Please turn on the camera</string>

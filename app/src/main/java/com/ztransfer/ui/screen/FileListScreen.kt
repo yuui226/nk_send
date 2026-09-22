@@ -129,6 +129,8 @@ import com.ztransfer.ui.util.formatSpeed
 import com.ztransfer.ui.util.rememberHaptics
 import com.ztransfer.viewmodel.ActiveTransferProgress
 import com.ztransfer.viewmodel.CameraState
+import com.ztransfer.viewmodel.presentationConnectionType
+import com.ztransfer.viewmodel.presentationIsSta
 import com.ztransfer.viewmodel.CameraViewModel
 import com.ztransfer.viewmodel.ExportedOriginalIndex
 import com.ztransfer.viewmodel.PhotoExif
@@ -206,8 +208,8 @@ internal data class FileListCameraUiState(
 internal fun CameraState.toFileListCameraUiState(): FileListCameraUiState =
     FileListCameraUiState(
         isConnectedToCamera = isConnectedToCamera,
-        connectionType = connectionType,
-        isStaConnection = isStaConnection,
+        connectionType = presentationConnectionType,
+        isStaConnection = presentationIsSta,
         files = files,
         storageIds = storageIds,
         isLoadingFiles = isLoadingFiles,
@@ -275,8 +277,8 @@ internal fun CameraState.toFileListSignalUiState(): FileListSignalUiState =
     FileListSignalUiState(
         rssi = wifiRssi,
         connected = isConnectedToCamera,
-        connectionType = connectionType,
-        staMode = isStaConnection,
+        connectionType = presentationConnectionType,
+        staMode = presentationIsSta,
     )
 
 /** 一段真实连拍。它只描述检测结果；是否折成虚拟卡位由列表设置决定。 */
@@ -1347,7 +1349,7 @@ fun FileListScreen(
             }
     ) {
         // ---------- 内容（铺满，延伸到系统栏后面）----------
-        if (state.isLoadingFiles && presentedCameraFiles.isEmpty()) {
+        if (state.isConnectedToCamera && state.isLoadingFiles && presentedCameraFiles.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     CircularProgressIndicator(color = colors.accentBlue)
@@ -1357,9 +1359,9 @@ fun FileListScreen(
             }
         }
 
-        if (!state.isLoadingFiles && presentedCameraFiles.isEmpty() &&
+        if (presentedCameraFiles.isEmpty() &&
             !cameraRemovalReflowActive &&
-            (state.hasCompletedFileScan || !state.isConnectedToCamera)
+            (!state.isConnectedToCamera || (!state.isLoadingFiles && state.hasCompletedFileScan))
         ) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(
@@ -1367,63 +1369,62 @@ fun FileListScreen(
                     modifier = Modifier.padding(horizontal = 32.dp)
                 ) {
                     if (!state.isConnectedToCamera) {
-                        // 兜底：断开且列表从未加载成功（掉线不再清列表，正常断开时网格保留、
-                        // 由顶栏信号按钮指示状态，不会走到这里）。提示与本次会话的传输方式
-                        // 绑定，避免 USB 相机关机时短暂闪出 Wi-Fi 文案和系统设置按钮。
+                        // 首次加载失败、重连后再次掉线、进程恢复都可能进入空列表断开态。
+                        // 与顶栏使用同一套会话/恢复模式，不能把所有无线连接都当作 AP。
                         val usbMode =
                             disconnectedConnectionType(state.connectionType) ==
                                 CameraConnectionType.USB
+                        val presentation = disconnectedCameraPresentation(state.connectionType, state.isStaConnection)
                         if (usbMode) {
                             ClassicUsbIcon(
-                                tint = colors.accentOrange,
+                                tint = colors.statusError,
                                 modifier = Modifier.size(64.dp)
+                            )
+                        } else if (state.isStaConnection) {
+                            StaSignalIcon(
+                                connected = false,
+                                tint = colors.statusError,
+                                modifier = Modifier.size(64.dp),
                             )
                         } else {
                             Icon(
                                 Icons.Default.WifiOff,
                                 contentDescription = null,
                                 modifier = Modifier.size(64.dp),
-                                tint = colors.accentOrange
+                                tint = colors.statusError
                             )
                         }
                         Spacer(modifier = Modifier.height(16.dp))
                         Text(
-                            stringResource(
-                                if (usbMode) {
-                                    R.string.usb_connection_lost
-                                } else {
-                                    R.string.connection_lost
-                                }
-                            ),
+                            stringResource(presentation.title),
                             color = colors.onBackground,
                             style = MaterialTheme.typography.titleMedium
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            stringResource(
-                                if (usbMode) {
-                                    R.string.reconnect_camera_usb
-                                } else {
-                                    R.string.connect_camera_wifi
-                                }
-                            ),
+                            stringResource(presentation.hint),
                             color = colors.onSurfaceVariant,
                             style = MaterialTheme.typography.bodySmall,
                             textAlign = TextAlign.Center
                         )
-                        // 一键直达系统 Wi-Fi 设置（与连接页同款按钮），不必退回连接页。
-                        if (!usbMode) {
+                        presentation.actionLabel?.let { actionLabel ->
                             Spacer(modifier = Modifier.height(20.dp))
                             GlassButton(
                                 onClick = {
-                                    try {
+                                    if (state.isStaConnection) {
+                                        cameraViewModel.retryStaConnection()
+                                    } else try {
                                         context.startActivity(Intent(Settings.ACTION_WIFI_SETTINGS))
                                     } catch (_: Exception) {}
                                 }
                             ) {
-                                Icon(Icons.Default.Wifi, contentDescription = null, tint = colors.accentBlue, modifier = Modifier.size(20.dp))
+                                if (state.isStaConnection) {
+                                    StaSignalIcon(false, colors.statusError, Modifier.size(20.dp))
+                                } else {
+                                    Icon(Icons.Default.WifiOff, contentDescription = null, tint = colors.statusError, modifier = Modifier.size(20.dp))
+                                }
                                 Text(
-                                    stringResource(R.string.open_wifi_settings),
+                                    stringResource(actionLabel),
                                     style = MaterialTheme.typography.labelLarge,
                                     fontWeight = FontWeight.Medium,
                                     color = colors.onBackground
@@ -2639,6 +2640,27 @@ internal fun disconnectedConnectionType(
     connectionType: CameraConnectionType?
 ): CameraConnectionType = connectionType ?: CameraConnectionType.WIFI
 
+internal data class DisconnectedCameraPresentation(
+    val title: Int,
+    val hint: Int,
+    val actionLabel: Int?,
+)
+
+internal fun disconnectedCameraPresentation(
+    connectionType: CameraConnectionType?,
+    staMode: Boolean,
+): DisconnectedCameraPresentation = when {
+    connectionType == CameraConnectionType.USB -> DisconnectedCameraPresentation(
+        R.string.usb_connection_lost, R.string.reconnect_camera_usb, null,
+    )
+    staMode -> DisconnectedCameraPresentation(
+        R.string.connection_lost, R.string.reconnect_camera_sta, R.string.reconnect_camera,
+    )
+    else -> DisconnectedCameraPresentation(
+        R.string.connection_lost, R.string.connect_camera_wifi, R.string.open_wifi_settings,
+    )
+}
+
 internal data class FilterButtonPalette(
     val inactiveIcon: Color,
     val activeIcon: Color,
@@ -2774,7 +2796,7 @@ private fun FileListSignalPill(
 
 /**
  * 连接状态毛玻璃按钮：AP 显示信号格与 dBm，STA 显示专属拓扑状态，USB 显示经典三叉标；
- * AP 断开进入 Wi-Fi 设置，STA 断开进入个人热点设置，USB 断开则等待重新插线。
+ * AP 断开进入 Wi-Fi 设置，STA 断开重试局域网发现，USB 断开则等待重新插线。
  * [pulseTrigger] 递增时按钮轻微放大再弹性缩回（断开时点缩略图的"病因指向"反馈）。
  * "Z传"页与队列页顶栏共用。
  */
@@ -2790,7 +2812,10 @@ fun SignalPill(
     val colors = AppTheme.colors
     var expanded by remember { mutableStateOf(false) }
     val usbMode = connectionType == CameraConnectionType.USB
-    val online = connected && (usbMode || staMode || rssi != null)
+    val mode = signalPillMode(connectionType, staMode, connected, rssi)
+    val online = mode == SignalPillMode.USB_ONLINE ||
+        mode == SignalPillMode.STA_ONLINE || mode == SignalPillMode.WIFI_ONLINE
+    LaunchedEffect(online) { if (!online) expanded = false }
     val r = rssi ?: -999
     // dBm 越接近 0 越强。判定从严：满格只给极好信号，稍差立刻掉格。
     //  -30↑ 满格 / -45↑ 三格 / -55↑ 两格 / -65↑ 一格 / 更弱 0 格。
@@ -2802,10 +2827,8 @@ fun SignalPill(
         else -> 0
     }
     val color = when {
-        usbMode && connected -> colors.accentBlue
-        usbMode -> colors.statusError
-        staMode && connected -> colors.accentBlue
-        staMode -> colors.statusError
+        !online -> colors.statusError
+        usbMode || staMode -> colors.accentBlue
         level == 4 -> colors.statusConnected
         level >= 2 -> colors.accentOrange
         else -> colors.statusError
@@ -2844,7 +2867,9 @@ fun SignalPill(
     val context = LocalContext.current
     GlassButton(
         onClick = {
-            if (staMode) {
+            if (usbMode) {
+                if (online) expanded = !expanded
+            } else if (staMode) {
                 expanded = false
                 if (!connected) {
                     onStaDisconnectedClick()
@@ -2882,19 +2907,14 @@ fun SignalPill(
         ) {
             // AP、STA、USB 各自使用独立图形；连接状态变化时交叉淡化切换。
             Crossfade(
-                targetState = when {
-                    usbMode -> SignalPillMode.USB
-                    staMode && connected -> SignalPillMode.STA_ONLINE
-                    staMode -> SignalPillMode.STA_OFFLINE
-                    online -> SignalPillMode.WIFI_ONLINE
-                    else -> SignalPillMode.WIFI_OFFLINE
-                },
+                targetState = mode,
                 animationSpec = tween(220),
                 label = "signalMode"
             ) { mode ->
                 when (mode) {
-                    SignalPillMode.USB -> ClassicUsbIcon(
-                            tint = color,
+                    SignalPillMode.USB_ONLINE,
+                    SignalPillMode.USB_OFFLINE -> ClassicUsbIcon(
+                            tint = if (mode == SignalPillMode.USB_ONLINE) colors.accentBlue else colors.statusError,
                             modifier = Modifier
                                 .wrapContentHeight(unbounded = true)
                                 .size(18.dp),
@@ -2965,12 +2985,25 @@ fun SignalPill(
     }
 }
 
-private enum class SignalPillMode {
+internal enum class SignalPillMode {
     WIFI_OFFLINE,
     WIFI_ONLINE,
     STA_OFFLINE,
     STA_ONLINE,
-    USB,
+    USB_ONLINE,
+    USB_OFFLINE,
+}
+
+internal fun signalPillMode(
+    connectionType: CameraConnectionType?,
+    staMode: Boolean,
+    connected: Boolean,
+    rssi: Int?,
+): SignalPillMode = when {
+    connectionType == CameraConnectionType.USB -> if (connected) SignalPillMode.USB_ONLINE else SignalPillMode.USB_OFFLINE
+    staMode -> if (connected) SignalPillMode.STA_ONLINE else SignalPillMode.STA_OFFLINE
+    connected && rssi != null -> SignalPillMode.WIFI_ONLINE
+    else -> SignalPillMode.WIFI_OFFLINE
 }
 
 /** STA does not expose a meaningful client-Wi-Fi RSSI, so connected state stays visually full. */
@@ -2987,10 +3020,11 @@ private fun StaSignalIcon(
     Canvas(
         modifier = modifier.semantics { contentDescription = description },
     ) {
-        val barWidth = 3.2.dp.toPx()
-        val gap = 1.65.dp.toPx()
+        val unit = size.minDimension / 19f
+        val barWidth = 3.2f * unit
+        val gap = 1.65f * unit
         val bottom = size.height * 0.88f
-        val barHeights = floatArrayOf(5.dp.toPx(), 8.dp.toPx(), 11.dp.toPx(), 14.dp.toPx())
+        val barHeights = floatArrayOf(5f, 8f, 11f, 14f).map { it * unit }
         val totalWidth = barWidth * barHeights.size + gap * (barHeights.size - 1)
         val startX = (size.width - totalWidth) / 2f
         val barColor = if (connected) tint else tint.copy(alpha = 0.28f)
@@ -3000,7 +3034,7 @@ private fun StaSignalIcon(
                 color = barColor,
                 topLeft = Offset(startX + index * (barWidth + gap), bottom - height),
                 size = Size(barWidth, height),
-                cornerRadius = CornerRadius(1.35.dp.toPx()),
+                cornerRadius = CornerRadius(1.35f * unit),
             )
         }
 
@@ -3009,7 +3043,7 @@ private fun StaSignalIcon(
                 color = tint,
                 start = Offset(size.width * 0.15f, size.height * 0.12f),
                 end = Offset(size.width * 0.87f, size.height * 0.88f),
-                strokeWidth = 2.15.dp.toPx(),
+                strokeWidth = 2.15f * unit,
                 cap = StrokeCap.Round,
             )
         }

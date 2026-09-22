@@ -79,6 +79,8 @@ import com.ztransfer.ui.theme.*
 import com.ztransfer.ui.util.formatDuration
 import com.ztransfer.ui.util.formatFileSize
 import com.ztransfer.ui.util.formatSpeed
+import com.ztransfer.viewmodel.presentationConnectionType
+import com.ztransfer.viewmodel.presentationIsSta
 import com.ztransfer.viewmodel.CameraViewModel
 import com.ztransfer.viewmodel.CameraState
 import com.ztransfer.viewmodel.TransferStatus
@@ -131,8 +133,8 @@ private data class TransferCameraUiState(
 
 private fun CameraState.toTransferCameraUiState(): TransferCameraUiState = TransferCameraUiState(
     isConnectedToCamera = isConnectedToCamera,
-    connectionType = connectionType,
-    isStaConnection = isStaConnection,
+    connectionType = presentationConnectionType,
+    isStaConnection = presentationIsSta,
     wifiRssi = wifiRssi,
 )
 

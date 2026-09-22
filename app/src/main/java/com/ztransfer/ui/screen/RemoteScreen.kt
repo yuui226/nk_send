@@ -172,6 +172,8 @@ import com.ztransfer.ui.theme.Motion
 import com.ztransfer.ui.theme.SkinPreset
 import com.ztransfer.ui.theme.rememberAppBackgroundBrush
 import com.ztransfer.ui.util.rememberHaptics
+import com.ztransfer.viewmodel.presentationConnectionType
+import com.ztransfer.viewmodel.presentationIsSta
 import com.ztransfer.viewmodel.CameraViewModel
 import com.ztransfer.recorder.RecordingSink
 import com.ztransfer.recorder.ViewfinderRecorder
@@ -2795,8 +2797,8 @@ private fun RemoteContent(
                         SignalPill(
                             rssi = camState.wifiRssi,
                             connected = connected,
-                            connectionType = camState.connectionType,
-                            staMode = camState.isStaConnection,
+                            connectionType = camState.presentationConnectionType,
+                            staMode = camState.presentationIsSta,
                             onStaDisconnectedClick = cameraViewModel::retryStaConnection,
                         )
                         BatteryPill(percent = rcBatteryPercentage(batteryParam))
@@ -3190,8 +3192,8 @@ private fun RemoteContent(
                             SignalPill(
                                 rssi = camState.wifiRssi,
                                 connected = connected,
-                                connectionType = camState.connectionType,
-                                staMode = camState.isStaConnection,
+                                connectionType = camState.presentationConnectionType,
+                                staMode = camState.presentationIsSta,
                                 onStaDisconnectedClick = cameraViewModel::retryStaConnection,
                             )
                             BatteryPill(percent = rcBatteryPercentage(batteryParam))

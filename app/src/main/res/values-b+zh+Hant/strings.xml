@@ -69,6 +69,8 @@
     <string name="loading_file_list">正在取得檔案清單…</string>
     <string name="connection_lost">連線已中斷</string>
     <string name="usb_connection_lost">有線連線已中斷</string>
+    <string name="reconnect_camera_sta">請保持相機連線至手機熱點或同一區域網路</string>
+    <string name="reconnect_camera">重新連線</string>
     <string name="reconnect_camera_usb">請開啟相機電源並檢查 USB 資料線</string>
     <string name="no_photos_on_camera">相機中沒有照片</string>
     <string name="usb_turn_on_camera_hint">請開啟相機電源</string>

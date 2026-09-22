@@ -405,6 +405,8 @@ data class CameraState(
     val wirelessMode: WirelessMode = WirelessMode.STA,
     /** True when the active/most recent Wi-Fi session was reached through STA discovery. */
     val isStaConnection: Boolean = false,
+    /** Display/retry fallback after process recreation; never evidence of an active transport. */
+    val rememberedConnectionMode: CameraConnectionMode? = null,
     val staConnectionStatus: StaConnectionStatus = StaConnectionStatus.IDLE,
     val staDiscoveryProgress: String? = null,
     val staConnectionError: String? = null,
@@ -477,6 +479,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         CameraState(
             wirelessMode = restoredWirelessMode(
                 connectionPreferences.getString(WIRELESS_MODE_PREFERENCE, null),
+            ),
+            rememberedConnectionMode = restoredConnectionMode(
+                connectionPreferences.getString(CONNECTION_MODE_PREFERENCE, null),
             ),
         ),
     )
@@ -903,6 +908,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                             camera = cam
                             activateThumbnailDiskCache(cam)
                             activeUsbDeviceId = device.deviceId
+                            rememberConnectionMode(CameraConnectionMode.USB)
                             _state.update {
                                 it.copy(
                                     isConnectedToCamera = true,
@@ -1742,7 +1748,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    private fun rememberConnectionMode(mode: CameraConnectionMode) {
+        connectionPreferences.edit().putString(CONNECTION_MODE_PREFERENCE, mode.name).apply()
+        _state.update { it.copy(rememberedConnectionMode = mode) }
+    }
+
     private fun persistWirelessMode(mode: WirelessMode) {
+        // An explicit selection supersedes a previous session, including a restored USB session.
+        rememberConnectionMode(if (mode == WirelessMode.STA) CameraConnectionMode.STA else CameraConnectionMode.AP)
         connectionPreferences.edit()
             .putString(WIRELESS_MODE_PREFERENCE, mode.name)
             .apply()
@@ -1788,10 +1801,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     fun retryStaConnection() {
         val current = _state.value
         if (connectionDiscoveryPaused || purchaseHold ||
-            current.isConnectedToCamera ||
-            current.connectionType != CameraConnectionType.WIFI ||
-            current.wirelessMode != WirelessMode.STA ||
-            !current.isStaConnection
+            !current.canRetryStaConnection
         ) return
 
         // The shared signal button exists on the files, queue and monitor pages. A retry may
@@ -2280,6 +2290,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         camera = candidateCamera
         acquireSessionWifiLock()
         rememberStaCameraProfile(candidateCamera, ip, identity)
+        rememberConnectionMode(CameraConnectionMode.STA)
         _state.update {
             it.copy(
                 isConnectedToCamera = true,
@@ -2463,6 +2474,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         camera = cam
                         activateThumbnailDiskCache(cam)
                         acquireSessionWifiLock()   // 会话保活：连着就不让 Wi-Fi 打盹
+                        rememberConnectionMode(CameraConnectionMode.AP)
                         _state.update {
                             it.copy(
                                 isConnectedToCamera = true,
@@ -4452,6 +4464,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val STA_RECONNECT_DELAYS_MS = longArrayOf(3_000L, 8_000L, 15_000L, 30_000L)
         private const val CONNECTION_PREFERENCES = "sta_connection"
         private const val WIRELESS_MODE_PREFERENCE = "wireless_mode"
+        private const val CONNECTION_MODE_PREFERENCE = "last_connection_mode"
         internal const val FILE_THUMBNAIL_PIPELINE_BATCH_SIZE = 12
         const val EFFECT_PREVIEW_SOURCE_EDGE = 1_920
         const val MAX_FHD_PREVIEW_EDGE = 1_920
