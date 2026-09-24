@@ -35,8 +35,8 @@ android {
         applicationId = "com.ztransfer"
         minSdk = 26
         targetSdk = 35
-        versionCode = 56
-        versionName = "1.83"
+        versionCode = 57
+        versionName = "1.84"
         // Keep the default explicit: AGP otherwise rewrites the first manifest entry when several
         // standalone instrumentation suites are registered.
         testInstrumentationRunner = "com.ztransfer.frame.FramePlaceLayoutInstrumentation"
