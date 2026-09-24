@@ -10,6 +10,38 @@ import java.util.Locale
 
 class PhotoFrameMetadataSettingsTest {
     @Test
+    fun brandCycleAndLogoSettingsSurvivePersistenceForEveryPreset() {
+        PhotoFramePreset.entries.forEach { preset ->
+            val off = defaultPhotoFrameMetadataSettings(preset).copy(showBrand = false)
+            val text = off.nextBrandStyle()
+            val logo = text.nextBrandStyle()
+            assertTrue(text.showBrand)
+            assertEquals(PhotoFrameBrandStyle.TEXT, text.brandStyle)
+            assertTrue(logo.showBrand)
+            assertEquals(PhotoFrameBrandStyle.LOGO, logo.brandStyle)
+            for (locations in listOf(false, true)) {
+                val value = logo.copy(showCity = locations, showRegion = locations)
+                assertEquals(value, decodePhotoFrameMetadataSettings(
+                    encodePhotoFrameMetadataSettings(mapOf(preset to value))
+                )[preset])
+            }
+            assertFalse(logo.nextBrandStyle().showBrand)
+        }
+    }
+
+    @Test
+    fun logoRequiresNikonBrandAndRespectsHiddenBrand() {
+        val options = defaultPhotoFrameMetadataSettings(PhotoFramePreset.MIST)
+            .copy(showBrand = true, brandStyle = PhotoFrameBrandStyle.LOGO)
+        fun metadata(make: String?, model: String?) = PhotoFrameMetadata(make, model, null, null, null, null)
+        assertTrue(metadata("NIKON CORPORATION", "NIKON Z 30").withPresentation(options).useNikonLogo)
+        assertTrue(metadata(null, "NIKON Z 30").withPresentation(options).useNikonLogo)
+        assertFalse(metadata("Canon", "EOS R5").withPresentation(options).useNikonLogo)
+        assertFalse(metadata(null, null).withPresentation(options).useNikonLogo)
+        assertFalse(metadata("NIKON", "NIKON Z 30").withPresentation(options.copy(showBrand = false)).useNikonLogo)
+    }
+
+    @Test
     fun defaultsPreserveEachExistingFrameStyle() {
         val standard = listOf(
             PhotoFramePreset.MIST,

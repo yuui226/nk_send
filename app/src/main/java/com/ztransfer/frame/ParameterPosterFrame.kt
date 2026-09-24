@@ -40,6 +40,7 @@ private data class PosterRow(
     val italic: Boolean = false,
     val alpha: Int = 255,
     val gapAfter: Float = 0f,
+    val brandLogo: Boolean = false,
 )
 
 /** Metadata is already filtered by the shared switches; never infer a hidden brand from a model. */
@@ -50,7 +51,7 @@ internal fun drawParameterPosterMetadata(canvas: Canvas, layout: PhotoFrameLayou
     val bodySize = width * if (portrait) 0.034f else 0.025f
     val identity = buildList {
         normalizeCameraMake(metadata.make).takeIf(String::isNotBlank)?.let {
-            add(PosterRow(it, width * if (portrait) 0.112f else 0.078f, bold = true, italic = true, gapAfter = width * 0.012f))
+            add(PosterRow(it, width * if (portrait) 0.112f else 0.078f, bold = true, italic = true, gapAfter = width * 0.012f, brandLogo = metadata.useNikonLogo))
         }
         normalizeCameraModel(metadata.make, metadata.model).takeIf(String::isNotBlank)?.let {
             // Treat the model as a secondary headline; keep lens details visually quieter.
@@ -139,7 +140,7 @@ private fun drawPosterRows(canvas: Canvas, rows: List<PosterRow>, area: RectF) {
     if (rows.isEmpty() || area.width() <= 0 || area.height() <= 0) return
     val wrapped = rows.flatMap { row ->
         if (row.label != null) listOf(row) else if (row.bold || row.medium) {
-            val measured = posterPaint(row).measureText(row.text)
+            val measured = posterPaint(row).measureFrameIdentity(row.text, row.brandLogo)
             listOf(row.copy(size = row.size * minOf(1f, area.width() * 0.96f / measured.coerceAtLeast(1f))))
         } else {
             val paint = posterPaint(row)
@@ -171,7 +172,7 @@ private fun drawPosterRows(canvas: Canvas, rows: List<PosterRow>, area: RectF) {
         val paint = posterPaint(row)
         val rowHeight = rowHeight(row)
         if (row.label == null) {
-            canvas.drawText(row.text, 0f, y - paint.fontMetrics.ascent, paint)
+            canvas.drawFrameIdentity(row.text, 0f, y - paint.fontMetrics.ascent, paint, row.brandLogo)
         } else {
             val boxWidth = minOf(availableWidth * 0.42f, row.size * 3.65f)
             val boxHeight = row.size * 1.88f

@@ -128,6 +128,30 @@ class TransferStateTest {
         assertEquals(task, task.finishFrameGeneration(nowElapsedMs = 10_000L))
     }
 
+    @Test
+    fun skippedGenerationKeepsQueuedRecipeAndClearsOnlyGenerationTiming() {
+        val task = TransferTask(file(1), framePreset = PhotoFramePreset.IMMERSIVE,
+            frameMetadataSettings = defaultPhotoFrameMetadataSettings(PhotoFramePreset.IMMERSIVE),
+            status = TransferStatus.COMPLETED, downloaded = 100L, elapsedMs = 200L)
+        val skipped = task.startFrameGeneration(1_000L).skipFrameGeneration()
+        assertEquals(true, skipped.frameGenerationSkipped)
+        assertEquals(false, skipped.isGeneratingFrame)
+        assertEquals(null, skipped.frameGenerationStartedAtElapsedMs)
+        assertEquals(null, skipped.frameGenerationElapsedMs)
+        assertEquals(task.framePreset, skipped.framePreset)
+        assertEquals(task.frameMetadataSettings, skipped.frameMetadataSettings)
+        assertEquals(task.frameWatermarkRequested, skipped.frameWatermarkRequested)
+        assertEquals(task.elapsedMs, skipped.elapsedMs)
+        assertEquals(task.downloaded, skipped.downloaded)
+        // The worker completion callback must not turn a skip into a timed generation.
+        assertEquals(skipped, skipped.finishFrameGeneration(2_000L))
+    }
+
+    @Test
+    fun originalOnlyTaskDoesNotAcquireASkippedGenerationStage() {
+        assertEquals(false, TransferTask(file(1)).skipFrameGeneration().frameGenerationSkipped)
+    }
+
     private fun file(handle: Int) = NikonCamera.FileInfo(
         handle = handle,
         size = 100L,
@@ -532,6 +556,10 @@ class TransferStateTest {
         assertEquals(null, task.framePreset)
         assertEquals(filter, task.photoFilterRequested)
         assertEquals(64, task.photoFilterRequested?.normalizedIntensityPercent)
+        val skipped = task.skipFrameGeneration()
+        assertEquals(true, skipped.frameGenerationSkipped)
+        assertEquals(filter, skipped.photoFilterRequested)
+        assertEquals(false, task.frameGenerationSkipped)
     }
 
     @Test

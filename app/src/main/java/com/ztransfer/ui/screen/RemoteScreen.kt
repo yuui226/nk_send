@@ -18,6 +18,7 @@ import android.view.OrientationEventListener
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Animatable
@@ -377,6 +378,7 @@ fun RemoteScreen(
     var rotation by remember { mutableIntStateOf(if (tools.locked.value) tools.lockedRotation.value else 0) }
     val orientationLocked by tools.locked
     var editingTools by remember { mutableStateOf(false) }
+    // Keep the portrait editor stable while the user rearranges tools.
     val orientationFrozen = orientationLocked || editingTools
     val currentOrientationLocked by rememberUpdatedState(orientationFrozen)
     var switchingRotation by remember { mutableStateOf(false) }
@@ -403,7 +405,9 @@ fun RemoteScreen(
                     targetValue = 0f,
                     animationSpec = tween(REMOTE_ROTATION_FADE_OUT_MS),
                 )
-                if (!currentOrientationLocked) rotation = request.rotation
+                if (!currentOrientationLocked) {
+                    rotation = request.rotation
+                }
                 // Let the new constraints/layout reach composition while the host is invisible.
                 withFrameNanos { }
                 rotationFade.animateTo(
@@ -537,7 +541,7 @@ fun RemoteScreen(
                         onEditingTools = { editing ->
                             orientationSession.pause()
                             while (rotationRequests.tryReceive().isSuccess) { }
-                            editingTools = editing
+                            editingTools = editing && rotation == 0
                         },
                         onLockRotation = { lock ->
                             orientationSession.pause()
@@ -684,11 +688,15 @@ private fun RemoteContent(
     // 相机机身的滚转角（0xD067），null=还没读到/机身不支持，此时水平仪一笔都不画
     var levelRoll by remember { mutableStateOf<Float?>(null) }
     var probing by remember { mutableStateOf(false) }
-    // 全屏监看：沿用同一个取景器实例做边界动画，只保留右上角返回。
+    // 沉浸全屏仅用于横屏；沿用同一个取景器实例做边界动画。
     var immersiveFullscreen by remember { mutableStateOf(false) }
+    LaunchedEffect(rotation) {
+        if (rotation == 0) immersiveFullscreen = false
+    }
     fun enterFullscreen() {
         // 竖屏入口先沿用页面现有的转屏动画进入横屏；退出全屏后停留在横屏常规布局。
-        if (rotation == 0 && !tools.locked.value) onCycleRotation()
+        if (rotation == 0 && tools.locked.value) return
+        if (rotation == 0) onCycleRotation()
         listProp = null
         devPanel = false
         immersiveFullscreen = true
@@ -2701,11 +2709,12 @@ private fun RemoteContent(
         }
         tools.layout(movieMode).setVisible(tool, visible)
     }
+    var dispMode by tools.disp
     val changeToolVisibility: (RemoteTool, Boolean) -> Unit = ::setToolVisible
     ApplyRemoteToolLayout(tools.layout(movieMode), changeToolVisibility)
-    val renderTools: @Composable (androidx.compose.ui.unit.Dp, Modifier) -> Unit = { gap, modifier ->
+    val renderTools: @Composable (androidx.compose.ui.unit.Dp, Modifier, Boolean) -> Unit = { gap, modifier, singleLine ->
         RemoteToolBar(tools, editingTools, movieMode, changeToolVisibility,
-            modifier.fillMaxWidth(), gap,
+            modifier.fillMaxWidth(), gap, singleLine = singleLine,
             leading = {
                 if (devUnlocked && !editingTools) TopIconToggle(false, stringResource(R.string.cd_dev_panel), { devPanel = true }) {
                     Icon(Icons.Default.BugReport, null, Modifier.size(18.dp))
@@ -2730,7 +2739,9 @@ private fun RemoteContent(
                             RemoteTool.LOCK -> tools.locked.value
                             else -> false
                         }
-                        val disabled = (tool?.fixed == true && editingTools) || (tool == RemoteTool.ROTATE && tools.locked.value)
+                        val disabled = (tool?.fixed == true && editingTools) ||
+                            (tool == RemoteTool.ROTATE && tools.locked.value) ||
+                            (tool == RemoteTool.FULLSCREEN && rotation == 0 && tools.locked.value)
                         TopIconToggle(active, stringResource(tool?.title ?: if (editingTools) R.string.remote_tool_done else R.string.remote_tool_manage), {
                             when (tool) {
                                 RemoteTool.HD -> { hdLiveView = !hdLiveView; startSession(hdLiveView) }
@@ -2870,7 +2881,7 @@ private fun RemoteContent(
             // 填不下的整颗挪到第二行左对齐（仍与取景器同一左边界）。
             // HD/FPS 等文字键随系统字号变化，录像控件也有不同宽度。
             // 自定义 Layout 按每颗按钮的真实测量宽度分行，避免右端两颗被挤出屏幕。
-            renderTools(6.dp, Modifier)
+            renderTools(6.dp, Modifier, false)
             Spacer(Modifier.height(12.dp))
 
             // 2×2 数值拨轮微调：读数即控件——在数值上【上下拖动】，数值列随手指 1:1
@@ -2984,12 +2995,15 @@ private fun RemoteContent(
                 val normalImageY =
                     normalVerticalPadding + (normalViewfinderHeight - normalImageHeight) / 2
 
+                val fullscreenShutterSize = (maxHeight * 0.18f).coerceIn(48.dp, 64.dp)
+                val fullscreenAudioWidth = if (movieMode && showAudioLevels) 36.dp else 0.dp
+                val fullscreenRailWidth = fullscreenShutterSize + fullscreenAudioWidth + 20.dp
                 val fullscreenAvailableHeight =
                     (maxHeight - fullscreenVerticalBreathingRoom * 2).coerceAtLeast(0.dp)
                 val (fullscreenImageWidth, fullscreenImageHeight) =
-                    fitWithin(maxWidth, fullscreenAvailableHeight)
+                    fitWithin(maxWidth - fullscreenRailWidth - 4.dp, fullscreenAvailableHeight)
                 val targetImageX = if (immersiveFullscreen) {
-                    (maxWidth - fullscreenImageWidth) / 2
+                    4.dp
                 } else {
                     normalImageX
                 }
@@ -3027,14 +3041,14 @@ private fun RemoteContent(
                 // 录像画面按比例适配后，横屏/全屏通常会在取景器左侧留下空白。
                 // 至少 44dp 时把 30dp 宽的电平表放到画面外，并保留 6dp 间隔。
                 val audioMeterSlotWidth = 44.dp
-                val audioMeterOutside = imageX >= audioMeterSlotWidth
+                val audioMeterOutside = immersiveFullscreen || imageX >= audioMeterSlotWidth
 
                 RemoteViewfinderPanel(
                     frameProvider = { frame },
                     grid = framingGrid,
                     histogramMode = histogramMode,
-                    modeText = modeText,
-                    focusModeText = focusModeText,
+                    modeText = if (immersiveFullscreen) null else modeText,
+                    focusModeText = if (immersiveFullscreen) null else focusModeText,
                     movieMode = movieMode,
                     showAudioLevels = showAudioLevels,
                     recording = recording,
@@ -3069,9 +3083,52 @@ private fun RemoteContent(
                         frameProvider = { frame },
                         bottomInset = 0.dp,
                         modifier = Modifier
-                            .offset(x = imageX - audioMeterSlotWidth, y = imageY)
-                            .size(width = audioMeterSlotWidth, height = imageHeight)
+                            .offset(x = if (immersiveFullscreen) imageX + imageWidth + 4.dp else imageX - audioMeterSlotWidth, y = imageY)
+                            .size(width = if (immersiveFullscreen) fullscreenAudioWidth else audioMeterSlotWidth, height = imageHeight)
                     )
+                }
+
+                if (immersiveFullscreen) {
+                    ImmersiveMonitorControls(
+                        onExit = { immersiveFullscreen = false },
+                        onCycle = { dispMode = dispMode.next() },
+                        modifier = Modifier.offset(x = imageX + imageWidth + fullscreenAudioWidth + 8.dp, y = normalVerticalPadding)
+                            .width((maxWidth - imageX - imageWidth - fullscreenAudioWidth - 12.dp).coerceAtLeast(fullscreenShutterSize))
+                            .height((maxHeight - normalVerticalPadding * 2).coerceAtLeast(0.dp)),
+                    ) {
+                        ShutterButton(
+                            capturing = capturing, focusing = afHeld,
+                            enabled = connected && !probing, movie = movieMode, recording = recording,
+                            onFocusStart = { startFocus() }, onRelease = ::finishShutterGesture,
+                            onQuickTap = { if (movieMode) toggleRecord() else shoot() },
+                            diameter = fullscreenShutterSize,
+                        )
+                    }
+                    val activeProps = if (movieMode) MOVIE_EXPOSURE_PROPS else EXPOSURE_PROPS
+                    val exposureInfo = listOfNotNull(modeText) + listOf(3, 2, 1, 0).mapNotNull { index ->
+                        params[activeProps[index]]?.let { param ->
+                            val label = paramLabel(activeProps[index])
+                            "$label ${rcFormat(param.prop, param.current)}"
+                        }
+                    }
+                    ImmersiveMonitorFooter(
+                        dispMode, exposureInfo, connected,
+                        Modifier.offset(x = imageX + 8.dp, y = imageY + if (dispMode == MonitorDispMode.FULL) 27.dp else 9.dp)
+                            .width((imageWidth - if (recording) 104.dp else 16.dp).coerceAtLeast(0.dp)),
+                    )
+                    AnimatedVisibility(
+                        visible = dispMode == MonitorDispMode.FULL && connected,
+                        enter = fadeIn(tween(180)), exit = fadeOut(tween(180)),
+                        modifier = Modifier.offset(x = imageX, y = imageY + 9.dp).width(imageWidth),
+                    ) {
+                        val details = rememberMonitorDetails(
+                            cameraViewModel.getCamera(), movieMode,
+                            enabled = connected && initialLoaded && dispMode == MonitorDispMode.FULL,
+                            pollingAllowed = !probing && !diagnosticControlBusy && !recBusy && !capturing,
+                        )
+                        ImmersiveMonitorDetails(details, rcBatteryPercentage(batteryParam),
+                            Modifier.padding(start = 8.dp, end = if (recording) 88.dp else 8.dp))
+                    }
                 }
 
                 // 操作区独立淡出/淡入，取景器尺寸动画不会重建或交叉切换帧画面。
@@ -3106,7 +3163,7 @@ private fun RemoteContent(
                             Spacer(Modifier.height(toolRowGap))
                             renderTools(5.dp, Modifier.onSizeChanged {
                                 if (landscapeToolBarHeightPx != it.height) landscapeToolBarHeightPx = it.height
-                            })
+                            }, true)
                         }
 
                         Column(
@@ -3172,10 +3229,10 @@ private fun RemoteContent(
                     }
                 }
 
-                // 返回始终固定在右上角；信号随工具区淡变，全屏时返回只恢复常规横屏布局。
-                Row(
+                // 普通横屏保留原有返回入口；沉浸入口统一放在右侧操作栏。
+                if (!immersiveFullscreen) Row(
                     modifier = Modifier
-                        .align(Alignment.TopEnd)
+                        .align(if (immersiveFullscreen) Alignment.TopStart else Alignment.TopEnd)
                         .padding(
                             horizontal = normalHorizontalPadding,
                             vertical = normalVerticalPadding
@@ -3235,12 +3292,16 @@ private fun RemoteContent(
         if (trialLeftSeconds != null) {
             RemoteTrialTimeBadge(
                 seconds = trialLeftSeconds,
+                compact = immersiveFullscreen,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .then(
                         if (rotation == 0) Modifier.navigationBarsPadding() else Modifier
                     )
-                    .padding(end = 16.dp, bottom = 12.dp)
+                    .padding(
+                        end = if (immersiveFullscreen) 6.dp else 16.dp,
+                        bottom = if (immersiveFullscreen) 4.dp else 12.dp,
+                    )
             )
         }
 
@@ -3663,22 +3724,23 @@ private fun BatteryPill(percent: Int?) {
 @Composable
 private fun RemoteTrialTimeBadge(
     seconds: Int,
+    compact: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val colors = AppTheme.colors
     val safeSeconds = seconds.coerceAtLeast(0)
     val shape = RoundedCornerShape(9.dp)
     Box(
-        modifier = modifier
-            .background(colors.glassSurfaceHeavy, shape)
-            .border(1.dp, colors.glassPanelBorder, shape)
-            .padding(horizontal = 10.dp, vertical = 5.dp)
+        modifier = modifier.then(
+            if (compact) Modifier else Modifier
+                .background(colors.glassSurfaceHeavy, shape)
+                .border(1.dp, colors.glassPanelBorder, shape)
+                .padding(horizontal = 10.dp, vertical = 5.dp)
+        )
     ) {
+        val countdown = "%d:%02d".format(safeSeconds / 60, safeSeconds % 60)
         Text(
-            text = stringResource(
-                R.string.remote_trial_left,
-                "%d:%02d".format(safeSeconds / 60, safeSeconds % 60)
-            ),
+            text = countdown,
             style = MaterialTheme.typography.labelMedium,
             color = colors.onSurfaceVariant,
             fontFamily = FontFamily.Monospace,
@@ -3738,11 +3800,17 @@ private fun RemoteViewfinderPanel(
     modifier: Modifier = Modifier
 ) {
     val colors = AppTheme.colors
+    val recordingBorder by animateColorAsState(
+        targetValue = if (connected && movieMode && recording) Color(0xFFFF424D) else Color.Transparent,
+        animationSpec = tween(280),
+        label = "cameraRecordingBorder",
+    )
     val soundMeterEnabled = connected && movieMode && showAudioLevels
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(14.dp))
             .background(Color(0xFF0D0D0D))
+            .border(2.dp, recordingBorder, RoundedCornerShape(14.dp))
     ) {
         ViewfinderImage(
             frameProvider = frameProvider,
@@ -3794,7 +3862,7 @@ private fun RemoteViewfinderPanel(
             }
         }
 
-        if (recording) {
+        if (connected && movieMode && recording) {
             val recPulse = rememberInfiniteTransition(label = "recPulse")
             val dotAlpha by recPulse.animateFloat(
                 initialValue = 1f,
@@ -4033,6 +4101,7 @@ private fun ViewfinderImage(
     scopeStartInset: androidx.compose.ui.unit.Dp = 8.dp,
     desqueezeMultiplier: Float = 1f
 ) {
+    val viewport = remember { ViewfinderViewport() }
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         val liveFrame = frameProvider()
         if (liveFrame != null) {
@@ -4050,6 +4119,7 @@ private fun ViewfinderImage(
             val focusCoordinateHeight =
                 liveFrame.metadata?.focusCoordinateHeight ?: imageHeight
             val currentTapHandler by rememberUpdatedState(onTapFocus)
+            ZoomableViewfinder(viewport, displayAspectRatio, Modifier.matchParentSize()) {
             Box(
                 Modifier
                     .matchParentSize()
@@ -4062,7 +4132,9 @@ private fun ViewfinderImage(
                         focusCoordinateWidth,
                         focusCoordinateHeight
                     ) {
-                        detectTapGestures { tap ->
+                        detectTapGestures(
+                            onDoubleTap = { viewport.reset() },
+                            onTap = { tap ->
                             val imageRect = fitCenterRect(
                                 size.width.toFloat(),
                                 size.height.toFloat(),
@@ -4097,7 +4169,7 @@ private fun ViewfinderImage(
                                     )
                                 )
                             }
-                        }
+                        })
                     },
                 contentAlignment = Alignment.Center
             ) {
@@ -4194,6 +4266,7 @@ private fun ViewfinderImage(
                     modifier = Modifier.matchParentSize()
                 )
             }
+            } // Only image-space layers zoom; scopes remain anchored to the panel.
             // Stable composition keeps the outgoing scope alive for its exit animation and
             // lets a surviving waveform slide to the same left anchor used by a lone histogram.
             MonitorAnalysisOverlays(
@@ -4592,10 +4665,14 @@ private fun ShutterButton(
     recording: Boolean,
     onFocusStart: () -> Unit,
     onRelease: (fire: Boolean) -> Unit,
-    onQuickTap: () -> Unit
+    onQuickTap: () -> Unit,
+    diameter: androidx.compose.ui.unit.Dp = 76.dp,
 ) {
     val colors = AppTheme.colors
     var heldDown by remember { mutableStateOf(false) }
+    val currentFocusStart by rememberUpdatedState(onFocusStart)
+    val currentRelease by rememberUpdatedState(onRelease)
+    val currentQuickTap by rememberUpdatedState(onQuickTap)
     val coroutineScope = rememberCoroutineScope()
     val innerScale by animateFloatAsState(
         targetValue = if (focusing) 0.8f else 1f,
@@ -4618,16 +4695,16 @@ private fun ShutterButton(
     // 语义），尺寸与圆角同步动画做圆→方块的连续变形。
     val innerColor = if (movie) colors.statusError else Color.White
     val innerSize by animateDpAsState(
-        targetValue = if (recording) 28.dp else 60.dp,
+        targetValue = if (recording) diameter * (28f / 76f) else diameter * (60f / 76f),
         animationSpec = tween(160), label = "recInnerSize"
     )
     val innerCorner by animateDpAsState(
-        targetValue = if (recording) 7.dp else 30.dp,
+        targetValue = if (recording) diameter * (7f / 76f) else diameter * (30f / 76f),
         animationSpec = tween(160), label = "recInnerCorner"
     )
     Box(
         modifier = Modifier
-            .size(76.dp)
+            .size(diameter)
             .graphicsLayer {
                 scaleX = pressScale
                 scaleY = pressScale
@@ -4645,7 +4722,7 @@ private fun ShutterButton(
                             val timerJob = coroutineScope.launch {
                                 delay(300)
                                 timerFired = true
-                                onFocusStart()
+                                currentFocusStart()
                             }
                             val up = waitForUpOrCancellation()
                             heldDown = false
@@ -4655,13 +4732,13 @@ private fun ShutterButton(
                                 val fire = up != null &&
                                     up.position.x in 0f..size.width.toFloat() &&
                                     up.position.y in 0f..size.height.toFloat()
-                                onRelease(fire)
+                                currentRelease(fire)
                             } else {
                                 // 快拍：无对焦，抬手在键内直接拍摄
                                 val fire = up != null &&
                                     up.position.x in 0f..size.width.toFloat() &&
                                     up.position.y in 0f..size.height.toFloat()
-                                if (fire) onQuickTap()
+                                if (fire) currentQuickTap()
                             }
                         }
                     }
@@ -4671,7 +4748,7 @@ private fun ShutterButton(
     ) {
         if (capturing) {
             CircularProgressIndicator(
-                modifier = Modifier.size(52.dp),
+                modifier = Modifier.size(diameter * (52f / 76f)),
                 color = colors.onBackground,
                 strokeWidth = 3.dp
             )
@@ -4848,7 +4925,10 @@ internal fun AdaptiveRemoteToolBar(
         val capacity = ((maxWidth + gapPx) / (cellWidth + gapPx)).coerceAtLeast(1)
         fun span(index: Int) = ((placeables[index].width + gapPx + cellWidth + gapPx - 1) /
             (cellWidth + gapPx)).coerceIn(1, capacity)
-        val columns = minOf(capacity, visibleIndices.sumOf(::span).coerceAtLeast(1))
+        // Keep the full set of column tracks even when most tools are hidden.
+        // Otherwise three remaining buttons spread across the row and put full screen
+        // in its center instead of beside rotation at the trailing edge.
+        val columns = capacity
         val pitch = if (columns > 1) ((maxWidth - cellWidth).toFloat() / (columns - 1)) else 0f
         val pinnedSpans = pinned.sumOf(::span)
         val firstCapacity = (columns - pinnedSpans).coerceAtLeast(0)
@@ -4949,7 +5029,7 @@ internal fun RemoteToolMark(tool: RemoteTool, preferences: RemoteToolPreferences
         } else Icon(Icons.Outlined.AspectRatio, null, mark)
         RemoteTool.LEVEL -> LevelMark(mark)
         RemoteTool.RECORD -> Icon(Icons.Default.Videocam, null, mark)
-        RemoteTool.FULLSCREEN -> FullscreenEnterMark(mark)
+        RemoteTool.FULLSCREEN -> FullscreenMark(mark)
         RemoteTool.ROTATE -> RotateMark(mark)
         RemoteTool.LOCK -> Icon(if (preferences.locked.value) Icons.Default.Lock else Icons.Default.LockOpen, null, mark)
         RemoteTool.WHITE_BALANCE -> Text("WB", fontSize = 11.sp, fontWeight = FontWeight.Bold)

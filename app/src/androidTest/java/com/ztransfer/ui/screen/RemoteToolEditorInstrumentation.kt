@@ -23,15 +23,29 @@ class RemoteToolEditorInstrumentation : Instrumentation() {
         var outcome = Activity.RESULT_CANCELED
         val disk = targetContext.getSharedPreferences("ztransfer", 0)
         val savedRemotePrefs = disk.all.filterKeys { it.startsWith("remote_") }
+        val savedTransferDir = disk.getString("transfer_dir", null)
         try {
             // Dedicated emulator run: restore toolbar defaults, preserving unrelated app preferences.
             val keys = listOf("remote_tool_order_photo", "remote_hidden_tools_photo", "remote_lock_starts_second_row_photo", "remote_hd", "remote_grid", "remote_layout_locked")
             check(disk.edit().apply { keys.forEach { remove(it) } }.commit())
+            // This UI-only test never records or transfers files. Supply a well-formed tree URI
+            // to satisfy the monitor entry prerequisite, then restore the user's setting.
+            check(disk.edit().putString("transfer_dir",
+                savedTransferDir ?: "content://com.android.externalstorage.documents/tree/primary%3ADownload").commit())
             fun tools() = RemoteToolPreferences(disk)
             fun layout() = tools().layout(false)
             uiAutomation // Activate accessibility before composing the real application.
-            activity = startActivitySync(Intent(targetContext, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
-            labels = activity
+            // Do not wait indefinitely for a previously open, animated settings page to idle.
+            val monitor = addMonitor(MainActivity::class.java.name, null, false)
+            try {
+                runOnMainSync {
+                    targetContext.startActivity(Intent(targetContext, MainActivity::class.java)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
+                }
+                activity = monitor.waitForActivityWithTimeout(10_000) as? MainActivity
+                    ?: error("MainActivity did not resume within 10 seconds")
+            } finally { removeMonitor(monitor) }
+            labels = checkNotNull(activity)
             // Navigate through the actual app; there is no editor-only activity or blank preview.
             for (attempt in 0 until 40) {
                 if (node(label(R.string.remote_tool_manage)) != null) break
@@ -102,7 +116,29 @@ class RemoteToolEditorInstrumentation : Instrumentation() {
             tap(bounds(label(R.string.remote_tool_done))); SystemClock.sleep(500)
             check(node(label(R.string.remote_tool_manage)) != null)
             check(bounds(RemoteTool.ROTATE).centerX() > labels.resources.displayMetrics.widthPixels - 48)
+            val sparseFullscreen = bounds(RemoteTool.FULLSCREEN)
+            val sparseRotate = bounds(RemoteTool.ROTATE)
+            check(kotlin.math.abs((sparseRotate.left - sparseFullscreen.right) -
+                (rotate.left - fullscreen.right)) <= 2) {
+                "Fixed-pair spacing changed between full and sparse rows"
+            }
+            check(sparseFullscreen.centerX() > labels.resources.displayMetrics.widthPixels * 0.65f)
+            check(sparseRotate.left - sparseFullscreen.right <= sparseFullscreen.width()) {
+                "Sparse toolbar separated the fixed pair: $sparseFullscreen / $sparseRotate"
+            }
             screenshot("remote-editor-minimal.png")
+            tap(bounds(RemoteTool.FULLSCREEN)); SystemClock.sleep(900)
+            check(node(label(R.string.remote_tool_manage)) == null)
+            check(node(label(R.string.cd_remote_fullscreen_exit)) != null)
+            check(node("DISP") != null)
+            screenshot("remote-immersive-layout.png")
+            tap(bounds(label(R.string.cd_remote_fullscreen_exit))); SystemClock.sleep(600)
+            check(node(label(R.string.remote_tool_manage)) == null) { "Landscape exposed its editor" }
+            screenshot("remote-landscape-toolbar.png")
+            tap(bounds(RemoteTool.ROTATE)); SystemClock.sleep(800)
+            tap(bounds(RemoteTool.ROTATE)); SystemClock.sleep(800)
+            check(node(label(R.string.remote_tool_manage)) != null)
+            check(node(label(R.string.remote_tool_done)) == null) { "Returning to portrait resumed editing" }
             result.putString("result", "PASS: whole-button visibility, restore-to-tail, actual cross-row drag, no click after drag, hidden non-draggable, photo editor excludes audio, default lock at second-row start and drag/hide/restore, fixed controls, all-hidden manager access")
             outcome = Activity.RESULT_OK
         } catch (e: Throwable) {
@@ -112,6 +148,7 @@ class RemoteToolEditorInstrumentation : Instrumentation() {
         } finally {
             activity?.let { runOnMainSync { it.finish() } }
             disk.edit().apply {
+                if (savedTransferDir == null) remove("transfer_dir") else putString("transfer_dir", savedTransferDir)
                 disk.all.keys.filter { it.startsWith("remote_") }.forEach { remove(it) }
                 savedRemotePrefs.forEach { (key, value) ->
                     when (value) {
@@ -130,7 +167,7 @@ class RemoteToolEditorInstrumentation : Instrumentation() {
     private fun node(label: String): AccessibilityNodeInfo? {
         if (android.os.Build.VERSION.SDK_INT >= 33) uiAutomation.clearCache()
         fun find(n: AccessibilityNodeInfo): AccessibilityNodeInfo? {
-            if (n.contentDescription?.toString() == label) return n
+            if (n.contentDescription?.toString() == label || n.text?.toString() == label) return n
             for (i in 0 until n.childCount) n.getChild(i)?.let { find(it)?.let { found -> return found } }
             return null
         }

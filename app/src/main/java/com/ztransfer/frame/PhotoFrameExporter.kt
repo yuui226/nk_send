@@ -517,6 +517,7 @@ internal data class PhotoFrameMetadata(
     val address: String? = null,
     val city: String? = null,
     val region: String? = null,
+    val brandStyle: PhotoFrameBrandStyle = PhotoFrameBrandStyle.TEXT,
 )
 
 internal data class FrameTextVisualBounds(
@@ -2236,7 +2237,7 @@ object PhotoFrameExporter {
         } else {
             0f
         }
-        val initialWidth = brandPaint.measureText(brand) + gap + modelPaint.measureText(model)
+        val initialWidth = brandPaint.measureFrameIdentity(brand, metadata.useNikonLogo) + gap + modelPaint.measureText(model)
         val maxTitleWidth = layout.canvasWidth *
             if (preset == PhotoFramePreset.FROSTED) 0.78f else 0.86f
         if (initialWidth > maxTitleWidth) {
@@ -2358,11 +2359,11 @@ object PhotoFrameExporter {
 
         titleBaseline?.let { baseline ->
             val totalWidth =
-                brandPaint.measureText(brand) + gap + modelPaint.measureText(model)
+                brandPaint.measureFrameIdentity(brand, metadata.useNikonLogo) + gap + modelPaint.measureText(model)
             var x = centerX - totalWidth / 2f
             if (brand.isNotEmpty()) {
-                canvas.drawText(brand, x, baseline, brandPaint)
-                x += brandPaint.measureText(brand) + gap
+                canvas.drawFrameIdentity(brand, x, baseline, brandPaint, metadata.useNikonLogo)
+                x += brandPaint.measureFrameIdentity(brand, metadata.useNikonLogo) + gap
             }
             if (model.isNotEmpty()) {
                 canvas.drawText(model, x, baseline, modelPaint)
@@ -2958,7 +2959,7 @@ object PhotoFrameExporter {
         }
         var componentGap = shortEdge * 0.014f
         fun firstRowWidth(): Float =
-            (cameraPaint?.measureText(cameraName) ?: 0f) +
+            (cameraPaint?.measureFrameIdentity(cameraName, metadata.useNikonLogo) ?: 0f) +
                 (inlineWatermarkPaint?.measureText(inlineWatermarkText) ?: 0f) +
                 (dividerPaint?.measureText(divider) ?: 0f) +
                 if (dividerPaint != null) componentGap * 2f else 0f
@@ -3014,20 +3015,7 @@ object PhotoFrameExporter {
             val safeBottom = maxOf(shortEdge * 0.045f, photoRect.height() * 0.025f)
             val blockBottom = photoRect.bottom - safeBottom
             val blockTop = blockBottom - blockHeight
-            Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                shader = LinearGradient(
-                    0f,
-                    (blockTop - shortEdge * 0.10f).coerceAtLeast(photoRect.height() * 0.58f),
-                    0f,
-                    photoRect.bottom,
-                    Color.TRANSPARENT,
-                    Color.argb(118, 0, 0, 0),
-                    Shader.TileMode.CLAMP,
-                )
-                canvas.drawRect(0f, photoRect.height() * 0.52f, photoRect.right, photoRect.bottom, this)
-            }
-
-            // Explicit in-photo placement remains above the contrast veil and below metadata.
+            // Preserve the photograph: metadata overlays do not darken the image beneath them.
             drawPhotoWatermark(context, canvas, photoRect, PhotoFramePreset.IMMERSIVE, watermark)
 
             val baselines = centeredFrameTextBaselines(
@@ -3047,8 +3035,8 @@ object PhotoFrameExporter {
             titleBaseline?.let { baseline ->
                 var x = photoRect.centerX() - firstRowWidth() / 2f
                 cameraPaint?.let { paint ->
-                    canvas.drawText(cameraName, x, baseline, paint)
-                    x += paint.measureText(cameraName)
+                    canvas.drawFrameIdentity(cameraName, x, baseline, paint, metadata.useNikonLogo)
+                    x += paint.measureFrameIdentity(cameraName, metadata.useNikonLogo)
                 }
                 dividerPaint?.let { paint ->
                     x += componentGap
@@ -3874,7 +3862,7 @@ object PhotoFrameExporter {
                 listOf(bounds),
                 0f,
             ).single()
-            canvas.drawText(header, layout.canvasWidth / 2f, baseline, paint)
+            canvas.drawFrameIdentity(header, layout.canvasWidth / 2f, baseline, paint, metadata.useNikonLogo)
         }
         val rows = buildList {
             metadata.lensModel?.takeIf(String::isNotBlank)?.let(::add)
@@ -3927,6 +3915,7 @@ object PhotoFrameExporter {
             editorialMetadataRows(metadata),
             watermark.bandWatermarkFor(PhotoFramePreset.GALLERY_MAT),
             darkText = true,
+            brandLogo = metadata.useNikonLogo,
         )
     }
 
@@ -3991,11 +3980,12 @@ object PhotoFrameExporter {
                 color = filmTextColor,
                 typeface = Typeface.create("sans-serif", Typeface.BOLD),
             ).apply { textAlign = Paint.Align.LEFT }
-            canvas.drawText(
+            canvas.drawFrameIdentity(
                 cameraIdentity,
                 outer.left + unit * 0.15f,
                 outer.top + unit * 0.028f,
                 identityPaint,
+                metadata.useNikonLogo,
             )
         }
         metadata.dateTime?.takeIf(String::isNotBlank)?.let { dateTime ->
@@ -4122,7 +4112,7 @@ object PhotoFrameExporter {
                 preferredGap,
             )
             rows.forEachIndexed { index, text ->
-                canvas.drawText(text, band.centerX(), baselines[index], paints[index])
+                canvas.drawFrameIdentity(text, band.centerX(), baselines[index], paints[index], index == 0 && identity.isNotEmpty() && metadata.useNikonLogo)
             }
         }
     }
@@ -4136,6 +4126,7 @@ object PhotoFrameExporter {
         watermark: PhotoFrameWatermark?,
         darkText: Boolean,
         emphasizeFirst: Boolean = false,
+        brandLogo: Boolean = false,
     ) {
         if (area.height() <= 0f) return
         val color = if (darkText) Color.rgb(27, 28, 30) else Color.rgb(249, 248, 245)
@@ -4194,7 +4185,7 @@ object PhotoFrameExporter {
         val rows = bounds()
         val baselines = centeredFrameTextBaselines(area.top, area.bottom, rows, gap)
         metadataRows.forEachIndexed { index, text ->
-            canvas.drawText(text, area.centerX(), baselines[index], paints[index])
+            canvas.drawFrameIdentity(text, area.centerX(), baselines[index], paints[index], index == 0 && brandLogo)
         }
         if (watermark != null && watermarkPaint != null) {
             val paint = checkNotNull(watermarkPaint)
@@ -4333,7 +4324,7 @@ object PhotoFrameExporter {
                 preferredGap,
             )
             rows.forEachIndexed { index, (text, paint) ->
-                canvas.drawText(text, textArea.left, baselines[index], paint)
+                canvas.drawFrameIdentity(text, textArea.left, baselines[index], paint, index == 0 && identity.isNotEmpty() && metadata.useNikonLogo)
             }
         }
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -4573,6 +4564,7 @@ object PhotoFrameExporter {
                 canvas = canvas,
                 photoRect = photoRect,
                 brand = identity,
+                brandLogo = metadata.useNikonLogo,
                 lens = lens,
                 details = details,
                 occupiedWatermarkBounds = occupiedWatermarkBounds,
@@ -4596,7 +4588,7 @@ object PhotoFrameExporter {
             canvas.drawRoundRect(photoRect, radius, radius, this)
         }
         if (preset == PhotoFramePreset.BRAND_GALLERY) {
-            drawBrandGalleryBand(context, canvas, layout, identity, watermark)
+            drawBrandGalleryBand(context, canvas, layout, identity, watermark, metadata.useNikonLogo)
         }
     }
 
@@ -4604,6 +4596,7 @@ object PhotoFrameExporter {
         canvas: Canvas,
         photoRect: RectF,
         brand: String,
+        brandLogo: Boolean,
         lens: String,
         details: List<String>,
         occupiedWatermarkBounds: BrandFrameBounds?,
@@ -4671,7 +4664,7 @@ object PhotoFrameExporter {
         )
         var row = 0
         if (brandPaint != null) {
-            canvas.drawText(brand, photoRect.centerX(), baselines[row++], brandPaint)
+            canvas.drawFrameIdentity(brand, photoRect.centerX(), baselines[row++], brandPaint, brandLogo)
         }
         if (lensPaint != null) {
             canvas.drawText(lens, photoRect.centerX(), baselines[row++], lensPaint)
@@ -4747,6 +4740,7 @@ object PhotoFrameExporter {
         layout: PhotoFrameLayout,
         brand: String,
         watermark: PhotoFrameWatermark,
+        brandLogo: Boolean,
     ) {
         val band = RectF(
             0f,
@@ -4829,7 +4823,7 @@ object PhotoFrameExporter {
             )
         }
         if (brandPaint != null) {
-            canvas.drawText(brand, band.centerX(), baselines[row], brandPaint)
+            canvas.drawFrameIdentity(brand, band.centerX(), baselines[row], brandPaint, brandLogo)
         }
     }
 
@@ -5121,7 +5115,7 @@ object PhotoFrameExporter {
             }
         }
         if (leftPrimary != null && leftPrimaryPaint != null && primaryBaseline != null) {
-            canvas.drawText(leftPrimary, leftX, primaryBaseline, leftPrimaryPaint)
+            canvas.drawFrameIdentity(leftPrimary, leftX, primaryBaseline, leftPrimaryPaint, metadata.useNikonLogo)
         }
         if (leftSecondary != null && leftSecondaryPaint != null && secondaryBaseline != null) {
             canvas.drawText(leftSecondary, leftX, secondaryBaseline, leftSecondaryPaint)

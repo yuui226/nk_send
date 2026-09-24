@@ -13,4 +13,6 @@
         android:targetPackage="com.ztransfer.debug" />
     <instrumentation android:name="com.ztransfer.ui.screen.RemotePreviewHistogramInstrumentation"
         android:targetPackage="com.ztransfer.debug" />
+    <instrumentation android:name="com.ztransfer.ui.screen.MonitorInteractionInstrumentation"
+        android:targetPackage="com.ztransfer.debug" />
 </manifest>

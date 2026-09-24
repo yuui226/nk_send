@@ -2,6 +2,8 @@ package com.ztransfer.ui.screen
 
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.*
 import androidx.compose.foundation.layout.*
@@ -20,6 +22,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.layoutId
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.res.stringResource
@@ -63,7 +67,7 @@ internal fun ApplyRemoteToolLayout(layout: RemoteToolLayout, onVisible: (RemoteT
     }
 }
 
-/** Same wrapping toolbar in normal and edit modes; no modal, list or scrolling surface. */
+/** Portrait edits and wraps in place; landscape only browses a single scrolling row. */
 @Composable
 internal fun RemoteToolBar(
     tools: RemoteToolPreferences,
@@ -72,16 +76,18 @@ internal fun RemoteToolBar(
     onVisible: (RemoteTool, Boolean) -> Unit,
     modifier: Modifier = Modifier,
     gap: Dp = 6.dp,
+    singleLine: Boolean = false,
     leading: @Composable () -> Unit = {},
     button: @Composable (RemoteTool?) -> Unit,
 ) {
-    val dragState = remember { ToolDragState() }
+    val dragState = remember(singleLine) { ToolDragState() }
     val layout = tools.layout(movie)
     val currentLayout by rememberUpdatedState(layout)
     val secondRowLock = layout.lockStartsSecondRow
-    val sequence = layout.shownTools + (if (editing) layout.hiddenTools else emptyList())
+    val editEnabled = editing && !singleLine
+    val sequence = layout.shownTools + (if (editEnabled) layout.hiddenTools else emptyList())
     val endTools = listOf(RemoteTool.FULLSCREEN, RemoteTool.ROTATE)
-    val gesture = if (!editing) Modifier else Modifier.pointerInput(dragState, layout) {
+    val gesture = if (!editEnabled) Modifier else Modifier.pointerInput(dragState, layout, singleLine) {
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false)
             val tool = currentLayout.shownTools.firstOrNull {
@@ -101,20 +107,14 @@ internal fun RemoteToolBar(
             } finally { dragState.dragging = null }
         }
     }
-    DisposableEffect(editing, layout) {
+    DisposableEffect(editEnabled, layout) {
         onDispose { dragState.dragging = null }
     }
-    AdaptiveRemoteToolBar(
-        modifier.animateContentSize(tween(220)).then(gesture),
-        horizontalGap = gap, verticalGap = 4.dp, pinnedEndCount = endTools.size,
-        secondRowFirstId = if (secondRowLock) RemoteTool.LOCK.id else null,
-    ) {
-        leading()
-        (sequence + listOf(null) + endTools).forEach { tool ->
+    val renderTool: @Composable (RemoteTool?) -> Unit = { tool ->
             val id = tool?.id ?: "manage"
             key(id) {
-                AnimatedToolSlot(id, tool, editing, layout.visibleOrManager(tool), dragState) {
-                    if (editing && tool != null && !tool.fixed) {
+                AnimatedToolSlot(id, tool, editEnabled, layout.visibleOrManager(tool), dragState) {
+                    if (editEnabled && tool != null && !tool.fixed) {
                         val visible = layout.visible(tool)
                         val title = stringResource(tool.title)
                         val stateLabel = stringResource(if (visible) R.string.remote_tool_show else R.string.remote_tool_hide)
@@ -143,6 +143,79 @@ internal fun RemoteToolBar(
                     } else button(tool)
                 }
             }
+    }
+    if (singleLine) {
+        LandscapeRemoteToolBar(
+            modifier = modifier, minimumGap = gap,
+            tools = sequence, fixedTools = endTools, leading = leading,
+            button = { tool -> button(tool) },
+        )
+    } else {
+        AdaptiveRemoteToolBar(
+            modifier.animateContentSize(tween(220)).then(gesture),
+            horizontalGap = gap, verticalGap = 4.dp, pinnedEndCount = endTools.size,
+            secondRowFirstId = if (secondRowLock) RemoteTool.LOCK.id else null,
+        ) {
+            leading()
+            (sequence + listOf(null) + endTools).forEach { renderTool(it) }
+        }
+    }
+}
+
+/** Fit: distribute whitespace across every gap. Overflow: scroll tools, pin trailing actions. */
+@Composable
+private fun LandscapeRemoteToolBar(
+    modifier: Modifier,
+    minimumGap: Dp,
+    tools: List<RemoteTool>,
+    fixedTools: List<RemoteTool>,
+    leading: @Composable () -> Unit,
+    button: @Composable (RemoteTool) -> Unit,
+) {
+    val widths = remember { mutableStateMapOf<String, Int>() }
+    val scroll = rememberScrollState()
+    val density = LocalDensity.current
+    BoxWithConstraints(modifier) {
+        val ids = listOf("leading") + (tools + fixedTools).map { it.id }
+        val measured = ids.all { it in widths }
+        val visibleWidths = ids.mapNotNull { widths[it]?.takeIf { width -> width > 0 } }
+        val gapCount = (visibleWidths.size - 1).coerceAtLeast(1)
+        val availablePx = with(density) { maxWidth.toPx() }
+        val freePerGap = (availablePx - visibleWidths.sum()) / gapCount
+        val hasScrollableTools = tools.isNotEmpty() || (widths["leading"] ?: 0) > 0
+        val targetGap = if (measured && hasScrollableTools) {
+            with(density) { freePerGap.toDp() }.coerceAtLeast(minimumGap)
+        } else minimumGap
+        val animatedGap by animateDpAsState(targetGap, tween(180), label = "landscapeToolSpacing")
+        // Shrinking the viewport must never temporarily push the fixed actions outside it.
+        val spacing = animatedGap.coerceAtMost(targetGap)
+        val measuredSlot: @Composable (String, @Composable () -> Unit) -> Unit = { id, content ->
+            Box(Modifier.onSizeChanged { size ->
+                if (widths[id] != size.width) widths[id] = size.width
+            }) { content() }
+        }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(spacing)) {
+            Row(
+                Modifier.weight(1f).horizontalScroll(scroll).padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(spacing),
+            ) {
+                // A zero-width leading slot must not introduce an extra Row gap.
+                // Keep the optional content inside the first tool's slot instead.
+                tools.forEachIndexed { index, tool ->
+                    if (index == 0) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(
+                            if ((widths["leading"] ?: 0) > 0) spacing else 0.dp
+                        ), verticalAlignment = Alignment.CenterVertically) {
+                            measuredSlot("leading", leading)
+                            measuredSlot(tool.id) { button(tool) }
+                        }
+                    } else measuredSlot(tool.id) { button(tool) }
+                }
+                if (tools.isEmpty()) measuredSlot("leading", leading)
+            }
+            fixedTools.forEach { tool -> measuredSlot(tool.id) { button(tool) } }
         }
     }
 }

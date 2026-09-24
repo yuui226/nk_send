@@ -822,10 +822,11 @@ private fun TransferTaskCardContent(
         else -> null
     }
     val transferDuration = task.elapsedMs?.let(::formatDuration)
-    val generationDuration = displayedFrameGenerationElapsedMs?.let(::formatDuration)
+    val generationDuration = displayedFrameGenerationElapsedMs
+        ?.takeUnless { task.frameGenerationSkipped }?.let(::formatDuration)
     val effectText = transferTaskEffectText(task)
     val animateTransferPills = task.status == TransferStatus.TRANSFERING
-    val animateGenerationPills = task.isGeneratingFrame
+    val animateGenerationPills = task.isGeneratingFrame && !task.frameGenerationSkipped
 
     Column(modifier = modifier) {
         Text(
@@ -890,7 +891,7 @@ private fun TransferTaskCardContent(
                 horizontalArrangement = Arrangement.spacedBy(5.dp),
             ) {
                 TransferInfoPill(
-                    text = effectText,
+                    text = if (task.frameGenerationSkipped) stringResource(R.string.status_skipped) else effectText,
                     tone = TransferCardPillTone.EFFECT,
                     respond = animateGenerationPills && generationDuration != null,
                     modifier = Modifier.weight(1f, fill = false),
@@ -999,8 +1000,10 @@ private fun TransferInfoPill(
 @Composable
 private fun transferTaskEffectText(task: TransferTask): String? {
     val frameName = task.framePreset
-        ?.takeIf { task.frameBorderRequested }
-        ?.let { photoFramePresetLabel(it) }
+        ?.let {
+            if (task.frameBorderRequested) photoFramePresetLabel(it)
+            else stringResource(R.string.photo_frame_watermark_short)
+        }
     val filterName = task.photoFilterRequested?.let {
         "${photoFilterDisplayName(it.preset)} ${it.normalizedIntensityPercent}%"
     }
@@ -1188,4 +1191,3 @@ private fun QueueThumbnail(
         }
     }
 }
-

@@ -57,6 +57,7 @@ internal class RemoteToolPreferences(private val prefs: SharedPreferences) {
         enumValues<T>().find { it.name == prefs.getString(key, null) } ?: default
     ) { prefs.edit().putString(key, it.name).apply() }
 
+    val disp = enum("remote_disp_mode", MonitorDispMode.EXPOSURE)
     val fps = bool("remote_fps", true)
     val hd = bool("remote_hd")
     val histogram = enum("remote_histogram_mode", if (prefs.getBoolean("remote_histogram", false)) HistogramMode.LUMA else HistogramMode.OFF)

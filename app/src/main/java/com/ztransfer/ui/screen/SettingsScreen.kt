@@ -102,11 +102,11 @@ import androidx.core.content.ContextCompat
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.TextRange
@@ -131,6 +131,8 @@ import com.ztransfer.effects.FavoritePhotoFilter
 import com.ztransfer.effects.orderWithFavorites
 import com.ztransfer.frame.PhotoFrameExporter
 import com.ztransfer.frame.PhotoFrameMetadata
+import com.ztransfer.frame.PhotoFrameBrandStyle
+import com.ztransfer.frame.nextBrandStyle
 import com.ztransfer.frame.PhotoFrameMetadataSettings
 import com.ztransfer.frame.PhotoFramePreset
 import com.ztransfer.frame.PhotoFrameWatermark
@@ -764,8 +766,7 @@ fun SettingsOverlay(
                                 requestedPortrait = previewSource.bitmap.height >
                                     previewSource.bitmap.width,
                                 onRotate = rotateEffectPreview,
-                                borderEnabled =
-                                    frameDraftDecorationEnabled && frameDraftBorderEnabled,
+                                borderEnabled = frameDraftDecorationEnabled && frameDraftBorderEnabled,
                                 preset = frameDraftPreset,
                                 metadataSettings = resolvedPhotoFrameMetadataSettings(
                                     state.photoFrameMetadataSettings,
@@ -1087,7 +1088,7 @@ fun SettingsOverlay(
                     stringResource(R.string.photo_frame_parameter_poster),
             )
             val selectedFrameChoice = frameChoices.first { it.first == state.photoFramePreset }
-            val visibleWatermark = if (state.photoFrameEnabled) {
+            val visibleWatermark = if (state.photoEffectsEnabled && state.photoFrameEnabled) {
                 effectivePhotoFrameWatermark(
                     isPro,
                     state.photoFrameWatermark,
@@ -1106,7 +1107,7 @@ fun SettingsOverlay(
                 stringResource(R.string.photo_frame_no_watermark)
             }
             val filterSummaryLines = selectedPhotoFilter
-                ?.takeIf { state.photoFilterEnabled }
+                ?.takeIf { state.photoEffectsEnabled && state.photoFilterEnabled }
                 ?.let {
                     listOf(
                         photoFilterDisplayName(it),
@@ -1117,7 +1118,7 @@ fun SettingsOverlay(
                     )
                 }
                 ?: listOf(stringResource(R.string.photo_filter_off_option))
-            val frameSummary = if (state.photoFrameEnabled && state.photoFrameBorderEnabled) {
+            val frameSummary = if (state.photoEffectsEnabled && state.photoFrameEnabled && state.photoFrameBorderEnabled) {
                 selectedFrameChoice.second
             } else {
                 stringResource(R.string.photo_frame_off)
@@ -1145,7 +1146,7 @@ fun SettingsOverlay(
             }
             SettingsCard(
                 borderColor = colors.accentOrange.copy(
-                    alpha = if (state.photoFilterEnabled || state.photoFrameEnabled) 0.56f
+                    alpha = if (state.photoEffectsEnabled && (state.photoFilterEnabled || state.photoFrameEnabled)) 0.56f
                     else 0.30f
                 ),
                 pressAccentColor = colors.accentOrange,
@@ -1157,6 +1158,15 @@ fun SettingsOverlay(
                         color = colors.accentOrange,
                         modifier = Modifier.weight(1f),
                     )
+                    val effectsLabel = stringResource(R.string.photo_effects)
+                    Switch(
+                        checked = state.photoEffectsEnabled,
+                        onCheckedChange = viewModel::setPhotoEffectsEnabled,
+                        modifier = Modifier.semantics {
+                            contentDescription = effectsLabel
+                        },
+                    )
+                    Spacer(Modifier.width(8.dp))
                     Icon(
                         Icons.Default.ChevronRight,
                         contentDescription = stringResource(R.string.photo_effects_open_editor),
@@ -2510,7 +2520,7 @@ private fun PhotoFrameMetadataInlineSettings(
     ) {
         val choices = listOfNotNull(
             Triple(R.string.photo_frame_metadata_brand, settings.showBrand) {
-                settings.copy(showBrand = !settings.showBrand)
+                settings.nextBrandStyle()
             },
             Triple(R.string.photo_frame_metadata_model, settings.showModel) {
                 settings.copy(showModel = !settings.showModel)
@@ -2544,7 +2554,9 @@ private fun PhotoFrameMetadataInlineSettings(
             ) {
                 rowChoices.forEach { (label, selected, update) ->
                     FilterChip(
-                        label = stringResource(label),
+                        label = if (label == R.string.photo_frame_metadata_brand && selected) {
+                            stringResource(if (settings.brandStyle == PhotoFrameBrandStyle.LOGO) R.string.photo_frame_metadata_brand_logo else R.string.photo_frame_metadata_brand_text)
+                        } else stringResource(label),
                         selected = selected,
                         fitLabel = true,
                         onClick = {

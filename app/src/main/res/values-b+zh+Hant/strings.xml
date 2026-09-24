@@ -614,4 +614,6 @@
     <string name="remote_grid_golden">黃金分割</string>
     <string name="remote_grid_cycle">構圖參考線：%1$s，點擊切換</string>
     <string name="photo_frame_parameter_poster">參數海報</string>
+    <string name="photo_frame_metadata_brand_text">品牌·文字</string>
+    <string name="photo_frame_metadata_brand_logo">品牌·圖標</string>
 </resources>

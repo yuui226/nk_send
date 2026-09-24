@@ -6,7 +6,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Text
 import androidx.compose.ui.Alignment
@@ -348,7 +351,7 @@ internal fun FpsMark(modifier: Modifier = Modifier) {
 
 /** 全屏——四角括号（通用「放大到全屏」符号）。 */
 @Composable
-internal fun FullscreenEnterMark(modifier: Modifier = Modifier) {
+internal fun FullscreenMark(modifier: Modifier = Modifier, exiting: Boolean = false) {
     val c = LocalContentColor.current
     Canvas(modifier) {
         val sw = ToolMarkStrokeWidth.toPx()
@@ -358,8 +361,10 @@ internal fun FullscreenEnterMark(modifier: Modifier = Modifier) {
         val h = size.height
         // 每个角一个 L 形括号，开口朝外
         fun bracket(cornerX: Float, cornerY: Float, dx: Float, dy: Float) {
-            drawLine(c, Offset(cornerX, cornerY), Offset(cornerX + dx * arm, cornerY), sw, StrokeCap.Round)
-            drawLine(c, Offset(cornerX, cornerY), Offset(cornerX, cornerY + dy * arm), sw, StrokeCap.Round)
+            val corner = Offset(cornerX, cornerY) + if (exiting) Offset(dx * arm, dy * arm) else Offset.Zero
+            val direction = if (exiting) -1f else 1f
+            drawLine(c, corner, corner + Offset(dx * arm * direction, 0f), sw, StrokeCap.Round)
+            drawLine(c, corner, corner + Offset(0f, dy * arm * direction), sw, StrokeCap.Round)
         }
         bracket(pad, pad, 1f, 1f)                    // 左上 ┌
         bracket(w - pad, pad, -1f, 1f)               // 右上 ┐
@@ -568,76 +573,47 @@ internal fun ViewfinderZebraOverlay(
     )
 }
 
-/** ±1° 内算水平：够严格才有意义，又不至于因手抖级别的读数抖动反复变色。 */
-private const val LevelToleranceDegrees = 1.0f
+/** Separate enter/exit limits stop a nearly level camera from flickering between colors. */
+internal fun horizonAligned(roll: Float, wasAligned: Boolean): Boolean =
+    roll.isFinite() && abs(roll) <= if (wasAligned) 1.2f else 0.7f
 
-/**
- * 电子水平仪叠加层——相机式虚拟水平线。
- *
- * [rollDegrees] 是【相机机身】的滚转角（Nikon AngleLevel 0xD067），不是手机传感器：
- * 相机在三脚架上、手机在手里，只有相机自身的姿态对构图有意义。
- * 地平线按滚转角的反向旋转，因此它在画面里始终代表真水平；中央与两端的固定参考
- * 标记不随之旋转，两者的夹角就是偏差。水平时转绿，否则用琥珀色。
- *
- * [rollDegrees] 为 null（还没读到角度或机身不支持该属性）时什么都不画——
- * 宁可没有水平仪，也不画一条假的水平线。
- */
+/** Z30-style circular reference. Only camera roll is available; no simulated pitch indicator. */
 @Composable
 internal fun ViewfinderLevelOverlay(
     rollDegrees: Float?,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
 ) {
-    val roll = rollDegrees ?: return
-    val colors = AppTheme.colors
-    val horizonColor = (
-        if (abs(roll) <= LevelToleranceDegrees) colors.statusConnected else colors.accentOrange
-        ).copy(alpha = 0.82f)
+    val roll = rollDegrees?.takeIf { it.isFinite() } ?: return
+    var aligned by remember { mutableStateOf(horizonAligned(roll, false)) }
+    LaunchedEffect(roll) { aligned = horizonAligned(roll, aligned) }
+    val angle by animateFloatAsState(roll, tween(100), label = "horizonRoll")
+    val tint by animateColorAsState(
+        if (aligned) Color(0xFF52F58B) else Color(0xFFFFC857),
+        tween(160), label = "horizonColor",
+    )
+    val stroke by animateFloatAsState(if (aligned) 3f else 1.8f, tween(160), label = "horizonStroke")
     Canvas(modifier) {
-        // 线宽与网格/直方图同一量级，半透明，不跟画面抢注意力。
-        val horizonStroke = 1.2.dp.toPx()
-        val refStroke = 1.5.dp.toPx()
-        val innerGap = 16.dp.toPx()          // 中央留空，不压住主体
-        val arm = (size.width * 0.27f).coerceAtMost(size.height * 0.42f)
-        if (arm <= innerGap) return@Canvas
-        val refColor = Color.White.copy(alpha = 0.45f)
-
-        // 相机顺时针歪 3°，线就逆时针转 3°——画面里这条线才是真水平。
-        rotate(degrees = -roll) {
-            drawLine(
-                horizonColor,
-                Offset(center.x - arm, center.y),
-                Offset(center.x - innerGap, center.y),
-                horizonStroke,
-                StrokeCap.Round
-            )
-            drawLine(
-                horizonColor,
-                Offset(center.x + innerGap, center.y),
-                Offset(center.x + arm, center.y),
-                horizonStroke,
-                StrokeCap.Round
-            )
+        val radius = minOf(size.width * 0.19f, size.height * 0.28f)
+        if (radius < 18.dp.toPx()) return@Canvas
+        val outline = Color.Black.copy(alpha = 0.65f)
+        val reference = if (aligned) tint.copy(alpha = 0.95f) else Color.White.copy(alpha = 0.65f)
+        drawCircle(outline, radius, style = Stroke(4.dp.toPx()))
+        drawCircle(reference, radius, style = Stroke(if (aligned) 2.5.dp.toPx() else 1.5.dp.toPx()))
+        // Fixed horizontal and vertical references remain anchored to the viewfinder.
+        drawLine(outline, center - Offset(radius, 0f), center + Offset(radius, 0f), 4.dp.toPx())
+        drawLine(reference, center - Offset(radius, 0f), center + Offset(radius, 0f), 1.dp.toPx())
+        drawLine(reference.copy(alpha = 0.45f), center - Offset(0f, radius), center + Offset(0f, radius), 1.dp.toPx())
+        rotate(-angle) {
+            val start = center - Offset(radius, 0f)
+            val end = center + Offset(radius, 0f)
+            drawLine(outline, start, end, (stroke + 2f).dp.toPx(), StrokeCap.Round)
+            drawLine(tint, start, end, stroke.dp.toPx(), StrokeCap.Round)
+            for (side in listOf(-1, 1)) {
+                val x = center.x + side * radius
+                drawLine(tint, Offset(x, center.y - 5.dp.toPx()), Offset(x, center.y + 5.dp.toPx()), stroke.dp.toPx(), StrokeCap.Round)
+            }
         }
-
-        // 固定中央参考短线（不旋转）
-        val refHalf = 10.dp.toPx()
-        drawLine(
-            refColor,
-            Offset(center.x - refHalf, center.y),
-            Offset(center.x + refHalf, center.y),
-            refStroke,
-            StrokeCap.Round
-        )
-        // 固定两端刻度：水平时旋转的地平线正好压在这两个刻度上
-        val tick = 4.dp.toPx()
-        for (dx in floatArrayOf(-arm, arm)) {
-            drawLine(
-                refColor,
-                Offset(center.x + dx, center.y - tick),
-                Offset(center.x + dx, center.y + tick),
-                refStroke,
-                StrokeCap.Round
-            )
-        }
+        drawCircle(outline, 4.dp.toPx())
+        drawCircle(tint, if (aligned) 3.dp.toPx() else 1.8.dp.toPx())
     }
 }

@@ -183,11 +183,22 @@ data class TransferTask(
     val frameGenerationStartedAtElapsedMs: Long? = null,
     /** 单次派生从显示“生成中”到结束的用户可感知耗时。 */
     val frameGenerationElapsedMs: Long? = null,
+    /** 本次任务因照片效果总开关关闭而跳过生成；与原片查重跳过相互独立。 */
+    val frameGenerationSkipped: Boolean = false,
 )
 
 internal fun TransferTask.startFrameGeneration(nowElapsedMs: Long): TransferTask = copy(
+    frameGenerationSkipped = false,
     isGeneratingFrame = true,
     frameGenerationStartedAtElapsedMs = nowElapsedMs,
+    frameGenerationElapsedMs = null,
+)
+
+/** Preserve the queued recipe so future tasks and explicit retries still use their snapshot. */
+internal fun TransferTask.skipFrameGeneration(): TransferTask = copy(
+    frameGenerationSkipped = framePreset != null || photoFilterRequested != null,
+    isGeneratingFrame = false,
+    frameGenerationStartedAtElapsedMs = null,
     frameGenerationElapsedMs = null,
 )
 
@@ -357,6 +368,7 @@ private fun TransferTask.newAttempt(): TransferTask = copy(
     downloaded = 0L,
     error = null,
     skipped = false,
+    frameGenerationSkipped = false,
     downloadMBps = 0f,
     elapsedMs = null,
     isGeneratingFrame = false,
@@ -434,6 +446,7 @@ data class TransferState(
     // 照片预览直方图的可见状态。跨照片、跨预览会话与 App 重启持久化。
     val previewHistogramMode: HistogramMode = HistogramMode.OFF,
     // 开启后：受支持的原图落盘成功，再派生一张保留原片细节的边框/水印效果图。
+    val photoEffectsEnabled: Boolean = true,
     val photoFrameEnabled: Boolean = false,
     // 总开关开启时，边框与水印可以独立组合；false 允许只在原照片上叠水印。
     val photoFrameBorderEnabled: Boolean = true,
@@ -1088,6 +1101,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     prefs.getString("preview_histogram_mode", null),
                     prefs.getBoolean("preview_histogram_enabled", false),
                 ),
+                photoEffectsEnabled = prefs.getBoolean("photo_effects_enabled", true),
                 photoFrameEnabled = prefs.getBoolean("photo_frame_enabled", false),
                 photoFrameBorderEnabled = prefs.getBoolean("photo_frame_border_enabled", true),
                 photoFramePreset = runCatching {
@@ -1264,6 +1278,12 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     fun setPreviewHistogramMode(mode: HistogramMode) {
         prefs.edit().putString("preview_histogram_mode", mode.name).apply()
         _state.update { it.copy(previewHistogramMode = mode) }
+    }
+
+    /** A runtime gate, not a destructive edit of the user's saved effect recipe. */
+    fun setPhotoEffectsEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean("photo_effects_enabled", enabled).apply()
+        _state.update { it.copy(photoEffectsEnabled = enabled) }
     }
 
     fun setPhotoFrameEnabled(enabled: Boolean) {
@@ -1856,6 +1876,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     }
 
     private fun prewarmPhotoFilterFor(tasks: Collection<TransferTask>) {
+        if (!_state.value.photoEffectsEnabled) return
         tasks.firstNotNullOfOrNull { it.photoFilterRequested }?.let(::prewarmPhotoFilter)
     }
 
@@ -1990,8 +2011,9 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                             size = localOriginal.size,
                             localUri = localOriginal.uri,
                         )
-                        val preset = task.framePreset
-                        val filter = task.photoFilterRequested
+                        val effectsEnabled = _state.value.photoEffectsEnabled
+                        val preset = task.framePreset.takeIf { effectsEnabled }
+                        val filter = task.photoFilterRequested.takeIf { effectsEnabled }
                         if (preset == null && filter == null) {
                             updateTask(taskId) {
                                 it.copy(
@@ -2000,7 +2022,9 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                     progress = 1f,
                                     downloaded = localOriginal.size,
                                     speed = 0,
-                                )
+                                ).let { completed ->
+                                    if (!effectsEnabled) completed.skipFrameGeneration() else completed
+                                }
                             }
                         } else {
                             // 第二查必须发生在启动前台服务之前。若派生图已经存在，任务会瞬间
@@ -2036,6 +2060,18 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                             }
                             // 预检查挂起期间用户可能撤回这项；此时不得继续派生或传输。
                             if (pendingTransferQueue.consumeWithdrawal(taskId)) continue
+                            if (!_state.value.photoEffectsEnabled) {
+                                updateTask(taskId) {
+                                    it.copy(
+                                        status = TransferStatus.COMPLETED,
+                                        skipped = true,
+                                        progress = 1f,
+                                        downloaded = localOriginal.size,
+                                        speed = 0,
+                                    ).skipFrameGeneration()
+                                }
+                                continue
+                            }
                             if (frameExists) {
                                 log {
                                         "DERIVATIVE_SKIP existing: ${localOriginal.displayName} " +
@@ -2382,8 +2418,9 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                         size = stats.bytes,
                                         localUri = renamedUri,
                                     )
-                                    val framePreset = task.framePreset
-                                    val photoFilter = task.photoFilterRequested
+                                    val effectsEnabled = _state.value.photoEffectsEnabled
+                                    val framePreset = task.framePreset.takeIf { effectsEnabled }
+                                    val photoFilter = task.photoFilterRequested.takeIf { effectsEnabled }
                                     val shouldGenerateFrame = framePreset != null || photoFilter != null
                                     // 起点由协议层在本文件进入下载流程时记录（包含为大图/EXIF
                                     // 让路的块间时间）；这里仍是正式文件已落盘并完成改名/复制后的完成点。
@@ -2408,7 +2445,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                                     android.os.SystemClock.elapsedRealtime(),
                                                 )
                                             } else {
-                                                completed
+                                                if (!effectsEnabled) completed.skipFrameGeneration() else completed
                                             }
                                         }
                                     }
@@ -2926,6 +2963,13 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         var frameExportSaved = false
         activePhotoFrameExports.incrementAndGet()
         val job = viewModelScope.launch(photoFrameDispatcher) {
+            // Recheck at worker entry: metadata reads and dispatcher queues may have suspended
+            // since transfer completion. A running export is allowed to finish after this point.
+            if (!_state.value.photoEffectsEnabled) {
+                probeOutcome = "skipped:effects-disabled"
+                updateTask(taskId) { it.skipFrameGeneration() }
+                return@launch
+            }
             if (PhotoGenerationProbe.enabled) {
                 PhotoGenerationProbe.stage(
                     sessionId = probeSession,

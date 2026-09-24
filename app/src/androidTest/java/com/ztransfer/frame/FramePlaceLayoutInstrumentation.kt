@@ -11,12 +11,17 @@ import java.io.File
 
 /** Run on an emulator with am instrument; writes real renderer contact sheets, without geocoding. */
 class FramePlaceLayoutInstrumentation : Instrumentation() {
-    override fun onCreate(arguments: Bundle?) { super.onCreate(arguments); start() }
+    private var brandLogo = false
+    override fun onCreate(arguments: Bundle?) {
+        super.onCreate(arguments)
+        brandLogo = arguments?.getString("brandLogo") == "true"
+        start()
+    }
 
     override fun onStart() {
         val result = Bundle()
         try {
-            val folder = File(targetContext.filesDir, "frame-place-layouts").apply {
+            val folder = File(targetContext.filesDir, if (brandLogo) "frame-logo-layouts" else "frame-place-layouts").apply {
                 check(isDirectory || mkdirs()) { "Cannot create layout output directory: $absolutePath" }
             }
             for (portrait in listOf(false, true)) {
@@ -36,9 +41,17 @@ class FramePlaceLayoutInstrumentation : Instrumentation() {
                         city = "杭州市", region = "西湖区")
                     val settings = defaultPhotoFrameMetadataSettings(preset).copy(showCity = true, showRegion = true,
                         showCoordinates = true, showAltitude = true, showBrand = true, showModel = true,
-                        showLensModel = true, showDate = true, showTime = true, showFocalLength = true, showExposure = true)
+                        showLensModel = true, showDate = true, showTime = true, showFocalLength = true, showExposure = true,
+                        brandStyle = if (brandLogo) PhotoFrameBrandStyle.LOGO else PhotoFrameBrandStyle.TEXT)
                     val output = PhotoFrameExporter.renderPreview(targetContext, source, metadata, preset,
                         PhotoFrameWatermark(), metadataSettings = settings, longEdge = 1200, previewPlaceholders = false)
+                    if (brandLogo) {
+                        var yellowPixels = 0
+                        for (y in 0 until output.height) for (x in 0 until output.width) {
+                            if (output.getPixel(x, y) == Color.rgb(255, 225, 0)) yellowPixels++
+                        }
+                        check(yellowPixels > 0) { "Missing Nikon logo in $preset (portrait=$portrait)" }
+                    }
                     File(folder, "${preset.name}-${if (portrait) "portrait" else "landscape"}.png").outputStream().use {
                         output.compress(Bitmap.CompressFormat.PNG, 100, it)
                     }

@@ -620,4 +620,6 @@
     <string name="remote_grid_golden">Golden ratio</string>
     <string name="remote_grid_cycle">Framing grid: %1$s. Tap to cycle.</string>
     <string name="photo_frame_parameter_poster">Parameter Poster</string>
+    <string name="photo_frame_metadata_brand_text">Brand · Text</string>
+    <string name="photo_frame_metadata_brand_logo">Brand · Logo</string>
 </resources>

@@ -30,6 +30,8 @@ internal const val PHOTO_FRAME_ADDRESS_METADATA_ENABLED = false
 internal val PHOTO_FRAME_DATE_PATTERNS = listOf("yyyy-MM-dd", "yyyy/MM/dd", "yyyy.MM.dd", "MM-dd-yyyy")
 internal val PHOTO_FRAME_TIME_PATTERNS = listOf("HH:mm", "HH:mm:ss", "HH.mm", "HH.mm.ss")
 
+enum class PhotoFrameBrandStyle { TEXT, LOGO }
+
 /** Per-preset metadata presentation. Missing map entries always fall back to preset defaults. */
 data class PhotoFrameMetadataSettings(
     val showDate: Boolean,
@@ -46,6 +48,7 @@ data class PhotoFrameMetadataSettings(
     val showAltitude: Boolean = false,
     val showCity: Boolean = false,
     val showRegion: Boolean = false,
+    val brandStyle: PhotoFrameBrandStyle = PhotoFrameBrandStyle.TEXT,
 )
 
 internal fun defaultPhotoFrameMetadataSettings(
@@ -170,9 +173,11 @@ internal fun PhotoFrameMetadata.withPresentation(
         }
     } else null
     return copy(
+        brandStyle = normalized.brandStyle,
         make = when {
             !normalized.showBrand -> null
             sourceMake != null -> sourceMake
+            normalized.brandStyle == PhotoFrameBrandStyle.LOGO && inferredBrand != null -> inferredBrand
             // Preserve export presentation: model-derived brand fallback was historically only
             // materialized when the model row was hidden. Preview may also use that real inference
             // before falling back to the deliberately fake brand.
@@ -341,8 +346,11 @@ internal fun encodePhotoFrameMetadataSettings(
         value.datePattern,
         value.timePattern,
     ).let { fields ->
-        if (value.showCity || value.showRegion) fields + listOf(value.showCity, value.showRegion)
-        else fields
+        when {
+            value.brandStyle == PhotoFrameBrandStyle.LOGO -> fields + listOf(value.showCity, value.showRegion, value.brandStyle.name)
+            value.showCity || value.showRegion -> fields + listOf(value.showCity, value.showRegion)
+            else -> fields
+        }
     }.joinToString(FIELD_SEPARATOR)
 }.joinToString(ENTRY_SEPARATOR)
 
@@ -355,8 +363,8 @@ internal fun decodePhotoFrameMetadataSettings(
         val fields = entry.split(FIELD_SEPARATOR)
         // Older versions stored six or seven visibility flags. Accept those entries forever;
         // the former 13-field location format had an address slot which is deliberately skipped.
-        // 14-field entries append city/district after the unchanged 12-field layout.
-        if (fields.size != 9 && fields.size != 10 && fields.size != 12 && fields.size != 13 && fields.size != 14) {
+        // 14-field entries append city/district; 15-field entries append brand style.
+        if (fields.size != 9 && fields.size != 10 && fields.size != 12 && fields.size != 13 && fields.size != 14 && fields.size != 15) {
             return@forEach
         }
         val preset = PhotoFramePreset.entries.firstOrNull { it.name == fields[0] }
@@ -367,7 +375,7 @@ internal fun decodePhotoFrameMetadataSettings(
         val hasLegacyAddressSlot = fields.size == 13
         val booleanEnd = when {
             fields.size == 13 -> 11
-            fields.size == 12 || fields.size == 14 -> 10
+            fields.size == 12 || fields.size >= 14 -> 10
             hasLensModel -> 8
             else -> 7
         }
@@ -387,12 +395,13 @@ internal fun decodePhotoFrameMetadataSettings(
                 showFocalLength = checkNotNull(booleans[2]),
                 showExposure = checkNotNull(booleans[3]),
                 showBrand = checkNotNull(booleans[4]),
+                brandStyle = if (fields.size == 15) PhotoFrameBrandStyle.entries.firstOrNull { it.name == fields[14] } ?: return@forEach else PhotoFrameBrandStyle.TEXT,
                 showModel = checkNotNull(booleans[5]),
                 showLensModel = if (hasLensModel) checkNotNull(booleans[6]) else false,
                 // Address was removed from the border feature; retain only coordinate/altitude.
                 showAddress = false,
-                showCity = if (fields.size == 14) fields[12].toBooleanStrictOrNull() ?: return@forEach else false,
-                showRegion = if (fields.size == 14) fields[13].toBooleanStrictOrNull() ?: return@forEach else false,
+                showCity = if (fields.size >= 14) fields[12].toBooleanStrictOrNull() ?: return@forEach else false,
+                showRegion = if (fields.size >= 14) fields[13].toBooleanStrictOrNull() ?: return@forEach else false,
                 showCoordinates = if (hasLocation) {
                     checkNotNull(booleans[7])
                 } else false,
@@ -424,4 +433,11 @@ internal fun photoFrameMetadataSettingsFingerprintToken(
     )
     if (rendered == defaults) return null
     return encodePhotoFrameMetadataSettings(mapOf(preset to rendered)).takeIf(String::isNotEmpty)
+}
+
+/** Brand button: off → text → logo → off. */
+internal fun PhotoFrameMetadataSettings.nextBrandStyle(): PhotoFrameMetadataSettings = when {
+    !showBrand -> copy(showBrand = true, brandStyle = PhotoFrameBrandStyle.TEXT)
+    brandStyle == PhotoFrameBrandStyle.TEXT -> copy(brandStyle = PhotoFrameBrandStyle.LOGO)
+    else -> copy(showBrand = false, brandStyle = PhotoFrameBrandStyle.TEXT)
 }
