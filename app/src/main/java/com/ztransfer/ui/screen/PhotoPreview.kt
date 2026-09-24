@@ -93,6 +93,7 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -223,28 +224,9 @@ internal sealed interface PhotoPreviewItem {
     }
 }
 
-/**
- * 固定一次全屏预览会话能够看到的本地原图来源。
- *
- * 传输可能在 overlay 存活期间完成，但此时不能把正在淡入、缩放或绘制的相机 FHD
- * 热替换成完整原图。除了可能重置手势观感，这还会让旧 FHD 与大尺寸本地位图在同一帧
- * 参与纹理上传，造成明显的内存峰值，部分设备会直接崩溃。下次重新打开 overlay 时会
- * 创建新快照，自然获得刚传完的原图。合集成员也必须在打开时一起冻结，否则展开合集
- * 会绕过同一会话规则。
- */
-internal fun <T> snapshotPreviewSessionSources(
-    items: List<PhotoPreviewItem>,
-    sourceFor: (NikonCamera.FileInfo) -> T?,
-): Map<Int, T?> = buildMap {
-    items.forEach { item ->
-        when (item) {
-            is PhotoPreviewItem.Photo -> put(item.file.handle, sourceFor(item.file))
-            is PhotoPreviewItem.BurstCollection -> item.files.forEach { file ->
-                put(file.handle, sourceFor(file))
-            }
-        }
-    }
-}
+/** Only a completed transfer may supply the local original for this page visit. */
+internal fun <T> previewVisitSource(transferred: Boolean, source: () -> T?): T? =
+    if (transferred) source() else null
 
 internal fun isPreviewBurstExpanded(
     items: List<PhotoPreviewItem>,
@@ -300,7 +282,7 @@ internal fun allowPreviewRemoteThumbnailFallback(
 /**
  * 全屏预览层：普通页显示缓存缩略图的**未裁切**（Fit）完整画面；折叠连拍在分页中
  * 保持为一个合集页，只有用户主动展开才把成员插入其后。
- * 传输中仍可预读相邻本地原图；只有相机 FHD + EXIF 继续限制为当前页优先。
+ * 本地原图仅当前页读取和保留；相邻页只预取相机 FHD，传输期间暂停预取。
  * 整体从被长按格子 [anchorRect] 的位置缩放展开，关闭时反向缩回（从哪来回哪去）。
  * 已传输原图优先从本地解码；本地不存在或无法解码时才向相机请求 FHD。
  * 本层在深浅两种主题下都保持黑底沉浸式（照片查看器惯例，黑底最衬照片），
@@ -368,16 +350,13 @@ internal fun PhotoPreviewOverlay(
     val latestCurrentFile by rememberUpdatedState(currentFile)
     val latestPrepareDismissTarget by rememberUpdatedState(prepareDismissTarget)
     val latestOnDismiss by rememberUpdatedState(onDismiss)
-    // 本次 overlay 打开时已经存在的原图可以直接使用；打开后才完成的传输不热切换。
-    // remember 不带动态传输状态 key 是有意的：关闭并重新进入才创建下一份来源快照。
-    val sessionLocalOriginalUris = remember {
-        snapshotPreviewSessionSources(items, localOriginalUriFor)
+    // 每次翻到一张照片时捕获来源。传输完成不会在原地热切换；翻走再回来即可升级。
+    val currentLocalOriginalUri = remember(currentHandle) {
+        currentFile?.let { file ->
+            previewVisitSource(isTransferred(file)) { localOriginalUriFor(file) }
+        }
     }
-    val sessionLocalOriginalUriFor: (NikonCamera.FileInfo) -> Uri? = remember(
-        sessionLocalOriginalUris,
-    ) {
-        { file -> sessionLocalOriginalUris[file.handle] }
-    }
+    val localDecodeMutex = remember { kotlinx.coroutines.sync.Mutex() }
     // 高清图/EXIF 到位会触发大位图纹理上传与预览子树更新，因此稍延后启动。
     // 这个功能门绝不能依赖 progress.animateTo 返回：某些设备动画帧时钟停滞时，
     // 等动画完成会让 FHD、EXIF 和远程缩略图全部永久不启动。
@@ -414,8 +393,7 @@ internal fun PhotoPreviewOverlay(
     // 状态图按 handle 存储；handle 仅在本 overlay 存活期有效（关闭随 Composable 释放）。
     val highResolutionBitmaps = remember { mutableStateMapOf<Int, ImageBitmap>() }
     val highResolutionLoading = remember { mutableStateMapOf<Int, Boolean>() }
-    // 仅记录由本地原图生成的高清位图来源。同一会话使用打开时的来源快照，因此这里
-    // 只负责避免重复解码，不会在传输完成瞬间替换正在显示的相机 FHD。
+    // 标记完整原图，翻页后立即移除其缓存引用，不与邻页 FHD 共用保留窗口。
     val localPreviewUris = remember { mutableStateMapOf<Int, Uri>() }
     // 本地原图或 RAW 内嵌预览仍可能因损坏、权限或格式异常解码失败；按 URI 记住失败结果，
     // 本次预览不反复读盘，但仍会正常回退到相机 FHD。
@@ -755,17 +733,19 @@ internal fun PhotoPreviewOverlay(
     }
 
     // 加载单页高清图：普通照片读取本地完整原图，NEF/NRW 提取最大内嵌 JPEG，
-    // TIFF 直接请求相机 FHD；视频继续使用既有封面分支。当前页与邻页共用同一规则。
+    // TIFF 直接请求相机 FHD；视频继续使用既有封面分支。邻页禁止本地原图解码。
     // 返回 true 表示本次确实取到并解码成功（用于当前页到位的触感反馈）。
     suspend fun loadHighResolutionPage(
         page: Int,
         awaitExisting: Boolean = false,
         allowCameraRequest: Boolean,
+        allowLocalOriginal: Boolean = false,
     ): Boolean {
         val file = (previewItems.getOrNull(page) as? PhotoPreviewItem.Photo)?.file
             ?: return false
         val h = file.handle
-        val localUri = sessionLocalOriginalUriFor(file)
+        val visibleHandle = (previewItems.getOrNull(pagerState.currentPage) as? PhotoPreviewItem.Photo)?.file?.handle
+        val localUri = currentLocalOriginalUri.takeIf { allowLocalOriginal && h == visibleHandle }
         val localPreviewRoute = localOriginalPreviewRoute(file.extension)
         // 视频没有高清封面（FHD 操作码只对照片有效），不发注定失败的请求、也不显示加载条。
         if (file.extension in VIDEO_EXTENSIONS) {
@@ -774,6 +754,7 @@ internal fun PhotoPreviewOverlay(
         }
         if (h in highResolutionBitmaps) {
             val cachedLocalUri = localPreviewUris[h]
+            if (!allowLocalOriginal && cachedLocalUri != null) return false
             if (cachedLocalUri != null && cachedLocalUri != localUri) {
                 highResolutionBitmaps.remove(h)
                 displayedBitmaps.remove(h)
@@ -787,8 +768,10 @@ internal fun PhotoPreviewOverlay(
             if (!awaitExisting) return false
             // 当前页可能正由上一页的预取任务加载。等待它完成；若它因翻页被取消，
             // loading 会在 finally 中释放，随后由当前页重新发起，绝不漏载。
-            while (highResolutionLoading.containsKey(h) && h !in highResolutionBitmaps) delay(16)
-            if (h in highResolutionBitmaps) return false
+            while (highResolutionLoading.containsKey(h)) delay(16)
+            if (h in highResolutionBitmaps &&
+                (localUri == null || localPreviewUris[h] == localUri)
+            ) return false
         }
         fhdUnavailable.remove(h)
         highResolutionLoading[h] = true
@@ -798,23 +781,34 @@ internal fun PhotoPreviewOverlay(
                 localDecodeFailures[h] != localUri
             ) {
                 val localPreview = try {
-                    withContext(Dispatchers.IO) {
-                        val sourceUri = localUri
-                        val bitmap = when (localPreviewRoute) {
-                            LocalOriginalPreviewRoute.RAW_EMBEDDED_JPEG ->
-                                PhotoFrameExporter.decodeRawEmbeddedPreview(contentResolver, sourceUri)
-                            LocalOriginalPreviewRoute.DIRECT_BITMAP ->
-                                PhotoFrameExporter.decodeOriginalPreview(contentResolver, sourceUri)
-                            LocalOriginalPreviewRoute.CAMERA_FHD -> null
+                    localDecodeMutex.withLock {
+                        withContext(Dispatchers.IO) {
+                            val sourceUri = localUri
+                            val bitmap = when (localPreviewRoute) {
+                                LocalOriginalPreviewRoute.RAW_EMBEDDED_JPEG ->
+                                    PhotoFrameExporter.decodeRawEmbeddedPreview(contentResolver, sourceUri)
+                                LocalOriginalPreviewRoute.DIRECT_BITMAP ->
+                                    PhotoFrameExporter.decodeOriginalPreview(contentResolver, sourceUri)
+                                LocalOriginalPreviewRoute.CAMERA_FHD -> null
+                            }
+                            if (!kotlinx.coroutines.currentCoroutineContext().isActive) {
+                                bitmap?.recycle()
+                                throw CancellationException("Preview page changed during decode")
+                            }
+                            bitmap?.asImageBitmap()
                         }
-                        bitmap?.asImageBitmap()
                     }
                 } catch (cancelled: CancellationException) {
                     throw cancelled
-                } catch (_: Exception) {
+                } catch (oom: OutOfMemoryError) {
+                    // 原图分配失败时退回轻量预览，不再次尝试完整解码。
+                    android.util.Log.w("PhotoPreview", "Local preview memory allocation failed; handle=$h", oom)
+                    null
+                } catch (failure: Exception) {
+                    android.util.Log.w("PhotoPreview", "Local preview unreadable; handle=$h", failure)
                     null
                 }
-                if (localPreview != null) {
+                if (localPreview != null && h == (previewItems.getOrNull(pagerState.currentPage) as? PhotoPreviewItem.Photo)?.file?.handle) {
                     highResolutionBitmaps[h] = localPreview
                     localPreviewUris[h] = localUri
                     fhdUnavailable.remove(h)
@@ -850,7 +844,7 @@ internal fun PhotoPreviewOverlay(
         exifFinished.remove(h)
         exifLoading[h] = true
         try {
-            val localUri = sessionLocalOriginalUriFor(file)
+            val localUri = currentLocalOriginalUri
             exifData[h] = if (localUri != null) {
                 cameraViewModel.loadLocalExif(file, localUri)
             } else {
@@ -870,8 +864,13 @@ internal fun PhotoPreviewOverlay(
         val keepH = keep.mapNotNull { page ->
             (previewItems.getOrNull(page) as? PhotoPreviewItem.Photo)?.file?.handle
         }.toSet()
+        val staleOriginals = localPreviewUris.keys.filter { it != currentHandle }.toSet()
+        staleOriginals.forEach {
+            displayedBitmaps.remove(it)
+            localPreviewUris.remove(it)
+        }
         highResolutionBitmaps.keys
-            .filter { it !in keepH }
+            .filter { it !in keepH || it in staleOriginals }
             .forEach { highResolutionBitmaps.remove(it) }
         localPreviewUris.keys.filter { it !in keepH }.forEach { localPreviewUris.remove(it) }
         displayedBitmaps.keys.filter { it !in keepH }.forEach { displayedBitmaps.remove(it) }
@@ -881,12 +880,7 @@ internal fun PhotoPreviewOverlay(
         exifFinished.keys.filter { it !in keepH }.forEach { exifFinished.remove(it) }
     }
 
-    val currentLocalOriginalUri = currentFile?.let(sessionLocalOriginalUriFor)
-
-    // 当前页拥有最高优先级。会话快照中的本地 URI 与连接状态纳入 key；传输在本次预览
-    // 期间完成不会改变该 URI，因而不会取消当前任务或热替换位图。关闭后重新进入时，
-    // 新 overlay 会捕获已完成传输的本地 URI。本地不可用且断线后原地重连时仍可重新请求 FHD。
-    // 当前页与邻页由同一协程严格串行，避免首次失败时两个 effect 重复请求并触发熔断。
+    // 当前页读取本次访问捕获的来源；传输状态变化不取消正在进行的 PTP 请求。
     LaunchedEffect(
         previewItems,
         pagerState.currentPage,
@@ -901,6 +895,7 @@ internal fun PhotoPreviewOverlay(
             page = cp,
             awaitExisting = true,
             allowCameraRequest = false,
+            allowLocalOriginal = true,
         )
         if (loadedCurrent) haptics.tick()
         val resolvedLocally = currentHandle?.let { handle ->
@@ -919,6 +914,7 @@ internal fun PhotoPreviewOverlay(
                         page = cp,
                         awaitExisting = true,
                         allowCameraRequest = true,
+                        allowLocalOriginal = true,
                     )
                 ) {
                     haptics.tick()
@@ -944,7 +940,7 @@ internal fun PhotoPreviewOverlay(
 
     // 上面的主加载不能把 transfersBusy 放进 key，否则状态变化会取消正在读取的 PTP
     // 事务。这里仅监听“忙→闲”，在用户仍停留当前页时补上此前跳过的邻页预取。
-    LaunchedEffect(transfersBusy) {
+    LaunchedEffect(transfersBusy, currentHandle) {
         val shouldResumePrefetch = previousTransfersBusy && !transfersBusy
         previousTransfersBusy = transfersBusy
         if (!shouldResumePrefetch || !deferredLoadsEnabled) {
