@@ -144,7 +144,6 @@ import com.ztransfer.viewmodel.compactDateRangeLabel
 import com.ztransfer.viewmodel.isTransferredOriginal
 import com.ztransfer.viewmodel.latestCaptureLocalDate
 import com.ztransfer.viewmodel.storageIdsBySlot
-import com.ztransfer.viewmodel.transferredOriginalUri
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.math.sin
@@ -2067,13 +2066,6 @@ fun FileListScreen(
                             ?.takeIf { it.file.handle == file.handle }
                     },
                     isTransferred = hasLocalOriginal,
-                    localOriginalUriFor = { file ->
-                        transferredOriginalUri(
-                            file = file,
-                            existingExportIndex = transferState.existingExportIndex,
-                            organizeTransfersByDate = transferState.organizeTransfersByDate,
-                        )
-                    },
                     activeProgressFlow = transferViewModel.activeTransferProgress,
                     queueTargetBounds = queueTargetBounds,
                     onQueueFlightStarted = onQueueFlightStarted,

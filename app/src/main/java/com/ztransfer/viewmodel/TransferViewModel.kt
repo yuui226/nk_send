@@ -275,23 +275,6 @@ class ExportedOriginalIndex internal constructor() {
             filesBySize.keys.any { it < 0L || it == file.size }
     }
 
-    internal fun localUriString(
-        file: NikonCamera.FileInfo,
-        destinationFolderName: String? = null,
-    ): String? {
-        val filesBySize = filesByDestination[exportDestinationKey(destinationFolderName)]
-            ?.get(directoryLookupKey(file.fileName))
-            ?: return null
-        return if (file.size == PtpConstants.SIZE_UNKNOWN) {
-            filesBySize.values.firstOrNull { it.isNotEmpty() }
-        } else {
-            filesBySize[file.size]?.takeIf { it.isNotEmpty() }
-                ?: filesBySize.entries.firstOrNull {
-                    it.key < 0L && it.value.isNotEmpty()
-                }?.value
-        }
-    }
-
     private fun exportDestinationKey(destinationFolderName: String?): String =
         destinationFolderName?.lowercase(Locale.ROOT) ?: ROOT_EXPORT_DESTINATION
 
@@ -672,19 +655,6 @@ internal fun isTransferredOriginal(
         organizeTransfersByDate = organizeTransfersByDate,
     ),
 )
-
-/** Returns the already-indexed local original for preview, using the exact same destination rule. */
-internal fun transferredOriginalUri(
-    file: NikonCamera.FileInfo,
-    existingExportIndex: ExportedOriginalIndex,
-    organizeTransfersByDate: Boolean,
-): Uri? = existingExportIndex.localUriString(
-    file = file,
-    destinationFolderName = transferDestinationFolderName(
-        captureDate = file.captureDate,
-        organizeTransfersByDate = organizeTransfersByDate,
-    ),
-)?.let(Uri::parse)
 
 /** 已入队任务使用入队时锁定的目标目录，不受之后的“按天保存”开关变化影响。 */
 internal fun isTransferredOriginal(

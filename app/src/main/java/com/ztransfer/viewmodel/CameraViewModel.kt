@@ -4196,30 +4196,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             ?: run { exifCache[key] = null; null }
     }
 
-    /** Reads EXIF from an already-transferred local original without touching the camera session. */
-    suspend fun loadLocalExif(file: NikonCamera.FileInfo, sourceUri: Uri): PhotoExif? {
-        val key = exifKey(file)
-        if (key in exifCache) return exifCache[key]
-        if (file.extension !in EXIF_SUPPORTED_EXTENSIONS) {
-            exifCache[key] = null
-            return null
-        }
-        val parsed = withContext(Dispatchers.IO) {
-            val resolver = getApplication<Application>().contentResolver
-            runCatching {
-                resolver.openFileDescriptor(sourceUri, "r")?.use { descriptor ->
-                    parseExifImpl(ExifInterface(descriptor.fileDescriptor))
-                }
-            }.getOrNull() ?: runCatching {
-                resolver.openInputStream(sourceUri)?.use { input ->
-                    parseExifImpl(ExifInterface(java.io.BufferedInputStream(input)))
-                }
-            }.getOrNull()
-        }
-        exifCache[key] = parsed
-        return parsed
-    }
-
     /**
      * 解析 ExifInterface RATIONAL/SRATIONAL 属性值（"num/denom" → Float）。
      * SHORT/LONG 等整数类型直接解析为 Float。null 或格式异常返回 null。

@@ -2,7 +2,6 @@ package com.ztransfer.ui.screen
 
 import com.ztransfer.util.HistogramMode
 
-import android.net.Uri
 import android.os.SystemClock
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
@@ -74,7 +73,6 @@ import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -92,8 +90,6 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sin
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -104,15 +100,12 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.Dispatchers
 import androidx.compose.ui.unit.dp
 import com.ztransfer.R
-import com.ztransfer.frame.PhotoFrameExporter
 import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.protocol.PtpConstants
 import com.ztransfer.ui.theme.*
 import com.ztransfer.ui.util.formatFileSize
 import com.ztransfer.ui.util.rememberHaptics
 import com.ztransfer.viewmodel.CameraViewModel
-import com.ztransfer.viewmodel.NIKON_RAW_EXTENSIONS
-import com.ztransfer.viewmodel.TIFF_EXTENSIONS
 import com.ztransfer.viewmodel.PhotoExif
 import com.ztransfer.viewmodel.ActiveTransferProgress
 import com.ztransfer.viewmodel.TransferTask
@@ -132,19 +125,6 @@ private const val PREVIEW_QUEUE_GHOST_PREROLL_MS = 32L
 private const val PREVIEW_QUEUE_ANIMATION_TIMEOUT_MS = 1_000L
 
 internal enum class PreviewQueueDragDirection { UNDECIDED, UPWARD, REJECTED }
-
-internal enum class LocalOriginalPreviewRoute { DIRECT_BITMAP, RAW_EMBEDDED_JPEG, CAMERA_FHD }
-
-internal fun localOriginalPreviewRoute(extension: String): LocalOriginalPreviewRoute = when {
-    extension in NIKON_RAW_EXTENSIONS -> LocalOriginalPreviewRoute.RAW_EMBEDDED_JPEG
-    extension in TIFF_EXTENSIONS -> LocalOriginalPreviewRoute.CAMERA_FHD
-    else -> LocalOriginalPreviewRoute.DIRECT_BITMAP
-}
-
-internal fun <T> isLocalPreviewResolved(
-    localSource: T?,
-    cachedLocalSource: T?,
-): Boolean = localSource != null && cachedLocalSource == localSource
 
 /**
  * 默认缩放下只接管意图明确的上滑。横向或向下移动尽早放行，避免与翻页竞争；
@@ -224,10 +204,6 @@ internal sealed interface PhotoPreviewItem {
     }
 }
 
-/** Only a completed transfer may supply the local original for this page visit. */
-internal fun <T> previewVisitSource(transferred: Boolean, source: () -> T?): T? =
-    if (transferred) source() else null
-
 internal fun isPreviewBurstExpanded(
     items: List<PhotoPreviewItem>,
     collectionPage: Int,
@@ -282,9 +258,9 @@ internal fun allowPreviewRemoteThumbnailFallback(
 /**
  * 全屏预览层：普通页显示缓存缩略图的**未裁切**（Fit）完整画面；折叠连拍在分页中
  * 保持为一个合集页，只有用户主动展开才把成员插入其后。
- * 本地原图仅当前页读取和保留；相邻页只预取相机 FHD，传输期间暂停预取。
+ * 所有照片统一读取相机 FHD，相邻页预取在传输期间暂停。
  * 整体从被长按格子 [anchorRect] 的位置缩放展开，关闭时反向缩回（从哪来回哪去）。
- * 已传输原图优先从本地解码；本地不存在或无法解码时才向相机请求 FHD。
+ * 不读取已传照片的本地原图；FHD 不可用时回退缩略图。
  * 本层在深浅两种主题下都保持黑底沉浸式（照片查看器惯例，黑底最衬照片），
  * 因此内部直接用深色常量而非主题 token——这是有意的，不参与深浅切换。
  */
@@ -307,8 +283,6 @@ internal fun PhotoPreviewOverlay(
     // 复用列表的任务索引与完成判定，预览不维护第二套传输状态。
     queueTaskFor: (NikonCamera.FileInfo) -> TransferTask? = { null },
     isTransferred: (NikonCamera.FileInfo) -> Boolean = { false },
-    // 与完成对号复用同一导出索引；三种连接模式都先走本地 URI，再回退相机 FHD。
-    localOriginalUriFor: (NikonCamera.FileInfo) -> Uri? = { null },
     activeProgressFlow: StateFlow<ActiveTransferProgress?>,
     // 根坐标中的真实队列胶囊承载区；预览残影使用它计算与列表一致的弧线落点。
     queueTargetBounds: Rect? = null,
@@ -338,7 +312,6 @@ internal fun PhotoPreviewOverlay(
     val currentFile = (currentItem as? PhotoPreviewItem.Photo)?.file
     val currentHandle = currentFile?.handle
     val previewScope = rememberCoroutineScope()
-    val contentResolver = LocalContext.current.contentResolver
     val cameraState by cameraViewModel.state.collectAsState()
     val currentTransfersBusy by rememberUpdatedState(transfersBusy)
     var previousTransfersBusy by remember { mutableStateOf(transfersBusy) }
@@ -350,13 +323,6 @@ internal fun PhotoPreviewOverlay(
     val latestCurrentFile by rememberUpdatedState(currentFile)
     val latestPrepareDismissTarget by rememberUpdatedState(prepareDismissTarget)
     val latestOnDismiss by rememberUpdatedState(onDismiss)
-    // 每次翻到一张照片时捕获来源。传输完成不会在原地热切换；翻走再回来即可升级。
-    val currentLocalOriginalUri = remember(currentHandle) {
-        currentFile?.let { file ->
-            previewVisitSource(isTransferred(file)) { localOriginalUriFor(file) }
-        }
-    }
-    val localDecodeMutex = remember { kotlinx.coroutines.sync.Mutex() }
     // 高清图/EXIF 到位会触发大位图纹理上传与预览子树更新，因此稍延后启动。
     // 这个功能门绝不能依赖 progress.animateTo 返回：某些设备动画帧时钟停滞时，
     // 等动画完成会让 FHD、EXIF 和远程缩略图全部永久不启动。
@@ -389,15 +355,10 @@ internal fun PhotoPreviewOverlay(
     }
     BackHandler(enabled = !closing) { startClose() }
 
-    // ---- 高清预览：当前本地原图保持完整分辨率；相机回退仍使用 FHD ----
+    // ---- 高清预览：统一使用相机 FHD，不加载本地完整原图 ----
     // 状态图按 handle 存储；handle 仅在本 overlay 存活期有效（关闭随 Composable 释放）。
     val highResolutionBitmaps = remember { mutableStateMapOf<Int, ImageBitmap>() }
     val highResolutionLoading = remember { mutableStateMapOf<Int, Boolean>() }
-    // 标记完整原图，翻页后立即移除其缓存引用，不与邻页 FHD 共用保留窗口。
-    val localPreviewUris = remember { mutableStateMapOf<Int, Uri>() }
-    // 本地原图或 RAW 内嵌预览仍可能因损坏、权限或格式异常解码失败；按 URI 记住失败结果，
-    // 本次预览不反复读盘，但仍会正常回退到相机 FHD。
-    val localDecodeFailures = remember { mutableStateMapOf<Int, Uri>() }
     // 只有当前照片的 FHD 确认不可用、且当前 EXIF 已经读取完毕后，才允许向相机请求
     // 一张缩略图兜底。这样占位图不会跑到 FHD / EXIF 前面争抢相机通道。
     val fhdUnavailable = remember { mutableStateMapOf<Int, Boolean>() }
@@ -732,102 +693,35 @@ internal fun PhotoPreviewOverlay(
         onDispose { cameraViewModel.setFhdActive(false) }
     }
 
-    // 加载单页高清图：普通照片读取本地完整原图，NEF/NRW 提取最大内嵌 JPEG，
-    // TIFF 直接请求相机 FHD；视频继续使用既有封面分支。邻页禁止本地原图解码。
-    // 返回 true 表示本次确实取到并解码成功（用于当前页到位的触感反馈）。
+    // 当前页与邻页统一读取相机 FHD；视频只使用缩略图封面。
     suspend fun loadHighResolutionPage(
         page: Int,
         awaitExisting: Boolean = false,
         allowCameraRequest: Boolean,
-        allowLocalOriginal: Boolean = false,
     ): Boolean {
         val file = (previewItems.getOrNull(page) as? PhotoPreviewItem.Photo)?.file
             ?: return false
         val h = file.handle
-        val visibleHandle = (previewItems.getOrNull(pagerState.currentPage) as? PhotoPreviewItem.Photo)?.file?.handle
-        val localUri = currentLocalOriginalUri.takeIf { allowLocalOriginal && h == visibleHandle }
-        val localPreviewRoute = localOriginalPreviewRoute(file.extension)
-        // 视频没有高清封面（FHD 操作码只对照片有效），不发注定失败的请求、也不显示加载条。
         if (file.extension in VIDEO_EXTENSIONS) {
             fhdUnavailable[h] = true
             return false
         }
-        if (h in highResolutionBitmaps) {
-            val cachedLocalUri = localPreviewUris[h]
-            if (!allowLocalOriginal && cachedLocalUri != null) return false
-            if (cachedLocalUri != null && cachedLocalUri != localUri) {
-                highResolutionBitmaps.remove(h)
-                displayedBitmaps.remove(h)
-                localPreviewUris.remove(h)
-            } else if (localUri == null || cachedLocalUri == localUri) {
-                fhdUnavailable.remove(h)
-                return false
-            }
-        }
+        if (h in highResolutionBitmaps) return false
         if (highResolutionLoading.containsKey(h)) {
             if (!awaitExisting) return false
-            // 当前页可能正由上一页的预取任务加载。等待它完成；若它因翻页被取消，
-            // loading 会在 finally 中释放，随后由当前页重新发起，绝不漏载。
             while (highResolutionLoading.containsKey(h)) delay(16)
-            if (h in highResolutionBitmaps &&
-                (localUri == null || localPreviewUris[h] == localUri)
-            ) return false
+            if (h in highResolutionBitmaps) return false
         }
+        // 离线时保留已有缓存，不把临时断线记成相机不支持 FHD。
+        if (!allowCameraRequest) return false
         fhdUnavailable.remove(h)
         highResolutionLoading[h] = true
         try {
-            if (localUri != null &&
-                localPreviewRoute != LocalOriginalPreviewRoute.CAMERA_FHD &&
-                localDecodeFailures[h] != localUri
-            ) {
-                val localPreview = try {
-                    localDecodeMutex.withLock {
-                        withContext(Dispatchers.IO) {
-                            val sourceUri = localUri
-                            val bitmap = when (localPreviewRoute) {
-                                LocalOriginalPreviewRoute.RAW_EMBEDDED_JPEG ->
-                                    PhotoFrameExporter.decodeRawEmbeddedPreview(contentResolver, sourceUri)
-                                LocalOriginalPreviewRoute.DIRECT_BITMAP ->
-                                    PhotoFrameExporter.decodeOriginalPreview(contentResolver, sourceUri)
-                                LocalOriginalPreviewRoute.CAMERA_FHD -> null
-                            }
-                            if (!kotlinx.coroutines.currentCoroutineContext().isActive) {
-                                bitmap?.recycle()
-                                throw CancellationException("Preview page changed during decode")
-                            }
-                            bitmap?.asImageBitmap()
-                        }
-                    }
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (oom: OutOfMemoryError) {
-                    // 原图分配失败时退回轻量预览，不再次尝试完整解码。
-                    android.util.Log.w("PhotoPreview", "Local preview memory allocation failed; handle=$h", oom)
-                    null
-                } catch (failure: Exception) {
-                    android.util.Log.w("PhotoPreview", "Local preview unreadable; handle=$h", failure)
-                    null
-                }
-                if (localPreview != null && h == (previewItems.getOrNull(pagerState.currentPage) as? PhotoPreviewItem.Photo)?.file?.handle) {
-                    highResolutionBitmaps[h] = localPreview
-                    localPreviewUris[h] = localUri
-                    fhdUnavailable.remove(h)
-                    localDecodeFailures.remove(h)
-                    return true
-                }
-                localDecodeFailures[h] = localUri
-            }
-            // 相机 FHD 已经存在且本地原图不可解码时，继续复用现有位图，不重复请求相机。
-            if (h in highResolutionBitmaps) return false
-            // 本地预览不依赖相机连接。没有本地可用图时等待连接状态变化后再回退，
-            // 不能把“当前离线”永久记成 FHD 不可用。
-            if (!allowCameraRequest) return false
             val res = cameraViewModel.loadFhdPreview(file) ?: run {
                 fhdUnavailable[h] = true
                 return false
             }
             highResolutionBitmaps[h] = res
-            localPreviewUris.remove(h)
             fhdUnavailable.remove(h)
             return true
         } finally {
@@ -844,12 +738,7 @@ internal fun PhotoPreviewOverlay(
         exifFinished.remove(h)
         exifLoading[h] = true
         try {
-            val localUri = currentLocalOriginalUri
-            exifData[h] = if (localUri != null) {
-                cameraViewModel.loadLocalExif(file, localUri)
-            } else {
-                cameraViewModel.loadExif(file)
-            }
+            exifData[h] = cameraViewModel.loadExif(file)
             exifFinished[h] = true
         } finally {
             exifLoading.remove(h)
@@ -864,59 +753,28 @@ internal fun PhotoPreviewOverlay(
         val keepH = keep.mapNotNull { page ->
             (previewItems.getOrNull(page) as? PhotoPreviewItem.Photo)?.file?.handle
         }.toSet()
-        val staleOriginals = localPreviewUris.keys.filter { it != currentHandle }.toSet()
-        staleOriginals.forEach {
-            displayedBitmaps.remove(it)
-            localPreviewUris.remove(it)
-        }
         highResolutionBitmaps.keys
-            .filter { it !in keepH || it in staleOriginals }
+            .filter { it !in keepH }
             .forEach { highResolutionBitmaps.remove(it) }
-        localPreviewUris.keys.filter { it !in keepH }.forEach { localPreviewUris.remove(it) }
         displayedBitmaps.keys.filter { it !in keepH }.forEach { displayedBitmaps.remove(it) }
         fhdUnavailable.keys.filter { it !in keepH }.forEach { fhdUnavailable.remove(it) }
-        localDecodeFailures.keys.filter { it !in keepH }.forEach { localDecodeFailures.remove(it) }
         exifData.keys.filter { it !in keepH }.forEach { exifData.remove(it) }
         exifFinished.keys.filter { it !in keepH }.forEach { exifFinished.remove(it) }
     }
 
-    // 当前页读取本次访问捕获的来源；传输状态变化不取消正在进行的 PTP 请求。
+    // 当前页 FHD 和 EXIF 优先，完成后再预取邻页；传输状态变化不取消当前请求。
     LaunchedEffect(
         previewItems,
         pagerState.currentPage,
         currentHandle,
-        currentLocalOriginalUri,
         cameraState.isConnectedToCamera,
         deferredLoadsEnabled
     ) {
         if (!deferredLoadsEnabled) return@LaunchedEffect
         val cp = pagerState.currentPage
-        val loadedCurrent = loadHighResolutionPage(
-            page = cp,
-            awaitExisting = true,
-            allowCameraRequest = false,
-            allowLocalOriginal = true,
-        )
-        if (loadedCurrent) haptics.tick()
-        val resolvedLocally = currentHandle?.let { handle ->
-            isLocalPreviewResolved(
-                localSource = currentLocalOriginalUri,
-                cachedLocalSource = localPreviewUris[handle],
-            )
-        } == true
-        if (resolvedLocally) {
-            // 图片和 EXIF 都直接读取本地文件，不进入相机交互优先窗口。
-            loadExifPage(cp)
-        } else if (cameraState.isConnectedToCamera) {
+        if (cameraState.isConnectedToCamera) {
             cameraViewModel.withInteractivePreviewPriority {
-                if (
-                    loadHighResolutionPage(
-                        page = cp,
-                        awaitExisting = true,
-                        allowCameraRequest = true,
-                        allowLocalOriginal = true,
-                    )
-                ) {
+                if (loadHighResolutionPage(cp, awaitExisting = true, allowCameraRequest = true)) {
                     haptics.tick()
                 }
                 loadExifPage(cp)
@@ -2035,7 +1893,7 @@ private fun TransferQueueButton(
     }
 }
 
-// 普通预览至少允许 4x；本地原图会按实际像素动态提高上限，确保能够查看到 1:1 细节。
+// 预览至少允许 4x，并根据实际预览像素保证可查看到 1:1。
 private const val MAX_ZOOM = 4f
 private const val DOUBLE_TAP_ZOOM = 2.5f
 

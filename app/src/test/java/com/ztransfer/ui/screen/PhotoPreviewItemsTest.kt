@@ -97,18 +97,6 @@ class PhotoPreviewItemsTest {
     }
 
     @Test
-    fun originalSourceRequiresCompletedTransferAndIsCapturedPerVisit() {
-        var uri: String? = null
-        assertNull(previewVisitSource(false) { error("Unfinished file must not be read") })
-        val firstVisit = previewVisitSource(true) { uri }
-        uri = "content://photo/1"
-        assertNull(firstVisit)
-        assertEquals(uri, previewVisitSource(true) { uri })
-        uri = null
-        assertNull(previewVisitSource(true) { uri })
-    }
-
-    @Test
     fun videoMetadataUsesObjectInfoSizeAndCaptureTime() {
         assertEquals(
             "1.5 MB  ·  2026-07-24 12:34:56",
