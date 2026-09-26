@@ -615,7 +615,6 @@ private fun RemoteContent(
     var capturing by remember { mutableStateOf(false) }
     var modeText by remember { mutableStateOf<String?>(null) }
     var movieMode by remember { mutableStateOf(false) }
-    var toolModeReady by remember(connected) { mutableStateOf(!connected) }
     var focusModeText by remember { mutableStateOf<String?>(null) }
     var focusModeProp by remember { mutableStateOf<Int?>(null) }
     var focusModeManual by remember { mutableStateOf(false) }
@@ -689,6 +688,8 @@ private fun RemoteContent(
     var gridPanelCloseRequested by remember { mutableStateOf(false) }
     var gridAnchor by remember { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
     var cameraToolPanel by remember { mutableStateOf<RemoteCameraTool?>(null) }
+    val cameraToolUnavailableHint = stringResource(R.string.remote_camera_tool_unavailable)
+    var cameraToolLoading by remember(cameraToolPanel) { mutableStateOf(cameraToolPanel != null) }
     var cameraToolCloseRequested by remember { mutableStateOf(false) }
     var toolOverlayCoordinates by remember { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
     var whiteBalanceAnchor by remember { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
@@ -1372,8 +1373,6 @@ private fun RemoteContent(
                 // 避免重进页面时先按错误模式加载整套参数。
                 refreshMovieMode(refreshExposureOnChange = false)
             }
-            // Render the first toolbar from the resolved selector (or the existing photo fallback).
-            toolModeReady = true
             diagnosticControlEnabled = sessionCamera.remoteDiagnosticControlModeSet &&
                 sessionCamera.remoteControlModeSet
             if (diagnosticControlEnabled) diagnosticControlLogging = true
@@ -2738,11 +2737,7 @@ private fun RemoteContent(
     var dispMode by tools.disp
     val changeToolVisibility: (RemoteTool, Boolean) -> Unit = ::setToolVisible
     ApplyRemoteToolLayout(tools.layout(movieMode), changeToolVisibility)
-    val renderTools: @Composable (androidx.compose.ui.unit.Dp, Modifier, Boolean) -> Unit = toolsContent@{ gap, modifier, singleLine ->
-        if (!toolModeReady) {
-            Spacer(modifier.fillMaxWidth().height(36.dp))
-            return@toolsContent
-        }
+    val renderTools: @Composable (androidx.compose.ui.unit.Dp, Modifier, Boolean) -> Unit = { gap, modifier, singleLine ->
         RemoteToolBar(tools, editingTools, movieMode, changeToolVisibility,
             modifier.fillMaxWidth(), gap, singleLine = singleLine,
             leading = {
@@ -2814,7 +2809,12 @@ private fun RemoteContent(
                             gridAnchor = it
                         } else Modifier, enabled = !disabled) {
                             if (tool == null) Icon(if (editingTools) Icons.Default.Check else Icons.Default.Settings, null, Modifier.size(19.dp))
-                            else RemoteToolMark(tool, tools)
+                            else if (cameraToolLoading && (
+                                (tool == RemoteTool.WHITE_BALANCE && cameraToolPanel == RemoteCameraTool.WHITE_BALANCE) ||
+                                (tool == RemoteTool.FOCUS_AREA && cameraToolPanel == RemoteCameraTool.FOCUS_AREA))) {
+                                androidx.compose.material3.CircularProgressIndicator(
+                                    modifier=Modifier.size(18.dp),strokeWidth=1.5.dp,color=colors.accentBlue)
+                            } else RemoteToolMark(tool, tools)
                         }
                     }
         }
@@ -3641,6 +3641,8 @@ private fun RemoteContent(
         }
         key(selectedTool) { RemoteCameraToolPanel(panelCamera, movieMode, selectedTool,
             closeRequested = cameraToolCloseRequested,
+            onLoadingChanged = { cameraToolLoading = it },
+            onUnavailable = { showHint(cameraToolUnavailableHint) },
             landscape = rotation != 0,
             anchor = localAnchor,
             canWrite = connected && initialLoaded && !probing && !diagnosticControlBusy && !capturing && !recBusy && !afHeld && !tapFocusBusy && afJob?.isActive != true,

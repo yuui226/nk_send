@@ -99,6 +99,8 @@ internal fun RemoteCameraToolPanel(
     onApplied: suspend () -> Unit,
     log: (String) -> Unit,
     onDismiss: () -> Unit,
+    onLoadingChanged: (Boolean) -> Unit,
+    onUnavailable: () -> Unit,
     anchor: androidx.compose.ui.geometry.Rect? = null,
     closeRequested: Boolean = false,
     landscape: Boolean = false,
@@ -117,26 +119,43 @@ internal fun RemoteCameraToolPanel(
     val latestMovie by rememberUpdatedState(movie)
     fun label(p: RcParam, value: Long): String = cameraToolLabelResource(tool, p.prop, value, camera?.deviceModel, p.dataType)?.let(context::getString)
         ?: context.getString(R.string.remote_camera_option, value.toString())
+    val latestDismiss by rememberUpdatedState(onDismiss)
+    val latestUnavailable by rememberUpdatedState(onUnavailable)
+    LaunchedEffect(loading, camera, movie, tool) { onLoadingChanged(loading) }
+    LaunchedEffect(closeRequested) { if (closeRequested && loading) latestDismiss() }
+    if (loading) androidx.activity.compose.BackHandler { latestDismiss() }
     LaunchedEffect(camera, movie, tool) {
-        if (camera == null) { loading = false; return@LaunchedEffect }
+        if (camera == null) { latestUnavailable(); latestDismiss(); return@LaunchedEffect }
         while (true) {
+            if (!currentCameraCheck()) { latestDismiss(); return@LaunchedEffect }
             if (!busy && currentCameraCheck()) {
                 try {
                     access.withLock {
                         if (!busy && currentCameraCheck()) {
-                            param = camera.rcGetCameraTool(tool, movie, if (loading) log else { _ -> })
+                            val fresh = kotlinx.coroutines.withTimeoutOrNull(5_000L) {
+                                camera.rcGetCameraTool(tool, movie, if (loading) log else { _ -> })
+                            }
+                            if (!currentCameraCheck()) { latestDismiss(); return@LaunchedEffect }
+                            if (loading && (fresh == null || !fresh.writable || fresh.values.isEmpty())) {
+                                latestUnavailable()
+                                latestDismiss()
+                                return@LaunchedEffect
+                            }
+                            param = fresh
                         }
                     }
                 } catch (cancelled: CancellationException) { throw cancelled }
                 catch (e: Exception) {
-                    param = null
                     log("!! camera tool read ${tool.name}: ${e.javaClass.simpleName}")
+                    if (loading) { latestUnavailable(); latestDismiss(); return@LaunchedEffect }
                 }
                 loading = false
             }
             delay(1_200)
         }
     }
+    // Mount the popup only after its real rows and final width are available.
+    if (loading) return
     val density = androidx.compose.ui.platform.LocalDensity.current
     val textMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
     val labelStyle = MaterialTheme.typography.bodyMedium
@@ -153,10 +172,6 @@ internal fun RemoteCameraToolPanel(
     val menuWidth = (labelWidth + 24.dp).coerceIn(48.dp,280.dp)
     RemoteChoicePopup(anchor,landscape,menuWidth,closeRequested,onDismiss) { close, closing ->
         val p = param
-        // Initial discovery has no selectable row yet; never insert a progress header above options.
-        if (loading && p == null) Box(Modifier.fillMaxWidth().height(40.dp),contentAlignment=Alignment.Center) {
-            CircularProgressIndicator(Modifier.size(16.dp),color=colors.accentBlue,strokeWidth=1.5.dp)
-        }
         if (!loading && (p == null || !p.writable || p.values.isEmpty())) Text(
             stringResource(R.string.remote_camera_tool_unavailable), color = colors.onSurfaceVariant,
             style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp))

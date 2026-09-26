@@ -24,6 +24,8 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -131,6 +133,13 @@ fun AnchorPopup(
                         setLayerRecorded = { animationState.layerRecorded = it },
                         allowAboveAnchor = true,
                     )
+                    // Preserve the original settings-content render boundary beneath the warp.
+                    .graphicsLayer {
+                        compositingStrategy = CompositingStrategy.Auto
+                        alpha = 1f
+                        scaleX = 1f
+                        scaleY = 1f
+                    }
                     .pointerInput(Unit) { detectTapGestures { } },
                 shape = shape,
                 color = colors.glassSurfaceHeavy,

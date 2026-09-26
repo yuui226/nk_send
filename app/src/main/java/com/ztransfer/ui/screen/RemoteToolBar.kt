@@ -1,5 +1,6 @@
 package com.ztransfer.ui.screen
 
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.horizontalScroll
@@ -85,6 +86,32 @@ internal fun RemoteToolBar(
     gap: Dp = 6.dp,
     singleLine: Boolean = false,
     leading: @Composable () -> Unit = {},
+    button: @Composable (RemoteTool?) -> Unit,
+) {
+    // Render immediately. Only a photo/movie layout change crossfades; initial composition does not.
+    Crossfade(targetState=movie,animationSpec=tween(160),modifier=modifier,label="toolModeFade") { displayedMovie ->
+        RemoteToolBarContent(tools,editing,displayedMovie,onVisible,
+            modifier=Modifier.pointerInput(displayedMovie==movie) {
+                if(displayedMovie!=movie) awaitEachGesture {
+                    do {
+                        val event=awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+                        event.changes.forEach { it.consume() }
+                    } while(event.changes.any { it.pressed })
+                }
+            },gap=gap,singleLine=singleLine,leading=leading,button=button)
+    }
+}
+
+@Composable
+private fun RemoteToolBarContent(
+    tools: RemoteToolPreferences,
+    editing: Boolean,
+    movie: Boolean,
+    onVisible: (RemoteTool, Boolean) -> Unit,
+    modifier: Modifier,
+    gap: Dp,
+    singleLine: Boolean,
+    leading: @Composable () -> Unit,
     button: @Composable (RemoteTool?) -> Unit,
 ) {
     val dragState = remember(singleLine, movie) { ToolDragState() }
