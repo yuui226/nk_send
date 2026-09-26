@@ -47,21 +47,21 @@ import com.ztransfer.ui.theme.AppTheme
 internal fun CropEditor(
     preview: CropPreview?,
     failed: Boolean,
+    active: Boolean = true,
+    geometry: CropEditorGeometry?,
+    confirming: Boolean,
     failure: CropPreparationException? = null,
-    bottomClearance: androidx.compose.ui.unit.Dp = 80.dp,
+    bottomClearance: androidx.compose.ui.unit.Dp = 56.dp,
     placement: PreviewImagePlacement? = null,
     onImageChanged: (Rect) -> Unit = {},
     onRetry: () -> Unit,
     onCancel: () -> Unit,
-    onConfirm: (JpegCropSelection, CropQueueVisual) -> Boolean,
     onFeedback: () -> Unit,
 ) {
     val colors = AppTheme.colors
-    val geometry = remember(preview) { preview?.let { CropEditorGeometry(it.source) } }
     var touching by remember { mutableStateOf(false) }
     val gridAlpha by animateFloatAsState(if (touching) .45f else 0f, tween(120), label="cropGrid")
-    var confirming by remember { mutableStateOf(false) }
-    BackHandler { onCancel() }
+    BackHandler(enabled = active) { onCancel() }
     Box(Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxSize(),
             contentAlignment=Alignment.Center) {
@@ -71,7 +71,8 @@ internal fun CropEditor(
                         if (placement!=null) geometry.initialize(placement.viewport,placement.content(preview))
                         else geometry.resize(Size(it.width.toFloat(),it.height.toFloat()))
                     }
-                    .pointerInput(geometry) {
+                    .pointerInput(geometry, active) {
+                        if (!active) return@pointerInput
                         awaitEachGesture {
                             val down=awaitFirstDown(requireUnconsumed=false)
                             var corner=geometry.cornerAt(down.position,28.dp.toPx())
@@ -122,21 +123,16 @@ internal fun CropEditor(
                     }
                     Text(stringResource(message),textAlign=androidx.compose.ui.text.style.TextAlign.Center,
                         style=MaterialTheme.typography.bodySmall,color=Color.White)
-                    if(failed) IconButton(onClick={onFeedback();onRetry()}) {
+                    if(failed) IconButton(enabled=active,onClick={onFeedback();onRetry()}) {
                         Icon(Icons.Default.Refresh,stringResource(R.string.crop_retry),tint=colors.accentBlue)
                     }
                 }
             }
         }
-        Row(Modifier.align(Alignment.TopStart).statusBarsPadding().padding(start=12.dp,top=4.dp),
-            horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-            CropControl(Icons.Default.Close,R.string.crop_cancel,onClick={onFeedback();onCancel()})
-
-        }
-        Column(Modifier.align(Alignment.BottomCenter).widthIn(max=480.dp).fillMaxWidth()
-            .padding(start=16.dp,end=16.dp,bottom=bottomClearance),
-            verticalArrangement=Arrangement.spacedBy(4.dp)) {
-            val enabled = geometry != null && !confirming
+        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+            .padding(start=20.dp,end=20.dp,bottom=bottomClearance),
+            verticalArrangement=Arrangement.spacedBy(2.dp)) {
+            val enabled = active && geometry != null && !confirming
             val selectRatio: (CropRatio) -> Unit = { ratio ->
                 onFeedback()
                 geometry?.let { it.select(ratio); onImageChanged(it.image) }
@@ -151,7 +147,7 @@ internal fun CropEditor(
                     }
                 }
             }
-            Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,
+            Row(Modifier.fillMaxWidth().height(44.dp),verticalAlignment=Alignment.CenterVertically,
                 horizontalArrangement=Arrangement.spacedBy(12.dp)) {
                 Row(Modifier.weight(1f),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                     listOf(CropRatio.FREE,CropRatio.ORIGINAL,CropRatio.SQUARE).forEach { ratio ->
@@ -163,15 +159,14 @@ internal fun CropEditor(
                         CropRatioOption(title,geometry?.ratio==ratio,enabled,Modifier.weight(1f)) { selectRatio(ratio) }
                     }
                 }
-            CropControl(Icons.Default.Check,R.string.crop_confirm,geometry!=null&&geometry.size.width>0&&!confirming,
-                modifier=Modifier.size(52.dp),accent=true,onClick={
-                    if (geometry!=null && preview!=null) {
-                        onFeedback();confirming=true
-                        val displayed=geometry.selection(preview.originalOrientation)
-                        confirming=onConfirm(preview.canonicalSelection(displayed),CropQueueVisual(
-                            preview.image,preview.rawSelection(displayed),geometry.frame,placement?.rotation ?: 0f))
-                    }
-                })
+                GlassButton(onClick = { onFeedback(); onCancel() }, enabled = active && !confirming,
+                    modifier = Modifier.size(44.dp), shape = CircleShape,
+                    contentPadding = PaddingValues(0.dp)) {
+                    Icon(Icons.Default.Close, stringResource(R.string.crop_cancel),
+                        tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(22.dp))
+                }
+                // The persistent plus/check button is drawn by the preview at this exact slot.
+                Spacer(Modifier.size(44.dp))
             }
         }
     }
@@ -181,34 +176,19 @@ internal fun CropEditor(
 private fun CropRatioOption(title: String, selected: Boolean, enabled: Boolean,
     modifier: Modifier = Modifier, onClick: () -> Unit) {
     val accent = AppTheme.colors.accentBlue
-    val background by animateColorAsState(if(selected) accent.copy(alpha=.32f).compositeOver(Color(0xFF20242A)) else Color(0xFF292C31).copy(alpha=.94f),
+    val background by animateColorAsState(if(selected) accent.copy(alpha=.24f).compositeOver(Color(0xFF20242A).copy(alpha=.42f)) else Color(0xFF292C31).copy(alpha=.46f),
         tween(160),label="cropRatioBackground")
     val foreground by animateColorAsState(if(selected) accent else Color.White.copy(alpha=.85f),
         tween(160),label="cropRatioForeground")
     val outline by animateColorAsState(if(selected) accent.copy(alpha=.85f) else Color.White.copy(alpha=.22f),
         tween(160),label="cropRatioOutline")
-    val shape = RoundedCornerShape(12.dp)
-    Box(modifier.height(48.dp).padding(vertical=3.dp).clip(shape)
+    val shape = RoundedCornerShape(10.dp)
+    Box(modifier.height(40.dp).padding(vertical=2.dp).clip(shape)
         .background(background,shape)
         .border(1.dp,outline.copy(alpha=if(enabled) outline.alpha else .1f),shape)
         .selectable(selected=selected,enabled=enabled,role=Role.RadioButton,onClick=onClick),
         contentAlignment=Alignment.Center) {
         Text(title,color=foreground.copy(alpha=if(enabled) foreground.alpha else .35f),
             style=MaterialTheme.typography.labelMedium,fontWeight=FontWeight.Medium,maxLines=1)
-    }
-}
-
-@Composable
-private fun CropControl(icon: androidx.compose.ui.graphics.vector.ImageVector, label: Int,
-    enabled: Boolean=true, modifier: Modifier=Modifier.size(44.dp),accent: Boolean=false,onClick:()->Unit) {
-    val colors=AppTheme.colors
-    if(accent) {
-        GlassButton(onClick=onClick,enabled=enabled,modifier=modifier,
-            shape=CircleShape,contentPadding=PaddingValues(0.dp)) {
-            Icon(icon,stringResource(label),tint=colors.accentBlue.copy(alpha=if(enabled) 1f else .35f))
-        }
-    } else IconButton(onClick=onClick,enabled=enabled,
-        modifier=modifier.background(Color.Black.copy(alpha=.45f),CircleShape)) {
-        Icon(icon,stringResource(label),tint=Color.White.copy(alpha=if(enabled) 1f else .35f))
     }
 }

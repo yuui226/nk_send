@@ -2,6 +2,8 @@ package com.ztransfer.ui.screen
 
 import androidx.compose.animation.core.*
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -16,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.ztransfer.R
 import com.ztransfer.protocol.*
 import com.ztransfer.ui.theme.AppTheme
@@ -91,6 +94,23 @@ private fun focusAreaLabelResource(prop: Int, value: Long, model: String?, dataT
     } else null
 }
 
+// Group by the resolved mode name, not the camera's numeric enumeration order.
+// Shared across languages; variants follow their base mode, unknown values remain numeric.
+private val focusAreaNameOrder = listOf(
+    R.string.remote_af_pinpoint, R.string.remote_af_spot,
+    R.string.remote_af_single, R.string.remote_af_normal,
+    R.string.remote_af_dynamic, R.string.remote_af_dynamic_9,
+    R.string.remote_af_dynamic_21, R.string.remote_af_dynamic_25,
+    R.string.remote_af_dynamic_51, R.string.remote_af_dynamic_72, R.string.remote_af_dynamic_153,
+    R.string.remote_af_wide, R.string.remote_af_wide_s, R.string.remote_af_wide_l,
+    R.string.remote_af_wide_people, R.string.remote_af_wide_animals,
+    R.string.remote_af_wide_c1, R.string.remote_af_wide_c2,
+    R.string.remote_af_group,
+    R.string.remote_af_auto, R.string.remote_af_auto_people, R.string.remote_af_auto_animals,
+    R.string.remote_af_face_priority,
+    R.string.remote_af_tracking, R.string.remote_af_subject_tracking,
+).withIndex().associate { it.value to it.index }
+
 @Composable
 internal fun RemoteCameraToolPanel(
     camera: NikonCamera?, movie: Boolean, tool: RemoteCameraTool, canWrite: Boolean,
@@ -158,7 +178,10 @@ internal fun RemoteCameraToolPanel(
     if (loading) return
     val density = androidx.compose.ui.platform.LocalDensity.current
     val textMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
-    val labelStyle = MaterialTheme.typography.bodyMedium
+    val whiteBalanceGrid = tool == RemoteCameraTool.WHITE_BALANCE
+    val labelStyle = if (whiteBalanceGrid)
+        MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp, lineHeight = 18.sp)
+    else MaterialTheme.typography.bodyMedium
     fun hasTapMarker(p: RcParam, value: Long) =
         tool == RemoteCameraTool.FOCUS_AREA && p.prop in listOf(0x501C, 0xD05D, 0xD1F8) &&
             value in listOf(0x8011L, 0x8020L, 0x8021L)
@@ -169,18 +192,21 @@ internal fun RemoteCameraToolPanel(
                 if (hasTapMarker(p, value)) 22.dp else 0.dp
         }
     } ?: 60.dp
-    val menuWidth = (labelWidth + 24.dp).coerceIn(48.dp,280.dp)
+    val menuWidth = if (whiteBalanceGrid) ((labelWidth + 12.dp) * 3 + 12.dp).coerceIn(252.dp, 300.dp)
+        else (labelWidth + 24.dp).coerceIn(48.dp,280.dp)
     RemoteChoicePopup(anchor,landscape,menuWidth,closeRequested,onDismiss) { close, closing ->
         val p = param
         if (!loading && (p == null || !p.writable || p.values.isEmpty())) Text(
             stringResource(R.string.remote_camera_tool_unavailable), color = colors.onSurfaceVariant,
             style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp))
         error?.let { Text(it, color = colors.accentOrange, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) }
-        if (p != null) LazyColumn(Modifier.weight(1f, fill = false)) {
-            items((p.values + p.current).distinct(), key = { it }) { value ->
+        if (p != null) {
+            val choice: @Composable (Long, Modifier) -> Unit = { value, cellModifier ->
                 val pending = busy && pendingValue == value
                 val selected = if(busy) pending else value == p.current
-                Row(Modifier.fillMaxWidth().pendingCameraChoice(pending && !closing).background(if (selected) colors.accentBlue.copy(alpha = 0.08f) else androidx.compose.ui.graphics.Color.Transparent)
+                Row(cellModifier
+                    .then(if (whiteBalanceGrid) Modifier.heightIn(min = 40.dp).clip(RoundedCornerShape(8.dp)) else Modifier)
+                    .pendingCameraChoice(pending && !closing).background(if (selected) colors.accentBlue.copy(alpha = 0.08f) else androidx.compose.ui.graphics.Color.Transparent)
                     .clickable(enabled = !closing && !busy && canWrite && p.writable && value in p.values) {
                         if (selected) { close(); return@clickable }
                         val cam = camera ?: return@clickable
@@ -238,7 +264,8 @@ internal fun RemoteCameraToolPanel(
                                 pendingValue = null
                             }
                         }
-                    }.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    }.padding(horizontal = if (whiteBalanceGrid) 6.dp else 12.dp,
+                        vertical = if (whiteBalanceGrid) 4.dp else 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.weight(1f)) {
                         val name = label(p, value)
                         val qualifier = name.indexOfAny(charArrayOf('（', '('))
@@ -252,7 +279,12 @@ internal fun RemoteCameraToolPanel(
                                 }
                             },
                             color = if (selected) colors.accentBlue else colors.onBackground,
-                            style = MaterialTheme.typography.bodyMedium,
+                            style = labelStyle,
+                            textAlign = if (whiteBalanceGrid) androidx.compose.ui.text.style.TextAlign.Center
+                                else androidx.compose.ui.text.style.TextAlign.Start,
+                            maxLines = if (whiteBalanceGrid) 2 else Int.MAX_VALUE,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            modifier = Modifier.fillMaxWidth(),
                         )
                     }
                     if (hasTapMarker(p, value)) {
@@ -264,6 +296,30 @@ internal fun RemoteCameraToolPanel(
                             modifier = Modifier.size(16.dp),
                         )
                     }
+                }
+            }
+            val values = (p.values + p.current).distinct().let { values ->
+                if (tool == RemoteCameraTool.FOCUS_AREA) values.sortedWith(
+                    compareBy<Long> { value ->
+                        focusAreaNameOrder[cameraToolLabelResource(tool, p.prop, value, camera?.deviceModel, p.dataType)]
+                            ?: Int.MAX_VALUE
+                    }.thenBy { it }
+                ) else values
+            }
+            if (whiteBalanceGrid) {
+                LazyColumn(Modifier.weight(1f, fill = false).padding(horizontal = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    items(values.chunked(3), key = { it.first() }) { row ->
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(2.dp),
+                            verticalAlignment = Alignment.CenterVertically) {
+                            row.forEach { value -> choice(value, Modifier.weight(1f)) }
+                            repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
+                        }
+                    }
+                }
+            } else {
+                LazyColumn(Modifier.weight(1f, fill = false)) {
+                    items(values, key = { it }) { value -> choice(value, Modifier.fillMaxWidth()) }
                 }
             }
         }

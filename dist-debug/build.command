@@ -71,7 +71,7 @@ BUILD_LOG="$(mktemp "${TMPDIR:-/tmp}/ztransfer-debug-build.XXXXXX")"
 DEBUG_APK="$(sed -n 's/^Timestamped debug APK: //p' "$BUILD_LOG" | tail -n 1)"
 if [[ -z "$DEBUG_APK" || ! -s "$DEBUG_APK" ||
       "$(dirname -- "$DEBUG_APK")" != "$SCRIPT_DIR" ||
-      "$(basename -- "$DEBUG_APK")" != ZTransfer-debug-*.apk ]]; then
+      "$(basename -- "$DEBUG_APK")" != Zdebug-*.apk ]]; then
   echo "ERROR: this build did not report a valid timestamped Debug APK in $SCRIPT_DIR" >&2
   exit 1
 fi

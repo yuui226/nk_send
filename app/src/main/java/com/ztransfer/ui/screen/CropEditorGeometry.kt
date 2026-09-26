@@ -141,6 +141,17 @@ internal class CropEditorGeometry(val source: JpegCropSource) {
         transform(frame.center,Offset.Zero,1f)
         ratioReference=frame
     }
+    // Compare the visible selection to the image, not the selected ratio or gesture history.
+    // A tiny relative tolerance ignores floating-point noise when returning to the full image.
+    val hasCrop: Boolean
+        get() {
+            if (image.width <= 0f || image.height <= 0f || frame.width <= 0f || frame.height <= 0f) return false
+            val toleranceX = image.width * 0.00001f
+            val toleranceY = image.height * 0.00001f
+            return frame.left - image.left > toleranceX || image.right - frame.right > toleranceX ||
+                frame.top - image.top > toleranceY || image.bottom - frame.bottom > toleranceY
+        }
+
     fun selection(orientation: Int): JpegCropSelection {
         val (w,h) = ratioPair()
         val bounds = CropBounds(((frame.left-image.left)/image.width).toDouble().coerceIn(0.0,1.0),

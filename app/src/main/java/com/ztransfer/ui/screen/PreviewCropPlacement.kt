@@ -16,7 +16,9 @@ internal class PreviewViewportState {
     val offset=mutableStateOf(Offset.Zero)
 }
 
-internal data class PreviewImagePlacement(val image: Rect,val viewport: Size,val rotation: Float) {
+internal data class PreviewImagePlacement(val image: Rect,val viewport: Size,val rotation: Float,
+    val baseCenter: Offset = Offset(viewport.width/2f, viewport.height/2f),
+    val layoutProgress: Float = 0f) {
     fun content(preview: CropPreview): Rect {
         val c=preview.content
         val bounds=transformCropBounds(CropBounds(c.left.toDouble()/preview.image.width,c.top.toDouble()/preview.image.height,

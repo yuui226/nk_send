@@ -2187,8 +2187,12 @@ internal fun summarizeQueuePillTasks(tasks: List<TransferTask>): QueuePillTaskSu
                 if (firstWaitingTaskId == null) firstWaitingTaskId = task.taskId
             }
             TransferStatus.TRANSFERING -> {
-                downloadRemaining++
-                if (activeDownloadTaskId == null) activeDownloadTaskId = task.taskId
+                // Crop tasks remain TRANSFERING until crop/effects finish; the network
+                // download has already ended once their generation stage starts.
+                if (!task.isGeneratingFrame) {
+                    downloadRemaining++
+                    if (activeDownloadTaskId == null) activeDownloadTaskId = task.taskId
+                }
             }
             TransferStatus.CANCELLED -> hasCancelled = true
             TransferStatus.COMPLETED,

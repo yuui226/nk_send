@@ -147,7 +147,7 @@ val copyTimestampedDebugApk = tasks.register("copyTimestampedDebugApk") {
         val version = android.defaultConfig.versionName ?: "unknown"
         val destinationDirectory = rootProject.file("dist-debug").apply { mkdirs() }
         val destination = destinationDirectory.resolve(
-            "ZTransfer-debug-$version-$stamp.apk"
+            "Zdebug-$version-$stamp.apk"
         )
         source.copyTo(destination, overwrite = false)
         println("Timestamped debug APK: ${destination.absolutePath}")

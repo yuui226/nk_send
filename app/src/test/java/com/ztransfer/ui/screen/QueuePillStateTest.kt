@@ -192,4 +192,19 @@ class QueuePillStateTest {
         assertEquals(generating.taskId, summary.activeProgressTaskId)
         assertEquals(true, summary.hasActive)
     }
+    @Test
+    fun cropGenerationIsNotAlsoCountedAsAnActiveDownload() {
+        val crop = task(handle = 1, status = TransferStatus.TRANSFERING, isGeneratingFrame = true)
+        val summary = summarizeQueuePillTasks(listOf(crop))
+        assertEquals(0, summary.downloadRemaining)
+        assertEquals(1, summary.generationRemaining)
+        assertEquals(null, summary.activeDownloadTaskId)
+        assertEquals(crop.taskId, summary.activeProgressTaskId)
+        assertEquals(PillMode.GENERATING, queuePillMode(summary.downloadRemaining, summary.generationRemaining))
+        val next = task(handle = 2, status = TransferStatus.TRANSFERING)
+        val concurrent = summarizeQueuePillTasks(listOf(crop, next))
+        assertEquals(1, concurrent.downloadRemaining)
+        assertEquals(next.taskId, concurrent.activeDownloadTaskId)
+    }
+
 }

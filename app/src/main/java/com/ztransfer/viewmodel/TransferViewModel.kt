@@ -154,6 +154,9 @@ internal class ExistingFileNameIndex<T> {
     }
 }
 
+/** A published lossless crop survives effect-generation failures and explicit retries. */
+data class SavedCropOutput(val uri: Uri, val parent: Uri, val name: String)
+
 data class TransferTask(
     val file: NikonCamera.FileInfo,
     /** 队列任务的进程内唯一标识；同一相机文件可以按不同装饰配置创建多个独立任务。 */
@@ -190,6 +193,7 @@ data class TransferTask(
     val frameGenerationSkipped: Boolean = false,
     val cropRecipe: com.ztransfer.crop.JpegCropSelection? = null,
     val cropEffectsSkipped: Boolean = false,
+    val savedCropOutput: SavedCropOutput? = null,
 )
 
 internal fun TransferTask.startFrameGeneration(nowElapsedMs: Long): TransferTask = copy(
@@ -2663,6 +2667,30 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     downloadedAt - stats.startedAtElapsedMs) / (1024f * 1024f))
                 .startFrameGeneration(downloadedAt) }
             _activeTransferProgress.value = null
+            val directoryIndex = getDirectoryIndex(treeUri, destinationUri)
+            fun unusedName(preferred: String): String {
+                if (!directoryIndex.containsDisplayName(preferred)) return preferred
+                var suffix = 1
+                while (directoryIndex.containsDisplayName(suffixedName(preferred, suffix))) suffix++
+                return suffixedName(preferred, suffix)
+            }
+            // Keep the downloaded original under its camera filename. A readable original
+            // already indexed by name/size need not be published again on another crop/retry.
+            withContext(Dispatchers.IO) {
+                val existing = directoryIndex.findOriginal(task.file)?.takeIf { local ->
+                    runCatching { contentResolver.openInputStream(local.uri)?.use { it.read() >= 0 } == true }
+                        .getOrDefault(false)
+                }
+                if (existing == null) {
+                    val name = unusedName(task.file.fileName)
+                    withContext(NonCancellable) {
+                        val originalUri = publishCroppedJpeg(source, destinationUri, name)
+                        val savedName = displayNameOf(originalUri) ?: name
+                        directoryIndex.addFile(savedName, source.length(), originalUri)
+                        recordExistingExport(treeUri, task.destinationFolderName, savedName, source.length(), originalUri)
+                    }
+                }
+            }
             // Use the same generation worker pool. Crop is part of this task's required processing,
             // so a disabled photo-effects switch must never skip it.
             withContext(photoFrameDispatcher) {
@@ -2676,8 +2704,28 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     (task.framePreset != null || task.photoFilterRequested != null)) }
                 val preset = task.framePreset.takeIf { effects }
                 val filter = task.photoFilterRequested.takeIf { effects }
-                val sourceName = task.file.fileName.substringBeforeLast('.') +
-                    "_crop_" + java.util.UUID.randomUUID().toString().take(8) + ".jpg"
+                // Publish the lossless crop even when an effect is requested. Keep it if the
+                // subsequent export fails; retries reuse this task's readable published file.
+                val savedCrop = withContext(Dispatchers.IO) {
+                    task.savedCropOutput?.takeIf { saved ->
+                        saved.parent == destinationUri && runCatching {
+                            contentResolver.openInputStream(saved.uri)?.use { it.read() >= 0 } == true
+                        }.getOrDefault(false)
+                    }
+                } ?: run {
+                    val name = unusedName(task.file.fileName.substringBeforeLast('.') + "_crop.jpg")
+                    // Record a successful publication even if cancellation arrives at its boundary.
+                    withContext(NonCancellable) {
+                        val uri = publishCroppedJpeg(cropped, destinationUri, name)
+                        val savedName = displayNameOf(uri) ?: name
+                        directoryIndex.addFile(savedName, cropped.length(), uri)
+                        SavedCropOutput(uri, destinationUri, savedName).also { saved ->
+                            updateTask(id) { it.copy(savedCropOutput = saved) }
+                        }
+                    }
+                }
+                currentCoroutineContext().ensureActive()
+                val sourceName = savedCrop.name
                 if (preset != null || filter != null) {
                     val selectedPreset = preset ?: PhotoFramePreset.MIST
                     val border = preset != null && task.frameBorderRequested
@@ -2687,13 +2735,11 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     PhotoFrameExporter.export(
                         context = getApplication(), resolver = contentResolver,
                         destination = getOrPreparePhotoFrameDestination(treeUri, destinationUri),
-                        sourceUri = Uri.fromFile(cropped), sourceName = sourceName,
+                        sourceUri = savedCrop.uri, sourceName = sourceName,
                         preset = selectedPreset, watermark = watermark, borderEnabled = border,
                         metadataSettings = task.frameMetadataSettings ?: defaultPhotoFrameMetadataSettings(selectedPreset),
                         filter = filter,
                     ).getOrThrow()
-                } else {
-                    publishCroppedJpeg(cropped, destinationUri, sourceName)
                 }
                 } finally { repeat(acquired) { photoProcessingSlots.release() } }
             }
@@ -2713,8 +2759,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    private suspend fun publishCroppedJpeg(file: java.io.File, parent: Uri, name: String) {
-        com.ztransfer.crop.publishCropOutput(contentResolver, file, parent, name,
+    private suspend fun publishCroppedJpeg(file: java.io.File, parent: Uri, name: String): Uri {
+        return com.ztransfer.crop.publishCropOutput(contentResolver, file, parent, name,
             ".nkcrop_${cropSessionName}_${java.util.UUID.randomUUID()}.part")
     }
 
