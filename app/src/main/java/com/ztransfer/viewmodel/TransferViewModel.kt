@@ -12,6 +12,7 @@ import androidx.lifecycle.viewModelScope
 import com.ztransfer.AppLocale
 import com.ztransfer.BuildConfig
 import com.ztransfer.R
+import com.ztransfer.diagnostics.UsbTransferDiagnostic
 import com.ztransfer.diagnostics.PhotoGenerationProbe
 import com.ztransfer.effects.FAVORITE_FRAME_EFFECTS_PREFERENCE_KEY
 import com.ztransfer.effects.FAVORITE_PHOTO_FILTERS_PREFERENCE_KEY
@@ -2006,6 +2007,14 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     val localOriginal = directoryIndex.findOriginal(task.file)
                     if (localOriginal != null) {
                         log { "DL_SKIP existing: ${task.file.fileName}" }
+                        cameraProvider()?.takeIf { it.connectionType == CameraConnectionType.USB }?.let { camera ->
+                            UsbTransferDiagnostic.start(contentResolver, rootDirectoryUri, task.file.fileName,
+                                task.file.size, 0L, camera.deviceModel, taskId, ::showUsbDiagnosticReportFailure)?.let { diagnostic ->
+                                diagnostic.noDownload("existing file reused; use an empty folder for a fresh transfer")
+                                diagnostic.inspect("existing-file-only", localOriginal.uri)
+                                diagnostic.finish("skipped-existing")
+                            }
+                        }
                         recordExistingExport(
                             uri = uri,
                             destinationFolderName = task.destinationFolderName,
@@ -2192,6 +2201,11 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                             // 仅在大小【已知】时走此捷径——SIZE_UNKNOWN 下 partSize>=哨兵会把
                             // 4.3GB 的截断视频误判为完整，造成静默数据丢失。
                             log { "DL_RESUME_COMPLETE: ${task.file.fileName} partSize=$partSize" }
+                            val partDiagnostic = if (camera.connectionType == CameraConnectionType.USB)
+                                UsbTransferDiagnostic.start(contentResolver, rootDirectoryUri, task.file.fileName,
+                                    task.file.size, 0L, camera.deviceModel, taskId, ::showUsbDiagnosticReportFailure) else null
+                            partDiagnostic?.noDownload("complete-sized partial file reused; original reception is unverified")
+                            partDiagnostic?.inspect("complete-sized-part", partFile.uri)
                             val finalName = task.file.fileName
                             var renamed = renameQuietly(partFile.uri, finalName)
                             if (renamed == null) {
@@ -2204,6 +2218,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                 }
                             }
                             if (renamed != null) {
+                                partDiagnostic?.inspect("final-from-complete-part", renamed)
+                                partDiagnostic?.finish("promoted-complete-sized-part")
                                 val savedName = displayNameOf(renamed) ?: finalName
                                 directoryIndex.addFile(savedName, partSize, renamed)
                                 directoryIndex.removePart(task.file.fileName)
@@ -2220,6 +2236,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                 taskToRecheck = task
                                 continue
                             } else {
+                                partDiagnostic?.finish("part-rename-failed; restarting download")
                                 // 改不了，删半成品让正常路径重下
                                 deleteQuietly(partFile.uri)
                                 directoryIndex.removePart(task.file.fileName)
@@ -2259,6 +2276,10 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         serviceStarted = true
                     }
 
+                    val usbDiagnostic = if (camera.connectionType == CameraConnectionType.USB)
+                        UsbTransferDiagnostic.start(contentResolver, rootDirectoryUri, task.file.fileName,
+                            task.file.size, resumeOffset, camera.deviceModel, taskId, ::showUsbDiagnosticReportFailure) else null
+                    var diagnosticOutcome = "interrupted"
                     try {
                         var cameraHeaderPrefix: ByteArray? = null
                         // SAF 的建文件/开流/关闭冲刷都是跨进程 Binder + 磁盘 IO，放 IO 线程，
@@ -2302,10 +2323,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
 
                             // 用大缓冲包裹 SAF 输出流，把零散的写批量化，减少 ContentProvider 往返。
                             // 缺了它，每个 PTP-IP 数据包都要跨 Binder 写一次 SAF，吞吐直接腰斩（2M/s→<1M/s）。
-                            val downloadResult = java.io.BufferedOutputStream(
-                                outputStream,
-                                1024 * 1024,
-                            ).use { out ->
+                            val bufferedOutput = java.io.BufferedOutputStream(outputStream, 1024 * 1024)
+                            val downloadResult = (usbDiagnostic?.wrap(bufferedOutput) ?: bufferedOutput).use { out ->
                                 camera.downloadToFile(
                                     handle, out,
                                     onProgress = { progress ->
@@ -2345,6 +2364,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         }
                         // withContext 正常返回则 fileDocUri 必已赋值。
                         val createdUri = checkNotNull(fileDocUri)
+                        usbDiagnostic?.receivedComplete()
+                        usbDiagnostic?.inspect("temporary-after-close", createdUri)
                         // Parse the small immutable metadata object in parallel with the provider
                         // rename/copy below. This releases the 256 KiB prefix promptly instead of
                         // retaining one byte array per queued frame task.
@@ -2406,6 +2427,9 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                     }
                                 }
                                 if (renamedUri != null) {
+                                    usbDiagnostic?.note("saveMode=$originalSaveMode savedName=$savedName")
+                                    usbDiagnostic?.inspect("final-after-save", renamedUri)
+                                    diagnosticOutcome = "saved"
                                     PhotoGenerationProbe.note(
                                         category = "FRAME-META",
                                         message = "original saved mode=$originalSaveMode " +
@@ -2499,6 +2523,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                         )
                                     }
                                 } else {
+                                    diagnosticOutcome = "save-failed ${saveError?.message}"
                                     // 改名与复制均失败：删掉临时文件并标记失败——
                                     // 重试时从头下载（改名失败不是传输层问题，续传解决不了）。
                                     deleteQuietly(createdUri)
@@ -2515,6 +2540,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                 }
                             },
                             onFailure = { e ->
+                                diagnosticOutcome = "download-failed ${e.javaClass.simpleName}: ${e.message}"
                                 if (e is ResumeUnavailableException) {
                                     // 走不了续传（相机不支持分块 / >4GB 拿不到真实大小）：删掉半成品，
                                     // 本次标记失败，重试将从头全新下载——绝不用错位的全量数据续写。
@@ -2544,6 +2570,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         //（.nkpart_ 前缀带前导点，相册中本就不可见），也是断点续传的基础。
                         throw e
                     } catch (e: Exception) {
+                        diagnosticOutcome = "exception ${e.javaClass.simpleName}: ${e.message}"
+                        fileDocUri?.let { usbDiagnostic?.inspect("temporary-after-error", it) }
                         // 异常保留半成品——不是传输层错误（如目录失效），但半成品仍有价值
                         // 保留可让用户修好设置后重试时续传。
                         if (BuildConfig.DEBUG) {
@@ -2557,6 +2585,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         updateTask(taskId) {
                             it.copy(status = TransferStatus.FAILED, error = friendlyError(e), speed = 0)
                         }
+                    } finally {
+                        usbDiagnostic?.finish(diagnosticOutcome)
                     }
                 }
                 } catch (cancelled: CancellationException) {
@@ -2619,6 +2649,12 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         job.start()
     }
 
+    private suspend fun showUsbDiagnosticReportFailure() = withContext(Dispatchers.Main) {
+        android.widget.Toast.makeText(getApplication(),
+            str(R.string.usb_diagnostic_report_failed),
+            android.widget.Toast.LENGTH_LONG).show()
+    }
+
     /** Explicit crop tasks never enter the original-file skip/publish paths. */
     private suspend fun processCropTask(
         task: TransferTask,
@@ -2629,11 +2665,18 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         val recipe = checkNotNull(task.cropRecipe)
         val id = task.taskId
         var staging: java.io.File? = null
+        var usbDiagnostic: UsbTransferDiagnostic? = null
+        var diagnosticOutcome = "interrupted"
         try {
             if (LicenseManager.transferLimitReached()) throw IllegalStateException(str(R.string.transfer_limit_reached))
             if (LicenseManager.freeSizeLimitExceeded(task.file.size)) throw IllegalStateException(
                 str(R.string.transfer_size_limit, LicenseManager.FREE_MAX_FILE_BYTES / (1024 * 1024)))
             val camera = cameraProvider() ?: throw IllegalStateException(str(R.string.camera_not_connected))
+            if (camera.connectionType == CameraConnectionType.USB) {
+                usbDiagnostic = UsbTransferDiagnostic.start(contentResolver, rootDocumentUri(treeUri),
+                    task.file.fileName, task.file.size, 0L, camera.deviceModel, id, ::showUsbDiagnosticReportFailure)
+                usbDiagnostic?.note("task=crop; hashes below compare the unmodified downloaded original")
+            }
             updateTask(id) { it.copy(status = TransferStatus.TRANSFERING, error = null) }
             _activeTransferProgress.value = ActiveTransferProgress(taskId = id)
             val directory = withContext(Dispatchers.IO) {
@@ -2644,7 +2687,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             val source = java.io.File(directory, "source.jpg")
             val cropped = java.io.File(directory, "cropped.jpg")
             val stats = withContext(Dispatchers.IO) {
-                source.outputStream().buffered(1024 * 1024).use { output ->
+                val bufferedOutput = source.outputStream().buffered(1024 * 1024)
+                (usbDiagnostic?.wrap(bufferedOutput) ?: bufferedOutput).use { output ->
                     camera.downloadToFile(task.file.handle, output,
                         totalSize = task.file.size,
                         preferHighThroughputAtStart = { preferHighThroughputTransfers },
@@ -2660,6 +2704,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         }).getOrThrow()
                 }
             }
+            usbDiagnostic?.inspect("private-temporary-after-close", Uri.fromFile(source))
             val downloadedAt = android.os.SystemClock.elapsedRealtime()
             updateTask(id) { it.copy(progress = 1f, downloaded = stats.bytes, speed = 0,
                 elapsedMs = downloadedAt - stats.startedAtElapsedMs,
@@ -2685,10 +2730,14 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     val name = unusedName(task.file.fileName)
                     withContext(NonCancellable) {
                         val originalUri = publishCroppedJpeg(source, destinationUri, name)
+                        usbDiagnostic?.inspect("final-original-after-save", originalUri)
                         val savedName = displayNameOf(originalUri) ?: name
                         directoryIndex.addFile(savedName, source.length(), originalUri)
                         recordExistingExport(treeUri, task.destinationFolderName, savedName, source.length(), originalUri)
                     }
+                } else {
+                    usbDiagnostic?.note("original=reused-existing")
+                    usbDiagnostic?.inspect("existing-original", existing.uri)
                 }
             }
             // Use the same generation worker pool. Crop is part of this task's required processing,
@@ -2744,6 +2793,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 } finally { repeat(acquired) { photoProcessingSlots.release() } }
             }
 
+            diagnosticOutcome = "saved"
             LicenseManager.recordTransferDone()
             updateTask(id) { it.finishFrameGeneration(android.os.SystemClock.elapsedRealtime())
                 .copy(status = TransferStatus.COMPLETED, progress = 1f, speed = 0) }
@@ -2751,9 +2801,14 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             throw cancelled
         } catch (failure: Throwable) {
             if (failure !is Exception && failure !is OutOfMemoryError && failure !is LinkageError) throw failure
+            diagnosticOutcome = "exception ${failure.javaClass.simpleName}: ${failure.message}"
+            staging?.let { java.io.File(it, "source.jpg") }?.takeIf { it.isFile }?.let {
+                usbDiagnostic?.inspect("private-temporary-after-error", Uri.fromFile(it))
+            }
             updateTask(id) { it.finishFrameGeneration(android.os.SystemClock.elapsedRealtime())
                 .copy(status = TransferStatus.FAILED, error = friendlyError(failure), speed = 0) }
         } finally {
+            usbDiagnostic?.finish(diagnosticOutcome)
             if (_activeTransferProgress.value?.taskId == id) _activeTransferProgress.value = null
             withContext(NonCancellable + Dispatchers.IO) { staging?.deleteRecursively() }
         }

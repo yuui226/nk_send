@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="usb_diagnostic_report_failed">USB diagnostic TXT could not be saved. Please choose another transfer folder.</string>
+</resources>
