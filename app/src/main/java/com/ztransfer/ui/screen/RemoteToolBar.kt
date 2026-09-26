@@ -87,7 +87,7 @@ internal fun RemoteToolBar(
     leading: @Composable () -> Unit = {},
     button: @Composable (RemoteTool?) -> Unit,
 ) {
-    val dragState = remember(singleLine) { ToolDragState() }
+    val dragState = remember(singleLine, movie) { ToolDragState() }
     val layout = tools.layout(movie)
     val currentLayout by rememberUpdatedState(layout)
     val secondRowLock = layout.lockStartsSecondRow
@@ -159,7 +159,7 @@ internal fun RemoteToolBar(
         )
     } else {
         AdaptiveRemoteToolBar(
-            modifier.animateContentSize(tween(220)).then(gesture),
+            modifier.then(if (editEnabled) Modifier.animateContentSize(tween(220)) else Modifier).then(gesture),
             horizontalGap = gap, verticalGap = 4.dp, pinnedEndCount = endTools.size,
             secondRowFirstId = if (secondRowLock) RemoteTool.LOCK.id else null,
         ) {
@@ -266,7 +266,7 @@ private fun AnimatedToolSlot(
     val dragging = tool != null && state.dragging == tool
     val position = if (slot != null) animateOffsetAsState(
         if (dragging) state.topLeft else slot.topLeft,
-        animationSpec = if (dragging) snap() else spring(dampingRatio = 0.86f, stiffness = 500f),
+        animationSpec = if (dragging || !editing) snap() else spring(dampingRatio = 0.86f, stiffness = 500f),
         label = "toolPosition-$id",
     ) else null
     val scale = animateFloatAsState(if (dragging) 1.10f else 1f, tween(120), label = "toolLift-$id")
@@ -277,7 +277,7 @@ private fun AnimatedToolSlot(
                 initialStartOffset = StartOffset((tool.ordinal % 3) * 55)), label = "toolWiggle-$id")
     } else null
     SideEffect { state.visualPositions[id] = { position?.value ?: state.slots[id]?.topLeft ?: Offset.Zero } }
-    DisposableEffect(id) {
+    DisposableEffect(id, state) {
         onDispose { state.slots.remove(id); state.visualPositions.remove(id) }
     }
     Box(Modifier.layoutId(id).onPlaced { coordinates ->
@@ -286,8 +286,8 @@ private fun AnimatedToolSlot(
     }.zIndex(if (dragging) 1f else 0f).graphicsLayer {
         val base = state.slots[id]?.topLeft ?: Offset.Zero
         val animated = position?.value ?: base
-        translationX = animated.x - base.x
-        translationY = animated.y - base.y
+        translationX = if (editing) animated.x - base.x else 0f
+        translationY = if (editing) animated.y - base.y else 0f
         rotationZ = wiggle?.value ?: 0f
         scaleX = scale.value
         scaleY = scale.value

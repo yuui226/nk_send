@@ -19,6 +19,13 @@ val keystoreProps = Properties().apply {
 android {
     namespace = "com.ztransfer"
     compileSdk = 35
+    ndkVersion = "27.2.12479018"
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
 
     signingConfigs {
         if (hasReleaseKeystore) {

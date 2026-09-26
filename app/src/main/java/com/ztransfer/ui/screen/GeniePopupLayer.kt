@@ -7,6 +7,7 @@ import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Paint
+import androidx.compose.ui.graphics.Matrix
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.layer.CompositingStrategy
@@ -31,10 +32,15 @@ internal fun Modifier.geniePopupLayer(
     panel: () -> Rect?,
     layerRecorded: () -> Boolean,
     setLayerRecorded: (Boolean) -> Unit,
+    allowAboveAnchor: Boolean = false,
 ): Modifier = this
     .drawWithCache {
         val tile = Path()
         val composite = Paint()
+        val matrix = Matrix()
+        val rows = arrayOfNulls<GenieRow>(GENIE_RENDER_BANDS + 1)
+        // A new cache can mean a resized panel/different density: never reuse its old recording.
+        setLayerRecorded(false)
         onDrawWithContent {
             val p = genieProgress(progress())
             if (p == 1f) {
@@ -47,8 +53,11 @@ internal fun Modifier.geniePopupLayer(
             if (panelAlpha <= 0f || size.width <= 0f || size.height <= 0f) return@onDrawWithContent
             val bounds = panel() ?: Rect(0f, 0f, size.width, size.height)
             val origin = anchor()
+            val above = allowAboveAnchor && origin != null && bounds.bottom <= origin.top
+            fun mirrorY(rect: Rect) = Rect(rect.left,-rect.bottom,rect.right,-rect.top)
+            val geometryBounds=if(above) mirrorY(bounds) else bounds
+            val geometryOrigin=if(above) origin?.let(::mirrorY) else origin
             layer.compositingStrategy = CompositingStrategy.Offscreen
-            layer.blendMode = BlendMode.SrcOver
             layer.alpha = 1f
             // Fade the assembled panel, not each triangle (or individual nested shadows).
             composite.alpha = panelAlpha
@@ -58,8 +67,9 @@ internal fun Modifier.geniePopupLayer(
                 layer.record { this@onDrawWithContent.drawContent() }
                 setLayerRecorded(true)
             }
-            if (!validGenieAnchor(origin, bounds)) {
+            if (!validGenieAnchor(geometryOrigin, geometryBounds)) {
                 layer.alpha = p
+                layer.blendMode = BlendMode.SrcOver
                 drawLayer(layer)
                 return@onDrawWithContent
             }
@@ -68,14 +78,25 @@ internal fun Modifier.geniePopupLayer(
             // Six bands are sufficient once the funnel is nearly open; p==1 above still settles
             // to the normal live draw.
             val renderBands = if (p > 0.82f) 6 else GENIE_RENDER_BANDS
-            val source = requireNotNull(origin)
+            val source = requireNotNull(geometryOrigin)
             val mouthWidth = GENIE_Z_MARK_WIDTH_DP.dp.toPx()
-            val rows = Array(renderBands + 1) {
-                genieRow(p, it.toFloat() / renderBands, source, bounds, mouthWidth)
+            var minX=Float.POSITIVE_INFINITY
+            var minY=Float.POSITIVE_INFINITY
+            var maxX=Float.NEGATIVE_INFINITY
+            var maxY=Float.NEGATIVE_INFINITY
+            for(index in 0..renderBands) {
+                val fraction=index.toFloat()/renderBands
+                // Reflect coordinates once per frame, not separately for every band.
+                val base=genieRow(p,if(above) 1f-fraction else fraction,source,geometryBounds,mouthWidth)
+                val row=if(above) GenieRow(base.left,base.right,size.height-base.y,-base.tilt) else base
+                rows[index]=row
+                minX=minOf(minX,row.left)
+                maxX=maxOf(maxX,row.right)
+                minY=minOf(minY,row.leftY,row.rightY)
+                maxY=maxOf(maxY,row.leftY,row.rightY)
             }
-            // Include the mouth above the panel's layout bounds; never clip it to y=0.
-            val outputBounds = Rect(rows.minOf { it.left }, rows.minOf { minOf(it.leftY, it.rightY) },
-                rows.maxOf { it.right }, rows.maxOf { maxOf(it.leftY, it.rightY) }).inflate(1f)
+            // Include the inlet outside the panel bounds without allocating a full-screen layer.
+            val outputBounds=Rect(minX-1f,minY-1f,maxX+1f,maxY+1f)
             val canvas = drawContext.canvas
             canvas.saveLayer(outputBounds, composite)
             try {
@@ -83,8 +104,8 @@ internal fun Modifier.geniePopupLayer(
                 for (index in 0 until renderBands) {
                     val sourceTop = size.height * index / renderBands
                     val sourceBottom = size.height * (index + 1) / renderBands
-                    val top = rows[index]
-                    val bottom = rows[index + 1]
+                    val top = requireNotNull(rows[index])
+                    val bottom = requireNotNull(rows[index + 1])
                     for (triangle in 0..1) {
                         tile.rewind()
                         if (triangle == 0) {
@@ -97,8 +118,8 @@ internal fun Modifier.geniePopupLayer(
                             tile.lineTo(bottom.left, bottom.leftY)
                         }
                         tile.close()
-                        val matrix = genieBandMatrix(size.width, sourceTop, sourceBottom, top, bottom,
-                            upper = triangle == 0)
+                        genieBandMatrix(size.width, sourceTop, sourceBottom, top, bottom,
+                            upper = triangle == 0, destination = matrix)
                         withTransform({
                             // Clip in destination space using exactly the same shared endpoints.
                             // Do not round or expand tiles: overlap would brighten glass with Plus.

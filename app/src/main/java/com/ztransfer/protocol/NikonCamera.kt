@@ -2392,11 +2392,12 @@ class NikonCamera(private val context: Context) {
      * [maxSize] 字节（默认 128KB，足以覆盖绝大多数 JPEG 的 EXIF 段）；与 [ioMutex]
      * 串行化。任何失败返回 null——EXIF 是纯体验增强，不应为失败产生视觉噪音。
      */
-    suspend fun readExifHeader(handle: Int, maxSize: Int = 128 * 1024): ByteArray? =
+    suspend fun readExifHeader(handle: Int, maxSize: Int = 128 * 1024, bypassCache: Boolean = false,
+        retryDeviceBusy: Boolean = false): ByteArray? =
         ioGate.withInteractive {
             withContext(Dispatchers.IO) {
                 try {
-                    if (staDirectObjectReadValidated) {
+                    if (staDirectObjectReadValidated && !bypassCache) {
                         staDirectRecentHeaders[handle]?.let { cached ->
                             return@withContext if (cached.size <= maxSize) {
                                 cached
@@ -2405,13 +2406,20 @@ class NikonCamera(private val context: Context) {
                             }
                         }
                     }
-                    sendCmd(PtpConstants.NK_GET_PARTIAL_OBJECT_EX, handle, 0, 0, maxSize, 0)
-                    val (respCode, data) = recvRespWithPayload()
-                    if (respCode == PtpConstants.RESPONSE_OK && data != null && data.isNotEmpty()) data
-                    else {
+                    var retries = if (retryDeviceBusy) FHD_DEVICE_BUSY_RETRIES else 0
+                    var result: ByteArray? = null
+                    while (true) {
+                        sendCmd(PtpConstants.NK_GET_PARTIAL_OBJECT_EX, handle, 0, 0, maxSize, 0)
+                        val (respCode, data) = recvRespWithPayload()
+                        if (respCode == PtpConstants.RESPONSE_OK && data != null && data.isNotEmpty()) {
+                            result = data
+                            break
+                        }
                         log { "ReadExifHeader handle=$handle resp=0x${respCode.toString(16)} len=${data?.size ?: 0}" }
-                        null
+                        if (respCode != PtpConstants.DEVICE_BUSY || retries-- <= 0) break
+                        delay(FHD_DEVICE_BUSY_RETRY_DELAY_MS)
                     }
+                    result
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {

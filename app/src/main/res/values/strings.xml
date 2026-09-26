@@ -625,4 +625,7 @@
     <string name="remote_grid_thirds_diagonals">3×3 + diagonals</string>
     <string name="remote_grid_fourths_diagonals">4×4 + diagonals</string>
     <string name="auto_transfer_video">Video</string>
+    <string name="remote_grid_235">2.35:1</string>
+    <string name="remote_grid_169">16:9</string>
+    <string name="remote_grid_43">4:3</string>
 </resources>

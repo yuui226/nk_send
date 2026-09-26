@@ -619,4 +619,7 @@
     <string name="remote_grid_thirds_diagonals">3×3＋對角線</string>
     <string name="remote_grid_fourths_diagonals">4×4＋對角線</string>
     <string name="auto_transfer_video">影片</string>
+    <string name="remote_grid_235">2.35:1</string>
+    <string name="remote_grid_169">16:9</string>
+    <string name="remote_grid_43">4:3</string>
 </resources>

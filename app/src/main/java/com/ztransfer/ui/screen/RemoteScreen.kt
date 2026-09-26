@@ -615,6 +615,7 @@ private fun RemoteContent(
     var capturing by remember { mutableStateOf(false) }
     var modeText by remember { mutableStateOf<String?>(null) }
     var movieMode by remember { mutableStateOf(false) }
+    var toolModeReady by remember(connected) { mutableStateOf(!connected) }
     var focusModeText by remember { mutableStateOf<String?>(null) }
     var focusModeProp by remember { mutableStateOf<Int?>(null) }
     var focusModeManual by remember { mutableStateOf(false) }
@@ -684,6 +685,9 @@ private fun RemoteContent(
     var desqueezeMultiplier by tools.desqueeze
     var waveformMode by tools.waveform
     val showWaveform = waveformMode != WaveformMode.OFF
+    var gridPanelOpen by remember { mutableStateOf(false) }
+    var gridPanelCloseRequested by remember { mutableStateOf(false) }
+    var gridAnchor by remember { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
     var cameraToolPanel by remember { mutableStateOf<RemoteCameraTool?>(null) }
     var cameraToolCloseRequested by remember { mutableStateOf(false) }
     var toolOverlayCoordinates by remember { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
@@ -697,7 +701,9 @@ private fun RemoteContent(
     var probing by remember { mutableStateOf(false) }
     // 沉浸全屏仅用于横屏；沿用同一个取景器实例做边界动画。
     var immersiveFullscreen by remember { mutableStateOf(false) }
-    LaunchedEffect(rotation) {
+    LaunchedEffect(rotation, editingTools) {
+        gridPanelOpen = false
+        gridPanelCloseRequested = false
         cameraToolPanel = null
         cameraToolCloseRequested = false
         if (rotation == 0) immersiveFullscreen = false
@@ -1366,6 +1372,8 @@ private fun RemoteContent(
                 // 避免重进页面时先按错误模式加载整套参数。
                 refreshMovieMode(refreshExposureOnChange = false)
             }
+            // Render the first toolbar from the resolved selector (or the existing photo fallback).
+            toolModeReady = true
             diagnosticControlEnabled = sessionCamera.remoteDiagnosticControlModeSet &&
                 sessionCamera.remoteControlModeSet
             if (diagnosticControlEnabled) diagnosticControlLogging = true
@@ -2021,9 +2029,6 @@ private fun RemoteContent(
         hintDurationMs = durationMs
         hintVisible = true
         hintNonce++
-    }
-    fun cycleFramingGrid() {
-        framingGrid = framingGrid.next()
     }
     LaunchedEffect(hintNonce) {
         if (hintVisible) {
@@ -2722,6 +2727,7 @@ private fun RemoteContent(
                 }
                 RemoteTool.LOCK -> onLockRotation(false)
                 RemoteTool.FULLSCREEN -> immersiveFullscreen = false
+                RemoteTool.GRID -> gridPanelOpen = false
                 RemoteTool.WHITE_BALANCE -> if (cameraToolPanel == RemoteCameraTool.WHITE_BALANCE) cameraToolPanel = null
                 RemoteTool.FOCUS_AREA -> if (cameraToolPanel == RemoteCameraTool.FOCUS_AREA) cameraToolPanel = null
                 else -> Unit
@@ -2732,7 +2738,11 @@ private fun RemoteContent(
     var dispMode by tools.disp
     val changeToolVisibility: (RemoteTool, Boolean) -> Unit = ::setToolVisible
     ApplyRemoteToolLayout(tools.layout(movieMode), changeToolVisibility)
-    val renderTools: @Composable (androidx.compose.ui.unit.Dp, Modifier, Boolean) -> Unit = { gap, modifier, singleLine ->
+    val renderTools: @Composable (androidx.compose.ui.unit.Dp, Modifier, Boolean) -> Unit = toolsContent@{ gap, modifier, singleLine ->
+        if (!toolModeReady) {
+            Spacer(modifier.fillMaxWidth().height(36.dp))
+            return@toolsContent
+        }
         RemoteToolBar(tools, editingTools, movieMode, changeToolVisibility,
             modifier.fillMaxWidth(), gap, singleLine = singleLine,
             leading = {
@@ -2768,7 +2778,11 @@ private fun RemoteContent(
                                 RemoteTool.FPS -> toggleFpsControl()
                                 RemoteTool.AUDIO -> toggleAudioLevels()
                                 RemoteTool.HISTOGRAM -> histogramMode = histogramMode.next()
-                                RemoteTool.GRID -> cycleFramingGrid()
+                                RemoteTool.GRID -> {
+                                    listProp=null; devPanel=false; cameraToolPanel=null
+                                    if(gridPanelOpen) gridPanelCloseRequested=true
+                                    else { gridPanelCloseRequested=false; gridPanelOpen=true }
+                                }
                                 RemoteTool.EXPOSURE -> exposureAssist = exposureAssist.next()
                                 RemoteTool.DESQUEEZE -> {
                                     val i = REMOTE_DESQUEEZE_OPTIONS.indices.minByOrNull { abs(REMOTE_DESQUEEZE_OPTIONS[it] - desqueezeMultiplier) } ?: 0
@@ -2783,8 +2797,8 @@ private fun RemoteContent(
                                 }
                                 RemoteTool.FULLSCREEN -> enterFullscreen()
                                 RemoteTool.ROTATE -> if (!disabled) onCycleRotation()
-                                RemoteTool.WHITE_BALANCE -> { listProp = null; devPanel = false; if (cameraToolPanel == RemoteCameraTool.WHITE_BALANCE) cameraToolCloseRequested = true else { cameraToolCloseRequested = false; cameraToolPanel = RemoteCameraTool.WHITE_BALANCE } }
-                                RemoteTool.FOCUS_AREA -> { listProp = null; devPanel = false; if (cameraToolPanel == RemoteCameraTool.FOCUS_AREA) cameraToolCloseRequested = true else { cameraToolCloseRequested = false; cameraToolPanel = RemoteCameraTool.FOCUS_AREA } }
+                                RemoteTool.WHITE_BALANCE -> { gridPanelOpen = false; listProp = null; devPanel = false; if (cameraToolPanel == RemoteCameraTool.WHITE_BALANCE) cameraToolCloseRequested = true else { cameraToolCloseRequested = false; cameraToolPanel = RemoteCameraTool.WHITE_BALANCE } }
+                                RemoteTool.FOCUS_AREA -> { gridPanelOpen = false; listProp = null; devPanel = false; if (cameraToolPanel == RemoteCameraTool.FOCUS_AREA) cameraToolCloseRequested = true else { cameraToolCloseRequested = false; cameraToolPanel = RemoteCameraTool.FOCUS_AREA } }
                                 else -> {
                                     listProp = null
                                     devPanel = false
@@ -2796,6 +2810,8 @@ private fun RemoteContent(
                             whiteBalanceAnchor = it
                         } else if (tool == RemoteTool.FOCUS_AREA) Modifier.onGloballyPositioned {
                             focusAreaAnchor = it
+                        } else if (tool == RemoteTool.GRID) Modifier.onGloballyPositioned {
+                            gridAnchor = it
                         } else Modifier, enabled = !disabled) {
                             if (tool == null) Icon(if (editingTools) Icons.Default.Check else Icons.Default.Settings, null, Modifier.size(19.dp))
                             else RemoteToolMark(tool, tools)
@@ -3610,6 +3626,13 @@ private fun RemoteContent(
                 }
             }
             }
+    if(gridPanelOpen) {
+        val localAnchor=toolOverlayCoordinates?.takeIf { it.isAttached }?.let { root ->
+            gridAnchor?.takeIf { it.isAttached }?.let { root.localBoundingBoxOf(it,clipBounds=false) }
+        }
+        RemoteGridPanel(framingGrid,localAnchor,rotation!=0,gridPanelCloseRequested,
+            onSelect={ framingGrid=it },onDismiss={gridPanelOpen=false;gridPanelCloseRequested=false})
+    }
     cameraToolPanel?.let { selectedTool ->
         val panelCamera = cameraViewModel.getCamera()
         val buttonCoordinates = if (selectedTool == RemoteCameraTool.WHITE_BALANCE) whiteBalanceAnchor else focusAreaAnchor

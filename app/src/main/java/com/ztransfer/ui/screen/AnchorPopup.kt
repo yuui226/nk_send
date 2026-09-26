@@ -121,7 +121,9 @@ fun AnchorPopup(
                 .align(panelAlignment)
                 .then(panelModifier)
                 .onGloballyPositioned { coordinates ->
-                    animationState.panelBounds = coordinates.boundsInRoot()
+                    val bounds = coordinates.boundsInRoot()
+                    if (animationState.panelBounds?.size != bounds.size) animationState.layerRecorded = false
+                    animationState.panelBounds = bounds
                     if (!animationState.expansionStarted && !animationState.closing) {
                         animationState.expansionStarted = true
                         animationScope.launch {

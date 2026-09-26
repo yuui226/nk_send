@@ -10,14 +10,15 @@ class FramingGridTest {
     fun cyclesThroughRequestedStylesAndBackToOff() {
         val visited = mutableListOf<ViewfinderGrid>()
         var grid = ViewfinderGrid.OFF
-        repeat(8) {
+        repeat(11) {
             visited.add(grid)
             grid = grid.next()
         }
         assertEquals(
             listOf(ViewfinderGrid.OFF, ViewfinderGrid.THIRDS, ViewfinderGrid.THIRDS_DIAGONALS, ViewfinderGrid.FOURTHS,
                 ViewfinderGrid.FOURTHS_DIAGONALS,
-                ViewfinderGrid.CENTER, ViewfinderGrid.GOLDEN, ViewfinderGrid.OFF),
+                ViewfinderGrid.CENTER, ViewfinderGrid.GOLDEN, ViewfinderGrid.WIDE_235, ViewfinderGrid.WIDE_169,
+                ViewfinderGrid.FRAME_43, ViewfinderGrid.OFF),
             visited
         )
     }
@@ -68,7 +69,18 @@ class FramingGridTest {
             val top = (height - imageHeight) / 2f
             for (grid in ViewfinderGrid.entries) {
                 val lines = framingGridLines(grid, width, height, aspect)
-                assertEquals(grid.fractions.size * 2 + if (grid.diagonals) 2 else 0, lines.size)
+                assertEquals(if(grid.frameAspect!=null) 4 else grid.fractions.size * 2 + if (grid.diagonals) 2 else 0, lines.size)
+                grid.frameAspect?.let { target ->
+                    val x0=lines[0].start.x
+                    val y0=lines[0].start.y
+                    val x1=lines[1].start.x
+                    val y1=lines[1].end.y
+                    assertEquals(target,(x1-x0)/(y1-y0),0.001f)
+                    assertEquals(width/2f,(x0+x1)/2f,0.001f)
+                    assertEquals(height/2f,(y0+y1)/2f,0.001f)
+                    assertTrue(x0>=left-.001f && x1<=left+imageWidth+.001f)
+                    assertTrue(y0>=top-.001f && y1<=top+imageHeight+.001f)
+                }
                 if (grid.diagonals) {
                     val expected = listOf(
                         FramingGridLine(Offset(left, top), Offset(left + imageWidth, top + imageHeight)),

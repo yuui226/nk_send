@@ -40,14 +40,17 @@ import kotlin.math.sqrt
 
 private val ToolMarkStrokeWidth = 1.5.dp
 
-internal enum class ViewfinderGrid(val fractions: List<Float>, val labelRes: Int, val diagonals: Boolean = false) {
+internal enum class ViewfinderGrid(val fractions: List<Float>, val labelRes: Int, val diagonals: Boolean = false, val frameAspect: Float? = null) {
     OFF(emptyList(), R.string.remote_grid_off),
     THIRDS(listOf(1f / 3f, 2f / 3f), R.string.remote_grid_thirds),
     FOURTHS(listOf(0.25f, 0.5f, 0.75f), R.string.remote_grid_fourths),
     CENTER(listOf(0.5f), R.string.remote_grid_center),
     GOLDEN(listOf(0.38196602f, 0.618034f), R.string.remote_grid_golden),
     THIRDS_DIAGONALS(listOf(1f / 3f, 2f / 3f), R.string.remote_grid_thirds_diagonals, true),
-    FOURTHS_DIAGONALS(listOf(0.25f, 0.5f, 0.75f), R.string.remote_grid_fourths_diagonals, true);
+    FOURTHS_DIAGONALS(listOf(0.25f, 0.5f, 0.75f), R.string.remote_grid_fourths_diagonals, true),
+    WIDE_235(emptyList(), R.string.remote_grid_235, frameAspect = 2.35f),
+    WIDE_169(emptyList(), R.string.remote_grid_169, frameAspect = 16f/9f),
+    FRAME_43(emptyList(), R.string.remote_grid_43, frameAspect = 4f/3f);
 
     fun next(): ViewfinderGrid = when (this) {
         OFF -> THIRDS
@@ -56,7 +59,10 @@ internal enum class ViewfinderGrid(val fractions: List<Float>, val labelRes: Int
         FOURTHS -> FOURTHS_DIAGONALS
         FOURTHS_DIAGONALS -> CENTER
         CENTER -> GOLDEN
-        GOLDEN -> OFF
+        GOLDEN -> WIDE_235
+        WIDE_235 -> WIDE_169
+        WIDE_169 -> FRAME_43
+        FRAME_43 -> OFF
     }
 }
 
@@ -72,6 +78,16 @@ internal fun framingGridLines(
     if (grid == ViewfinderGrid.OFF) return emptyList()
     val rect = fitCenterRect(containerWidth, containerHeight, imageAspectRatio)
     if (rect.width <= 0f || rect.height <= 0f) return emptyList()
+    grid.frameAspect?.let { aspect ->
+        val fitted=fitCenterRect(rect.width,rect.height,aspect)
+        val frame=Rect(fitted.left+rect.left,fitted.top+rect.top,fitted.right+rect.left,fitted.bottom+rect.top)
+        return listOf(
+            FramingGridLine(frame.topLeft,Offset(frame.right,frame.top)),
+            FramingGridLine(Offset(frame.right,frame.top),frame.bottomRight),
+            FramingGridLine(frame.bottomRight,Offset(frame.left,frame.bottom)),
+            FramingGridLine(Offset(frame.left,frame.bottom),frame.topLeft),
+        )
+    }
     val lines = grid.fractions.flatMap { fraction ->
         val x = rect.left + rect.width * fraction
         val y = rect.top + rect.height * fraction
@@ -348,6 +364,10 @@ internal fun GridMark(grid: ViewfinderGrid, modifier: Modifier = Modifier) {
     Canvas(modifier) {
         val sw = ToolMarkStrokeWidth.toPx()
         val inset = 2.dp.toPx()
+        grid.frameAspect?.let { aspect ->
+            val frame=fitCenterRect(size.width-inset*2,size.height-inset*2,aspect)
+            drawRect(c,frame.topLeft+Offset(inset,inset),frame.size,style=Stroke(sw))
+        }
         for (f in (if (grid == ViewfinderGrid.OFF) ViewfinderGrid.THIRDS else grid).fractions) {
             val x = inset + (size.width - inset * 2f) * f
             val y = inset + (size.height - inset * 2f) * f

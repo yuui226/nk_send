@@ -34,6 +34,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -829,6 +830,12 @@ private fun TransferTaskCardContent(
     val animateGenerationPills = task.isGeneratingFrame && !task.frameGenerationSkipped
 
     Column(modifier = modifier) {
+        Row(verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = if (isFailed) Modifier.padding(end = 42.dp) else Modifier) {
+            if (task.cropRecipe != null) Icon(Icons.Default.ContentCut,
+                contentDescription = stringResource(R.string.crop_task),
+                tint = colors.accentBlue, modifier = Modifier.size(14.dp))
         Text(
             text = task.file.fileName,
             style = MaterialTheme.typography.bodyMedium,
@@ -840,8 +847,9 @@ private fun TransferTaskCardContent(
             },
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = if (isFailed) Modifier.padding(end = 42.dp) else Modifier,
+            modifier = Modifier.weight(1f),
         )
+        }
 
         Spacer(modifier = Modifier.height(6.dp))
         Row(
@@ -1007,7 +1015,9 @@ private fun transferTaskEffectText(task: TransferTask): String? {
     val filterName = task.photoFilterRequested?.let {
         "${photoFilterDisplayName(it.preset)} ${it.normalizedIntensityPercent}%"
     }
-    val parts = listOfNotNull(frameName, filterName)
+    val cropName = if (task.cropRecipe != null) stringResource(R.string.crop_title) else null
+    val parts = if (task.cropEffectsSkipped) listOfNotNull(cropName, stringResource(R.string.crop_effects_skipped))
+        else listOfNotNull(cropName, frameName, filterName)
     return parts.takeIf { it.isNotEmpty() }?.joinToString(" · ")
 }
 

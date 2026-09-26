@@ -446,6 +446,7 @@ data class PhotoExif(
     val longitude: Double? = null,
     val altitudeMeters: Double? = null,
     val address: String? = null,
+    val orientation: Int? = null,
 )
 
 internal fun formatExposureCompensation(value: Float?): String? {
@@ -4055,6 +4056,24 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         ?.let { if (file.extension in VIDEO_EXTENSIONS) cropVideoBars(it) else it }
         ?.asImageBitmap()
 
+    /** Crop reuses the visible FHD. Only a missing EXIF orientation may need a small metadata read. */
+    internal suspend fun prepareCrop(file: NikonCamera.FileInfo, image: ImageBitmap,
+        previewOrientation: Int? = null, rotation: Float = 0f): com.ztransfer.crop.CropPreview {
+        val cached = exifCache[exifKey(file)]?.orientation
+        val orientation = cached ?: run {
+            val cam = camera ?: throw com.ztransfer.crop.CropPreparationException(
+                com.ztransfer.crop.CropPreparationException.Reason.CONNECTION)
+            val bytes = cam.readExifHeader(file.handle, retryDeviceBusy = true)
+                ?: throw com.ztransfer.crop.CropPreparationException(com.ztransfer.crop.CropPreparationException.Reason.ORIENTATION)
+            com.ztransfer.crop.parseJpegCropOrientation(bytes)
+                ?: throw com.ztransfer.crop.CropPreparationException(com.ztransfer.crop.CropPreparationException.Reason.ORIENTATION)
+        }
+        return withContext(Dispatchers.Default) {
+            // The displayed bitmap is borrowed from the preview cache; never recycle it here.
+            com.ztransfer.crop.prepareCropPreview(image.asAndroidBitmap(), orientation, previewOrientation, rotation)
+        }
+    }
+
     /**
      * 长按预览专用：加载 FHD (1920×1080) 预览图。直接从相机拉 FHD JPEG 并解码。
      * 任何环节失败均返回 null，调用方静默回退到缩略图。
@@ -4325,6 +4344,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             latitude = latitude.takeIf { validCoordinates },
             longitude = longitude.takeIf { validCoordinates },
             altitudeMeters = altitude,
+            orientation = exif.getAttribute(ExifInterface.TAG_ORIENTATION)?.toIntOrNull()?.takeIf { it in 1..8 },
         )
     }
 

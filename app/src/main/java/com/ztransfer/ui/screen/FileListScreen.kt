@@ -1045,6 +1045,8 @@ fun FileListScreen(
 
     // 长按预览：全屏翻页 + 从被长按格子的位置放大展开。
     var previewIndex by remember { mutableStateOf<Int?>(null) }
+    // Every explicit open owns a new pager/cache/gesture lifetime, including close→open races.
+    var previewSessionId by remember { mutableStateOf(0L) }
     val latestPreviewVisibilityChanged by rememberUpdatedState(onPreviewVisibilityChanged)
     val updatePreviewIndex: (Int?) -> Unit = { nextIndex ->
         previewIndex = nextIndex
@@ -1146,6 +1148,7 @@ fun FileListScreen(
                 it is PhotoPreviewItem.Photo && it.file.handle == file.handle
             }
             if (idx >= 0 && currentPreviewSourceIdentity === sourceAtOpen) {
+                previewSessionId++
                 previewItems = snapshot
                 updatePreviewIndex(idx)
                 previewAnchor = rect
@@ -1170,6 +1173,7 @@ fun FileListScreen(
                     it is PhotoPreviewItem.Photo && it.file.handle == first.handle
                 }
                 if (idx >= 0 && currentPreviewSourceIdentity === sourceAtOpen) {
+                    previewSessionId++
                     previewItems = snapshot
                     updatePreviewIndex(idx)
                     previewAnchor = rect
@@ -2048,6 +2052,8 @@ fun FileListScreen(
         // 长按预览层：全屏翻页，从被长按格子的位置放大展开/收回。
         previewIndex?.let { idx ->
             if (idx in previewItems.indices) {
+                val openedSession=previewSessionId
+                androidx.compose.runtime.key(openedSession) {
                 PhotoPreviewOverlay(
                     items = previewItems,
                     initialIndex = idx,
@@ -2073,6 +2079,23 @@ fun FileListScreen(
                     onQueueFlightsCancelled = onQueueFlightsCancelled,
                     onQueueFlightCaught = onQueueFlightCaught,
                     onTransfer = onTransferFromPreview,
+                    onCropTransfer = { file, recipe ->
+                        when {
+                            transferState.transferDirUri == null -> {
+                                updatePreviewIndex(null)
+                                previewItems = emptyList()
+                                previewSourceAtOpen = null
+                                requestTransferDirectory()
+                                false
+                            }
+                            !state.isConnectedToCamera -> { showHint(notConnectedHint); false }
+                            else -> {
+                                transferViewModel.addToQueue(listOf(file), cameraViewModel::getCamera, recipe)
+                                showHint(context.getString(R.string.crop_added))
+                                true
+                            }
+                        }
+                    },
                     onTransferBurst = onTransferBurstPreview,
                     onBurstExpandedChange = { id, expanded ->
                         if (expanded) expandedBurstCollections[id] = true
@@ -2082,7 +2105,8 @@ fun FileListScreen(
                     onHistogramModeChanged =
                         transferViewModel::setPreviewHistogramMode,
                     prepareDismissTarget = preparePreviewDismissTarget,
-                    onDismiss = { returnFile ->
+                    onDismiss = dismissPreview@{ returnFile ->
+                        if(openedSession!=previewSessionId) return@dismissPreview
                         updatePreviewIndex(null)
                         previewItems = emptyList()
                         previewSourceAtOpen = null
@@ -2097,6 +2121,7 @@ fun FileListScreen(
                         }
                     }
                 )
+                }
             }
         }
 

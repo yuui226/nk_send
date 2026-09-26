@@ -84,6 +84,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
@@ -99,6 +101,7 @@ enum class TransferStatus {
 }
 
 private val transferTaskIds = AtomicLong(0L)
+private val cropSessionName = "crop-${java.util.UUID.randomUUID()}"
 private const val PHOTO_FRAME_WATERMARK_SIZE_SCALE_VERSION = 2
 private const val PHOTO_FRAME_WATERMARK_SIZE_SCALE_VERSION_KEY =
     "photo_frame_watermark_size_scale_version"
@@ -185,6 +188,8 @@ data class TransferTask(
     val frameGenerationElapsedMs: Long? = null,
     /** 本次任务因照片效果总开关关闭而跳过生成；与原片查重跳过相互独立。 */
     val frameGenerationSkipped: Boolean = false,
+    val cropRecipe: com.ztransfer.crop.JpegCropSelection? = null,
+    val cropEffectsSkipped: Boolean = false,
 )
 
 internal fun TransferTask.startFrameGeneration(nowElapsedMs: Long): TransferTask = copy(
@@ -351,6 +356,7 @@ private fun TransferTask.newAttempt(): TransferTask = copy(
     downloaded = 0L,
     error = null,
     skipped = false,
+    cropEffectsSkipped = false,
     frameGenerationSkipped = false,
     downloadMBps = 0f,
     elapsedMs = null,
@@ -741,6 +747,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         )
     }.asCoroutineDispatcher()
     private val activePhotoFrameExports = AtomicInteger(0)
+    private val photoProcessingSlots = kotlinx.coroutines.sync.Semaphore(PHOTO_FRAME_EXPORT_PARALLELISM)
     // 第一张派生图才创建/扫描专用子目录；同一根目录后续任务复用，避免逐张遍历文件夹。
     private val photoFrameDestinations =
         ConcurrentHashMap<String, PhotoFrameDestination>()
@@ -893,6 +900,11 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         PART_PREFIX + identityToken(file) + "_" + file.fileName
 
     init {
+        viewModelScope.launch(Dispatchers.IO) {
+            getApplication<Application>().cacheDir.listFiles()?.filter {
+                it.isDirectory && it.name.startsWith("crop-") && it.name != cropSessionName && it.name.length == 41
+            }?.forEach { it.deleteRecursively() }
+        }
         val dir = prefs.getString("transfer_dir", null)
         val restoredPhotoFilters = BuiltInPhotoFilters.all
         val validPhotoFilterCatalogKeys = restoredPhotoFilters
@@ -1794,7 +1806,9 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    fun addToQueue(files: List<NikonCamera.FileInfo>, cameraProvider: () -> NikonCamera?) {
+    fun addToQueue(files: List<NikonCamera.FileInfo>, cameraProvider: () -> NikonCamera?,
+        cropRecipe: com.ztransfer.crop.JpegCropSelection? = null) {
+        require(cropRecipe == null || (files.size == 1 && isJpegPhotoName(files.single().fileName)))
         val snapshot = _state.value
         val dirUri = snapshot.transferDirUri ?: return
         val newTasks = createQueueTasks(
@@ -1810,11 +1824,12 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             photoFilter = snapshot.photoFilterSelection,
             organizeTransfersByDate = snapshot.organizeTransfersByDate,
         )
-        if (newTasks.isEmpty()) return
+        val admittedTasks = if (cropRecipe == null) newTasks else newTasks.map { it.copy(cropRecipe = cropRecipe) }
+        if (admittedTasks.isEmpty()) return
         _state.update { state ->
-            state.withTaskStructure(state.tasks + newTasks)
+            state.withTaskStructure(state.tasks + admittedTasks)
         }
-        pendingTransferQueue.addAll(newTasks)
+        pendingTransferQueue.addAll(admittedTasks)
         val queueState = _state.value
         if (
             shouldRunQueueAfterEnqueue(
@@ -1823,7 +1838,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 pauseAfterCurrent = queueState.pauseAfterCurrent,
             )
         ) {
-            prewarmPhotoFilterFor(newTasks)
+            prewarmPhotoFilterFor(admittedTasks)
             processQueue(dirUri, cameraProvider)
         }
     }
@@ -1836,7 +1851,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         val snapshot = _state.value
         if (snapshot.autoTransferMode == AutoTransferMode.OFF || snapshot.transferDirUri == null) return emptyList()
         if (cameraProvider() == null) return emptyList()
-        val queued = snapshot.tasks.asSequence()
+        val queued = snapshot.tasks.asSequence().filter { it.cropRecipe == null }
             .mapTo(HashSet()) { it.file.autoTransferIdentity() }
         val candidates = files.asSequence()
             .filter { snapshot.autoTransferMode.accepts(it.fileName) }
@@ -1966,6 +1981,17 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                             getOrCreateTransferDirectory(uri, rootDirectoryUri, folderName)
                         }
                     } ?: rootDirectoryUri
+                    if (task.cropRecipe != null) {
+                        if (pendingTransferQueue.consumeWithdrawal(taskId)) continue
+                        if (!serviceStarted) {
+                            TransferService.start(getApplication(),
+                                useWifi = cameraProvider()?.connectionType == CameraConnectionType.WIFI)
+                            serviceStarted = true
+                        }
+                        processCropTask(task, uri, destinationDirectoryUri, cameraProvider)
+                        continue
+                    }
+
                     val directoryIndex = if (destinationDirectoryUri == rootDirectoryUri) {
                         rootDirectoryIndex
                     } else {
@@ -2589,6 +2615,109 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         job.start()
     }
 
+    /** Explicit crop tasks never enter the original-file skip/publish paths. */
+    private suspend fun processCropTask(
+        task: TransferTask,
+        treeUri: Uri,
+        destinationUri: Uri,
+        cameraProvider: () -> NikonCamera?,
+    ) {
+        val recipe = checkNotNull(task.cropRecipe)
+        val id = task.taskId
+        var staging: java.io.File? = null
+        try {
+            if (LicenseManager.transferLimitReached()) throw IllegalStateException(str(R.string.transfer_limit_reached))
+            if (LicenseManager.freeSizeLimitExceeded(task.file.size)) throw IllegalStateException(
+                str(R.string.transfer_size_limit, LicenseManager.FREE_MAX_FILE_BYTES / (1024 * 1024)))
+            val camera = cameraProvider() ?: throw IllegalStateException(str(R.string.camera_not_connected))
+            updateTask(id) { it.copy(status = TransferStatus.TRANSFERING, error = null) }
+            _activeTransferProgress.value = ActiveTransferProgress(taskId = id)
+            val directory = withContext(Dispatchers.IO) {
+                val cache = getApplication<Application>().cacheDir
+                java.io.File(cache, "$cropSessionName/${java.util.UUID.randomUUID()}").apply { check(mkdirs()) }
+            }
+            staging = directory
+            val source = java.io.File(directory, "source.jpg")
+            val cropped = java.io.File(directory, "cropped.jpg")
+            val stats = withContext(Dispatchers.IO) {
+                source.outputStream().buffered(1024 * 1024).use { output ->
+                    camera.downloadToFile(task.file.handle, output,
+                        totalSize = task.file.size,
+                        preferHighThroughputAtStart = { preferHighThroughputTransfers },
+                        onProgress = { progress ->
+                            _activeTransferProgress.update { active ->
+                                if (active?.taskId != id) active else active.copy(
+                                    fraction = if (progress.total > 0) (progress.downloaded.toDouble() / progress.total).toFloat().coerceIn(0f,1f) else 0f,
+                                    downloaded = progress.downloaded,
+                                    bytesPerSecond = progress.bytesPerSecond,
+                                    retainedBytesPerSecond = progress.bytesPerSecond,
+                                )
+                            }
+                        }).getOrThrow()
+                }
+            }
+            val downloadedAt = android.os.SystemClock.elapsedRealtime()
+            updateTask(id) { it.copy(progress = 1f, downloaded = stats.bytes, speed = 0,
+                elapsedMs = downloadedAt - stats.startedAtElapsedMs,
+                downloadMBps = endToEndBytesPerSecond(stats.transferredBytes,
+                    downloadedAt - stats.startedAtElapsedMs) / (1024f * 1024f))
+                .startFrameGeneration(downloadedAt) }
+            _activeTransferProgress.value = null
+            // Use the same generation worker pool. Crop is part of this task's required processing,
+            // so a disabled photo-effects switch must never skip it.
+            withContext(photoFrameDispatcher) {
+                var acquired = 0
+                try {
+                    repeat(PHOTO_FRAME_EXPORT_PARALLELISM) { photoProcessingSlots.acquire(); acquired++ }
+                com.ztransfer.crop.LosslessJpeg.crop(source, cropped, recipe)
+                currentCoroutineContext().ensureActive()
+                val effects = _state.value.photoEffectsEnabled
+                updateTask(id) { it.copy(cropEffectsSkipped = !effects &&
+                    (task.framePreset != null || task.photoFilterRequested != null)) }
+                val preset = task.framePreset.takeIf { effects }
+                val filter = task.photoFilterRequested.takeIf { effects }
+                val sourceName = task.file.fileName.substringBeforeLast('.') +
+                    "_crop_" + java.util.UUID.randomUUID().toString().take(8) + ".jpg"
+                if (preset != null || filter != null) {
+                    val selectedPreset = preset ?: PhotoFramePreset.MIST
+                    val border = preset != null && task.frameBorderRequested
+                    val watermark = if (preset != null) effectivePhotoFrameWatermark(
+                        isPro = LicenseManager.isPro.value, preference = task.frameWatermarkRequested,
+                        borderEnabled = border) else PhotoFrameWatermark(enabled = false)
+                    PhotoFrameExporter.export(
+                        context = getApplication(), resolver = contentResolver,
+                        destination = getOrPreparePhotoFrameDestination(treeUri, destinationUri),
+                        sourceUri = Uri.fromFile(cropped), sourceName = sourceName,
+                        preset = selectedPreset, watermark = watermark, borderEnabled = border,
+                        metadataSettings = task.frameMetadataSettings ?: defaultPhotoFrameMetadataSettings(selectedPreset),
+                        filter = filter,
+                    ).getOrThrow()
+                } else {
+                    publishCroppedJpeg(cropped, destinationUri, sourceName)
+                }
+                } finally { repeat(acquired) { photoProcessingSlots.release() } }
+            }
+
+            LicenseManager.recordTransferDone()
+            updateTask(id) { it.finishFrameGeneration(android.os.SystemClock.elapsedRealtime())
+                .copy(status = TransferStatus.COMPLETED, progress = 1f, speed = 0) }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Throwable) {
+            if (failure !is Exception && failure !is OutOfMemoryError && failure !is LinkageError) throw failure
+            updateTask(id) { it.finishFrameGeneration(android.os.SystemClock.elapsedRealtime())
+                .copy(status = TransferStatus.FAILED, error = friendlyError(failure), speed = 0) }
+        } finally {
+            if (_activeTransferProgress.value?.taskId == id) _activeTransferProgress.value = null
+            withContext(NonCancellable + Dispatchers.IO) { staging?.deleteRecursively() }
+        }
+    }
+
+    private suspend fun publishCroppedJpeg(file: java.io.File, parent: Uri, name: String) {
+        com.ztransfer.crop.publishCropOutput(contentResolver, file, parent, name,
+            ".nkcrop_${cropSessionName}_${java.util.UUID.randomUUID()}.part")
+    }
+
     /**
      * 单次遍历目标目录：
      * 1) 当 [deleteParts]=true 时删除遗留的半成品（[PART_PREFIX] 开头的临时文件，上次崩溃/被杀留下）；
@@ -2636,7 +2765,13 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         ) {
                             continue
                         }
-                        if (name.startsWith(PHOTO_FRAME_PART_PREFIX)) {
+                        if (name.startsWith(".nkcrop_")) {
+                            if (deleteParts && !name.startsWith(".nkcrop_${cropSessionName}_")) {
+                                val docId = c.getString(idIdx) ?: continue
+                                runCatching { DocumentsContract.deleteDocument(contentResolver,
+                                    DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)) }
+                            }
+                        } else if (name.startsWith(PHOTO_FRAME_PART_PREFIX)) {
                             // 边框派生临时文件不可续传：App 启动时清理；队列运行期间
                             // 只忽略不删除，避免新队列扫描误删仍在后台写入的旧队列任务。
                             if (
@@ -2935,6 +3070,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         var frameExportSaved = false
         activePhotoFrameExports.incrementAndGet()
         val job = viewModelScope.launch(photoFrameDispatcher) {
+            photoProcessingSlots.acquire()
+            try {
             // Recheck at worker entry: metadata reads and dispatcher queues may have suspended
             // since transfer completion. A running export is allowed to finish after this point.
             if (!_state.value.photoEffectsEnabled) {
@@ -3088,6 +3225,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     }
                 }
             }
+            } finally { photoProcessingSlots.release() }
         }
         // invokeOnCompletion 即使任务排队期间就被取消也必定执行，计数和 UI 不会泄漏。
         job.invokeOnCompletion { cause ->

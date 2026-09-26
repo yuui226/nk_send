@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="crop_title">Crop</string>
+    <string name="crop_task">Cropped photo</string>
+    <string name="crop_confirm">Crop and add to queue</string>
+    <string name="crop_reset">Reset crop</string>
+    <string name="crop_cancel">Cancel crop</string>
+    <string name="crop_free">Free</string>
+    <string name="crop_original">Original</string>
+    <string name="crop_swap">Switch crop orientation</string>
+    <string name="crop_loading">Preparing crop…</string>
+    <string name="crop_unavailable">Cannot prepare crop. Please retry.</string>
+    <string name="crop_retry">Retry</string>
+    <string name="crop_added">Added to queue</string>
+    <string name="crop_effects_skipped">Effects skipped</string>
+    <string name="crop_preview_read_failed">Cannot read the high-resolution preview. Please retry.</string>
+    <string name="crop_orientation_failed">Cannot read photo orientation. Please retry.</string>
+</resources>
