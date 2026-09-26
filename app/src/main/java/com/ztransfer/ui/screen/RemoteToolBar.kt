@@ -19,6 +19,13 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.layoutId
@@ -174,6 +181,34 @@ private fun LandscapeRemoteToolBar(
 ) {
     val widths = remember { mutableStateMapOf<String, Int>() }
     val scroll = rememberScrollState()
+    val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
+    val startFade = animateFloatAsState(
+        if (scroll.canScrollBackward) 1f else 0f, tween(150), label = "toolStartFade")
+    val endFade = animateFloatAsState(
+        if (scroll.canScrollForward) 1f else 0f, tween(150), label = "toolEndFade")
+    val edgeFade = Modifier
+        // Mask only this viewport, including button shadows; never erase the parent background.
+        .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+        .drawWithContent {
+            drawContent()
+            val width = minOf(14.dp.toPx(), size.width / 2f)
+            if (width <= 0f) return@drawWithContent
+            val left = if (rtl) endFade.value else startFade.value
+            val right = if (rtl) startFade.value else endFade.value
+            if (left > 0f) drawRect(
+                brush = Brush.horizontalGradient(
+                    listOf(Color.Black.copy(alpha = 1f - left), Color.Black),
+                    startX = 0f, endX = width),
+                size = Size(width, size.height), blendMode = BlendMode.DstIn,
+            )
+            if (right > 0f) drawRect(
+                brush = Brush.horizontalGradient(
+                    listOf(Color.Black, Color.Black.copy(alpha = 1f - right)),
+                    startX = size.width - width, endX = size.width),
+                topLeft = Offset(size.width - width, 0f),
+                size = Size(width, size.height), blendMode = BlendMode.DstIn,
+            )
+        }
     val density = LocalDensity.current
     BoxWithConstraints(modifier) {
         val ids = listOf("leading") + (tools + fixedTools).map { it.id }
@@ -197,7 +232,7 @@ private fun LandscapeRemoteToolBar(
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(spacing)) {
             Row(
-                Modifier.weight(1f).horizontalScroll(scroll).padding(vertical = 4.dp),
+                Modifier.weight(1f).then(edgeFade).horizontalScroll(scroll).padding(vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(spacing),
             ) {

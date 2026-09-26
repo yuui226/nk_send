@@ -4,7 +4,9 @@
 
 - Bucket：`ztransfer-hk`
 - 地域：香港 `cn-hongkong`
-- Endpoint：`https://oss-cn-hongkong.aliyuncs.com`
+- 发布 Endpoint：`https://apk.ztransfer.top`（已绑定本 Bucket 的自定义域名；ossutil 使用 `--addressing-style cname`）
+- 香港区域仍为 `cn-hongkong`。上传、凭证检查及同桶复制统一使用上述入口，避免原始 OSS 域名连接异常。
+- OSS 命令临时清除代理环境变量，显式使用 `--proxy env` 配合 `NO_PROXY=*` 直连，结束后恢复环境；连接超时 10 秒、读取超时 30 秒、失败重试 2 次。系统 TUN／透明代理不受环境变量控制。
 - 自定义公网域名：`https://apk.ztransfer.top`
 - App 版本目录：`releases/`
 - 新用户固定对象：`ZTransfer.apk`

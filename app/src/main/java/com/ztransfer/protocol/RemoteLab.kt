@@ -1708,7 +1708,8 @@ suspend fun NikonCamera.labGrabFrame(): LiveViewPacket? =
                 bytes = data,
                 jpegOffset = soi,
                 metadata = parseLiveViewMetadata(data, soi, operation),
-                receivedAtElapsedMs = SystemClock.elapsedRealtime()
+                receivedAtElapsedMs = SystemClock.elapsedRealtime(),
+                operation = operation
             )
         }
     }

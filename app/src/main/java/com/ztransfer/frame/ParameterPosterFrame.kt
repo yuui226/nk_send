@@ -140,7 +140,7 @@ private fun drawPosterRows(canvas: Canvas, rows: List<PosterRow>, area: RectF) {
     if (rows.isEmpty() || area.width() <= 0 || area.height() <= 0) return
     val wrapped = rows.flatMap { row ->
         if (row.label != null) listOf(row) else if (row.bold || row.medium) {
-            val measured = posterPaint(row).measureFrameIdentity(row.text, row.brandLogo)
+            val measured = posterPaint(row).measureFrameIdentity(row.text, row.brandLogo, PhotoFramePreset.PARAMETER_POSTER.brandLogoScale())
             listOf(row.copy(size = row.size * minOf(1f, area.width() * 0.96f / measured.coerceAtLeast(1f))))
         } else {
             val paint = posterPaint(row)
@@ -159,7 +159,9 @@ private fun drawPosterRows(canvas: Canvas, rows: List<PosterRow>, area: RectF) {
     }
     fun rowHeight(row: PosterRow): Float = if (row.label != null) row.size * 2.65f else {
         val fm = posterPaint(row).fontMetrics
-        (fm.descent - fm.ascent) * 1.16f
+        val bounds = frameIdentityVisualBounds(row.text, posterPaint(row), row.brandLogo,
+            PhotoFramePreset.PARAMETER_POSTER.brandLogoScale())
+        maxOf((fm.descent - fm.ascent) * 1.16f, bounds.bottom - bounds.top + row.size * 0.16f)
     }
     val total = wrapped.sumOf { (rowHeight(it) + it.gapAfter).toDouble() }.toFloat() - wrapped.last().gapAfter
     val scale = minOf(1f, area.height() / total)
@@ -172,7 +174,12 @@ private fun drawPosterRows(canvas: Canvas, rows: List<PosterRow>, area: RectF) {
         val paint = posterPaint(row)
         val rowHeight = rowHeight(row)
         if (row.label == null) {
-            canvas.drawFrameIdentity(row.text, 0f, y - paint.fontMetrics.ascent, paint, row.brandLogo)
+            val bounds = frameIdentityVisualBounds(row.text, paint, row.brandLogo,
+                PhotoFramePreset.PARAMETER_POSTER.brandLogoScale())
+            val baseline = if (row.brandLogo) y + (rowHeight - bounds.bottom + bounds.top) / 2f - bounds.top
+                else y - paint.fontMetrics.ascent
+            canvas.drawFrameIdentity(row.text, 0f, baseline, paint, row.brandLogo,
+                PhotoFramePreset.PARAMETER_POSTER.brandLogoScale())
         } else {
             val boxWidth = minOf(availableWidth * 0.42f, row.size * 3.65f)
             val boxHeight = row.size * 1.88f

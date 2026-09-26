@@ -140,7 +140,7 @@
     <string name="transfer_directory_required_hint">請先設定傳輸目錄</string>
     <string name="settings_help_title">設定說明</string>
     <string name="auto_transfer_new_media">即時傳輸</string>
-    <string name="auto_transfer_new_media_summary">連線期間新增的照片和影片會自動加入傳輸清單。</string>
+    <string name="auto_transfer_new_media_summary">依檔位自動加入新增檔案：全部、JPG、RAW（NEF 照片）或影片（MOV/MP4）。不影響既有任務與手動傳輸。</string>
     <string name="defer_transfer_start">選完再傳</string>
     <string name="defer_transfer_start_summary">加入傳輸佇列後不會立即開始傳輸，方便繼續預覽挑選照片。</string>
     <string name="organize_transfers_by_date">按天儲存</string>
@@ -616,4 +616,7 @@
     <string name="photo_frame_parameter_poster">參數海報</string>
     <string name="photo_frame_metadata_brand_text">品牌·文字</string>
     <string name="photo_frame_metadata_brand_logo">品牌·圖標</string>
+    <string name="remote_grid_thirds_diagonals">3×3＋對角線</string>
+    <string name="remote_grid_fourths_diagonals">4×4＋對角線</string>
+    <string name="auto_transfer_video">影片</string>
 </resources>

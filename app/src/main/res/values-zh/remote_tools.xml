@@ -36,7 +36,7 @@
     <string name="remote_wb_kelvin">色温</string>
     <string name="remote_wb_preset">手动预设</string>
     <string name="remote_wb_off">关闭</string>
-    <string name="remote_wb_natural">自然光自动适应</string>
+    <string name="remote_wb_natural">自然光自动</string>
     <string name="remote_af_dynamic">动态区域 AF</string>
     <string name="remote_af_single">单点 AF</string>
     <string name="remote_af_auto">自动区域 AF</string>
@@ -48,4 +48,24 @@
     <string name="remote_af_wide_c1">宽区域 AF（C1）</string>
     <string name="remote_af_wide_c2">宽区域 AF（C2）</string>
     <string name="remote_tool_done">完成编辑</string>
+    <string name="remote_af_wide_people">宽区域 AF（L · 人物）</string>
+    <string name="remote_af_wide_animals">宽区域 AF（L · 动物）</string>
+    <string name="remote_af_auto_people">自动区域 AF（人物）</string>
+    <string name="remote_af_auto_animals">自动区域 AF（动物）</string>
+    <string name="remote_af_tap_badge">可点按对焦</string>
+    <string name="remote_tap_focus_area_retry">请切换对焦区域后重试</string>
+    <string name="remote_tap_focus_retry">对焦失败，请重试</string>
+    <string name="remote_rotation_stopped">自动旋转停止</string>
+    <string name="remote_rotation_resumed">自动旋转恢复</string>
+    <string name="remote_af_face_priority">脸部优先 AF</string>
+    <string name="remote_af_wide">宽区域 AF</string>
+    <string name="remote_af_normal">标准区域 AF</string>
+    <string name="remote_af_subject_tracking">对象跟踪 AF</string>
+    <string name="remote_af_spot">点区域 AF</string>
+    <string name="remote_af_dynamic_9">动态区域 AF（9 点）</string>
+    <string name="remote_af_dynamic_21">动态区域 AF（21 点）</string>
+    <string name="remote_af_dynamic_25">动态区域 AF（25 点）</string>
+    <string name="remote_af_dynamic_51">动态区域 AF（51 点）</string>
+    <string name="remote_af_dynamic_72">动态区域 AF（72 点）</string>
+    <string name="remote_af_dynamic_153">动态区域 AF（153 点）</string>
 </resources>

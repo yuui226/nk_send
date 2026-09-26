@@ -21,6 +21,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.*
@@ -112,24 +113,44 @@ private fun ScopeCard(label: String, range: String, modifier: Modifier, content:
 internal fun MonitorHistogramOverlay(histogram: LuminanceHistogram, mode: HistogramMode, modifier: Modifier) {
     ScopeCard(if (mode == HistogramMode.RGB) "RGB" else "Y′", "0–255", modifier) {
         Crossfade(mode, animationSpec = tween(180), label = "histogramChannels", modifier = Modifier.fillMaxWidth().weight(1f)) { selected ->
-            Canvas(Modifier.fillMaxSize().graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }) {
+            Box(Modifier.fillMaxSize().graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }.drawWithCache {
                 val height = (size.height - 2.dp.toPx()).coerceAtLeast(1f)
-                for (fraction in listOf(0f, 0.25f, 0.5f, 0.75f, 1f)) {
-                    drawLine(Color.White.copy(alpha = 0.07f), Offset(size.width * fraction, 0f), Offset(size.width * fraction, height), 0.5.dp.toPx())
-                }
                 val channels = if (selected == HistogramMode.RGB) histogram.rgb ?: listOf(histogram.bins) else listOf(histogram.bins)
-                channels.forEachIndexed { channel, bins ->
+                val paths = channels.mapIndexed { channel, bins ->
                     val color = if (selected == HistogramMode.RGB && channels.size == 3) ScopeRgbColors[channel] else Color(0xFFE4EBE7)
-                    val path = Path().apply {
-                        moveTo(0f, height)
-                        bins.forEachIndexed { i, value -> lineTo(size.width * i / 255f, height * (1f - value.coerceIn(0f, 1f))) }
-                        lineTo(size.width, height); close()
+                    // Bins cover intervals, not isolated endpoints. Use a frequency polygon
+                    // through bin centres; outline only the data, never the closing baseline.
+                    val contour = Path().apply {
+                        bins.forEachIndexed { i, value ->
+                            val x = size.width * (i + 0.5f) / bins.size
+                            val y = height * (1f - value.coerceIn(0f, 1f))
+                            if (i == 0) { moveTo(0f, y); lineTo(x, y) } else lineTo(x, y)
+                        }
+                        lineTo(size.width, height * (1f - (bins.lastOrNull() ?: 0f).coerceIn(0f, 1f)))
                     }
-                    drawPath(path, color.copy(alpha = 0.30f), blendMode = BlendMode.Plus)
-                    drawPath(path, color.copy(alpha = 0.85f), style = Stroke(0.8.dp.toPx()), blendMode = BlendMode.Plus)
+                    val fill = Path().apply {
+                        addPath(contour)
+                        lineTo(size.width, height)
+                        lineTo(0f, height)
+                        close()
+                    }
+                    val histogramColor = if (selected == HistogramMode.RGB && channels.size == 3) {
+                        listOf(Color(0xFFFF3030), Color(0xFF30EF30), Color(0xFF4040FF))[channel]
+                    } else color
+                    Triple(fill, contour, histogramColor)
                 }
-                drawLine(Color.White.copy(alpha = 0.22f), Offset(0f, height), Offset(size.width, height), 0.5.dp.toPx())
-            }
+                onDrawBehind {
+                    repeat(5) { index ->
+                        val x = size.width * index / 4f
+                        drawLine(Color.White.copy(alpha = 0.07f), Offset(x, 0f), Offset(x, height), 0.5.dp.toPx())
+                    }
+                    paths.forEach { (fill, contour, color) ->
+                        drawPath(fill, color.copy(alpha = 0.34f), blendMode = BlendMode.Plus)
+                        drawPath(contour, color.copy(alpha = 0.62f), style = Stroke(0.65.dp.toPx()), blendMode = BlendMode.Plus)
+                    }
+                    drawLine(Color.White.copy(alpha = 0.22f), Offset(0f, height), Offset(size.width, height), 0.5.dp.toPx())
+                }
+            })
         }
     }
 }

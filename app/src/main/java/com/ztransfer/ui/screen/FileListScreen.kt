@@ -2368,8 +2368,17 @@ fun QueuePill(
     // 取消导致的"归零"不是完成：不闪 done、不震成功震（否则取消后出现庆祝反馈，误导）。
     // sawTransfer 在每次归零时都复位，取消那轮的记录不能污染下一轮的完成判定。
     val hasCancelled = taskSummary.hasCancelled
+    // Keep the active pill mounted on the very first completion frame, before the effect runs.
+    // Otherwise it briefly becomes GlassButton, destroying AnimatedContent before Done appears.
+    val completionPending = allDone && !prevAllDone && !hasCancelled
     LaunchedEffect(allDone) {
-        if (allDone && !prevAllDone) {
+        val justCompleted = allDone && !prevAllDone
+        // Commit the edge before suspension; a new task may cancel the Done hold at any time.
+        prevAllDone = allDone
+        if (!allDone) {
+            showDoneLabel = false
+            finishProgressVisible = false
+        } else if (justCompleted) {
             val celebrate = !hasCancelled && sawTransfer
             sawTransfer = false
             finishProgressVisible = celebrate
@@ -2381,7 +2390,6 @@ fun QueuePill(
             }
             finishProgressVisible = false
         }
-        prevAllDone = allDone
     }
     // 尚无飞行卡片落袋时显示默认图标而不是数字 0；这条优先于 PAUSED，确保“选完再传”
     // 模式也遵循相同叙事。其余情况保持原有规则：完成或尚未准许显示数字时收为图标。
@@ -2391,7 +2399,7 @@ fun QueuePill(
     )
     val collapsedToIcon = allRemainingTasksAreInFlight ||
         (mode != PillMode.PAUSED && (
-            (allDone && !showDoneLabel) || (!allDone && !countingVisible)
+            (allDone && !showDoneLabel && !completionPending) || (!allDone && !countingVisible)
         ))
 
     // 进度条 = 当前单文件进度（复用传输页语义）。保留最近的进度归属，让最后一张
@@ -2401,7 +2409,7 @@ fun QueuePill(
         taskSummary.activeProgressTaskId?.let { retainedProgressTaskId = it }
     }
     val barFraction = when {
-        allDone && finishProgressVisible -> 1f
+        allDone && (finishProgressVisible || (completionPending && sawTransfer)) -> 1f
         allDone -> 0f // 静止图标态不预热动画，避免下一轮等待阶段错误继承满格。
         activeProgress != null -> activeProgress.fraction
         generationRemaining > 0 -> 1f
@@ -2495,7 +2503,7 @@ fun QueuePill(
     ) {
         Box(contentAlignment = Alignment.CenterEnd) {
             // 1) 单文件进度填充（填满当前动画宽度；收起为图标后不显示）。
-            if (!allDone || finishProgressVisible) {
+            if (!allDone || finishProgressVisible || (completionPending && sawTransfer)) {
                 LiquidProgressFill(
                     progress = { animatedBar.value },
                     waveEligible = taskSummary.activeDownloadTaskId != null ||
@@ -2536,28 +2544,23 @@ fun QueuePill(
                         activeQueueMaxWidthPx = it.size.width
                     }
                 }) {
-                    // 胶囊内部的 Done / 计数切换用交叉淡化 + 轻微缩放过渡，不硬切。
+                    // 模式切换用轻柔交叉淡化；退场内容持有自己的数量/速度快照，不先跳到 0。
                     // 尺寸动画交给外层的弹性宽度弹簧（snap 禁用 AnimatedContent 自带的尺寸
                     // 动画，避免两套叠加）；计数态内部的数字/速度更新不触发转场，原地刷新。
                     AnimatedContent(
-                        targetState = mode,
+                        targetState = Triple(mode, remaining, activeSpeedText),
+                        contentKey = { it.first },
                         // 胶囊右缘钉死、向左伸缩：新旧内容必须都锚定右缘（CenterEnd），
                         // 否则容器 snap 到新宽度时，退场内容会从右对齐跳成左对齐（文字漂移）。
                         contentAlignment = Alignment.CenterEnd,
                         transitionSpec = {
-                            (fadeIn(tween(200, delayMillis = 60)) +
-                                    scaleIn(
-                                        initialScale = 0.85f,
-                                        animationSpec = tween(200, delayMillis = 60),
-                                        // 缩放原点同样锚在右缘中点，与布局语义一致
-                                        transformOrigin = TransformOrigin(1f, 0.5f)
-                                    ))
-                                .togetherWith(fadeOut(tween(120)))
+                            fadeIn(tween(220, delayMillis = 35))
+                                .togetherWith(fadeOut(tween(160)))
                                 .using(SizeTransform(clip = false, sizeAnimationSpec = { _, _ -> snap() }))
                         },
                         label = "pillContent"
-                    ) { m ->
-                        when (m) {
+                    ) { (displayedMode, displayedCount, displayedSpeed) ->
+                        when (displayedMode) {
                             PillMode.DONE ->
                                 Text(
                                     // 刻意不走字符串资源:所有语言统一显示 "Done"(短暂闪现的
@@ -2570,7 +2573,7 @@ fun QueuePill(
                                 )
                             PillMode.PAUSED ->
                                 AnimatedQueuePillCount(
-                                    count = remaining,
+                                    count = displayedCount,
                                     color = colors.onBackground,
                                     label = "pausedCount",
                                     modifier = Modifier.padding(horizontal = 16.dp),
@@ -2581,14 +2584,14 @@ fun QueuePill(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                                 ) {
-                                    Text(
-                                        text = stringResource(R.string.queue_pill_generating),
-                                        style = MaterialTheme.typography.labelLarge,
-                                        color = colors.accentBlue,
-                                        fontWeight = FontWeight.Bold,
+                                    Icon(
+                                        imageVector = Icons.Default.AutoAwesome,
+                                        contentDescription = stringResource(R.string.queue_pill_generating),
+                                        tint = colors.accentPurple,
+                                        modifier = Modifier.size(16.dp),
                                     )
                                     AnimatedQueuePillCount(
-                                        count = generationRemaining,
+                                        count = displayedCount,
                                         color = colors.onBackground,
                                         label = "generationCount",
                                     )
@@ -2600,9 +2603,9 @@ fun QueuePill(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     // 速度在前（仅传输且有速度时显示）。tnum：等宽数字，位数相同则宽度恒定。
-                                    if (activeSpeedText != null) {
+                                    if (displayedSpeed != null) {
                                         Text(
-                                            text = activeSpeedText,
+                                            text = displayedSpeed,
                                             style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
                                             color = colors.accentBlue,
                                             fontWeight = FontWeight.Bold
@@ -2611,7 +2614,7 @@ fun QueuePill(
                                     // 数字滚动：减少（传输推进）时旧数上滑、新数自下滑入；增加（新入队）反向。
                                     // 尺寸仍 snap 交给外层宽度弹簧；clip 让滑动的数字在行内裁切，像里程表。
                                     AnimatedQueuePillCount(
-                                        count = remaining,
+                                        count = displayedCount,
                                         color = colors.onBackground,
                                         label = "downloadCount",
                                     )

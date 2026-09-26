@@ -48,4 +48,24 @@
     <string name="remote_af_wide_c1">Wide-area AF (C1)</string>
     <string name="remote_af_wide_c2">Wide-area AF (C2)</string>
     <string name="remote_tool_done">Done editing</string>
+    <string name="remote_af_wide_people">Wide-area AF (L · people)</string>
+    <string name="remote_af_wide_animals">Wide-area AF (L · animals)</string>
+    <string name="remote_af_auto_people">Auto-area AF (people)</string>
+    <string name="remote_af_auto_animals">Auto-area AF (animals)</string>
+    <string name="remote_af_tap_badge">Tap to focus</string>
+    <string name="remote_tap_focus_area_retry">Try changing the AF-area mode</string>
+    <string name="remote_tap_focus_retry">Focus failed. Please try again</string>
+    <string name="remote_rotation_stopped">Auto-rotation stopped</string>
+    <string name="remote_rotation_resumed">Auto-rotation resumed</string>
+    <string name="remote_af_face_priority">Face-priority AF</string>
+    <string name="remote_af_wide">Wide-area AF</string>
+    <string name="remote_af_normal">Normal-area AF</string>
+    <string name="remote_af_subject_tracking">Subject-tracking AF</string>
+    <string name="remote_af_spot">Spot-area AF</string>
+    <string name="remote_af_dynamic_9">Dynamic-area AF (9 points)</string>
+    <string name="remote_af_dynamic_21">Dynamic-area AF (21 points)</string>
+    <string name="remote_af_dynamic_25">Dynamic-area AF (25 points)</string>
+    <string name="remote_af_dynamic_51">Dynamic-area AF (51 points)</string>
+    <string name="remote_af_dynamic_72">Dynamic-area AF (72 points)</string>
+    <string name="remote_af_dynamic_153">Dynamic-area AF (153 points)</string>
 </resources>

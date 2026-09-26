@@ -140,7 +140,7 @@
     <string name="transfer_directory_required_hint">Please set a transfer folder first</string>
     <string name="settings_help_title">Settings guide</string>
     <string name="auto_transfer_new_media">Real-time transfer</string>
-    <string name="auto_transfer_new_media_summary">Photos and videos added while connected appear in the transfer list automatically.</string>
+    <string name="auto_transfer_new_media_summary">New files are queued automatically by mode: All, JPG, RAW (NEF photos), or Video (MOV/MP4). Existing tasks and manual transfers are unaffected.</string>
     <string name="defer_transfer_start">Transfer after selecting</string>
     <string name="defer_transfer_start_summary">Items added to the transfer queue do not start transferring immediately, so you can keep previewing and selecting photos.</string>
     <string name="organize_transfers_by_date">Save by day</string>
@@ -622,4 +622,7 @@
     <string name="photo_frame_parameter_poster">Parameter Poster</string>
     <string name="photo_frame_metadata_brand_text">Brand · Text</string>
     <string name="photo_frame_metadata_brand_logo">Brand · Logo</string>
+    <string name="remote_grid_thirds_diagonals">3×3 + diagonals</string>
+    <string name="remote_grid_fourths_diagonals">4×4 + diagonals</string>
+    <string name="auto_transfer_video">Video</string>
 </resources>

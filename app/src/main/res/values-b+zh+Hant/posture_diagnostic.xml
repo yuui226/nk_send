@@ -1,0 +1,15 @@
+<resources>
+    <string name="posture_title">姿態診斷</string>
+    <string name="posture_hint">擺好姿勢後點擊採集，保持約 2 秒。只記錄幀頭；離開監看前請複製報告。</string>
+    <string name="posture_level">相機放平</string>
+    <string name="posture_up">鏡頭向上抬約 20°</string>
+    <string name="posture_down">鏡頭向下壓約 20°</string>
+    <string name="posture_left">機身向左傾約 20°</string>
+    <string name="posture_right">機身向右傾約 20°</string>
+    <string name="posture_done">五個姿勢已採集，請複製報告回饋。</string>
+    <string name="posture_error">採集失敗，請保持監看連線後重試；更換相機或模式後請重新開始。</string>
+    <string name="posture_collecting">採集中…</string>
+    <string name="posture_capture">採集</string>
+    <string name="posture_copy">複製報告</string>
+    <string name="posture_reset">重新開始</string>
+</resources>

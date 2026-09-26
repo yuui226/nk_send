@@ -1,23 +1,22 @@
 package com.ztransfer.ui.screen
 
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.ztransfer.R
 import com.ztransfer.protocol.*
@@ -31,7 +30,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 /** Labels only for documented codes; never invent a name for a model-specific numeric value. */
-internal fun cameraToolLabelResource(tool: RemoteCameraTool, prop: Int, value: Long): Int? = when (tool) {
+internal fun cameraToolLabelResource(tool: RemoteCameraTool, prop: Int, value: Long, model: String? = null, dataType: Int? = null): Int? = when (tool) {
     RemoteCameraTool.WHITE_BALANCE -> when (value) {
         1L -> R.string.remote_wb_manual
         2L -> R.string.remote_wb_auto
@@ -48,15 +47,46 @@ internal fun cameraToolLabelResource(tool: RemoteCameraTool, prop: Int, value: L
         0x8016L -> R.string.remote_wb_natural
         else -> null
     }
-    RemoteCameraTool.FOCUS_AREA -> if (prop == 0x501C) when (value) {
-        2L -> R.string.remote_af_dynamic
+    RemoteCameraTool.FOCUS_AREA -> focusAreaLabelResource(prop, value, model, dataType)
+}
+
+// PTP mappings: libgphoto2 camlibs/ptp2/config.c (Nikon_D7100/D850_FocusMetering,
+// Nikon_LiveViewAF). Do not reuse DSLR point counts for an unknown body.
+private fun focusAreaLabelResource(prop: Int, value: Long, model: String?, dataType: Int?): Int? {
+    val body = model.orEmpty().trim().uppercase(java.util.Locale.ROOT).removePrefix("NIKON").trim()
+    if (prop == 0xD05D && dataType in listOf(0x0001, 0x0002)) {
+        return when (value) {
+            0L -> R.string.remote_af_face_priority
+            1L -> R.string.remote_af_wide
+            2L -> R.string.remote_af_normal
+            3L -> R.string.remote_af_subject_tracking
+            4L -> R.string.remote_af_spot
+            else -> null
+        }
+    }
+    if (prop == 0x501C && body in listOf("D7100", "D850")) {
+        val specific = when (value) {
+            2L -> if (body == "D7100") R.string.remote_af_dynamic_9 else R.string.remote_af_dynamic_25
+            0x8013L -> if (body == "D7100") R.string.remote_af_dynamic_21 else R.string.remote_af_dynamic_72
+            0x8014L -> if (body == "D7100") R.string.remote_af_dynamic_51 else R.string.remote_af_dynamic_153
+            0x8016L -> if (body == "D850") R.string.remote_af_dynamic_9 else null
+            else -> null
+        }
+        if (specific != null) return specific
+    }
+    return if (prop in listOf(0x501C, 0xD05D, 0xD1F8)) when (value) {
+        2L -> if (prop == 0x501C && body.startsWith("Z")) R.string.remote_af_dynamic else null
         0x8010L -> R.string.remote_af_single
         0x8011L -> R.string.remote_af_auto
-        0x8012L -> R.string.remote_af_tracking
+        0x8012L -> if (body.startsWith("Z") || body in listOf("D7100", "D850")) R.string.remote_af_tracking else null
         0x8015L -> R.string.remote_af_group
         0x8017L -> R.string.remote_af_pinpoint
         0x8018L -> R.string.remote_af_wide_s
         0x8019L -> R.string.remote_af_wide_l
+        0x801AL -> R.string.remote_af_wide_people
+        0x801BL -> R.string.remote_af_wide_animals
+        0x8020L -> R.string.remote_af_auto_people
+        0x8021L -> R.string.remote_af_auto_animals
         0x801EL -> R.string.remote_af_wide_c1
         0x801FL -> R.string.remote_af_wide_c2
         else -> null
@@ -71,6 +101,9 @@ internal fun RemoteCameraToolPanel(
     onApplied: suspend () -> Unit,
     log: (String) -> Unit,
     onDismiss: () -> Unit,
+    anchor: androidx.compose.ui.geometry.Rect? = null,
+    closeRequested: Boolean = false,
+    landscape: Boolean = false,
 ) {
     val colors = AppTheme.colors
     val context = LocalContext.current
@@ -83,8 +116,25 @@ internal fun RemoteCameraToolPanel(
     val currentCanWrite by rememberUpdatedState(canWrite)
     val currentCameraCheck by rememberUpdatedState(isCurrentCamera)
     val latestMovie by rememberUpdatedState(movie)
-    val title = stringResource(if (tool == RemoteCameraTool.WHITE_BALANCE) R.string.remote_tool_wb else R.string.remote_tool_focus_area)
-    fun label(p: RcParam, value: Long): String = cameraToolLabelResource(tool, p.prop, value)?.let(context::getString)
+    val progress = remember { androidx.compose.animation.core.Animatable(0f) }
+    var closing by remember { mutableStateOf(false) }
+    val latestDismiss by rememberUpdatedState(onDismiss)
+    val close: () -> Unit = {
+        if (!closing) {
+            closing = true
+            scope.launch {
+                progress.animateTo(0f, androidx.compose.animation.core.tween(120))
+                latestDismiss()
+            }
+        }
+    }
+    LaunchedEffect(Unit) {
+        withFrameNanos { }
+        if (!closing) progress.animateTo(1f, androidx.compose.animation.core.tween(160,
+            easing = androidx.compose.animation.core.FastOutSlowInEasing))
+    }
+    LaunchedEffect(closeRequested) { if (closeRequested) close() }
+    fun label(p: RcParam, value: Long): String = cameraToolLabelResource(tool, p.prop, value, camera?.deviceModel, p.dataType)?.let(context::getString)
         ?: context.getString(R.string.remote_camera_option, value.toString())
     LaunchedEffect(camera, movie, tool) {
         if (camera == null) { loading = false; return@LaunchedEffect }
@@ -106,30 +156,54 @@ internal fun RemoteCameraToolPanel(
             delay(1_200)
         }
     }
-    BackHandler { if (!busy) onDismiss() }
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Box(Modifier.fillMaxSize().background(colors.scrim).clickable(
-            interactionSource = remember { MutableInteractionSource() }, indication = null,
-        ) { if (!busy) onDismiss() })
-        Surface(Modifier.padding(24.dp).widthIn(max = 340.dp).fillMaxWidth().heightIn(max = 440.dp),
-            color = colors.glassSurfaceHeavy, shape = RoundedCornerShape(22.dp), shadowElevation = 6.dp) {
-            Column(Modifier.padding(vertical = 10.dp)) {
-                Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(title, color = colors.onBackground, style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                    IconButton(onClick = onDismiss, enabled = !busy) { Icon(Icons.Default.Close, stringResource(R.string.cd_close), tint = colors.onSurfaceVariant) }
+    androidx.activity.compose.BackHandler { close() }
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val gap = 6.dp
+    val margin = 8.dp
+    val anchorTop = with(density) { (anchor?.top ?: 0f).toDp() }
+    val anchorBottom = with(density) { (anchor?.bottom ?: 0f).toDp() }
+    // Use this rotated host's dimensions and local anchor, never the physical window dimensions.
+    val menuMaxHeight = (if (landscape) anchorTop - gap - margin
+        else maxHeight - anchorBottom - gap - margin).coerceAtLeast(1.dp)
+    val textMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
+    val labelStyle = MaterialTheme.typography.bodyMedium
+    fun hasTapMarker(p: RcParam, value: Long) =
+        tool == RemoteCameraTool.FOCUS_AREA && p.prop in listOf(0x501C, 0xD05D, 0xD1F8) &&
+            value in listOf(0x8011L, 0x8020L, 0x8021L)
+    // Measure only the connected camera's rows; unsupported long labels must not widen this menu.
+    val labelWidth = param?.let { p ->
+        (p.values + p.current).distinct().maxOfOrNull { value ->
+            with(density) { textMeasurer.measure(label(p, value), labelStyle).size.width.toDp() } +
+                if (hasTapMarker(p, value)) 22.dp else 0.dp
+        }
+    } ?: 100.dp
+    val menuWidth = (labelWidth + 24.dp).coerceIn(124.dp,
+        (maxWidth - 16.dp).coerceAtLeast(124.dp).coerceAtMost(280.dp))
+    val panelContent: @Composable () -> Unit = {
+        Box(
+            modifier = Modifier.width(menuWidth).heightIn(max = menuMaxHeight)
+                .graphicsLayer {
+                    alpha = progress.value
+                    // Always start next to the button; no moving scale pivot or long travel.
+                    translationY = (if (landscape) 1f else -1f) * 4.dp.toPx() * (1f - progress.value)
                 }
-                if (loading || busy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 20.dp), color = colors.accentBlue)
+                .clip(RoundedCornerShape(12.dp))
+                .background(colors.surface),
+        ) {
+            Column(Modifier.padding(vertical = 4.dp)) {
+                if (loading || busy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 12.dp), color = colors.accentBlue)
                 val p = param
                 if (!loading && (p == null || !p.writable || p.values.isEmpty())) Text(
                     stringResource(R.string.remote_camera_tool_unavailable), color = colors.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
-                error?.let { Text(it, color = colors.accentOrange, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) }
+                    style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp))
+                error?.let { Text(it, color = colors.accentOrange, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) }
                 if (p != null) LazyColumn(Modifier.weight(1f, fill = false)) {
                     items((p.values + p.current).distinct(), key = { it }) { value ->
                         val selected = value == p.current
                         Row(Modifier.fillMaxWidth().background(if (selected) colors.accentBlue.copy(alpha = 0.08f) else androidx.compose.ui.graphics.Color.Transparent)
-                            .clickable(enabled = !busy && canWrite && p.writable && value in p.values && !selected) {
+                            .clickable(enabled = !closing && !busy && canWrite && p.writable && value in p.values) {
+                                if (selected) { close(); return@clickable }
                                 val cam = camera ?: return@clickable
                                 busy = true
                                 error = null
@@ -167,7 +241,10 @@ internal fun RemoteCameraToolPanel(
                                             log("camera tool write ${tool.name} prop=0x%04X target=%d confirmed=%s response=0x%04X".format(fresh.prop, value, result.confirmed, result.responseCode))
                                             if (currentCameraCheck() && latestMovie == movie) {
                                                 param = result.actual ?: cam.rcGetCameraTool(tool, movie)
-                                                if (result.confirmed) onApplied()
+                                                if (result.confirmed) {
+                                                    onApplied()
+                                                    close()
+                                                }
                                                 else error = context.getString(R.string.remote_camera_tool_failed)
                                             }
                                         }
@@ -180,14 +257,63 @@ internal fun RemoteCameraToolPanel(
                                         busy = false
                                     }
                                 }
-                            }.padding(horizontal = 20.dp, vertical = 13.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text(label(p, value), color = if (selected) colors.accentBlue else colors.onBackground,
-                                style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                            if (selected) Icon(Icons.Default.Check, null, tint = colors.accentBlue, modifier = Modifier.size(18.dp))
+                            }.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.weight(1f)) {
+                                val name = label(p, value)
+                                val qualifier = name.indexOfAny(charArrayOf('（', '('))
+                                Text(
+                                    text = androidx.compose.ui.text.buildAnnotatedString {
+                                        if (qualifier < 0) append(name) else {
+                                            append(name.substring(0, qualifier))
+                                            pushStyle(androidx.compose.ui.text.SpanStyle(color = if (selected) colors.accentBlue else colors.onSurfaceVariant))
+                                            append(name.substring(qualifier))
+                                            pop()
+                                        }
+                                    },
+                                    color = if (selected) colors.accentBlue else colors.onBackground,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                            }
+                            if (hasTapMarker(p, value)) {
+                                Spacer(Modifier.width(6.dp))
+                                Icon(
+                                    Icons.Default.TouchApp,
+                                    contentDescription = stringResource(R.string.remote_af_tap_badge),
+                                    tint = if (selected) colors.accentBlue else colors.onSurfaceVariant,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                            }
                         }
                     }
                 }
             }
         }
+    }
+    // Transparent dismissal layer belongs to the same rotated host. It consumes outside taps
+    // so dismissing the list cannot accidentally focus or trigger a camera control underneath.
+    Box(Modifier.matchParentSize().clickable(
+        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+        indication = null,
+    ) { close() })
+    androidx.compose.ui.layout.Layout(
+        content = {
+            Box(Modifier.clickable(
+                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                indication = null,
+            ) { /* Consume taps in the panel's padding. */ }) { panelContent() }
+        },
+        modifier = Modifier.fillMaxSize(),
+    ) { measurables, constraints ->
+        val panel = measurables.single().measure(constraints.copy(minWidth = 0, minHeight = 0))
+        val inset = margin.roundToPx()
+        val spacing = gap.roundToPx()
+        val left = (anchor?.left?.toInt() ?: inset)
+            .coerceIn(inset, (constraints.maxWidth - panel.width - inset).coerceAtLeast(inset))
+        val top = if (landscape) (anchor?.top?.toInt() ?: constraints.maxHeight) - spacing - panel.height
+            else (anchor?.bottom?.toInt() ?: inset) + spacing
+        layout(constraints.maxWidth, constraints.maxHeight) {
+            panel.place(left, top.coerceIn(0, (constraints.maxHeight - panel.height).coerceAtLeast(0)))
+        }
+    }
     }
 }

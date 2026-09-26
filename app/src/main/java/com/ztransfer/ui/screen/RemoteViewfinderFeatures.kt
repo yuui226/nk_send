@@ -40,17 +40,21 @@ import kotlin.math.sqrt
 
 private val ToolMarkStrokeWidth = 1.5.dp
 
-internal enum class ViewfinderGrid(val fractions: List<Float>, val labelRes: Int) {
+internal enum class ViewfinderGrid(val fractions: List<Float>, val labelRes: Int, val diagonals: Boolean = false) {
     OFF(emptyList(), R.string.remote_grid_off),
     THIRDS(listOf(1f / 3f, 2f / 3f), R.string.remote_grid_thirds),
     FOURTHS(listOf(0.25f, 0.5f, 0.75f), R.string.remote_grid_fourths),
     CENTER(listOf(0.5f), R.string.remote_grid_center),
-    GOLDEN(listOf(0.38196602f, 0.618034f), R.string.remote_grid_golden);
+    GOLDEN(listOf(0.38196602f, 0.618034f), R.string.remote_grid_golden),
+    THIRDS_DIAGONALS(listOf(1f / 3f, 2f / 3f), R.string.remote_grid_thirds_diagonals, true),
+    FOURTHS_DIAGONALS(listOf(0.25f, 0.5f, 0.75f), R.string.remote_grid_fourths_diagonals, true);
 
     fun next(): ViewfinderGrid = when (this) {
         OFF -> THIRDS
-        THIRDS -> FOURTHS
-        FOURTHS -> CENTER
+        THIRDS -> THIRDS_DIAGONALS
+        THIRDS_DIAGONALS -> FOURTHS
+        FOURTHS -> FOURTHS_DIAGONALS
+        FOURTHS_DIAGONALS -> CENTER
         CENTER -> GOLDEN
         GOLDEN -> OFF
     }
@@ -68,7 +72,7 @@ internal fun framingGridLines(
     if (grid == ViewfinderGrid.OFF) return emptyList()
     val rect = fitCenterRect(containerWidth, containerHeight, imageAspectRatio)
     if (rect.width <= 0f || rect.height <= 0f) return emptyList()
-    return grid.fractions.flatMap { fraction ->
+    val lines = grid.fractions.flatMap { fraction ->
         val x = rect.left + rect.width * fraction
         val y = rect.top + rect.height * fraction
         listOf(
@@ -76,6 +80,10 @@ internal fun framingGridLines(
             FramingGridLine(Offset(rect.left, y), Offset(rect.right, y))
         )
     }
+    return if (grid.diagonals) lines + listOf(
+        FramingGridLine(rect.topLeft, rect.bottomRight),
+        FramingGridLine(Offset(rect.right, rect.top), Offset(rect.left, rect.bottom)),
+    ) else lines
 }
 
 /** ContentScale.Fit 在容器中的真实图像区域；网格、点击坐标与 AF 框共用。 */
@@ -148,12 +156,16 @@ internal data class LuminanceHistogram(val bins: FloatArray, val rgb: List<Float
  * 从已经解码的 Live View Bitmap 抽样统计，不再解一遍 JPEG。目标约 24k 像素，
  * VGA/XGA 都有稳定上限；按行复用一个 IntArray，避免每帧分配整图像素数组。
  */
-internal fun calculateLuminanceHistogram(bitmap: Bitmap, includeRgb: Boolean = false): LuminanceHistogram {
+internal fun calculateLuminanceHistogram(bitmap: Bitmap, includeRgb: Boolean = false, sampleLimit: Int = 24_000): LuminanceHistogram {
     val width = bitmap.width.coerceAtLeast(1)
     val height = bitmap.height.coerceAtLeast(1)
-    val step = ceil(sqrt(width.toDouble() * height / 24_000.0)).toInt().coerceAtLeast(1)
+    val step = ceil(sqrt(width.toDouble() * height / sampleLimit.coerceAtLeast(1).toDouble())).toInt().coerceAtLeast(1)
     val counts = IntArray(256)
-    val channels = if (includeRgb) List(3) { IntArray(256) } else null
+    // RGB_565 expands 5/6-bit channels into sparse 8-bit values. Group all channels
+    // at the shared 5-bit precision instead of drawing empty bins as a comb.
+    val rgbBinCount = if (bitmap.config == Bitmap.Config.RGB_565) 32 else 256
+    val rgbBinWidth = 256 / rgbBinCount
+    val channels = if (includeRgb) List(3) { IntArray(rgbBinCount) } else null
     val row = IntArray(width)
     var y = 0
     while (y < height) {
@@ -166,7 +178,7 @@ internal fun calculateLuminanceHistogram(bitmap: Bitmap, includeRgb: Boolean = f
             val blue = px and 0xFF
             // Rec.709 亮度权重的整数近似（54 + 183 + 19 = 256）。
             counts[(54 * red + 183 * green + 19 * blue) ushr 8]++
-            channels?.let { it[0][red]++; it[1][green]++; it[2][blue]++ }
+            channels?.let { it[0][red / rgbBinWidth]++; it[1][green / rgbBinWidth]++; it[2][blue / rgbBinWidth]++ }
             x += step
         }
         y += step
@@ -176,7 +188,34 @@ internal fun calculateLuminanceHistogram(bitmap: Bitmap, includeRgb: Boolean = f
     // One shared RGB scale preserves relative channel counts; never normalize each separately.
     val rgbPeak = channels?.maxOf { it.maxOrNull() ?: 0 }?.coerceAtLeast(1) ?: 1
     return LuminanceHistogram(FloatArray(256) { i -> counts[i].toFloat() / peak },
-        channels?.map { channel -> FloatArray(256) { channel[it].toFloat() / rgbPeak } })
+        channels?.map { channel -> FloatArray(channel.size) { channel[it].toFloat() / rgbPeak } })
+}
+
+/** Decode only a small 8-bit RGB analysis image; display still uses RGB_565. */
+internal fun previewHistogramFromJpeg(bytes: ByteArray): LuminanceHistogram? {
+    return try {
+        val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        var sample = 1
+        while ((maxOf(bounds.outWidth, bounds.outHeight).toLong() + sample - 1) / sample > 512) sample *= 2
+        val bitmap = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size,
+            android.graphics.BitmapFactory.Options().apply {
+                inSampleSize = sample
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+                inPreferredColorSpace = android.graphics.ColorSpace.get(android.graphics.ColorSpace.Named.SRGB)
+            }) ?: return null
+        try {
+            // Scan every pixel of this bounded image: tiny highlights should not fall between samples.
+            calculateLuminanceHistogram(bitmap, includeRgb = true, sampleLimit = Int.MAX_VALUE)
+        } finally {
+            bitmap.recycle()
+        }
+    } catch (_: OutOfMemoryError) {
+        null // An optional scope must not prevent the photograph from being displayed.
+    } catch (_: Exception) {
+        null
+    }
 }
 
 /** 过曝斑马掩码：cols×rows 粗网格按行优先排列，true = 该格抽样亮度达到过曝阈值。 */
@@ -199,15 +238,18 @@ internal fun calculateZebraMask(bitmap: Bitmap): ZebraMask {
     val cols = (width + cellW - 1) / cellW
     val rows = (height + cellH - 1) / cellH
     val cells = BooleanArray(cols * rows)
-    val row = IntArray(width)
+    val sampled = Bitmap.createScaledBitmap(bitmap, cols, rows, false)
+    val pixels = IntArray(cols * rows)
+    try {
+        sampled.getPixels(pixels, 0, cols, 0, 0, cols, rows)
+    } finally {
+        if (sampled !== bitmap) sampled.recycle()
+    }
     var r = 0
     while (r < rows) {
-        val y = (r * cellH + cellH / 2).coerceAtMost(height - 1)
-        bitmap.getPixels(row, 0, width, 0, y, width, 1)
         var c = 0
         while (c < cols) {
-            val x = (c * cellW + cellW / 2).coerceAtMost(width - 1)
-            val px = row[x]
+            val px = pixels[r * cols + c]
             val red = (px ushr 16) and 0xFF
             val green = (px ushr 8) and 0xFF
             val blue = px and 0xFF
@@ -311,6 +353,10 @@ internal fun GridMark(grid: ViewfinderGrid, modifier: Modifier = Modifier) {
             val y = inset + (size.height - inset * 2f) * f
             drawLine(c, Offset(x, inset), Offset(x, size.height - inset), sw, StrokeCap.Round)
             drawLine(c, Offset(inset, y), Offset(size.width - inset, y), sw, StrokeCap.Round)
+        }
+        if (grid.diagonals) {
+            drawLine(c, Offset(inset, inset), Offset(size.width - inset, size.height - inset), sw, StrokeCap.Round)
+            drawLine(c, Offset(size.width - inset, inset), Offset(inset, size.height - inset), sw, StrokeCap.Round)
         }
     }
 }
@@ -574,46 +620,89 @@ internal fun ViewfinderZebraOverlay(
 }
 
 /** Separate enter/exit limits stop a nearly level camera from flickering between colors. */
-internal fun horizonAligned(roll: Float, wasAligned: Boolean): Boolean =
-    roll.isFinite() && abs(roll) <= if (wasAligned) 1.2f else 0.7f
+internal fun horizonAligned(roll: Float, wasAligned: Boolean): Boolean {
+    if (!roll.isFinite()) return false
+    // Align to the nearest horizontal or vertical axis, including inverted orientations.
+    val remainder = abs(roll % 90f)
+    val deviation = minOf(remainder, 90f - remainder)
+    return deviation <= if (wasAligned) 1.2f else 0.7f
+}
 
-/** Z30-style circular reference. Only camera roll is available; no simulated pitch indicator. */
+/** Preserve physical orientation and unwrap across ±180° for the shortest animation path. */
+internal fun horizonDisplayRoll(roll: Float, previous: Float = roll): Float =
+    previous + ((roll - previous + 180f) % 360f + 360f) % 360f - 180f
+
+/** Rotating diameter and parallel pitch chord; each axis indicates alignment independently. */
 @Composable
 internal fun ViewfinderLevelOverlay(
     rollDegrees: Float?,
     modifier: Modifier = Modifier,
+    pitchDegrees: Float? = null,
 ) {
     val roll = rollDegrees?.takeIf { it.isFinite() } ?: return
-    var aligned by remember { mutableStateOf(horizonAligned(roll, false)) }
-    LaunchedEffect(roll) { aligned = horizonAligned(roll, aligned) }
-    val angle by animateFloatAsState(roll, tween(100), label = "horizonRoll")
+    val pitch = pitchDegrees?.takeIf { it.isFinite() && kotlin.math.abs(it) <= 90f }
+    var rollAligned by remember { mutableStateOf(horizonAligned(roll, false)) }
+    var pitchAligned by remember { mutableStateOf(false) }
+    LaunchedEffect(roll, pitch) {
+        rollAligned = horizonAligned(roll, rollAligned)
+        pitchAligned = pitch != null && kotlin.math.abs(pitch) <= if (pitchAligned) 1.2f else 0.7f
+    }
+    val aligned = rollAligned && (pitch == null || pitchAligned)
+    val pitchOffset by animateFloatAsState((pitch ?: 0f).coerceIn(-30f, 30f) / 30f, tween(100), label = "horizonPitch")
+    var rollTarget by remember { mutableFloatStateOf(roll) }
+    LaunchedEffect(roll) { rollTarget = horizonDisplayRoll(roll, rollTarget) }
+    val angle by animateFloatAsState(rollTarget, tween(100), label = "horizonRoll")
     val tint by animateColorAsState(
-        if (aligned) Color(0xFF52F58B) else Color(0xFFFFC857),
+        if (rollAligned) Color(0xFF52F58B) else Color(0xFFFFC857),
         tween(160), label = "horizonColor",
     )
-    val stroke by animateFloatAsState(if (aligned) 3f else 1.8f, tween(160), label = "horizonStroke")
+    val stroke by animateFloatAsState(if (rollAligned) 1.6f else 1.2f, tween(160), label = "horizonStroke")
+    val pitchTint by animateColorAsState(
+        if (pitchAligned) Color(0xFF52F58B) else Color.White.copy(alpha = 0.65f),
+        tween(160), label = "horizonPitchColor",
+    )
+    val reference by animateColorAsState(
+        if (aligned) Color(0xFF52F58B).copy(alpha = 0.38f) else Color.White.copy(alpha = 0.26f),
+        tween(160), label = "horizonReference",
+    )
     Canvas(modifier) {
         val radius = minOf(size.width * 0.19f, size.height * 0.28f)
         if (radius < 18.dp.toPx()) return@Canvas
-        val outline = Color.Black.copy(alpha = 0.65f)
-        val reference = if (aligned) tint.copy(alpha = 0.95f) else Color.White.copy(alpha = 0.65f)
-        drawCircle(outline, radius, style = Stroke(4.dp.toPx()))
-        drawCircle(reference, radius, style = Stroke(if (aligned) 2.5.dp.toPx() else 1.5.dp.toPx()))
-        // Fixed horizontal and vertical references remain anchored to the viewfinder.
-        drawLine(outline, center - Offset(radius, 0f), center + Offset(radius, 0f), 4.dp.toPx())
-        drawLine(reference, center - Offset(radius, 0f), center + Offset(radius, 0f), 1.dp.toPx())
-        drawLine(reference.copy(alpha = 0.45f), center - Offset(0f, radius), center + Offset(0f, radius), 1.dp.toPx())
-        rotate(-angle) {
-            val start = center - Offset(radius, 0f)
-            val end = center + Offset(radius, 0f)
-            drawLine(outline, start, end, (stroke + 2f).dp.toPx(), StrokeCap.Round)
-            drawLine(tint, start, end, stroke.dp.toPx(), StrokeCap.Round)
-            for (side in listOf(-1, 1)) {
-                val x = center.x + side * radius
-                drawLine(tint, Offset(x, center.y - 5.dp.toPx()), Offset(x, center.y + 5.dp.toPx()), stroke.dp.toPx(), StrokeCap.Round)
-            }
+        val outline = Color.Black.copy(alpha = 0.24f)
+        drawCircle(Color.Black.copy(alpha = 0.12f), radius, style = Stroke(1.5.dp.toPx()))
+        drawCircle(reference, radius, style = Stroke(0.75.dp.toPx()))
+        // Only short fixed ticks: there is no competing fixed diameter.
+        for (side in listOf(-1, 1)) {
+            drawLine(reference, center + Offset(side * (radius - 4.dp.toPx()), 0f),
+                center + Offset(side * radius, 0f), 1.dp.toPx(), StrokeCap.Round)
+            drawLine(reference, center + Offset(0f, side * (radius - 4.dp.toPx())),
+                center + Offset(0f, side * radius), 1.dp.toPx(), StrokeCap.Round)
         }
-        drawCircle(outline, 4.dp.toPx())
-        drawCircle(tint, if (aligned) 3.dp.toPx() else 1.8.dp.toPx())
+        // Match the camera display: the reported roll already has the required sign.
+        rotate(angle) {
+            // Leave room for rounded caps and the outline, keeping every stroke inside the ring.
+            val innerRadius = (radius - 2.dp.toPx()).coerceAtLeast(0f)
+            val start = center - Offset(innerRadius, 0f)
+            val end = center + Offset(innerRadius, 0f)
+            if (pitch != null) {
+                // Both lines use the same rotation. Pitch translates perpendicular to the
+                // diameter, and sqrt(r²-y²) keeps its endpoints on the inner circle.
+                val y = pitchOffset * innerRadius * 0.75f
+                val halfWidth = sqrt((innerRadius * innerRadius - y * y).coerceAtLeast(0f))
+                val pitchCenter = center + Offset(0f, y)
+                val pitchStart = pitchCenter - Offset(halfWidth, 0f)
+                val pitchEnd = pitchCenter + Offset(halfWidth, 0f)
+                drawLine(outline, pitchStart, pitchEnd, 2.dp.toPx(), StrokeCap.Round)
+                drawLine(pitchTint, pitchStart, pitchEnd, 1.dp.toPx(), StrokeCap.Round)
+            }
+            // Draw roll last so a level-pitch chord cannot obscure a tilted roll warning.
+            drawLine(outline, start, end, (stroke + 1f).dp.toPx(), StrokeCap.Round)
+            drawLine(tint, start, end, stroke.dp.toPx(), StrokeCap.Round)
+        }
+        drawCircle(outline, 3.dp.toPx())
+        // The centre marker reports pitch separately; single-axis cameras retain roll feedback.
+        drawCircle(if (pitch != null) {
+            if (pitchAligned) Color(0xFF52F58B) else Color(0xFFFFC857)
+        } else tint, if (aligned) 2.2.dp.toPx() else 1.5.dp.toPx())
     }
 }

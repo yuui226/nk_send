@@ -1579,6 +1579,7 @@ object PhotoFrameExporter {
                 source,
                 watermark,
                 longEdge ?: maxOf(source.width, source.height),
+                allowInPlace = longEdge == null,
             )
         }
         val layout = if (longEdge != null) {
@@ -2158,7 +2159,7 @@ object PhotoFrameExporter {
         }
         fun titleBounds(): FrameTextVisualBounds? = if (hasTitle) {
             listOfNotNull(
-                brand.takeIf(String::isNotEmpty)?.let { textVisualBounds(it, brandPaint) },
+                brand.takeIf(String::isNotEmpty)?.let { textVisualBounds(it, brandPaint, metadata.useNikonLogo) },
                 model.takeIf(String::isNotEmpty)?.let { textVisualBounds(it, modelPaint) },
             ).reduce(::mergeTextVisualBounds)
         } else {
@@ -2266,11 +2267,14 @@ object PhotoFrameExporter {
         source: Bitmap,
         watermark: PhotoFrameWatermark,
         longEdge: Int,
+        allowInPlace: Boolean,
     ): Bitmap {
         val scale = min(1f, longEdge.toFloat() / maxOf(source.width, source.height))
         val width = (source.width * scale).roundToInt().coerceAtLeast(1)
         val height = (source.height * scale).roundToInt().coerceAtLeast(1)
-        if (width == source.width && height == source.height && source.isMutable) {
+        // Preview sources can be shared by filter, comparison and completed-frame caches.
+        // Never bake a watermark into those inputs, even when no resizing is needed.
+        if (allowInPlace && width == source.width && height == source.height && source.isMutable) {
             val photoRect = RectF(0f, 0f, width.toFloat(), height.toFloat())
             drawPhotoWatermark(
                 context,
@@ -2694,11 +2698,9 @@ object PhotoFrameExporter {
         }
     }
 
-    private fun textVisualBounds(text: String, paint: Paint): FrameTextVisualBounds {
-        val bounds = Rect()
-        paint.getTextBounds(text, 0, text.length, bounds)
-        return FrameTextVisualBounds(bounds.top.toFloat(), bounds.bottom.toFloat())
-    }
+    private fun textVisualBounds(
+        text: String, paint: Paint, logo: Boolean = false, logoScale: Float = 1.35f,
+    ): FrameTextVisualBounds = frameIdentityVisualBounds(text, paint, logo, logoScale)
 
     private fun mergeTextVisualBounds(
         first: FrameTextVisualBounds,
@@ -2824,7 +2826,7 @@ object PhotoFrameExporter {
         }
         var componentGap = shortEdge * 0.014f
         fun firstRowWidth(): Float =
-            (cameraPaint?.measureFrameIdentity(cameraName, metadata.useNikonLogo) ?: 0f) +
+            (cameraPaint?.measureFrameIdentity(cameraName, metadata.useNikonLogo, PhotoFramePreset.IMMERSIVE.brandLogoScale()) ?: 0f) +
                 (inlineWatermarkPaint?.measureText(inlineWatermarkText) ?: 0f) +
                 (dividerPaint?.measureText(divider) ?: 0f) +
                 if (dividerPaint != null) componentGap * 2f else 0f
@@ -2849,7 +2851,7 @@ object PhotoFrameExporter {
 
         fun firstRowBounds(): FrameTextVisualBounds? {
             val bounds = buildList {
-                cameraPaint?.let { add(textVisualBounds(cameraName, it)) }
+                cameraPaint?.let { add(textVisualBounds(cameraName, it, metadata.useNikonLogo, PhotoFramePreset.IMMERSIVE.brandLogoScale())) }
                 inlineWatermarkPaint?.let {
                     add(textVisualBounds(inlineWatermarkText, it))
                 }
@@ -2900,8 +2902,8 @@ object PhotoFrameExporter {
             titleBaseline?.let { baseline ->
                 var x = photoRect.centerX() - firstRowWidth() / 2f
                 cameraPaint?.let { paint ->
-                    canvas.drawFrameIdentity(cameraName, x, baseline, paint, metadata.useNikonLogo)
-                    x += paint.measureFrameIdentity(cameraName, metadata.useNikonLogo)
+                    canvas.drawFrameIdentity(cameraName, x, baseline, paint, metadata.useNikonLogo, PhotoFramePreset.IMMERSIVE.brandLogoScale())
+                    x += paint.measureFrameIdentity(cameraName, metadata.useNikonLogo, PhotoFramePreset.IMMERSIVE.brandLogoScale())
                 }
                 dividerPaint?.let { paint ->
                     x += componentGap
@@ -3720,14 +3722,14 @@ object PhotoFrameExporter {
                 Color.rgb(10, 11, 12),
                 Typeface.create("sans-serif-black", Typeface.BOLD_ITALIC),
             )
-            val bounds = textVisualBounds(header, paint)
+            val bounds = textVisualBounds(header, paint, metadata.useNikonLogo, PhotoFramePreset.CLASSIC_SIGNATURE.brandLogoScale())
             val baseline = centeredFrameTextBaselines(
                 0f,
                 layout.photoTop,
                 listOf(bounds),
                 0f,
             ).single()
-            canvas.drawFrameIdentity(header, layout.canvasWidth / 2f, baseline, paint, metadata.useNikonLogo)
+            canvas.drawFrameIdentity(header, layout.canvasWidth / 2f, baseline, paint, metadata.useNikonLogo, PhotoFramePreset.CLASSIC_SIGNATURE.brandLogoScale())
         }
         val rows = buildList {
             metadata.lensModel?.takeIf(String::isNotBlank)?.let(::add)
@@ -3850,8 +3852,7 @@ object PhotoFrameExporter {
                 outer.left + unit * 0.15f,
                 outer.top + unit * 0.028f,
                 identityPaint,
-                metadata.useNikonLogo,
-            )
+                metadata.useNikonLogo, PhotoFramePreset.FILM_GALLERY.brandLogoScale())
         }
         metadata.dateTime?.takeIf(String::isNotBlank)?.let { dateTime ->
             val dateTimePaint = fittedEditorialPaint(
@@ -3959,7 +3960,7 @@ object PhotoFrameExporter {
             }
             val preferredGap = band.height() * 0.10f
             val initialBounds = rows.mapIndexed { index, text ->
-                textVisualBounds(text, paints[index])
+                textVisualBounds(text, paints[index], index == 0 && identity.isNotEmpty() && metadata.useNikonLogo, PhotoFramePreset.FILM_EDGE.brandLogoScale())
             }
             val scale = frameTextScaleToFit(
                 (band.height() - preferredGap * (rows.size - 1).coerceAtLeast(0))
@@ -3968,7 +3969,7 @@ object PhotoFrameExporter {
             )
             if (scale < 1f) paints.forEach { it.textSize *= scale }
             val bounds = rows.mapIndexed { index, text ->
-                textVisualBounds(text, paints[index])
+                textVisualBounds(text, paints[index], index == 0 && identity.isNotEmpty() && metadata.useNikonLogo, PhotoFramePreset.FILM_EDGE.brandLogoScale())
             }
             val baselines = centeredFrameTextBaselines(
                 band.top,
@@ -3977,7 +3978,7 @@ object PhotoFrameExporter {
                 preferredGap,
             )
             rows.forEachIndexed { index, text ->
-                canvas.drawFrameIdentity(text, band.centerX(), baselines[index], paints[index], index == 0 && identity.isNotEmpty() && metadata.useNikonLogo)
+                canvas.drawFrameIdentity(text, band.centerX(), baselines[index], paints[index], index == 0 && identity.isNotEmpty() && metadata.useNikonLogo, PhotoFramePreset.FILM_EDGE.brandLogoScale())
             }
         }
     }
@@ -4030,7 +4031,7 @@ object PhotoFrameExporter {
         }
         fun bounds(): List<FrameTextVisualBounds> = buildList {
             metadataRows.forEachIndexed { index, text ->
-                add(textVisualBounds(text, paints[index]))
+                add(textVisualBounds(text, paints[index], index == 0 && brandLogo, preset.brandLogoScale()))
             }
             if (watermark != null && watermarkPaint != null) {
                 add(textVisualBounds(watermark.displayText, checkNotNull(watermarkPaint)))
@@ -4050,7 +4051,7 @@ object PhotoFrameExporter {
         val rows = bounds()
         val baselines = centeredFrameTextBaselines(area.top, area.bottom, rows, gap)
         metadataRows.forEachIndexed { index, text ->
-            canvas.drawFrameIdentity(text, area.centerX(), baselines[index], paints[index], index == 0 && brandLogo)
+            canvas.drawFrameIdentity(text, area.centerX(), baselines[index], paints[index], index == 0 && brandLogo, preset.brandLogoScale())
         }
         if (watermark != null && watermarkPaint != null) {
             val paint = checkNotNull(watermarkPaint)
@@ -4172,8 +4173,8 @@ object PhotoFrameExporter {
             }
         }
         if (rows.isNotEmpty()) {
-            fun bounds(): List<FrameTextVisualBounds> = rows.map { (text, paint) ->
-                textVisualBounds(text, paint)
+            fun bounds(): List<FrameTextVisualBounds> = rows.mapIndexed { index, (text, paint) ->
+                textVisualBounds(text, paint, index == 0 && identity.isNotEmpty() && metadata.useNikonLogo, PhotoFramePreset.COLOR_ARCHIVE.brandLogoScale())
             }
             val initial = bounds()
             val preferredGap = bandHeight * 0.055f
@@ -4189,7 +4190,7 @@ object PhotoFrameExporter {
                 preferredGap,
             )
             rows.forEachIndexed { index, (text, paint) ->
-                canvas.drawFrameIdentity(text, textArea.left, baselines[index], paint, index == 0 && identity.isNotEmpty() && metadata.useNikonLogo)
+                canvas.drawFrameIdentity(text, textArea.left, baselines[index], paint, index == 0 && identity.isNotEmpty() && metadata.useNikonLogo, PhotoFramePreset.COLOR_ARCHIVE.brandLogoScale())
             }
         }
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -4497,7 +4498,7 @@ object PhotoFrameExporter {
             )
         }
         val rows = buildList {
-            brandPaint?.let { add(textVisualBounds(brand, it)) }
+            brandPaint?.let { add(textVisualBounds(brand, it, brandLogo, PhotoFramePreset.BRAND_INSET.brandLogoScale())) }
             lensPaint?.let { add(textVisualBounds(lens, it)) }
             details.forEachIndexed { index, text ->
                 add(textVisualBounds(text, detailPaints[index]))
@@ -4508,7 +4509,7 @@ object PhotoFrameExporter {
         val blockHeight = rows.sumOf { (it.bottom - it.top).toDouble() }.toFloat() +
             shortEdge * 0.020f * (rows.size - 1).coerceAtLeast(0)
         val blockWidth = maxOf(
-            brandPaint?.measureText(brand) ?: 0f,
+            brandPaint?.measureFrameIdentity(brand, brandLogo, PhotoFramePreset.BRAND_INSET.brandLogoScale()) ?: 0f,
             lensPaint?.measureText(lens) ?: 0f,
             details.zip(detailPaints).maxOfOrNull { (text, paint) -> paint.measureText(text) }
                 ?: 0f,
@@ -4529,7 +4530,7 @@ object PhotoFrameExporter {
         )
         var row = 0
         if (brandPaint != null) {
-            canvas.drawFrameIdentity(brand, photoRect.centerX(), baselines[row++], brandPaint, brandLogo)
+            canvas.drawFrameIdentity(brand, photoRect.centerX(), baselines[row++], brandPaint, brandLogo, PhotoFramePreset.BRAND_INSET.brandLogoScale())
         }
         if (lensPaint != null) {
             canvas.drawText(lens, photoRect.centerX(), baselines[row++], lensPaint)
@@ -4646,7 +4647,7 @@ object PhotoFrameExporter {
             watermarkPaint?.let {
                 textVisualBounds(checkNotNull(bandWatermark).displayText, it)
             },
-            brandPaint?.let { textVisualBounds(brand, it) },
+            brandPaint?.let { textVisualBounds(brand, it, brandLogo, PhotoFramePreset.BRAND_GALLERY.brandLogoScale()) },
         )
         if (initialRows.isEmpty()) return
         val gapAllowance = if (initialRows.size > 1) preferredGap else 0f
@@ -4662,7 +4663,7 @@ object PhotoFrameExporter {
             watermarkPaint?.let {
                 textVisualBounds(checkNotNull(bandWatermark).displayText, it)
             },
-            brandPaint?.let { textVisualBounds(brand, it) },
+            brandPaint?.let { textVisualBounds(brand, it, brandLogo, PhotoFramePreset.BRAND_GALLERY.brandLogoScale()) },
         )
         val baselines = centeredFrameTextBaselines(
             areaTop = availableTop,
@@ -4688,7 +4689,7 @@ object PhotoFrameExporter {
             )
         }
         if (brandPaint != null) {
-            canvas.drawFrameIdentity(brand, band.centerX(), baselines[row], brandPaint, brandLogo)
+            canvas.drawFrameIdentity(brand, band.centerX(), baselines[row], brandPaint, brandLogo, PhotoFramePreset.BRAND_GALLERY.brandLogoScale())
         }
     }
 
@@ -4870,7 +4871,7 @@ object PhotoFrameExporter {
         }
         var leftPrimaryBounds =
             if (leftPrimary != null && leftPrimaryPaint != null) {
-                textVisualBounds(leftPrimary, leftPrimaryPaint)
+                textVisualBounds(leftPrimary, leftPrimaryPaint, metadata.useNikonLogo)
             } else {
                 null
             }
@@ -4923,7 +4924,7 @@ object PhotoFrameExporter {
                 watermarkPaint,
             ).forEach { paint -> paint.textSize *= rowScale }
             leftPrimaryBounds = leftPrimary?.let { text ->
-                leftPrimaryPaint?.let { textVisualBounds(text, it) }
+                leftPrimaryPaint?.let { textVisualBounds(text, it, metadata.useNikonLogo) }
             }
             leftSecondaryBounds = leftSecondary?.let { text ->
                 leftSecondaryPaint?.let { textVisualBounds(text, it) }
@@ -6398,7 +6399,7 @@ internal fun photoFrameWatermarkFingerprint(
         identity
     }
     return MessageDigest.getInstance("SHA-256")
-        .digest(versionedIdentity.toByteArray(Charsets.UTF_8))
+        .digest((versionedIdentity + if (effectiveMetadataSettings.brandStyle == PhotoFrameBrandStyle.LOGO) "\u0000brand-logo-v=2" else "").toByteArray(Charsets.UTF_8))
         .take(6)
         .joinToString("") { byte -> "%02x".format(Locale.ROOT, byte.toInt() and 0xff) }
 }

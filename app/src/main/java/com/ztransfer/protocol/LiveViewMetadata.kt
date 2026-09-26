@@ -40,6 +40,8 @@ data class LiveViewSoundLevels(
     }
 }
 
+data class LiveViewAttitude(val roll: Float, val pitch: Float)
+
 data class LiveViewMetadata(
     val focusJudgement: LiveViewFocusJudgement,
     val selectedFocusFrame: LiveViewFocusFrame?,
@@ -50,7 +52,8 @@ data class LiveViewMetadata(
     val focusCoordinateWidth: Int?,
     val focusCoordinateHeight: Int?,
     /** 视频 Live View 的机内 L/R 电平；头型不支持或字段校验失败时为 null。 */
-    val soundLevels: LiveViewSoundLevels?
+    val soundLevels: LiveViewSoundLevels?,
+    val attitude: LiveViewAttitude? = null
 )
 
 /** 一帧完整 Live View 载荷；JPEG 直接从 [jpegOffset] 解码，避免热路径复制。 */
@@ -59,7 +62,9 @@ data class LiveViewPacket(
     val jpegOffset: Int,
     val metadata: LiveViewMetadata?,
     /** 收到完整帧的单调时钟时间；用于排除 AF 完成前已排队的旧帧。 */
-    val receivedAtElapsedMs: Long
+    val receivedAtElapsedMs: Long,
+    /** Actual operation after any protocol fallback. */
+    val operation: Int = 0
 )
 
 private fun ByteArray.be16(offset: Int): Int =
@@ -92,8 +97,9 @@ private const val EXTENDED_SOUND_LEVELS_OFFSET = 824
  * - +20 ~ +27（8 字节）：未知；
  * - +32 ~ +41（10 字节）：未知；
  * - +46 ~ +47（2 字节）：在 selectedIndex 与 AF 框数据之间，未解析。
- * Z8/Z9/Z6iii 等 Expeed 7 世代可能在扩展 LV 信息块中携带机身姿态（roll/pitch），
- * 尚未抓包验证——拿到真机样本后再决定是否从此处解析，届时可免去 0xD067 轮询开销。
+ * 512-byte v1 帧头 +404/+408 为滚转/俯仰角：Z30 V1.20 四组姿态实测确认，
+ * 大端 16.16 定点环角。竖拍时 +408 为 FFFFFFFF，有效俯仰轴改为 +412。
+ * 1024-byte 扩展头的姿态位置尚未验证，不套用偏移。
  *
  * 未知版本/长度一律返回 null。AF 框记录使用同一份头部声明的数量与选中索引；
  * 只有完整记录区、索引和坐标都通过边界校验时才把框位交给 UI。
@@ -190,7 +196,8 @@ internal fun parseLiveViewMetadata(
         trackingCoordinateHeight = coordinateHeight,
         focusCoordinateWidth = focusCoordinateWidth.takeIf { validFocusCoordinateGrid },
         focusCoordinateHeight = focusCoordinateHeight.takeIf { validFocusCoordinateGrid },
-        soundLevels = soundLevels
+        soundLevels = soundLevels,
+        attitude = parseCompactLiveViewAttitude(payload, jpegOffset)
     )
 }
 
@@ -232,4 +239,32 @@ private fun parseLiveViewSoundLevels(
         currentLeft = currentLeft,
         currentRight = currentRight
     )
+}
+
+/** Verified 0x9428 v1 compact layout. Extended/legacy offsets are deliberately not inferred. */
+internal fun parseCompactLiveViewAttitude(payload: ByteArray, headerSize: Int): LiveViewAttitude? {
+    if (headerSize != 512 || payload.size < headerSize ||
+        payload.be16(0) != 1 || payload.be16(2) != 0 || payload.be32(8) != 512L) return null
+    val roll = payload.be32(404)
+    val landscapePitch = payload.be32(408)
+    // Z30 V1.20 portrait samples: +408 is explicitly unavailable (FFFFFFFF),
+    // while +412 carries the active tilt axis. Do not treat arbitrary bad values as a switch.
+    val rollDegrees = roll / 65536.0
+    val portrait = rollDegrees in 45.0..135.0 || rollDegrees in 225.0..315.0
+    val alternateAxis = landscapePitch == 0xFFFFFFFFL && portrait
+    val pitch = if (alternateAxis) payload.be32(412) else landscapePitch
+    // Reserved zero-filled blocks and invalid sentinels must not look like a level camera.
+    if (roll == 0L && pitch == 0L) return null
+    if (roll >= 360L * 65536 || pitch >= 360L * 65536) return null
+    fun degrees(raw: Long): Float = (raw / 65536f).let { if (it > 180f) it - 360f else it }
+    // Both inverted orientations use a 180° neutral and reversed pitch direction.
+    // Reverse portrait uses +412; inverted landscape uses +408 (+412 unavailable).
+    val reversePortrait = alternateAxis && rollDegrees in 225.0..315.0
+    val invertedLandscape = !alternateAxis && rollDegrees in 135.0..225.0 &&
+        payload.be32(412) == 0xFFFFFFFFL
+    val p = if (reversePortrait || invertedLandscape) {
+        180f - pitch / 65536f
+    } else degrees(pitch)
+    if (kotlin.math.abs(p) > 90f) return null
+    return LiveViewAttitude(degrees(roll), p)
 }

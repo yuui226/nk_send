@@ -34,7 +34,9 @@ $TokenFile = Join-Path $PSScriptRoot "admin-token.txt"
 $MaxPriceFen = 10000000
 $OssBucket = "ztransfer-hk"
 $OssRegion = "cn-hongkong"
-$OssEndpoint = "https://oss-cn-hongkong.aliyuncs.com"
+# This custom domain is bound directly to ztransfer-hk (not a download-only CDN).
+# Use CNAME addressing so ossutil does not prepend the bucket name to this host.
+$OssEndpoint = "https://apk.ztransfer.top"
 $OssPublicBaseUrl = "https://apk.ztransfer.top"
 $OssLatestObjectKey = "ZTransfer.apk"
 $ExpectedApkSignerSha256 = "388c6ea56aa0b3fc0cc78ab878285d6223763b822a55514b6eb267058829072b"
@@ -843,12 +845,32 @@ function Invoke-OssUtilAuthenticated($ossutil, $commandArgs) {
     if (-not $credential) { return 97 }
     $previousAccessKeyId = $env:OSS_ACCESS_KEY_ID
     $previousAccessKeySecret = $env:OSS_ACCESS_KEY_SECRET
+    # ossutil inherits shell proxy variables (including lowercase variants on macOS).
+    # Scope direct access to this invocation; restore the admin process even on failure.
+    $proxyNames = @('HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy', 'NO_PROXY', 'no_proxy')
+    $previousProxyEnvironment = @($proxyNames | ForEach-Object {
+        [pscustomobject]@{ Name = $_; Value = [Environment]::GetEnvironmentVariable($_, 'Process') }
+    })
     try {
+        foreach ($name in $proxyNames) {
+            [Environment]::SetEnvironmentVariable($name, $null, 'Process')
+        }
+        [Environment]::SetEnvironmentVariable('NO_PROXY', '*', 'Process')
+        [Environment]::SetEnvironmentVariable('no_proxy', '*', 'Process')
         $env:OSS_ACCESS_KEY_ID = $credential.AccessKeyId
         $env:OSS_ACCESS_KEY_SECRET = $credential.AccessKeySecret
-        & $ossutil @commandArgs | Out-Host
+        # Shared by CLI/GUI setup, upload and same-bucket copy. Explicit env mode prevents
+        # a user-level ossutil proxy setting from overriding the direct-access environment.
+        $directArgs = @($commandArgs) + @(
+            '--addressing-style', 'cname', '--proxy', 'env',
+            '--connect-timeout', '10', '--read-timeout', '30', '--retry-times', '2'
+        )
+        & $ossutil @directArgs | Out-Host
         return $LASTEXITCODE
     } finally {
+        foreach ($entry in $previousProxyEnvironment) {
+            [Environment]::SetEnvironmentVariable($entry.Name, $entry.Value, 'Process')
+        }
         if ($null -eq $previousAccessKeyId) { Remove-Item Env:OSS_ACCESS_KEY_ID -ErrorAction SilentlyContinue }
         else { $env:OSS_ACCESS_KEY_ID = $previousAccessKeyId }
         if ($null -eq $previousAccessKeySecret) { Remove-Item Env:OSS_ACCESS_KEY_SECRET -ErrorAction SilentlyContinue }

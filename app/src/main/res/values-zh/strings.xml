@@ -140,7 +140,7 @@
     <string name="transfer_directory_required_hint">请先设置传输目录</string>
     <string name="settings_help_title">设置说明</string>
     <string name="auto_transfer_new_media">实时传输</string>
-    <string name="auto_transfer_new_media_summary">连接期间新增的照片和视频会自动加入传输列表。</string>
+    <string name="auto_transfer_new_media_summary">按档位自动加入新增文件：全部、JPG、RAW（NEF 照片）或视频（MOV/MP4）。不影响已有任务和手动传输。</string>
     <string name="defer_transfer_start">选完再传</string>
     <string name="defer_transfer_start_summary">加入传输队列后不会立即开始传输，方便继续预览挑选照片。</string>
     <string name="organize_transfers_by_date">按天保存</string>
@@ -620,4 +620,7 @@
     <string name="photo_frame_parameter_poster">参数海报</string>
     <string name="photo_frame_metadata_brand_text">品牌·文字</string>
     <string name="photo_frame_metadata_brand_logo">品牌·图标</string>
+    <string name="remote_grid_thirds_diagonals">3×3＋对角线</string>
+    <string name="remote_grid_fourths_diagonals">4×4＋对角线</string>
+    <string name="auto_transfer_video">视频</string>
 </resources>

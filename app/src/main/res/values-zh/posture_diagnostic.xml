@@ -1,0 +1,15 @@
+<resources>
+    <string name="posture_title">姿态诊断</string>
+    <string name="posture_hint">摆好姿势后点击采集，保持约 2 秒。只记录帧头；离开监看前请复制报告。</string>
+    <string name="posture_level">相机放平</string>
+    <string name="posture_up">镜头向上抬约 20°</string>
+    <string name="posture_down">镜头向下压约 20°</string>
+    <string name="posture_left">机身向左倾约 20°</string>
+    <string name="posture_right">机身向右倾约 20°</string>
+    <string name="posture_done">五个姿势已采集，请复制报告反馈。</string>
+    <string name="posture_error">采集失败，请保持监看连接后重试；更换相机或模式后请重新开始。</string>
+    <string name="posture_collecting">采集中…</string>
+    <string name="posture_capture">采集</string>
+    <string name="posture_copy">复制报告</string>
+    <string name="posture_reset">重新开始</string>
+</resources>

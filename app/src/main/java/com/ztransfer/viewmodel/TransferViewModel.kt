@@ -402,7 +402,7 @@ data class TransferState(
     val staConnectionHelpViewed: Boolean = false,
     val localPhotoEffectsHelpViewed: Boolean = false,
     // 连接期间确认新增的照片和视频自动入队；默认关闭以保持旧版行为。
-    val autoTransferNewMedia: Boolean = false,
+    val autoTransferMode: AutoTransferMode = AutoTransferMode.OFF,
     // 待传模式：空闲时入队只保留 WAITING，由传输页的开始按钮显式放行；默认关闭。
     val deferTransferStart: Boolean = false,
     // 原图按拍摄日写入 ZTyyyy-MM-dd 子目录，派生效果图位于该目录的 ZTFrames 中；默认开启。
@@ -1048,7 +1048,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     KEY_LOCAL_PHOTO_EFFECTS_HELP_VIEWED,
                     false,
                 ),
-                autoTransferNewMedia = prefs.getBoolean("auto_transfer_new_media", false),
+                autoTransferMode = AutoTransferMode.restored(prefs.getString("auto_transfer_mode", null), prefs.getBoolean("auto_transfer_new_media", false)),
                 deferTransferStart = prefs.getBoolean("defer_transfer_start", false),
                 organizeTransfersByDate = prefs.getBoolean("organize_transfers_by_date", false),
                 themeMode = prefs.getString("theme_mode", null)
@@ -1222,9 +1222,10 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         _state.update { it.copy(localPhotoEffectsHelpViewed = true) }
     }
 
-    fun setAutoTransferNewMedia(enabled: Boolean) {
-        prefs.edit().putBoolean("auto_transfer_new_media", enabled).apply()
-        _state.update { it.copy(autoTransferNewMedia = enabled) }
+    fun setAutoTransferMode(mode: AutoTransferMode) {
+        prefs.edit().putString("auto_transfer_mode", mode.name)
+            .putBoolean("auto_transfer_new_media", mode != AutoTransferMode.OFF).apply()
+        _state.update { it.copy(autoTransferMode = mode) }
     }
 
     fun setDeferTransferStart(enabled: Boolean) {
@@ -1833,11 +1834,12 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         cameraProvider: () -> NikonCamera?,
     ): List<NikonCamera.FileInfo> {
         val snapshot = _state.value
-        if (!snapshot.autoTransferNewMedia || snapshot.transferDirUri == null) return emptyList()
+        if (snapshot.autoTransferMode == AutoTransferMode.OFF || snapshot.transferDirUri == null) return emptyList()
         if (cameraProvider() == null) return emptyList()
         val queued = snapshot.tasks.asSequence()
             .mapTo(HashSet()) { it.file.autoTransferIdentity() }
         val candidates = files.asSequence()
+            .filter { snapshot.autoTransferMode.accepts(it.fileName) }
             .distinctBy { it.autoTransferIdentity() }
             .filterNot { it.autoTransferIdentity() in queued }
             .toList()

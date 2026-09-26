@@ -49,16 +49,30 @@ internal data class MonitorAnalysis(
 /** Decoder-owned cache: no Compose state writes for analysis bookkeeping. */
 internal class MonitorAnalysisThrottle {
     private var cached: MonitorAnalysis? = null
-    private var key: List<Int> = emptyList()
+    private var width = 0
+    private var height = 0
+    private var waveformRgb = false
     private var lastAt = 0L
     fun analyze(bitmap: Bitmap, falseColor: Boolean, waveform: Boolean, now: Long, rgb: Boolean = false): MonitorAnalysis? {
-        if (!falseColor && !waveform) { cached = null; key = emptyList(); return null }
-        val nextKey = listOf(bitmap.width, bitmap.height, if (falseColor) 1 else 0, if (waveform) 1 else 0, if (waveform && rgb) 1 else 0)
-        if (cached == null || key != nextKey || now - lastAt >= 125L) {
-            cached = analyzeMonitorFrame(bitmap, falseColor, waveform, rgb)
-            key = nextKey
-            lastAt = now
-        }
+        if (!falseColor && !waveform) { cached = null; return null }
+        val refreshWaveform = waveform && (cached?.waveform == null ||
+            width != bitmap.width || height != bitmap.height || waveformRgb != rgb || now - lastAt >= 125L)
+        // Reuse the entire scope-only result between updates, including after false color ends.
+        if (!falseColor && !refreshWaveform && cached?.falseColor == null) return cached
+        // False color replaces the picture: reusing it for 125ms caps apparent motion at 8fps.
+        // Recompute it for each displayed frame; only the small scope retains its own cadence.
+        val fresh = if (falseColor || refreshWaveform) {
+            analyzeMonitorFrame(bitmap, falseColor, refreshWaveform, rgb)
+        } else null
+        cached = MonitorAnalysis(
+            falseColor = fresh?.falseColor,
+            waveform = if (!waveform) null else if (refreshWaveform) fresh?.waveform else cached?.waveform,
+            waveformMode = if (rgb) WaveformMode.RGB else WaveformMode.LUMA,
+        )
+        if (refreshWaveform) lastAt = now
+        width = bitmap.width
+        height = bitmap.height
+        waveformRgb = rgb
         return cached
     }
 }
@@ -71,13 +85,20 @@ internal fun analyzeMonitorFrame(bitmap: Bitmap, falseColor: Boolean, waveform: 
     if (!falseColor && !waveform) return MonitorAnalysis(null, null)
     val w = minOf(bitmap.width, 256)
     val h = minOf(bitmap.height, 192)
-    val row = IntArray(bitmap.width)
+    // Downsample in native code, then cross JNI once rather than copying a full HD row
+    // for every sampled scanline. Never recycle the source, which is owned by the renderer.
+    val sampled = Bitmap.createScaledBitmap(bitmap, w, h, false)
+    val pixels = IntArray(w * h)
+    try {
+        sampled.getPixels(pixels, 0, w, 0, 0, w, h)
+    } finally {
+        if (sampled !== bitmap) sampled.recycle()
+    }
     val colors = if (falseColor) IntArray(w * h) else null
     val bins = if (waveform) List(if (rgb) 3 else 1) { IntArray(WaveformWidth * WaveformHeight) } else null
     for (y in 0 until h) {
-        bitmap.getPixels(row, 0, bitmap.width, 0, y * bitmap.height / h, bitmap.width, 1)
         for (x in 0 until w) {
-            val pixel = row[x * bitmap.width / w]
+            val pixel = pixels[y * w + x]
             val luma = monitorLuma(pixel)
             colors?.set(y * w + x, falseColorForLuma(luma))
             if (bins != null) {

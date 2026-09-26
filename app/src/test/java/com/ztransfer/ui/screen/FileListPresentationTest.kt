@@ -54,7 +54,7 @@ class FileListPresentationTest {
         assertEquals(
             initial,
             source.copy(
-                autoTransferNewMedia = true,
+                autoTransferMode = com.ztransfer.viewmodel.AutoTransferMode.ALL,
                 deferTransferStart = true,
                 keepScreenOn = false,
             ).toFileListTransferUiState(),

@@ -114,6 +114,7 @@ class NewMediaTransferPolicyTest {
         fun file(name: String) = NikonCamera.FileInfo(1, 1L, name, null)
 
         assertTrue(isAutoTransferMedia(file("DSC_0001.JPG")))
+        assertTrue(isAutoTransferMedia(file("DSC_0001.JPEG")))
         assertTrue(isAutoTransferMedia(file("DSC_0002.NEF")))
         assertTrue(isAutoTransferMedia(file("DSC_0003.MOV")))
         assertTrue(isAutoTransferMedia(file("DSC_0004.AVI")))

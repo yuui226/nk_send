@@ -83,6 +83,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
@@ -330,7 +331,7 @@ private class HistogramThrottle {
     var cached: LuminanceHistogram? = null
 }
 
-/** 斑马掩码与直方图同一套节流：250ms 算一次，节流间隔内复用缓存实例。 */
+/** 斑马掩码最多 20Hz 更新，节流间隔内复用缓存实例。 */
 private class ZebraThrottle {
     var lastCalculatedAtMs: Long = 0L
     var cached: ZebraMask? = null
@@ -659,6 +660,7 @@ private fun RemoteContent(
     var diagnosticReportStarted by remember { mutableStateOf(false) }
     var diagnosticCapture by remember { mutableStateOf(false) }
     var devPanel by remember { mutableStateOf(false) }
+    val postureDiagnostic = remember { PostureDiagnostic() }
     var diagnosticControlEnabled by remember { mutableStateOf(false) }
     var diagnosticControlBusy by remember { mutableStateOf(false) }
     var diagnosticControlJob by remember { mutableStateOf<Job?>(null) }
@@ -683,14 +685,21 @@ private fun RemoteContent(
     var waveformMode by tools.waveform
     val showWaveform = waveformMode != WaveformMode.OFF
     var cameraToolPanel by remember { mutableStateOf<RemoteCameraTool?>(null) }
+    var cameraToolCloseRequested by remember { mutableStateOf(false) }
+    var toolOverlayCoordinates by remember { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
+    var whiteBalanceAnchor by remember { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
+    var focusAreaAnchor by remember { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
     fun setDesqueezeMultiplier(value: Float) { desqueezeMultiplier = value }
     fun toggleAudioLevels() { showAudioLevels = !showAudioLevels }
     // 相机机身的滚转角（0xD067），null=还没读到/机身不支持，此时水平仪一笔都不画
     var levelRoll by remember { mutableStateOf<Float?>(null) }
+    var levelPitch by remember { mutableStateOf<Float?>(null) }
     var probing by remember { mutableStateOf(false) }
     // 沉浸全屏仅用于横屏；沿用同一个取景器实例做边界动画。
     var immersiveFullscreen by remember { mutableStateOf(false) }
     LaunchedEffect(rotation) {
+        cameraToolPanel = null
+        cameraToolCloseRequested = false
         if (rotation == 0) immersiveFullscreen = false
     }
     fun enterFullscreen() {
@@ -740,7 +749,7 @@ private fun RemoteContent(
     // 拍摄流程从这里等 ObjectAdded。
     val eventFlow = remember { MutableSharedFlow<Pair<Int, Long>>(extraBufferCapacity = 32) }
 
-    val currentHistogramEnabled = rememberUpdatedState(showHistogram)
+    val currentHistogramMode = rememberUpdatedState(histogramMode)
     val histogramThrottle = remember { HistogramThrottle() }
     val currentZebraEnabled = rememberUpdatedState(showZebra)
     val currentFalseColorEnabled = rememberUpdatedState(exposureAssist == ExposureAssist.FALSE_COLOR)
@@ -755,12 +764,14 @@ private fun RemoteContent(
     ): RemoteLiveFrame? =
         withContext(Dispatchers.Default) {
             BitmapFactory.decodeByteArray(bytes, offset, bytes.size - offset)?.let { bitmap ->
-                val histogram = if (currentHistogramEnabled.value) {
+                val histogram = if (currentHistogramMode.value != HistogramMode.OFF) {
                     val now = SystemClock.elapsedRealtime()
+                    val includeRgb = currentHistogramMode.value == HistogramMode.RGB
                     if (histogramThrottle.cached == null ||
+                        (includeRgb && histogramThrottle.cached?.rgb == null) ||
                         now - histogramThrottle.lastCalculatedAtMs >= 250L
                     ) {
-                        histogramThrottle.cached = calculateLuminanceHistogram(bitmap, includeRgb = true)
+                        histogramThrottle.cached = calculateLuminanceHistogram(bitmap, includeRgb = includeRgb)
                         histogramThrottle.lastCalculatedAtMs = now
                     }
                     histogramThrottle.cached
@@ -768,11 +779,11 @@ private fun RemoteContent(
                     histogramThrottle.cached = null
                     null
                 }
-                // 斑马掩码与直方图同一节奏：解码线程上按 250ms 节流计算，关闭时零开销。
+                // 斑马掩码独立以最多 20Hz 更新，避免高光区域跟随动作明显滞后。
                 val zebraMask = if (currentZebraEnabled.value) {
                     val now = SystemClock.elapsedRealtime()
                     if (zebraThrottle.cached == null ||
-                        now - zebraThrottle.lastCalculatedAtMs >= 250L
+                        now - zebraThrottle.lastCalculatedAtMs >= 50L
                     ) {
                         zebraThrottle.cached = calculateZebraMask(bitmap)
                         zebraThrottle.lastCalculatedAtMs = now
@@ -1154,6 +1165,7 @@ private fun RemoteContent(
                             firstFrameLogged = true
                             devLog("LiveView first frame received after ${SystemClock.elapsedRealtime() - stabilizationStartedAt}ms")
                         }
+                        postureDiagnostic.offer(cam, grabbed)
                         frameCh.trySend(grabbed)
                         val now = SystemClock.elapsedRealtime()
                         if (!liveViewStable && requiresUsbStabilization) {
@@ -1461,52 +1473,53 @@ private fun RemoteContent(
     // 共用 ioMutex，多一个常驻轮询就是白占取帧通道。250ms 对水平指示足够跟手。
     // 机身不支持时停止轮询、不显示假角度，保留用户偏好供下次连接使用。
     LaunchedEffect(showLevel, connected) {
-        if (!showLevel || !connected) {
-            levelRoll = null
-            return@LaunchedEffect
-        }
-        // 与进页首批参数读取错开，别抢 ioMutex 拖慢参数首显（同事件轮询的处理）。
+        levelRoll = null
+        levelPitch = null
+        if (!showLevel || !connected) return@LaunchedEffect
         while (isActive && !initialLoaded) delay(150)
         val cam = cameraViewModel.getCamera() ?: return@LaunchedEffect
-        val described = runCatching { cam.rcGetAngleLevel() }.getOrNull()
-        if (described == null) {
-            levelRoll = null
-            devLog("!! angle level unavailable (0xD067 poll)")
-            return@LaunchedEffect
-        }
-        // 首次读到就把原始值打进开发者面板：编码（16.16 定点度数）与正负方向都要
-        // 真机核对，日志里同时留 raw 和换算值才能对着机身自己的水平仪校准。
-        var param: RcParam = described
-        var loggedRoll = Float.NaN
+        var param: RcParam? = null
         var failures = 0
-        while (isActive) {
-            val roll = rcAngleLevelRoll(param)?.let {
-                // 量化到 0.1°：机身读数的细微抖动就不会每 250ms 触发一次无意义重组。
-                (it * 10f).roundToInt() / 10f
+        var fallbackUnavailable = false
+        var source = ""
+        while (isActive && cameraViewModel.getCamera() === cam) {
+            val current = frame
+            val attitude = current?.metadata?.attitude?.takeIf {
+                SystemClock.elapsedRealtime() - current.receivedAtElapsedMs in 0L..1500L
             }
-            if (roll != null) {
-                if (levelRoll != roll) levelRoll = roll
-                // 每次变化都打会刷爆 300 行的面板；变化超过 0.5° 才记一条。
-                if (loggedRoll.isNaN() || abs(roll - loggedRoll) >= 0.5f) {
-                    loggedRoll = roll
-                    devLog(
-                        "angle level 0xD067 poll type=0x%04X raw=%d roll=%+.1f°"
-                            .format(param.dataType, param.current, roll)
-                    )
+            if (attitude != null) {
+                levelRoll = (attitude.roll * 10f).roundToInt() / 10f
+                levelPitch = (attitude.pitch * 10f).roundToInt() / 10f
+                if (source != "header") {
+                    devLog("angle source=liveview compact-v1 offsets=404/(408-or-412) roll=${attitude.roll} pitch=${attitude.pitch}; property polling suspended")
+                    source = "header"
+                }
+            } else {
+                levelPitch = null
+                if (source == "header") levelRoll = null
+                if (source != "property") {
+                    devLog("angle source=0xD067 fallback; no valid fresh dual-axis header")
+                    source = "property"
+                }
+                if (!fallbackUnavailable) {
+                    val previous = param
+                    param = try {
+                        if (previous == null) cam.rcGetAngleLevel() else cam.rcRefreshParam(previous)
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) { null }
+                    val roll = param?.let(::rcAngleLevelRoll)
+                    if (roll != null) {
+                        levelRoll = (roll * 10f).roundToInt() / 10f
+                        failures = 0
+                    } else if (++failures >= 3) {
+                        levelRoll = null
+                        fallbackUnavailable = true
+                        devLog("!! angle property unavailable; still watching liveview attitude")
+                    }
                 }
             }
             delay(250)
-            // 偶发读失败（忙/抖动）留着上一次的角度继续试；连续失败则收回读数，
-            // 不让画面停在一条早已过时的水平线上。
-            val refreshed = runCatching { cam.rcRefreshParam(param) }.getOrNull()
-            if (refreshed != null) {
-                param = refreshed
-                failures = 0
-            } else if (++failures >= 3) {
-                levelRoll = null
-                devLog("!! angle level 0xD067 poll read failed 3x, stopping")
-                break
-            }
         }
     }
 
@@ -2026,7 +2039,10 @@ private fun RemoteContent(
     val recFailHint = stringResource(R.string.remote_rec_start_failed)
     val recStopFailHint = stringResource(R.string.remote_rec_stop_failed)
     val manualFocusHint = stringResource(R.string.remote_tap_focus_manual)
-    val trackingAreaModeHint = stringResource(R.string.remote_tracking_area_mode_required)
+    val trackingAreaModeHint = stringResource(R.string.remote_tap_focus_area_retry)
+    val tapFocusFailedHint = stringResource(R.string.remote_tap_focus_retry)
+    val rotationStoppedHint = stringResource(R.string.remote_rotation_stopped)
+    val rotationResumedHint = stringResource(R.string.remote_rotation_resumed)
 
     fun focusAt(tap: ViewfinderTap) {
         if (!connected || capturing || tapFocusBusy || afHeld || probing || afJob?.isActive == true) return
@@ -2130,9 +2146,6 @@ private fun RemoteContent(
                     result.trackingResponseCode != null &&
                     result.trackingResponseCode != PtpConstants.OPERATION_NOT_SUPPORTED
                 ) {
-                    if (result.trackingResponseCode == Lab.NK_INVALID_STATUS) {
-                        showHint(trackingAreaModeHint)
-                    }
                     devLog(
                         "!! StartTracking resp=0x%04X".format(
                             result.trackingResponseCode and 0xFFFF
@@ -2182,6 +2195,12 @@ private fun RemoteContent(
                         }
                     }
                 }
+                if (tapFocusFeedback == TapFocusFeedback.FAILED) {
+                    // Area rejection differs from an accepted AF operation that could not lock.
+                    showHint(if (!result.trackingStarted && result.moveResponseCode != Lab.OK) {
+                        trackingAreaModeHint
+                    } else tapFocusFailedHint)
+                }
                 val completedNonce = tapFocusNonce
                 val focusLocked = tapFocusFeedback == TapFocusFeedback.LOCKED
                 val trackingStarted = result.trackingStarted
@@ -2205,6 +2224,7 @@ private fun RemoteContent(
                 confirmedFocusMarker = null
                 subjectTrackingActive = false
                 devLog("!! tap AF exception: ${e.message}")
+                showHint(tapFocusFailedHint)
                 val completedNonce = tapFocusNonce
                 tapFocusHideJob = services.scope.launch {
                     delay(1_300)
@@ -2756,11 +2776,15 @@ private fun RemoteContent(
                                 }
                                 RemoteTool.LEVEL -> showLevel = !showLevel
                                 RemoteTool.WAVEFORM -> waveformMode = waveformMode.next()
-                                RemoteTool.LOCK -> onLockRotation(!tools.locked.value)
+                                RemoteTool.LOCK -> {
+                                    val locked = !tools.locked.value
+                                    onLockRotation(locked)
+                                    showHint(if (locked) rotationStoppedHint else rotationResumedHint)
+                                }
                                 RemoteTool.FULLSCREEN -> enterFullscreen()
                                 RemoteTool.ROTATE -> if (!disabled) onCycleRotation()
-                                RemoteTool.WHITE_BALANCE -> { listProp = null; devPanel = false; cameraToolPanel = RemoteCameraTool.WHITE_BALANCE }
-                                RemoteTool.FOCUS_AREA -> { listProp = null; devPanel = false; cameraToolPanel = RemoteCameraTool.FOCUS_AREA }
+                                RemoteTool.WHITE_BALANCE -> { listProp = null; devPanel = false; if (cameraToolPanel == RemoteCameraTool.WHITE_BALANCE) cameraToolCloseRequested = true else { cameraToolCloseRequested = false; cameraToolPanel = RemoteCameraTool.WHITE_BALANCE } }
+                                RemoteTool.FOCUS_AREA -> { listProp = null; devPanel = false; if (cameraToolPanel == RemoteCameraTool.FOCUS_AREA) cameraToolCloseRequested = true else { cameraToolCloseRequested = false; cameraToolPanel = RemoteCameraTool.FOCUS_AREA } }
                                 else -> {
                                     listProp = null
                                     devPanel = false
@@ -2768,7 +2792,11 @@ private fun RemoteContent(
                                     onEditingTools(!editingTools)
                                 }
                             }
-                        }, enabled = !disabled) {
+                        }, modifier = if (tool == RemoteTool.WHITE_BALANCE) Modifier.onGloballyPositioned {
+                            whiteBalanceAnchor = it
+                        } else if (tool == RemoteTool.FOCUS_AREA) Modifier.onGloballyPositioned {
+                            focusAreaAnchor = it
+                        } else Modifier, enabled = !disabled) {
                             if (tool == null) Icon(if (editingTools) Icons.Default.Check else Icons.Default.Settings, null, Modifier.size(19.dp))
                             else RemoteToolMark(tool, tools)
                         }
@@ -2777,7 +2805,8 @@ private fun RemoteContent(
     }
 
     // ---------- 布局 ----------
-    Box(modifier = Modifier.fillMaxSize().background(rememberAppBackgroundBrush())) {
+    Box(modifier = Modifier.fillMaxSize().background(rememberAppBackgroundBrush())
+        .onGloballyPositioned { toolOverlayCoordinates = it }) {
         AnimatedContent(
             targetState = rotation,
             transitionSpec = {
@@ -2871,6 +2900,7 @@ private fun RemoteContent(
                     showWaveform = showWaveform,
                 showLevel = showLevel,
                 levelRoll = levelRoll,
+                levelPitch = levelPitch,
                 desqueezeMultiplier = desqueezeMultiplier,
                 modifier = Modifier.fillMaxWidth().aspectRatio(viewfinderAspect * desqueezeMultiplier)
             )
@@ -3070,6 +3100,7 @@ private fun RemoteContent(
                     showWaveform = showWaveform,
                     showLevel = showLevel,
                     levelRoll = levelRoll,
+                levelPitch = levelPitch,
                     showEmbeddedAudioMeter = !audioMeterOutside,
                     desqueezeMultiplier = desqueezeMultiplier,
                     modifier = Modifier
@@ -3523,6 +3554,14 @@ private fun RemoteContent(
                                 modifier = Modifier.padding(bottom = 8.dp)
                             )
                         }
+                        PostureDiagnosticPanel(
+                            collector = postureDiagnostic,
+                            camera = cameraViewModel.getCamera(),
+                            enabled = connected && initialLoaded && !probing && !diagnosticControlBusy,
+                            info = "model=${cameraViewModel.getCamera()?.deviceModel} firmware=${cameraViewModel.getCamera()?.cachedDeviceInfo?.deviceVersion} " +
+                                "transport=${cameraViewModel.getCamera()?.connectionType} sta=${camState.isStaConnection} " +
+                                "movie=$movieMode control=$diagnosticControlEnabled app=${BuildConfig.VERSION_NAME}(${BuildConfig.VERSION_CODE})",
+                        )
                         GlassButton(onClick = ::runProbe, enabled = connected && !probing) {
                             Text(
                                 stringResource(R.string.lab_run_probe),
@@ -3573,7 +3612,14 @@ private fun RemoteContent(
             }
     cameraToolPanel?.let { selectedTool ->
         val panelCamera = cameraViewModel.getCamera()
-        RemoteCameraToolPanel(panelCamera, movieMode, selectedTool,
+        val buttonCoordinates = if (selectedTool == RemoteCameraTool.WHITE_BALANCE) whiteBalanceAnchor else focusAreaAnchor
+        val localAnchor = toolOverlayCoordinates?.takeIf { it.isAttached }?.let { root ->
+            buttonCoordinates?.takeIf { it.isAttached }?.let { root.localBoundingBoxOf(it, clipBounds = false) }
+        }
+        key(selectedTool) { RemoteCameraToolPanel(panelCamera, movieMode, selectedTool,
+            closeRequested = cameraToolCloseRequested,
+            landscape = rotation != 0,
+            anchor = localAnchor,
             canWrite = connected && initialLoaded && !probing && !diagnosticControlBusy && !capturing && !recBusy && !afHeld && !tapFocusBusy && afJob?.isActive != true,
             isCurrentCamera = { panelCamera != null && cameraViewModel.getCamera() === panelCamera },
             beforeWrite = {
@@ -3594,7 +3640,7 @@ private fun RemoteContent(
                     afLocked = false
                     refreshFocusMode()
                 }
-            }, log = { devLog(it) }, onDismiss = { cameraToolPanel = null })
+            }, log = { devLog(it) }, onDismiss = { cameraToolPanel = null; cameraToolCloseRequested = false }) }
     }
     BackHandler(enabled = editingTools) { onEditingTools(false) }
         }
@@ -3795,6 +3841,7 @@ private fun RemoteViewfinderPanel(
     showLevel: Boolean = false,
     /** 相机机身滚转角；null=没有可用角度，水平仪什么都不画。 */
     levelRoll: Float? = null,
+    levelPitch: Float? = null,
     showEmbeddedAudioMeter: Boolean = true,
     desqueezeMultiplier: Float = 1f,
     modifier: Modifier = Modifier
@@ -3842,7 +3889,7 @@ private fun RemoteViewfinderPanel(
         }
 
         if (showLevel) {
-            ViewfinderLevelOverlay(rollDegrees = levelRoll, modifier = Modifier.matchParentSize())
+            ViewfinderLevelOverlay(rollDegrees = levelRoll, pitchDegrees = levelPitch, modifier = Modifier.matchParentSize())
         }
 
         if (modeText != null || focusModeText != null) {
@@ -3999,14 +4046,14 @@ private fun StereoSoundMeter(
     ) {
         SoundMeterChannel(
             label = "L",
-            level = leftLevel,
-            peak = leftPeak,
+            level = { leftLevel },
+            peak = { leftPeak },
             modifier = Modifier.fillMaxHeight()
         )
         SoundMeterChannel(
             label = "R",
-            level = rightLevel,
-            peak = rightPeak,
+            level = { rightLevel },
+            peak = { rightPeak },
             modifier = Modifier.fillMaxHeight()
         )
     }
@@ -4015,8 +4062,8 @@ private fun StereoSoundMeter(
 @Composable
 private fun SoundMeterChannel(
     label: String,
-    level: Float,
-    peak: Float,
+    level: () -> Float,
+    peak: () -> Float,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -4024,17 +4071,20 @@ private fun SoundMeterChannel(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Canvas(Modifier.width(9.dp).weight(1f)) {
+            // Read animation state only while drawing, avoiding per-tick layout recomposition.
+            val currentLevel = level()
+            val currentPeak = peak()
             val segmentCount = 15
             val gap = 1.dp.toPx()
             val segmentHeight =
                 ((size.height - gap * (segmentCount - 1)) / segmentCount).coerceAtLeast(0f)
             val activeCount = (
-                level.coerceIn(0f, LiveViewSoundLevels.MAX_SEGMENT.toFloat()) /
+                currentLevel.coerceIn(0f, LiveViewSoundLevels.MAX_SEGMENT.toFloat()) /
                     LiveViewSoundLevels.MAX_SEGMENT * segmentCount
                 ).roundToInt().coerceIn(0, segmentCount)
-            val peakIndex = if (peak > 0f) {
+            val peakIndex = if (currentPeak > 0f) {
                 (
-                    peak.coerceIn(0f, LiveViewSoundLevels.MAX_SEGMENT.toFloat()) /
+                    currentPeak.coerceIn(0f, LiveViewSoundLevels.MAX_SEGMENT.toFloat()) /
                         LiveViewSoundLevels.MAX_SEGMENT * (segmentCount - 1)
                     ).roundToInt().coerceIn(0, segmentCount - 1)
             } else {

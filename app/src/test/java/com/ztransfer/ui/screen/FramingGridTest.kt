@@ -10,12 +10,13 @@ class FramingGridTest {
     fun cyclesThroughRequestedStylesAndBackToOff() {
         val visited = mutableListOf<ViewfinderGrid>()
         var grid = ViewfinderGrid.OFF
-        repeat(6) {
+        repeat(8) {
             visited.add(grid)
             grid = grid.next()
         }
         assertEquals(
-            listOf(ViewfinderGrid.OFF, ViewfinderGrid.THIRDS, ViewfinderGrid.FOURTHS,
+            listOf(ViewfinderGrid.OFF, ViewfinderGrid.THIRDS, ViewfinderGrid.THIRDS_DIAGONALS, ViewfinderGrid.FOURTHS,
+                ViewfinderGrid.FOURTHS_DIAGONALS,
                 ViewfinderGrid.CENTER, ViewfinderGrid.GOLDEN, ViewfinderGrid.OFF),
             visited
         )
@@ -67,7 +68,19 @@ class FramingGridTest {
             val top = (height - imageHeight) / 2f
             for (grid in ViewfinderGrid.entries) {
                 val lines = framingGridLines(grid, width, height, aspect)
-                assertEquals(grid.fractions.size * 2, lines.size)
+                assertEquals(grid.fractions.size * 2 + if (grid.diagonals) 2 else 0, lines.size)
+                if (grid.diagonals) {
+                    val expected = listOf(
+                        FramingGridLine(Offset(left, top), Offset(left + imageWidth, top + imageHeight)),
+                        FramingGridLine(Offset(left + imageWidth, top), Offset(left, top + imageHeight)),
+                    )
+                    expected.zip(lines.takeLast(2)).forEach { (want, actual) ->
+                        assertEquals(want.start.x, actual.start.x, 0.001f)
+                        assertEquals(want.start.y, actual.start.y, 0.001f)
+                        assertEquals(want.end.x, actual.end.x, 0.001f)
+                        assertEquals(want.end.y, actual.end.y, 0.001f)
+                    }
+                }
                 grid.fractions.forEachIndexed { index, fraction ->
                     val vertical = lines[index * 2]
                     val horizontal = lines[index * 2 + 1]

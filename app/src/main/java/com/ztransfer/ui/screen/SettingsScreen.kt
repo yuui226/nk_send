@@ -1,5 +1,7 @@
 package com.ztransfer.ui.screen
 
+import com.ztransfer.viewmodel.AutoTransferMode
+
 import android.Manifest
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
@@ -46,6 +48,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -985,10 +988,9 @@ fun SettingsOverlay(
                         enabled = state.transferDirUri != null,
                         modifier = Modifier.weight(1f),
                     )
-                    BooleanSettingsWheel(
-                        label = stringResource(R.string.auto_transfer_new_media),
-                        checked = state.autoTransferNewMedia,
-                        onCheckedChange = viewModel::setAutoTransferNewMedia,
+                    AutoTransferSettingsWheel(
+                        mode = state.autoTransferMode,
+                        onModeChanged = viewModel::setAutoTransferMode,
                         hapticsEnabled = state.hapticsEnabled,
                         enabled = state.transferDirUri != null,
                         modifier = Modifier.weight(1f),
@@ -1088,7 +1090,7 @@ fun SettingsOverlay(
                     stringResource(R.string.photo_frame_parameter_poster),
             )
             val selectedFrameChoice = frameChoices.first { it.first == state.photoFramePreset }
-            val visibleWatermark = if (state.photoEffectsEnabled && state.photoFrameEnabled) {
+            val visibleWatermark = if (state.photoFrameEnabled) {
                 effectivePhotoFrameWatermark(
                     isPro,
                     state.photoFrameWatermark,
@@ -1107,7 +1109,7 @@ fun SettingsOverlay(
                 stringResource(R.string.photo_frame_no_watermark)
             }
             val filterSummaryLines = selectedPhotoFilter
-                ?.takeIf { state.photoEffectsEnabled && state.photoFilterEnabled }
+                ?.takeIf { state.photoFilterEnabled }
                 ?.let {
                     listOf(
                         photoFilterDisplayName(it),
@@ -1118,7 +1120,7 @@ fun SettingsOverlay(
                     )
                 }
                 ?: listOf(stringResource(R.string.photo_filter_off_option))
-            val frameSummary = if (state.photoEffectsEnabled && state.photoFrameEnabled && state.photoFrameBorderEnabled) {
+            val frameSummary = if (state.photoFrameEnabled && state.photoFrameBorderEnabled) {
                 selectedFrameChoice.second
             } else {
                 stringResource(R.string.photo_frame_off)
@@ -1133,8 +1135,7 @@ fun SettingsOverlay(
                 filterDraftIntensity = state.photoFilterIntensityPercent
                 filterDraftEnabled = state.photoFilterEnabled
                 frameDraftDecorationEnabled = state.photoFrameEnabled
-                // 总开关关闭时 ViewModel 会保留上次的子配置。编辑草稿必须从当前实际
-                // 输出状态开始，避免用户只打开水印时把隐藏的旧边框一起恢复。
+                // 编辑草稿使用各子项的配置，不受照片效果总开关影响。
                 frameDraftBorderEnabled = state.photoFrameEnabled && state.photoFrameBorderEnabled
                 frameDraftPreset = state.photoFramePreset
                 watermarkDraft = state.photoFrameWatermark.copy(
@@ -1158,12 +1159,11 @@ fun SettingsOverlay(
                         color = colors.accentOrange,
                         modifier = Modifier.weight(1f),
                     )
-                    val effectsLabel = stringResource(R.string.photo_effects)
-                    Switch(
+                    PhotoEffectsMasterSwitch(
                         checked = state.photoEffectsEnabled,
-                        onCheckedChange = viewModel::setPhotoEffectsEnabled,
-                        modifier = Modifier.semantics {
-                            contentDescription = effectsLabel
+                        onCheckedChange = { enabled ->
+                            haptics.tick()
+                            viewModel.setPhotoEffectsEnabled(enabled)
                         },
                     )
                     Spacer(Modifier.width(8.dp))
@@ -3477,6 +3477,28 @@ private fun BooleanSettingsWheel(
     )
 }
 
+@Composable
+private fun AutoTransferSettingsWheel(
+    mode: AutoTransferMode,
+    onModeChanged: (AutoTransferMode) -> Unit,
+    hapticsEnabled: Boolean,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val colors = AppTheme.colors
+    val haptics = rememberHaptics(hapticsEnabled)
+    val labels = mapOf(AutoTransferMode.OFF to stringResource(R.string.setting_off),
+        AutoTransferMode.ALL to stringResource(R.string.filter_all),
+        AutoTransferMode.JPG to "JPG", AutoTransferMode.RAW to "RAW",
+        AutoTransferMode.VIDEO to stringResource(R.string.auto_transfer_video))
+    ReleaseCommitWheel(options = AutoTransferMode.entries.toList(), selected = mode,
+        optionLabel = { labels.getValue(it) }, onValueCommitted = onModeChanged,
+        onDetent = haptics::tick, label = stringResource(R.string.auto_transfer_new_media),
+        accentColor = if (mode == AutoTransferMode.OFF) colors.statusWaiting else colors.accentBlue,
+        emphasized = mode != AutoTransferMode.OFF, wheelHeight = BOOLEAN_SETTINGS_WHEEL_HEIGHT,
+        optionRowHeight = 18.dp, optionFontSize = 14.sp, modifier = modifier, enabled = enabled)
+}
+
 private val BOOLEAN_SETTINGS_OPTIONS = listOf(false, true)
 private val BOOLEAN_SETTINGS_WHEEL_HEIGHT = 50.dp
 private val COMPACT_SETTINGS_WHEEL_HEIGHT = 42.dp
@@ -5226,6 +5248,61 @@ internal fun ProBadgeButton(
                     maxLines = if (big) 2 else 1,
                 )
             }
+        }
+    }
+}
+
+/** Compact title-row switch; its hit area is wider than the drawn track. */
+@Composable
+private fun PhotoEffectsMasterSwitch(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    val colors = AppTheme.colors
+    val label = stringResource(R.string.photo_effects)
+    val position by animateFloatAsState(
+        targetValue = if (checked) 1f else 0f,
+        animationSpec = tween(180),
+        label = "photoEffectsSwitchPosition",
+    )
+    val trackColor by animateColorAsState(
+        targetValue = if (checked) colors.accentOrange else colors.onBackground.copy(alpha = 0.16f),
+        animationSpec = tween(180),
+        label = "photoEffectsSwitchTrack",
+    )
+    val thumbColor by animateColorAsState(
+        targetValue = if (checked) Color.White else colors.onSurfaceVariant,
+        animationSpec = tween(180),
+        label = "photoEffectsSwitchThumb",
+    )
+    Box(
+        modifier = Modifier
+            .size(width = 48.dp, height = 32.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .toggleable(
+                value = checked,
+                role = Role.Switch,
+                onValueChange = onCheckedChange,
+            )
+            .semantics { contentDescription = label },
+        contentAlignment = Alignment.Center,
+    ) {
+        androidx.compose.foundation.Canvas(Modifier.size(width = 36.dp, height = 20.dp)) {
+            drawRoundRect(
+                color = trackColor,
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.height / 2f),
+            )
+            val progress = if (layoutDirection == androidx.compose.ui.unit.LayoutDirection.Rtl) {
+                1f - position
+            } else position
+            drawCircle(
+                color = thumbColor,
+                radius = 7.dp.toPx(),
+                center = androidx.compose.ui.geometry.Offset(
+                    x = size.height / 2f + (size.width - size.height) * progress,
+                    y = size.height / 2f,
+                ),
+            )
         }
     }
 }

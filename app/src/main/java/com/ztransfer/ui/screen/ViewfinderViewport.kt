@@ -7,6 +7,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.GenericShape
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
@@ -45,8 +47,8 @@ internal class ViewfinderViewport {
 
     private fun bounded(value: Offset, zoom: Float, aspect: Float): Offset {
         val image = fitCenterRect(size.width, size.height, aspect)
-        val maxX = ((image.width * zoom - size.width) / 2f).coerceAtLeast(0f)
-        val maxY = ((image.height * zoom - size.height) / 2f).coerceAtLeast(0f)
+        val maxX = ((image.width * (zoom - 1f)) / 2f).coerceAtLeast(0f)
+        val maxY = ((image.height * (zoom - 1f)) / 2f).coerceAtLeast(0f)
         return Offset(value.x.coerceIn(-maxX, maxX), value.y.coerceIn(-maxY, maxY))
     }
 
@@ -57,7 +59,7 @@ internal class ViewfinderViewport {
         val center = Offset(size.width / 2f, size.height / 2f)
         fun x(value: Float) = (((value - center.x - offset.x) / scale + center.x - image.left) / image.width).coerceIn(0f, 1f)
         fun y(value: Float) = (((value - center.y - offset.y) / scale + center.y - image.top) / image.height).coerceIn(0f, 1f)
-        return Rect(x(0f), y(0f), x(size.width), y(size.height))
+        return Rect(x(image.left), y(image.top), x(image.right), y(image.bottom))
     }
 }
 
@@ -69,6 +71,9 @@ internal fun ZoomableViewfinder(
     content: @Composable BoxScope.() -> Unit,
 ) {
     LaunchedEffect(imageAspect) { viewport.reset() }
+    val imageWindow = remember(imageAspect) {
+        GenericShape { size, _ -> addRect(fitCenterRect(size.width, size.height, imageAspect)) }
+    }
     Box(modifier.clipToBounds()
         .onSizeChanged { viewport.resize(Size(it.width.toFloat(), it.height.toFloat()), imageAspect) }
         .pointerInput(viewport, imageAspect) {
@@ -78,12 +83,14 @@ internal fun ZoomableViewfinder(
         }) {
         // Pointer coordinates inside this layer are inverse-transformed by Compose as well,
         // so the existing AF mapping and its reticles share exactly the same coordinate space.
+        Box(Modifier.matchParentSize().clip(imageWindow)) {
         Box(Modifier.matchParentSize().graphicsLayer {
             scaleX = viewport.scale
             scaleY = viewport.scale
             translationX = viewport.offset.x
             translationY = viewport.offset.y
         }, content = content)
+        }
         if (viewport.scale > 1.01f) {
             val crop = viewport.visibleRegion(imageAspect)
             Canvas(Modifier.align(Alignment.TopEnd).padding(top = 42.dp, end = 8.dp)

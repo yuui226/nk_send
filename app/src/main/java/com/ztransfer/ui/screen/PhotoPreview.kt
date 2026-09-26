@@ -358,6 +358,7 @@ internal fun PhotoPreviewOverlay(
     // ---- 高清预览：统一使用相机 FHD，不加载本地完整原图 ----
     // 状态图按 handle 存储；handle 仅在本 overlay 存活期有效（关闭随 Composable 释放）。
     val highResolutionBitmaps = remember { mutableStateMapOf<Int, ImageBitmap>() }
+    val fhdHistograms = remember { mutableStateMapOf<Int, LuminanceHistogram>() }
     val highResolutionLoading = remember { mutableStateMapOf<Int, Boolean>() }
     // 只有当前照片的 FHD 确认不可用、且当前 EXIF 已经读取完毕后，才允许向相机请求
     // 一张缩略图兜底。这样占位图不会跑到 FHD / EXIF 前面争抢相机通道。
@@ -386,17 +387,19 @@ internal fun PhotoPreviewOverlay(
     val currentOnQueueFlightCaught by rememberUpdatedState(onQueueFlightCaught)
     val histogramVisible = histogramMode != HistogramMode.OFF
     val histogramSource = currentHandle?.let(displayedBitmaps::get)
+    val fhdHistogram = currentHandle?.let(fhdHistograms::get)
     val previewHistogram by produceState<LuminanceHistogram?>(
         initialValue = null,
         histogramVisible,
         currentHandle,
         histogramSource,
+        fhdHistogram,
     ) {
         value = null
         if (histogramVisible && histogramSource != null &&
             currentFile.extension !in VIDEO_EXTENSIONS
         ) {
-            value = withContext(Dispatchers.Default) {
+            value = fhdHistogram ?: withContext(Dispatchers.Default) {
                 calculateLuminanceHistogram(histogramSource.asAndroidBitmap(), includeRgb = true)
             }
         }
@@ -717,10 +720,14 @@ internal fun PhotoPreviewOverlay(
         fhdUnavailable.remove(h)
         highResolutionLoading[h] = true
         try {
-            val res = cameraViewModel.loadFhdPreview(file) ?: run {
+            var histogram: LuminanceHistogram? = null
+            val res = cameraViewModel.loadFhdPreview(file) { bytes ->
+                histogram = previewHistogramFromJpeg(bytes)
+            } ?: run {
                 fhdUnavailable[h] = true
                 return false
             }
+            histogram?.let { fhdHistograms[h] = it }
             highResolutionBitmaps[h] = res
             fhdUnavailable.remove(h)
             return true
@@ -756,6 +763,7 @@ internal fun PhotoPreviewOverlay(
         highResolutionBitmaps.keys
             .filter { it !in keepH }
             .forEach { highResolutionBitmaps.remove(it) }
+        fhdHistograms.keys.filter { it !in keepH }.forEach { fhdHistograms.remove(it) }
         displayedBitmaps.keys.filter { it !in keepH }.forEach { displayedBitmaps.remove(it) }
         fhdUnavailable.keys.filter { it !in keepH }.forEach { fhdUnavailable.remove(it) }
         exifData.keys.filter { it !in keepH }.forEach { exifData.remove(it) }

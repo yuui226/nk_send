@@ -173,7 +173,7 @@ private val EFFECT_PREVIEW_VIDEO_EXTENSIONS = setOf(".mov", ".mp4")
 internal val NIKON_RAW_EXTENSIONS = setOf(".nef", ".nrw")
 internal val TIFF_EXTENSIONS = setOf(".tif", ".tiff")
 private val LARGE_EXIF_HEADER_EXTENSIONS = NIKON_RAW_EXTENSIONS + TIFF_EXTENSIONS
-private val AUTO_TRANSFER_MEDIA_EXTENSIONS = PtpConstants.FORMAT_EXT.values.toSet()
+private val AUTO_TRANSFER_MEDIA_EXTENSIONS = PtpConstants.FORMAT_EXT.values.toSet() + ".jpeg"
 
 /** 未知 PTP 对象(.bin 等)仍显示在列表，但不会被“照片/视频自动传输”误收。 */
 internal fun isAutoTransferMedia(file: NikonCamera.FileInfo): Boolean =
@@ -4067,12 +4067,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * 的像素方向，继续由既有手动旋转功能负责。
      * 调用方应先通过 [setFhdActive] 暂停后台缩略图填充，再调用本方法。
      */
-    suspend fun loadFhdPreview(file: NikonCamera.FileInfo): ImageBitmap? {
+    suspend fun loadFhdPreview(
+        file: NikonCamera.FileInfo,
+        onPreviewJpeg: ((ByteArray) -> Unit)? = null,
+    ): ImageBitmap? {
         return loadFhdBitmap(
             file,
             Bitmap.Config.RGB_565,
             honorExifOrientation = false,
             retryDeviceBusy = true,
+            onPreviewJpeg = onPreviewJpeg,
         )?.asImageBitmap()
     }
 
@@ -4088,6 +4092,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         honorExifOrientation: Boolean,
         retryDeviceBusy: Boolean,
         maxLongEdge: Int = MAX_FHD_PREVIEW_EDGE,
+        onPreviewJpeg: ((ByteArray) -> Unit)? = null,
     ): Bitmap? {
         val cam = camera ?: return null
         val startedAt = android.os.SystemClock.elapsedRealtime()
@@ -4111,6 +4116,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
         return withContext(Dispatchers.Default) {
             try {
+                // Analyse the same response before display decoding; never retain JPEG bytes.
+                onPreviewJpeg?.invoke(bytes)
                 // FHD 预览图是相机直出的 1920×1080 JPEG，非缩略图，不做黑边裁切。
                 // 交互式长按使用 RGB_565 控制内存；设置演示图使用 ARGB_8888，确保连续
                 // 调色计算不会先被 565 量化。两者共用同一条可靠的取图/解码路径。

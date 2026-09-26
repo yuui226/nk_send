@@ -45,12 +45,14 @@ class MonitorInteractionInstrumentation : Instrumentation() {
                     ZTransferTheme {
                         Column(Modifier.fillMaxSize().background(Color(0xFF19252B)).padding(top = 50.dp)) {
                             ZoomableViewfinder(viewport, 1.5f,
-                                Modifier.fillMaxWidth().aspectRatio(1.5f).onGloballyPositioned {
+                                Modifier.fillMaxWidth().aspectRatio(1f).onGloballyPositioned {
                                     origin = it.boundsInWindow().topLeft
                                 }) {
-                                Box(Modifier.fillMaxSize().background(Color(0xFF73939C)).pointerInput(Unit) {
-                                    detectTapGestures(onDoubleTap = { viewport.reset() }, onTap = { tap = it })
-                                })
+                                Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                                    Box(Modifier.fillMaxWidth().aspectRatio(1.5f).background(Color(0xFF73939C)).pointerInput(Unit) {
+                                        detectTapGestures(onDoubleTap = { viewport.reset() }, onTap = { tap = it })
+                                    })
+                                }
                             }
                             Box(Modifier.fillMaxWidth().height(180.dp)) {
                                 ViewfinderLevelOverlay(roll.floatValue, Modifier.fillMaxSize())
@@ -66,6 +68,14 @@ class MonitorInteractionInstrumentation : Instrumentation() {
             pinch(center, viewport.size.width * 0.10f, viewport.size.width * 0.24f)
             SystemClock.sleep(400)
             check(viewport.scale > 1.7f) { "Pinch did not reach production viewport: ${viewport.scale}" }
+            val zoomed = uiAutomation.takeScreenshot()
+            try {
+                val letterbox = zoomed.getPixel(center.x.toInt(), (origin.y + viewport.size.height * 0.08f).toInt())
+                check(letterbox == android.graphics.Color.rgb(25, 37, 43)) {
+                    "Zoom filled the fixed letterbox: ${Integer.toHexString(letterbox)}"
+                }
+                check(zoomed.getPixel(center.x.toInt(), center.y.toInt()) == android.graphics.Color.rgb(115, 147, 156))
+            } finally { zoomed.recycle() }
             val at = center + Offset(viewport.size.width * 0.15f, 0f)
             tap(at); SystemClock.sleep(400)
             val expected = viewport.size.width / 2f + (at.x - center.x - viewport.offset.x) / viewport.scale

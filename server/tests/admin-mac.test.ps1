@@ -5,6 +5,7 @@ $env:ZT_ADMIN_TOKEN = 'mac-test-token'
 . (Join-Path $PSScriptRoot '../admin.ps1') -LibraryMode
 function Assert($condition, $message) { if (-not $condition) { throw $message } }
 Assert $AdminIsMac 'This test must run on macOS'
+Assert ($OssEndpoint -eq 'https://apk.ztransfer.top') 'OSS must use the bound custom domain'
 Assert ($CurlExecutable -eq '/usr/bin/curl') 'Mac curl selection'
 $testDir = Join-Path ([IO.Path]::GetTempPath()) ('zt-admin-mac-' + [guid]::NewGuid())
 New-Item -ItemType Directory $testDir | Out-Null
@@ -49,8 +50,16 @@ try {
         $global:LASTEXITCODE = 0
     }
     function Mock-OssUtil {
+        Assert ($args[[array]::IndexOf($args, '--addressing-style') + 1] -eq 'cname') 'CNAME addressing missing'
+        Assert ($args[[array]::IndexOf($args, '--proxy') + 1] -eq 'env') 'Explicit direct proxy policy missing'
+        Assert ($args[[array]::IndexOf($args, '--retry-times') + 1] -eq '2') 'Bounded retry policy missing'
         Assert ($env:OSS_ACCESS_KEY_ID -eq 'fake-id') 'OSS access ID not passed'
         Assert ($env:OSS_ACCESS_KEY_SECRET -eq 'fake-secret') 'OSS secret not passed'
+        foreach ($name in @('HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy')) {
+            Assert ([string]::IsNullOrEmpty([Environment]::GetEnvironmentVariable($name, 'Process'))) "Proxy inherited: $name"
+        }
+        Assert ($env:NO_PROXY -eq '*') 'NO_PROXY must bypass all hosts'
+        Assert ($env:no_proxy -eq '*') 'Lowercase no_proxy must bypass all hosts'
         $global:LASTEXITCODE = $script:OssExit
     }
     function Get-OssUtilPath { return 'Mock-OssUtil' }
@@ -65,7 +74,13 @@ try {
     $env:OSS_ACCESS_KEY_ID = 'previous-id'
     $env:OSS_ACCESS_KEY_SECRET = 'previous-secret'
     $script:OssExit = 42
+    $env:HTTPS_PROXY = 'http://127.0.0.1:9999'
+    $env:https_proxy = 'http://127.0.0.1:8888'
+    $env:NO_PROXY = 'localhost'
     Assert ((Invoke-OssUtilAuthenticated 'Mock-OssUtil' @('ls')) -eq 42) 'OSS exit code lost'
+    Assert ($env:HTTPS_PROXY -eq 'http://127.0.0.1:9999') 'Uppercase proxy was not restored'
+    Assert ($env:https_proxy -eq 'http://127.0.0.1:8888') 'Lowercase proxy was not restored'
+    Assert ($env:NO_PROXY -eq 'localhost') 'NO_PROXY was not restored'
     Assert ($env:OSS_ACCESS_KEY_ID -eq 'previous-id') 'OSS ID was not restored'
     Assert ($env:OSS_ACCESS_KEY_SECRET -eq 'previous-secret') 'OSS secret was not restored'
     Write-Host 'PASS: Mac keychain flow and OSS environment restoration'
