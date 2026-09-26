@@ -1,4 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <string name="usb_diagnostic_report_failed">USB 诊断 TXT 保存失败，请更换传输目录后重试。</string>
-</resources>
