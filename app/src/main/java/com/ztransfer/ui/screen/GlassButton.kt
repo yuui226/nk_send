@@ -7,7 +7,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -25,6 +25,12 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.currentCompositeKeyHash
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -966,7 +972,48 @@ fun GlassButton(
     val dark = colors.background.luminance() < 0.5f
     val resolvedActiveColor = activeColor ?: colors.accentBlue
     val interactionSource = remember { MutableInteractionSource() }
-    val pressed by interactionSource.collectIsPressedAsState()
+    // Consume individual events: a quick Press/Release can occur in one frame,
+    // so collectIsPressedAsState alone can hide the entire visual feedback.
+    var pressed by remember(interactionSource) { mutableStateOf(false) }
+    LaunchedEffect(interactionSource, enabled) {
+        pressed = false
+        if (!enabled) return@LaunchedEffect
+        val presses = mutableSetOf<PressInteraction.Press>()
+        var pressedAt = 0L
+        var releaseJob: Job? = null
+        try {
+            interactionSource.interactions.collect { interaction ->
+                when (interaction) {
+                    is PressInteraction.Press -> {
+                        releaseJob?.cancel()
+                        if (presses.isEmpty()) pressedAt = android.os.SystemClock.uptimeMillis()
+                        presses.add(interaction)
+                        pressed = true
+                    }
+                    is PressInteraction.Release -> {
+                        if (presses.remove(interaction.press) && presses.isEmpty()) {
+                            releaseJob?.cancel()
+                            releaseJob = launch {
+                                // Only the visual release waits; onClick runs immediately.
+                                delay((90L - (android.os.SystemClock.uptimeMillis() - pressedAt)).coerceAtLeast(0L))
+                                pressed = false
+                            }
+                        }
+                    }
+                    is PressInteraction.Cancel -> {
+                        presses.remove(interaction.press)
+                        if (presses.isEmpty()) {
+                            releaseJob?.cancel()
+                            pressed = false
+                        }
+                    }
+                }
+            }
+        } finally {
+            releaseJob?.cancel()
+            pressed = false
+        }
+    }
     val texturePalette = LocalButtonTexturePalette.current
     val isTitaniumButton = texturePalette?.skin == SkinPreset.TITANIUM
     val isWoodButton = texturePalette?.skin == SkinPreset.WOOD

@@ -2395,7 +2395,9 @@ private fun ZoomablePreviewViewport(
     val targetBoundsWidth = baseImageW * targetAbsCos + baseImageH * targetAbsSin
     val targetBoundsHeight = baseImageW * targetAbsSin + baseImageH * targetAbsCos
     val fittedViewportWidth = with(LocalDensity.current) {
-        (viewportW - if (imageTop != null) 24.dp.toPx() else 0f).coerceAtLeast(1f)
+        (viewportW - if (imageTop != null) {
+            if ((imageAspect ?: 1f) < 1f) 40.dp.toPx() else 24.dp.toPx()
+        } else 0f).coerceAtLeast(1f)
     }
     val targetRotationFit = if (
         targetBoundsWidth > 0f && targetBoundsHeight > 0f && viewportW > 0f && viewportH > 0f
@@ -2404,11 +2406,7 @@ private fun ZoomablePreviewViewport(
     } else {
         1f
     }
-    val targetBreathingRoom = if ((rawAspect ?: 0f) > 1f) {
-        1f - 0.08f * targetAbsSin
-    } else {
-        1f
-    }
+    val targetBreathingRoom = 1f
     val density = LocalDensity.current
     val cropTopPx = with(density) {
         imageTop?.let { (it + if ((imageAspect ?: 0f) > 1f) 60.dp else 0.dp).toPx() }
@@ -2418,8 +2416,16 @@ private fun ZoomablePreviewViewport(
     val cropExtraPx = with(density) { 84.dp.toPx() }
     fun layoutFor(height: Float): PreviewPhotoLayout = if (cropTopPx == null)
         PreviewPhotoLayout(1f, viewportH / 2f)
-    else previewPhotoLayout(viewportH, height, normalTopPx, cropTopPx, cropExtraPx, cropProgress,
-        cropTopAlignment = if ((imageAspect ?: 0f) > 1f) .5f else 1f)
+    else {
+        val layout = previewPhotoLayout(viewportH, height, normalTopPx, cropTopPx, cropExtraPx, cropProgress,
+            cropTopAlignment = if ((imageAspect ?: 0f) > 1f) .5f else 1f)
+        // Lift normal portrait previews slightly, without crossing the information area.
+        val lift = if ((imageAspect ?: 1f) < 1f)
+            minOf(with(density) { 12.dp.toPx() } * (1f - cropProgress),
+                (layout.centerY - height * layout.scale / 2f - normalTopPx).coerceAtLeast(0f))
+        else 0f
+        layout.copy(centerY = layout.centerY - lift)
+    }
     val photoLayout = layoutFor(targetBoundsHeight * targetRotationFit * targetBreathingRoom)
     val topFit = photoLayout.scale
     val baseShiftY = photoLayout.centerY - viewportH / 2f
@@ -2559,11 +2565,7 @@ private fun ZoomablePreviewViewport(
                 } else {
                     1f
                 }
-                val portraitBreathingRoom = if ((rawAspect ?: 0f) > 1f) {
-                    1f - 0.08f * absSin
-                } else {
-                    1f
-                }
+                val portraitBreathingRoom = 1f
                 val animatedLayout = layoutFor(boundsHeight * rotationFit * portraitBreathingRoom)
                 scaleX = scale * rotationFit * portraitBreathingRoom * animatedLayout.scale
                 scaleY = scaleX

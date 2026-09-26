@@ -61,6 +61,14 @@ internal fun CropEditor(
     val colors = AppTheme.colors
     var touching by remember { mutableStateOf(false) }
     val gridAlpha by animateFloatAsState(if (touching) .45f else 0f, tween(120), label="cropGrid")
+    var showPreparing by remember { mutableStateOf(false) }
+    LaunchedEffect(preview, failed, active) {
+        showPreparing = false
+        if (active && preview == null && !failed) {
+            kotlinx.coroutines.delay(400)
+            showPreparing = true
+        }
+    }
     BackHandler(enabled = active) { onCancel() }
     Box(Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxSize(),
@@ -114,8 +122,9 @@ internal fun CropEditor(
                 }
             } else {
                 Column(horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(12.dp)) {
-                    if(!failed) CircularProgressIndicator(Modifier.size(24.dp),color=colors.accentBlue,strokeWidth=2.dp)
-                    val message = if (!failed) R.string.crop_loading else when (failure?.reason) {
+                    if(showPreparing && !failed) CircularProgressIndicator(Modifier.size(24.dp),color=colors.accentBlue,strokeWidth=2.dp)
+                    if (failed) {
+                    val message = when (failure?.reason) {
                         CropPreparationException.Reason.ORIENTATION -> R.string.crop_orientation_failed
                         CropPreparationException.Reason.PREVIEW_READ -> R.string.crop_preview_read_failed
                         CropPreparationException.Reason.CONNECTION -> R.string.camera_not_connected
@@ -123,6 +132,7 @@ internal fun CropEditor(
                     }
                     Text(stringResource(message),textAlign=androidx.compose.ui.text.style.TextAlign.Center,
                         style=MaterialTheme.typography.bodySmall,color=Color.White)
+                    }
                     if(failed) IconButton(enabled=active,onClick={onFeedback();onRetry()}) {
                         Icon(Icons.Default.Refresh,stringResource(R.string.crop_retry),tint=colors.accentBlue)
                     }
