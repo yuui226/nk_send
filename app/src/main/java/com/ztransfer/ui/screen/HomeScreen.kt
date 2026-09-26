@@ -740,6 +740,7 @@ fun HomeScreen(
                                         if (staBusy) {
                                             viewModel.cancelStaDiscovery()
                                         } else {
+                                            haptics.tick()
                                             viewModel.discoverStaCamera()
                                         }
                                     },

@@ -38,6 +38,9 @@ import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -246,6 +249,16 @@ fun TransferScreen(
     // 清空队列只作用于"不在传输中"的任务（正在传的文件会传完，中途打断会让相机关 Wi-Fi）：
     // 有可清的卡片才显示扫帚 FAB；确认后卡片集体收合退场、FAB 随之消失。
     val hasClearable = actionVisibility.hasClearable
+    val retryConfirmVisibility=rememberGenieVisibility(hasRetryable && showRetryConfirm)
+    val clearConfirmVisibility=rememberGenieVisibility(hasClearable && showClearConfirm)
+    LaunchedEffect(hasRetryable,hasClearable) {
+        if(!hasRetryable) showRetryConfirm=false
+        if(!hasClearable) showClearConfirm=false
+    }
+    BackHandler(enabled=retryConfirmVisibility.mounted.value || clearConfirmVisibility.mounted.value) {
+        showRetryConfirm=false
+        showClearConfirm=false
+    }
     // 共用顶部控制按钮仍沿用本页原行为：操作时收起已展开的清空/重试确认卡。
     LaunchedEffect(queueControlActionNonce) {
         if (queueControlActionNonce > 0L) {
@@ -575,18 +588,14 @@ fun TransferScreen(
         }
 
         // ---------- 右下角悬浮控件：只保留清空与重试，并继续沿用二次确认 ----------
-        val confirmOpen = (hasClearable && showClearConfirm) ||
-                (hasRetryable && showRetryConfirm)
-        // 全屏遮罩：确认卡展开时接管"点击外部任意处关闭"，淡入淡出，位于卡片之下、内容之上。
-        AnimatedVisibility(
-            visible = confirmOpen,
-            enter = fadeIn(),
-            exit = fadeOut()
-        ) {
+        // Keep input interception alive for exactly the same interval as the outgoing cards.
+        if (retryConfirmVisibility.mounted.value || clearConfirmVisibility.mounted.value) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(colors.scrim)
+                    .drawBehind {
+                        drawRect(colors.scrim,alpha=maxOf(retryConfirmVisibility.progress.value,clearConfirmVisibility.progress.value))
+                    }
                     .pointerInput(Unit) {
                         detectTapGestures {
                             showClearConfirm = false
@@ -607,12 +616,12 @@ fun TransferScreen(
         ) {
             // 断开时重试置灰禁用而非消失（配合顶栏红色断连图标，用户能看懂"等重连"）。
             AnimatedVisibility(
-                visible = hasRetryable,
+                visible = hasRetryable || retryConfirmVisibility.mounted.value,
                 enter = fadeIn() + scaleIn(initialScale = 0.6f),
                 exit = fadeOut() + scaleOut(targetScale = 0.6f)
             ) {
                 ConfirmFab(
-                    expanded = showRetryConfirm,
+                    visibility = retryConfirmVisibility,
                     icon = {
                         Icon(
                             Icons.Default.Refresh,
@@ -640,12 +649,12 @@ fun TransferScreen(
                 )
             }
             AnimatedVisibility(
-                visible = hasClearable,
+                visible = hasClearable || clearConfirmVisibility.mounted.value,
                 enter = fadeIn() + scaleIn(initialScale = 0.6f),
                 exit = fadeOut() + scaleOut(targetScale = 0.6f)
             ) {
                 ConfirmFab(
-                    expanded = showClearConfirm,
+                    visibility = clearConfirmVisibility,
                     icon = {
                         // 自绘斜握扫帚（CleaningServices 官方图标像叉子，弃用）。
                         BroomMark(
@@ -1053,12 +1062,12 @@ private fun photoFilterDisplayName(filter: PhotoFilterPreset): String =
 
 /**
  * 右下角悬浮的"图标 FAB + 二次确认"控件（清空/重试全部共用）：毛玻璃圆形按钮，
- * 点击后在其左上方弹出确认卡片（缩放动画以 FAB 所在的右下角为原点，向左上放大），
+ * 点击后确认卡片沿统一 Genie 动画从 FAB 向左上展开，关闭后收回原按钮，
  * 确认后才真正执行。外边距由调用方的叠放容器统一提供（可能同时叠两颗）。
  */
 @Composable
 private fun ConfirmFab(
-    expanded: Boolean,
+    visibility: GenieVisibilityState,
     icon: @Composable () -> Unit,
     title: String,
     confirmText: String,
@@ -1070,13 +1079,9 @@ private fun ConfirmFab(
     enabled: Boolean = true,
     modifier: Modifier = Modifier
 ) {
+    var triggerBounds by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
     Column(horizontalAlignment = Alignment.End, modifier = modifier) {
-        AnimatedVisibility(
-            visible = expanded,
-            // 以右下角为原点缩放弹出，视觉上从 FAB 位置向左上方展开。
-            enter = scaleIn(transformOrigin = TransformOrigin(1f, 1f)) + fadeIn(),
-            exit = scaleOut(transformOrigin = TransformOrigin(1f, 1f)) + fadeOut()
-        ) {
+        GenieInlinePanel(visibility,anchor={triggerBounds}) {
             ConfirmCard(
                 title = title,
                 subtitle = subtitle,
@@ -1094,7 +1099,7 @@ private fun ConfirmFab(
             enabled = enabled,
             shape = CircleShape,
             contentPadding = PaddingValues(16.dp),
-            modifier = Modifier.align(Alignment.End)
+            modifier = Modifier.align(Alignment.End).onGloballyPositioned { triggerBounds=it.boundsInRoot() }
         ) {
             icon()
         }

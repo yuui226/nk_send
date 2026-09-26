@@ -486,8 +486,6 @@ fun SettingsOverlay(
             .padding(start = 12.dp, end = 12.dp, top = panelTop)
             .navigationBarsPadding()   // 小屏时面板底部不顶进导航栏
             .fillMaxWidth(),
-        animateScale = false,
-        genieFromAnchor = true,
         overlayContent = {
             if (showMainSettingsInfo) {
                 MainSettingsInfoBubble(
@@ -3827,12 +3825,9 @@ internal fun GpsConnectionControl(
     var placeBubbleCoordinates by remember { mutableStateOf<Pair<Double, Double>?>(null) }
     var placeBubbleRequestId by remember { mutableIntStateOf(0) }
     var expanded by rememberSaveable { mutableStateOf(false) }
-    val detailVisibility = remember { MutableTransitionState(false) }
-    detailVisibility.targetState = expanded
-    val detailLayoutActive = gpsAnimatedLayerActive(
-        currentState = detailVisibility.currentState,
-        targetState = detailVisibility.targetState,
-    )
+    val detailVisibility = rememberGenieVisibility(expanded)
+    val detailLayoutActive = detailVisibility.mounted.value
+    var detailAnchor by remember { mutableStateOf<Rect?>(null) }
     var hintText by remember { mutableStateOf<String?>(null) }
     val permissionHint = stringResource(R.string.gps_permission_required)
     val logCopiedHint = stringResource(R.string.code_copied)
@@ -4036,53 +4031,18 @@ internal fun GpsConnectionControl(
             showEmphasisBorder = false,
             ambientEffectColor = gpsEntryAccent,
             ambientEffectAlpha = gpsEntryAmbientAlpha,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().onGloballyPositioned { detailAnchor=it.boundsInRoot() },
             onLongClick = {
                 clipboard.setText(AnnotatedString(GpsDiagnostics.snapshot()))
                 showHint(logCopiedHint)
             },
         )
         GpsDetailOverflowLayer(modifier = Modifier.fillMaxWidth()) {
-            AnimatedVisibility(
-                visibleState = detailVisibility,
-                modifier = if (detailLayoutActive) {
-                    Modifier.requiredWidth(GPS_DETAIL_PANEL_WIDTH)
-                } else {
-                    Modifier.width(0.dp)
-                },
-                enter = fadeIn(
-                    animationSpec = tween(
-                        durationMillis = 190,
-                        delayMillis = 25,
-                        easing = FastOutSlowInEasing,
-                    ),
-                ) + scaleIn(
-                    initialScale = 0.965f,
-                    transformOrigin = TransformOrigin(0f, 0f),
-                    animationSpec = tween(260, easing = FastOutSlowInEasing),
-                ) + slideInVertically(
-                    initialOffsetY = { height -> -height / 22 },
-                    animationSpec = tween(260, easing = FastOutSlowInEasing),
-                ),
-                exit = fadeOut(
-                    animationSpec = tween(
-                        durationMillis = 155,
-                        delayMillis = 20,
-                        easing = FastOutSlowInEasing,
-                    ),
-                ) + scaleOut(
-                    targetScale = 0.975f,
-                    transformOrigin = TransformOrigin(0f, 0f),
-                    animationSpec = tween(220, easing = FastOutSlowInEasing),
-                ) + slideOutVertically(
-                    targetOffsetY = { height -> -height / 28 },
-                    animationSpec = tween(220, easing = FastOutSlowInEasing),
-                ),
-        ) {
+            GenieInlinePanel(detailVisibility,anchor={detailAnchor},
+                modifier=Modifier.requiredWidth(GPS_DETAIL_PANEL_WIDTH).padding(top=6.dp)) {
             Surface(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 6.dp),
+                    .fillMaxWidth(),
                 shape = GPS_PANEL_SHAPE,
                 color = colors.glassSurface,
                 border = BorderStroke(1.dp, colors.glassPanelBorder),
@@ -4339,33 +4299,22 @@ private fun GpsPlaceLookupBubble(
     // Keep the last real address through the exit animation. Clearing the lookup owner must not
     // replace it with an idle/default frame while the bubble is visibly folding away.
     val displayedState = if (expanded) state else retainedState
-    val bubbleVisibility = remember { MutableTransitionState(false) }
-    bubbleVisibility.targetState = expanded
-    val bubbleMounted = gpsAnimatedLayerActive(
-        currentState = bubbleVisibility.currentState,
-        targetState = bubbleVisibility.targetState,
-    )
-    val density = LocalDensity.current
-    // Bottom-aligning the popup to the coordinate control puts it above that control. Offset it by
-    // one control height plus a fixed gap so every navigation mode gets the same visual spacing.
-    val bubbleOffset = with(density) {
-        (COMPACT_SETTINGS_WHEEL_HEIGHT + 8.dp).roundToPx()
-    }
-
-    if (bubbleMounted) {
+    val bubbleVisibility = rememberGenieVisibility(expanded)
+    val density=LocalDensity.current
+    var bubbleHostBounds by remember { mutableStateOf<Rect?>(null) }
+    if (bubbleVisibility.mounted.value) {
         Popup(
             alignment = Alignment.BottomCenter,
-            offset = IntOffset(0, -bubbleOffset),
             onDismissRequest = onDismiss,
             properties = PopupProperties(focusable = false),
         ) {
-            // Match the app's existing bottom hint bubble: a short upward drift and fade, never a
-            // dropdown expansion from the coordinate control.
-            AnimatedVisibility(
-                visibleState = bubbleVisibility,
-                enter = fadeIn(tween(160)) + slideInVertically(tween(180)) { it / 2 },
-                exit = fadeOut(tween(140)) + slideOutVertically(tween(160)) { it / 2 },
-            ) {
+            Column(Modifier.onGloballyPositioned { bubbleHostBounds=it.boundsInRoot() }) {
+            GenieInlinePanel(bubbleVisibility,anchor={
+                bubbleHostBounds?.let { bounds ->
+                    val h=with(density) { COMPACT_SETTINGS_WHEEL_HEIGHT.toPx() }
+                    Rect(bounds.center.x-h/2,bounds.bottom-h,bounds.center.x+h/2,bounds.bottom)
+                }
+            }) {
                 Box(
                     modifier = Modifier
                         .widthIn(max = 270.dp)
@@ -4437,6 +4386,10 @@ private fun GpsPlaceLookupBubble(
                         }
                     }
                 }
+            }
+            Spacer(Modifier.align(Alignment.CenterHorizontally).width(COMPACT_SETTINGS_WHEEL_HEIGHT).height(COMPACT_SETTINGS_WHEEL_HEIGHT+8.dp)
+                .clickable(interactionSource=remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                    indication=null,onClick=onDismiss))
             }
         }
     }

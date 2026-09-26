@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+BUILD_LOG=""
 
 # Finder-launched .command files should disappear after a successful build, while
 # failures must leave the terminal open so the error can be read and copied.
 finish_terminal() {
   local status=$?
   trap - EXIT
+  if [[ -n "${BUILD_LOG:-}" ]]; then rm -f -- "$BUILD_LOG"; fi
   if [[ "$status" -ne 0 ]]; then
     printf '\nBuild failed (exit %s). The window will stay open.\n' "$status" >&2
     if [[ -t 0 ]]; then
@@ -60,16 +62,56 @@ if [[ ! -x "$ROOT_DIR/gradlew" ]]; then
 fi
 
 printf 'Building timestamped Debug APK with %s...\n' "$JAVA_HOME"
-"$ROOT_DIR/gradlew" :app:assembleDebug --no-daemon --console=plain
+BUILD_LOG="$(mktemp "${TMPDIR:-/tmp}/ztransfer-debug-build.XXXXXX")"
+"$ROOT_DIR/gradlew" :app:assembleDebug --no-daemon --console=plain | tee "$BUILD_LOG"
 
 # app/build.gradle.kts finalizes assembleDebug with copyTimestampedDebugApk,
 # which creates the distributable name in this directory.
-DEBUG_APK="$(ls -t "$SCRIPT_DIR"/ZTransfer-debug-*.apk 2>/dev/null | head -n 1 || true)"
-if [[ -z "$DEBUG_APK" || ! -f "$DEBUG_APK" ]]; then
-  echo "ERROR: timestamped Debug APK was not found in $SCRIPT_DIR" >&2
+# Use the artifact reported by THIS successful build, never an older file from ls.
+DEBUG_APK="$(sed -n 's/^Timestamped debug APK: //p' "$BUILD_LOG" | tail -n 1)"
+if [[ -z "$DEBUG_APK" || ! -s "$DEBUG_APK" ||
+      "$(dirname -- "$DEBUG_APK")" != "$SCRIPT_DIR" ||
+      "$(basename -- "$DEBUG_APK")" != ZTransfer-debug-*.apk ]]; then
+  echo "ERROR: this build did not report a valid timestamped Debug APK in $SCRIPT_DIR" >&2
   exit 1
 fi
 printf 'Artifact ready: %s\n' "$DEBUG_APK"
+
+# Only clean this script's directory after a successful build and artifact validation.
+# Include hidden APK files; do not recurse or touch the release directory.
+shopt -s nullglob dotglob nocaseglob
+for OLD_APK in "$SCRIPT_DIR"/*.apk; do
+  [[ "$OLD_APK" == "$DEBUG_APK" || ! -f "$OLD_APK" ]] && continue
+  rm -- "$OLD_APK"
+  printf 'Removed old APK: %s\n' "$(basename -- "$OLD_APK")"
+done
+shopt -u nullglob dotglob nocaseglob
+
+# Store a file reference, not its path as text, so Finder/chat apps can paste the APK.
+if /usr/bin/osascript -l JavaScript - "$DEBUG_APK" <<'JAVASCRIPT'
+ObjC.import('AppKit');
+function run(argv) {
+  var path = argv[0];
+  var url = $.NSURL.fileURLWithPath(path);
+  var board = $.NSPasteboard.generalPasteboard;
+  board.clearContents;
+  if (!board.writeObjects($.NSArray.arrayWithObject(url))) {
+    throw new Error('Cannot write APK file URL to clipboard');
+  }
+  // Older file-aware apps use the legacy filenames list instead of public.file-url.
+  board.setPropertyListForType($.NSArray.arrayWithObject($(path)), $('NSFilenamesPboardType'));
+  var stored = board.stringForType($('public.file-url'));
+  if (!stored || ObjC.unwrap(stored) !== ObjC.unwrap(url.absoluteString)) {
+    throw new Error('Clipboard file URL verification failed');
+  }
+}
+JAVASCRIPT
+then
+  echo "APK file copied to clipboard. Paste with Command-V."
+else
+  echo "WARNING: APK built successfully, but copying the file to the clipboard failed." >&2
+  echo "You can copy the APK manually from: $DEBUG_APK" >&2
+fi
 
 # Match dist-debug/build-debug.bat: install and launch every authorized ADB device,
 # while allowing a disconnected-phone build to finish successfully.
