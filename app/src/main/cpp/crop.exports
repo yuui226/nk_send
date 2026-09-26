@@ -1,0 +1,6 @@
+{
+  global:
+    Java_com_ztransfer_crop_LosslessJpeg_nativeCrop;
+  local:
+    *;
+};
