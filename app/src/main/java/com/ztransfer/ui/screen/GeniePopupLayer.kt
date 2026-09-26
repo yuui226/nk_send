@@ -44,25 +44,29 @@ internal fun Modifier.geniePopupLayer(
                 drawContent()
                 return@onDrawWithContent
             }
+            if (size.width <= 0f || size.height <= 0f) return@onDrawWithContent
+            layer.compositingStrategy = CompositingStrategy.Offscreen
+            layer.blendMode = BlendMode.SrcOver
+            layer.alpha = 1f
+            // Prepare the content on the invisible first draw. Waiting until alpha > 0 puts
+            // the full settings recording and the first mesh frame on the same deadline.
+            if (!layerRecorded() || layer.size.width != size.width.toInt() || layer.size.height != size.height.toInt()) {
+                android.os.Trace.beginSection("ZTransfer.Genie.record")
+                try {
+                    layer.record { this@onDrawWithContent.drawContent() }
+                    setLayerRecorded(true)
+                } finally { android.os.Trace.endSection() }
+            }
             val panelAlpha = geniePanelAlpha(p)
-            if (panelAlpha <= 0f || size.width <= 0f || size.height <= 0f) return@onDrawWithContent
+            if (panelAlpha <= 0f) return@onDrawWithContent
             val bounds = panel() ?: Rect(0f, 0f, size.width, size.height)
             val origin = anchor()
             val above = allowAboveAnchor && origin != null && bounds.bottom <= origin.top
             fun mirrorY(rect: Rect) = Rect(rect.left,-rect.bottom,rect.right,-rect.top)
             val geometryBounds=if(above) mirrorY(bounds) else bounds
             val geometryOrigin=if(above) origin?.let(::mirrorY) else origin
-            layer.compositingStrategy = CompositingStrategy.Offscreen
-            layer.blendMode = BlendMode.SrcOver
-            layer.alpha = 1f
             // Fade the assembled panel, not each triangle (or individual nested shadows).
             composite.alpha = panelAlpha
-            // Settings content is static while the popup is opening or closing. Re-recording
-            // the complete tree for every frame was the dominant source of iOS jank.
-            if (!layerRecorded() || layer.size.width != size.width.toInt() || layer.size.height != size.height.toInt()) {
-                layer.record { this@onDrawWithContent.drawContent() }
-                setLayerRecorded(true)
-            }
             if (!validGenieAnchor(geometryOrigin, geometryBounds)) {
                 layer.alpha = p
                 drawLayer(layer)
@@ -84,6 +88,7 @@ internal fun Modifier.geniePopupLayer(
             val outputBounds = Rect(rows.minOf { it.left }, rows.minOf { minOf(it.leftY, it.rightY) },
                 rows.maxOf { it.right }, rows.maxOf { maxOf(it.leftY, it.rightY) }).inflate(1f)
             val canvas = drawContext.canvas
+            android.os.Trace.beginSection("ZTransfer.Genie.mesh")
             canvas.saveLayer(outputBounds, composite)
             try {
                 layer.blendMode = BlendMode.Plus
@@ -116,6 +121,7 @@ internal fun Modifier.geniePopupLayer(
                 }
             } finally {
                 canvas.restore()
+                android.os.Trace.endSection()
             }
         }
     }
