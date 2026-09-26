@@ -91,6 +91,10 @@ android {
         kotlinCompilerExtensionVersion = "1.5.5"
     }
     packaging {
+        jniLibs {
+            // Compress native libraries in the APK; Android extracts them at install time.
+            useLegacyPackaging = true
+        }
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
