@@ -510,7 +510,7 @@
     <string name="purchase_activated">高级版已解锁</string>
     <string name="purchase_activation_code_label">你的激活码</string>
     <string name="purchase_activation_code_keep">换机或重装时需要此激活码，请妥善保存。</string>
-    <string name="settings_view_code">我要换机</string>
+    <string name="settings_view_code">换机</string>
     <string name="settings_code_hint">在新设备输入此激活码即可换机，本机会恢复成免费版。请勿滥用，滥用会导致激活码失效。</string>
     <string name="copy_code">复制</string>
     <string name="code_copied">已复制</string>
@@ -526,7 +526,7 @@
     <string name="purchase_back_to_plans">返回选择方案</string>
 
     <!-- 检查更新（设置页脚） -->
-    <string name="check_update">检查更新</string>
+    <string name="check_update">更新</string>
     <string name="checking_update">检查中…</string>
     <string name="update_latest">已是最新版本</string>
     <string name="update_check_failed">检查失败，请检查网络</string>
