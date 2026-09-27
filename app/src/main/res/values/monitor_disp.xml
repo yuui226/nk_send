@@ -1,0 +1,5 @@
+<resources>
+    <string name="monitor_disp_photo">Photo</string>
+    <string name="monitor_disp_video">Video</string>
+    <string name="monitor_disp_card">Storage %1$d · %2$s</string>
+</resources>

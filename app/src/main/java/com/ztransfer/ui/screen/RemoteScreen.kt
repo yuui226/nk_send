@@ -116,6 +116,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
@@ -3118,6 +3119,7 @@ private fun RemoteContent(
                     levelRoll = levelRoll,
                 levelPitch = levelPitch,
                     showEmbeddedAudioMeter = !audioMeterOutside,
+                    informationBottomInset = if (immersiveFullscreen && dispMode == MonitorDispMode.CAMERA) 48.dp else 0.dp,
                     desqueezeMultiplier = desqueezeMultiplier,
                     modifier = Modifier
                         .offset(x = imageX, y = imageY)
@@ -3158,8 +3160,34 @@ private fun RemoteContent(
                             "$label ${rcFormat(param.prop, param.current)}"
                         }
                     }
+                    val cameraDisp = dispMode == MonitorDispMode.CAMERA
+                    val detailValues = rememberMonitorDetails(
+                        cameraViewModel.getCamera(), movieMode,
+                        enabled = connected && initialLoaded && cameraDisp,
+                        pollingAllowed = !probing && !diagnosticControlBusy && !recBusy && !capturing && !recording,
+                        whiteBalanceOnly = true,
+                    )
+                    val storageValues = rememberMonitorStorage(
+                        cameraViewModel.getCamera(), camState.storageIds,
+                        enabled = connected && initialLoaded && cameraDisp,
+                        pollingAllowed = !probing && !diagnosticControlBusy && !recBusy && !capturing && !recording,
+                    )
+                    AnimatedVisibility(visible = cameraDisp && connected,
+                        enter = fadeIn(tween(180)), exit = fadeOut(tween(180)),
+                        modifier = Modifier.offset(x = imageX, y = imageY).size(imageWidth, imageHeight)) {
+                        val cells = listOfNotNull(modeText?.let { "MODE" to it }) +
+                            listOf(3, 2, 1, 0).mapNotNull { index ->
+                                params[activeProps[index]]?.let { param ->
+                                    paramLabel(activeProps[index]) to rcFormat(param.prop, param.current)
+                                }
+                            } + listOfNotNull(
+                                detailValues[RemoteCameraTool.WHITE_BALANCE]?.let { "WB" to it },
+                                focusModeText?.let { "AF" to it })
+                        CameraMonitorDisp(cells, storageValues, movieMode,
+                            rcBatteryPercentage(batteryParam), recording, Modifier.fillMaxSize())
+                    }
                     ImmersiveMonitorFooter(
-                        dispMode, exposureInfo, connected,
+                        if (cameraDisp && connected) MonitorDispMode.CLEAN else dispMode, exposureInfo, connected,
                         Modifier.offset(x = imageX + 8.dp, y = imageY + if (dispMode == MonitorDispMode.FULL) 27.dp else 9.dp)
                             .width((imageWidth - if (recording) 104.dp else 16.dp).coerceAtLeast(0.dp)),
                     )
@@ -3173,7 +3201,7 @@ private fun RemoteContent(
                             enabled = connected && initialLoaded && dispMode == MonitorDispMode.FULL,
                             pollingAllowed = !probing && !diagnosticControlBusy && !recBusy && !capturing,
                         )
-                        ImmersiveMonitorDetails(details, rcBatteryPercentage(batteryParam),
+                        ImmersiveMonitorDetails(details.values.toList(), rcBatteryPercentage(batteryParam),
                             Modifier.padding(start = 8.dp, end = if (recording) 88.dp else 8.dp))
                     }
                 }
@@ -3868,10 +3896,13 @@ private fun RemoteViewfinderPanel(
     levelRoll: Float? = null,
     levelPitch: Float? = null,
     showEmbeddedAudioMeter: Boolean = true,
+    informationBottomInset: Dp = 0.dp,
     desqueezeMultiplier: Float = 1f,
     modifier: Modifier = Modifier
 ) {
     val colors = AppTheme.colors
+    val animatedInformationInset by animateDpAsState(
+        informationBottomInset, tween(180), label = "dispInformationInset")
     val recordingBorder by animateColorAsState(
         targetValue = if (connected && movieMode && recording) Color(0xFFFF424D) else Color.Transparent,
         animationSpec = tween(280),
@@ -3901,6 +3932,7 @@ private fun RemoteViewfinderPanel(
             showFalseColor = showFalseColor,
             showWaveform = showWaveform,
             scopeStartInset = if (soundMeterEnabled && showEmbeddedAudioMeter) 48.dp else 8.dp,
+            informationBottomInset = animatedInformationInset,
             desqueezeMultiplier = desqueezeMultiplier
         )
 
@@ -3908,7 +3940,7 @@ private fun RemoteViewfinderPanel(
             ViewfinderSoundMeterOverlay(
                 enabled = soundMeterEnabled,
                 frameProvider = frameProvider,
-                bottomInset = 8.dp,
+                bottomInset = 8.dp + animatedInformationInset,
                 modifier = Modifier.matchParentSize()
             )
         }
@@ -3975,7 +4007,7 @@ private fun RemoteViewfinderPanel(
                 fontFamily = FontFamily.Monospace,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(8.dp)
+                    .padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 8.dp + animatedInformationInset)
                     .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
                     .padding(horizontal = 6.dp, vertical = 2.dp)
             )
@@ -4174,6 +4206,7 @@ private fun ViewfinderImage(
     showFalseColor: Boolean,
     showWaveform: Boolean,
     scopeStartInset: androidx.compose.ui.unit.Dp = 8.dp,
+    informationBottomInset: Dp = 0.dp,
     desqueezeMultiplier: Float = 1f
 ) {
     val viewport = remember { ViewfinderViewport() }
@@ -4347,7 +4380,7 @@ private fun ViewfinderImage(
             MonitorAnalysisOverlays(
                 histogram = liveFrame.histogram.takeIf { histogramMode != HistogramMode.OFF },
                 waveform = liveFrame.analysis?.waveform.takeIf { showWaveform },
-                falseColor = showFalseColor, modifier = Modifier.matchParentSize(),
+                falseColor = showFalseColor, modifier = Modifier.matchParentSize().padding(bottom = informationBottomInset),
                 histogramMode = histogramMode,
                 waveformMode = liveFrame.analysis?.waveformMode ?: WaveformMode.LUMA,
                 startInset = scopeStartInset,
