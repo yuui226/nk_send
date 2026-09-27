@@ -179,8 +179,7 @@ internal fun CameraMonitorDisp(cells: List<Pair<String, String>>, storage: List<
         androidx.compose.ui.graphics.Color.Black.copy(alpha = .85f), blurRadius = 4f))
     val white = androidx.compose.ui.graphics.Color.White
     Box(modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
-        val topItems = listOf(stringResource(if (movie) R.string.monitor_disp_video else R.string.monitor_disp_photo)) +
-            storage.map { (number, free) ->
+        val topItems = storage.map { (number, free) ->
                 val capacity = String.format(java.util.Locale.getDefault(), "%.1f GB", free / 1_000_000_000.0)
                 stringResource(R.string.monitor_disp_card, number, capacity)
             } + listOfNotNull(battery?.let { "$it%" })
