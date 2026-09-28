@@ -1615,15 +1615,8 @@ private fun RemoteContent(
                         val prop = rcCanonicalExposureProp(reportedProp)
                         if (reportedProp == Lab.PROP_BATTERY_LEVEL) refreshBattery()
                         if (reportedProp in ALL_AUTO_ISO_PROPS) refreshAutoIso()
-                        if (reportedProp == Lab.PROP_NK_ISO_CONTROL_SENSITIVITY &&
-                            autoIsoProp?.let { params[it]?.current != 0L } == true
-                        ) {
-                            params[reportedProp]?.let { current ->
-                                runCatching { cam.rcRefreshParam(current) }.getOrNull()?.let {
-                                    params[reportedProp] = it
-                                }
-                            }
-                        }
+                        // D0B5 is owned by the 500ms effective-ISO poll above. Reading it
+                        // again for property events only competes with live-view frame requests.
                         // 本地还有未发出的乐观值时不刷新——自己刚设的值触发的事件
                         // 会把正在连调的显示值拽回去。照片/录像两套参数都听。
                         if (prop in ALL_EXPOSURE_PROPS && pendingSets[prop]?.isActive != true) {
