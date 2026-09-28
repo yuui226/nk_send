@@ -126,6 +126,7 @@ class MainActivity : ComponentActivity() {
                 AppLocale.forComposition(baseContext, transferState.appLanguage)
             }
             CompositionLocalProvider(
+                com.ztransfer.ui.util.LocalHapticsEnabled provides transferState.hapticsEnabled,
                 LocalContext provides localeContext.context,
                 LocalConfiguration provides localeContext.configuration,
             ) {

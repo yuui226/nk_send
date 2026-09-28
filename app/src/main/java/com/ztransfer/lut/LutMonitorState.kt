@@ -86,6 +86,13 @@ internal class LutMonitorState(
     fun select(file: LutFile, manual: Boolean = true) {
         if (!available) { notice(R.string.lut_frame_unavailable); return }
         if (manual) movie?.let { suppressedSelections.remove(it) }
+        // Selecting the already presented file also cancels a pending switch, without reparsing
+        // the file or allocating another GL surface. Changed metadata still takes the reload path.
+        if (manual && active?.file == file) {
+            invalidate()
+            closeMenuRequested = true
+            return
+        }
         val id = begin(manual)
         loading = file.uri
         ticket = LutIoQueue.submit({ repository.read(file, it) }) { result ->

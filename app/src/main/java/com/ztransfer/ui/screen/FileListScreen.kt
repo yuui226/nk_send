@@ -3638,6 +3638,7 @@ private fun BurstCollectionCell(
     onBoundsChanged: (Rect?) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val longPressFeedback = com.ztransfer.ui.util.rememberLongPressFeedback()
     val colors = AppTheme.colors
     val a11y = stringResource(R.string.burst_collection_a11y, files.size)
     // 两个坐标都只在点击/长按瞬间读取，使用普通容器避免列表滚动时的全局坐标变化
@@ -3756,12 +3757,15 @@ private fun BurstCollectionCell(
             modifier = Modifier
                 .fillMaxSize(0.86f)
                 .align(Alignment.Center)
-                .pointerInput(files.firstOrNull()?.handle) {
+                .pointerInput(files.firstOrNull()?.handle, longPressFeedback) {
                     detectTapGestures(
+                        onPress = { longPressFeedback.trackPress(this) },
                         onLongPress = {
                             // 长按只建立“合集 + 成员”的预览快照并直达第一张；底层列表不在
                             // 预览出现前重排，从而不会短暂闪出展开成员或箭头旋转。
-                            collectionBoundsRef[0]?.let(latestOnPreviewFirst)
+                            collectionBoundsRef[0]?.let { bounds ->
+                                longPressFeedback.trigger { latestOnPreviewFirst(bounds) }
+                            }
                         }
                     )
                 }
@@ -3919,6 +3923,7 @@ private fun ThumbnailCell(
     returnFocusNonce: Int? = null,
     onExitFinished: (Int) -> Unit = {}
 ) {
+    val longPressFeedback = com.ztransfer.ui.util.rememberLongPressFeedback()
     val colors = AppTheme.colors
     // 展开/筛选入场：本组刚被展开或筛选刚确定时淡入+轻微放大、按 revealDelayMs 级联错峰；
     // 平时（滚动进入）revealProgress 初始即 1，直接全显、零开销。
@@ -4013,6 +4018,8 @@ private fun ThumbnailCell(
             }
             // 只在这里交换两个既有动作的手势入口；传输校验、入队和预览逻辑保持单一来源。
             .combinedClickable(
+                interactionSource = longPressFeedback.interactions,
+                indication = androidx.compose.foundation.LocalIndication.current,
                 enabled = !exiting,
                 onClick = {
                     if (tapToPreview) {
@@ -4020,8 +4027,10 @@ private fun ThumbnailCell(
                     } else onTapFile(file)
                 },
                 onLongClick = {
-                    if (tapToPreview) onTapFile(file)
-                    else cellBoundsRegistry[file.handle]?.let { onPreview(file, it) }
+                    longPressFeedback.trigger {
+                        if (tapToPreview) onTapFile(file)
+                        else cellBoundsRegistry[file.handle]?.let { onPreview(file, it) }
+                    }
                 }
             )
     ) {

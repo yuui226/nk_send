@@ -461,6 +461,7 @@ data class TransferState(
     val favoritePhotoFilters: List<FavoritePhotoFilter> = emptyList(),
     val favoriteFrameEffects: List<FavoriteFrameWatermarkEffect> = emptyList(),
     val photoFilterEnabled: Boolean = false,
+    val photoLut: PhotoFilterSelection? = null,
     val selectedPhotoFilterId: String? = null,
     val photoFilterIntensityPercent: Int = DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT,
     val transferPhotoFilterIntensities: Map<String, Int> = emptyMap(),
@@ -578,6 +579,7 @@ internal fun freeEditionPhotoFrameWatermark(): PhotoFrameWatermark = PhotoFrameW
 
 internal val TransferState.photoFilterSelection: PhotoFilterSelection?
     get() {
+        photoLut?.let { return it }
         if (!photoFilterEnabled) return null
         val preset = photoFilters.firstOrNull { it.id == selectedPhotoFilterId } ?: return null
         return PhotoFilterSelection(preset, photoFilterIntensityPercent)
@@ -1139,6 +1141,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         ) ?: PhotoFrameWatermarkEffect.AUTO.name,
                     )
                 }.getOrDefault(PhotoFrameWatermarkEffect.AUTO),
+                photoLut = com.ztransfer.lut.PhotoLutStore(getApplication()).restore("transfer"),
                 photoFilters = restoredPhotoFilters,
                 favoritePhotoFilters = decodedFavoritePhotoFilters,
                 favoriteFrameEffects = restoredFavoriteFrameEffects,
@@ -1153,6 +1156,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 appLanguage = prefs.getString(AppLocale.PREF_KEY, AppLocale.SYSTEM) ?: AppLocale.SYSTEM
             )
         }
+        viewModelScope.launch(Dispatchers.IO) { com.ztransfer.lut.PhotoLutStore(getApplication()).prune() }
         // 开 App 时清扫上次崩溃/被杀留下的半成品（.nkpart_ 临时文件）。
         if (dir != null) {
             val uri = Uri.parse(dir)
@@ -1374,7 +1378,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     fun setPhotoFilterEnabled(enabled: Boolean) {
         val canEnable = enabled && _state.value.selectedPhotoFilterId != null
         prefs.edit().putBoolean("photo_filter_enabled", canEnable).apply()
-        _state.update { it.copy(photoFilterEnabled = canEnable) }
+        if (canEnable) com.ztransfer.lut.PhotoLutStore(getApplication()).save("transfer", null, null)
+        _state.update { it.copy(photoFilterEnabled = canEnable, photoLut = if (canEnable) null else it.photoLut) }
     }
 
     fun toggleFavoritePhotoFilter(filterId: String) {
@@ -1457,10 +1462,13 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         selectedId: String?,
         intensityPercent: Int,
         enabled: Boolean,
+        lut: PhotoFilterSelection? = null,
+        lutUri: String? = null,
     ) {
         val validId = selectedId?.takeIf { id -> _state.value.photoFilters.any { it.id == id } }
         val intensity = normalizePhotoFilterIntensity(intensityPercent)
-        val active = enabled && validId != null
+        val active = enabled && validId != null && lut == null
+        com.ztransfer.lut.PhotoLutStore(getApplication()).save("transfer", lut, lutUri)
         validId?.let { rememberTransferPhotoFilterIntensity(it, intensity) }
         prefs.edit().apply {
             if (validId == null) remove("photo_filter_selected_id")
@@ -1472,6 +1480,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 selectedPhotoFilterId = validId,
                 photoFilterIntensityPercent = intensity,
                 photoFilterEnabled = active,
+                photoLut = lut,
             )
         }
     }

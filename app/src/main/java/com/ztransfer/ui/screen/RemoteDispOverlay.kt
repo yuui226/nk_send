@@ -1,7 +1,5 @@
 package com.ztransfer.ui.screen
 
-import androidx.compose.animation.Crossfade
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -20,7 +18,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 
 internal enum class MonitorDispMode {
-    CAMERA, EXPOSURE, FULL, CLEAN;
+    CAMERA, EXPOSURE, CLEAN;
     fun next() = entries[(ordinal + 1) % entries.size]
 }
 
@@ -31,12 +29,11 @@ internal fun rememberMonitorDetails(
     movie: Boolean,
     enabled: Boolean,
     pollingAllowed: Boolean,
-    whiteBalanceOnly: Boolean = false,
 ): Map<RemoteCameraTool, String> {
     val context = LocalContext.current
     val canPoll by rememberUpdatedState(pollingAllowed)
     var details by remember(camera, movie) { mutableStateOf(emptyMap<RemoteCameraTool, String>()) }
-    LaunchedEffect(camera, movie, enabled, context, whiteBalanceOnly) {
+    LaunchedEffect(camera, movie, enabled, context) {
         details = emptyMap()
         if (!enabled || camera == null) return@LaunchedEffect
         // A capture temporarily pauses I/O without discarding descriptors or visible labels.
@@ -45,7 +42,7 @@ internal fun rememberMonitorDetails(
         }
         // Resolve supported properties once, then only read their scalar values.
         // Unsupported options are omitted rather than probed on every refresh.
-        val tools = if (whiteBalanceOnly) listOf(RemoteCameraTool.WHITE_BALANCE) else RemoteCameraTool.entries
+        val tools = listOf(RemoteCameraTool.WHITE_BALANCE)
         val properties = tools.mapNotNull { tool ->
             try {
                 awaitPolling()
@@ -81,27 +78,16 @@ internal fun MonitorExposureSummary(
     modifier: Modifier = Modifier,
 ) {
     val colors = AppTheme.colors
-    Crossfade(mode, animationSpec = tween(180), label = "monitorDisp", modifier = modifier) { selected ->
         Text(
+            modifier = modifier,
             text = if (!connected) stringResource(R.string.connection_lost)
-                else if (selected == MonitorDispMode.CLEAN) "" else exposure.joinToString("   "),
+                else if (mode != MonitorDispMode.EXPOSURE) "" else exposure.joinToString("   "),
             color = if (connected) androidx.compose.ui.graphics.Color.White else colors.statusError,
             fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
             style = androidx.compose.ui.text.TextStyle(shadow = androidx.compose.ui.graphics.Shadow(
                 androidx.compose.ui.graphics.Color.Black, blurRadius = 4f)),
         )
-    }
 }
-
-@Composable
-internal fun MonitorDetailSummary(details: List<String>, battery: Int?, modifier: Modifier = Modifier) {
-    val text = (details + listOfNotNull(battery?.let { "$it%" })).joinToString("   ·   ")
-    Text(text, modifier, color = androidx.compose.ui.graphics.Color.White,
-        fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-        style = androidx.compose.ui.text.TextStyle(shadow = androidx.compose.ui.graphics.Shadow(
-            androidx.compose.ui.graphics.Color.Black, blurRadius = 4f)))
-}
-
 
 @Composable
 internal fun rememberMonitorStorage(camera: NikonCamera?, storageIds: List<Int>, enabled: Boolean,
@@ -138,14 +124,15 @@ internal fun rememberMonitorStorage(camera: NikonCamera?, storageIds: List<Int>,
 /** Camera-style readout; no background panel over the live image. */
 @Composable
 internal fun CameraMonitorDisp(cells: List<Pair<String, String>>, storage: List<Pair<Int, Long>>,
-    movie: Boolean, battery: Int?, recording: Boolean, modifier: Modifier = Modifier) {
+    movie: Boolean, battery: Int?, recording: Boolean, modifier: Modifier = Modifier,
+    storageSlotCount: Int = storage.size) {
     val shadow = androidx.compose.ui.text.TextStyle(shadow = androidx.compose.ui.graphics.Shadow(
         androidx.compose.ui.graphics.Color.Black.copy(alpha = .85f), blurRadius = 4f))
     val white = androidx.compose.ui.graphics.Color.White
-    Box(modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
+    Box(modifier.padding(horizontal = 12.dp, vertical = MonitorInfoTopInset)) {
         val topItems = storage.map { (number, free) ->
                 val capacity = String.format(java.util.Locale.getDefault(), "%.1f GB", free / 1_000_000_000.0)
-                stringResource(R.string.monitor_disp_card, number, capacity)
+                if (storageSlotCount <= 1) capacity else stringResource(R.string.monitor_disp_card, number, capacity)
             } + listOfNotNull(battery?.let { "$it%" })
         Text(topItems.joinToString("   ·   "),
             Modifier.align(Alignment.TopStart).fillMaxWidth().padding(end = 100.dp),

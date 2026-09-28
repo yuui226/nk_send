@@ -32,6 +32,7 @@ private class ChoicePopupGeometry {
 internal fun RemoteChoicePopup(
     anchor: Rect?, landscape: Boolean, width: Dp, closeRequested: Boolean,
     onDismiss: () -> Unit,
+    besideAnchor: Boolean = false,
     content: @Composable ColumnScope.(close: () -> Unit, closing: Boolean) -> Unit,
 ) {
     val progress=remember { Animatable(0f) }
@@ -61,7 +62,13 @@ internal fun RemoteChoicePopup(
         val margin=8.dp
         val top=with(density) { (anchor?.top ?: 0f).toDp() }
         val bottom=with(density) { (anchor?.bottom ?: 0f).toDp() }
-        val available=(if(landscape) top-gap-margin else maxHeight-bottom-gap-margin).coerceAtLeast(1.dp)
+        // Compare space in the rotated monitor host, not the physical screen orientation.
+        // Measurement and placement must use the same direction to avoid a clipped short menu.
+        val aboveSpace=(top.coerceIn(0.dp,maxHeight)-gap-margin).coerceAtLeast(0.dp)
+        val belowSpace=(maxHeight-bottom.coerceIn(0.dp,maxHeight)-gap-margin).coerceAtLeast(0.dp)
+        val expandAbove=landscape && anchor != null && aboveSpace > belowSpace
+        val available=(if(besideAnchor) maxHeight-margin*2
+            else if(expandAbove) aboveSpace else belowSpace).coerceAtLeast(1.dp)
         val menuWidth=width.coerceAtMost((maxWidth-margin*2).coerceAtLeast(1.dp))
         Box(Modifier.matchParentSize().clickable(
             interactionSource=remember { MutableInteractionSource() },indication=null,onClick=close)
@@ -76,8 +83,13 @@ internal fun RemoteChoicePopup(
         },modifier=Modifier.fillMaxSize()) { measurables,constraints ->
             val panel=measurables.single().measure(constraints.copy(minWidth=0,minHeight=0))
             val inset=margin.roundToPx()
-            val left=(anchor?.left?.toInt() ?: inset).coerceIn(inset,(constraints.maxWidth-panel.width-inset).coerceAtLeast(inset))
-            val desiredTop=if(landscape) (anchor?.top?.toInt() ?: constraints.maxHeight)-gap.roundToPx()-panel.height
+            val preferredLeft = if (besideAnchor && anchor != null) {
+                val before = anchor.left.toInt() - gap.roundToPx() - panel.width
+                if (before >= inset) before else anchor.right.toInt() + gap.roundToPx()
+            } else anchor?.left?.toInt() ?: inset
+            val left=preferredLeft.coerceIn(inset,(constraints.maxWidth-panel.width-inset).coerceAtLeast(inset))
+            val desiredTop=if(besideAnchor) (anchor?.center?.y?.toInt() ?: constraints.maxHeight / 2) - panel.height / 2
+                else if(expandAbove) (anchor?.top?.toInt() ?: constraints.maxHeight)-gap.roundToPx()-panel.height
                 else (anchor?.bottom?.toInt() ?: inset)+gap.roundToPx()
             val y=desiredTop.coerceIn(0,(constraints.maxHeight-panel.height).coerceAtLeast(0))
             val bounds=Rect(left.toFloat(),y.toFloat(),(left+panel.width).toFloat(),(y+panel.height).toFloat())

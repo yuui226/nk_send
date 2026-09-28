@@ -258,7 +258,7 @@
     <string name="photo_frame_effect_shadow">陰影</string>
     <string name="photo_frame_effect_outline">描邊</string>
     <string name="photo_filter">照片濾鏡</string>
-    <string name="photo_effects">濾鏡·邊框·浮水印</string>
+    <string name="photo_effects">濾鏡·LUT·邊框·浮水印</string>
     <string name="photo_effects_open_editor">編輯照片效果</string>
     <string name="photo_effects_info_title">照片效果說明</string>
     <string name="photo_effects_info_description">傳輸原圖後，效果圖另存。</string>
@@ -266,8 +266,8 @@
     <string name="photo_effects_wheel_hint">撥輪：按住上下拖動可快速調整</string>
     <string name="photo_effects_full_chooser_hint">長按濾鏡撥輪可按分類選擇</string>
     <string name="photo_filter_off_option">無濾鏡</string>
-    <string name="photo_filter_intensity_summary">強度 %1$d%%</string>
-    <string name="photo_filter_intensity">濾鏡強度</string>
+    <string name="photo_filter_intensity_summary">%1$d%%</string>
+    <string name="photo_filter_intensity">強度</string>
     <string name="photo_filter_task_label">濾鏡：%1$s · %2$d%%</string>
     <string name="photo_effect_favorite_add">收藏目前效果</string>
     <string name="photo_effect_favorite_remove">取消收藏目前效果</string>
@@ -545,7 +545,7 @@
     <string name="update_manual_copied">請手動更新，已複製到剪貼簿</string>
     <string name="update_failure_manual">%1$s，%2$s</string>
     <string name="update_open_download_page">開啟下載頁</string>
-    <string name="local_photo_effects_entry">濾鏡·邊框·浮水印</string>
+    <string name="local_photo_effects_entry">濾鏡·LUT·邊框·浮水印</string>
     <string name="local_photo_effects_info_description">可多選照片，共用目前濾鏡、邊框和浮水印，效果圖另存。</string>
     <string name="local_photo_effects_exif_hint">邊框：截圖等無 EXIF 的圖片不顯示拍攝參數</string>
     <string name="local_photo_effects_gesture_hint">預覽：左右滑動切換照片 · 長按對比濾鏡前後</string>
@@ -646,4 +646,6 @@
     <string name="remote_tool_meter">曝光尺</string>
     <string name="remote_parameters">曝光參數</string>
     <string name="remote_tool_dock">工具列</string>
+    <string name="photo_lut_set_folder">設定LUT檔案目錄</string>
+    <string name="photo_lut_help">LUT：選擇含 .cube 檔案的資料夾。長按 LUT 撥輪更換資料夾。</string>
 </resources>

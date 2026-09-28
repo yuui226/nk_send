@@ -57,10 +57,15 @@ private class ToolDragState {
 
 /** Keep the mode effect's captures small; share the screen's normal hide/stop path. */
 @Composable
-internal fun ApplyRemoteToolLayout(layout: RemoteToolLayout, onVisible: (RemoteTool, Boolean) -> Unit) {
+internal fun ApplyRemoteToolLayout(
+    layout: RemoteToolLayout,
+    onVisible: (RemoteTool, Boolean) -> Unit,
+    fixedRecorder: Boolean = false,
+) {
     val currentOnVisible by rememberUpdatedState(onVisible)
-    LaunchedEffect(layout) {
-        layout.hiddenTools.forEach { currentOnVisible(it, false) }
+    LaunchedEffect(layout, fixedRecorder) {
+        layout.hiddenTools.filterNot { fixedRecorder && it == RemoteTool.RECORD }
+            .forEach { currentOnVisible(it, false) }
     }
 }
 

@@ -22,6 +22,19 @@ internal data class LutFile(
     val label: String get() = name.dropLast(5)
 }
 
+/** Stable labels are based on folder order, independent of favorite reordering. */
+internal fun lutFileLabels(files: List<LutFile>): Map<Uri, String> {
+    val counts = files.groupingBy { it.label.lowercase(java.util.Locale.ROOT) }.eachCount()
+    val positions = mutableMapOf<String, Int>()
+    return files.associate { file ->
+        val name = file.label.ifEmpty { file.name }.take(256)
+        val group = file.label.lowercase(java.util.Locale.ROOT)
+        val position = (positions[group] ?: 0) + 1
+        positions[group] = position
+        file.uri to if ((counts[group] ?: 0) > 1) "$name · $position" else name
+    }
+}
+
 internal enum class LutFolderFailure { MISSING, DENIED, READ, TOO_MANY }
 internal class LutFolderException(val reason: LutFolderFailure, cause: Throwable? = null) :
     IOException(reason.name, cause)
@@ -35,7 +48,10 @@ internal interface LutSource {
 }
 
 /** Metadata-only enumeration. A failed enumeration never returns a partial list. */
-internal class LutFolderRepository(private val resolver: ContentResolver) : LutSource {
+internal class LutFolderRepository(
+    private val resolver: ContentResolver,
+    private val sharedGrant: (Uri) -> Boolean = { false },
+) : LutSource {
     override suspend fun scan(tree: Uri, replacing: Boolean, signal: CancellationSignal): LutFolderSnapshot =
         withContext(Dispatchers.IO) {
             var acquired = false
@@ -55,6 +71,7 @@ internal class LutFolderRepository(private val resolver: ContentResolver) : LutS
     override fun releaseGrant(uri: Uri) {
         // A write grant may belong to the transfer destination; never revoke its shared access.
         try {
+            if (sharedGrant(uri)) return
             if (resolver.persistedUriPermissions.none { it.uri == uri && it.isWritePermission }) {
                 resolver.releasePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
@@ -115,14 +132,44 @@ internal class LutFolderRepository(private val resolver: ContentResolver) : LutS
         }
     }
 
+    private fun metadata(file: LutFile, signal: CancellationSignal): Pair<Long?, Long?> {
+        val columns = arrayOf(DocumentsContract.Document.COLUMN_SIZE, DocumentsContract.Document.COLUMN_LAST_MODIFIED)
+        return resolver.query(file.uri, columns, null, null, null, signal)?.use { cursor ->
+            if (!cursor.moveToFirst()) throw FileNotFoundException(file.name)
+            val size = if (cursor.isNull(0)) null else cursor.getLong(0).takeIf { it > 0 }
+            val modified = if (cursor.isNull(1)) null else cursor.getLong(1).takeIf { it > 0 }
+            size to modified
+        } ?: (null to null)
+    }
+
+    private companion object {
+        val parsedCache = ParsedLutCache()
+    }
+
     override suspend fun read(file: LutFile, signal: CancellationSignal): CubeLut = withContext(Dispatchers.IO) {
         val context = currentCoroutineContext()
         context.ensureActive()
-        if ((file.size ?: 0) > CubeLutParser.MAX_BYTES) {
+        signal.throwIfCanceled()
+        val key = file.uri.toString()
+        // Always ask the provider, including on cache hits: revoked access or edited files
+        // must not silently use an old table. Unknown metadata deliberately bypasses caching.
+        val stamp = try { metadata(file, signal) } catch (failure: Exception) {
+            parsedCache.remove(key)
+            throw failure
+        }
+        context.ensureActive()
+        signal.throwIfCanceled()
+        if ((stamp.first ?: 0) > CubeLutParser.MAX_BYTES) {
+            parsedCache.remove(key)
             throw LutException(LutFailure.TOO_LARGE, "LUT exceeds file limit")
         }
+        parsedCache.get(key, stamp.first, stamp.second)?.let {
+            context.ensureActive()
+            signal.throwIfCanceled()
+            return@withContext it
+        }
         // A cancellable descriptor also permits virtual/cloud providers to abort opening the file.
-        resolver.openAssetFileDescriptor(file.uri, "r", signal)?.use { descriptor ->
+        val table = resolver.openAssetFileDescriptor(file.uri, "r", signal)?.use { descriptor ->
             descriptor.createInputStream().use { input ->
                 CubeLutParser.parse(input) {
                     context.ensureActive()
@@ -130,5 +177,11 @@ internal class LutFolderRepository(private val resolver: ContentResolver) : LutS
                 }
             }
         } ?: throw LutException(LutFailure.READ, "Provider did not return a stream")
+        context.ensureActive()
+        signal.throwIfCanceled()
+        if (stamp.first != null && stamp.second != null && metadata(file, signal) == stamp) {
+            parsedCache.put(key, stamp.first, stamp.second, table)
+        }
+        table
     }
 }

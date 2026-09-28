@@ -11,7 +11,14 @@ class RemoteExposureMeterTest {
             assertEquals(raw / 12f, requireNotNull(rcExposureMeterEv(meter(raw))), 0.00001f)
         }
         assertNull(rcExposureMeterEv(meter(12).copy(prop = Lab.PROP_EXP_COMPENSATION)))
-        assertNull(rcExposureMeterEv(meter(12).copy(prop = 0xD1B1)))
+
+    }
+
+    @Test fun exposureIndicateMovesExactlyOneMinorTickPerRawUnit() {
+        for (raw in listOf(-12L, -4L, -1L, 0L, 1L, 4L, 12L)) {
+            assertEquals(raw / 3f, requireNotNull(rcExposureMeterEv(
+                meter(raw).copy(prop = NIKON_EXPOSURE_INDICATE))), 0f)
+        }
     }
 
     @Test fun unknownTypesAndOutOfVerifiedRangeAreNotZero() {
@@ -30,7 +37,7 @@ class RemoteExposureMeterTest {
         assertNull(rcDecodeExposureMeterValue(meter(0), 0x2019, byteArrayOf(0)))
         val alternative = rcDecodeExposureMeterValue(meter(0).copy(prop = NIKON_EXPOSURE_INDICATE), Lab.OK, byteArrayOf(12))
         assertEquals(12L, alternative?.current)
-        assertNull(rcExposureMeterEv(alternative))
+        assertEquals(4f, requireNotNull(rcExposureMeterEv(alternative)), 0f)
     }
 
     @Test fun delayedOrClockInvalidSamplesAreNeverFresh() {

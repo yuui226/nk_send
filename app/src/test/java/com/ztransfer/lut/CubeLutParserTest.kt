@@ -33,6 +33,15 @@ class CubeLutParserTest {
         rejects("DOMAIN_MIN -5e-39 0 0\nDOMAIN_MAX 5e-39 1 1\n" + identity())
         rejects("LUT_3D_INPUT_RANGE 0 1\n" + identity(), LutFailure.UNSUPPORTED)
     }
+    @Test fun dataTokenizerPreservesWhitespaceCommentsAndRejectsWrongComponentCounts() {
+        val original = identity()
+        val varied = original.replaceFirst("0.0 0.0 0.0", "  +0e0\t0.0   -0.0  # comment")
+        assertArrayEquals(parse(original).rgb, parse(varied).rgb, 0f)
+        for (row in listOf("0 0", "0 0 0 1", "0 0 NaN", "0 Infinity 0", "0 65505 0")) {
+            rejects(original.replaceFirst("0.0 0.0 0.0", row))
+        }
+    }
+
     @Test fun boundsLinesBeforeGrowingMemory() {
         rejects("#".repeat(CubeLutParser.MAX_LINE + 1), LutFailure.TOO_LARGE)
     }

@@ -65,6 +65,7 @@ object PhotoFilterRenderer {
         val preset: PhotoFilterPreset,
         val strength: Float,
         val preserveAlpha: Boolean,
+        val cubeMapper: PhotoCubeMapper? = null,
         val ncpHueShiftDegrees: Float = 0f,
         val ncpSaturationAdjustment: Float = 0f,
         val np3SaturationAdjustment: Float = 0f,
@@ -93,6 +94,7 @@ object PhotoFilterRenderer {
         val preset = selection.preset
         val strength = selection.normalizedIntensityPercent / 100f
         return when (val parameters = preset.parameters) {
+            is CubePhotoFilterParameters -> CompiledFilter(preset, strength, preserveAlpha, cubeMapper = parameters.mapper)
             is NcpPhotoFilterParameters -> CompiledFilter(
                 preset = preset,
                 strength = strength,
@@ -197,6 +199,11 @@ object PhotoFilterRenderer {
         isCancelled: () -> Boolean = { false },
     ): PreparedOriginalFilter {
         if (isCancelled()) throw CancellationException("Photo filter render superseded")
+        // A cube already is a compact lookup; do not allocate/build the 64MiB exact RGB cache.
+        if (selection.preset.parameters is CubePhotoFilterParameters) {
+            synchronized(exactLutLock) { cachedExactLut = null }
+            return PreparedOriginalFilter(selection, null, PreparationMode.DIRECT_FALLBACK)
+        }
         if (exactLutDisabledAfterOom) {
             return PreparedOriginalFilter(
                 selection,
@@ -518,6 +525,9 @@ object PhotoFilterRenderer {
     }
 
     private fun filterPixel(color: Int, compiled: CompiledFilter): Int {
+        compiled.cubeMapper?.let {
+            return it.map(color, compiled.strength, compiled.preserveAlpha)
+        }
         val alpha = if (compiled.preserveAlpha) color ushr 24 and 0xff else 0xff
         if (alpha == 0) return color
         val originalR = color ushr 16 and 0xff
@@ -551,6 +561,7 @@ object PhotoFilterRenderer {
         var hue = originalHue
 
         when (val parameters = compiled.preset.parameters) {
+            is CubePhotoFilterParameters -> error("Cube handled before HSL conversion")
             is NcpPhotoFilterParameters -> {
                 if (compiled.ncpHueShiftDegrees != 0f) {
                     hue = normalizeHue(

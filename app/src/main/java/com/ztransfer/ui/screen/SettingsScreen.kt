@@ -341,6 +341,8 @@ fun SettingsOverlay(
     var filterDraftIntensity by remember {
         mutableIntStateOf(state.photoFilterIntensityPercent)
     }
+    val photoLutDraft = rememberPhotoLutDraft("transfer", state.photoLut) { filterDraftEnabled = false }
+
     // 真实相机图始终直接复用，不能在主设置页主动清空，否则进入效果页的第一帧会无谓闪空。
     // 兜底图延迟生成：给内存缩略图和按需 FHD 足够时间，绝大多数已连接场景不会看见假图。
     var generatedEffectPreviewFallback by remember { mutableStateOf<Bitmap?>(null) }
@@ -410,6 +412,8 @@ fun SettingsOverlay(
             selectedId = filterDraftId,
             intensityPercent = filterDraftIntensity,
             enabled = filterDraftEnabled && filterDraftId != null,
+            lut = photoLutDraft.selection,
+            lutUri = photoLutDraft.selectedUri?.toString(),
         )
     }
     fun commitPhotoEffectsDraft() {
@@ -688,7 +692,7 @@ fun SettingsOverlay(
 
             if (page == SettingsPage.EFFECTS) {
                 Spacer(Modifier.height(14.dp))
-                val previewFilter = state.photoFilters
+                val previewFilter = photoLutDraft.selection ?: state.photoFilters
                     .firstOrNull { it.id == filterDraftId }
                     ?.takeIf { filterDraftEnabled }
                     ?.let { PhotoFilterSelection(it, filterDraftIntensity) }
@@ -698,13 +702,14 @@ fun SettingsOverlay(
                     state.transferPhotoFilterIntensities,
                     filterDraftId,
                     filterDraftEnabled,
+                    photoLutDraft.selection,
                 ) {
                     nextPhotoFilterSelections(
                         filters = state.photoFilters,
                         favoriteCatalogKeys = state.favoritePhotoFilters.map { it.catalogKey },
                         rememberedIntensities = state.transferPhotoFilterIntensities,
                         selectedId = filterDraftId,
-                        enabled = filterDraftEnabled,
+                        enabled = filterDraftEnabled && photoLutDraft.selection == null,
                     )
                 }
                 val editorWatermark = when {
@@ -791,26 +796,33 @@ fun SettingsOverlay(
                     }
                 }
                 Spacer(Modifier.height(10.dp))
-                PhotoFilterEditor(
-                    filters = state.photoFilters,
-                    favoriteFilters = state.favoritePhotoFilters,
-                    rememberedIntensities = state.transferPhotoFilterIntensities,
-                    selectedId = filterDraftId,
-                    enabled = filterDraftEnabled,
-                    intensityPercent = filterDraftIntensity,
-                    onDisabled = { filterDraftEnabled = false },
-                    onSelected = {
-                        filterDraftId = it
-                        filterDraftEnabled = true
-                    },
-                    onIntensityChanged = { filterId, intensity ->
-                        filterDraftIntensity = intensity
-                        viewModel.rememberTransferPhotoFilterIntensity(filterId, intensity)
-                    },
-                    onFavoriteToggled = viewModel::toggleFavoritePhotoFilter,
-                    hapticsEnabled = state.hapticsEnabled,
-                )
-                Spacer(Modifier.height(10.dp))
+                PhotoColorEffectGroup(visible = photoLutDraft.selection == null) {
+                    PhotoFilterEditor(
+                        filters = state.photoFilters,
+                        favoriteFilters = state.favoritePhotoFilters,
+                        rememberedIntensities = state.transferPhotoFilterIntensities,
+                        selectedId = filterDraftId,
+                        enabled = filterDraftEnabled && photoLutDraft.selection == null,
+                        intensityPercent = filterDraftIntensity,
+                        onDisabled = { filterDraftEnabled = false },
+                        onSelected = {
+                            photoLutDraft.off()
+                            filterDraftId = it
+                            filterDraftEnabled = true
+                        },
+                        onIntensityChanged = { filterId, intensity ->
+                            filterDraftIntensity = intensity
+                            viewModel.rememberTransferPhotoFilterIntensity(filterId, intensity)
+                        },
+                        onFavoriteToggled = viewModel::toggleFavoritePhotoFilter,
+                        hapticsEnabled = state.hapticsEnabled,
+                    )
+                }
+                PhotoColorEffectGroup(
+                    visible = !(filterDraftEnabled && state.photoFilters.any { it.id == filterDraftId }) || photoLutDraft.selection != null,
+                ) {
+                    PhotoLutEditor(photoLutDraft, state.hapticsEnabled)
+                }
                 PhotoFrameWatermarkEditor(
                     favoriteEffects = state.favoriteFrameEffects,
                     borderEnabled = frameDraftDecorationEnabled && frameDraftBorderEnabled,
@@ -1106,7 +1118,9 @@ fun SettingsOverlay(
             } else {
                 stringResource(R.string.photo_frame_no_watermark)
             }
-            val filterSummaryLines = selectedPhotoFilter
+            val filterSummaryLines = state.photoLut?.let {
+                listOf(it.preset.name, stringResource(R.string.photo_filter_intensity_summary, it.normalizedIntensityPercent))
+            } ?: selectedPhotoFilter
                 ?.takeIf { state.photoFilterEnabled }
                 ?.let {
                     listOf(
@@ -1132,6 +1146,7 @@ fun SettingsOverlay(
                     ?: state.photoFilters.firstOrNull()?.id
                 filterDraftIntensity = state.photoFilterIntensityPercent
                 filterDraftEnabled = state.photoFilterEnabled
+                photoLutDraft.reset(state.photoLut, photoLutDraft.store.uri("transfer"))
                 frameDraftDecorationEnabled = state.photoFrameEnabled
                 // 编辑草稿使用各子项的配置，不受照片效果总开关影响。
                 frameDraftBorderEnabled = state.photoFrameEnabled && state.photoFrameBorderEnabled
@@ -1145,7 +1160,7 @@ fun SettingsOverlay(
             }
             SettingsCard(
                 borderColor = colors.accentOrange.copy(
-                    alpha = if (state.photoEffectsEnabled && (state.photoFilterEnabled || state.photoFrameEnabled)) 0.56f
+                    alpha = if (state.photoEffectsEnabled && (state.photoFilterEnabled || state.photoLut != null || state.photoFrameEnabled)) 0.56f
                     else 0.30f
                 ),
                 pressAccentColor = colors.accentOrange,
@@ -1180,9 +1195,11 @@ fun SettingsOverlay(
                         .height(IntrinsicSize.Min),
                 ) {
                     PhotoEffectSummaryItem(
-                        label = stringResource(R.string.photo_filter),
+                        label = if (state.photoLut != null) "LUT" else stringResource(R.string.photo_filter),
                         valueLines = filterSummaryLines,
-                        accentColor = colors.accentOrange,
+                        accentColor = if (state.photoLut != null)
+                            androidx.compose.ui.graphics.lerp(colors.statusConnected, colors.accentBlue, .35f)
+                        else colors.accentBlue,
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxHeight(),
@@ -1426,21 +1443,17 @@ internal fun PhotoEffectsInfoBubble(
     val panelTop = anchorBounds?.let {
         with(density) { it.bottom.toDp() } - parentTopInset + 8.dp
     } ?: 64.dp
-    val guidance = listOf(gestureHint, stringResource(R.string.photo_effects_wheel_hint))
+    val wheelHint = stringResource(R.string.photo_effects_wheel_hint)
+    val lutHint = stringResource(R.string.photo_lut_help)
+    val items = listOf(description) + extraHints + listOf(gestureHint, wheelHint, lutHint)
+    val visibleItems = items
         .filter { it.isNotBlank() }
-        .joinToString("\n")
-    val items = buildList {
-        if (description.isNotBlank()) add(TipBubbleItem(text = description))
-        extraHints.filter { it.isNotBlank() }.forEach { add(TipBubbleItem(text = it)) }
-        if (guidance.isNotBlank()) {
-            add(TipBubbleItem(text = guidance, emphasized = true))
-        }
-    }
+        .map { TipBubbleItem(text = it) }
     AnchorPopup(
         anchorBounds = anchorBounds,
         onDismiss = onDismiss,
         panelModifier = Modifier
-            .padding(start = 18.dp, end = 18.dp, top = panelTop)
+            .padding(start = 18.dp, end = 18.dp, top = panelTop, bottom = 18.dp)
             .widthIn(min = 260.dp, max = 420.dp),
         panelAlignment = Alignment.TopEnd,
         shape = RoundedCornerShape(18.dp),
@@ -1448,7 +1461,9 @@ internal fun PhotoEffectsInfoBubble(
     ) { _ ->
         TipBubbleContent(
             title = stringResource(R.string.photo_effects_info_title),
-            items = items,
+            items = visibleItems,
+            bulleted = true,
+            modifier = Modifier.verticalScroll(rememberScrollState()),
         )
     }
 }
@@ -1529,6 +1544,7 @@ private fun PhotoEffectSummaryItem(
                 style = MaterialTheme.typography.bodySmall,
                 color = colors.onSurfaceVariant,
                 maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }
@@ -1607,7 +1623,7 @@ internal fun PhotoFilterEditor(
                 label = stringResource(R.string.photo_filter),
                 wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
                 accentColor = filterAccent,
-                modifier = Modifier.weight(PHOTO_EFFECTS_PRIMARY_WHEEL_WEIGHT),
+                modifier = Modifier.weight(PHOTO_COLOR_NAME_WEIGHT),
                 onLongClick = { showFullChooser = true },
             )
             ReleaseCommitWheel(
@@ -1624,7 +1640,7 @@ internal fun PhotoFilterEditor(
                 enabled = enabled && selected != null,
                 wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
                 accentColor = filterAccent,
-                modifier = Modifier.weight(PHOTO_EFFECTS_SECONDARY_WHEEL_WEIGHT),
+                modifier = Modifier.weight(PHOTO_COLOR_INTENSITY_WEIGHT),
             )
             FavoriteToggleButton(
                 favorite = selected?.let { preset ->
@@ -1812,7 +1828,7 @@ internal fun photoEffectFavoriteButtonPalette(
 }
 
 @Composable
-private fun FavoriteToggleButton(
+internal fun FavoriteToggleButton(
     favorite: Boolean,
     enabled: Boolean,
     onClick: () -> Unit,
@@ -2817,6 +2833,7 @@ internal fun PhotoEffectsRenderedPreview(
     prefetchFilters: List<PhotoFilterSelection> = emptyList(),
     onOpen: ((Bitmap, Rect) -> Unit)?,
 ) {
+    val longPressFeedback = com.ztransfer.ui.util.rememberLongPressFeedback()
     val colors = AppTheme.colors
     val context = LocalContext.current
     val placeLookupAllowed by remember(context) {
@@ -3142,12 +3159,13 @@ internal fun PhotoEffectsRenderedPreview(
                 // 横图和竖图各用稳定视口；边框成片在内部 Fit，完整呈现对应方向的留白与铭牌。
                 .aspectRatio(viewportAspectRatio)
                 .onGloballyPositioned { previewBounds = it.boundsInRoot() }
-                .pointerInput(previewForGesture, boundsForGesture) {
+                .pointerInput(previewForGesture, boundsForGesture, longPressFeedback) {
                     if (previewForGesture == null || boundsForGesture == null) return@pointerInput
                     detectTapGestures(
                         onPress = {
                             try {
-                                tryAwaitRelease()
+                                if (previewForGesture.unfilteredBitmap != null) longPressFeedback.trackPress(this)
+                                else tryAwaitRelease()
                             } finally {
                                 showUnfiltered = false
                             }
@@ -3158,7 +3176,7 @@ internal fun PhotoEffectsRenderedPreview(
                         onDoubleTap = { latestOnRotate?.invoke() },
                         onLongPress = {
                             if (previewForGesture.unfilteredBitmap != null) {
-                                showUnfiltered = true
+                                longPressFeedback.trigger { showUnfiltered = true }
                             }
                         },
                     )
@@ -3247,8 +3265,10 @@ private fun PhotoEffectsPreviewLayer(
 
 private const val PHOTO_EFFECTS_PREVIEW_LANDSCAPE_ASPECT_RATIO = 4f / 3f
 private const val PHOTO_EFFECTS_PREVIEW_PORTRAIT_ASPECT_RATIO = 3f / 4f
-private val PHOTO_EFFECTS_CONTROL_HEIGHT = 50.dp
+internal val PHOTO_EFFECTS_CONTROL_HEIGHT = 50.dp
 // 顶部两行共用 4:3 栅格：名称类波轮更舒展，数值/开关波轮更紧凑，收藏方钮保持对齐。
+internal const val PHOTO_COLOR_NAME_WEIGHT = 3f
+internal const val PHOTO_COLOR_INTENSITY_WEIGHT = 2f
 private const val PHOTO_EFFECTS_PRIMARY_WHEEL_WEIGHT = 4f
 private const val PHOTO_EFFECTS_SECONDARY_WHEEL_WEIGHT = 3f
 // 与相机 FHD 预览源保持一致，避免高密度屏幕或放大查看时出现二次缩放模糊。
@@ -4980,7 +5000,7 @@ private fun GpsStatusButton(
  * 把相关设置聚成一个视觉区域。[borderColor] 可覆盖描边（如目录未设时橙色强调）。
  */
 @Composable
-private fun SettingsCard(
+internal fun SettingsCard(
     modifier: Modifier = Modifier,
     borderColor: Color = AppTheme.colors.glassPanelBorder,
     tintColor: Color? = null,

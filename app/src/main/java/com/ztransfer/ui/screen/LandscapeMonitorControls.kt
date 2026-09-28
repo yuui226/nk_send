@@ -5,11 +5,8 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.foundation.background
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -21,17 +18,14 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.dp
-import com.ztransfer.ui.theme.AppTheme
 
 /** Layout only: all camera actions and tool preference mutations remain in RemoteScreen. */
 @Composable
 internal fun LandscapeMonitorControls(
     layout: LandscapeMonitorLayout,
     tools: List<RemoteTool>,
-    cameraRecording: Boolean,
     onPanelChange: () -> Unit,
     dockButton: @Composable (Boolean, () -> Unit, Modifier) -> Unit,
-    parameterButton: @Composable (Boolean, () -> Unit) -> Unit,
     rotateButton: @Composable () -> Unit,
     backButton: @Composable () -> Unit,
     dispButton: @Composable () -> Unit,
@@ -41,154 +35,131 @@ internal fun LandscapeMonitorControls(
     tool: @Composable (RemoteTool) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val overlay = layout.placement == MonitorControlPlacement.OVERLAY
-    val bottom = layout.placement == MonitorControlPlacement.BOTTOM
-    var dockOpen by remember(layout.placement) { mutableStateOf(false) }
-    var parametersOpen by remember(layout.placement) { mutableStateOf(!overlay) }
+    var dockOpen by remember { mutableStateOf(false) }
     var anchor by remember { mutableStateOf<Rect?>(null) }
     // A window/ratio change can detach a menu's old tool anchor. Close that menu before reuse.
     LaunchedEffect(layout) { onPanelChange() }
     fun close() {
         onPanelChange()
         dockOpen = false
-        parametersOpen = !overlay
     }
-    BackHandler(dockOpen || (overlay && parametersOpen)) { close() }
-    val showParameters = parametersOpen && !dockOpen
+    BackHandler(dockOpen) { close() }
+    val showParameters = !dockOpen
     val parameterAnimation = rememberGenieVisibility(showParameters)
     val dockAnimation = rememberGenieVisibility(dockOpen)
-    val panelSurface = if (overlay) Modifier.background(
-        AppTheme.colors.background.copy(alpha = .92f), RoundedCornerShape(20.dp)
-    ) else Modifier
     val dockSlot: @Composable () -> Unit = {
         dockButton(dockOpen, {
             onPanelChange()
             dockOpen = !dockOpen
-            parametersOpen = !overlay
         }, Modifier.onGloballyPositioned { anchor = it.boundsInRoot() })
-    }
-    val parameterEntry: @Composable () -> Unit = {
-        if (overlay && !dockOpen) parameterButton(parametersOpen) {
-            onPanelChange()
-            parametersOpen = !parametersOpen
-        }
     }
     val header: @Composable () -> Unit = {
         // The caller supplies real bounds wide enough for all navigation hit targets.
-        Box(Modifier.fillMaxWidth().height(40.dp), contentAlignment = Alignment.CenterEnd) {
+        Box(Modifier.fillMaxWidth().height(36.dp), contentAlignment = Alignment.CenterEnd) {
             Row(Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically) {
-                rotateButton()
-                Spacer(Modifier.width(4.dp))
                 dockSlot()
-                if (overlay) Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) { parameterEntry() }
                 Spacer(Modifier.weight(1f))
                 backButton()
             }
         }
     }
     val content: @Composable () -> Unit = {
-        Box(Modifier.fillMaxSize()) {
-            GenieInlinePanel(parameterAnimation, { anchor },
-                Modifier.fillMaxSize().blockMonitorPanelInput { !showParameters || parameterAnimation.progress.value < .999f }) {
-                Box(Modifier.fillMaxSize().then(panelSurface)) {
-                if (bottom) {
-                    // Narrow square windows still need readable wheel widths.
-                    val parameterColumns = if (layout.controls.width - 244f >= 338f) 4 else 2
-                    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterVertically)) {
-                        (0..3).toList().chunked(parameterColumns).forEach { row ->
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                row.forEach { parameter(it, Modifier.weight(1f)) }
-                            }
-                        }
+        GenieInlinePanel(parameterAnimation, { anchor },
+            Modifier.fillMaxSize().blockMonitorPanelInput { !showParameters || parameterAnimation.progress.value < .999f }) {
+            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(if (layout.columns == 1) 2.dp else if (layout.bottomControls) 4.dp else 6.dp, Alignment.CenterVertically)) {
+                (0..3).toList().chunked(layout.columns).forEach { indices ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        indices.forEach { parameter(it, Modifier.weight(1f)) }
                     }
-                } else {
-                    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
-                        verticalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterVertically)) {
-                        (0..3).toList().chunked(layout.columns).forEach { indices ->
-                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                indices.forEach { parameter(it, Modifier.weight(1f)) }
-                            }
-                        }
-                    }
-                }
                 }
             }
-            GenieInlinePanel(dockAnimation, { anchor },
-                Modifier.fillMaxSize().blockMonitorPanelInput { !dockOpen || dockAnimation.progress.value < .999f }) {
-                Box(Modifier.fillMaxSize().then(panelSurface)) {
-                if (bottom) {
-                    Row(Modifier.fillMaxSize().horizontalScroll(rememberScrollState()).padding(4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        tools.chunked(2).forEach { column ->
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                column.forEach { entry -> key(entry) { Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) { tool(entry) } } }
-                            }
-                        }
+        }
+    }
+    // Tool tiles are narrower than parameter wheels, so they have their own column count.
+    val dockColumns = ((layout.controls.width - 8f) / 48f).toInt()
+        .coerceIn(1, if (layout.bottomControls) Int.MAX_VALUE else 3)
+    val dockContent: @Composable () -> Unit = {
+        val dockScroll = rememberScrollState()
+        GenieInlinePanel(dockAnimation, { anchor },
+            Modifier.fillMaxSize().blockMonitorPanelInput { !dockOpen || dockAnimation.progress.value < .999f }) {
+            Column(Modifier.fillMaxSize().verticalScrollEdgeFade(dockScroll).verticalScroll(dockScroll).padding(4.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                tools.chunked(dockColumns).forEach { row ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        row.forEach { entry -> key(entry) {
+                            Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) { tool(entry) }
+                        } }
+                        repeat(dockColumns - row.size) { Spacer(Modifier.size(44.dp)) }
                     }
-                } else {
-                    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(4.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        tools.chunked(layout.columns).forEach { row ->
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                                row.forEach { entry -> key(entry) { Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) { tool(entry) } } }
-                                if (row.size < layout.columns) Spacer(Modifier.size(44.dp))
-                            }
-                        }
-                    }
-                }
                 }
             }
         }
     }
     val captureSlot: @Composable () -> Unit = {
         Box(Modifier.size(layout.shutterSize.dp), contentAlignment = Alignment.Center) {
-            val visible = !dockOpen || cameraRecording
+            val visible = !dockOpen
             AnimatedVisibility(visible, enter = fadeIn(tween(160)), exit = fadeOut(tween(160)),
                 modifier = Modifier.blockMonitorPanelInput { !visible }) { shutter() }
         }
     }
-    // Reserve the full expanded recording width; expansion must not move DISP or the image.
+    // Horizontal expansion stays in the bottom row, beside rotation.
     val localSlot: @Composable () -> Unit = {
-        Box(Modifier.width(96.dp).height(44.dp).padding(start = 8.dp),
-            contentAlignment = Alignment.CenterStart) { localRecorder() }
+        Box(Modifier.height(36.dp), contentAlignment = Alignment.CenterStart) {
+            AnimatedVisibility(!dockOpen, enter = fadeIn(tween(160)), exit = fadeOut(tween(160)),
+                modifier = Modifier.blockMonitorPanelInput { dockOpen }) { localRecorder() }
+        }
     }
     val dispSlot: @Composable () -> Unit = {
-        Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(36.dp), contentAlignment = Alignment.Center) {
             AnimatedVisibility(!dockOpen, enter = fadeIn(tween(160)), exit = fadeOut(tween(160)),
                 modifier = Modifier.blockMonitorPanelInput { dockOpen }) { dispButton() }
         }
     }
-    if (bottom) {
-        Row(modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            // Square screens use the existing bottom fallback. Keep DISP at shutter height.
-            Column(Modifier.width(96.dp).padding(top = (layout.shutterSize / 2f - 22f).dp)) {
-                localSlot()
-                Box(Modifier.padding(start = 4.dp)) { dispSlot() }
+    val rotationSlot: @Composable () -> Unit = {
+        Box(Modifier.size(36.dp), contentAlignment = Alignment.Center) {
+            AnimatedVisibility(!dockOpen, enter = fadeIn(tween(160)), exit = fadeOut(tween(160)),
+                modifier = Modifier.blockMonitorPanelInput { dockOpen }) { rotateButton() }
+        }
+    }
+    val captureCluster: @Composable () -> Unit = {
+        Box(Modifier.fillMaxWidth().height((layout.footerHeight + layout.captureLift).dp)) {
+            Column(Modifier.align(Alignment.BottomStart).padding(start = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                dispSlot()
+                rotationSlot()
             }
-            Box(Modifier.weight(1f).fillMaxHeight()) { content() }
-            Column(Modifier.width(132.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                header()
-                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { captureSlot() }
+            Box(Modifier.align(if (!layout.bottomControls && layout.columns == 2)
+                Alignment.TopCenter else Alignment.TopEnd)) { captureSlot() }
+            Box(Modifier.align(Alignment.BottomStart).padding(start = 44.dp)) { localSlot() }
+        }
+    }
+    if (layout.bottomControls) {
+        Box(modifier) {
+            Row(Modifier.fillMaxSize().padding(top = 40.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.weight(1f).fillMaxHeight()) { content() }
+                Box(Modifier.width(maxOf(116f, layout.shutterSize + 52f).dp)) { captureCluster() }
             }
+            Box(Modifier.fillMaxSize().padding(top = 40.dp)) { dockContent() }
+            header()
         }
     } else {
         Box(modifier) {
             Column(Modifier.align(Alignment.TopEnd).width(layout.controls.width.dp).fillMaxHeight(),
-                verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Spacer(Modifier.height(40.dp))
+                verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Spacer(Modifier.height(36.dp))
                 Box(Modifier.weight(1f).fillMaxWidth()) { content() }
-                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { captureSlot() }
-                // Same DISP baseline as before, with recording directly above it.
-                // Use the actual interaction width on narrow rails so the saved state also fits.
-                Spacer(Modifier.height(if (layout.controls.width >= 132f) 88.dp else 132.dp))
+                // Capture shares the bottom row with DISP; it never takes a wheel row.
+                Spacer(Modifier.height((layout.footerHeight + layout.captureLift).dp))
             }
-            Column(Modifier.align(Alignment.BottomStart)
-                .padding(start = (layout.interactionBounds.width - if (overlay) 96f else maxOf(layout.controls.width, 96f)).coerceAtLeast(0f).dp)
-                .padding(bottom = if (layout.controls.width >= 132f) 0.dp else 44.dp)) {
-                localSlot()
-                Box(Modifier.padding(start = 4.dp)) { dispSlot() }
-            }
+            Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth()) { captureCluster() }
+            // Dock owns all space below navigation, including the capture/recorder footer.
+            Box(Modifier.align(Alignment.TopEnd).width(layout.controls.width.dp)
+                .fillMaxHeight().padding(top = 40.dp)) { dockContent() }
             header()
         }
     }

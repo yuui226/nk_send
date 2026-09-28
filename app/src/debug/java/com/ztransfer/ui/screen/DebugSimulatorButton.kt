@@ -29,6 +29,7 @@ internal fun DebugSimulatorButton(
     onClick: () -> Unit,
     onLongClick: () -> Unit,
 ) {
+    val longPressFeedback = com.ztransfer.ui.util.rememberLongPressFeedback()
     val colors = AppTheme.colors
     Row {
         Spacer(Modifier.width(8.dp))
@@ -37,10 +38,12 @@ internal fun DebugSimulatorButton(
             modifier = Modifier
                 .height(36.dp)
                 .combinedClickable(
+                    interactionSource = longPressFeedback.interactions,
+                    indication = androidx.compose.foundation.LocalIndication.current,
                     role = Role.Button,
                     onClick = onClick,
                     onLongClickLabel = "播放高级版连接成功动画",
-                    onLongClick = onLongClick,
+                    onLongClick = { longPressFeedback.trigger(onLongClick) },
                 ),
         ) {
             Box(

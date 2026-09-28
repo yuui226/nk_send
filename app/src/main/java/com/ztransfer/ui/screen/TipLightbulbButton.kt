@@ -274,6 +274,7 @@ internal fun TipBubbleContent(
     title: String,
     items: List<TipBubbleItem>,
     modifier: Modifier = Modifier,
+    bulleted: Boolean = false,
 ) {
     val colors = AppTheme.colors
     Column(modifier = modifier.padding(18.dp)) {
@@ -305,7 +306,18 @@ internal fun TipBubbleContent(
                 if (hasText) Spacer(Modifier.height(5.dp))
             }
             if (!hasText) return@forEachIndexed
-            if (item.emphasized) {
+            if (bulleted) {
+                Row(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "·",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.onSurfaceVariant,
+                    )
+                    Box(Modifier.weight(1f)) {
+                        TipBubbleItemText(item, colors.onSurfaceVariant, null)
+                    }
+                }
+            } else if (item.emphasized) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()

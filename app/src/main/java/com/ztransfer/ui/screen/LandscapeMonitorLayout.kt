@@ -6,62 +6,62 @@ internal data class MonitorBounds(val x: Float, val y: Float, val width: Float, 
     val bottom get() = y + height
 }
 
-internal enum class MonitorControlPlacement { RIGHT, BOTTOM, OVERLAY }
-
 internal data class LandscapeMonitorLayout(
     val image: MonitorBounds,
     val controls: MonitorBounds,
-    val placement: MonitorControlPlacement,
     val columns: Int,
     val shutterSize: Float,
+    val bottomControls: Boolean = false,
 ) {
-    /** Include the navigation row in actual hit-test bounds, not just its drawing overflow. */
-    val interactionBounds: MonitorBounds
-        get() {
-            val width = maxOf(128f, controls.width)
-            return MonitorBounds((controls.right - width).coerceAtLeast(0f), controls.y,
-                minOf(width, controls.right), controls.height)
-        }
+    val footerHeight: Float get() = maxOf(36f, shutterSize) + 40f
+    // Use spare height on wide rails to bring capture closer to the parameter controls.
+    val captureLift: Float get() = if (!bottomControls && columns == 2)
+        ((controls.height - 36f - 8f - footerHeight - 98f) / 3f).coerceIn(0f, 48f) else 0f
+    val parameterHeight: Float get() = when {
+        bottomControls -> 46f
+        columns == 1 -> ((controls.height - 36f - 8f - footerHeight - 6f) / 4f).coerceIn(42f, 46f)
+        else -> 46f
+    }
+    val interactionBounds: MonitorBounds get() = controls
 }
 
-/**
- * Preserves the immersive image fit first, then uses the remaining space for controls.
- * Tool visibility, Dock state and recording state deliberately are not inputs.
- * The audio slot is reserved by camera mode so toggling meters cannot resize the image.
+/** Fit the largest image first. Use natural side/bottom space before reducing its size.
+ * Only when neither fits, compare both arrangements and keep the larger image.
  */
 internal fun landscapeMonitorLayout(
     width: Float,
     height: Float,
     imageAspect: Float,
-    movie: Boolean,
 ): LandscapeMonitorLayout {
     require(width.isFinite() && height.isFinite() && width >= 0f && height >= 0f)
     require(imageAspect.isFinite() && imageAspect > 0f)
     val shutter = (height * .18f).coerceIn(48f, 64f)
-    val audio = if (movie) 36f else 0f
-    val availableWidth = (width - shutter - audio - 24f).coerceAtLeast(0f)
-    val availableHeight = (height - 8f).coerceAtLeast(0f)
-    val imageWidth = minOf(availableWidth, availableHeight * imageAspect)
+    val fullWidth = minOf((width - 8f).coerceAtLeast(0f),
+        (height - 8f).coerceAtLeast(0f) * imageAspect)
+    // Never reserve a two-column rail just because the viewport is short.
+    val minimumRail = 116f
+    val sideWidth = minOf(fullWidth, (width - minimumRail - 16f).coerceAtLeast(0f))
+    // Header + two compact parameter rows. Recorder and shutter sit beside those rows.
+    val bottomHeight = 164f
+    val bottomWidth = if (width >= 360f && height >= bottomHeight + 16f)
+        minOf(fullWidth, (height - bottomHeight - 16f) * imageAspect) else -1f
+    val useBottom = bottomWidth > sideWidth + .01f
+    val imageWidth = if (useBottom) bottomWidth else sideWidth
     val imageHeight = imageWidth / imageAspect
-    val image = MonitorBounds(minOf(4f, width), (height - imageHeight) / 2f, imageWidth, imageHeight)
-    val rightX = (image.right + audio + 8f).coerceAtMost(width)
-    val rightWidth = (width - rightX - 4f).coerceAtLeast(0f)
-    val bottomY = (image.bottom + 8f).coerceAtMost(height)
-    val bottomHeight = (height - bottomY - 4f).coerceAtLeast(0f)
-    val safeHeight = (height - 16f).coerceAtLeast(0f)
-    val placement = when {
-        rightWidth >= 176f && safeHeight >= 292f -> MonitorControlPlacement.RIGHT
-        rightWidth >= 88f && safeHeight >= 460f -> MonitorControlPlacement.RIGHT
-        bottomHeight >= 156f && width >= 360f -> MonitorControlPlacement.BOTTOM
-        else -> MonitorControlPlacement.OVERLAY
+    val imageY = if (useBottom) minOf((height - imageHeight) / 2f,
+        height - bottomHeight - 12f - imageHeight).coerceAtLeast(4f)
+        else (height - imageHeight) / 2f
+    val image = MonitorBounds(minOf(4f, width), imageY, imageWidth, imageHeight)
+    val controls = if (useBottom) {
+        MonitorBounds(4f, image.bottom + 8f, (width - 8f).coerceAtLeast(0f),
+            (height - image.bottom - 12f).coerceAtLeast(0f))
+    } else {
+        val rightX = (image.right + 8f).coerceAtMost(width)
+        MonitorBounds(rightX, minOf(8f, height), (width - rightX - 4f).coerceAtLeast(0f),
+            (height - 12f).coerceAtLeast(0f))
     }
-    val controls = when (placement) {
-        MonitorControlPlacement.RIGHT -> MonitorBounds(rightX, minOf(8f, height), rightWidth, safeHeight)
-        MonitorControlPlacement.BOTTOM -> MonitorBounds(minOf(8f, width), bottomY, (width - 16f).coerceAtLeast(0f), bottomHeight)
-        MonitorControlPlacement.OVERLAY -> {
-            val panelWidth = minOf(192f, (width - 16f).coerceAtLeast(0f))
-            MonitorBounds((width - panelWidth - 8f).coerceAtLeast(0f), minOf(8f, height), panelWidth, safeHeight)
-        }
-    }
-    return LandscapeMonitorLayout(image, controls, placement, if (controls.width >= 176f) 2 else 1, shutter)
+    val columns = if (useBottom) 2 else if (controls.width >= 176f) 2 else 1
+    // Enlarge within existing free width only; keep the left DISP/rotation column clear.
+    val captureSize = if (useBottom) shutter else (controls.width - 56f).coerceIn(48f, 74f)
+    return LandscapeMonitorLayout(image, controls, columns, captureSize, useBottom)
 }

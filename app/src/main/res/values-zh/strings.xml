@@ -262,7 +262,7 @@
     <string name="photo_frame_effect_shadow">阴影</string>
     <string name="photo_frame_effect_outline">描边</string>
     <string name="photo_filter">照片滤镜</string>
-    <string name="photo_effects">滤镜·边框·水印</string>
+    <string name="photo_effects">滤镜·LUT·边框·水印</string>
     <string name="photo_effects_open_editor">编辑照片效果</string>
     <string name="photo_effects_info_title">照片效果说明</string>
     <string name="photo_effects_info_description">传输原图后，效果图另存。</string>
@@ -270,8 +270,8 @@
     <string name="photo_effects_wheel_hint">波轮：按住上下拖动可快速调节</string>
     <string name="photo_effects_full_chooser_hint">长按滤镜拨轮可按分类选择</string>
     <string name="photo_filter_off_option">无滤镜</string>
-    <string name="photo_filter_intensity_summary">强度 %1$d%%</string>
-    <string name="photo_filter_intensity">滤镜强度</string>
+    <string name="photo_filter_intensity_summary">%1$d%%</string>
+    <string name="photo_filter_intensity">强度</string>
     <string name="photo_filter_task_label">滤镜：%1$s · %2$d%%</string>
     <string name="photo_effect_favorite_add">收藏当前效果</string>
     <string name="photo_effect_favorite_remove">取消收藏当前效果</string>
@@ -549,7 +549,7 @@
     <string name="update_manual_copied">请手动更新，已复制到剪贴板</string>
     <string name="update_failure_manual">%1$s，%2$s</string>
     <string name="update_open_download_page">打开下载页</string>
-    <string name="local_photo_effects_entry">滤镜·边框·水印</string>
+    <string name="local_photo_effects_entry">滤镜·LUT·边框·水印</string>
     <string name="local_photo_effects_info_description">可多选照片，共用当前滤镜、边框和水印，效果图另存。</string>
     <string name="local_photo_effects_exif_hint">边框：截图等无 EXIF 的图片不显示拍摄参数</string>
     <string name="local_photo_effects_gesture_hint">预览：左右滑动切换照片 · 长按对比滤镜前后</string>
@@ -650,4 +650,6 @@
     <string name="remote_tool_meter">曝光尺</string>
     <string name="remote_parameters">曝光参数</string>
     <string name="remote_tool_dock">工具栏</string>
+    <string name="photo_lut_set_folder">设置LUT文件目录</string>
+    <string name="photo_lut_help">LUT：选择含 .cube 文件的文件夹。长按 LUT 拨轮更换文件夹。</string>
 </resources>

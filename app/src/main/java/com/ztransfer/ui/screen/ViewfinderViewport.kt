@@ -95,7 +95,7 @@ internal fun ZoomableViewfinder(
             val crop = viewport.visibleRegion(imageAspect)
             Canvas(Modifier.align(Alignment.TopEnd).padding(top = 42.dp, end = 8.dp)
                 .width(64.dp).aspectRatio(imageAspect)) {
-                drawRect(Color.Black.copy(alpha = 0.55f))
+                drawRect(MonitorOverlayBackground)
                 drawRect(Color.White.copy(alpha = 0.65f), style = Stroke(1.dp.toPx()))
                 drawRect(Color(0xFFFFD45B),
                     topLeft = Offset(crop.left * size.width, crop.top * size.height),

@@ -73,7 +73,6 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.CenterFocusStrong
 import androidx.compose.material.icons.filled.LockOpen
-import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.outlined.AspectRatio
@@ -653,6 +652,7 @@ private fun RemoteContent(
     }
     // 弹出完整值表的参数（点胶囊中间值触发）
     var listProp by remember { mutableStateOf<Int?>(null) }
+    val parameterAnchors = remember { mutableMapOf<Int, androidx.compose.ui.layout.LayoutCoordinates>() }
 
     // ---------- 开发者面板 ----------
     val diagnosticPreferences = remember(services.context) {
@@ -661,13 +661,12 @@ private fun RemoteContent(
     val logLines = remember {
         mutableStateListOf<String>().apply {
             diagnosticPreferences.getString("last_report", null)?.lineSequence()
-                ?.filter { it.isNotBlank() }?.forEach { appendRemoteDiagnosticLine(this, it) }
+                ?.filter { it.isNotBlank() && "] meter " !in it }?.forEach { appendRemoteDiagnosticLine(this, it) }
         }
     }
     var diagnosticReportStarted by remember { mutableStateOf(false) }
     var diagnosticCapture by remember { mutableStateOf(false) }
     var devPanel by remember { mutableStateOf(false) }
-    val postureDiagnostic = remember { PostureDiagnostic() }
     var diagnosticControlEnabled by remember { mutableStateOf(false) }
     var diagnosticControlBusy by remember { mutableStateOf(false) }
     var diagnosticControlJob by remember { mutableStateOf<Job?>(null) }
@@ -738,8 +737,6 @@ private fun RemoteContent(
         if (!isRemoteDiagnosticLine(line)) return
         appendDiagnostic(line)
     }
-    // Meter sampling is explicitly requested by enabling its tool, independent of PC-control diagnostics.
-    fun meterLog(line: String) = appendDiagnostic("meter $line")
 
     fun beginDiagnosticReport(cam: NikonCamera) {
         diagnosticControlLogging = true
@@ -1174,7 +1171,6 @@ private fun RemoteContent(
                             firstFrameLogged = true
                             devLog("LiveView first frame received after ${SystemClock.elapsedRealtime() - stabilizationStartedAt}ms")
                         }
-                        postureDiagnostic.offer(cam, grabbed)
                         frameCh.trySend(grabbed)
                         val now = SystemClock.elapsedRealtime()
                         if (!liveViewStable && requiresUsbStabilization) {
@@ -2039,7 +2035,10 @@ private fun RemoteContent(
     }
     val lutState = remember {
         LutMonitorState(
-            repository = LutFolderRepository(services.context.applicationContext.contentResolver),
+            repository = LutFolderRepository(services.context.applicationContext.contentResolver) { uri ->
+                val photoFolders = com.ztransfer.lut.PhotoLutStore(services.context).folders
+                (photoFolders.folder == uri).also { shared -> if (shared) photoFolders.markFolderGrantOwned() }
+            },
             preferences = LutPreferences(services.context.getSharedPreferences("monitor_lut", Context.MODE_PRIVATE)),
             scope = services.scope,
             closeFalseColor = {
@@ -2086,75 +2085,55 @@ private fun RemoteContent(
         val cam = cameraViewModel.getCamera() ?: return@LaunchedEffect
         fun busy() = capturing || recBusy || diagnosticControlBusy || probing || autoIsoBusy ||
             afHeld || tapFocusBusy || afJob?.isActive == true || pendingSets.values.any { it.isActive }
-        meterLog("start app=${BuildConfig.VERSION_NAME} camera=${cam.deviceModel} movie=$movieMode")
         var capability: RcParam? = null
         try {
             for (attempt in 0 until 3) {
                 while (busy()) delay(250)
-                capability = cam.rcGetParam(NIKON_LIGHT_METER, ::meterLog)
+                capability = cam.rcGetParam(NIKON_LIGHT_METER)
                 if (capability != null) break
                 delay(700)
             }
-            val descriptor = capability
+            var descriptor = capability
             if (descriptor == null || descriptor.dataType != 0x0001 || descriptor.writable) {
-                meterLog("unavailable prop=0xD10A type=${descriptor?.dataType} writable=${descriptor?.writable}; no guessed fallback")
                 while (busy()) delay(250)
-                val alternative = cam.rcGetParam(NIKON_EXPOSURE_INDICATE, ::meterLog)
-                if (alternative?.dataType == 0x0001 && !alternative.writable) {
-                    meterLog("diagnostic-only prop=0xD1B1; EV scale unverified; collecting up to 12 raw samples")
-                    var samples = 0
-                    val deadline = SystemClock.elapsedRealtime() + 30_000L
-                    while (isActive && samples < 12 && SystemClock.elapsedRealtime() < deadline) {
-                        if (busy()) { delay(250); continue }
-                        val raw = cam.rcReadExposureMeter(alternative, ::meterLog) ?: return@LaunchedEffect
-                        if (!isActive || meterGeneration[0] != generation) return@LaunchedEffect
-                        if (!busy()) {
-                            meterLog("diagnostic prop=0xD1B1 raw=${raw.current} movie=$movieMode")
-                            samples++
-                        }
-                        delay(1_000)
-                    }
-                }
+                descriptor = cam.rcGetParam(NIKON_EXPOSURE_INDICATE)
+            }
+            if (descriptor == null || descriptor.dataType != 0x0001 || descriptor.writable) {
                 return@LaunchedEffect
             }
             var failures = 0
-            var lastLog = 0L
             while (isActive) {
                 if (busy()) {
-                    meterSample = null
+                    // Preserve the last indicator while camera writes temporarily pause polling.
+                    meterSample = meterSample?.let { it.first to SystemClock.elapsedRealtime() }
                     delay(500)
                     continue
                 }
                 val startedAt = SystemClock.elapsedRealtime()
-                val value = cam.rcReadExposureMeter(descriptor, ::meterLog)
+                val value = cam.rcReadExposureMeter(descriptor)
                 if (!isActive || meterGeneration[0] != generation) return@LaunchedEffect
                 val ev = rcExposureMeterEv(value)
                 val now = SystemClock.elapsedRealtime()
                 val fresh = com.ztransfer.protocol.rcExposureMeterFresh(startedAt, now) && !busy()
-                meterSample = ev?.takeIf { fresh }?.let { it to startedAt }
+                if (ev != null && fresh) meterSample = ev to startedAt
                 failures = if (value == null) failures + 1 else 0
-                if (now - lastLog >= 5_000L || failures == 1) {
-                    meterLog("prop=0xD10A raw=${value?.current} ev=$ev fresh=$fresh elapsed=${now - startedAt}ms movie=$movieMode")
-                    lastLog = now
-                }
                 if (failures >= 3) {
-                    meterLog("suspended after 3 read failures; toggle tool to retry")
                     break
                 }
                 delay(500)
             }
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled
-        } catch (error: Exception) {
-            meterLog("read failed ${error.javaClass.simpleName}")
+        } catch (_: Exception) {
+            // Unsupported/interrupted reads leave the meter unavailable, never stale.
         } finally {
             if (meterGeneration[0] == generation) meterSample = null
         }
     }
-    // Expire even while a protocol read is blocked; never leave an old reading on the ruler.
+    // Briefly retain the last reading between writes/reads; disconnect and terminal failure still clear it.
     LaunchedEffect(meterSample) {
         val sample = meterSample ?: return@LaunchedEffect
-        delay((1_500L - (SystemClock.elapsedRealtime() - sample.second)).coerceAtLeast(0L))
+        delay((3_000L - (SystemClock.elapsedRealtime() - sample.second)).coerceAtLeast(0L))
         if (meterSample == sample) meterSample = null
     }
 
@@ -2859,13 +2838,13 @@ private fun RemoteContent(
     }
     var dispMode by tools.disp
     val changeToolVisibility: (RemoteTool, Boolean) -> Unit = ::setToolVisible
-    ApplyRemoteToolLayout(tools.layout(movieMode), changeToolVisibility)
+    ApplyRemoteToolLayout(tools.layout(movieMode), changeToolVisibility, fixedRecorder = landscapeLayout)
     val renderTool: @Composable (RemoteTool?) -> Unit = { tool ->
         if (tool == RemoteTool.RECORD) {
             RecControlBar(viewfinderRecorder != null, recPaused, recElapsed,
                 { startRecorder() }, { togglePauseRecorder() }, { stopRecorder() },
                 modifier = Modifier.height(36.dp), enabled = isPro,
-                isFinalizing = recFinalizing, showDone = recSaveSuccess)
+                isFinalizing = recFinalizing, showDone = recSaveSuccess, compactSaved = landscapeLayout)
         } else {
             val active = when (tool) {
                 RemoteTool.HD -> hdLiveView
@@ -2993,20 +2972,8 @@ private fun RemoteContent(
                     BatteryPill(percent = rcBatteryPercentage(batteryParam))
                 }
                 Spacer(Modifier.weight(1f))
-                GlassButton(
-                    onClick = {
-                        onNavigateBack()
-                    },
-                    shape = RoundedCornerShape(22.dp),
-                    showSheen = false,
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                    modifier = Modifier.height(36.dp)
-                ) {
-                    Icon(
-                        Icons.Default.ArrowForward,
-                        contentDescription = stringResource(R.string.cd_back),
-                        tint = colors.onBackground, modifier = Modifier.size(18.dp)
-                    )
+                MonitorHeaderButton(onNavigateBack) {
+                    Icon(Icons.Default.ArrowForward, stringResource(R.string.cd_back), Modifier.size(18.dp))
                 }
             }
             Spacer(Modifier.height(12.dp))
@@ -3071,7 +3038,7 @@ private fun RemoteContent(
                                 autoIsoValue = if (hasAutoIso) effectiveAutoIsoValue else null,
                                 autoIsoBusy = hasAutoIso && autoIsoBusy,
                                 onAutoIsoToggle = if (hasAutoIso) ::setAutoIso else null,
-                                modifier = Modifier.weight(1f),
+                                modifier = Modifier.weight(1f).onGloballyPositioned { parameterAnchors[prop] = it },
                                 onStep = { delta -> stepParam(prop, delta) },
                                 onOpenList = {
                                     if (params[prop]?.values?.isNotEmpty() == true) listProp = prop
@@ -3110,13 +3077,15 @@ private fun RemoteContent(
         } else {
             BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
                 val monitorLayout = landscapeMonitorLayout(maxWidth.value, maxHeight.value,
-                    viewfinderAspect * desqueezeMultiplier, movieMode)
+                    viewfinderAspect * desqueezeMultiplier)
                 val imageX = monitorLayout.image.x.dp
                 val imageY = monitorLayout.image.y.dp
                 val imageWidth = monitorLayout.image.width.dp
                 val imageHeight = monitorLayout.image.height.dp
                 val landscapeShutterSize = monitorLayout.shutterSize.dp
-                val landscapeAudioWidth = if (movieMode) 36.dp else 0.dp
+                val landscapeMeterTop = if (movieMode) 34.dp else MonitorInfoTopInset
+                val audioTop = landscapeMeterTop + if (meterEnabled) MonitorExposureMeterHeight + MonitorMeterStackGap else 0.dp
+                val audioHeight = (imageHeight - audioTop - 8.dp).coerceIn(0.dp, 88.dp)
 
                 RemoteViewfinderPanel(
                     frameProvider = { frame },
@@ -3151,81 +3120,67 @@ private fun RemoteContent(
                 levelPitch = levelPitch,
                     showEmbeddedAudioMeter = false,
                     informationBottomInset = if (dispMode == MonitorDispMode.CAMERA) 48.dp else 0.dp,
-                    // Leave room for DISP text and the narrow-screen navigation row.
-                    meterTopInset = 54.dp,
+                    // Sit directly below STBY; navigation stays outside the image.
+                    meterTopInset = landscapeMeterTop,
                     desqueezeMultiplier = desqueezeMultiplier,
                     modifier = Modifier
                         .offset(x = imageX, y = imageY)
                         .size(width = imageWidth, height = imageHeight)
                 )
 
+                // Same right-edge column as the exposure meter, below its 120dp ruler.
                 ViewfinderSoundMeterOverlay(
                     enabled = connected && movieMode && showAudioLevels,
                     frameProvider = { frame },
                     bottomInset = 0.dp,
+                    startInset = 0.dp,
                     modifier = Modifier
-                        .offset(x = imageX + imageWidth + 4.dp, y = imageY)
-                        .size(width = landscapeAudioWidth, height = imageHeight)
+                        .offset(x = imageX + imageWidth - MonitorMeterEndInset - MonitorMeterWidth, y = imageY + audioTop.coerceAtMost(imageHeight))
+                        .size(width = MonitorMeterWidth, height = audioHeight)
                 )
 
 
                 val activeProps = if (movieMode) MOVIE_EXPOSURE_PROPS else EXPOSURE_PROPS
-                val exposureInfo = listOfNotNull(modeText) + listOf(3, 2, 1, 0).mapNotNull { index ->
-                    params[activeProps[index]]?.let { param ->
-                        val label = paramLabel(activeProps[index])
-                        "$label ${rcFormat(param.prop, param.current)}"
+                val activeIsoProp = if (movieMode) Lab.PROP_NK_MOVIE_ISO else Lab.PROP_ISO
+                // Both DISP styles use the same ISO source and unknown state as the wheel.
+                val exposureCells = listOf(3, 2, 1, 0).mapNotNull { index ->
+                    val prop = activeProps[index]
+                    params[prop]?.let { param ->
+                        val text = if (prop == activeIsoProp && autoIsoAvailable && autoIsoEnabled == true) {
+                            effectiveAutoIsoValue?.let { rcFormat(Lab.PROP_ISO, it) } ?: "—"
+                        } else rcFormat(param.prop, param.current)
+                        paramLabel(prop) to text
                     }
                 }
+                val exposureInfo = listOfNotNull(modeText) + exposureCells.map { (label, value) -> "$label $value" }
                 val cameraDisp = dispMode == MonitorDispMode.CAMERA
                 val detailValues = rememberMonitorDetails(
                     cameraViewModel.getCamera(), movieMode,
                     enabled = connected && initialLoaded && cameraDisp,
                     pollingAllowed = !probing && !diagnosticControlBusy && !recBusy && !capturing && !recording,
-                    whiteBalanceOnly = true,
                 )
                 val storageValues = rememberMonitorStorage(
                     cameraViewModel.getCamera(), camState.storageIds,
                     enabled = connected && initialLoaded && cameraDisp,
                     pollingAllowed = !probing && !diagnosticControlBusy && !recBusy && !capturing && !recording,
                 )
-                AnimatedVisibility(visible = cameraDisp && connected,
-                    enter = fadeIn(tween(180)), exit = fadeOut(tween(180)),
-                    modifier = Modifier.offset(x = imageX, y = imageY).size(imageWidth, imageHeight)) {
-                    val cells = listOfNotNull(modeText?.let { "MODE" to it }) +
-                        listOf(3, 2, 1, 0).mapNotNull { index ->
-                            params[activeProps[index]]?.let { param ->
-                                paramLabel(activeProps[index]) to rcFormat(param.prop, param.current)
-                            }
-                        } + listOfNotNull(
+                if (cameraDisp && connected) {
+                    val cells = listOfNotNull(modeText?.let { "MODE" to it }) + exposureCells + listOfNotNull(
                             detailValues[RemoteCameraTool.WHITE_BALANCE]?.let { "WB" to it },
                             focusModeText?.let { "AF" to it })
                     CameraMonitorDisp(cells, storageValues, movieMode,
-                        rcBatteryPercentage(batteryParam), recording, Modifier.fillMaxSize())
+                        rcBatteryPercentage(batteryParam), recording,
+                        Modifier.offset(x = imageX, y = imageY).size(imageWidth, imageHeight),
+                        storageSlotCount = camState.storageIds.filter { it != 0 && it != -1 }.distinct().size)
                 }
                 MonitorExposureSummary(
                     if (cameraDisp && connected) MonitorDispMode.CLEAN else dispMode, exposureInfo, connected,
-                    Modifier.offset(x = imageX + 8.dp, y = imageY + if (dispMode == MonitorDispMode.FULL) 27.dp else 9.dp)
+                    Modifier.offset(x = imageX + 8.dp, y = imageY + 9.dp)
                         .width((imageWidth - if (recording) 104.dp else 16.dp).coerceAtLeast(0.dp)),
                 )
-                AnimatedVisibility(
-                    visible = dispMode == MonitorDispMode.FULL && connected,
-                    enter = fadeIn(tween(180)), exit = fadeOut(tween(180)),
-                    modifier = Modifier.offset(x = imageX, y = imageY + 9.dp).width(imageWidth),
-                ) {
-                    val details = rememberMonitorDetails(
-                        cameraViewModel.getCamera(), movieMode,
-                        enabled = connected && initialLoaded && dispMode == MonitorDispMode.FULL,
-                        pollingAllowed = !probing && !diagnosticControlBusy && !recBusy && !capturing,
-                    )
-                    MonitorDetailSummary(details.values.toList(), rcBatteryPercentage(batteryParam),
-                        Modifier.padding(start = 8.dp, end = if (recording) 88.dp else 8.dp))
-                }
-
-
                 LandscapeMonitorControls(
                     layout = monitorLayout,
                     tools = tools.layout(movieMode).shownTools.filter { it != RemoteTool.RECORD },
-                    cameraRecording = recording,
                     onPanelChange = {
                         gridPanelOpen = false
                         cameraToolPanel = null
@@ -3234,25 +3189,19 @@ private fun RemoteContent(
                         devPanel = false
                     },
                     dockButton = { active, click, modifier ->
-                        TopIconToggle(active, stringResource(R.string.remote_tool_dock), click, modifier.size(40.dp)) {
-                            Icon(Icons.Default.Settings, null, Modifier.size(20.dp))
-                        }
-                    },
-                    parameterButton = { active, click ->
-                        TopIconToggle(active, stringResource(R.string.remote_parameters), click) {
-                            Icon(Icons.Default.Tune, null, Modifier.size(20.dp))
+                        MonitorHeaderButton(click, modifier.semantics { contentDescription = services.context.getString(R.string.remote_tool_dock) }, active) {
+                            DockToolMark()
                         }
                     },
                     rotateButton = { renderTool(RemoteTool.ROTATE) },
                     backButton = {
-                        TopIconToggle(false, stringResource(R.string.cd_back), onNavigateBack,
-                            Modifier.size(40.dp)) {
-                            Icon(Icons.Default.ArrowForward, null, Modifier.size(20.dp))
+                        MonitorHeaderButton(onNavigateBack) {
+                            Icon(Icons.Default.ArrowForward, stringResource(R.string.cd_back), Modifier.size(18.dp))
                         }
                     },
                     dispButton = {
                         TopIconToggle(false, "DISP", { dispMode = dispMode.next() }) {
-                            Text("DISP", fontSize = 10.sp)
+                            Text("DISP", fontSize = 8.sp, maxLines = 1, softWrap = false)
                         }
                     },
                     shutter = {
@@ -3272,7 +3221,8 @@ private fun RemoteContent(
                             autoIsoValue = if (hasAutoIso) effectiveAutoIsoValue else null,
                             autoIsoBusy = hasAutoIso && autoIsoBusy,
                             onAutoIsoToggle = if (hasAutoIso) ::setAutoIso else null,
-                            modifier = modifier, onStep = { stepParam(prop, it) },
+                            modifier = modifier.onGloballyPositioned { parameterAnchors[prop] = it }, tileHeight = monitorLayout.parameterHeight.dp,
+                            onStep = { stepParam(prop, it) },
                             onOpenList = { if (params[prop]?.values?.isNotEmpty() == true) listProp = prop })
                     },
                     tool = { renderTool(it) },
@@ -3327,84 +3277,17 @@ private fun RemoteContent(
             }
         }
 
-        // 完整值表（点胶囊中间值弹出）：呼出=缩放淡入、消失=淡出（item 9 动画）。
-        // 用 lastListProp 记住最后一次的参数，让消失动画期间仍有数据可渲染。
-        var lastListProp by remember { mutableStateOf<Int?>(null) }
-        LaunchedEffect(listProp) { if (listProp != null) lastListProp = listProp }
-        // 遮罩：淡入淡出（180/140，与面板本体及全局筛选面板同节奏）
-        AnimatedVisibility(
-            visible = listProp != null,
-            enter = fadeIn(tween(180)),
-            exit = fadeOut(tween(140)),
-            modifier = Modifier.fillMaxSize()
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(colors.scrim)
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null
-                    ) { listProp = null }
-            )
-        }
-        // 面板：缩放+淡入呼出、缩放+淡出消失
-        AnimatedVisibility(
-            visible = listProp != null,
-            enter = fadeIn(tween(180)) + scaleIn(initialScale = 0.88f, animationSpec = tween(180)),
-            exit = fadeOut(tween(140)) + scaleOut(targetScale = 0.9f, animationSpec = tween(140)),
-            modifier = Modifier.fillMaxSize()
-        ) {
-            val prop = lastListProp
-            val listParam = prop?.let { params[it] }
-            if (prop != null && listParam != null) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    val valueListState = rememberLazyListState()
-                    LaunchedEffect(prop) {
-                        val idx = listParam.values.indexOf(listParam.current)
-                        if (idx > 3) valueListState.scrollToItem(idx - 3)
-                    }
-                    // 面板走全局玻璃面板惯用法（Surface + 细描边 + 投影，同类型筛选面板）；
-                    // 当前值行用全局选中语言：高亮底 + 蓝色加粗（同 FilterRow）。
-                    Surface(
-                        shape = RoundedCornerShape(16.dp),
-                        color = colors.glassSurfaceHeavy,
-                        border = BorderStroke(1.dp, colors.glassPanelBorder),
-                        shadowElevation = 6.dp,
-                        modifier = Modifier.width(190.dp)
-                    ) {
-                        LazyColumn(
-                            state = valueListState,
-                            modifier = Modifier
-                                .heightIn(max = 340.dp)
-                                .padding(horizontal = 6.dp, vertical = 6.dp)
-                        ) {
-                            items(listParam.values) { v ->
-                                val isCurrent = v == listParam.current
-                                Text(
-                                    rcFormat(prop, v),
-                                    color = if (isCurrent) colors.accentBlue else colors.onBackground,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 15.sp,
-                                    fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal,
-                                    textAlign = TextAlign.Center,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(9.dp))
-                                        .background(
-                                            if (isCurrent) colors.accentBlue.copy(alpha = 0.18f)
-                                            else Color.Transparent
-                                        )
-                                        .clickable {
-                                            sendValue(prop, v, immediate = true)
-                                            listProp = null
-                                        }
-                                        .padding(vertical = 10.dp)
-                                )
-                            }
-                        }
-                    }
+        listProp?.let { prop ->
+            val listParam = params[prop]
+            val localAnchor = toolOverlayCoordinates?.takeIf { it.isAttached }?.let { root ->
+                parameterAnchors[prop]?.takeIf { it.isAttached }?.let {
+                    root.localBoundingBoxOf(it, clipBounds = false)
                 }
+            }
+            if (listParam != null) key(prop) {
+                RemoteParameterPanel(listParam, localAnchor, rotation != 0,
+                    onSelect = { sendValue(prop, it, immediate = true) },
+                    onDismiss = { listProp = null })
             }
         }
 
@@ -3519,14 +3402,6 @@ private fun RemoteContent(
                                 modifier = Modifier.padding(bottom = 8.dp)
                             )
                         }
-                        PostureDiagnosticPanel(
-                            collector = postureDiagnostic,
-                            camera = cameraViewModel.getCamera(),
-                            enabled = connected && initialLoaded && !probing && !diagnosticControlBusy,
-                            info = "model=${cameraViewModel.getCamera()?.deviceModel} firmware=${cameraViewModel.getCamera()?.cachedDeviceInfo?.deviceVersion} " +
-                                "transport=${cameraViewModel.getCamera()?.connectionType} sta=${camState.isStaConnection} " +
-                                "movie=$movieMode control=$diagnosticControlEnabled app=${BuildConfig.VERSION_NAME}(${BuildConfig.VERSION_CODE})",
-                        )
                         GlassButton(onClick = ::runProbe, enabled = connected && !probing) {
                             Text(
                                 stringResource(R.string.lab_run_probe),
@@ -3543,7 +3418,7 @@ private fun RemoteContent(
                         // 日志跟尾：面板刚打开（尚无布局信息）直接跳到底；此后新行到来时，
                         // 停在底部附近才跟到底，用户上翻查看时不打扰。
                         val logState = rememberLazyListState()
-                        LaunchedEffect(logLines.size) {
+                        LaunchedEffect(logLines.lastOrNull()) {
                             if (logLines.isEmpty()) return@LaunchedEffect
                             val lastVisible =
                                 logState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
@@ -3684,10 +3559,10 @@ private fun BatteryPill(percent: Int?) {
     GlassButton(
         onClick = { expanded = !expanded },
         shape = RoundedCornerShape(22.dp),
-        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 9.dp),
+        // Collapsed width: 21dp icon + 21dp padding = back button's 18dp + 24dp.
+        contentPadding = PaddingValues(horizontal = 10.5.dp, vertical = 9.dp),
         modifier = Modifier
             .height(36.dp)
-            .widthIn(min = 48.dp)
             .semantics {
                 contentDescription = batteryContentDescription
             }
@@ -3799,7 +3674,7 @@ private fun ViewfinderStatusBadge(text: String, weight: FontWeight) {
         fontSize = 11.sp,
         fontWeight = weight,
         modifier = Modifier
-            .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+            .background(MonitorOverlayBackground, RoundedCornerShape(8.dp))
             .padding(horizontal = 7.dp, vertical = 2.dp)
     )
 }
@@ -3835,7 +3710,7 @@ private fun RemoteViewfinderPanel(
     showLevel: Boolean = false,
     showMeter: Boolean = false,
     meterEv: Float? = null,
-    meterTopInset: Dp = 34.dp,
+    meterTopInset: Dp = if (movieMode) 34.dp else MonitorInfoTopInset,
     /** 相机机身滚转角；null=没有可用角度，水平仪什么都不画。 */
     levelRoll: Float? = null,
     levelPitch: Float? = null,
@@ -3878,6 +3753,7 @@ private fun RemoteViewfinderPanel(
             showWaveform = showWaveform,
             scopeStartInset = if (soundMeterEnabled && showEmbeddedAudioMeter) 48.dp else 8.dp,
             informationBottomInset = animatedInformationInset,
+            scopeBottomInset = 8.dp,
             desqueezeMultiplier = desqueezeMultiplier
         )
 
@@ -3892,7 +3768,7 @@ private fun RemoteViewfinderPanel(
 
         if (showMeter) {
             ExposureMeterOverlay(meterEv, Modifier.align(Alignment.TopEnd)
-                .padding(top = meterTopInset, end = 8.dp))
+                .padding(top = meterTopInset, end = MonitorMeterEndInset))
         }
 
         if (showLevel) {
@@ -3929,7 +3805,7 @@ private fun RemoteViewfinderPanel(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .padding(8.dp)
-                    .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                    .background(MonitorOverlayBackground, RoundedCornerShape(8.dp))
                     .padding(horizontal = 7.dp, vertical = 2.dp)
             ) {
                 Box(
@@ -3958,7 +3834,7 @@ private fun RemoteViewfinderPanel(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 8.dp + animatedInformationInset)
-                    .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                    .background(MonitorOverlayBackground, RoundedCornerShape(8.dp))
                     .padding(horizontal = 6.dp, vertical = 2.dp)
             )
         }
@@ -3970,7 +3846,7 @@ private fun RemoteViewfinderPanel(
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier
                     .align(Alignment.Center)
-                    .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(8.dp))
+                    .background(MonitorOverlayBackground, RoundedCornerShape(8.dp))
                     .padding(horizontal = 12.dp, vertical = 6.dp)
             )
         }
@@ -3986,12 +3862,13 @@ private fun ViewfinderSoundMeterOverlay(
     enabled: Boolean,
     frameProvider: () -> RemoteLiveFrame?,
     bottomInset: androidx.compose.ui.unit.Dp = 8.dp,
+    startInset: androidx.compose.ui.unit.Dp = 8.dp,
     modifier: Modifier = Modifier
 ) {
     BoxWithConstraints(modifier) {
         val levels = if (enabled) frameProvider()?.metadata?.soundLevels else null
         // 短竖条高度封顶，避免横屏时向挖孔侧延伸。
-        // 横屏优先放在取景器外；空间不足时回落到画面内，并在直方图上方显示。
+        // 横屏由调用方限定在右侧曝光尺下方，竖屏沿用左下角位置。
         val availableHeight = (maxHeight - 16.dp).coerceAtLeast(0.dp)
         val targetMeterHeight = (maxHeight * 0.24f)
             .coerceIn(56.dp, 72.dp)
@@ -4008,7 +3885,7 @@ private fun ViewfinderSoundMeterOverlay(
             exit = fadeOut(tween(140, easing = FastOutSlowInEasing)),
             modifier = Modifier
                 .align(Alignment.BottomStart)
-                .padding(start = 8.dp, bottom = bottomInset)
+                .padding(start = startInset, bottom = bottomInset)
         ) {
             StereoSoundMeter(
                 levels = levels ?: LiveViewSoundLevels(0, 0, 0, 0),
@@ -4046,22 +3923,23 @@ private fun StereoSoundMeter(
     val shape = RoundedCornerShape(7.dp)
     Row(
         modifier = modifier
-            .background(Color.Black.copy(alpha = 0.56f), shape)
+            .width(MonitorMeterWidth)
+            .background(MonitorOverlayBackground, shape)
             .border(0.5.dp, Color.White.copy(alpha = 0.14f), shape)
-            .padding(horizontal = 4.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp)
+            .padding(horizontal = 3.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(3.dp)
     ) {
         SoundMeterChannel(
             label = "L",
             level = { leftLevel },
             peak = { leftPeak },
-            modifier = Modifier.fillMaxHeight()
+            modifier = Modifier.weight(1f).fillMaxHeight()
         )
         SoundMeterChannel(
             label = "R",
             level = { rightLevel },
             peak = { rightPeak },
-            modifier = Modifier.fillMaxHeight()
+            modifier = Modifier.weight(1f).fillMaxHeight()
         )
     }
 }
@@ -4077,7 +3955,7 @@ private fun SoundMeterChannel(
         modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Canvas(Modifier.width(9.dp).weight(1f)) {
+        Canvas(Modifier.fillMaxWidth().weight(1f)) {
             // Read animation state only while drawing, avoiding per-tick layout recomposition.
             val currentLevel = level()
             val currentPeak = peak()
@@ -4157,6 +4035,7 @@ private fun ViewfinderImage(
     showFalseColor: Boolean,
     showWaveform: Boolean,
     scopeStartInset: androidx.compose.ui.unit.Dp = 8.dp,
+    scopeBottomInset: Dp = 26.dp,
     informationBottomInset: Dp = 0.dp,
     desqueezeMultiplier: Float = 1f
 ) {
@@ -4334,6 +4213,7 @@ private fun ViewfinderImage(
                 histogramMode = histogramMode,
                 waveformMode = liveFrame.analysis?.waveformMode ?: WaveformMode.LUMA,
                 startInset = scopeStartInset,
+                bottomInset = scopeBottomInset,
             )
 
         } else {
@@ -4426,8 +4306,10 @@ private fun ParamTile(
     onAutoIsoToggle: ((Boolean) -> Unit)?,
     modifier: Modifier = Modifier,
     onStep: (Int) -> Unit,
-    onOpenList: () -> Unit
+    onOpenList: () -> Unit,
+    tileHeight: androidx.compose.ui.unit.Dp = 54.dp,
 ) {
+    val compact = tileHeight < 44.dp
     val colors = AppTheme.colors
     val density = LocalDensity.current
     val hasAutoIsoControl = autoIsoEnabled != null && onAutoIsoToggle != null
@@ -4470,7 +4352,7 @@ private fun ParamTile(
     val tileShape = RoundedCornerShape(14.dp)
     BoxWithConstraints(
         modifier = modifier
-            .height(54.dp)
+            .height(tileHeight)
             .clip(tileShape)
             .background(colors.glassSurface)
             .background(
@@ -4571,7 +4453,7 @@ private fun ParamTile(
                 color = colors.onSurfaceVariant.copy(
                     alpha = if (valueWritable || hasAutoIsoControl) 0.85f else 0.4f
                 ),
-                modifier = Modifier.align(Alignment.TopStart).padding(start = 10.dp, top = 6.dp)
+                modifier = Modifier.align(Alignment.TopStart).padding(start = 10.dp, top = if (compact) 2.dp else 6.dp)
             )
         }
         if (hasAutoIsoControl) {
@@ -4619,7 +4501,7 @@ private fun ParamTile(
             Icon(
                 Icons.Default.Lock, contentDescription = null,
                 tint = colors.onSurfaceVariant.copy(alpha = 0.55f),
-                modifier = Modifier.align(Alignment.TopEnd).padding(end = 8.dp, top = 6.dp).size(11.dp)
+                modifier = Modifier.align(Alignment.TopEnd).padding(end = 8.dp, top = if (compact) 2.dp else 6.dp).size(11.dp)
             )
         }
         // 每个参数项右下角固定保留小型上下调节提示；不可调或 AUTO 接管时压暗。
@@ -4639,7 +4521,8 @@ private fun ParamTile(
                 autoIsoValue?.let { rcFormat(Lab.PROP_ISO, it) } ?: "—",
                 color = colors.onBackground,
                 fontFamily = FontFamily.Monospace,
-                fontSize = 16.sp,
+                fontSize = if (compact) 14.sp else 16.sp,
+                lineHeight = if (compact) 16.sp else 20.sp,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
                 modifier = Modifier.align(Alignment.Center)
@@ -4664,7 +4547,8 @@ private fun ParamTile(
                         rcFormat(propCode, shownValue),
                         color = colors.onBackground,
                         fontFamily = FontFamily.Monospace,
-                        fontSize = 16.sp,
+                        fontSize = if (compact) 14.sp else 16.sp,
+                lineHeight = if (compact) 16.sp else 20.sp,
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
                         modifier = Modifier.align(Alignment.Center).graphicsLayer {
@@ -4697,7 +4581,8 @@ private fun ParamTile(
                 color = if (param == null) colors.onSurfaceVariant.copy(alpha = loadingAlpha)
                         else colors.onSurfaceVariant.copy(alpha = 0.5f),
                 fontFamily = FontFamily.Monospace,
-                fontSize = 16.sp,
+                fontSize = if (compact) 14.sp else 16.sp,
+                lineHeight = if (compact) 16.sp else 20.sp,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
                 modifier = Modifier.align(Alignment.Center)
@@ -4726,6 +4611,7 @@ private fun ShutterButton(
     onQuickTap: () -> Unit,
     diameter: androidx.compose.ui.unit.Dp = 76.dp,
 ) {
+    val longPressFeedback = com.ztransfer.ui.util.rememberLongPressFeedback(durationMs = 300L)
     val colors = AppTheme.colors
     var heldDown by remember { mutableStateOf(false) }
     val currentFocusStart by rememberUpdatedState(onFocusStart)
@@ -4771,20 +4657,25 @@ private fun ShutterButton(
             .then(
                 // 照片拍摄确认中禁手势；录制中保持可用——停止靠的就是再按一下。
                 if (enabled && !capturing)
-                    Modifier.pointerInput(Unit) {
+                    Modifier.pointerInput(longPressFeedback) {
                         awaitEachGesture {
                             awaitFirstDown()
                             heldDown = true
+                            longPressFeedback.start()
                             var timerFired = false
                             // 300ms 计时器：超时后触发半按对焦；抬起在计时结束前=快拍。
                             val timerJob = coroutineScope.launch {
                                 delay(300)
                                 timerFired = true
-                                currentFocusStart()
+                                longPressFeedback.trigger { currentFocusStart() }
                             }
-                            val up = waitForUpOrCancellation()
-                            heldDown = false
-                            timerJob.cancel()
+                            val up = try {
+                                waitForUpOrCancellation()
+                            } finally {
+                                heldDown = false
+                                timerJob.cancel()
+                                longPressFeedback.cancel()
+                            }
                             if (timerFired) {
                                 // 长按：对焦已触发，抬手落点判定拍摄/取消
                                 val fire = up != null &&
@@ -5036,6 +4927,20 @@ internal fun AdaptiveRemoteToolBar(
 }
 
 /** 棋子式圆润工具按钮：沿用主题材质，以低矮弧面表达微凸。 */
+/** Shared portrait/landscape navigation style. */
+@Composable
+private fun MonitorHeaderButton(onClick: () -> Unit, modifier: Modifier = Modifier,
+    active: Boolean = false, content: @Composable () -> Unit) {
+    val colors = AppTheme.colors
+    GlassButton(onClick = onClick, active = active, shape = RoundedCornerShape(22.dp),
+        showSheen = false, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+        modifier = modifier.size(width = 42.dp, height = 36.dp)) {
+        CompositionLocalProvider(LocalContentColor provides if (active) colors.accentBlue else colors.onBackground) {
+            content()
+        }
+    }
+}
+
 @Composable
 internal fun TopIconToggle(
     active: Boolean,
@@ -5070,6 +4975,27 @@ internal fun TopIconToggle(
     }
 }
 
+
+/** Four rounded tiles distinguish the landscape tool drawer from portrait editing. */
+@Composable
+private fun DockToolMark() {
+    val color = LocalContentColor.current
+    Canvas(Modifier.size(19.dp)) {
+        val stroke = 1.6.dp.toPx()
+        val inset = stroke / 2f
+        val gap = 3.dp.toPx()
+        val tile = (size.width - stroke - gap) / 2f
+        for (row in 0..1) for (column in 0..1) {
+            drawRoundRect(
+                color = color,
+                topLeft = Offset(inset + column * (tile + gap), inset + row * (tile + gap)),
+                size = androidx.compose.ui.geometry.Size(tile, tile),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(1.5.dp.toPx()),
+                style = androidx.compose.ui.graphics.drawscope.Stroke(stroke),
+            )
+        }
+    }
+}
 
 /** Shared by the actual toolbar and its manager; there is no second icon set. */
 @Composable

@@ -52,6 +52,30 @@ internal object CubeLutParser {
             if (lineNumber == 1) text = text.removePrefix("\uFEFF")
             text = text.substringBefore('#').trim()
             if (text.isEmpty()) return
+            // Data dominates .cube files. Avoid regex splitting, lists and temporary RGB arrays
+            // for every lattice point; still use the platform's exact float parser.
+            if (!text.first().isLetter()) {
+                val target = values ?: invalid("Missing LUT_3D_SIZE")
+                dataStarted = true
+                if (offset + 3 > target.size) invalid("Extra table entries")
+                var position = 0
+                repeat(3) {
+                    while (position < text.length && text[position].isWhitespace()) position++
+                    val start = position
+                    while (position < text.length && !text[position].isWhitespace()) position++
+                    if (start == position) invalid("Expected three components")
+                    // toFloatOrNull validates with a regex before parsing. Valid data rows
+                    // need only one parse; malformed input still fails with the same error.
+                    val value = try { java.lang.Float.parseFloat(text.substring(start, position)) }
+                        catch (_: NumberFormatException) { invalid("Invalid number") }
+                    if (!value.isFinite()) invalid("Invalid number")
+                    if (value < -65504f || value > 65504f) invalid("Color exceeds half-float range")
+                    target[offset++] = value
+                }
+                while (position < text.length && text[position].isWhitespace()) position++
+                if (position != text.length) invalid("Expected three components")
+                return
+            }
             val tokens = text.split(whitespace)
             val command = tokens.first()
             when (command) {
@@ -78,15 +102,7 @@ internal object CubeLutParser {
                     }
                 }
                 else -> {
-                    if (command.first().isLetter()) throw LutException(LutFailure.UNSUPPORTED, "Unsupported directive: $command")
-                    val target = values ?: invalid("Missing LUT_3D_SIZE")
-                    dataStarted = true
-                    if (offset + 3 > target.size) invalid("Extra table entries")
-                    val color = triple(tokens)
-                    for (value in color) {
-                        if (value < -65504f || value > 65504f) invalid("Color exceeds half-float range")
-                        target[offset++] = value
-                    }
+                    throw LutException(LutFailure.UNSUPPORTED, "Unsupported directive: $command")
                 }
             }
         }

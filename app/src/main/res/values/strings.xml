@@ -262,7 +262,7 @@
     <string name="photo_frame_effect_shadow">Shadow</string>
     <string name="photo_frame_effect_outline">Outline</string>
     <string name="photo_filter">Photo filter</string>
-    <string name="photo_effects">Filter · Frame · Watermark</string>
+    <string name="photo_effects">Filter · LUT · Frame · Watermark</string>
     <string name="photo_effects_open_editor">Edit photo effects</string>
     <string name="photo_effects_info_title">About photo effects</string>
     <string name="photo_effects_info_description">After the original is transferred, the edited version is saved separately.</string>
@@ -270,7 +270,7 @@
     <string name="photo_effects_wheel_hint">Wheels: Hold and drag vertically for quick adjustments</string>
     <string name="photo_effects_full_chooser_hint">Hold the photo filter wheel to choose by category</string>
     <string name="photo_filter_off_option">No filter</string>
-    <string name="photo_filter_intensity_summary">Intensity %1$d%%</string>
+    <string name="photo_filter_intensity_summary">%1$d%%</string>
     <string name="photo_filter_intensity">Intensity</string>
     <string name="photo_filter_task_label">Filter: %1$s · %2$d%%</string>
     <string name="photo_effect_favorite_add">Add current effect to favorites</string>
@@ -551,7 +551,7 @@
     <string name="update_manual_copied">Update manually. Copied to clipboard</string>
     <string name="update_failure_manual">%1$s. %2$s</string>
     <string name="update_open_download_page">Open download page</string>
-    <string name="local_photo_effects_entry">Filter · Frame · Watermark</string>
+    <string name="local_photo_effects_entry">Filter · LUT · Frame · Watermark</string>
     <string name="local_photo_effects_info_description">Select multiple photos to apply the same filter, frame, and watermark. Edited photos are saved as new copies.</string>
     <string name="local_photo_effects_exif_hint">Frame: Images without EXIF data, such as screenshots, won’t show shooting details</string>
     <string name="local_photo_effects_gesture_hint">Preview: Swipe between photos · Hold to compare with the unfiltered version</string>
@@ -652,4 +652,6 @@
     <string name="remote_tool_meter">Exposure meter</string>
     <string name="remote_parameters">Exposure controls</string>
     <string name="remote_tool_dock">Tools</string>
+    <string name="photo_lut_set_folder">Set LUT folder</string>
+    <string name="photo_lut_help">LUT: Choose a folder containing .cube files. Long-press the LUT wheel to change folders.</string>
 </resources>

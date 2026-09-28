@@ -102,7 +102,8 @@ fun LocalPhotoEffectsPage(
 
     var watermarkDraft by remember { mutableStateOf(initialSettings.watermark) }
     var filterId by remember { mutableStateOf(initialSettings.filterId) }
-    var filterEnabled by remember { mutableStateOf(initialSettings.filterEnabled) }
+    val initialLut = remember { com.ztransfer.lut.PhotoLutStore(context).restore("local") }
+    var filterEnabled by remember { mutableStateOf(initialSettings.filterEnabled && initialLut == null) }
     var filterIntensity by remember {
         mutableIntStateOf(initialSettings.filterIntensityPercent)
     }
@@ -197,7 +198,19 @@ fun LocalPhotoEffectsPage(
         }
     }
 
-    val selectedFilter = state.photoFilters
+    val photoLutDraft = rememberPhotoLutDraft("local", initialLut) {
+        filterEnabled = false
+    }
+    LaunchedEffect(photoLutDraft.selection, photoLutDraft.selectedUri) {
+        photoLutDraft.store.save("local", photoLutDraft.selection, photoLutDraft.selectedUri?.toString())
+    }
+    DisposableEffect(photoLutDraft) {
+        onDispose {
+            // Read the draft directly: closing immediately after a detent must save that value too.
+            photoLutDraft.store.save("local", photoLutDraft.selection, photoLutDraft.selectedUri?.toString())
+        }
+    }
+    val selectedFilter = photoLutDraft.selection ?: state.photoFilters
         .firstOrNull { it.id == filterId }
         ?.takeIf { filterEnabled }
         ?.let { PhotoFilterSelection(it, filterIntensity) }
@@ -299,14 +312,14 @@ fun LocalPhotoEffectsPage(
 
             Spacer(Modifier.height(14.dp))
             val previewFilterPrefetch = remember(
-                state.photoFilters, favoritePhotoFilters, filterIntensities, filterId, filterEnabled,
+                state.photoFilters, favoritePhotoFilters, filterIntensities, filterId, filterEnabled, photoLutDraft.selection,
             ) {
                 nextPhotoFilterSelections(
                     filters = state.photoFilters,
                     favoriteCatalogKeys = favoritePhotoFilters.map { it.catalogKey },
                     rememberedIntensities = filterIntensities,
                     selectedId = filterId,
-                    enabled = filterEnabled,
+                    enabled = filterEnabled && photoLutDraft.selection == null,
                 )
             }
             val previewEffects = LocalPhotoBatchEffects(
@@ -348,38 +361,45 @@ fun LocalPhotoEffectsPage(
             }
 
             Spacer(Modifier.height(10.dp))
-            PhotoFilterEditor(
-                filters = state.photoFilters,
-                favoriteFilters = favoritePhotoFilters,
-                rememberedIntensities = filterIntensities,
-                selectedId = filterId,
-                enabled = filterEnabled,
-                intensityPercent = filterIntensity,
-                onDisabled = { filterEnabled = false },
-                onSelected = {
-                    filterId = it
-                    filterEnabled = true
-                },
-                onIntensityChanged = { selectedFilterId, intensity ->
-                    filterIntensity = intensity
-                    val catalogKey = BuiltInPhotoFilters.catalogKey(selectedFilterId)
-                        ?: selectedFilterId
-                    filterIntensities = filterIntensities + (catalogKey to intensity)
-                },
-                onFavoriteToggled = { selectedFilterId ->
-                    BuiltInPhotoFilters.catalogKey(selectedFilterId)?.let { catalogKey ->
-                        favoritePhotoFilters = if (
-                            favoritePhotoFilters.any { it.catalogKey == catalogKey }
-                        ) {
-                            favoritePhotoFilters.filterNot { it.catalogKey == catalogKey }
-                        } else {
-                            favoritePhotoFilters + FavoritePhotoFilter(catalogKey)
+            PhotoColorEffectGroup(visible = photoLutDraft.selection == null) {
+                PhotoFilterEditor(
+                    filters = state.photoFilters,
+                    favoriteFilters = favoritePhotoFilters,
+                    rememberedIntensities = filterIntensities,
+                    selectedId = filterId,
+                    enabled = filterEnabled && photoLutDraft.selection == null,
+                    intensityPercent = filterIntensity,
+                    onDisabled = { filterEnabled = false },
+                    onSelected = {
+                        photoLutDraft.off()
+                        filterId = it
+                        filterEnabled = true
+                    },
+                    onIntensityChanged = { selectedFilterId, intensity ->
+                        filterIntensity = intensity
+                        val catalogKey = BuiltInPhotoFilters.catalogKey(selectedFilterId)
+                            ?: selectedFilterId
+                        filterIntensities = filterIntensities + (catalogKey to intensity)
+                    },
+                    onFavoriteToggled = { selectedFilterId ->
+                        BuiltInPhotoFilters.catalogKey(selectedFilterId)?.let { catalogKey ->
+                            favoritePhotoFilters = if (
+                                favoritePhotoFilters.any { it.catalogKey == catalogKey }
+                            ) {
+                                favoritePhotoFilters.filterNot { it.catalogKey == catalogKey }
+                            } else {
+                                favoritePhotoFilters + FavoritePhotoFilter(catalogKey)
+                            }
                         }
-                    }
-                },
-                hapticsEnabled = state.hapticsEnabled,
-            )
-            Spacer(Modifier.height(10.dp))
+                    },
+                    hapticsEnabled = state.hapticsEnabled,
+                )
+            }
+            PhotoColorEffectGroup(
+                visible = !(filterEnabled && state.photoFilters.any { it.id == filterId }) || photoLutDraft.selection != null,
+            ) {
+                PhotoLutEditor(photoLutDraft, state.hapticsEnabled)
+            }
             PhotoFrameWatermarkEditor(
                 favoriteEffects = favoriteFrameEffects,
                 borderEnabled = decorationEnabled && borderEnabled,

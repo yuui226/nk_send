@@ -108,6 +108,7 @@ internal fun <T> ReleaseCommitWheel(
     optionTextStyle: TextStyle? = null,
     optionFontWeight: FontWeight? = null,
     optionMaxLines: Int = 1,
+    optionFontSizeFor: ((T) -> TextUnit)? = null,
     showDragHint: Boolean = true,
     accentColor: Color? = null,
     emphasized: Boolean = false,
@@ -133,6 +134,7 @@ internal fun <T> ReleaseCommitWheel(
     val latestDetent by rememberUpdatedState(onDetent)
     val latestActivated by rememberUpdatedState(onActivated)
     val latestLongClick by rememberUpdatedState(onLongClick)
+    val longPressFeedback = if (onLongClick != null) com.ztransfer.ui.util.rememberLongPressFeedback() else null
     val latestFavoriteOption by rememberUpdatedState(favoriteOption)
 
     var dragging by remember { mutableStateOf(false) }
@@ -221,7 +223,7 @@ internal fun <T> ReleaseCommitWheel(
                     append(optionLabel(options[selectedIndex]))
                 }
             }
-            .pointerInput(options.size, rowPx, enabled, readOnly) {
+            .pointerInput(options, rowPx, enabled, readOnly) {
                 if (!enabled || readOnly || !wheelDragEnabled(options.size)) return@pointerInput
                 var accumulatedDy = 0f
                 try {
@@ -271,6 +273,8 @@ internal fun <T> ReleaseCommitWheel(
             .then(
                 if (onLongClick != null) {
                     Modifier.combinedClickable(
+                        interactionSource = longPressFeedback!!.interactions,
+                        indication = androidx.compose.foundation.LocalIndication.current,
                         enabled = enabled && !readOnly,
                         onClick = {
                             if (latestActivated != null) {
@@ -284,7 +288,7 @@ internal fun <T> ReleaseCommitWheel(
                                 }
                             }
                         },
-                        onLongClick = { latestLongClick?.invoke() },
+                        onLongClick = { longPressFeedback.trigger { latestLongClick?.invoke() } },
                     )
                 } else {
                     Modifier.clickable(enabled = enabled && !readOnly) {
@@ -335,16 +339,19 @@ internal fun <T> ReleaseCommitWheel(
             modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.Center,
         ) {
-            val firstVisible = floor(position).toInt() - 1
-            val lastVisible = ceil(position).toInt() + 1
-            val idleCenter = wheelReleaseIndex(position, options.lastIndex)
+            // Reordering (favorites) and external commits must render the selected identity
+            // immediately, not the previous numeric position until LaunchedEffect runs.
+            val displayPosition = if (dragging) position else selectedIndex.toFloat()
+            val firstVisible = floor(displayPosition).toInt() - 1
+            val lastVisible = ceil(displayPosition).toInt() + 1
+            val idleCenter = selectedIndex
             for (index in firstVisible..lastVisible) {
                 if (index !in options.indices) continue
                 // 与监看参数拨轮一致：静止时只显示中心真值，只有实际拖动后才显示邻档。
                 if (!dragging && index != idleCenter) continue
-                val distance = abs(index - position)
+                val distance = abs(index - displayPosition)
                 val itemAlpha = if (distance < 0.5f) 1f else 0.38f
-                val itemOffsetY = (rowPx * (index - position)).roundToInt()
+                val itemOffsetY = (rowPx * (index - displayPosition)).roundToInt()
                 val itemModifier = if (wheelDragEnabled(options.size)) {
                     Modifier
                         .fillMaxWidth()
@@ -363,6 +370,7 @@ internal fun <T> ReleaseCommitWheel(
                     // band on devices with imperfect layer compositing.
                     Modifier.fillMaxWidth()
                 }
+                val itemFontSize = optionFontSizeFor?.invoke(options[index]) ?: optionFontSize
                 val textStyle = optionTextStyle ?: MaterialTheme.typography.labelMedium
                 val textWeight = optionFontWeight ?: if (distance < 0.5f) {
                     FontWeight.SemiBold
@@ -385,9 +393,9 @@ internal fun <T> ReleaseCommitWheel(
                         Text(
                             text = optionLabel(options[index]),
                             style = textStyle,
-                            fontSize = optionFontSize,
+                            fontSize = itemFontSize,
                             lineHeight = (
-                                optionFontSize.value + if (optionMaxLines > 1) 1f else 2f
+                                itemFontSize.value + if (optionMaxLines > 1) 1f else 2f
                             ).sp,
                             fontWeight = textWeight,
                             color = colors.onBackground.copy(alpha = itemAlpha),
@@ -405,9 +413,9 @@ internal fun <T> ReleaseCommitWheel(
                         Text(
                             text = optionLabel(options[index]),
                             style = textStyle,
-                            fontSize = optionFontSize,
+                            fontSize = itemFontSize,
                             lineHeight = (
-                                optionFontSize.value + if (optionMaxLines > 1) 1f else 2f
+                                itemFontSize.value + if (optionMaxLines > 1) 1f else 2f
                             ).sp,
                             fontWeight = textWeight,
                             color = textColor,
@@ -427,9 +435,9 @@ internal fun <T> ReleaseCommitWheel(
                             Text(
                                 text = optionLabel(options[index]),
                                 style = textStyle,
-                                fontSize = optionFontSize,
+                                fontSize = itemFontSize,
                                 lineHeight = (
-                                    optionFontSize.value + if (optionMaxLines > 1) 1f else 2f
+                                    itemFontSize.value + if (optionMaxLines > 1) 1f else 2f
                                 ).sp,
                                 fontWeight = textWeight,
                                 color = textColor,

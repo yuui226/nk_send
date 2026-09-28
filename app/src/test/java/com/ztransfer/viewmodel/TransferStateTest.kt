@@ -18,6 +18,24 @@ import org.junit.Test
 
 class TransferStateTest {
     @Test
+    fun lutRecipeStaysInQueuedTaskWhenCurrentEffectChanges() {
+        val table = com.ztransfer.lut.CubeLutParser.parse(("LUT_3D_SIZE 2\n" +
+            "0 0 0\n1 0 0\n0 1 0\n1 1 0\n0 0 1\n1 0 1\n0 1 1\n1 1 1\n").byteInputStream())
+        val recipe = PhotoFilterSelection(PhotoFilterPreset("cube:${table.digest}", "Test LUT",
+            com.ztransfer.filter.CubePhotoFilterParameters(table)), 76)
+        val initial = TransferState(photoLut = recipe)
+        val task = createQueueTasks(listOf(file(1)), false, photoFramePreset = PhotoFramePreset.MIST,
+            photoFrameWatermark = PhotoFrameWatermark(enabled = false), photoFilter = initial.photoFilterSelection).single()
+        val disabled = initial.copy(photoLut = null)
+        assertEquals(null, disabled.photoFilterSelection)
+        org.junit.Assert.assertSame(recipe, task.photoFilterRequested)
+        org.junit.Assert.assertSame(table, (task.photoFilterRequested!!.preset.parameters as
+            com.ztransfer.filter.CubePhotoFilterParameters).table)
+        assertEquals(76, task.photoFilterRequested!!.normalizedIntensityPercent)
+        assertEquals(true, task.skipFrameGeneration().frameGenerationSkipped)
+    }
+
+    @Test
     fun deferredTransferAndPauseAreOptInByDefault() {
         val state = TransferState()
 

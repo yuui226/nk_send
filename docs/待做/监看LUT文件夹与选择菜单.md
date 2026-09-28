@@ -277,3 +277,11 @@ adb shell am instrument -w com.ztransfer.debug.test/com.ztransfer.lut.LutStateIn
 - 可选：[尼康官方 N-Log LUT](https://downloadcenter.nikonimglib.com/en/download/sw/258.html)，只适合输入确实为 N-Log 的情况；录像设置为 N-Log 不代表传入 App 的监看帧就是 N-Log。
 - 解压后将所需 .cube 直接放在所选文件夹内；不扫描子目录，不读取 ZIP／.3dl。
 - 手机试用关注：关闭与两个 LUT 来回切换、伪色双向互斥、退出重进与模式记忆，以及持续监看帧率、方向和缩放是否正常。
+
+
+## 五项功能复查补充
+
+- 再次选择当前已经成功显示的 LUT 时，取消其他候选加载并收起菜单，保留当前渲染层，不重复读取、解析或创建 GPU 图层。文件元数据变化仍沿用重新加载路径。
+- 复查确认：候选显示成功后才提交选中并关闭伪色；开启伪色会使未完成候选失效；加载失败保留原效果；目录扫描与解析不在帧循环执行，帧投递只保留最新待处理帧。
+- 不新增内置 LUT，继续使用用户文件夹。
+- 新增重复选中回归场景到 LutStateInstrumentation，留待设备运行；本轮未启动模拟器，不能将新增设备测试或 GPU 色彩／性能视为已验证。

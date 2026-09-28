@@ -57,6 +57,16 @@ class LutStateInstrumentation : Instrumentation() {
             present()
             main { check(controller.active?.file == a && preferences.selection(false) == a.uri && falseColorClosed == 1) }
 
+            // Re-selecting the already presented LUT closes without reading or GPU replacement.
+            val committed = main { checkNotNull(controller.active) }
+            main { controller.select(a) }
+            drain()
+            main {
+                check(controller.active === committed && controller.candidate == null)
+                check(controller.closeMenuRequested && controller.loading == null)
+            }
+            check(source.reads.tryReceive().isFailure)
+
             main { controller.select(b) }
             val stale = source.nextRead()
             main { controller.falseColorEnabled() }

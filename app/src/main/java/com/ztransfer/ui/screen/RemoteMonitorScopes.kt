@@ -52,6 +52,7 @@ internal fun MonitorAnalysisOverlays(
     histogramMode: HistogramMode = HistogramMode.LUMA,
     waveformMode: WaveformMode = WaveformMode.LUMA,
     startInset: Dp = 8.dp,
+    bottomInset: Dp = 26.dp,
 ) {
     var lastHistogram by remember { mutableStateOf(histogram) }
     var lastHistogramMode by remember { mutableStateOf(histogramMode) }
@@ -71,7 +72,7 @@ internal fun MonitorAnalysisOverlays(
             if (histogram != null) chartWidth + gap else 0.dp,
             tween(300, easing = FastOutSlowInEasing), label = "waveformSlot",
         )
-        Box(Modifier.align(Alignment.BottomStart).padding(start = startInset, bottom = 26.dp)
+        Box(Modifier.align(Alignment.BottomStart).padding(start = startInset, bottom = bottomInset)
             .width(usableWidth).height(chartHeight)) {
             AnimatedVisibility(histogram != null,
                 enter = fadeIn(tween(180)) + scaleIn(tween(220), initialScale = 0.96f),
@@ -96,7 +97,7 @@ internal fun MonitorAnalysisOverlays(
 
 @Composable
 private fun ScopeCard(label: String, range: String, modifier: Modifier, content: @Composable ColumnScope.() -> Unit) {
-    BoxWithConstraints(modifier.background(Color.Black.copy(alpha = 0.66f), RoundedCornerShape(7.dp))
+    BoxWithConstraints(modifier.background(MonitorOverlayBackground, RoundedCornerShape(7.dp))
         .border(0.5.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(7.dp))) {
         val compact = maxHeight < 42.dp
         Column(Modifier.fillMaxSize().padding(horizontal = 5.dp, vertical = 3.dp)) {

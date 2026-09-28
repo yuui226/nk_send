@@ -22,6 +22,7 @@ import com.ztransfer.R
 import com.ztransfer.lut.LutFolderFailure
 import com.ztransfer.lut.LutMonitorState
 import com.ztransfer.lut.folderMessage
+import com.ztransfer.lut.lutFileLabels
 import com.ztransfer.ui.theme.AppTheme
 
 @Composable
@@ -42,15 +43,7 @@ internal fun RemoteLutPanel(state: LutMonitorState, anchor: Rect?, landscape: Bo
     val density = LocalDensity.current
     val accessible = state.folderFailure != LutFolderFailure.MISSING && state.folderFailure != LutFolderFailure.DENIED
     val fileLabels = remember(state.files) {
-        val counts = state.files.groupingBy { it.label.lowercase(java.util.Locale.ROOT) }.eachCount()
-        val positions = mutableMapOf<String, Int>()
-        state.files.associate { file ->
-            val name = file.label.ifEmpty { file.name }.take(256)
-            val group = file.label.lowercase(java.util.Locale.ROOT)
-            val position = (positions[group] ?: 0) + 1
-            positions[group] = position
-            file.uri to if ((counts[group] ?: 0) > 1) "$name · $position" else name
-        }
+        lutFileLabels(state.files)
     }
     val labels = remember(fileLabels, off, folderLabel, guidance) {
         fileLabels.values.toList() + listOfNotNull(off, folderLabel, guidance)
