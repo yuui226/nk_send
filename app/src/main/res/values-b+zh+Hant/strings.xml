@@ -393,7 +393,6 @@
     <string name="cd_remote_grid">構圖參考線</string>
     <string name="cd_remote_rotate">旋轉螢幕</string>
     <string name="cd_remote_fullscreen_enter">全螢幕監看</string>
-    <string name="cd_remote_fullscreen_exit">退出全螢幕</string>
     <string name="dev_fps_overlay">幀率顯示</string>
     <string name="lab_run_probe">完整探測</string>
     <string name="lab_tracking_probe_hint">追蹤探測開始後，讓有紋理的主體位於畫面中央並緩慢移動</string>
@@ -645,4 +644,6 @@
     <string name="lut_frame_unavailable">監看畫面就緒後再試</string>
     <string name="lut_input_color_unsupported">暫不支援此監看色彩格式的 LUT</string>
     <string name="remote_tool_meter">曝光尺</string>
+    <string name="remote_parameters">曝光參數</string>
+    <string name="remote_tool_dock">工具列</string>
 </resources>

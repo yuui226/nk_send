@@ -124,7 +124,7 @@ class RemoteToolsInstrumentation : Instrumentation() {
             layout.move(RemoteTool.ROTATE, 0); check(layout.order == order)
             RemoteTool.entries.forEach { layout.setVisible(it, false) }
             check(layout.available.none(layout::visible))
-            check(layout.visible(RemoteTool.FULLSCREEN) && layout.visible(RemoteTool.ROTATE))
+            check(layout.visible(RemoteTool.ROTATE))
             RemoteTool.entries.forEach { layout.setVisible(it, true) }
             check(layout.order == layout.available)
             layout.setVisible(RemoteTool.GRID, false)

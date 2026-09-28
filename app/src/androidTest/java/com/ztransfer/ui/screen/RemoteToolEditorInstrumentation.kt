@@ -57,9 +57,7 @@ class RemoteToolEditorInstrumentation : Instrumentation() {
             }
             tap(bounds(label(R.string.remote_tool_manage)))
             SystemClock.sleep(600)
-            val fullscreen = bounds(RemoteTool.FULLSCREEN)
             val rotate = bounds(RemoteTool.ROTATE)
-            check(kotlin.math.abs(fullscreen.centerY() - rotate.centerY()) <= 10)
             val lock = bounds(RemoteTool.LOCK)
             check(lock.centerY() > rotate.centerY() && kotlin.math.abs(lock.centerX() - bounds(RemoteTool.HD).centerX()) <= 8)
             screenshot("remote-editor-default.png")
@@ -80,7 +78,6 @@ class RemoteToolEditorInstrumentation : Instrumentation() {
             SystemClock.sleep(700)
             check(layout().shownTools.indexOf(RemoteTool.HD) >= 8) { "Cross-row drag did not move HD: ${layout().order}" }
             check(layout().visible(RemoteTool.HD) && layout().hiddenTools.isEmpty()) { "Drop incorrectly triggered a click" }
-            check(kotlin.math.abs(bounds(RemoteTool.FULLSCREEN).centerX() - fullscreen.centerX()) <= 8)
             check(kotlin.math.abs(bounds(RemoteTool.ROTATE).centerX() - rotate.centerX()) <= 8)
             // Fixed actions are inert while editing.
             tap(bounds(RemoteTool.ROTATE)); check(node(label(R.string.remote_tool_done)) != null)
@@ -116,24 +113,13 @@ class RemoteToolEditorInstrumentation : Instrumentation() {
             tap(bounds(label(R.string.remote_tool_done))); SystemClock.sleep(500)
             check(node(label(R.string.remote_tool_manage)) != null)
             check(bounds(RemoteTool.ROTATE).centerX() > labels.resources.displayMetrics.widthPixels - 48)
-            val sparseFullscreen = bounds(RemoteTool.FULLSCREEN)
-            val sparseRotate = bounds(RemoteTool.ROTATE)
-            check(kotlin.math.abs((sparseRotate.left - sparseFullscreen.right) -
-                (rotate.left - fullscreen.right)) <= 2) {
-                "Fixed-pair spacing changed between full and sparse rows"
-            }
-            check(sparseFullscreen.centerX() > labels.resources.displayMetrics.widthPixels * 0.65f)
-            check(sparseRotate.left - sparseFullscreen.right <= sparseFullscreen.width()) {
-                "Sparse toolbar separated the fixed pair: $sparseFullscreen / $sparseRotate"
-            }
+            check(kotlin.math.abs(bounds(RemoteTool.ROTATE).centerX() - rotate.centerX()) <= 8)
             screenshot("remote-editor-minimal.png")
-            tap(bounds(RemoteTool.FULLSCREEN)); SystemClock.sleep(900)
+            tap(bounds(RemoteTool.ROTATE)); SystemClock.sleep(900)
+            check(node(label(R.string.remote_tool_done)) == null)
+            check(node(label(R.string.remote_tool_dock)) != null)
             check(node(label(R.string.remote_tool_manage)) == null)
-            check(node(label(R.string.cd_remote_fullscreen_exit)) != null)
             check(node("DISP") != null)
-            screenshot("remote-immersive-layout.png")
-            tap(bounds(label(R.string.cd_remote_fullscreen_exit))); SystemClock.sleep(600)
-            check(node(label(R.string.remote_tool_manage)) == null) { "Landscape exposed its editor" }
             screenshot("remote-landscape-toolbar.png")
             tap(bounds(RemoteTool.ROTATE)); SystemClock.sleep(800)
             tap(bounds(RemoteTool.ROTATE)); SystemClock.sleep(800)

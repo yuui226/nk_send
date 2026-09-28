@@ -415,30 +415,6 @@ internal fun FpsMark(modifier: Modifier = Modifier) {
     }
 }
 
-/** 全屏——四角括号（通用「放大到全屏」符号）。 */
-@Composable
-internal fun FullscreenMark(modifier: Modifier = Modifier, exiting: Boolean = false) {
-    val c = LocalContentColor.current
-    Canvas(modifier) {
-        val sw = ToolMarkStrokeWidth.toPx()
-        val pad = 2.dp.toPx()
-        val arm = 5.dp.toPx()
-        val w = size.width
-        val h = size.height
-        // 每个角一个 L 形括号，开口朝外
-        fun bracket(cornerX: Float, cornerY: Float, dx: Float, dy: Float) {
-            val corner = Offset(cornerX, cornerY) + if (exiting) Offset(dx * arm, dy * arm) else Offset.Zero
-            val direction = if (exiting) -1f else 1f
-            drawLine(c, corner, corner + Offset(dx * arm * direction, 0f), sw, StrokeCap.Round)
-            drawLine(c, corner, corner + Offset(0f, dy * arm * direction), sw, StrokeCap.Round)
-        }
-        bracket(pad, pad, 1f, 1f)                    // 左上 ┌
-        bracket(w - pad, pad, -1f, 1f)               // 右上 ┐
-        bracket(pad, h - pad, 1f, -1f)               // 左下 └
-        bracket(w - pad, h - pad, -1f, -1f)          // 右下 ┘
-    }
-}
-
 /** 旋转：开放圆弧末端只保留外侧半边箭翼，小尺寸下比完整箭头更端正。 */
 @Composable
 internal fun RotateMark(modifier: Modifier = Modifier) {

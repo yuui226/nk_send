@@ -12,7 +12,6 @@
     <string name="remote_tool_focus_area">Focus area</string>
     <string name="remote_tool_waveform">Waveform</string>
     <string name="remote_tool_lock">Lock orientation</string>
-    <string name="remote_tool_fullscreen">Clean fullscreen</string>
     <string name="remote_tool_rotate">Rotate layout</string>
     <string name="remote_tool_manage">Manage tools</string>
     <string name="remote_tool_fixed">Fixed position</string>

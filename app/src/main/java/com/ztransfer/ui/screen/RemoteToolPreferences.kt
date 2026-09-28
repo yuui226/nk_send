@@ -20,7 +20,6 @@ internal enum class RemoteTool(val id: String, val title: Int, val fixed: Boolea
     LUT("lut", R.string.remote_tool_lut),
     METER("meter", R.string.remote_tool_meter),
     LOCK("lock", R.string.remote_tool_lock),
-    FULLSCREEN("fullscreen", R.string.remote_tool_fullscreen, true),
     ROTATE("rotate", R.string.remote_tool_rotate, true);
 
     fun availableIn(movie: Boolean) = this != AUDIO || movie

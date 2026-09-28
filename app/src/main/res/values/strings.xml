@@ -397,7 +397,6 @@
     <string name="cd_remote_grid">Framing grid</string>
     <string name="cd_remote_rotate">Rotate screen</string>
     <string name="cd_remote_fullscreen_enter">Fullscreen monitor</string>
-    <string name="cd_remote_fullscreen_exit">Exit fullscreen</string>
     <string name="dev_fps_overlay">FPS overlay</string>
     <string name="lab_run_probe">Probe</string>
     <string name="lab_tracking_probe_hint">When tracking probe starts, keep a textured subject near center and move it slowly</string>
@@ -651,4 +650,6 @@
     <string name="lut_frame_unavailable">Try again when the live view is ready</string>
     <string name="lut_input_color_unsupported">This live-view color format does not support LUT yet</string>
     <string name="remote_tool_meter">Exposure meter</string>
+    <string name="remote_parameters">Exposure controls</string>
+    <string name="remote_tool_dock">Tools</string>
 </resources>

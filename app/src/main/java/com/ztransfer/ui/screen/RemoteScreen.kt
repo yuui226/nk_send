@@ -70,6 +70,9 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.CenterFocusStrong
 import androidx.compose.material.icons.filled.LockOpen
@@ -106,7 +109,6 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.layoutId
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -711,25 +713,12 @@ private fun RemoteContent(
     var levelRoll by remember { mutableStateOf<Float?>(null) }
     var levelPitch by remember { mutableStateOf<Float?>(null) }
     var probing by remember { mutableStateOf(false) }
-    // 沉浸全屏仅用于横屏；沿用同一个取景器实例做边界动画。
-    var immersiveFullscreen by remember { mutableStateOf(false) }
+    val landscapeLayout = rotation != 0
     LaunchedEffect(rotation, editingTools) {
         gridPanelOpen = false
         gridPanelCloseRequested = false
         cameraToolPanel = null
         cameraToolCloseRequested = false
-        if (rotation == 0) immersiveFullscreen = false
-    }
-    fun enterFullscreen() {
-        // 竖屏入口先沿用页面现有的转屏动画进入横屏；退出全屏后停留在横屏常规布局。
-        if (rotation == 0 && tools.locked.value) return
-        if (rotation == 0) onCycleRotation()
-        listProp = null
-        devPanel = false
-        immersiveFullscreen = true
-    }
-    BackHandler(enabled = immersiveFullscreen) {
-        immersiveFullscreen = false
     }
     BackHandler(enabled = devPanel) { devPanel = false }
     var viewfinderRecorder by remember { mutableStateOf<ViewfinderRecorder?>(null) }
@@ -2862,7 +2851,6 @@ private fun RemoteContent(
                     startSession(false)
                 }
                 RemoteTool.LOCK -> onLockRotation(false)
-                RemoteTool.FULLSCREEN -> immersiveFullscreen = false
                 RemoteTool.LUT -> { lutState.off(); lutState.dismissMenu() }
                 RemoteTool.GRID -> gridPanelOpen = false
                 RemoteTool.WHITE_BALANCE -> if (cameraToolPanel == RemoteCameraTool.WHITE_BALANCE) cameraToolPanel = null
@@ -2875,101 +2863,102 @@ private fun RemoteContent(
     var dispMode by tools.disp
     val changeToolVisibility: (RemoteTool, Boolean) -> Unit = ::setToolVisible
     ApplyRemoteToolLayout(tools.layout(movieMode), changeToolVisibility)
-    val renderTools: @Composable (androidx.compose.ui.unit.Dp, Modifier, Boolean) -> Unit = { gap, modifier, singleLine ->
+    val renderTool: @Composable (RemoteTool?) -> Unit = { tool ->
+        if (tool == RemoteTool.RECORD) {
+            RecControlBar(viewfinderRecorder != null, recPaused, recElapsed,
+                { startRecorder() }, { togglePauseRecorder() }, { stopRecorder() },
+                modifier = Modifier.height(36.dp), enabled = isPro,
+                isFinalizing = recFinalizing, showDone = recSaveSuccess)
+        } else {
+            val active = when (tool) {
+                RemoteTool.HD -> hdLiveView
+                RemoteTool.FPS -> showFps
+                RemoteTool.AUDIO -> showAudioLevels
+                RemoteTool.HISTOGRAM -> showHistogram
+                RemoteTool.LUT -> lutState.active != null
+                RemoteTool.GRID -> framingGrid != ViewfinderGrid.OFF
+                RemoteTool.EXPOSURE -> exposureAssist != ExposureAssist.OFF
+                RemoteTool.DESQUEEZE -> desqueezeMultiplier > 1.001f
+                RemoteTool.METER -> showMeter
+                RemoteTool.LEVEL -> showLevel
+                RemoteTool.WAVEFORM -> showWaveform
+                RemoteTool.LOCK -> tools.locked.value
+                else -> false
+            }
+            val disabled = (tool?.fixed == true && editingTools) ||
+                (tool == RemoteTool.ROTATE && tools.locked.value)
+            TopIconToggle(active, stringResource(tool?.title ?: if (editingTools) R.string.remote_tool_done else R.string.remote_tool_manage), {
+                when (tool) {
+                    RemoteTool.HD -> { hdLiveView = !hdLiveView; startSession(hdLiveView) }
+                    RemoteTool.FPS -> toggleFpsControl()
+                    RemoteTool.AUDIO -> toggleAudioLevels()
+                    RemoteTool.HISTOGRAM -> histogramMode = histogramMode.next()
+                    RemoteTool.LUT -> {
+                        listProp = null; devPanel = false; cameraToolPanel = null; gridPanelOpen = false
+                        lutState.openMenu()
+                    }
+                    RemoteTool.GRID -> {
+                        lutState.dismissMenu()
+                        listProp=null; devPanel=false; cameraToolPanel=null
+                        if(gridPanelOpen) gridPanelCloseRequested=true
+                        else { gridPanelCloseRequested=false; gridPanelOpen=true }
+                    }
+                    RemoteTool.EXPOSURE -> {
+                        val next = exposureAssist.next()
+                        if (next == ExposureAssist.FALSE_COLOR) lutState.falseColorEnabled()
+                        exposureAssist = next
+                    }
+                    RemoteTool.DESQUEEZE -> {
+                        val i = REMOTE_DESQUEEZE_OPTIONS.indices.minByOrNull { abs(REMOTE_DESQUEEZE_OPTIONS[it] - desqueezeMultiplier) } ?: 0
+                        setDesqueezeMultiplier(REMOTE_DESQUEEZE_OPTIONS[(i + 1) % REMOTE_DESQUEEZE_OPTIONS.size])
+                    }
+                    RemoteTool.METER -> showMeter = !showMeter
+                    RemoteTool.LEVEL -> showLevel = !showLevel
+                    RemoteTool.WAVEFORM -> waveformMode = waveformMode.next()
+                    RemoteTool.LOCK -> {
+                        val locked = !tools.locked.value
+                        onLockRotation(locked)
+                        showHint(if (locked) rotationStoppedHint else rotationResumedHint)
+                    }
+                    RemoteTool.ROTATE -> if (!disabled) onCycleRotation()
+                    RemoteTool.WHITE_BALANCE -> { lutState.dismissMenu(); gridPanelOpen = false; listProp = null; devPanel = false; if (cameraToolPanel == RemoteCameraTool.WHITE_BALANCE) cameraToolCloseRequested = true else { cameraToolCloseRequested = false; cameraToolPanel = RemoteCameraTool.WHITE_BALANCE } }
+                    RemoteTool.FOCUS_AREA -> { lutState.dismissMenu(); gridPanelOpen = false; listProp = null; devPanel = false; if (cameraToolPanel == RemoteCameraTool.FOCUS_AREA) cameraToolCloseRequested = true else { cameraToolCloseRequested = false; cameraToolPanel = RemoteCameraTool.FOCUS_AREA } }
+                    else -> {
+                        listProp = null
+                        devPanel = false
+                        cameraToolPanel = null
+                        onEditingTools(!editingTools)
+                    }
+                }
+            }, modifier = if (tool == RemoteTool.WHITE_BALANCE) Modifier.onGloballyPositioned {
+                whiteBalanceAnchor = it
+            } else if (tool == RemoteTool.FOCUS_AREA) Modifier.onGloballyPositioned {
+                focusAreaAnchor = it
+            } else if (tool == RemoteTool.LUT) Modifier.onGloballyPositioned {
+                lutAnchor = it
+            } else if (tool == RemoteTool.GRID) Modifier.onGloballyPositioned {
+                gridAnchor = it
+            } else Modifier, enabled = !disabled) {
+                if (tool == null) Icon(if (editingTools) Icons.Default.Check else Icons.Default.Settings, null, Modifier.size(19.dp))
+                else if (cameraToolLoading && (
+                    (tool == RemoteTool.WHITE_BALANCE && cameraToolPanel == RemoteCameraTool.WHITE_BALANCE) ||
+                    (tool == RemoteTool.FOCUS_AREA && cameraToolPanel == RemoteCameraTool.FOCUS_AREA))) {
+                    androidx.compose.material3.CircularProgressIndicator(
+                        modifier=Modifier.size(18.dp),strokeWidth=1.5.dp,color=colors.accentBlue)
+                } else RemoteToolMark(tool, tools)
+            }
+        }
+    }
+
+
+    val renderTools: @Composable (androidx.compose.ui.unit.Dp, Modifier) -> Unit = { gap, modifier ->
         RemoteToolBar(tools, editingTools, movieMode, changeToolVisibility,
-            modifier.fillMaxWidth(), gap, singleLine = singleLine,
+            modifier.fillMaxWidth(), gap,
             leading = {
                 if (devUnlocked && !editingTools) TopIconToggle(false, stringResource(R.string.cd_dev_panel), { devPanel = true }) {
                     Icon(Icons.Default.BugReport, null, Modifier.size(18.dp))
                 }
-            }) { tool ->
-                    if (tool == RemoteTool.RECORD) {
-                        RecControlBar(viewfinderRecorder != null, recPaused, recElapsed,
-                            { startRecorder() }, { togglePauseRecorder() }, { stopRecorder() },
-                            modifier = Modifier.height(36.dp), enabled = isPro,
-                            isFinalizing = recFinalizing, showDone = recSaveSuccess)
-                    } else {
-                        val active = when (tool) {
-                            RemoteTool.HD -> hdLiveView
-                            RemoteTool.FPS -> showFps
-                            RemoteTool.AUDIO -> showAudioLevels
-                            RemoteTool.HISTOGRAM -> showHistogram
-                            RemoteTool.LUT -> lutState.active != null
-                            RemoteTool.GRID -> framingGrid != ViewfinderGrid.OFF
-                            RemoteTool.EXPOSURE -> exposureAssist != ExposureAssist.OFF
-                            RemoteTool.DESQUEEZE -> desqueezeMultiplier > 1.001f
-                            RemoteTool.METER -> showMeter
-                            RemoteTool.LEVEL -> showLevel
-                            RemoteTool.WAVEFORM -> showWaveform
-                            RemoteTool.LOCK -> tools.locked.value
-                            else -> false
-                        }
-                        val disabled = (tool?.fixed == true && editingTools) ||
-                            (tool == RemoteTool.ROTATE && tools.locked.value) ||
-                            (tool == RemoteTool.FULLSCREEN && rotation == 0 && tools.locked.value)
-                        TopIconToggle(active, stringResource(tool?.title ?: if (editingTools) R.string.remote_tool_done else R.string.remote_tool_manage), {
-                            when (tool) {
-                                RemoteTool.HD -> { hdLiveView = !hdLiveView; startSession(hdLiveView) }
-                                RemoteTool.FPS -> toggleFpsControl()
-                                RemoteTool.AUDIO -> toggleAudioLevels()
-                                RemoteTool.HISTOGRAM -> histogramMode = histogramMode.next()
-                                RemoteTool.LUT -> {
-                                    listProp = null; devPanel = false; cameraToolPanel = null; gridPanelOpen = false
-                                    lutState.openMenu()
-                                }
-                                RemoteTool.GRID -> {
-                                    lutState.dismissMenu()
-                                    listProp=null; devPanel=false; cameraToolPanel=null
-                                    if(gridPanelOpen) gridPanelCloseRequested=true
-                                    else { gridPanelCloseRequested=false; gridPanelOpen=true }
-                                }
-                                RemoteTool.EXPOSURE -> {
-                                    val next = exposureAssist.next()
-                                    if (next == ExposureAssist.FALSE_COLOR) lutState.falseColorEnabled()
-                                    exposureAssist = next
-                                }
-                                RemoteTool.DESQUEEZE -> {
-                                    val i = REMOTE_DESQUEEZE_OPTIONS.indices.minByOrNull { abs(REMOTE_DESQUEEZE_OPTIONS[it] - desqueezeMultiplier) } ?: 0
-                                    setDesqueezeMultiplier(REMOTE_DESQUEEZE_OPTIONS[(i + 1) % REMOTE_DESQUEEZE_OPTIONS.size])
-                                }
-                                RemoteTool.METER -> showMeter = !showMeter
-                                RemoteTool.LEVEL -> showLevel = !showLevel
-                                RemoteTool.WAVEFORM -> waveformMode = waveformMode.next()
-                                RemoteTool.LOCK -> {
-                                    val locked = !tools.locked.value
-                                    onLockRotation(locked)
-                                    showHint(if (locked) rotationStoppedHint else rotationResumedHint)
-                                }
-                                RemoteTool.FULLSCREEN -> enterFullscreen()
-                                RemoteTool.ROTATE -> if (!disabled) onCycleRotation()
-                                RemoteTool.WHITE_BALANCE -> { lutState.dismissMenu(); gridPanelOpen = false; listProp = null; devPanel = false; if (cameraToolPanel == RemoteCameraTool.WHITE_BALANCE) cameraToolCloseRequested = true else { cameraToolCloseRequested = false; cameraToolPanel = RemoteCameraTool.WHITE_BALANCE } }
-                                RemoteTool.FOCUS_AREA -> { lutState.dismissMenu(); gridPanelOpen = false; listProp = null; devPanel = false; if (cameraToolPanel == RemoteCameraTool.FOCUS_AREA) cameraToolCloseRequested = true else { cameraToolCloseRequested = false; cameraToolPanel = RemoteCameraTool.FOCUS_AREA } }
-                                else -> {
-                                    listProp = null
-                                    devPanel = false
-                                    cameraToolPanel = null
-                                    onEditingTools(!editingTools)
-                                }
-                            }
-                        }, modifier = if (tool == RemoteTool.WHITE_BALANCE) Modifier.onGloballyPositioned {
-                            whiteBalanceAnchor = it
-                        } else if (tool == RemoteTool.FOCUS_AREA) Modifier.onGloballyPositioned {
-                            focusAreaAnchor = it
-                        } else if (tool == RemoteTool.LUT) Modifier.onGloballyPositioned {
-                            lutAnchor = it
-                        } else if (tool == RemoteTool.GRID) Modifier.onGloballyPositioned {
-                            gridAnchor = it
-                        } else Modifier, enabled = !disabled) {
-                            if (tool == null) Icon(if (editingTools) Icons.Default.Check else Icons.Default.Settings, null, Modifier.size(19.dp))
-                            else if (cameraToolLoading && (
-                                (tool == RemoteTool.WHITE_BALANCE && cameraToolPanel == RemoteCameraTool.WHITE_BALANCE) ||
-                                (tool == RemoteTool.FOCUS_AREA && cameraToolPanel == RemoteCameraTool.FOCUS_AREA))) {
-                                androidx.compose.material3.CircularProgressIndicator(
-                                    modifier=Modifier.size(18.dp),strokeWidth=1.5.dp,color=colors.accentBlue)
-                            } else RemoteToolMark(tool, tools)
-                        }
-                    }
-        }
+            }, button = renderTool)
     }
 
     // ---------- 布局 ----------
@@ -2996,30 +2985,20 @@ private fun RemoteContent(
         ) {
             // 顶栏返回常驻；信号随其他工具淡变，监看工具统一放到取景器下方。
             Row(verticalAlignment = Alignment.CenterVertically) {
-                AnimatedVisibility(
-                    visible = !immersiveFullscreen,
-                    enter = fadeIn(tween(260, easing = FastOutSlowInEasing)),
-                    exit = fadeOut(tween(180, easing = FastOutSlowInEasing))
-                ) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        SignalPill(
-                            rssi = camState.wifiRssi,
-                            connected = connected,
-                            connectionType = camState.presentationConnectionType,
-                            staMode = camState.presentationIsSta,
-                            onStaDisconnectedClick = cameraViewModel::retryStaConnection,
-                        )
-                        BatteryPill(percent = rcBatteryPercentage(batteryParam))
-                    }
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    SignalPill(
+                        rssi = camState.wifiRssi,
+                        connected = connected,
+                        connectionType = camState.presentationConnectionType,
+                        staMode = camState.presentationIsSta,
+                        onStaDisconnectedClick = cameraViewModel::retryStaConnection,
+                    )
+                    BatteryPill(percent = rcBatteryPercentage(batteryParam))
                 }
                 Spacer(Modifier.weight(1f))
                 GlassButton(
                     onClick = {
-                        if (immersiveFullscreen) {
-                            immersiveFullscreen = false
-                        } else {
-                            onNavigateBack()
-                        }
+                        onNavigateBack()
                     },
                     shape = RoundedCornerShape(22.dp),
                     showSheen = false,
@@ -3028,13 +3007,7 @@ private fun RemoteContent(
                 ) {
                     Icon(
                         Icons.Default.ArrowForward,
-                        contentDescription = stringResource(
-                            if (immersiveFullscreen) {
-                                R.string.cd_remote_fullscreen_exit
-                            } else {
-                                R.string.cd_back
-                            }
-                        ),
+                        contentDescription = stringResource(R.string.cd_back),
                         tint = colors.onBackground, modifier = Modifier.size(18.dp)
                     )
                 }
@@ -3076,13 +3049,9 @@ private fun RemoteContent(
                 modifier = Modifier.fillMaxWidth().aspectRatio(viewfinderAspect * desqueezeMultiplier)
             )
             Spacer(Modifier.height(8.dp))
-            // Row 1: overlay tools (left) + screen actions (right)
-            // Row 不会自动折行，窄屏上这排按钮会直接顶出屏幕外。这里做一次「量宽再
-            // 分行」：右端永久留给【进全屏 / 转屏】两颗，监看工具从左往右填第一行，
-            // 填不下的整颗挪到第二行左对齐（仍与取景器同一左边界）。
-            // HD/FPS 等文字键随系统字号变化，录像控件也有不同宽度。
-            // 自定义 Layout 按每颗按钮的真实测量宽度分行，避免右端两颗被挤出屏幕。
-            renderTools(6.dp, Modifier, false)
+            // 竖屏按实际按钮宽度换行，旋转固定在第一行右端。
+            // HD/FPS 字号和录制控件宽度变化仍由同一套列轨道处理。
+            renderTools(6.dp, Modifier)
             Spacer(Modifier.height(12.dp))
 
             // 2×2 数值拨轮微调：读数即控件——在数值上【上下拖动】，数值列随手指 1:1
@@ -3143,114 +3112,22 @@ private fun RemoteContent(
         }
         } else {
             BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-                val normalHorizontalPadding = 10.dp
-                val normalVerticalPadding = 8.dp
-                val controlsGap = 8.dp
-                val parameterPanelWidth = 170.dp
-                val fallbackToolBarHeight = 40.dp
-                val toolRowGap = 4.dp
-                val fullscreenVerticalBreathingRoom = 4.dp
-                val density = LocalDensity.current
-                var landscapeToolBarHeightPx by remember { mutableIntStateOf(0) }
-                val landscapeToolBarHeight = if (landscapeToolBarHeightPx > 0) {
-                    with(density) { landscapeToolBarHeightPx.toDp() }
-                } else {
-                    fallbackToolBarHeight
-                }
-
-                fun fitWithin(
-                    availableWidth: androidx.compose.ui.unit.Dp,
-                    availableHeight: androidx.compose.ui.unit.Dp,
-                    aspectRatio: Float = viewfinderAspect * desqueezeMultiplier,
-                ): Pair<androidx.compose.ui.unit.Dp, androidx.compose.ui.unit.Dp> {
-                    val width = availableWidth.coerceAtLeast(0.dp)
-                    val height = availableHeight.coerceAtLeast(0.dp)
-                    if (width == 0.dp || height == 0.dp) return 0.dp to 0.dp
-                    val heightAtFullWidth = width / aspectRatio
-                    return if (heightAtFullWidth <= height) {
-                        width to heightAtFullWidth
-                    } else {
-                        (height * aspectRatio) to height
-                    }
-                }
-
-                // 常规横屏中，取景器位于左栏、工具行上方；全屏时用同一个实例扩展到整个
-                // 安全区域。外层 RemoteScreen 已把状态栏、导航栏和挖孔映射成左右 inset，
-                // 所以这里的 maxWidth/maxHeight 正是可以安全使用的最大画布。
-                val normalLeftWidth = (
-                    maxWidth -
-                        normalHorizontalPadding * 2 -
-                        parameterPanelWidth -
-                        controlsGap
-                    ).coerceAtLeast(0.dp)
-                val normalViewfinderHeight = (
-                    maxHeight -
-                        normalVerticalPadding * 2 -
-                        landscapeToolBarHeight -
-                        toolRowGap
-                    ).coerceAtLeast(0.dp)
-                val (normalImageWidth, normalImageHeight) =
-                    fitWithin(normalLeftWidth, normalViewfinderHeight)
-                val normalImageX =
-                    normalHorizontalPadding + (normalLeftWidth - normalImageWidth) / 2
-                val normalImageY =
-                    normalVerticalPadding + (normalViewfinderHeight - normalImageHeight) / 2
-
-                val fullscreenShutterSize = (maxHeight * 0.18f).coerceIn(48.dp, 64.dp)
-                val fullscreenAudioWidth = if (movieMode && showAudioLevels) 36.dp else 0.dp
-                val fullscreenRailWidth = fullscreenShutterSize + fullscreenAudioWidth + 20.dp
-                val fullscreenAvailableHeight =
-                    (maxHeight - fullscreenVerticalBreathingRoom * 2).coerceAtLeast(0.dp)
-                val (fullscreenImageWidth, fullscreenImageHeight) =
-                    fitWithin(maxWidth - fullscreenRailWidth - 4.dp, fullscreenAvailableHeight)
-                val targetImageX = if (immersiveFullscreen) {
-                    4.dp
-                } else {
-                    normalImageX
-                }
-                val targetImageY = if (immersiveFullscreen) {
-                    fullscreenVerticalBreathingRoom +
-                        (fullscreenAvailableHeight - fullscreenImageHeight) / 2
-                } else {
-                    normalImageY
-                }
-                val targetImageWidth =
-                    if (immersiveFullscreen) fullscreenImageWidth else normalImageWidth
-                val targetImageHeight =
-                    if (immersiveFullscreen) fullscreenImageHeight else normalImageHeight
-                val boundsDuration = if (immersiveFullscreen) 360 else 300
-                val imageX by animateDpAsState(
-                    targetValue = targetImageX,
-                    animationSpec = tween(boundsDuration, easing = FastOutSlowInEasing),
-                    label = "fullscreenViewfinderX"
-                )
-                val imageY by animateDpAsState(
-                    targetValue = targetImageY,
-                    animationSpec = tween(boundsDuration, easing = FastOutSlowInEasing),
-                    label = "fullscreenViewfinderY"
-                )
-                val imageWidth by animateDpAsState(
-                    targetValue = targetImageWidth,
-                    animationSpec = tween(boundsDuration, easing = FastOutSlowInEasing),
-                    label = "fullscreenViewfinderWidth"
-                )
-                val imageHeight by animateDpAsState(
-                    targetValue = targetImageHeight,
-                    animationSpec = tween(boundsDuration, easing = FastOutSlowInEasing),
-                    label = "fullscreenViewfinderHeight"
-                )
-                // 录像画面按比例适配后，横屏/全屏通常会在取景器左侧留下空白。
-                // 至少 44dp 时把 30dp 宽的电平表放到画面外，并保留 6dp 间隔。
-                val audioMeterSlotWidth = 44.dp
-                val audioMeterOutside = immersiveFullscreen || imageX >= audioMeterSlotWidth
+                val monitorLayout = landscapeMonitorLayout(maxWidth.value, maxHeight.value,
+                    viewfinderAspect * desqueezeMultiplier, movieMode)
+                val imageX = monitorLayout.image.x.dp
+                val imageY = monitorLayout.image.y.dp
+                val imageWidth = monitorLayout.image.width.dp
+                val imageHeight = monitorLayout.image.height.dp
+                val landscapeShutterSize = monitorLayout.shutterSize.dp
+                val landscapeAudioWidth = if (movieMode) 36.dp else 0.dp
 
                 RemoteViewfinderPanel(
                     frameProvider = { frame },
                     lutState = lutState,
                     grid = framingGrid,
                     histogramMode = histogramMode,
-                    modeText = if (immersiveFullscreen) null else modeText,
-                    focusModeText = if (immersiveFullscreen) null else focusModeText,
+                    modeText = null,
+                    focusModeText = null,
                     movieMode = movieMode,
                     showAudioLevels = showAudioLevels,
                     recording = recording,
@@ -3275,265 +3152,174 @@ private fun RemoteContent(
                 meterEv = meterSample?.first,
                     levelRoll = levelRoll,
                 levelPitch = levelPitch,
-                    showEmbeddedAudioMeter = !audioMeterOutside,
-                    informationBottomInset = if (immersiveFullscreen && dispMode == MonitorDispMode.CAMERA) 48.dp else 0.dp,
-                    meterTopInset = if (immersiveFullscreen && dispMode == MonitorDispMode.FULL) 54.dp else 34.dp,
+                    showEmbeddedAudioMeter = false,
+                    informationBottomInset = if (dispMode == MonitorDispMode.CAMERA) 48.dp else 0.dp,
+                    // Leave room for DISP text and the narrow-screen navigation row.
+                    meterTopInset = 54.dp,
                     desqueezeMultiplier = desqueezeMultiplier,
                     modifier = Modifier
                         .offset(x = imageX, y = imageY)
                         .size(width = imageWidth, height = imageHeight)
                 )
 
-                if (audioMeterOutside) {
-                    ViewfinderSoundMeterOverlay(
-                        enabled = connected && movieMode && showAudioLevels,
-                        frameProvider = { frame },
-                        bottomInset = 0.dp,
-                        modifier = Modifier
-                            .offset(x = if (immersiveFullscreen) imageX + imageWidth + 4.dp else imageX - audioMeterSlotWidth, y = imageY)
-                            .size(width = if (immersiveFullscreen) fullscreenAudioWidth else audioMeterSlotWidth, height = imageHeight)
+                ViewfinderSoundMeterOverlay(
+                    enabled = connected && movieMode && showAudioLevels,
+                    frameProvider = { frame },
+                    bottomInset = 0.dp,
+                    modifier = Modifier
+                        .offset(x = imageX + imageWidth + 4.dp, y = imageY)
+                        .size(width = landscapeAudioWidth, height = imageHeight)
+                )
+
+
+                val activeProps = if (movieMode) MOVIE_EXPOSURE_PROPS else EXPOSURE_PROPS
+                val exposureInfo = listOfNotNull(modeText) + listOf(3, 2, 1, 0).mapNotNull { index ->
+                    params[activeProps[index]]?.let { param ->
+                        val label = paramLabel(activeProps[index])
+                        "$label ${rcFormat(param.prop, param.current)}"
+                    }
+                }
+                val cameraDisp = dispMode == MonitorDispMode.CAMERA
+                val detailValues = rememberMonitorDetails(
+                    cameraViewModel.getCamera(), movieMode,
+                    enabled = connected && initialLoaded && cameraDisp,
+                    pollingAllowed = !probing && !diagnosticControlBusy && !recBusy && !capturing && !recording,
+                    whiteBalanceOnly = true,
+                )
+                val storageValues = rememberMonitorStorage(
+                    cameraViewModel.getCamera(), camState.storageIds,
+                    enabled = connected && initialLoaded && cameraDisp,
+                    pollingAllowed = !probing && !diagnosticControlBusy && !recBusy && !capturing && !recording,
+                )
+                AnimatedVisibility(visible = cameraDisp && connected,
+                    enter = fadeIn(tween(180)), exit = fadeOut(tween(180)),
+                    modifier = Modifier.offset(x = imageX, y = imageY).size(imageWidth, imageHeight)) {
+                    val cells = listOfNotNull(modeText?.let { "MODE" to it }) +
+                        listOf(3, 2, 1, 0).mapNotNull { index ->
+                            params[activeProps[index]]?.let { param ->
+                                paramLabel(activeProps[index]) to rcFormat(param.prop, param.current)
+                            }
+                        } + listOfNotNull(
+                            detailValues[RemoteCameraTool.WHITE_BALANCE]?.let { "WB" to it },
+                            focusModeText?.let { "AF" to it })
+                    CameraMonitorDisp(cells, storageValues, movieMode,
+                        rcBatteryPercentage(batteryParam), recording, Modifier.fillMaxSize())
+                }
+                MonitorExposureSummary(
+                    if (cameraDisp && connected) MonitorDispMode.CLEAN else dispMode, exposureInfo, connected,
+                    Modifier.offset(x = imageX + 8.dp, y = imageY + if (dispMode == MonitorDispMode.FULL) 27.dp else 9.dp)
+                        .width((imageWidth - if (recording) 104.dp else 16.dp).coerceAtLeast(0.dp)),
+                )
+                AnimatedVisibility(
+                    visible = dispMode == MonitorDispMode.FULL && connected,
+                    enter = fadeIn(tween(180)), exit = fadeOut(tween(180)),
+                    modifier = Modifier.offset(x = imageX, y = imageY + 9.dp).width(imageWidth),
+                ) {
+                    val details = rememberMonitorDetails(
+                        cameraViewModel.getCamera(), movieMode,
+                        enabled = connected && initialLoaded && dispMode == MonitorDispMode.FULL,
+                        pollingAllowed = !probing && !diagnosticControlBusy && !recBusy && !capturing,
                     )
+                    MonitorDetailSummary(details.values.toList(), rcBatteryPercentage(batteryParam),
+                        Modifier.padding(start = 8.dp, end = if (recording) 88.dp else 8.dp))
                 }
 
-                if (immersiveFullscreen) {
-                    ImmersiveMonitorControls(
-                        onExit = { immersiveFullscreen = false },
-                        onCycle = { dispMode = dispMode.next() },
-                        modifier = Modifier.offset(x = imageX + imageWidth + fullscreenAudioWidth + 8.dp, y = normalVerticalPadding)
-                            .width((maxWidth - imageX - imageWidth - fullscreenAudioWidth - 12.dp).coerceAtLeast(fullscreenShutterSize))
-                            .height((maxHeight - normalVerticalPadding * 2).coerceAtLeast(0.dp)),
-                    ) {
-                        ShutterButton(
-                            capturing = capturing, focusing = afHeld,
+
+                LandscapeMonitorControls(
+                    layout = monitorLayout,
+                    tools = tools.layout(movieMode).shownTools,
+                    cameraRecording = recording,
+                    localRecording = viewfinderRecorder != null,
+                    onPanelChange = {
+                        gridPanelOpen = false
+                        cameraToolPanel = null
+                        lutState.dismissMenu()
+                        listProp = null
+                        devPanel = false
+                    },
+                    dockButton = { active, click, modifier ->
+                        TopIconToggle(active, stringResource(R.string.remote_tool_dock), click, modifier.size(40.dp)) {
+                            Icon(Icons.Default.Settings, null, Modifier.size(20.dp))
+                        }
+                    },
+                    parameterButton = { active, click ->
+                        TopIconToggle(active, stringResource(R.string.remote_parameters), click) {
+                            Icon(Icons.Default.Tune, null, Modifier.size(20.dp))
+                        }
+                    },
+                    rotateButton = { renderTool(RemoteTool.ROTATE) },
+                    backButton = {
+                        TopIconToggle(false, stringResource(R.string.cd_back), onNavigateBack,
+                            Modifier.size(40.dp)) {
+                            Icon(Icons.Default.ArrowForward, null, Modifier.size(20.dp))
+                        }
+                    },
+                    dispButton = {
+                        TopIconToggle(false, "DISP", { dispMode = dispMode.next() }) {
+                            Text("DISP", fontSize = 10.sp)
+                        }
+                    },
+                    shutter = {
+                        ShutterButton(capturing = capturing, focusing = afHeld,
                             enabled = connected && !probing, movie = movieMode, recording = recording,
                             onFocusStart = { startFocus() }, onRelease = ::finishShutterGesture,
                             onQuickTap = { if (movieMode) toggleRecord() else shoot() },
-                            diameter = fullscreenShutterSize,
-                        )
-                    }
-                    val activeProps = if (movieMode) MOVIE_EXPOSURE_PROPS else EXPOSURE_PROPS
-                    val exposureInfo = listOfNotNull(modeText) + listOf(3, 2, 1, 0).mapNotNull { index ->
-                        params[activeProps[index]]?.let { param ->
-                            val label = paramLabel(activeProps[index])
-                            "$label ${rcFormat(param.prop, param.current)}"
+                            diameter = landscapeShutterSize)
+                    },
+                    localStop = {
+                        TopIconToggle(true, stringResource(R.string.cd_remote_rec_stop), { stopRecorder() }) {
+                            Icon(Icons.Default.Stop, null, Modifier.size(20.dp))
                         }
-                    }
-                    val cameraDisp = dispMode == MonitorDispMode.CAMERA
-                    val detailValues = rememberMonitorDetails(
-                        cameraViewModel.getCamera(), movieMode,
-                        enabled = connected && initialLoaded && cameraDisp,
-                        pollingAllowed = !probing && !diagnosticControlBusy && !recBusy && !capturing && !recording,
-                        whiteBalanceOnly = true,
-                    )
-                    val storageValues = rememberMonitorStorage(
-                        cameraViewModel.getCamera(), camState.storageIds,
-                        enabled = connected && initialLoaded && cameraDisp,
-                        pollingAllowed = !probing && !diagnosticControlBusy && !recBusy && !capturing && !recording,
-                    )
-                    AnimatedVisibility(visible = cameraDisp && connected,
-                        enter = fadeIn(tween(180)), exit = fadeOut(tween(180)),
-                        modifier = Modifier.offset(x = imageX, y = imageY).size(imageWidth, imageHeight)) {
-                        val cells = listOfNotNull(modeText?.let { "MODE" to it }) +
-                            listOf(3, 2, 1, 0).mapNotNull { index ->
-                                params[activeProps[index]]?.let { param ->
-                                    paramLabel(activeProps[index]) to rcFormat(param.prop, param.current)
-                                }
-                            } + listOfNotNull(
-                                detailValues[RemoteCameraTool.WHITE_BALANCE]?.let { "WB" to it },
-                                focusModeText?.let { "AF" to it })
-                        CameraMonitorDisp(cells, storageValues, movieMode,
-                            rcBatteryPercentage(batteryParam), recording, Modifier.fillMaxSize())
-                    }
-                    ImmersiveMonitorFooter(
-                        if (cameraDisp && connected) MonitorDispMode.CLEAN else dispMode, exposureInfo, connected,
-                        Modifier.offset(x = imageX + 8.dp, y = imageY + if (dispMode == MonitorDispMode.FULL) 27.dp else 9.dp)
-                            .width((imageWidth - if (recording) 104.dp else 16.dp).coerceAtLeast(0.dp)),
-                    )
-                    AnimatedVisibility(
-                        visible = dispMode == MonitorDispMode.FULL && connected,
-                        enter = fadeIn(tween(180)), exit = fadeOut(tween(180)),
-                        modifier = Modifier.offset(x = imageX, y = imageY + 9.dp).width(imageWidth),
-                    ) {
-                        val details = rememberMonitorDetails(
-                            cameraViewModel.getCamera(), movieMode,
-                            enabled = connected && initialLoaded && dispMode == MonitorDispMode.FULL,
-                            pollingAllowed = !probing && !diagnosticControlBusy && !recBusy && !capturing,
-                        )
-                        ImmersiveMonitorDetails(details.values.toList(), rcBatteryPercentage(batteryParam),
-                            Modifier.padding(start = 8.dp, end = if (recording) 88.dp else 8.dp))
-                    }
-                }
-
-                // 操作区独立淡出/淡入，取景器尺寸动画不会重建或交叉切换帧画面。
-                AnimatedVisibility(
-                    visible = !immersiveFullscreen,
-                    enter = fadeIn(
-                        animationSpec = tween(
-                            durationMillis = 260,
-                            delayMillis = 70,
-                            easing = FastOutSlowInEasing
-                        )
-                    ),
-                    exit = fadeOut(
-                        animationSpec = tween(
-                            durationMillis = 180,
-                            easing = FastOutSlowInEasing
-                        )
-                    ),
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(
-                            horizontal = normalHorizontalPadding,
-                            vertical = normalVerticalPadding
-                        )
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxSize(),
-                        horizontalArrangement = Arrangement.spacedBy(controlsGap)
-                    ) {
-                        Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
-                            Spacer(Modifier.weight(1f))
-                            Spacer(Modifier.height(toolRowGap))
-                            renderTools(5.dp, Modifier.onSizeChanged {
-                                if (landscapeToolBarHeightPx != it.height) landscapeToolBarHeightPx = it.height
-                            }, true)
-                        }
-
-                        Column(
-                            modifier = Modifier
-                                .width(parameterPanelWidth)
-                                .fillMaxHeight(),
-                            verticalArrangement = Arrangement.Center
-                        ) {
-                            val activeProps =
-                                if (movieMode) MOVIE_EXPOSURE_PROPS else EXPOSURE_PROPS
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                activeProps.chunked(2).forEach { rowProps ->
-                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        rowProps.forEach { prop ->
-                                            val isoProp =
-                                                if (movieMode) {
-                                                    Lab.PROP_NK_MOVIE_ISO
-                                                } else {
-                                                    Lab.PROP_ISO
-                                                }
-                                            val hasAutoIso =
-                                                prop == isoProp && autoIsoAvailable
-                                            ParamTile(
-                                                label = paramLabel(prop),
-                                                param = params[prop],
-                                                autoIsoEnabled =
-                                                    if (hasAutoIso) autoIsoEnabled else null,
-                                                autoIsoValue =
-                                                    if (hasAutoIso) effectiveAutoIsoValue else null,
-                                                autoIsoBusy = hasAutoIso && autoIsoBusy,
-                                                onAutoIsoToggle =
-                                                    if (hasAutoIso) ::setAutoIso else null,
-                                                modifier = Modifier.weight(1f),
-                                                onStep = { delta -> stepParam(prop, delta) },
-                                                onOpenList = {
-                                                    if (
-                                                        params[prop]?.values?.isNotEmpty() == true
-                                                    ) {
-                                                        listProp = prop
-                                                    }
-                                                }
-                                            )
-                                        }
-                                    }
+                    },
+                    parameter = { index, modifier ->
+                        val prop = (if (movieMode) MOVIE_EXPOSURE_PROPS else EXPOSURE_PROPS)[index]
+                        val isoProp = if (movieMode) Lab.PROP_NK_MOVIE_ISO else Lab.PROP_ISO
+                        val hasAutoIso = prop == isoProp && autoIsoAvailable
+                        ParamTile(label = paramLabel(prop), param = params[prop],
+                            autoIsoEnabled = if (hasAutoIso) autoIsoEnabled else null,
+                            autoIsoValue = if (hasAutoIso) effectiveAutoIsoValue else null,
+                            autoIsoBusy = hasAutoIso && autoIsoBusy,
+                            onAutoIsoToggle = if (hasAutoIso) ::setAutoIso else null,
+                            modifier = modifier, onStep = { stepParam(prop, it) },
+                            onOpenList = { if (params[prop]?.values?.isNotEmpty() == true) listProp = prop })
+                    },
+                    tool = { tool ->
+                        if (tool == RemoteTool.RECORD) {
+                            val recorderActive = viewfinderRecorder != null
+                            val recorderAction = if (!recorderActive) R.string.remote_tool_record
+                                else if (recPaused) R.string.cd_remote_rec_resume else R.string.cd_remote_rec_pause
+                            TopIconToggle(recorderActive, stringResource(recorderAction), {
+                                if (viewfinderRecorder == null) startRecorder() else togglePauseRecorder()
+                            }, enabled = isPro && !recFinalizing) {
+                                if (recorderActive) Icon(if (recPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
+                                    null, Modifier.size(20.dp))
+                                else Canvas(Modifier.size(20.dp)) {
+                                    drawCircle(Color(0xFFE05252), radius = size.minDimension * .38f)
                                 }
                             }
-                            Spacer(Modifier.height(18.dp))
-                            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                                ShutterButton(
-                                    capturing = capturing,
-                                    focusing = afHeld,
-                                    enabled = connected && !probing,
-                                    movie = movieMode,
-                                    recording = recording,
-                                    onFocusStart = { startFocus() },
-                                    onRelease = ::finishShutterGesture,
-                                    onQuickTap = {
-                                        if (movieMode) toggleRecord() else shoot()
-                                    }
-                                )
-                            }
-                        }
-                    }
-                }
-
-                // 普通横屏保留原有返回入口；沉浸入口统一放在右侧操作栏。
-                if (!immersiveFullscreen) Row(
-                    modifier = Modifier
-                        .align(if (immersiveFullscreen) Alignment.TopStart else Alignment.TopEnd)
-                        .padding(
-                            horizontal = normalHorizontalPadding,
-                            vertical = normalVerticalPadding
-                        ),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    AnimatedVisibility(
-                        visible = !immersiveFullscreen,
-                        enter = fadeIn(tween(260, easing = FastOutSlowInEasing)),
-                        exit = fadeOut(tween(180, easing = FastOutSlowInEasing))
-                    ) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            SignalPill(
-                                rssi = camState.wifiRssi,
-                                connected = connected,
-                                connectionType = camState.presentationConnectionType,
-                                staMode = camState.presentationIsSta,
-                                onStaDisconnectedClick = cameraViewModel::retryStaConnection,
-                            )
-                            BatteryPill(percent = rcBatteryPercentage(batteryParam))
-                        }
-                    }
-                    GlassButton(
-                        onClick = {
-                            if (immersiveFullscreen) {
-                                immersiveFullscreen = false
-                            } else {
-                                onNavigateBack()
-                            }
-                        },
-                        shape = RoundedCornerShape(22.dp),
-                        showSheen = false,
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                        modifier = Modifier.height(36.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.ArrowForward,
-                            contentDescription = stringResource(
-                                if (immersiveFullscreen) {
-                                    R.string.cd_remote_fullscreen_exit
-                                } else {
-                                    R.string.cd_back
-                                }
-                            ),
-                            tint = colors.onBackground,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                }
+                        } else renderTool(tool)
+                    },
+                    modifier = Modifier.offset(monitorLayout.interactionBounds.x.dp, monitorLayout.interactionBounds.y.dp)
+                        .size(monitorLayout.interactionBounds.width.dp, monitorLayout.interactionBounds.height.dp),
+                )
             }
         }
         }
 
-        // 免费监看余量属于整页状态，不跟随取景器尺寸或全屏动画。竖屏避开系统
+        // 免费监看余量属于整页状态，不跟随 Dock 内容切换。竖屏避开系统
         // 导航栏；横屏安全区已由外层旋转容器换算成左右 inset，无需重复留白。
         if (trialLeftSeconds != null) {
             RemoteTrialTimeBadge(
                 seconds = trialLeftSeconds,
-                compact = immersiveFullscreen,
+                compact = landscapeLayout,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .then(
                         if (rotation == 0) Modifier.navigationBarsPadding() else Modifier
                     )
                     .padding(
-                        end = if (immersiveFullscreen) 6.dp else 16.dp,
-                        bottom = if (immersiveFullscreen) 4.dp else 12.dp,
+                        end = if (landscapeLayout) 6.dp else 16.dp,
+                        bottom = if (landscapeLayout) 4.dp else 12.dp,
                     )
             )
         }
@@ -3541,7 +3327,7 @@ private fun RemoteContent(
         // 顶部提示条：视觉与照片列表页的底部玻璃提示条同款（22dp 玻璃 Surface + 投影 +
         // labelLarge）；位置留在顶部——本页底部是快门键，提示不能压它。
         AnimatedVisibility(
-            visible = hintVisible && !immersiveFullscreen,
+            visible = hintVisible,
             enter = fadeIn(tween(200)) + slideInVertically(tween(200)) { -it / 2 },
             exit = fadeOut(tween(300)),
             modifier = Modifier
@@ -4128,7 +3914,8 @@ private fun RemoteViewfinderPanel(
         }
 
         if (showMeter) {
-            ExposureMeterOverlay(meterEv, Modifier.align(Alignment.TopCenter).padding(top = meterTopInset))
+            ExposureMeterOverlay(meterEv, Modifier.align(Alignment.TopEnd)
+                .padding(top = meterTopInset, end = 8.dp))
         }
 
         if (showLevel) {
@@ -4226,7 +4013,7 @@ private fun ViewfinderSoundMeterOverlay(
 ) {
     BoxWithConstraints(modifier) {
         val levels = if (enabled) frameProvider()?.metadata?.soundLevels else null
-        // 短竖条高度封顶，避免横屏/全屏时向挖孔侧延伸。
+        // 短竖条高度封顶，避免横屏时向挖孔侧延伸。
         // 横屏优先放在取景器外；空间不足时回落到画面内，并在直方图上方显示。
         val availableHeight = (maxHeight - 16.dp).coerceAtLeast(0.dp)
         val targetMeterHeight = (maxHeight * 0.24f)
@@ -5325,7 +5112,6 @@ internal fun RemoteToolMark(tool: RemoteTool, preferences: RemoteToolPreferences
         RemoteTool.METER -> Text("±EV", fontSize = 10.sp, fontWeight = FontWeight.Bold)
         RemoteTool.LEVEL -> LevelMark(mark)
         RemoteTool.RECORD -> Icon(Icons.Default.Videocam, null, mark)
-        RemoteTool.FULLSCREEN -> FullscreenMark(mark)
         RemoteTool.ROTATE -> RotateMark(mark)
         RemoteTool.LOCK -> Icon(if (preferences.locked.value) Icons.Default.Lock else Icons.Default.LockOpen, null, mark)
         RemoteTool.WHITE_BALANCE -> Text("WB", fontSize = 11.sp, fontWeight = FontWeight.Bold)

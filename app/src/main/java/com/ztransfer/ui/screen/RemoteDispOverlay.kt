@@ -4,13 +4,9 @@ import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Text
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.material3.LocalContentColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -78,7 +74,7 @@ internal fun rememberMonitorDetails(
 
 /** Compact exposure overlay takes no space away from the live image. */
 @Composable
-internal fun ImmersiveMonitorFooter(
+internal fun MonitorExposureSummary(
     mode: MonitorDispMode,
     exposure: List<String>,
     connected: Boolean,
@@ -97,40 +93,8 @@ internal fun ImmersiveMonitorFooter(
     }
 }
 
-/** A single side rail keeps all immersive actions outside the image. */
 @Composable
-internal fun ImmersiveMonitorControls(
-    onExit: () -> Unit,
-    onCycle: () -> Unit,
-    modifier: Modifier = Modifier,
-    shutter: @Composable () -> Unit,
-) {
-    val colors = AppTheme.colors
-    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(18.dp, Alignment.CenterVertically)) {
-        GlassButton(
-            onClick = onExit, shape = RoundedCornerShape(22.dp), showSheen = false,
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-            modifier = Modifier.height(36.dp),
-        ) {
-            val exitLabel = stringResource(R.string.cd_remote_fullscreen_exit)
-            CompositionLocalProvider(LocalContentColor provides colors.onBackground) {
-                FullscreenMark(Modifier.size(20.dp).semantics { contentDescription = exitLabel }, exiting = true)
-            }
-        }
-        shutter()
-        GlassButton(
-            onClick = onCycle,
-            contentPadding = PaddingValues(horizontal = 9.dp, vertical = 6.dp),
-            modifier = Modifier.height(36.dp),
-        ) {
-            Text("DISP", color = colors.onBackground, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-        }
-    }
-}
-
-@Composable
-internal fun ImmersiveMonitorDetails(details: List<String>, battery: Int?, modifier: Modifier = Modifier) {
+internal fun MonitorDetailSummary(details: List<String>, battery: Int?, modifier: Modifier = Modifier) {
     val text = (details + listOfNotNull(battery?.let { "$it%" })).joinToString("   ·   ")
     Text(text, modifier, color = androidx.compose.ui.graphics.Color.White,
         fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,

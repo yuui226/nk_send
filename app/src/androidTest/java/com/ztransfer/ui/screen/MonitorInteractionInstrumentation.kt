@@ -57,7 +57,7 @@ class MonitorInteractionInstrumentation : Instrumentation() {
                             Box(Modifier.fillMaxWidth().height(180.dp)) {
                                 ViewfinderLevelOverlay(roll.floatValue, Modifier.fillMaxSize())
                             }
-                            ImmersiveMonitorFooter(disp.value,
+                            MonitorExposureSummary(disp.value,
                                 listOf("M", "1/250", "F2.8", "ISO 100"), true, Modifier.fillMaxWidth())
                         }
                     }
