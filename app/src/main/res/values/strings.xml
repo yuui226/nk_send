@@ -628,4 +628,26 @@
     <string name="remote_grid_235">2.35:1</string>
     <string name="remote_grid_169">16:9</string>
     <string name="remote_grid_43">4:3</string>
+
+    <string name="remote_tool_lut">LUT</string>
+    <string name="lut_off">Off</string>
+    <string name="lut_choose_folder">Choose folder</string>
+    <string name="lut_change_folder">Change folder</string>
+    <string name="lut_choose_hint">Choose a folder containing .cube files</string>
+    <string name="lut_monitor_only">Monitor only; camera originals are unchanged</string>
+    <string name="lut_folder_empty">No .cube files found</string>
+    <string name="lut_folder_missing">Folder not found</string>
+    <string name="lut_folder_denied">Cannot access folder</string>
+    <string name="lut_folder_read_failed">Cannot read folder</string>
+    <string name="lut_folder_too_many">Too many files in this folder</string>
+    <string name="lut_reading_folder">Reading folder…</string>
+    <string name="lut_file_missing">Selected LUT was removed</string>
+    <string name="lut_read_timeout">LUT read timed out</string>
+    <string name="lut_read_failed">Cannot read LUT</string>
+    <string name="lut_invalid">Invalid LUT file</string>
+    <string name="lut_unsupported">Unsupported LUT format</string>
+    <string name="lut_too_large">LUT file exceeds supported limits</string>
+    <string name="lut_gpu_failed">LUT display failed</string>
+    <string name="lut_frame_unavailable">Try again when the live view is ready</string>
+    <string name="lut_input_color_unsupported">This live-view color format does not support LUT yet</string>
 </resources>

@@ -626,4 +626,26 @@
     <string name="remote_grid_235">2.35:1</string>
     <string name="remote_grid_169">16:9</string>
     <string name="remote_grid_43">4:3</string>
+
+    <string name="remote_tool_lut">LUT</string>
+    <string name="lut_off">关闭</string>
+    <string name="lut_choose_folder">选择文件夹</string>
+    <string name="lut_change_folder">更换文件夹</string>
+    <string name="lut_choose_hint">选择存放 .cube 文件的文件夹</string>
+    <string name="lut_monitor_only">仅影响监看，不改变相机原片</string>
+    <string name="lut_folder_empty">未找到 .cube 文件</string>
+    <string name="lut_folder_missing">文件夹不存在</string>
+    <string name="lut_folder_denied">无法访问文件夹</string>
+    <string name="lut_folder_read_failed">读取文件夹失败</string>
+    <string name="lut_folder_too_many">文件夹内文件过多</string>
+    <string name="lut_reading_folder">正在读取文件夹…</string>
+    <string name="lut_file_missing">所选 LUT 已被移除</string>
+    <string name="lut_read_timeout">读取 LUT 超时</string>
+    <string name="lut_read_failed">读取 LUT 失败</string>
+    <string name="lut_invalid">LUT 文件内容有误</string>
+    <string name="lut_unsupported">暂不支持此 LUT 格式</string>
+    <string name="lut_too_large">LUT 文件超出支持范围</string>
+    <string name="lut_gpu_failed">LUT 显示失败</string>
+    <string name="lut_frame_unavailable">监看画面就绪后再试</string>
+    <string name="lut_input_color_unsupported">暂不支持此监看色彩格式的 LUT</string>
 </resources>

@@ -36,6 +36,7 @@ internal fun LocalPhotoPreviewPager(
     generating: Boolean,
     onChoose: () -> Unit,
     onPageChanged: (Int) -> Unit = {},
+    debugBrand: String? = null,
 ) {
     val colors = AppTheme.colors
     if (photos.isEmpty()) {
@@ -73,6 +74,7 @@ internal fun LocalPhotoPreviewPager(
             ) { index ->
                 LocalPhotoPreviewPage(
                     uri = photos[index],
+                    debugBrand = debugBrand,
                     effects = effects,
                     prefetchFilters = if (index == pager.settledPage && !generating) prefetchFilters else emptyList(),
                 )
@@ -85,6 +87,7 @@ internal fun LocalPhotoPreviewPager(
 @Composable
 private fun LocalPhotoPreviewPage(
     uri: Uri,
+    debugBrand: String?,
     effects: LocalPhotoBatchEffects,
     prefetchFilters: List<PhotoFilterSelection>,
 ) {
@@ -110,7 +113,9 @@ private fun LocalPhotoPreviewPage(
             loaded != null -> PhotoEffectsRenderedPreview(
                 source = loaded.bitmap,
                 resetOnSourceChange = true,
-                metadata = loaded.metadata,
+                metadata = if (com.ztransfer.BuildConfig.DEBUG && debugBrand != null) {
+                    loaded.metadata.copy(make = debugBrand, model = "Model")
+                } else loaded.metadata,
                 sourceRotationQuarterTurns = 0,
                 requestedRotationQuarterTurns = 0,
                 // A stable viewport prevents vertical jumps while paging portrait/landscape photos.
@@ -118,7 +123,10 @@ private fun LocalPhotoPreviewPage(
                 onRotate = null,
                 borderEnabled = effects.borderEnabled,
                 preset = effects.preset,
-                metadataSettings = effects.metadataSettings,
+                metadataSettings = if (com.ztransfer.BuildConfig.DEBUG && debugBrand != null) {
+                    effects.metadataSettings.copy(showBrand = true,
+                        brandStyle = com.ztransfer.frame.PhotoFrameBrandStyle.LOGO)
+                } else effects.metadataSettings,
                 previewPlaceholders = true,
                 watermark = effects.watermark,
                 filter = effects.filter,

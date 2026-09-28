@@ -91,6 +91,15 @@ fun LocalPhotoEffectsPage(
     var borderEnabled by remember { mutableStateOf(initialSettings.borderEnabled) }
     var preset by remember { mutableStateOf(initialSettings.preset) }
     var metadataSettings by remember { mutableStateOf(initialSettings.metadataSettings) }
+    // Preview-only: never saved in preferences or passed to the batch exporter.
+    val debugBrands = remember {
+        listOf("Nikon", "SONY", "FUJIFILM", "Panasonic", "Leica", "DJI", "Apple",
+            "SAMSUNG", "HUAWEI", "XIAOMI", "OPPO", "vivo", "HONOR", "OnePlus",
+            "Google", "Motorola", "Nokia")
+    }
+    var debugBrandIndex by remember { mutableIntStateOf(-1) }
+    val debugBrand = if (com.ztransfer.BuildConfig.DEBUG) debugBrands.getOrNull(debugBrandIndex) else null
+
     var watermarkDraft by remember { mutableStateOf(initialSettings.watermark) }
     var filterId by remember { mutableStateOf(initialSettings.filterId) }
     var filterEnabled by remember { mutableStateOf(initialSettings.filterEnabled) }
@@ -314,6 +323,7 @@ fun LocalPhotoEffectsPage(
                 generating = saving,
                 onChoose = launchPhotoPicker,
                 onPageChanged = { previewPage = it },
+                debugBrand = debugBrand,
             )
             Spacer(Modifier.height(10.dp))
             LocalPhotoBatchButton(
@@ -379,6 +389,12 @@ fun LocalPhotoEffectsPage(
                     preset,
                 ).withoutLocationFields(),
                 showLocationFields = false,
+                debugBrandLabel = if (com.ztransfer.BuildConfig.DEBUG) {
+                    "Debug: " + (debugBrand ?: "Original") + "  \u21bb"
+                } else null,
+                onCycleDebugBrand = if (com.ztransfer.BuildConfig.DEBUG) ({
+                    debugBrandIndex = if (debugBrandIndex + 1 < debugBrands.size) debugBrandIndex + 1 else -1
+                }) else null,
                 watermark = editorWatermark,
                 watermarkContentSource = watermarkDraft,
                 isPro = isPro,

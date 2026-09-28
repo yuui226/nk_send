@@ -1944,6 +1944,8 @@ internal fun PhotoFrameWatermarkEditor(
     onFavoriteImageMissing: () -> Unit,
     onProRequired: () -> Unit,
     onImageRequested: () -> Unit,
+    debugBrandLabel: String? = null,
+    onCycleDebugBrand: (() -> Unit)? = null,
 ) {
     val colors = AppTheme.colors
     val frameAccent = colors.accentOrange
@@ -2149,6 +2151,8 @@ internal fun PhotoFrameWatermarkEditor(
                 showLocationFields = showLocationFields,
                 onSettingsChanged = onMetadataSettingsChanged,
                 onDetent = haptics::tick,
+                debugBrandLabel = debugBrandLabel,
+                onCycleDebugBrand = onCycleDebugBrand,
                 modifier = Modifier.padding(top = 8.dp),
             )
         }
@@ -2495,6 +2499,8 @@ private fun PhotoFrameMetadataInlineSettings(
     onSettingsChanged: (PhotoFrameMetadataSettings) -> Unit,
     onDetent: () -> Unit,
     modifier: Modifier = Modifier,
+    debugBrandLabel: String? = null,
+    onCycleDebugBrand: (() -> Unit)? = null,
 ) {
     val colors = AppTheme.colors
     val datePatterns = PHOTO_FRAME_DATE_PATTERNS
@@ -2516,6 +2522,14 @@ private fun PhotoFrameMetadataInlineSettings(
             .padding(8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        if (com.ztransfer.BuildConfig.DEBUG && debugBrandLabel != null && onCycleDebugBrand != null) {
+            FilterChip(
+                label = debugBrandLabel,
+                selected = true,
+                onClick = { onDetent(); onCycleDebugBrand() },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
         val choices = listOfNotNull(
             Triple(R.string.photo_frame_metadata_brand, settings.showBrand) {
                 settings.nextBrandStyle()

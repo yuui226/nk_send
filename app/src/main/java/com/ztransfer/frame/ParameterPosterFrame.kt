@@ -51,7 +51,7 @@ internal fun drawParameterPosterMetadata(canvas: Canvas, layout: PhotoFrameLayou
     val bodySize = width * if (portrait) 0.034f else 0.025f
     val identity = buildList {
         normalizeCameraMake(metadata.make).takeIf(String::isNotBlank)?.let {
-            add(PosterRow(it, width * if (portrait) 0.112f else 0.078f, bold = true, italic = true, gapAfter = width * 0.012f, brandLogo = metadata.useNikonLogo))
+            add(PosterRow(it, width * if (portrait) 0.112f else 0.078f, bold = true, italic = true, gapAfter = width * 0.012f, brandLogo = metadata.useBrandLogo))
         }
         normalizeCameraModel(metadata.make, metadata.model).takeIf(String::isNotBlank)?.let {
             // Treat the model as a secondary headline; keep lens details visually quieter.

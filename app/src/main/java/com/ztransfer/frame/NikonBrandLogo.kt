@@ -4,7 +4,6 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.LinearGradient
 import android.graphics.Paint
-import android.graphics.Rect
 import android.graphics.Shader
 import androidx.core.graphics.PathParser
 
@@ -45,61 +44,4 @@ internal object NikonBrandLogo {
         if (layer != null) canvas.restoreToCount(layer)
         canvas.restoreToCount(save)
     }
-}
-
-internal val PhotoFrameMetadata.useNikonLogo: Boolean
-    get() = brandStyle == PhotoFrameBrandStyle.LOGO && normalizeCameraMake(make).equals("Nikon", true)
-
-private val nikonIdentityPrefix = Regex("^NIKON(?:\\s+CORPORATION)?(?=\\s|$)", RegexOption.IGNORE_CASE)
-
-/** Replace only the brand prefix of an identity row, never arbitrary metadata/watermark text. */
-internal fun Canvas.drawFrameIdentity(text: String, x: Float, baseline: Float, paint: Paint, logo: Boolean, logoScale: Float = 1.35f) {
-    val prefix = if (logo) nikonIdentityPrefix.find(text)?.value else null
-    if (prefix == null) { drawText(text, x, baseline, paint); return }
-    val bounds = Rect().also { paint.getTextBounds(prefix, 0, prefix.length, it) }
-    val side = bounds.height().toFloat().coerceAtLeast(1f) * logoScale
-    val remaining = text.substring(prefix.length)
-    val width = side + paint.measureText(remaining)
-    val left = when (paint.textAlign) {
-        Paint.Align.CENTER -> x - width / 2f
-        Paint.Align.RIGHT -> x - width
-        else -> x
-    }
-    NikonBrandLogo.draw(this, left, baseline + (bounds.top + bounds.bottom) / 2f - side / 2f, side, paint.alpha)
-    if (remaining.isNotEmpty()) {
-        drawText(remaining, left + side, baseline, Paint(paint).apply { textAlign = Paint.Align.LEFT })
-    }
-}
-
-internal fun Paint.measureFrameIdentity(text: String, logo: Boolean, logoScale: Float = 1.35f): Float {
-    val prefix = if (logo) nikonIdentityPrefix.find(text)?.value else null
-    if (prefix == null) return measureText(text)
-    val bounds = Rect().also { getTextBounds(prefix, 0, prefix.length, it) }
-    return bounds.height().toFloat().coerceAtLeast(1f) * logoScale + measureText(text.substring(prefix.length))
-}
-
-/** The same visible bounds used for drawing, including the enlarged square and remaining text. */
-internal fun frameIdentityVisualBounds(
-    text: String, paint: Paint, logo: Boolean, logoScale: Float = 1.35f,
-): FrameTextVisualBounds {
-    val textBounds = Rect().also { paint.getTextBounds(text, 0, text.length, it) }
-    val prefix = if (logo) nikonIdentityPrefix.find(text)?.value else null
-    if (prefix == null) return FrameTextVisualBounds(textBounds.top.toFloat(), textBounds.bottom.toFloat())
-    val bounds = Rect().also { paint.getTextBounds(prefix, 0, prefix.length, it) }
-    val side = bounds.height().coerceAtLeast(1) * logoScale
-    val center = (bounds.top + bounds.bottom) / 2f
-    return FrameTextVisualBounds(minOf(textBounds.top.toFloat(), center - side / 2f),
-        maxOf(textBounds.bottom.toFloat(), center + side / 2f))
-}
-
-// Ratios are relative to visible brand lettering, not the font's em box.
-internal fun PhotoFramePreset.brandLogoScale(): Float = when (this) {
-    PhotoFramePreset.FILM_GALLERY -> 1.15f // Narrow strip above the perforations.
-    PhotoFramePreset.FILM_EDGE -> 1.20f
-    PhotoFramePreset.IMMERSIVE, PhotoFramePreset.COLOR_ARCHIVE -> 1.30f
-    PhotoFramePreset.MIST, PhotoFramePreset.CINEMA, PhotoFramePreset.MINIMAL,
-    PhotoFramePreset.FROSTED, PhotoFramePreset.PLAQUE -> 1.35f
-    PhotoFramePreset.BRAND_INSET, PhotoFramePreset.GALLERY_MAT -> 1.45f
-    PhotoFramePreset.CLASSIC_SIGNATURE, PhotoFramePreset.BRAND_GALLERY -> 1.55f
-    PhotoFramePreset.PARAMETER_POSTER -> 1.65f
 }

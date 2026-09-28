@@ -30,15 +30,23 @@ class PhotoFrameMetadataSettingsTest {
     }
 
     @Test
-    fun logoRequiresNikonBrandAndRespectsHiddenBrand() {
+    fun logoRequiresSupportedBrandAndRespectsHiddenBrand() {
         val options = defaultPhotoFrameMetadataSettings(PhotoFramePreset.MIST)
             .copy(showBrand = true, brandStyle = PhotoFrameBrandStyle.LOGO)
         fun metadata(make: String?, model: String?) = PhotoFrameMetadata(make, model, null, null, null, null)
-        assertTrue(metadata("NIKON CORPORATION", "NIKON Z 30").withPresentation(options).useNikonLogo)
-        assertTrue(metadata(null, "NIKON Z 30").withPresentation(options).useNikonLogo)
-        assertFalse(metadata("Canon", "EOS R5").withPresentation(options).useNikonLogo)
-        assertFalse(metadata(null, null).withPresentation(options).useNikonLogo)
-        assertFalse(metadata("NIKON", "NIKON Z 30").withPresentation(options.copy(showBrand = false)).useNikonLogo)
+        assertTrue(metadata("NIKON CORPORATION", "NIKON Z 30").withPresentation(options).useBrandLogo)
+        assertTrue(metadata(null, "NIKON Z 30").withPresentation(options).useBrandLogo)
+        assertFalse(metadata("Canon", "EOS R5").withPresentation(options).useBrandLogo)
+        listOf("SONY", "FUJIFILM", "Panasonic", "Leica", "DJI", "Apple", "SAMSUNG",
+            "HUAWEI", "Xiaomi", "OPPO", "vivo", "HONOR", "OnePlus", "Google",
+            "Motorola", "Nokia Corporation").forEach { brand ->
+            assertTrue(brand, metadata(brand, "Model").withPresentation(options).useBrandLogo)
+            assertFalse(brand, metadata(brand, "Model").withPresentation(options.copy(showBrand = false)).useBrandLogo)
+            assertFalse(brand, metadata(brand, "Model").withPresentation(options.copy(brandStyle = PhotoFrameBrandStyle.TEXT)).useBrandLogo)
+        }
+        assertFalse(metadata("Unknown Camera", "Model").withPresentation(options).useBrandLogo)
+        assertFalse(metadata(null, null).withPresentation(options).useBrandLogo)
+        assertFalse(metadata("NIKON", "NIKON Z 30").withPresentation(options.copy(showBrand = false)).useBrandLogo)
     }
 
     @Test

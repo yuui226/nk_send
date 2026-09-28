@@ -2103,7 +2103,7 @@ object PhotoFrameExporter {
         } else {
             0f
         }
-        val initialWidth = brandPaint.measureFrameIdentity(brand, metadata.useNikonLogo) + gap + modelPaint.measureText(model)
+        val initialWidth = brandPaint.measureFrameIdentity(brand, metadata.useBrandLogo) + gap + modelPaint.measureText(model)
         val maxTitleWidth = layout.canvasWidth *
             if (preset == PhotoFramePreset.FROSTED) 0.78f else 0.86f
         if (initialWidth > maxTitleWidth) {
@@ -2159,7 +2159,7 @@ object PhotoFrameExporter {
         }
         fun titleBounds(): FrameTextVisualBounds? = if (hasTitle) {
             listOfNotNull(
-                brand.takeIf(String::isNotEmpty)?.let { textVisualBounds(it, brandPaint, metadata.useNikonLogo) },
+                brand.takeIf(String::isNotEmpty)?.let { textVisualBounds(it, brandPaint, metadata.useBrandLogo) },
                 model.takeIf(String::isNotEmpty)?.let { textVisualBounds(it, modelPaint) },
             ).reduce(::mergeTextVisualBounds)
         } else {
@@ -2225,11 +2225,11 @@ object PhotoFrameExporter {
 
         titleBaseline?.let { baseline ->
             val totalWidth =
-                brandPaint.measureFrameIdentity(brand, metadata.useNikonLogo) + gap + modelPaint.measureText(model)
+                brandPaint.measureFrameIdentity(brand, metadata.useBrandLogo) + gap + modelPaint.measureText(model)
             var x = centerX - totalWidth / 2f
             if (brand.isNotEmpty()) {
-                canvas.drawFrameIdentity(brand, x, baseline, brandPaint, metadata.useNikonLogo)
-                x += brandPaint.measureFrameIdentity(brand, metadata.useNikonLogo) + gap
+                canvas.drawFrameIdentity(brand, x, baseline, brandPaint, metadata.useBrandLogo)
+                x += brandPaint.measureFrameIdentity(brand, metadata.useBrandLogo) + gap
             }
             if (model.isNotEmpty()) {
                 canvas.drawText(model, x, baseline, modelPaint)
@@ -2826,7 +2826,7 @@ object PhotoFrameExporter {
         }
         var componentGap = shortEdge * 0.014f
         fun firstRowWidth(): Float =
-            (cameraPaint?.measureFrameIdentity(cameraName, metadata.useNikonLogo, PhotoFramePreset.IMMERSIVE.brandLogoScale()) ?: 0f) +
+            (cameraPaint?.measureFrameIdentity(cameraName, metadata.useBrandLogo, PhotoFramePreset.IMMERSIVE.brandLogoScale()) ?: 0f) +
                 (inlineWatermarkPaint?.measureText(inlineWatermarkText) ?: 0f) +
                 (dividerPaint?.measureText(divider) ?: 0f) +
                 if (dividerPaint != null) componentGap * 2f else 0f
@@ -2851,7 +2851,7 @@ object PhotoFrameExporter {
 
         fun firstRowBounds(): FrameTextVisualBounds? {
             val bounds = buildList {
-                cameraPaint?.let { add(textVisualBounds(cameraName, it, metadata.useNikonLogo, PhotoFramePreset.IMMERSIVE.brandLogoScale())) }
+                cameraPaint?.let { add(textVisualBounds(cameraName, it, metadata.useBrandLogo, PhotoFramePreset.IMMERSIVE.brandLogoScale())) }
                 inlineWatermarkPaint?.let {
                     add(textVisualBounds(inlineWatermarkText, it))
                 }
@@ -2902,8 +2902,8 @@ object PhotoFrameExporter {
             titleBaseline?.let { baseline ->
                 var x = photoRect.centerX() - firstRowWidth() / 2f
                 cameraPaint?.let { paint ->
-                    canvas.drawFrameIdentity(cameraName, x, baseline, paint, metadata.useNikonLogo, PhotoFramePreset.IMMERSIVE.brandLogoScale())
-                    x += paint.measureFrameIdentity(cameraName, metadata.useNikonLogo, PhotoFramePreset.IMMERSIVE.brandLogoScale())
+                    canvas.drawFrameIdentity(cameraName, x, baseline, paint, metadata.useBrandLogo, PhotoFramePreset.IMMERSIVE.brandLogoScale())
+                    x += paint.measureFrameIdentity(cameraName, metadata.useBrandLogo, PhotoFramePreset.IMMERSIVE.brandLogoScale())
                 }
                 dividerPaint?.let { paint ->
                     x += componentGap
@@ -3722,14 +3722,14 @@ object PhotoFrameExporter {
                 Color.rgb(10, 11, 12),
                 Typeface.create("sans-serif-black", Typeface.BOLD_ITALIC),
             )
-            val bounds = textVisualBounds(header, paint, metadata.useNikonLogo, PhotoFramePreset.CLASSIC_SIGNATURE.brandLogoScale())
+            val bounds = textVisualBounds(header, paint, metadata.useBrandLogo, PhotoFramePreset.CLASSIC_SIGNATURE.brandLogoScale())
             val baseline = centeredFrameTextBaselines(
                 0f,
                 layout.photoTop,
                 listOf(bounds),
                 0f,
             ).single()
-            canvas.drawFrameIdentity(header, layout.canvasWidth / 2f, baseline, paint, metadata.useNikonLogo, PhotoFramePreset.CLASSIC_SIGNATURE.brandLogoScale())
+            canvas.drawFrameIdentity(header, layout.canvasWidth / 2f, baseline, paint, metadata.useBrandLogo, PhotoFramePreset.CLASSIC_SIGNATURE.brandLogoScale())
         }
         val rows = buildList {
             metadata.lensModel?.takeIf(String::isNotBlank)?.let(::add)
@@ -3782,7 +3782,7 @@ object PhotoFrameExporter {
             editorialMetadataRows(metadata),
             watermark.bandWatermarkFor(PhotoFramePreset.GALLERY_MAT),
             darkText = true,
-            brandLogo = metadata.useNikonLogo,
+            brandLogo = metadata.useBrandLogo,
         )
     }
 
@@ -3852,7 +3852,7 @@ object PhotoFrameExporter {
                 outer.left + unit * 0.15f,
                 outer.top + unit * 0.028f,
                 identityPaint,
-                metadata.useNikonLogo, PhotoFramePreset.FILM_GALLERY.brandLogoScale())
+                metadata.useBrandLogo, PhotoFramePreset.FILM_GALLERY.brandLogoScale())
         }
         metadata.dateTime?.takeIf(String::isNotBlank)?.let { dateTime ->
             val dateTimePaint = fittedEditorialPaint(
@@ -3960,7 +3960,7 @@ object PhotoFrameExporter {
             }
             val preferredGap = band.height() * 0.10f
             val initialBounds = rows.mapIndexed { index, text ->
-                textVisualBounds(text, paints[index], index == 0 && identity.isNotEmpty() && metadata.useNikonLogo, PhotoFramePreset.FILM_EDGE.brandLogoScale())
+                textVisualBounds(text, paints[index], index == 0 && identity.isNotEmpty() && metadata.useBrandLogo, PhotoFramePreset.FILM_EDGE.brandLogoScale())
             }
             val scale = frameTextScaleToFit(
                 (band.height() - preferredGap * (rows.size - 1).coerceAtLeast(0))
@@ -3969,7 +3969,7 @@ object PhotoFrameExporter {
             )
             if (scale < 1f) paints.forEach { it.textSize *= scale }
             val bounds = rows.mapIndexed { index, text ->
-                textVisualBounds(text, paints[index], index == 0 && identity.isNotEmpty() && metadata.useNikonLogo, PhotoFramePreset.FILM_EDGE.brandLogoScale())
+                textVisualBounds(text, paints[index], index == 0 && identity.isNotEmpty() && metadata.useBrandLogo, PhotoFramePreset.FILM_EDGE.brandLogoScale())
             }
             val baselines = centeredFrameTextBaselines(
                 band.top,
@@ -3978,7 +3978,7 @@ object PhotoFrameExporter {
                 preferredGap,
             )
             rows.forEachIndexed { index, text ->
-                canvas.drawFrameIdentity(text, band.centerX(), baselines[index], paints[index], index == 0 && identity.isNotEmpty() && metadata.useNikonLogo, PhotoFramePreset.FILM_EDGE.brandLogoScale())
+                canvas.drawFrameIdentity(text, band.centerX(), baselines[index], paints[index], index == 0 && identity.isNotEmpty() && metadata.useBrandLogo, PhotoFramePreset.FILM_EDGE.brandLogoScale())
             }
         }
     }
@@ -4174,7 +4174,7 @@ object PhotoFrameExporter {
         }
         if (rows.isNotEmpty()) {
             fun bounds(): List<FrameTextVisualBounds> = rows.mapIndexed { index, (text, paint) ->
-                textVisualBounds(text, paint, index == 0 && identity.isNotEmpty() && metadata.useNikonLogo, PhotoFramePreset.COLOR_ARCHIVE.brandLogoScale())
+                textVisualBounds(text, paint, index == 0 && identity.isNotEmpty() && metadata.useBrandLogo, PhotoFramePreset.COLOR_ARCHIVE.brandLogoScale())
             }
             val initial = bounds()
             val preferredGap = bandHeight * 0.055f
@@ -4190,7 +4190,7 @@ object PhotoFrameExporter {
                 preferredGap,
             )
             rows.forEachIndexed { index, (text, paint) ->
-                canvas.drawFrameIdentity(text, textArea.left, baselines[index], paint, index == 0 && identity.isNotEmpty() && metadata.useNikonLogo, PhotoFramePreset.COLOR_ARCHIVE.brandLogoScale())
+                canvas.drawFrameIdentity(text, textArea.left, baselines[index], paint, index == 0 && identity.isNotEmpty() && metadata.useBrandLogo, PhotoFramePreset.COLOR_ARCHIVE.brandLogoScale())
             }
         }
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -4430,7 +4430,7 @@ object PhotoFrameExporter {
                 canvas = canvas,
                 photoRect = photoRect,
                 brand = identity,
-                brandLogo = metadata.useNikonLogo,
+                brandLogo = metadata.useBrandLogo,
                 lens = lens,
                 details = details,
                 occupiedWatermarkBounds = occupiedWatermarkBounds,
@@ -4454,7 +4454,7 @@ object PhotoFrameExporter {
             canvas.drawRoundRect(photoRect, radius, radius, this)
         }
         if (preset == PhotoFramePreset.BRAND_GALLERY) {
-            drawBrandGalleryBand(context, canvas, layout, identity, watermark, metadata.useNikonLogo)
+            drawBrandGalleryBand(context, canvas, layout, identity, watermark, metadata.useBrandLogo)
         }
     }
 
@@ -4871,7 +4871,7 @@ object PhotoFrameExporter {
         }
         var leftPrimaryBounds =
             if (leftPrimary != null && leftPrimaryPaint != null) {
-                textVisualBounds(leftPrimary, leftPrimaryPaint, metadata.useNikonLogo)
+                textVisualBounds(leftPrimary, leftPrimaryPaint, metadata.useBrandLogo)
             } else {
                 null
             }
@@ -4924,7 +4924,7 @@ object PhotoFrameExporter {
                 watermarkPaint,
             ).forEach { paint -> paint.textSize *= rowScale }
             leftPrimaryBounds = leftPrimary?.let { text ->
-                leftPrimaryPaint?.let { textVisualBounds(text, it, metadata.useNikonLogo) }
+                leftPrimaryPaint?.let { textVisualBounds(text, it, metadata.useBrandLogo) }
             }
             leftSecondaryBounds = leftSecondary?.let { text ->
                 leftSecondaryPaint?.let { textVisualBounds(text, it) }
@@ -4981,7 +4981,7 @@ object PhotoFrameExporter {
             }
         }
         if (leftPrimary != null && leftPrimaryPaint != null && primaryBaseline != null) {
-            canvas.drawFrameIdentity(leftPrimary, leftX, primaryBaseline, leftPrimaryPaint, metadata.useNikonLogo)
+            canvas.drawFrameIdentity(leftPrimary, leftX, primaryBaseline, leftPrimaryPaint, metadata.useBrandLogo)
         }
         if (leftSecondary != null && leftSecondaryPaint != null && secondaryBaseline != null) {
             canvas.drawText(leftSecondary, leftX, secondaryBaseline, leftSecondaryPaint)
@@ -6124,6 +6124,10 @@ internal fun normalizeCameraMake(make: String?): String {
         value.contains("vivo", ignoreCase = true) -> "VIVO"
         value.contains("realme", ignoreCase = true) -> "REALME"
         value.contains("motorola", ignoreCase = true) -> "MOTOROLA"
+        value.equals("nokia", ignoreCase = true) ||
+            value.startsWith("Nokia ", ignoreCase = true) -> "NOKIA"
+        value.equals("dji", ignoreCase = true) ||
+            value.startsWith("DJI ", ignoreCase = true) -> "DJI"
         value.isNotEmpty() -> value
         else -> ""
     }
@@ -6399,7 +6403,7 @@ internal fun photoFrameWatermarkFingerprint(
         identity
     }
     return MessageDigest.getInstance("SHA-256")
-        .digest((versionedIdentity + if (effectiveMetadataSettings.brandStyle == PhotoFrameBrandStyle.LOGO) "\u0000brand-logo-v=2" else "").toByteArray(Charsets.UTF_8))
+        .digest((versionedIdentity + if (effectiveMetadataSettings.brandStyle == PhotoFrameBrandStyle.LOGO) "\u0000brand-logo-v=3" else "").toByteArray(Charsets.UTF_8))
         .take(6)
         .joinToString("") { byte -> "%02x".format(Locale.ROOT, byte.toInt() and 0xff) }
 }

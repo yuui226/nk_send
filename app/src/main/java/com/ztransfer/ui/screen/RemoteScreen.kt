@@ -1,6 +1,9 @@
 package com.ztransfer.ui.screen
 
 import com.ztransfer.util.HistogramMode
+import com.ztransfer.lut.LutFolderRepository
+import com.ztransfer.lut.LutMonitorState
+import com.ztransfer.lut.LutPreferences
 
 import android.Manifest
 import android.content.Context
@@ -2036,6 +2039,46 @@ private fun RemoteContent(
             hintVisible = false
         }
     }
+    val lutState = remember {
+        LutMonitorState(
+            repository = LutFolderRepository(services.context.applicationContext.contentResolver),
+            preferences = LutPreferences(services.context.getSharedPreferences("monitor_lut", Context.MODE_PRIVATE)),
+            scope = services.scope,
+            closeFalseColor = {
+                if (tools.exposure.value == ExposureAssist.FALSE_COLOR) tools.exposure.value = ExposureAssist.OFF
+            },
+            notice = { showHint(services.context.getString(it)) },
+        )
+    }
+    var lutAnchor by remember { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
+    val lutLifecycle = LocalLifecycleOwner.current
+    var lutResumed by remember { mutableStateOf(lutLifecycle.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
+    DisposableEffect(lutLifecycle, lutState) {
+        val observer = LifecycleEventObserver { _, _ ->
+            lutResumed = lutLifecycle.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
+            if (!lutResumed) lutState.suspendRendering()
+        }
+        lutLifecycle.lifecycle.addObserver(observer)
+        onDispose { lutLifecycle.lifecycle.removeObserver(observer) }
+    }
+    DisposableEffect(lutState) { onDispose { lutState.close() } }
+    var lutPickerActive by remember { mutableStateOf(false) }
+    var lutPickedFolder by remember { mutableStateOf<Uri?>(null) }
+    val lutFolderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        lutPickedFolder = uri
+        lutPickerActive = false
+    }
+    val lutFrameReady = connected && initialLoaded && frame != null && lutResumed && !lutPickerActive
+    val lutVisible = tools.layout(movieMode).visible(RemoteTool.LUT)
+    LaunchedEffect(movieMode, lutFrameReady, lutVisible, lutResumed, lutPickedFolder) {
+        lutState.environment(movieMode, lutFrameReady, lutVisible)
+        if (lutResumed) lutPickedFolder?.let { uri ->
+            lutPickedFolder = null
+            lutState.changeFolder(uri)
+        }
+    }
+    LaunchedEffect(rotation, editingTools) { lutState.dismissMenu() }
+
     // ---------- 录像开关 ----------
     // 开始：命令成功即乐观置位（UI 立即变停止键），事件 0xC10A 再确认；失败弹瞬时提示。
     // 停止：只有 EndMovieRec 成功才切换 UI；失败时保留录像态，避免 UI 与相机相反。
@@ -2727,6 +2770,7 @@ private fun RemoteContent(
                 }
                 RemoteTool.LOCK -> onLockRotation(false)
                 RemoteTool.FULLSCREEN -> immersiveFullscreen = false
+                RemoteTool.LUT -> { lutState.off(); lutState.dismissMenu() }
                 RemoteTool.GRID -> gridPanelOpen = false
                 RemoteTool.WHITE_BALANCE -> if (cameraToolPanel == RemoteCameraTool.WHITE_BALANCE) cameraToolPanel = null
                 RemoteTool.FOCUS_AREA -> if (cameraToolPanel == RemoteCameraTool.FOCUS_AREA) cameraToolPanel = null
@@ -2757,6 +2801,7 @@ private fun RemoteContent(
                             RemoteTool.FPS -> showFps
                             RemoteTool.AUDIO -> showAudioLevels
                             RemoteTool.HISTOGRAM -> showHistogram
+                            RemoteTool.LUT -> lutState.active != null
                             RemoteTool.GRID -> framingGrid != ViewfinderGrid.OFF
                             RemoteTool.EXPOSURE -> exposureAssist != ExposureAssist.OFF
                             RemoteTool.DESQUEEZE -> desqueezeMultiplier > 1.001f
@@ -2774,12 +2819,21 @@ private fun RemoteContent(
                                 RemoteTool.FPS -> toggleFpsControl()
                                 RemoteTool.AUDIO -> toggleAudioLevels()
                                 RemoteTool.HISTOGRAM -> histogramMode = histogramMode.next()
+                                RemoteTool.LUT -> {
+                                    listProp = null; devPanel = false; cameraToolPanel = null; gridPanelOpen = false
+                                    lutState.openMenu()
+                                }
                                 RemoteTool.GRID -> {
+                                    lutState.dismissMenu()
                                     listProp=null; devPanel=false; cameraToolPanel=null
                                     if(gridPanelOpen) gridPanelCloseRequested=true
                                     else { gridPanelCloseRequested=false; gridPanelOpen=true }
                                 }
-                                RemoteTool.EXPOSURE -> exposureAssist = exposureAssist.next()
+                                RemoteTool.EXPOSURE -> {
+                                    val next = exposureAssist.next()
+                                    if (next == ExposureAssist.FALSE_COLOR) lutState.falseColorEnabled()
+                                    exposureAssist = next
+                                }
                                 RemoteTool.DESQUEEZE -> {
                                     val i = REMOTE_DESQUEEZE_OPTIONS.indices.minByOrNull { abs(REMOTE_DESQUEEZE_OPTIONS[it] - desqueezeMultiplier) } ?: 0
                                     setDesqueezeMultiplier(REMOTE_DESQUEEZE_OPTIONS[(i + 1) % REMOTE_DESQUEEZE_OPTIONS.size])
@@ -2793,8 +2847,8 @@ private fun RemoteContent(
                                 }
                                 RemoteTool.FULLSCREEN -> enterFullscreen()
                                 RemoteTool.ROTATE -> if (!disabled) onCycleRotation()
-                                RemoteTool.WHITE_BALANCE -> { gridPanelOpen = false; listProp = null; devPanel = false; if (cameraToolPanel == RemoteCameraTool.WHITE_BALANCE) cameraToolCloseRequested = true else { cameraToolCloseRequested = false; cameraToolPanel = RemoteCameraTool.WHITE_BALANCE } }
-                                RemoteTool.FOCUS_AREA -> { gridPanelOpen = false; listProp = null; devPanel = false; if (cameraToolPanel == RemoteCameraTool.FOCUS_AREA) cameraToolCloseRequested = true else { cameraToolCloseRequested = false; cameraToolPanel = RemoteCameraTool.FOCUS_AREA } }
+                                RemoteTool.WHITE_BALANCE -> { lutState.dismissMenu(); gridPanelOpen = false; listProp = null; devPanel = false; if (cameraToolPanel == RemoteCameraTool.WHITE_BALANCE) cameraToolCloseRequested = true else { cameraToolCloseRequested = false; cameraToolPanel = RemoteCameraTool.WHITE_BALANCE } }
+                                RemoteTool.FOCUS_AREA -> { lutState.dismissMenu(); gridPanelOpen = false; listProp = null; devPanel = false; if (cameraToolPanel == RemoteCameraTool.FOCUS_AREA) cameraToolCloseRequested = true else { cameraToolCloseRequested = false; cameraToolPanel = RemoteCameraTool.FOCUS_AREA } }
                                 else -> {
                                     listProp = null
                                     devPanel = false
@@ -2806,6 +2860,8 @@ private fun RemoteContent(
                             whiteBalanceAnchor = it
                         } else if (tool == RemoteTool.FOCUS_AREA) Modifier.onGloballyPositioned {
                             focusAreaAnchor = it
+                        } else if (tool == RemoteTool.LUT) Modifier.onGloballyPositioned {
+                            lutAnchor = it
                         } else if (tool == RemoteTool.GRID) Modifier.onGloballyPositioned {
                             gridAnchor = it
                         } else Modifier, enabled = !disabled) {
@@ -2892,6 +2948,7 @@ private fun RemoteContent(
 
             RemoteViewfinderPanel(
                 frameProvider = { frame },
+                lutState = lutState,
                 grid = framingGrid,
                 histogramMode = histogramMode,
                 modeText = modeText,
@@ -3092,6 +3149,7 @@ private fun RemoteContent(
 
                 RemoteViewfinderPanel(
                     frameProvider = { frame },
+                    lutState = lutState,
                     grid = framingGrid,
                     histogramMode = histogramMode,
                     modeText = if (immersiveFullscreen) null else modeText,
@@ -3654,6 +3712,25 @@ private fun RemoteContent(
                 }
             }
             }
+    if (lutState.menuOpen) {
+        val localAnchor = toolOverlayCoordinates?.takeIf { it.isAttached }?.let { root ->
+            lutAnchor?.takeIf { it.isAttached }?.let { root.localBoundingBoxOf(it, clipBounds = false) }
+        }
+        RemoteLutPanel(lutState, localAnchor, rotation != 0,
+            onFolder = {
+                lutState.prepareFolderPicker()
+                lutPickerActive = true
+                try {
+                    lutFolderPicker.launch(lutState.folder)
+                } catch (_: android.content.ActivityNotFoundException) {
+                    lutPickerActive = false
+                    showHint(services.context.getString(R.string.lut_folder_denied))
+                } catch (_: SecurityException) {
+                    lutPickerActive = false
+                    showHint(services.context.getString(R.string.lut_folder_denied))
+                }
+            }, onFeedback = { services.haptics.tick() })
+    }
     if(gridPanelOpen) {
         val localAnchor=toolOverlayCoordinates?.takeIf { it.isAttached }?.let { root ->
             gridAnchor?.takeIf { it.isAttached }?.let { root.localBoundingBoxOf(it,clipBounds=false) }
@@ -3867,6 +3944,7 @@ private fun ViewfinderStatusBadge(text: String, weight: FontWeight) {
 /** 包含模式徽标、录制/FPS/对焦反馈的完整取景器；帧更新仍只落在其内部。 */
 @Composable
 private fun RemoteViewfinderPanel(
+    lutState: LutMonitorState,
     frameProvider: () -> RemoteLiveFrame?,
     grid: ViewfinderGrid,
     histogramMode: HistogramMode,
@@ -3916,6 +3994,7 @@ private fun RemoteViewfinderPanel(
             .border(2.dp, recordingBorder, RoundedCornerShape(14.dp))
     ) {
         ViewfinderImage(
+            lutState = lutState,
             frameProvider = frameProvider,
             grid = grid,
             histogramMode = histogramMode,
@@ -4190,6 +4269,7 @@ private fun SoundMeterChannel(
  */
 @Composable
 private fun ViewfinderImage(
+    lutState: LutMonitorState,
     frameProvider: () -> RemoteLiveFrame?,
     grid: ViewfinderGrid,
     histogramMode: HistogramMode,
@@ -4281,10 +4361,9 @@ private fun ViewfinderImage(
                     },
                 contentAlignment = Alignment.Center
             ) {
-                Image(
-                    bitmap = liveFrame.image,
-                    contentDescription = null,
-                    contentScale = ContentScale.Fit,
+                RemoteLutImage(
+                    image = liveFrame.image,
+                    state = lutState,
                     modifier = Modifier
                         // 与参考线共用 Fit 居中规则。尺寸动画期间也允许按高度适配，
                         // 不强制占满宽度，避免宽幅反挤压画面溢出或与网格错位。
@@ -5126,6 +5205,7 @@ internal fun TopIconToggle(
 internal fun RemoteToolMark(tool: RemoteTool, preferences: RemoteToolPreferences) {
     val mark = Modifier.size(19.dp)
     when (tool) {
+        RemoteTool.LUT -> Text("LUT", fontSize = 10.sp, fontWeight = FontWeight.Bold)
         RemoteTool.HD -> HdMark()
         RemoteTool.FPS -> FpsMark()
         RemoteTool.AUDIO -> Icon(Icons.Default.VolumeUp, null, mark)

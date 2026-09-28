@@ -25,4 +25,8 @@
         android:targetPackage="com.ztransfer.debug" />
     <instrumentation android:name="com.ztransfer.crop.CropOutputInstrumentation"
         android:targetPackage="com.ztransfer.debug" />
+    <instrumentation android:name="com.ztransfer.lut.LutColorInstrumentation"
+        android:targetPackage="com.ztransfer.debug" />
+    <instrumentation android:name="com.ztransfer.lut.LutStateInstrumentation"
+        android:targetPackage="com.ztransfer.debug" />
 </manifest>
