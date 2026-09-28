@@ -29,7 +29,6 @@ internal fun LandscapeMonitorControls(
     layout: LandscapeMonitorLayout,
     tools: List<RemoteTool>,
     cameraRecording: Boolean,
-    localRecording: Boolean,
     onPanelChange: () -> Unit,
     dockButton: @Composable (Boolean, () -> Unit, Modifier) -> Unit,
     parameterButton: @Composable (Boolean, () -> Unit) -> Unit,
@@ -37,7 +36,7 @@ internal fun LandscapeMonitorControls(
     backButton: @Composable () -> Unit,
     dispButton: @Composable () -> Unit,
     shutter: @Composable () -> Unit,
-    localStop: @Composable () -> Unit,
+    localRecorder: @Composable () -> Unit,
     parameter: @Composable (Int, Modifier) -> Unit,
     tool: @Composable (RemoteTool) -> Unit,
     modifier: Modifier = Modifier,
@@ -95,7 +94,7 @@ internal fun LandscapeMonitorControls(
                 Box(Modifier.fillMaxSize().then(panelSurface)) {
                 if (bottom) {
                     // Narrow square windows still need readable wheel widths.
-                    val parameterColumns = if (layout.controls.width - 140f >= 338f) 4 else 2
+                    val parameterColumns = if (layout.controls.width - 244f >= 338f) 4 else 2
                     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterVertically)) {
                         (0..3).toList().chunked(parameterColumns).forEach { row ->
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -149,8 +148,10 @@ internal fun LandscapeMonitorControls(
                 modifier = Modifier.blockMonitorPanelInput { !visible }) { shutter() }
         }
     }
+    // Reserve the full expanded recording width; expansion must not move DISP or the image.
     val localSlot: @Composable () -> Unit = {
-        Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) { if (localRecording) localStop() }
+        Box(Modifier.width(96.dp).height(44.dp).padding(start = 8.dp),
+            contentAlignment = Alignment.CenterStart) { localRecorder() }
     }
     val dispSlot: @Composable () -> Unit = {
         Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
@@ -160,12 +161,15 @@ internal fun LandscapeMonitorControls(
     }
     if (bottom) {
         Row(modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // Square screens use the existing bottom fallback. Keep DISP at shutter height.
+            Column(Modifier.width(96.dp).padding(top = (layout.shutterSize / 2f - 22f).dp)) {
+                localSlot()
+                Box(Modifier.padding(start = 4.dp)) { dispSlot() }
+            }
             Box(Modifier.weight(1f).fillMaxHeight()) { content() }
             Column(Modifier.width(132.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 header()
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceEvenly) { captureSlot(); dispSlot() }
-                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) { localSlot() }
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { captureSlot() }
             }
         }
     } else {
@@ -175,17 +179,15 @@ internal fun LandscapeMonitorControls(
                 Spacer(Modifier.height(40.dp))
                 Box(Modifier.weight(1f).fillMaxWidth()) { content() }
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { captureSlot() }
-                if (layout.controls.width >= 132f) {
-                    Box(Modifier.fillMaxWidth().height(44.dp)) {
-                        Box(Modifier.align(Alignment.Center)) { dispSlot() }
-                        Box(Modifier.align(Alignment.CenterEnd)) { localSlot() }
-                    }
-                } else {
-                    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-                        dispSlot()
-                        localSlot()
-                    }
-                }
+                // Same DISP baseline as before, with recording directly above it.
+                // Use the actual interaction width on narrow rails so the saved state also fits.
+                Spacer(Modifier.height(if (layout.controls.width >= 132f) 88.dp else 132.dp))
+            }
+            Column(Modifier.align(Alignment.BottomStart)
+                .padding(start = (layout.interactionBounds.width - if (overlay) 96f else maxOf(layout.controls.width, 96f)).coerceAtLeast(0f).dp)
+                .padding(bottom = if (layout.controls.width >= 132f) 0.dp else 44.dp)) {
+                localSlot()
+                Box(Modifier.padding(start = 4.dp)) { dispSlot() }
             }
             header()
         }

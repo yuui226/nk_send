@@ -70,9 +70,6 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.CenterFocusStrong
 import androidx.compose.material.icons.filled.LockOpen
@@ -3227,9 +3224,8 @@ private fun RemoteContent(
 
                 LandscapeMonitorControls(
                     layout = monitorLayout,
-                    tools = tools.layout(movieMode).shownTools,
+                    tools = tools.layout(movieMode).shownTools.filter { it != RemoteTool.RECORD },
                     cameraRecording = recording,
-                    localRecording = viewfinderRecorder != null,
                     onPanelChange = {
                         gridPanelOpen = false
                         cameraToolPanel = null
@@ -3266,11 +3262,7 @@ private fun RemoteContent(
                             onQuickTap = { if (movieMode) toggleRecord() else shoot() },
                             diameter = landscapeShutterSize)
                     },
-                    localStop = {
-                        TopIconToggle(true, stringResource(R.string.cd_remote_rec_stop), { stopRecorder() }) {
-                            Icon(Icons.Default.Stop, null, Modifier.size(20.dp))
-                        }
-                    },
+                    localRecorder = { renderTool(RemoteTool.RECORD) },
                     parameter = { index, modifier ->
                         val prop = (if (movieMode) MOVIE_EXPOSURE_PROPS else EXPOSURE_PROPS)[index]
                         val isoProp = if (movieMode) Lab.PROP_NK_MOVIE_ISO else Lab.PROP_ISO
@@ -3283,22 +3275,7 @@ private fun RemoteContent(
                             modifier = modifier, onStep = { stepParam(prop, it) },
                             onOpenList = { if (params[prop]?.values?.isNotEmpty() == true) listProp = prop })
                     },
-                    tool = { tool ->
-                        if (tool == RemoteTool.RECORD) {
-                            val recorderActive = viewfinderRecorder != null
-                            val recorderAction = if (!recorderActive) R.string.remote_tool_record
-                                else if (recPaused) R.string.cd_remote_rec_resume else R.string.cd_remote_rec_pause
-                            TopIconToggle(recorderActive, stringResource(recorderAction), {
-                                if (viewfinderRecorder == null) startRecorder() else togglePauseRecorder()
-                            }, enabled = isPro && !recFinalizing) {
-                                if (recorderActive) Icon(if (recPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
-                                    null, Modifier.size(20.dp))
-                                else Canvas(Modifier.size(20.dp)) {
-                                    drawCircle(Color(0xFFE05252), radius = size.minDimension * .38f)
-                                }
-                            }
-                        } else renderTool(tool)
-                    },
+                    tool = { renderTool(it) },
                     modifier = Modifier.offset(monitorLayout.interactionBounds.x.dp, monitorLayout.interactionBounds.y.dp)
                         .size(monitorLayout.interactionBounds.width.dp, monitorLayout.interactionBounds.height.dp),
                 )
