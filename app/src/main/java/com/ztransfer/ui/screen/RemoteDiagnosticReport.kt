@@ -7,7 +7,7 @@ internal fun isRemoteDiagnosticLine(line: String): Boolean {
     val lower = line.lowercase()
     return line.startsWith("!!") || listOf(
         "diagnostic", "capability", "selected=", " write ", "control mode",
-        "controlmode", "applicationmode", "liveview", "deviceready", "probe complete"
+        "meter ", "controlmode", "applicationmode", "liveview", "deviceready", "probe complete"
     ).any { it in lower }
 }
 

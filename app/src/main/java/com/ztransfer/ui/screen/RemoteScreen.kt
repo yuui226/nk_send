@@ -146,6 +146,10 @@ import com.ztransfer.protocol.liveViewWarmupRemainingMs
 import com.ztransfer.protocol.rcAfDriveAndWait
 import com.ztransfer.protocol.rcAngleLevelRoll
 import com.ztransfer.protocol.rcAutoIsoCandidateProps
+import com.ztransfer.protocol.NIKON_EXPOSURE_INDICATE
+import com.ztransfer.protocol.NIKON_LIGHT_METER
+import com.ztransfer.protocol.rcExposureMeterEv
+import com.ztransfer.protocol.rcReadExposureMeter
 import com.ztransfer.protocol.rcBatteryPercentage
 import com.ztransfer.protocol.rcCapture
 import com.ztransfer.protocol.rcFocusAt
@@ -684,6 +688,9 @@ private fun RemoteContent(
     var exposureAssist by tools.exposure
     val showZebra = exposureAssist == ExposureAssist.ZEBRA
     var showLevel by tools.level
+    var showMeter by tools.meter
+    var meterSample by remember { mutableStateOf<Pair<Float, Long>?>(null) }
+    val meterGeneration = remember { longArrayOf(0L) }
     var showAudioLevels by tools.audio
     var desqueezeMultiplier by tools.desqueeze
     var waveformMode by tools.waveform
@@ -734,14 +741,19 @@ private fun RemoteContent(
     // 暂停态用 Compose 状态镜像：recorder.isPaused 是普通 @Volatile 字段，
     // 直接读它不会触发重组，暂停/继续按钮图标会卡住不切换。
     var recPaused by remember { mutableStateOf(false) }
-    fun devLog(line: String) {
-        if (!diagnosticCapture && !diagnosticControlLogging) return
-        if (!isRemoteDiagnosticLine(line)) return
+    fun appendDiagnostic(line: String) {
         val stamp = java.time.LocalTime.now().toString().take(12)
         appendRemoteDiagnosticLine(logLines, "[$stamp] $line")
         // apply 在内存立即更新并异步落盘；退出清理也走此路径，重进页仍能复制失败报告。
         diagnosticPreferences.edit().putString("last_report", logLines.joinToString("\n")).apply()
     }
+    fun devLog(line: String) {
+        if (!diagnosticCapture && !diagnosticControlLogging) return
+        if (!isRemoteDiagnosticLine(line)) return
+        appendDiagnostic(line)
+    }
+    // Meter sampling is explicitly requested by enabling its tool, independent of PC-control diagnostics.
+    fun meterLog(line: String) = appendDiagnostic("meter $line")
 
     fun beginDiagnosticReport(cam: NikonCamera) {
         diagnosticControlLogging = true
@@ -2079,6 +2091,87 @@ private fun RemoteContent(
     }
     LaunchedEffect(rotation, editingTools) { lutState.dismissMenu() }
 
+    // Read-only metering. No camera control-mode changes or per-frame protocol work.
+    val meterEnabled = showMeter && tools.layout(movieMode).visible(RemoteTool.METER)
+    LaunchedEffect(meterEnabled, connected, initialLoaded, liveViewStable, lutResumed, movieMode) {
+        val generation = ++meterGeneration[0]
+        meterSample = null
+        if (!meterEnabled || !connected || !initialLoaded || !liveViewStable || !lutResumed) return@LaunchedEffect
+        val cam = cameraViewModel.getCamera() ?: return@LaunchedEffect
+        fun busy() = capturing || recBusy || diagnosticControlBusy || probing || autoIsoBusy ||
+            afHeld || tapFocusBusy || afJob?.isActive == true || pendingSets.values.any { it.isActive }
+        meterLog("start app=${BuildConfig.VERSION_NAME} camera=${cam.deviceModel} movie=$movieMode")
+        var capability: RcParam? = null
+        try {
+            for (attempt in 0 until 3) {
+                while (busy()) delay(250)
+                capability = cam.rcGetParam(NIKON_LIGHT_METER, ::meterLog)
+                if (capability != null) break
+                delay(700)
+            }
+            val descriptor = capability
+            if (descriptor == null || descriptor.dataType != 0x0001 || descriptor.writable) {
+                meterLog("unavailable prop=0xD10A type=${descriptor?.dataType} writable=${descriptor?.writable}; no guessed fallback")
+                while (busy()) delay(250)
+                val alternative = cam.rcGetParam(NIKON_EXPOSURE_INDICATE, ::meterLog)
+                if (alternative?.dataType == 0x0001 && !alternative.writable) {
+                    meterLog("diagnostic-only prop=0xD1B1; EV scale unverified; collecting up to 12 raw samples")
+                    var samples = 0
+                    val deadline = SystemClock.elapsedRealtime() + 30_000L
+                    while (isActive && samples < 12 && SystemClock.elapsedRealtime() < deadline) {
+                        if (busy()) { delay(250); continue }
+                        val raw = cam.rcReadExposureMeter(alternative, ::meterLog) ?: return@LaunchedEffect
+                        if (!isActive || meterGeneration[0] != generation) return@LaunchedEffect
+                        if (!busy()) {
+                            meterLog("diagnostic prop=0xD1B1 raw=${raw.current} movie=$movieMode")
+                            samples++
+                        }
+                        delay(1_000)
+                    }
+                }
+                return@LaunchedEffect
+            }
+            var failures = 0
+            var lastLog = 0L
+            while (isActive) {
+                if (busy()) {
+                    meterSample = null
+                    delay(500)
+                    continue
+                }
+                val startedAt = SystemClock.elapsedRealtime()
+                val value = cam.rcReadExposureMeter(descriptor, ::meterLog)
+                if (!isActive || meterGeneration[0] != generation) return@LaunchedEffect
+                val ev = rcExposureMeterEv(value)
+                val now = SystemClock.elapsedRealtime()
+                val fresh = com.ztransfer.protocol.rcExposureMeterFresh(startedAt, now) && !busy()
+                meterSample = ev?.takeIf { fresh }?.let { it to startedAt }
+                failures = if (value == null) failures + 1 else 0
+                if (now - lastLog >= 5_000L || failures == 1) {
+                    meterLog("prop=0xD10A raw=${value?.current} ev=$ev fresh=$fresh elapsed=${now - startedAt}ms movie=$movieMode")
+                    lastLog = now
+                }
+                if (failures >= 3) {
+                    meterLog("suspended after 3 read failures; toggle tool to retry")
+                    break
+                }
+                delay(500)
+            }
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            meterLog("read failed ${error.javaClass.simpleName}")
+        } finally {
+            if (meterGeneration[0] == generation) meterSample = null
+        }
+    }
+    // Expire even while a protocol read is blocked; never leave an old reading on the ruler.
+    LaunchedEffect(meterSample) {
+        val sample = meterSample ?: return@LaunchedEffect
+        delay((1_500L - (SystemClock.elapsedRealtime() - sample.second)).coerceAtLeast(0L))
+        if (meterSample == sample) meterSample = null
+    }
+
     // ---------- 录像开关 ----------
     // 开始：命令成功即乐观置位（UI 立即变停止键），事件 0xC10A 再确认；失败弹瞬时提示。
     // 停止：只有 EndMovieRec 成功才切换 UI；失败时保留录像态，避免 UI 与相机相反。
@@ -2805,6 +2898,7 @@ private fun RemoteContent(
                             RemoteTool.GRID -> framingGrid != ViewfinderGrid.OFF
                             RemoteTool.EXPOSURE -> exposureAssist != ExposureAssist.OFF
                             RemoteTool.DESQUEEZE -> desqueezeMultiplier > 1.001f
+                            RemoteTool.METER -> showMeter
                             RemoteTool.LEVEL -> showLevel
                             RemoteTool.WAVEFORM -> showWaveform
                             RemoteTool.LOCK -> tools.locked.value
@@ -2838,6 +2932,7 @@ private fun RemoteContent(
                                     val i = REMOTE_DESQUEEZE_OPTIONS.indices.minByOrNull { abs(REMOTE_DESQUEEZE_OPTIONS[it] - desqueezeMultiplier) } ?: 0
                                     setDesqueezeMultiplier(REMOTE_DESQUEEZE_OPTIONS[(i + 1) % REMOTE_DESQUEEZE_OPTIONS.size])
                                 }
+                                RemoteTool.METER -> showMeter = !showMeter
                                 RemoteTool.LEVEL -> showLevel = !showLevel
                                 RemoteTool.WAVEFORM -> waveformMode = waveformMode.next()
                                 RemoteTool.LOCK -> {
@@ -2973,6 +3068,8 @@ private fun RemoteContent(
                     showFalseColor = exposureAssist == ExposureAssist.FALSE_COLOR,
                     showWaveform = showWaveform,
                 showLevel = showLevel,
+                showMeter = meterEnabled,
+                meterEv = meterSample?.first,
                 levelRoll = levelRoll,
                 levelPitch = levelPitch,
                 desqueezeMultiplier = desqueezeMultiplier,
@@ -3174,10 +3271,13 @@ private fun RemoteContent(
                     showFalseColor = exposureAssist == ExposureAssist.FALSE_COLOR,
                     showWaveform = showWaveform,
                     showLevel = showLevel,
+                showMeter = meterEnabled,
+                meterEv = meterSample?.first,
                     levelRoll = levelRoll,
                 levelPitch = levelPitch,
                     showEmbeddedAudioMeter = !audioMeterOutside,
                     informationBottomInset = if (immersiveFullscreen && dispMode == MonitorDispMode.CAMERA) 48.dp else 0.dp,
+                    meterTopInset = if (immersiveFullscreen && dispMode == MonitorDispMode.FULL) 54.dp else 34.dp,
                     desqueezeMultiplier = desqueezeMultiplier,
                     modifier = Modifier
                         .offset(x = imageX, y = imageY)
@@ -3970,6 +4070,9 @@ private fun RemoteViewfinderPanel(
     showFalseColor: Boolean = false,
     showWaveform: Boolean = false,
     showLevel: Boolean = false,
+    showMeter: Boolean = false,
+    meterEv: Float? = null,
+    meterTopInset: Dp = 34.dp,
     /** 相机机身滚转角；null=没有可用角度，水平仪什么都不画。 */
     levelRoll: Float? = null,
     levelPitch: Float? = null,
@@ -4022,6 +4125,10 @@ private fun RemoteViewfinderPanel(
                 bottomInset = 8.dp + animatedInformationInset,
                 modifier = Modifier.matchParentSize()
             )
+        }
+
+        if (showMeter) {
+            ExposureMeterOverlay(meterEv, Modifier.align(Alignment.TopCenter).padding(top = meterTopInset))
         }
 
         if (showLevel) {
@@ -5215,6 +5322,7 @@ internal fun RemoteToolMark(tool: RemoteTool, preferences: RemoteToolPreferences
         RemoteTool.DESQUEEZE -> if (preferences.desqueeze.value > 1.001f) {
             Text(desqueezeDisplayValue(preferences.desqueeze.value), fontSize = 12.sp, fontWeight = FontWeight.Bold)
         } else Icon(Icons.Outlined.AspectRatio, null, mark)
+        RemoteTool.METER -> Text("±EV", fontSize = 10.sp, fontWeight = FontWeight.Bold)
         RemoteTool.LEVEL -> LevelMark(mark)
         RemoteTool.RECORD -> Icon(Icons.Default.Videocam, null, mark)
         RemoteTool.FULLSCREEN -> FullscreenMark(mark)

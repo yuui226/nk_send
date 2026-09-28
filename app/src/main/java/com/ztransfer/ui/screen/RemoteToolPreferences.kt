@@ -18,6 +18,7 @@ internal enum class RemoteTool(val id: String, val title: Int, val fixed: Boolea
     RECORD("record", R.string.remote_tool_record), WHITE_BALANCE("white_balance", R.string.remote_tool_wb),
     FOCUS_AREA("focus_area", R.string.remote_tool_focus_area), WAVEFORM("waveform", R.string.remote_tool_waveform),
     LUT("lut", R.string.remote_tool_lut),
+    METER("meter", R.string.remote_tool_meter),
     LOCK("lock", R.string.remote_tool_lock),
     FULLSCREEN("fullscreen", R.string.remote_tool_fullscreen, true),
     ROTATE("rotate", R.string.remote_tool_rotate, true);
@@ -65,6 +66,7 @@ internal class RemoteToolPreferences(private val prefs: SharedPreferences) {
     val grid = enum("remote_grid", ViewfinderGrid.OFF)
     val exposure = enum("remote_exposure_assist", ExposureAssist.OFF)
     val level = bool("remote_level")
+    val meter = bool("remote_exposure_meter")
     val audio = bool("remote_audio_levels_visible", true)
     val desqueeze: MutableState<Float> = SavedToolState(
         prefs.getFloat("remote_desqueeze_multiplier", 1f).takeIf { it.isFinite() && it in 1f..2f } ?: 1f
@@ -88,6 +90,7 @@ internal class RemoteToolPreferences(private val prefs: SharedPreferences) {
             RemoteTool.EXPOSURE -> exposure.value = ExposureAssist.OFF
             RemoteTool.DESQUEEZE -> desqueeze.value = 1f
             RemoteTool.LEVEL -> level.value = false
+            RemoteTool.METER -> meter.value = false
             RemoteTool.WAVEFORM -> waveform.value = WaveformMode.OFF
             RemoteTool.LOCK -> locked.value = false
             else -> Unit // Actions and camera parameters are not reset by hiding their entry.

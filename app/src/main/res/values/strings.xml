@@ -650,4 +650,5 @@
     <string name="lut_gpu_failed">LUT display failed</string>
     <string name="lut_frame_unavailable">Try again when the live view is ready</string>
     <string name="lut_input_color_unsupported">This live-view color format does not support LUT yet</string>
+    <string name="remote_tool_meter">Exposure meter</string>
 </resources>

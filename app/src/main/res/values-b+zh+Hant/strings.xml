@@ -644,4 +644,5 @@
     <string name="lut_gpu_failed">LUT 顯示失敗</string>
     <string name="lut_frame_unavailable">監看畫面就緒後再試</string>
     <string name="lut_input_color_unsupported">暫不支援此監看色彩格式的 LUT</string>
+    <string name="remote_tool_meter">曝光尺</string>
 </resources>

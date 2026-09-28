@@ -9,6 +9,9 @@ class RemoteDiagnosticReportTest {
     @Test
     fun retainsStartupAndReleaseFailuresWhileIgnoringFrameStatistics() {
         listOf(
+            "meter start app=1.87 camera=Z30",
+            "meter prop=0xD10A raw=-12 ev=-1.0",
+            "meter diagnostic prop=0xD1B1 raw=12",
             "!! DeviceReady(0x90C8) resp=0x2019 after 4000ms",
             "!! LV prohibit condition = 0x00000001",
             "!! LV: connection reset",
