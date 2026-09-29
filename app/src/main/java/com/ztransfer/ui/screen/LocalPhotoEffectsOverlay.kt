@@ -423,8 +423,18 @@ fun LocalPhotoEffectsPage(
                     borderEnabled = enabled
                     decorationEnabled = enabled || (isPro && watermarkDraft.enabled)
                 },
-                onPresetChanged = { preset = it },
+                onPresetChanged = { selected ->
+                    preset = selected
+                    favoriteFrameEffects.firstOrNull { it.framePreset == selected }?.let { favorite ->
+                        metadataSettings = metadataSettings + (selected to
+                            resolvedPhotoFrameMetadataSettings(metadataSettings, selected)
+                                .copy(widthPercent = favorite.frameWidthPercent))
+                    }
+                },
                 onMetadataSettingsChanged = { updated ->
+                    favoriteFrameEffects = favoriteFrameEffects.map {
+                        if (it.framePreset == preset) it.copy(frameWidthPercent = updated.widthPercent) else it
+                    }
                     val normalized = normalizePhotoFrameMetadataSettings(updated)
                         .withoutLocationFields()
                     metadataSettings = if (
@@ -466,6 +476,7 @@ fun LocalPhotoEffectsPage(
                         favoriteFrameEffects + FavoriteFrameWatermarkEffect.capture(
                             favoritePreset,
                             favoriteWatermark,
+                            resolvedPhotoFrameMetadataSettings(metadataSettings, favoritePreset).widthPercent,
                         )
                     }
                 },
@@ -475,6 +486,7 @@ fun LocalPhotoEffectsPage(
                             FavoriteFrameWatermarkEffect.capture(
                                 favoritePreset,
                                 favoriteWatermark,
+                                resolvedPhotoFrameMetadataSettings(metadataSettings, favoritePreset).widthPercent,
                             )
                         } else {
                             favorite

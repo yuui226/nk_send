@@ -13,6 +13,16 @@ import org.junit.Test
 
 class PhotoEffectFavoritesTest {
     @Test
+    fun frameFavoritesPersistWidthAndOldFavoritesDefaultToOriginalWidth() {
+        val favorite = FavoriteFrameWatermarkEffect.capture(
+            PhotoFramePreset.MIST, PhotoFrameWatermark(), 170,
+        )
+        assertEquals(favorite, decodeFavoriteFrameEffects(encodeFavoriteFrameEffects(listOf(favorite))).single())
+        val old = encodeFavoriteFrameEffects(listOf(favorite)).substringBeforeLast(",")
+        assertEquals(100, decodeFavoriteFrameEffects(old).single().frameWidthPercent)
+    }
+
+    @Test
     fun filterCodecPreservesOrderMigratesLegacyValuesAndDropsInvalidEntries() {
         val decoded = decodeFavoritePhotoFilters(
             encoded = "cinema_blue,71;missing,80;cinema_blue,92;soft_portrait,101;broken",

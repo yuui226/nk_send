@@ -1528,7 +1528,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         val updated = if (current.any { it.framePreset == preset }) {
             current.filterNot { it.framePreset == preset }
         } else {
-            current + FavoriteFrameWatermarkEffect.capture(preset, watermark)
+            current + FavoriteFrameWatermarkEffect.capture(preset, watermark,
+                    resolvedPhotoFrameMetadataSettings(_state.value.photoFrameMetadataSettings, preset).widthPercent)
         }
         persistFavoriteFrameEffects(updated)
     }
@@ -1541,7 +1542,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         if (current.none { it.framePreset == preset }) return
         val updated = current.map { favorite ->
             if (favorite.framePreset == preset) {
-                FavoriteFrameWatermarkEffect.capture(preset, watermark)
+                FavoriteFrameWatermarkEffect.capture(preset, watermark,
+                    resolvedPhotoFrameMetadataSettings(_state.value.photoFrameMetadataSettings, preset).widthPercent)
             } else {
                 favorite
             }
@@ -1705,6 +1707,13 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             )
             .apply()
         _state.update { it.copy(photoFrameMetadataSettings = updated) }
+        val width = normalized?.widthPercent ?: 100
+        val favorites = _state.value.favoriteFrameEffects
+        if (favorites.any { it.framePreset == preset && it.frameWidthPercent != width }) {
+            persistFavoriteFrameEffects(favorites.map {
+                if (it.framePreset == preset) it.copy(frameWidthPercent = width) else it
+            })
+        }
     }
 
     private fun rootDocumentUri(treeUri: Uri): Uri =

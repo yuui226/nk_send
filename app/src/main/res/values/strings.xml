@@ -197,7 +197,7 @@
     <string name="photo_frame_color_archive">Color Archive</string>
     <string name="photo_frame_film_gallery">Film Gallery</string>
     <string name="photo_frame_film_edge">Film Edge</string>
-    <string name="photo_frame_metadata_button">Frame info</string>
+    <string name="photo_frame_metadata_button">Frame settings</string>
     <string name="photo_frame_metadata_focal_length">Focal</string>
     <string name="photo_frame_metadata_exposure">Exposure</string>
     <string name="photo_frame_metadata_lens_model">Lens</string>
@@ -655,4 +655,5 @@
     <string name="photo_lut_set_folder">Set LUT folder</string>
     <string name="photo_lut_help">LUT: Choose a folder containing .cube files. Long-press the LUT wheel to change folders.</string>
     <string name="filter_rating_stars">%1$d stars</string>
+    <string name="photo_frame_width">Width</string>
 </resources>

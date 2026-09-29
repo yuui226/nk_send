@@ -69,7 +69,7 @@ private const val CLASSIC_SIGNATURE_TOP_TO_PHOTO_WIDTH = 0.095f
 private const val CLASSIC_SIGNATURE_BOTTOM_TO_PHOTO_WIDTH = 0.15f
 private const val FILM_GALLERY_SIDE_TO_PHOTO_WIDTH = 0.085f
 private const val FILM_GALLERY_TOP_TO_PHOTO_WIDTH = 0.16f
-private const val FILM_GALLERY_BAR_TO_PHOTO_WIDTH = 0.09f
+internal const val FILM_GALLERY_BAR_TO_PHOTO_WIDTH = 0.09f
 private const val FILM_GALLERY_BOTTOM_TO_PHOTO_WIDTH = 0.34f
 private const val FILM_EDGE_SIDE_TO_PHOTO_WIDTH = 0.07f
 private const val FILM_EDGE_TOP_TO_PHOTO_WIDTH = 0.035f
@@ -346,6 +346,11 @@ internal data class PhotoFrameLayout(
     val photoRight: Float,
     val photoBottom: Float,
     val metadataTop: Float,
+    // Styling units are independent of expanded margins. Defaults preserve every legacy layout.
+    val designWidth: Float = canvasWidth.toFloat(),
+    val designHeight: Float = canvasHeight.toFloat(),
+    val designMetadataTop: Float = metadataTop,
+    val addedBottomMargin: Float = 0f,
 )
 
 internal data class OrientedPhotoSize(val width: Int, val height: Int)
@@ -1036,6 +1041,7 @@ object PhotoFrameExporter {
                 watermark = watermark,
                 filter = filter,
                 probeSessionId = probeSessionId,
+                widthPercent = metadataSettings.widthPercent,
             )
         }
         val decodeStartedAtMs = generationProbeClock()
@@ -1076,6 +1082,7 @@ object PhotoFrameExporter {
                 preset,
                 watermark,
                 borderEnabled,
+                widthPercent = metadataSettings.widthPercent,
             )
             recordGenerationStage(
                 probeSessionId,
@@ -1587,6 +1594,7 @@ object PhotoFrameExporter {
                 // Preview must match export: filter only the photo, never the frame backdrop.
                 backdropSource = source,
                 longEdge = longEdge,
+                widthPercent = metadataSettings.widthPercent,
             )
         } finally {
             if (input !== source) input.recycle()
@@ -1602,6 +1610,7 @@ object PhotoFrameExporter {
         borderEnabled: Boolean,
         backdropSource: Bitmap = source,
         longEdge: Int? = null,
+        widthPercent: Int = 100,
     ): Bitmap {
         require(longEdge == null || longEdge > 0)
         if (!borderEnabled) {
@@ -1632,36 +1641,17 @@ object PhotoFrameExporter {
                 else -> calculatePhotoFrameLayout(source.width, source.height, longEdge)
             }
         } else {
-            when (preset) {
-                PhotoFramePreset.PLAQUE ->
-                    calculateOriginalQualityPlaqueLayout(source.width, source.height)
-                PhotoFramePreset.IMMERSIVE ->
-                    calculateImmersiveFrameLayout(
-                        source.width,
-                        source.height,
-                        maxOf(source.width, source.height),
-                    )
-                PhotoFramePreset.BRAND_INSET,
-                PhotoFramePreset.BRAND_GALLERY ->
-                    calculateOriginalQualityBrandFrameLayout(
-                        source.width,
-                        source.height,
-                        preset,
-                    )
-                PhotoFramePreset.CLASSIC_SIGNATURE,
-                PhotoFramePreset.GALLERY_MAT,
-                PhotoFramePreset.COLOR_ARCHIVE,
-                PhotoFramePreset.FILM_GALLERY,
-                PhotoFramePreset.FILM_EDGE,
-                PhotoFramePreset.PARAMETER_POSTER ->
-                    calculateOriginalQualityEditorialFrameLayout(
-                        source.width,
-                        source.height,
-                        preset,
-                    )
-                else -> calculateOriginalQualityPhotoFrameLayout(source.width, source.height)
-            }
+            calculateOriginalQualityFrameLayout(source.width, source.height, preset)
         }
+        val expandedLayout = layout.withFrameWidth(preset, widthPercent).fitPreview(longEdge)
+        return renderFrameWithLayout(context, source, metadata, preset, watermark, backdropSource, longEdge, expandedLayout)
+    }
+
+    private fun renderFrameWithLayout(
+        context: Context, source: Bitmap, metadata: PhotoFrameMetadata,
+        preset: PhotoFramePreset, watermark: PhotoFrameWatermark, backdropSource: Bitmap,
+        longEdge: Int?, layout: PhotoFrameLayout,
+    ): Bitmap {
         if (
             longEdge == null &&
             preset == PhotoFramePreset.IMMERSIVE &&
@@ -1733,11 +1723,11 @@ object PhotoFrameExporter {
                 photoRect,
                 Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG),
             )
-            drawPhotoWatermark(context, canvas, photoRect, preset, watermark)
+            drawPhotoWatermark(context, canvas, photoRect, preset, watermark, min(layout.designWidth, layout.designHeight))
             canvas.restore()
             Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 style = Paint.Style.STROKE
-                strokeWidth = maxOf(1f, layout.canvasWidth * 0.0012f)
+                strokeWidth = maxOf(1f, layout.designWidth * 0.0012f)
                 color = if (preset != PhotoFramePreset.MINIMAL) {
                     Color.argb(70, 255, 255, 255)
                 } else {
@@ -2122,16 +2112,16 @@ object PhotoFrameExporter {
 
         val brandPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = textColor
-            textSize = layout.canvasWidth * 0.032f
+            textSize = layout.designWidth * 0.032f
             typeface = Typeface.create("sans-serif", Typeface.BOLD_ITALIC)
         }
         val modelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = textColor
-            textSize = layout.canvasWidth * 0.024f
+            textSize = layout.designWidth * 0.024f
             typeface = Typeface.create("sans-serif", Typeface.NORMAL)
         }
         var gap = if (brand.isNotEmpty() && model.isNotEmpty()) {
-            layout.canvasWidth * 0.016f
+            layout.designWidth * 0.016f
         } else {
             0f
         }
@@ -2148,7 +2138,7 @@ object PhotoFrameExporter {
         val detailPaint = if (hasDetails) {
             val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = mutedColor
-                textSize = layout.canvasWidth * 0.020f
+                textSize = layout.designWidth * 0.020f
                 typeface = Typeface.create("sans-serif", Typeface.NORMAL)
                 textAlign = Paint.Align.CENTER
             }
@@ -2165,7 +2155,7 @@ object PhotoFrameExporter {
         val lensPaint = if (hasLens) {
             val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = mutedColor
-                textSize = layout.canvasWidth * 0.0185f
+                textSize = layout.designWidth * 0.0185f
                 typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
                 textAlign = Paint.Align.CENTER
             }
@@ -2185,6 +2175,7 @@ object PhotoFrameExporter {
                 preset = preset,
                 watermark = metadataWatermark,
                 maxWidth = contentArea.width() * 0.86f,
+                referenceShortEdge = min(layout.designWidth, layout.designHeight),
             )
         } else {
             null
@@ -2240,7 +2231,7 @@ object PhotoFrameExporter {
             watermarkBounds?.let(::add)
         }
         val preferredGap = min(
-            layout.canvasWidth * 0.0125f,
+            layout.designWidth * 0.0125f,
             contentArea.height() * 0.09f,
         )
         val baselines = centeredFrameTextBaselines(
@@ -2351,9 +2342,9 @@ object PhotoFrameExporter {
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.argb(150, 250, 253, 255)
             setShadowLayer(
-                layout.canvasWidth * 0.009f,
+                layout.designWidth * 0.009f,
                 0f,
-                layout.canvasHeight * 0.004f,
+                layout.designHeight * 0.004f,
                 Color.argb(52, 20, 35, 46),
             )
             canvas.drawRoundRect(panel, radius, radius, this)
@@ -2361,7 +2352,7 @@ object PhotoFrameExporter {
         }
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
-            strokeWidth = maxOf(1f, layout.canvasWidth * 0.0011f)
+            strokeWidth = maxOf(1f, layout.designWidth * 0.0011f)
             color = Color.argb(178, 255, 255, 255)
             canvas.drawRoundRect(panel, radius, radius, this)
         }
@@ -2385,8 +2376,9 @@ object PhotoFrameExporter {
         preset: PhotoFramePreset,
         watermark: PhotoFrameWatermark,
         maxWidth: Float,
+        referenceShortEdge: Float = min(canvas.width, canvas.height).toFloat(),
     ): Paint {
-        val shortEdge = min(canvas.width, canvas.height).toFloat()
+        val shortEdge = referenceShortEdge
         return Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
             color = when (watermark.color) {
                 // 显式颜色保持低饱和与轻透明，作为照片署名而不是浮在画面上的贴纸。
@@ -2460,8 +2452,9 @@ object PhotoFrameExporter {
         photoRect: RectF,
         preset: PhotoFramePreset,
         watermark: PhotoFrameWatermark,
+        referenceShortEdge: Float = min(canvas.width, canvas.height).toFloat(),
     ) {
-        val layout = layoutPhotoWatermark(context, canvas, photoRect, preset, watermark) ?: return
+        val layout = layoutPhotoWatermark(context, canvas, photoRect, preset, watermark, referenceShortEdge) ?: return
         drawPhotoWatermarkLayout(canvas, layout)
     }
 
@@ -2471,6 +2464,7 @@ object PhotoFrameExporter {
         photoRect: RectF,
         preset: PhotoFramePreset,
         watermark: PhotoFrameWatermark,
+        referenceShortEdge: Float = min(canvas.width, canvas.height).toFloat(),
     ): PhotoWatermarkRenderLayout? {
         if (!watermark.enabled || !watermark.position.isPhotoPlacement()) return null
         val safeInset = min(photoRect.width(), photoRect.height()) * 0.04f
@@ -2483,6 +2477,7 @@ object PhotoFrameExporter {
             preset = preset,
             watermark = watermark,
             maxWidth = (photoRect.width() - safeInset * 2f).coerceAtLeast(1f),
+            referenceShortEdge = referenceShortEdge,
         ).apply {
             // The placement calculation uses the actual glyph bounds from a left-aligned origin.
             textAlign = Paint.Align.LEFT
@@ -3075,6 +3070,7 @@ object PhotoFrameExporter {
         watermark: PhotoFrameWatermark,
         filter: PhotoFilterSelection?,
         probeSessionId: Long,
+        widthPercent: Int = 100,
     ): Bitmap = withRegionDecoder(
         context = context,
         resolver = resolver,
@@ -3084,28 +3080,8 @@ object PhotoFrameExporter {
         val setupStartedAtMs = generationProbeClock()
         val orientation = readSourceOrientation(resolver, sourceUri)
         val orientedSize = orientedPhotoSize(decoder.width, decoder.height, orientation)
-        val layout = when (preset) {
-            PhotoFramePreset.PLAQUE ->
-                calculateOriginalQualityPlaqueLayout(orientedSize.width, orientedSize.height)
-            PhotoFramePreset.BRAND_INSET,
-            PhotoFramePreset.BRAND_GALLERY ->
-                calculateOriginalQualityBrandFrameLayout(
-                    orientedSize.width,
-                    orientedSize.height,
-                    preset,
-                )
-            PhotoFramePreset.CLASSIC_SIGNATURE,
-            PhotoFramePreset.GALLERY_MAT,
-            PhotoFramePreset.FILM_GALLERY,
-            PhotoFramePreset.FILM_EDGE,
-            PhotoFramePreset.PARAMETER_POSTER ->
-                calculateOriginalQualityEditorialFrameLayout(
-                    orientedSize.width,
-                    orientedSize.height,
-                    preset,
-                )
-            else -> calculateOriginalQualityPhotoFrameLayout(orientedSize.width, orientedSize.height)
-        }
+        val layout = calculateOriginalQualityFrameLayout(orientedSize.width, orientedSize.height, preset)
+            .withFrameWidth(preset, widthPercent)
         val regionHeight = minOf(photoFrameRegionRows(decoder.width), decoder.height)
         val tileBytes = decoder.width.toLong() * regionHeight * 4L
         val scratchBytes = if (filter != null)
@@ -3297,11 +3273,11 @@ object PhotoFrameExporter {
             )
             val decorationStartedAtMs = generationProbeClock()
             // Watermark is intentionally after the filtered photo tiles and is never filtered.
-            drawPhotoWatermark(context, canvas, photoRect, preset, watermark)
+            drawPhotoWatermark(context, canvas, photoRect, preset, watermark, min(layout.designWidth, layout.designHeight))
             canvas.restore()
             Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 style = Paint.Style.STROKE
-                strokeWidth = maxOf(1f, layout.canvasWidth * 0.0012f)
+                strokeWidth = maxOf(1f, layout.designWidth * 0.0012f)
                 color = if (preset != PhotoFramePreset.MINIMAL) {
                     Color.argb(70, 255, 255, 255)
                 } else {
@@ -3723,7 +3699,7 @@ object PhotoFrameExporter {
     ) {
         require(preset.isEditorialFrame())
         val photo = layout.photoRect()
-        drawPhotoWatermark(context, canvas, photo, preset, watermark.forEditorialPhoto(preset))
+        drawPhotoWatermark(context, canvas, photo, preset, watermark.forEditorialPhoto(preset), min(layout.designWidth, layout.designHeight))
         when (preset) {
             PhotoFramePreset.CLASSIC_SIGNATURE ->
                 drawClassicSignatureDecoration(context, canvas, layout, metadata, watermark)
@@ -3755,7 +3731,7 @@ object PhotoFrameExporter {
         if (header.isNotEmpty()) {
             val paint = fittedEditorialPaint(
                 header,
-                layout.canvasWidth * 0.034f,
+                layout.designWidth * 0.034f,
                 layout.canvasWidth * 0.54f,
                 Color.rgb(10, 11, 12),
                 Typeface.create("sans-serif-black", Typeface.BOLD_ITALIC),
@@ -3789,10 +3765,13 @@ object PhotoFrameExporter {
             rows,
             watermark.bandWatermarkFor(PhotoFramePreset.CLASSIC_SIGNATURE),
             darkText = true,
+            extraVerticalSpace = layout.addedBottomMargin,
+            referenceWidth = layout.designWidth,
+            referenceShortEdge = min(layout.designWidth, layout.designHeight),
         )
         canvas.drawRect(layout.photoRect(), Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
-            strokeWidth = maxOf(1f, layout.canvasWidth * 0.0008f)
+            strokeWidth = maxOf(1f, layout.designWidth * 0.0008f)
             color = Color.argb(35, 0, 0, 0)
         })
     }
@@ -3820,6 +3799,9 @@ object PhotoFrameExporter {
             editorialMetadataRows(metadata),
             watermark.bandWatermarkFor(PhotoFramePreset.GALLERY_MAT),
             darkText = true,
+            extraVerticalSpace = layout.addedBottomMargin,
+            referenceWidth = layout.designWidth * 0.84f,
+            referenceShortEdge = min(layout.designWidth, layout.designHeight),
             brandLogo = metadata.useBrandLogo,
         )
     }
@@ -3944,6 +3926,9 @@ object PhotoFrameExporter {
             rows,
             watermark.bandWatermarkFor(PhotoFramePreset.FILM_GALLERY),
             darkText = false,
+            extraVerticalSpace = layout.addedBottomMargin,
+            referenceWidth = layout.designWidth * 0.84f,
+            referenceShortEdge = min(layout.designWidth, layout.designHeight),
         )
     }
 
@@ -3996,7 +3981,7 @@ object PhotoFrameExporter {
                     Typeface.create("sans-serif-condensed", Typeface.NORMAL),
                 )
             }
-            val preferredGap = band.height() * 0.10f
+            val preferredGap = (band.height() - layout.addedBottomMargin).coerceAtLeast(0f) * 0.10f
             val initialBounds = rows.mapIndexed { index, text ->
                 textVisualBounds(text, paints[index], index == 0 && identity.isNotEmpty() && metadata.useBrandLogo, PhotoFramePreset.FILM_EDGE.brandLogoScale())
             }
@@ -4031,6 +4016,9 @@ object PhotoFrameExporter {
         darkText: Boolean,
         emphasizeFirst: Boolean = false,
         brandLogo: Boolean = false,
+        extraVerticalSpace: Float = 0f,
+        referenceWidth: Float = area.width(),
+        referenceShortEdge: Float = min(canvas.width, canvas.height).toFloat(),
     ) {
         if (area.height() <= 0f) return
         val color = if (darkText) Color.rgb(27, 28, 30) else Color.rgb(249, 248, 245)
@@ -4038,7 +4026,7 @@ object PhotoFrameExporter {
         val paints = metadataRows.mapIndexed { index, text ->
             fittedEditorialPaint(
                 text,
-                area.width() * if (emphasizeFirst && index == 0) 0.052f else 0.024f,
+                referenceWidth * if (emphasizeFirst && index == 0) 0.052f else 0.024f,
                 area.width() * 0.90f,
                 if (index == 0) color else muted,
                 if (emphasizeFirst && index == 0) {
@@ -4065,6 +4053,7 @@ object PhotoFrameExporter {
                     it
                 },
                 area.width() * 0.48f,
+                referenceShortEdge = referenceShortEdge,
             )
         }
         fun bounds(): List<FrameTextVisualBounds> = buildList {
@@ -4077,7 +4066,7 @@ object PhotoFrameExporter {
         }
         val initial = bounds()
         if (initial.isEmpty()) return
-        val gap = area.height() * 0.055f
+        val gap = (area.height() - extraVerticalSpace).coerceAtLeast(0f) * 0.055f
         val scale = frameTextScaleToFit(
             (area.height() - gap * (initial.size - 1).coerceAtLeast(0)).coerceAtLeast(0f),
             initial,
@@ -4215,7 +4204,7 @@ object PhotoFrameExporter {
                 textVisualBounds(text, paint, index == 0 && identity.isNotEmpty() && metadata.useBrandLogo, PhotoFramePreset.COLOR_ARCHIVE.brandLogoScale())
             }
             val initial = bounds()
-            val preferredGap = bandHeight * 0.055f
+            val preferredGap = (bandHeight - layout.addedBottomMargin).coerceAtLeast(0f) * 0.055f
             val availableTextHeight = (
                 textArea.height() - preferredGap * (rows.size - 1).coerceAtLeast(0)
                 ).coerceAtLeast(0f)
@@ -4444,6 +4433,7 @@ object PhotoFrameExporter {
             photoRect = photoRect,
             preset = preset,
             watermark = photoWatermark,
+            referenceShortEdge = min(layout.designWidth, layout.designHeight),
         )
         val occupiedWatermarkBounds = photoWatermarkLayout?.bounds?.toBrandFrameBounds()
         val brand = cameraBrandLabel(metadata.make, metadata.model)
@@ -4487,7 +4477,7 @@ object PhotoFrameExporter {
 
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
-            strokeWidth = maxOf(1f, layout.canvasWidth * 0.001f)
+            strokeWidth = maxOf(1f, layout.designWidth * 0.001f)
             color = Color.argb(46, 15, 20, 24)
             canvas.drawRoundRect(photoRect, radius, radius, this)
         }
@@ -4660,7 +4650,7 @@ object PhotoFrameExporter {
         val brandPaint = brand.takeIf(String::isNotEmpty)?.let { text ->
             fittedBrandPaint(
                 text = text,
-                preferredSize = layout.canvasWidth * 0.052f,
+                preferredSize = layout.designWidth * 0.052f,
                 maxWidth = layout.canvasWidth * 0.72f,
                 color = Color.rgb(15, 17, 19),
             )
@@ -4676,9 +4666,10 @@ object PhotoFrameExporter {
                     bandStyle
                 },
                 maxWidth = band.width() * 0.34f,
+                referenceShortEdge = min(layout.designWidth, layout.designHeight),
             )
         }
-        val preferredGap = band.height() * 0.12f
+        val preferredGap = (band.height() - layout.addedBottomMargin).coerceAtLeast(0f) * 0.12f
         val availableTop = band.top + band.height() * 0.08f
         val availableBottom = band.bottom - band.height() * 0.10f
         val initialRows = listOfNotNull(
@@ -4802,7 +4793,7 @@ object PhotoFrameExporter {
             layout.photoRight,
             layout.photoBottom,
         )
-        drawPhotoWatermark(context, canvas, photoRect, PhotoFramePreset.PLAQUE, watermark)
+        drawPhotoWatermark(context, canvas, photoRect, PhotoFramePreset.PLAQUE, watermark, min(layout.designWidth, layout.designHeight))
 
         val width = layout.canvasWidth.toFloat()
         val bandTop = layout.metadataTop
@@ -4903,6 +4894,7 @@ object PhotoFrameExporter {
                 preset = PhotoFramePreset.PLAQUE,
                 watermark = metadataWatermark,
                 maxWidth = width * 0.884f,
+                referenceShortEdge = min(layout.designWidth, layout.designHeight),
             )
         } else {
             null
@@ -5959,9 +5951,9 @@ private fun PhotoFrameWatermark.bandWatermarkFor(
 private fun brandFrameCornerRadius(layout: PhotoFrameLayout): Float =
     (layout.photoRight - layout.photoLeft) * 0.014f
 
-/** 照片与毛玻璃参数卡共用的圆角，随底部信息区高度等比缩放。 */
+/** 照片与毛玻璃参数卡共用基础圆角；额外留白不会放大圆角。 */
 internal fun photoFrameCornerRadius(layout: PhotoFrameLayout): Float =
-    (layout.canvasHeight - layout.metadataTop) * 0.26f
+    (layout.designHeight - layout.designMetadataTop) * 0.26f
 
 internal fun PhotoFrameWatermarkPosition.isPhotoPlacement(): Boolean = when (this) {
     PhotoFrameWatermarkPosition.PHOTO_TOP_LEFT,
@@ -6393,6 +6385,7 @@ internal fun photoFrameWatermarkFingerprint(
             add("v=$PHOTO_FRAME_WATERMARK_RENDER_VERSION")
             if (preset.isBrandFrame()) add("brand-v=$BRAND_FRAME_RENDER_VERSION")
             if (preset.isEditorialFrame()) add("editorial-v=$EDITORIAL_FRAME_RENDER_VERSION")
+            if (preset == PhotoFramePreset.COLOR_ARCHIVE) add("archive-layout-v=2")
             if (preset == PhotoFramePreset.FILM_GALLERY) {
                 add("film-gallery-v=$FILM_GALLERY_RENDER_VERSION")
             }
@@ -6418,6 +6411,7 @@ internal fun photoFrameWatermarkFingerprint(
     } else if (preset.isEditorialFrame()) {
         buildList {
             add("editorial-v=$EDITORIAL_FRAME_RENDER_VERSION")
+            if (preset == PhotoFramePreset.COLOR_ARCHIVE) add("archive-layout-v=2")
             if (preset == PhotoFramePreset.FILM_GALLERY) {
                 add("film-gallery-v=$FILM_GALLERY_RENDER_VERSION")
             }

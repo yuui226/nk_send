@@ -32,7 +32,7 @@ internal val PHOTO_FRAME_TIME_PATTERNS = listOf("HH:mm", "HH:mm:ss", "HH.mm", "H
 
 enum class PhotoFrameBrandStyle { TEXT, LOGO }
 
-/** Per-preset metadata presentation. Missing map entries always fall back to preset defaults. */
+/** Per-preset frame presentation (including margin width). Missing map entries always fall back to preset defaults. */
 data class PhotoFrameMetadataSettings(
     val showDate: Boolean,
     val showTime: Boolean,
@@ -49,6 +49,7 @@ data class PhotoFrameMetadataSettings(
     val showCity: Boolean = false,
     val showRegion: Boolean = false,
     val brandStyle: PhotoFrameBrandStyle = PhotoFrameBrandStyle.TEXT,
+    val widthPercent: Int = 100,
 )
 
 /** Pure decoration needs no camera header; model/logo dependencies are covered by their flags. */
@@ -119,6 +120,7 @@ internal fun resolvedPhotoFrameMetadataSettings(
 internal fun normalizePhotoFrameMetadataSettings(
     settings: PhotoFrameMetadataSettings,
 ): PhotoFrameMetadataSettings = settings.copy(
+    widthPercent = normalizePhotoFrameWidthPercent(settings.widthPercent),
     // Never restore the old full street-address option.
     showAddress = settings.showAddress && PHOTO_FRAME_ADDRESS_METADATA_ENABLED,
     datePattern = normalizePhotoFrameDatePattern(settings.datePattern),
@@ -353,6 +355,7 @@ internal fun encodePhotoFrameMetadataSettings(
         value.timePattern,
     ).let { fields ->
         when {
+            value.widthPercent != 100 -> fields + listOf(value.showCity, value.showRegion, value.brandStyle.name, value.widthPercent)
             value.brandStyle == PhotoFrameBrandStyle.LOGO -> fields + listOf(value.showCity, value.showRegion, value.brandStyle.name)
             value.showCity || value.showRegion -> fields + listOf(value.showCity, value.showRegion)
             else -> fields
@@ -369,8 +372,8 @@ internal fun decodePhotoFrameMetadataSettings(
         val fields = entry.split(FIELD_SEPARATOR)
         // Older versions stored six or seven visibility flags. Accept those entries forever;
         // the former 13-field location format had an address slot which is deliberately skipped.
-        // 14-field entries append city/district; 15-field entries append brand style.
-        if (fields.size != 9 && fields.size != 10 && fields.size != 12 && fields.size != 13 && fields.size != 14 && fields.size != 15) {
+        // 14-field entries append city/district; 15-field entries append brand style; 16 adds width.
+        if (fields.size != 9 && fields.size != 10 && fields.size != 12 && fields.size != 13 && fields.size != 14 && fields.size != 15 && fields.size != 16) {
             return@forEach
         }
         val preset = PhotoFramePreset.entries.firstOrNull { it.name == fields[0] }
@@ -401,7 +404,8 @@ internal fun decodePhotoFrameMetadataSettings(
                 showFocalLength = checkNotNull(booleans[2]),
                 showExposure = checkNotNull(booleans[3]),
                 showBrand = checkNotNull(booleans[4]),
-                brandStyle = if (fields.size == 15) PhotoFrameBrandStyle.entries.firstOrNull { it.name == fields[14] } ?: return@forEach else PhotoFrameBrandStyle.TEXT,
+                widthPercent = if (fields.size == 16) fields[15].toIntOrNull() ?: return@forEach else 100,
+                brandStyle = if (fields.size >= 15) PhotoFrameBrandStyle.entries.firstOrNull { it.name == fields[14] } ?: return@forEach else PhotoFrameBrandStyle.TEXT,
                 showModel = checkNotNull(booleans[5]),
                 showLensModel = if (hasLensModel) checkNotNull(booleans[6]) else false,
                 // Address was removed from the border feature; retain only coordinate/altitude.
@@ -432,6 +436,7 @@ internal fun photoFrameMetadataSettingsFingerprintToken(
     // Hidden format choices are remembered for the next time the field is enabled, but they do
     // not change pixels and therefore must not create a different output name.
     val rendered = normalized.copy(
+        widthPercent = if (preset == PhotoFramePreset.IMMERSIVE) 100 else normalized.widthPercent,
         datePattern = normalized.datePattern.takeIf { normalized.showDate }
             ?: defaults.datePattern,
         timePattern = normalized.timePattern.takeIf { normalized.showTime }
@@ -447,3 +452,7 @@ internal fun PhotoFrameMetadataSettings.nextBrandStyle(): PhotoFrameMetadataSett
     brandStyle == PhotoFrameBrandStyle.TEXT -> copy(brandStyle = PhotoFrameBrandStyle.LOGO)
     else -> copy(showBrand = false, brandStyle = PhotoFrameBrandStyle.TEXT)
 }
+
+/** UI and persisted values use the same bounded ten-percent detents. */
+internal fun normalizePhotoFrameWidthPercent(value: Int): Int =
+    ((value.coerceIn(100, 200) + 5) / 10) * 10

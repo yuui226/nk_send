@@ -842,7 +842,14 @@ fun SettingsOverlay(
                         frameDraftBorderEnabled = enabled
                         frameDraftDecorationEnabled = enabled || (isPro && watermarkDraft.enabled)
                     },
-                    onPresetChanged = { frameDraftPreset = it },
+                    onPresetChanged = { selected ->
+                        frameDraftPreset = selected
+                        state.favoriteFrameEffects.firstOrNull { it.framePreset == selected }?.let { favorite ->
+                            viewModel.setPhotoFrameMetadataSettings(selected,
+                                resolvedPhotoFrameMetadataSettings(state.photoFrameMetadataSettings, selected)
+                                    .copy(widthPercent = favorite.frameWidthPercent))
+                        }
+                    },
                     onMetadataSettingsChanged = { updated ->
                         viewModel.setPhotoFrameMetadataSettings(frameDraftPreset, updated)
                     },
@@ -2164,6 +2171,7 @@ internal fun PhotoFrameWatermarkEditor(
             exit = fadeOut() + shrinkVertically(),
         ) {
             PhotoFrameMetadataInlineSettings(
+                preset = preset,
                 settings = metadataSettings,
                 showLocationFields = showLocationFields,
                 onSettingsChanged = onMetadataSettingsChanged,
@@ -2511,6 +2519,7 @@ internal fun PhotoFrameWatermarkEditor(
 @Composable
 @OptIn(ExperimentalFoundationApi::class)
 private fun PhotoFrameMetadataInlineSettings(
+    preset: PhotoFramePreset,
     settings: PhotoFrameMetadataSettings,
     showLocationFields: Boolean,
     onSettingsChanged: (PhotoFrameMetadataSettings) -> Unit,
@@ -2539,6 +2548,19 @@ private fun PhotoFrameMetadataInlineSettings(
             .padding(8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        if (preset != PhotoFramePreset.IMMERSIVE) {
+            ReleaseCommitWheel(
+                options = remember { (100..200 step 10).toList() },
+                selected = settings.widthPercent,
+                optionLabel = { "$it%" },
+                onValueCommitted = { onSettingsChanged(settings.copy(widthPercent = it)) },
+                onDetent = onDetent,
+                label = stringResource(R.string.photo_frame_width),
+                wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
+                accentColor = colors.accentOrange,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
         if (com.ztransfer.BuildConfig.DEBUG && debugBrandLabel != null && onCycleDebugBrand != null) {
             FilterChip(
                 label = debugBrandLabel,

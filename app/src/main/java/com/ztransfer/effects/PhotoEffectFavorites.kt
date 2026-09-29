@@ -1,5 +1,6 @@
 package com.ztransfer.effects
 
+import com.ztransfer.frame.normalizePhotoFrameWidthPercent
 import com.ztransfer.frame.PhotoFramePreset
 import com.ztransfer.frame.PhotoFrameWatermark
 import com.ztransfer.frame.PhotoFrameWatermarkColor
@@ -24,6 +25,7 @@ data class FavoriteFrameWatermarkEffect(
     val watermarkColor: PhotoFrameWatermarkColor,
     val watermarkOpacityPercent: Int,
     val watermarkEffect: PhotoFrameWatermarkEffect,
+    val frameWidthPercent: Int = 100,
 ) {
     /**
      * Applies only presentation settings. Text and image identity always come from the current
@@ -60,8 +62,10 @@ data class FavoriteFrameWatermarkEffect(
         fun capture(
             framePreset: PhotoFramePreset,
             watermark: PhotoFrameWatermark,
+            frameWidthPercent: Int = 100,
         ): FavoriteFrameWatermarkEffect = FavoriteFrameWatermarkEffect(
             framePreset = framePreset,
+            frameWidthPercent = normalizePhotoFrameWidthPercent(frameWidthPercent),
             watermarkEnabled = watermark.enabled,
             watermarkContent = watermark.content,
             watermarkFont = watermark.font,
@@ -146,6 +150,7 @@ internal fun encodeFavoriteFrameEffects(
         favorite.watermarkColor.name,
         normalizePhotoFrameWatermarkOpacityPercent(favorite.watermarkOpacityPercent),
         favorite.watermarkEffect.name,
+        normalizePhotoFrameWidthPercent(favorite.frameWidthPercent),
     ).joinToString(FIELD_SEPARATOR)
 }
 
@@ -156,7 +161,7 @@ internal fun decodeFavoriteFrameEffects(
     val seen = mutableSetOf<PhotoFramePreset>()
     return encoded.split(ENTRY_SEPARATOR).mapNotNull { entry ->
         val fields = entry.split(FIELD_SEPARATOR)
-        if (fields.size != 9) return@mapNotNull null
+        if (fields.size != 9 && fields.size != 10) return@mapNotNull null
         val preset = fields[0].enumOrNull<PhotoFramePreset>() ?: return@mapNotNull null
         if (!seen.add(preset)) return@mapNotNull null
         val enabled = fields[1].toBooleanStrictOrNull() ?: return@mapNotNull null
@@ -172,6 +177,7 @@ internal fun decodeFavoriteFrameEffects(
             ?: return@mapNotNull null
         FavoriteFrameWatermarkEffect(
             framePreset = preset,
+            frameWidthPercent = if (fields.size == 10) normalizePhotoFrameWidthPercent(fields[9].toIntOrNull() ?: return@mapNotNull null) else 100,
             watermarkEnabled = enabled,
             watermarkContent = content,
             watermarkFont = font,

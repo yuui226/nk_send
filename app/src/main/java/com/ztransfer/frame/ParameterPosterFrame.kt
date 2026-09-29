@@ -102,7 +102,7 @@ internal fun drawParameterPosterMetadata(canvas: Canvas, layout: PhotoFrameLayou
     }
     if (portrait) {
         drawPosterRows(canvas, joined(identity, exposure, location), RectF(
-            width * 0.36f, layout.photoTop + height * 0.06f,
+            width * 0.36f + (layout.canvasWidth - layout.designWidth) / 2f, layout.photoTop + height * 0.06f,
             layout.photoLeft - width * 0.18f, layout.photoBottom - height * 0.06f,
         ))
     } else {

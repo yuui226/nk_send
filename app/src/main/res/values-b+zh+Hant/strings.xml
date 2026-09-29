@@ -193,7 +193,7 @@
     <string name="photo_frame_brand_inset">品牌內嵌</string>
     <string name="photo_frame_brand_gallery">品牌留白</string>
     <string name="photo_frame_color_archive">色彩檔案</string>
-    <string name="photo_frame_metadata_button">邊框資訊</string>
+    <string name="photo_frame_metadata_button">邊框設定</string>
     <string name="photo_frame_metadata_focal_length">焦距</string>
     <string name="photo_frame_metadata_exposure">曝光</string>
     <string name="photo_frame_metadata_lens_model">鏡頭</string>
@@ -649,4 +649,5 @@
     <string name="photo_lut_set_folder">設定LUT檔案目錄</string>
     <string name="photo_lut_help">LUT：選擇含 .cube 檔案的資料夾。長按 LUT 撥輪更換資料夾。</string>
     <string name="filter_rating_stars">%1$d 星</string>
+    <string name="photo_frame_width">寬度</string>
 </resources>

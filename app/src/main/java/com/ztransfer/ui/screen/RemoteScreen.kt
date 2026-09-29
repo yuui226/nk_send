@@ -2946,12 +2946,13 @@ private fun RemoteContent(
         ) { renderedRotation ->
         val landscape = renderedRotation != 0
         if (!landscape) {
-        Column(
+        PortraitMonitorLayout(
+            aspectRatio = viewfinderAspect * desqueezeMultiplier,
             modifier = Modifier
                 .fillMaxSize()
                 .systemBarsPadding()
-                .padding(horizontal = 12.dp, vertical = 8.dp)
-        ) {
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            header = {
             // 顶栏返回常驻；信号随其他工具淡变，监看工具统一放到取景器下方。
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -2969,8 +2970,8 @@ private fun RemoteContent(
                     Icon(Icons.Default.ArrowForward, stringResource(R.string.cd_back), Modifier.size(18.dp))
                 }
             }
-            Spacer(Modifier.height(12.dp))
-
+            },
+            viewfinder = {
             RemoteViewfinderPanel(
                 frameProvider = { frame },
                 lutState = lutState,
@@ -3003,14 +3004,15 @@ private fun RemoteContent(
                 levelRoll = levelRoll,
                 levelPitch = levelPitch,
                 desqueezeMultiplier = desqueezeMultiplier,
-                modifier = Modifier.fillMaxWidth().aspectRatio(viewfinderAspect * desqueezeMultiplier)
+                modifier = Modifier.fillMaxSize()
             )
-            Spacer(Modifier.height(8.dp))
+            },
+            tools = {
             // 竖屏按实际按钮宽度换行，旋转固定在第一行右端。
             // HD/FPS 字号和录制控件宽度变化仍由同一套列轨道处理。
             renderTools(6.dp, Modifier)
-            Spacer(Modifier.height(12.dp))
-
+            },
+            parameters = {
             // 2×2 数值拨轮微调：读数即控件——在数值上【上下拖动】，数值列随手指 1:1
             // 同向滚动、跨档步进、松手吸附最近档（iOS 拨轮手感，无惯性甩动）；
             // 点一下弹全表直跳。只读参数整块压暗 + 锁。第一排 曝光补偿/ISO，第二排 光圈/快门。
@@ -3042,8 +3044,8 @@ private fun RemoteContent(
                 }
             }
 
-            Spacer(Modifier.weight(1f))
-
+            },
+            shutter = {
             // 快门键：悬在参数区与屏底之间留白的正中（上下 weight 等分），典型长屏上
             // 约落在屏高 3/4 的拇指自然落点——比贴屏底好按，也离刚调完的参数更近；
             // 固定 padding 保证小屏上下限间距。快按=直接拍摄/切换录制；长按=半按对焦再拍；
@@ -3065,8 +3067,8 @@ private fun RemoteContent(
                     }
                 )
             }
-            Spacer(Modifier.weight(1f))
-        }
+            },
+        )
         } else {
             BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
                 val monitorLayout = landscapeMonitorLayout(maxWidth.value, maxHeight.value,
@@ -4851,7 +4853,14 @@ internal fun AdaptiveRemoteToolBar(
         val regular = visibleIndices.filter { it < regularEnd }.toMutableList()
         val pinned = visibleIndices.filter { it >= regularEnd }
         // Wide recording capsules and enlarged text occupy whole columns, without shrinking.
-        val cellWidth = maxOf(36.dp.roundToPx(), visibleIndices.minOfOrNull { placeables[it].width } ?: 0)
+        // Text tools can be a little wider than icon tools (font scale / fractional density).
+        // Using the narrowest button made HD/FPS occupy two tracks and left alternating holes.
+        // Only the recording capsule is intentionally multi-column.
+        val cellWidth = maxOf(
+            36.dp.roundToPx(),
+            visibleIndices.filter { measurables[it].layoutId != RemoteTool.RECORD.id }
+                .maxOfOrNull { placeables[it].width } ?: 0,
+        )
         val capacity = ((maxWidth + gapPx) / (cellWidth + gapPx)).coerceAtLeast(1)
         fun span(index: Int) = ((placeables[index].width + gapPx + cellWidth + gapPx - 1) /
             (cellWidth + gapPx)).coerceIn(1, capacity)

@@ -197,7 +197,7 @@
     <string name="photo_frame_color_archive">色彩档案</string>
     <string name="photo_frame_film_gallery">胶片画廊</string>
     <string name="photo_frame_film_edge">胶片边框</string>
-    <string name="photo_frame_metadata_button">边框信息</string>
+    <string name="photo_frame_metadata_button">边框设置</string>
     <string name="photo_frame_metadata_focal_length">焦距</string>
     <string name="photo_frame_metadata_exposure">曝光</string>
     <string name="photo_frame_metadata_lens_model">镜头</string>
@@ -653,4 +653,5 @@
     <string name="photo_lut_set_folder">设置LUT文件目录</string>
     <string name="photo_lut_help">LUT：选择含 .cube 文件的文件夹。长按 LUT 拨轮更换文件夹。</string>
     <string name="filter_rating_stars">%1$d 星</string>
+    <string name="photo_frame_width">宽度</string>
 </resources>
