@@ -653,6 +653,7 @@
     <string name="remote_parameters">Exposure controls</string>
     <string name="remote_tool_dock">Tools</string>
     <string name="photo_lut_set_folder">Set LUT folder</string>
-    <string name="photo_lut_help">LUT: Choose a folder containing .cube files. Long-press the LUT wheel to change folders.</string>
+    <string name="photo_lut_help">LUT: Choose a folder containing .cube files. Long-press the LUT wheel to open the list and change folders.</string>
     <string name="photo_frame_width">Width</string>
+    <string name="lut_uncategorized">Uncategorized</string>
 </resources>

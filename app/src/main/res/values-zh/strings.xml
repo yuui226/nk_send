@@ -651,6 +651,7 @@
     <string name="remote_parameters">曝光参数</string>
     <string name="remote_tool_dock">工具栏</string>
     <string name="photo_lut_set_folder">设置LUT文件目录</string>
-    <string name="photo_lut_help">LUT：选择含 .cube 文件的文件夹。长按 LUT 拨轮更换文件夹。</string>
+    <string name="photo_lut_help">LUT：选择含 .cube 文件的文件夹。长按 LUT 拨轮打开列表，可更改文件夹。</string>
     <string name="photo_frame_width">宽度</string>
+    <string name="lut_uncategorized">未分类</string>
 </resources>

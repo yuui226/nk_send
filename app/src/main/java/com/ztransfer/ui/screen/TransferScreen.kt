@@ -66,6 +66,10 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
@@ -391,24 +395,14 @@ fun TransferScreen(
                     DisposableEffect(taskId) {
                         onDispose { removingTaskIds.remove(taskId) }
                     }
-                    val cardContainerColor by animateColorAsState(
-                        targetValue = lerp(
-                            colors.surface,
-                            transferCardStateColor(task, colors),
-                            0.055f,
-                        ),
-                        animationSpec = tween(240, easing = FastOutSlowInEasing),
-                        label = "transferCardStateColor",
+                    // 一条颜色动画驱动底色、描边和色标，切换时保持同一节奏。
+                    val cardAccent by animateColorAsState(
+                        targetValue = transferCardStateColor(task, colors),
+                        animationSpec = tween(300, easing = FastOutSlowInEasing),
+                        label = "transferCardStateAccent",
                     )
-                    val cardBorderColor by animateColorAsState(
-                        targetValue = lerp(
-                            colors.cardHairline,
-                            transferCardStateColor(task, colors),
-                            0.15f,
-                        ),
-                        animationSpec = tween(240, easing = FastOutSlowInEasing),
-                        label = "transferCardStateBorderColor",
-                    )
+                    val cardContainerColor = lerp(colors.surface, cardAccent, 0.09f)
+                    val cardBorderColor = lerp(colors.cardHairline, cardAccent, 0.32f)
                     Box(
                         modifier = Modifier
                             // 上方卡片增删/长矮时，本卡平滑让位而不是硬跳。
@@ -476,11 +470,20 @@ fun TransferScreen(
                                 )
                             }
 
-                        // 信息胶囊出现可能改变高度，继续柔和过渡；顶部 sheen 位于进度层之上，
-                        // 让液态填充仍属于卡片材质，而不是覆盖内容的色块。
+                        // 状态色标不参与测量；正常状态切换保持高度，错误说明仍可自然展开。
                         Column(
                             modifier = Modifier
                                 .background(cardSheen)
+                                .drawBehind {
+                                    val width = 3.dp.toPx()
+                                    val inset = 16.dp.toPx()
+                                    drawRoundRect(
+                                        color = cardAccent.copy(alpha = 0.8f),
+                                        topLeft = Offset(0f, inset),
+                                        size = Size(width, (size.height - inset * 2).coerceAtLeast(0f)),
+                                        cornerRadius = CornerRadius(width, width),
+                                    )
+                                }
                                 .animateContentSize(tween(250, easing = FastOutSlowInEasing))
                                 .padding(12.dp)
                         ) {
@@ -983,6 +986,9 @@ private fun TransferInfoPill(
     waiting: Boolean = false,
 ) {
     val colors = AppTheme.colors
+    val pillHeight = with(LocalDensity.current) {
+        MaterialTheme.typography.labelSmall.lineHeight.toDp().coerceAtLeast(16.dp) + 6.dp
+    }
     val accent = when (tone) {
         TransferCardPillTone.SIZE -> colors.onSurfaceVariant
         TransferCardPillTone.SPEED -> colors.statusConnected
@@ -1003,6 +1009,7 @@ private fun TransferInfoPill(
     }
     Box(
         modifier = modifier
+            .height(pillHeight)
             // 左侧为分裂锚点；仅改变 X 缩放，左边界始终固定，回弹发生在右缘。
             .graphicsLayer {
                 transformOrigin = TransformOrigin(0f, 0.5f)
@@ -1011,7 +1018,8 @@ private fun TransferInfoPill(
             .clip(RoundedCornerShape(999.dp))
             .background(accent.copy(alpha = 0.10f))
             .border(1.dp, accent.copy(alpha = 0.22f), RoundedCornerShape(999.dp))
-            .padding(horizontal = 7.dp, vertical = 3.dp),
+            .padding(horizontal = 7.dp),
+        contentAlignment = Alignment.Center,
     ) {
         if (waiting) {
             Icon(Icons.Default.Schedule, contentDescription = stringResource(R.string.status_waiting),

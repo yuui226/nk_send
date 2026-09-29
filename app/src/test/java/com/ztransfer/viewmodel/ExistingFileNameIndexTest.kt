@@ -107,4 +107,38 @@ class ExistingFileNameIndexTest {
 
         assertFalse(isTransferredOriginal(original, index, organizeTransfersByDate = true))
     }
+    @Test
+    fun differentPrefixesShareOriginalLookupButKeepTypeSizeAndDirectory() {
+        val names = ExistingFileNameIndex<String>().apply {
+            add("DSC_9049 (2).JPG", 123L, "original")
+        }
+        assertEquals("original", names.find("Z30_9049.jpg", 123L)?.value)
+        assertNull(names.find("Z30_9049.NEF", 123L))
+        assertNull(names.find("Z30_9049.JPG", 124L))
+        assertNull(names.find("Z30_9050.JPG", 123L))
+        assertFalse(names.containsDisplayName("Z30_9049.JPG"))
+
+        val exported = ExportedOriginalIndex().apply {
+            add("DSC_9049.JPG", 123L, "ZT2026-09-29")
+        }
+        val apFile = file("Z30_9049.JPG", 123L)
+        assertTrue(exported.contains(apFile, "ZT2026-09-29"))
+        assertFalse(exported.contains(apFile))
+        assertFalse(exported.contains(apFile.copy(size = 124L), "ZT2026-09-29"))
+        assertFalse(exported.contains(apFile.copy(fileName = "Z30_9049.NEF"), "ZT2026-09-29"))
+    }
+
+    @Test
+    fun videosShareSuffixButCropsAndNamesWithoutNumbersRemainSeparate() {
+        val index = ExistingFileNameIndex<String>().apply {
+            add("DSC_9053.MP4", 456L, "video")
+            add("DSC_9049_crop.JPG", 123L, "crop")
+            add("holiday.JPG", 123L, "photo")
+        }
+        assertEquals("video", index.find("Z30_9053.mp4", 456L)?.value)
+        assertNull(index.find("Z30_9053.MOV", 456L))
+        assertNull(index.find("Z30_9049.JPG", 123L))
+        assertNull(index.find("trip.JPG", 123L))
+        assertEquals("photo", index.find("HOLIDAY.jpg", 123L)?.value)
+    }
 }

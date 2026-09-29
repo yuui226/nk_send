@@ -116,8 +116,14 @@ private val IDENTITY_TOKEN_UNSAFE_CHARS = Regex("[^A-Za-z0-9.]")
 
 internal fun exportedOriginalBaseName(name: String): String = name.replace(COPY_SUFFIX_REGEX, "")
 
-private fun directoryLookupKey(name: String): String =
-    exportedOriginalBaseName(name).lowercase(Locale.ROOT)
+private val CAMERA_FILE_NUMBER_SUFFIX = Regex("""([0-9]+)\.([a-z0-9]+)$""")
+
+/** AP 的真实前缀与 STA 的推导前缀可能不同；目录与大小仍由调用方独立校验。 */
+private fun directoryLookupKey(name: String): String {
+    val baseName = exportedOriginalBaseName(name).lowercase(Locale.ROOT)
+    val suffix = CAMERA_FILE_NUMBER_SUFFIX.find(baseName)
+    return if (suffix != null) "number:${suffix.value}" else "name:$baseName"
+}
 
 internal data class IndexedExistingFile<T>(
     val displayName: String,

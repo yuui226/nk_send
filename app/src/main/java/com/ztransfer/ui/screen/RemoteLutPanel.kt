@@ -4,8 +4,6 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -13,16 +11,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.ztransfer.R
 import com.ztransfer.lut.LutFolderFailure
 import com.ztransfer.lut.LutMonitorState
 import com.ztransfer.lut.folderMessage
-import com.ztransfer.lut.lutFileLabels
 import com.ztransfer.ui.theme.AppTheme
 
 @Composable
@@ -39,49 +34,29 @@ internal fun RemoteLutPanel(state: LutMonitorState, anchor: Rect?, landscape: Bo
         state.files.isEmpty() -> stringResource(R.string.lut_folder_empty)
         else -> null
     }
-    val measurer = rememberTextMeasurer()
-    val density = LocalDensity.current
     val accessible = state.folderFailure != LutFolderFailure.MISSING && state.folderFailure != LutFolderFailure.DENIED
-    val fileLabels = remember(state.files) {
-        lutFileLabels(state.files)
-    }
-    val labels = remember(fileLabels, off, folderLabel, guidance) {
-        fileLabels.values.toList() + listOfNotNull(off, folderLabel, guidance)
-    }
-    val width = remember(labels, style, density, measurer) {
-        val limit = with(density) { 256.dp.roundToPx() }
-        var widest = 0
-        for (label in labels) {
-            widest = maxOf(widest, measurer.measure(label, style).size.width)
-            if (widest >= limit) break // Further measurement cannot change the capped menu width.
-        }
-        with(density) { widest.coerceAtMost(limit).toDp() } + 24.dp
-    }
-    RemoteChoicePopup(anchor, landscape, width.coerceIn(120.dp, 280.dp),
+    RemoteChoicePopup(anchor, landscape, if (state.files.isEmpty()) 260.dp else 320.dp,
         state.closeMenuRequested, state::dismissMenu) { _, closing ->
-        LazyColumn(Modifier.weight(1f, fill = false)) {
-            if (guidance != null) item("hint") {
-                Text(guidance, color = colors.onSurfaceVariant, style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(12.dp))
-                if (state.folder == null) Text(stringResource(R.string.lut_monitor_only),
-                    color = colors.onSurfaceVariant, style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 8.dp))
-            }
-            if ((accessible && state.files.isNotEmpty()) || state.active != null || state.loading != null) {
-                item("off") {
-                    LutChoice(off, state.active == null, false, !closing) { onFeedback(); state.chooseOff() }
-                }
-                items(if (accessible) state.files else emptyList(), key = { it.uri.toString() }) { file ->
-                    LutChoice(fileLabels.getValue(file.uri), state.active?.file?.uri == file.uri,
-                        state.loading == file.uri, !closing) { onFeedback(); state.select(file) }
-                }
-            }
-            item("folder") {
-                Text(folderLabel, style = style, color = colors.accentBlue,
-                    modifier = Modifier.fillMaxWidth().clickable(enabled = !closing) { onFeedback(); onFolder() }
-                        .padding(horizontal = 12.dp, vertical = 10.dp))
+        if (guidance != null) {
+            Text(guidance, color = colors.onSurfaceVariant, style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(12.dp))
+            if (state.folder == null) Text(stringResource(R.string.lut_monitor_only),
+                color = colors.onSurfaceVariant, style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(horizontal = 12.dp))
+        }
+        if ((accessible && state.files.isNotEmpty()) || state.active != null || state.loading != null) {
+            LutChoice(off, state.active == null, false, !closing) { onFeedback(); state.chooseOff() }
+        }
+        if (accessible && state.files.isNotEmpty()) {
+            LutCategoryList(state.files, state.active?.file?.uri, !closing,
+                Modifier.weight(1f, fill = false).fillMaxWidth()) { file ->
+                LutChoice(file.label, state.active?.file?.uri == file.uri,
+                    state.loading == file.uri, !closing) { onFeedback(); state.select(file) }
             }
         }
+        Text(folderLabel, style = style, color = colors.accentBlue,
+            modifier = Modifier.fillMaxWidth().clickable(enabled = !closing) { onFeedback(); onFolder() }
+                .padding(horizontal = 12.dp, vertical = 10.dp))
     }
 }
 
@@ -96,7 +71,7 @@ private fun LutChoice(text: String, selected: Boolean, pending: Boolean, enabled
     } else Modifier
     Text(text, style = MaterialTheme.typography.bodyMedium,
         color = if (selected || pending) colors.accentBlue else colors.onBackground,
-        maxLines = 1, overflow = TextOverflow.Ellipsis,
+        maxLines = 2, overflow = TextOverflow.Ellipsis,
         modifier = Modifier.fillMaxWidth().then(breathing)
             .background(if (selected) colors.accentBlue.copy(alpha = .08f) else Color.Transparent)
             .clickable(enabled = enabled, onClick = onClick).padding(horizontal = 12.dp, vertical = 8.dp))

@@ -632,7 +632,7 @@ fun HomeScreen(
                         } else {
                             staFeedback
                         },
-                        feedbackFollowsModeSelector = state.wirelessMode == WirelessMode.STA,
+                        feedbackFollowsModeSelector = true,
                         footer = {
                             if (state.wirelessMode == WirelessMode.AP) {
                                 Row(
@@ -1314,15 +1314,10 @@ private fun ConnectionMethodCard(
                     Spacer(Modifier.height(if (modeSelector == null) 20.dp else 10.dp))
                     modeSelector?.let {
                         it()
-                        Spacer(
-                            Modifier.height(
-                                if (feedbackFollowsModeSelector && feedback != null) 4.dp
-                                else 12.dp,
-                            ),
-                        )
+                        Spacer(Modifier.height(12.dp))
                     }
                     if (feedbackFollowsModeSelector && footer != null) {
-                        // STA 的步骤与失败提示共用固定的弹性内容槽。状态切换只在槽内淡变，
+                        // AP/STA 的步骤与状态提示共用固定的弹性内容槽。状态切换只在槽内淡变，
                         // 不再改变 footer 的测量位置，也不会把下方三个小按钮向上托起。
                         Box(
                             modifier = Modifier
@@ -1347,7 +1342,7 @@ private fun ConnectionMethodCard(
                                     )
                                 },
                                 contentAlignment = Alignment.TopStart,
-                                label = "staConnectionCardStatus",
+                                label = "wifiConnectionCardStatus",
                                 // Fill the reserved slot so AnimatedContent never animates its
                                 // own measured height while the two text layouts cross-fade.
                                 modifier = Modifier.fillMaxSize(),
@@ -1559,6 +1554,7 @@ private fun ConnectionCardFeedbackContent(
         }
         Row(
             modifier = Modifier
+                .fillMaxWidth()
                 .clip(RoundedCornerShape(10.dp))
                 .background(feedback.accent.copy(alpha = 0.10f))
                 .padding(
@@ -1575,13 +1571,13 @@ private fun ConnectionCardFeedbackContent(
                 )
                 Spacer(Modifier.width(7.dp))
             }
-            Column {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = feedback.title,
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Bold,
                     color = feedback.accent,
-                    maxLines = if (feedback.multiline) 2 else 1,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
                 feedback.body?.let { body ->
@@ -1589,7 +1585,7 @@ private fun ConnectionCardFeedbackContent(
                         text = body,
                         style = MaterialTheme.typography.labelSmall,
                         color = colors.onSurfaceVariant,
-                        maxLines = if (feedback.multiline) 3 else 1,
+                        maxLines = 3,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
