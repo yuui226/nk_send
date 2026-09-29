@@ -46,9 +46,20 @@ class LandscapeMonitorLayoutTest {
         val layout = landscapeMonitorLayout(800f, 800f, 16f / 9f)
         assertTrue(layout.bottomControls)
         assertEquals(792f, layout.image.width, .001f)
-        assertTrue(layout.controls.height >= 154f)
+        assertTrue(layout.controls.height >= 40f + maxOf(96f, layout.footerHeight))
         val wheelWidth = (layout.controls.width - 96f - layout.shutterSize - 16f - 6f) / 2f
         assertTrue(wheelWidth >= 80f)
+    }
+
+    @Test fun desqueezeMovesControlsBelowAndUsesFullAvailableWidth() {
+        val normal = landscapeMonitorLayout(800f, 400f, 16f / 9f)
+        assertFalse(normal.bottomControls)
+        val wide = landscapeMonitorLayout(800f, 400f, 16f / 9f * 2f)
+        assertTrue(wide.bottomControls)
+        assertEquals(792f, wide.image.width, .001f)
+        assertEquals(16f / 9f * 2f, wide.image.width / wide.image.height, .001f)
+        assertTrue(wide.controls.height >= 40f + maxOf(96f, wide.footerHeight))
+        assertTrue(wide.controls.y >= wide.image.bottom + 8f)
     }
 
     @Test fun naturalSideSpacePreservesFullHeightPhoto() {

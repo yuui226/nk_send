@@ -41,8 +41,10 @@ internal fun landscapeMonitorLayout(
     // Never reserve a two-column rail just because the viewport is short.
     val minimumRail = 116f
     val sideWidth = minOf(fullWidth, (width - minimumRail - 16f).coerceAtLeast(0f))
-    // Header + two compact parameter rows. Recorder and shutter sit beside those rows.
-    val bottomHeight = 164f
+    // Match the actual bottom layout: 36dp header + 4dp gap, then parameter
+    // rows beside the capture cluster. A fixed 164dp reservation wastes the
+    // space freed by desqueeze and can incorrectly keep the side rail.
+    val bottomHeight = 40f + maxOf(46f * 2f + 4f, maxOf(36f, shutter) + 40f)
     val bottomWidth = if (width >= 360f && height >= bottomHeight + 16f)
         minOf(fullWidth, (height - bottomHeight - 16f) * imageAspect) else -1f
     val useBottom = bottomWidth > sideWidth + .01f

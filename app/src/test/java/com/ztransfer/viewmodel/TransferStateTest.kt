@@ -12,6 +12,8 @@ import com.ztransfer.filter.NcpPhotoFilterParameters
 import com.ztransfer.filter.PhotoFilterPreset
 import com.ztransfer.filter.PhotoFilterSelection
 import com.ztransfer.protocol.NikonCamera
+import org.junit.Assert.assertTrue
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Test
@@ -122,6 +124,16 @@ class TransferStateTest {
                 isRecheckingCurrentTask = false,
             ),
         )
+    }
+
+    @Test
+    fun queuedGenerationDoesNotCountWaitingTime() {
+        val queued = TransferTask(file(1)).queueFrameGeneration()
+        assertTrue(queued.isGeneratingFrame)
+        assertNull(queued.frameGenerationStartedAtElapsedMs)
+        assertNull(queued.finishFrameGeneration(9_000L).frameGenerationElapsedMs)
+        val finished = queued.startFrameGeneration(10_000L).finishFrameGeneration(12_500L)
+        assertEquals(2_500L, finished.frameGenerationElapsedMs)
     }
 
     @Test

@@ -832,6 +832,8 @@ private fun TransferTaskCardContent(
         else -> null
     }
     val transferDuration = task.elapsedMs?.let(::formatDuration)
+    val generationWaiting = task.isGeneratingFrame && task.frameGenerationStartedAtElapsedMs == null &&
+        !task.frameGenerationSkipped
     val generationDuration = displayedFrameGenerationElapsedMs
         ?.takeUnless { task.frameGenerationSkipped }?.let(::formatDuration)
     val effectText = transferTaskEffectText(task)
@@ -914,12 +916,14 @@ private fun TransferTaskCardContent(
                     modifier = Modifier.weight(1f, fill = false),
                 )
                 TransferPillVisibility(
-                    visible = generationDuration != null,
+                    visible = generationWaiting || generationDuration != null,
                     delayMillis = 80,
                 ) {
-                    generationDuration?.let {
-                        TransferInfoPill(text = it, tone = TransferCardPillTone.GENERATION_DURATION)
-                    }
+                    TransferInfoPill(
+                        text = generationDuration.orEmpty(),
+                        tone = TransferCardPillTone.GENERATION_DURATION,
+                        waiting = generationWaiting,
+                    )
                 }
             }
         }
@@ -972,6 +976,7 @@ private fun TransferInfoPill(
     tone: TransferCardPillTone,
     modifier: Modifier = Modifier,
     respond: Boolean = false,
+    waiting: Boolean = false,
 ) {
     val colors = AppTheme.colors
     val accent = when (tone) {
@@ -1004,7 +1009,10 @@ private fun TransferInfoPill(
             .border(1.dp, accent.copy(alpha = 0.22f), RoundedCornerShape(999.dp))
             .padding(horizontal = 7.dp, vertical = 3.dp),
     ) {
-        Text(
+        if (waiting) {
+            Icon(Icons.Default.Schedule, contentDescription = stringResource(R.string.status_waiting),
+                tint = accent, modifier = Modifier.size(16.dp))
+        } else Text(
             text = text,
             style = MaterialTheme.typography.labelSmall,
             color = accent,

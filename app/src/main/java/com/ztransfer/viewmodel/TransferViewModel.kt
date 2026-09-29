@@ -1,5 +1,7 @@
 package com.ztransfer.viewmodel
 
+import kotlinx.coroutines.sync.withLock
+
 import com.ztransfer.util.HistogramMode
 
 import android.app.Application
@@ -185,15 +187,23 @@ data class TransferTask(
     val elapsedMs: Long? = null,
     // 原片已成功落盘后的派生步骤；失败不改变 COMPLETED，原片始终保留。
     val isGeneratingFrame: Boolean = false,
-    /** 用户看到“生成中”的单调时钟起点；仅在生成期间保留。 */
+    /** 实际取得处理名额后的单调时钟起点；排队时为空。 */
     val frameGenerationStartedAtElapsedMs: Long? = null,
-    /** 单次派生从显示“生成中”到结束的用户可感知耗时。 */
+    /** 实际生成至保存结束的耗时，不包含排队等待。 */
     val frameGenerationElapsedMs: Long? = null,
     /** 本次任务因照片效果总开关关闭而跳过生成；与原片查重跳过相互独立。 */
     val frameGenerationSkipped: Boolean = false,
     val cropRecipe: com.ztransfer.crop.JpegCropSelection? = null,
     val cropEffectsSkipped: Boolean = false,
     val savedCropOutput: SavedCropOutput? = null,
+)
+
+/** Pending work retains its busy state but has no running stopwatch. */
+internal fun TransferTask.queueFrameGeneration(): TransferTask = copy(
+    frameGenerationSkipped = false,
+    isGeneratingFrame = true,
+    frameGenerationStartedAtElapsedMs = null,
+    frameGenerationElapsedMs = null,
 )
 
 internal fun TransferTask.startFrameGeneration(nowElapsedMs: Long): TransferTask = copy(
@@ -754,6 +764,9 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     }.asCoroutineDispatcher()
     private val activePhotoFrameExports = AtomicInteger(0)
     private val photoProcessingSlots = kotlinx.coroutines.sync.Semaphore(PHOTO_FRAME_EXPORT_PARALLELISM)
+    // Acquire multiple permits atomically relative to other entrants. Without this gate,
+    // two exclusive jobs could each hold one permit and wait forever for the other.
+    private val photoProcessingAdmission = kotlinx.coroutines.sync.Mutex()
     // 第一张派生图才创建/扫描专用子目录；同一根目录后续任务复用，避免逐张遍历文件夹。
     private val photoFrameDestinations =
         ConcurrentHashMap<String, PhotoFrameDestination>()
@@ -2106,7 +2119,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                     progress = 1f,
                                     downloaded = localOriginal.size,
                                     speed = 0,
-                                ).startFrameGeneration(android.os.SystemClock.elapsedRealtime())
+                                ).queueFrameGeneration()
                             }
                             if (!serviceStarted) {
                                 TransferService.start(getApplication(), useWifi = false)
@@ -2452,9 +2465,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                             elapsedMs = elapsed,
                                         ).let { completed ->
                                             if (shouldGenerateFrame) {
-                                                completed.startFrameGeneration(
-                                                    android.os.SystemClock.elapsedRealtime(),
-                                                )
+                                                completed.queueFrameGeneration()
                                             } else {
                                                 if (!effectsEnabled) completed.skipFrameGeneration() else completed
                                             }
@@ -2674,7 +2685,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 elapsedMs = downloadedAt - stats.startedAtElapsedMs,
                 downloadMBps = endToEndBytesPerSecond(stats.transferredBytes,
                     downloadedAt - stats.startedAtElapsedMs) / (1024f * 1024f))
-                .startFrameGeneration(downloadedAt) }
+                .queueFrameGeneration() }
             _activeTransferProgress.value = null
             val directoryIndex = getDirectoryIndex(treeUri, destinationUri)
             fun unusedName(preferred: String): String {
@@ -2705,7 +2716,10 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             withContext(photoFrameDispatcher) {
                 var acquired = 0
                 try {
-                    repeat(PHOTO_FRAME_EXPORT_PARALLELISM) { photoProcessingSlots.acquire(); acquired++ }
+                    photoProcessingAdmission.withLock {
+                        repeat(PHOTO_FRAME_EXPORT_PARALLELISM) { photoProcessingSlots.acquire(); acquired++ }
+                    }
+                    updateTask(id) { it.startFrameGeneration(android.os.SystemClock.elapsedRealtime()) }
                 com.ztransfer.crop.LosslessJpeg.crop(source, cropped, recipe)
                 currentCoroutineContext().ensureActive()
                 val effects = _state.value.photoEffectsEnabled
@@ -3125,8 +3139,13 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         var frameExportSaved = false
         activePhotoFrameExports.incrementAndGet()
         val job = viewModelScope.launch(photoFrameDispatcher) {
-            photoProcessingSlots.acquire()
+            val permits = if (filterRequested?.preset?.parameters is com.ztransfer.filter.CubePhotoFilterParameters)
+                PHOTO_FRAME_EXPORT_PARALLELISM else 1
+            var acquired = 0
             try {
+            photoProcessingAdmission.withLock {
+                repeat(permits) { photoProcessingSlots.acquire(); acquired++ }
+            }
             // Recheck at worker entry: metadata reads and dispatcher queues may have suspended
             // since transfer completion. A running export is allowed to finish after this point.
             if (!_state.value.photoEffectsEnabled) {
@@ -3134,6 +3153,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 updateTask(taskId) { it.skipFrameGeneration() }
                 return@launch
             }
+            updateTask(taskId) { it.startFrameGeneration(android.os.SystemClock.elapsedRealtime()) }
             if (PhotoGenerationProbe.enabled) {
                 PhotoGenerationProbe.stage(
                     sessionId = probeSession,
@@ -3280,7 +3300,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     }
                 }
             }
-            } finally { photoProcessingSlots.release() }
+            } finally { repeat(acquired) { photoProcessingSlots.release() } }
         }
         // invokeOnCompletion 即使任务排队期间就被取消也必定执行，计数和 UI 不会泄漏。
         job.invokeOnCompletion { cause ->
