@@ -56,4 +56,25 @@ class PhotoCubeResourceCacheTest {
             assertEquals(1, reads.get())
         } finally { release.countDown(); pool.shutdownNow() }
     }
+
+    @Test fun activeRenderPinsEvenAnUncacheableCubeUntilAllRegionsFinish() {
+        val cache = PhotoCubeResourceCache(budget = 1, maxEntries = 1)
+        val reads = AtomicInteger()
+        val recipe = CubePhotoFilterParameters.fromSnapshot("large", cache) {
+            reads.incrementAndGet(); table("large")
+        }
+        val selection = PhotoFilterSelection(PhotoFilterPreset("lut:test", "Test", recipe), 80)
+        val prepared = PhotoFilterRenderer.prepareOriginalFilter(selection)
+        val mapper = requireNotNull(prepared.cubeMapper)
+        repeat(12) {
+            cache.acquire("other") { table("other") }
+            assertSame(mapper, prepared.cubeMapper)
+            mapper.map(0xff123456.toInt(), 0.8f, false)
+        }
+        assertEquals(1, reads.get())
+        assertEquals(0, cache.retainedBytes)
+        // A subsequent render may reload, but queued recipes do not pin the first table.
+        PhotoFilterRenderer.prepareOriginalFilter(selection)
+        assertEquals(2, reads.get())
+    }
 }

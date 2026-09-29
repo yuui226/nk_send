@@ -3,7 +3,7 @@ package com.ztransfer.filter
 import com.ztransfer.lut.CubeLut
 import kotlin.math.roundToInt
 
-/** Parsed content is owned by this immutable recipe, shared by queued tasks, never an external URI. */
+/** Queued recipes reload immutable private snapshots through a bounded shared resource cache. */
 internal class CubePhotoFilterParameters private constructor(
     private val acquire: () -> PhotoCubeResourceCache.Loaded,
 ) : PhotoFilterParameters {

@@ -55,6 +55,7 @@ object PhotoFilterRenderer {
         internal val selection: PhotoFilterSelection,
         internal val exactRgbMemo: ExactRgbMemo?,
         internal val mode: PreparationMode,
+        internal val cubeMapper: PhotoCubeMapper? = null,
     )
 
     internal enum class PreparationMode { EXACT_CACHE, EXACT_ALLOCATED, DIRECT_FALLBACK }
@@ -201,7 +202,9 @@ object PhotoFilterRenderer {
         // A cube already is a compact lookup; it does not need the exact-color memo.
         if (selection.preset.parameters is CubePhotoFilterParameters) {
             synchronized(exactMemoLock) { cachedExactMemo = null }
-            return PreparedOriginalFilter(selection, null, PreparationMode.DIRECT_FALLBACK)
+            // Pin only for this render: later regions must not reload an evicted/oversized LUT.
+            return PreparedOriginalFilter(selection, null, PreparationMode.DIRECT_FALLBACK,
+                cubeMapper = selection.preset.parameters.mapper)
         }
         if (exactMemoDisabledAfterOom) {
             return PreparedOriginalFilter(
@@ -261,7 +264,10 @@ object PhotoFilterRenderer {
         val pixels = scratchPixels?.also {
             require(it.size >= requiredPixels) { "Filter scratch buffer is too small" }
         } ?: IntArray(requiredPixels)
-        val compiled = compileFilter(prepared.selection,
+        val compiled = prepared.cubeMapper?.let { mapper ->
+            CompiledFilter(prepared.selection.preset,
+                prepared.selection.normalizedIntensityPercent / 100f, preserveAlpha, cubeMapper = mapper)
+        } ?: compileFilter(prepared.selection,
             preserveAlpha = if (prepared.exactRgbMemo == null) preserveAlpha else false)
         var top = 0
         while (top < height) {

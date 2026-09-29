@@ -2370,7 +2370,10 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                 try {
                                     var savedName = finalName
                                     var originalSaveMode = if (renameBroken) "full_copy" else "rename"
-                                    var renamedUri = if (renameBroken) null else renameQuietly(createdUri, finalName)
+                                    var renamedUri = if (renameBroken) null else renameQuietly(createdUri, finalName) {
+                                        // Execute before returning across the cancellable dispatcher boundary.
+                                        fileDocUri = null
+                                    }
                                     var saveError: Throwable? = null
                                     if (renamedUri == null) {
                                         val copyName = finalName
@@ -2808,9 +2811,13 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     }
 
     /** 改名；失败（如目标名已存在、部分 provider 返回 null）返回 null。走 IO 线程。 */
-    private suspend fun renameQuietly(uri: Uri, newName: String): Uri? = withContext(Dispatchers.IO) {
+    private suspend fun renameQuietly(
+        uri: Uri,
+        newName: String,
+        onRenamed: (Uri) -> Unit = {},
+    ): Uri? = withContext(Dispatchers.IO) {
         try {
-            DocumentsContract.renameDocument(contentResolver, uri, newName)
+            DocumentsContract.renameDocument(contentResolver, uri, newName)?.also(onRenamed)
         } catch (_: Exception) {
             null
         }
