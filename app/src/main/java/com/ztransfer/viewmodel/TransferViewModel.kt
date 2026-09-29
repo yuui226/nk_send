@@ -492,7 +492,6 @@ data class TransferState(
     val filterExtensions: Set<String>? = null,
     // 只看机内"保护"(🔑)标记过的照片（机内选片工作流）。持久化。
     val filterProtectedOnly: Boolean = false,
-    val filterRating: Int? = null,
     // 只看连拍照片（检测算法见 FileListScreen.computeBurstGroups）。持久化。
     val filterBurstOnly: Boolean = false,
     // 只看导出目录中尚未存在的照片。与缩略图已传对号共用同一份索引。持久化。
@@ -568,7 +567,6 @@ internal fun retainLastValidTransferSpeed(previous: Long, sample: Long): Long =
 data class PhotoFilterCriteria(
     val extensions: Set<String>? = null,
     val protectedOnly: Boolean = false,
-    val rating: Int? = null,
     val burstOnly: Boolean = false,
     val untransferredOnly: Boolean = false,
     val storageSlot: Int? = null,
@@ -1185,7 +1183,6 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 // getStringSet 返回的实例不可直接持有（SharedPreferences 约定），拷贝一份。
                 filterExtensions = prefs.getStringSet("filter_exts", null)?.toSet(),
                 filterProtectedOnly = prefs.getBoolean("filter_protected", false),
-                filterRating = prefs.getInt("filter_rating", 0).takeIf { it in 1..5 },
                 filterBurstOnly = prefs.getBoolean("filter_burst", false),
                 filterUntransferredOnly = prefs.getBoolean("filter_untransferred", false),
                 filterDateRange = PhotoDateRange.restore(
@@ -1633,7 +1630,6 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         prefs.edit().apply {
             if (criteria.extensions == null) remove("filter_exts")
             else putStringSet("filter_exts", criteria.extensions)
-            if (criteria.rating in 1..5) putInt("filter_rating", criteria.rating!!) else remove("filter_rating")
             if (criteria.protectedOnly) putBoolean("filter_protected", true) else remove("filter_protected")
             if (criteria.burstOnly) putBoolean("filter_burst", true) else remove("filter_burst")
             if (criteria.untransferredOnly) putBoolean("filter_untransferred", true)
@@ -1652,7 +1648,6 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             it.copy(
                 filterExtensions = criteria.extensions,
                 filterProtectedOnly = criteria.protectedOnly,
-                filterRating = criteria.rating?.takeIf { it in 1..5 },
                 filterBurstOnly = criteria.burstOnly,
                 filterUntransferredOnly = criteria.untransferredOnly,
                 filterStorageSlot = criteria.storageSlot,

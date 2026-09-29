@@ -1325,152 +1325,8 @@ class NikonCamera(private val context: Context) {
     private val staDirectRawIndexedPreviews = HashSet<Int>()
     private val staDirectOriginalFileNames = HashMap<Int, String>()
     private val staDirectCaptureDates = HashMap<Int, String>()
-    // Only small decoded ratings are retained; encoded photo prefixes have their separate budget.
-    private val photoRatings = java.util.Collections.synchronizedMap(LinkedHashMap<Int, Int>())
-    internal val photoRatingGeneration = MutableStateFlow(0)
-
-    internal fun cachedPhotoRating(handle: Int): Int? = photoRatings[handle]
-
-    internal fun invalidatePhotoRatings() {
-        synchronized(photoRatings) {
-            photoRatings.clear()
-            photoRatingGeneration.value += 1
-        }
-    }
-
-    private fun capturePhotoRating(handle: Int, bytes: ByteArray, validLength: Int = bytes.size) {
-        val generation = photoRatingGeneration.value
-        val length = minOf(validLength, bytes.size, 262144)
-        if (length < 8) return
-        val prefix = if (length == bytes.size) bytes else bytes.copyOf(length)
-        val rating = parsePhotoRating(prefix) ?: parseNikonVideoRating(prefix) ?: return
-        rememberPhotoRating(handle, rating, generation)
-    }
-
-    private fun rememberPhotoRating(handle: Int, rating: Int, generation: Int) {
-        synchronized(photoRatings) {
-            if (generation != photoRatingGeneration.value) return
-            photoRatings[handle] = rating
-            while (photoRatings.size > 8192) photoRatings.remove(photoRatings.keys.first())
-        }
-    }
-
-    // Capability failures belong to a connection and media kind, never to another camera/mode.
-    private class RatingReadDeferred : Exception("Camera busy; rating scan deferred")
-    private val ratingUnsupportedExtensions = HashSet<String>()
-    private var ratingOperationUnsupported = false
-
-    internal suspend fun readObjectRating(file: FileInfo): Int? = ioGate.withTransferSlice {
-        withContext(Dispatchers.IO) {
-            if (ratingOperationUnsupported || file.extension in ratingUnsupportedExtensions) return@withContext null
-            if (!sessionOpen) throw RatingReadDeferred()
-            val generation = photoRatingGeneration.value
-            try {
-                // AP bodies may implement this without advertising it in DeviceInfo.
-                sendCmd(PtpConstants.GET_OBJECT_PROP_VALUE, file.handle, 0xDC8A)
-                val (response, bytes) = recvRespWithPayload()
-                if (generation != photoRatingGeneration.value) return@withContext null
-                when (response) {
-                    0x2001 -> bytes?.let(::parseNikonObjectRating)?.also { rememberPhotoRating(file.handle, it, generation) }
-                    0x2005 -> { ratingOperationUnsupported = true; null }
-                    0xA80A, 0xA801 -> { ratingUnsupportedExtensions += file.extension; null }
-                    0x2019 -> throw RatingReadDeferred()
-                    // Denied and object errors do not prove persistent lack of support.
-                    else -> null
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                if (e !is RatingReadDeferred) closeQuietly()
-                // Stop the scan after a transport failure, rather than retrying every file.
-                throw e
-            }
-        }
-    }
-
-    private var ratingNikonHeaderUnsupported = false
-    private var ratingStandardHeaderUnsupported = false
-
-    /** At most 256KiB total; extend the prefix rather than download its first half twice. */
-    internal suspend fun readPhotoRatingHeader(file: FileInfo): Int? {
-        val generation = photoRatingGeneration.value
-        suspend fun chunk(offset: Int): ByteArray? = ioGate.withTransferSlice {
-            withContext(Dispatchers.IO) {
-                if (!sessionOpen || generation != photoRatingGeneration.value) return@withContext null
-                try {
-                    if (!ratingNikonHeaderUnsupported) {
-                        sendCmd(PtpConstants.NK_GET_PARTIAL_OBJECT_EX, file.handle, offset, 0, 131072, 0)
-                        val (response, bytes) = recvRespWithPayload()
-                        if (response == PtpConstants.RESPONSE_OK) return@withContext bytes
-                        if (response == 0x2019) throw RatingReadDeferred()
-                        if (response != 0x2005) return@withContext null
-                        ratingNikonHeaderUnsupported = true
-                    }
-                    if (ratingStandardHeaderUnsupported) return@withContext null
-                    sendCmd(0x101B, file.handle, offset, 131072)
-                    val (response, bytes) = recvRespWithPayload()
-                    if (response == 0x2019) throw RatingReadDeferred()
-                    if (response == 0x2005) ratingStandardHeaderUnsupported = true
-                    bytes?.takeIf { response == PtpConstants.RESPONSE_OK }
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    if (e !is RatingReadDeferred) closeQuietly()
-                    throw e
-                }
-            }
-        }
-        val first = chunk(0) ?: return null
-        if (first.size > 131072) return null
-        var rating = withContext(Dispatchers.Default) { parsePhotoRating(first) }
-        if (rating == null && first.size == 131072) {
-            val tail = chunk(first.size)
-            if (tail != null && tail.size <= 131072) {
-                rating = withContext(Dispatchers.Default) { parsePhotoRating(first + tail) }
-            }
-        }
-        if (generation != photoRatingGeneration.value) return null
-        rating?.let { rememberPhotoRating(file.handle, it, generation) }
-        return rating
-    }
-
-    internal suspend fun readVideoRating(file: FileInfo): Int? = withContext(Dispatchers.Default) {
-        val generation = photoRatingGeneration.value
-        // Parsed session values are reused above; old unversioned prefixes may predate a rating edit.
-        val rating = readNikonVideoRating(file.size) { offset, count ->
-            ioGate.withTransferSlice {
-                withContext(Dispatchers.IO) {
-                    if (!sessionOpen) throw RatingReadDeferred()
-                    if (generation != photoRatingGeneration.value) return@withContext null
-                    try {
-                        if (!ratingNikonHeaderUnsupported) {
-                            sendCmd(PtpConstants.NK_GET_PARTIAL_OBJECT_EX, file.handle, offset.toInt(), (offset ushr 32).toInt(), count, 0)
-                            val (response, bytes) = recvRespWithPayload()
-                            if (response == PtpConstants.RESPONSE_OK) return@withContext bytes
-                            if (response == 0x2019) throw RatingReadDeferred()
-                            if (response != 0x2005) return@withContext null
-                            ratingNikonHeaderUnsupported = true
-                        }
-                        if (ratingStandardHeaderUnsupported || offset > 0xffffffffL) return@withContext null
-                        sendCmd(0x101B, file.handle, offset.toInt(), count)
-                        val (response, bytes) = recvRespWithPayload()
-                        if (response == 0x2019) throw RatingReadDeferred()
-                        if (response == 0x2005) ratingStandardHeaderUnsupported = true
-                        bytes?.takeIf { response == PtpConstants.RESPONSE_OK }
-                    } catch (e: CancellationException) { throw e }
-                    catch (e: Exception) {
-                        if (e !is RatingReadDeferred) closeQuietly()
-                        throw e
-                    }
-                }
-            }
-        }
-        if (generation != photoRatingGeneration.value) return@withContext null
-        rating?.let { rememberPhotoRating(file.handle,it,generation) }
-        rating
-    }
-
-    // Recent photo prefixes: bounded independently of the small rating cache.
+    // 最近读取的少量文件前缀同时服务 MPF、EXIF、RAW 索引与缩略图；每项最多 512 KiB、
+    // 总共 4 项，避免冷缓存扫描把整卡数据留在堆中。所有访问都在同一 PTP IO gate 内串行。
     private val staDirectRecentHeaders = LinkedHashMap<Int, ByteArray>(4, 0.75f, true)
     private var staDirectFileNumberAnchor: NikonFileNumberAnchor? = null
     // A dual-card body may maintain independent object-handle sequences per slot. A single anchor
@@ -2570,7 +2426,6 @@ class NikonCamera(private val context: Context) {
                         sendCmd(PtpConstants.NK_GET_PARTIAL_OBJECT_EX, handle, 0, 0, maxSize, 0)
                         val (respCode, data) = recvRespWithPayload()
                         if (respCode == PtpConstants.RESPONSE_OK && data != null && data.isNotEmpty()) {
-                            capturePhotoRating(handle, data)
                             result = data
                             break
                         }
@@ -2947,7 +2802,6 @@ class NikonCamera(private val context: Context) {
 
     /** Retains only the useful beginning of a recent STA object; larger prefixes never grow the cap. */
     private fun rememberStaDirectPrefix(handle: Int, bytes: ByteArray, validLength: Int = bytes.size) {
-        if (cachedPhotoRating(handle) == null) capturePhotoRating(handle, bytes, validLength)
         val retainedLength = minOf(validLength, bytes.size, STA_DIRECT_RECENT_PREFIX_BYTES)
         if (retainedLength <= 0) return
         val existing = staDirectRecentHeaders[handle]

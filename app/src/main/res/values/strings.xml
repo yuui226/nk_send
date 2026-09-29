@@ -654,6 +654,5 @@
     <string name="remote_tool_dock">Tools</string>
     <string name="photo_lut_set_folder">Set LUT folder</string>
     <string name="photo_lut_help">LUT: Choose a folder containing .cube files. Long-press the LUT wheel to change folders.</string>
-    <string name="filter_rating_stars">%1$d stars</string>
     <string name="photo_frame_width">Width</string>
 </resources>
