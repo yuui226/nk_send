@@ -2976,6 +2976,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         detectNewHandles: Boolean = false,
     ) {
         val cam = camera ?: return
+        if (!preserveExisting && resumeSnapshot == null) cam.invalidatePhotoRatings()
         val diskCacheForScan = activeThumbnailDiskCache
         if (cam.staDirectObjectReadValidated && !preserveExisting) {
             staScanThumbnailDiskHits = 0

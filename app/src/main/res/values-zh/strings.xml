@@ -652,4 +652,5 @@
     <string name="remote_tool_dock">工具栏</string>
     <string name="photo_lut_set_folder">设置LUT文件目录</string>
     <string name="photo_lut_help">LUT：选择含 .cube 文件的文件夹。长按 LUT 拨轮更换文件夹。</string>
+    <string name="filter_rating_stars">%1$d 星</string>
 </resources>
