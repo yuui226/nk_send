@@ -1,10 +1,9 @@
 package com.ztransfer.ui.screen
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -12,11 +11,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
-import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.boundsInRoot
-import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.dp
 
 /** Layout only: all camera actions and tool preference mutations remain in RemoteScreen. */
@@ -36,7 +34,6 @@ internal fun LandscapeMonitorControls(
     modifier: Modifier = Modifier,
 ) {
     var dockOpen by remember { mutableStateOf(false) }
-    var anchor by remember { mutableStateOf<Rect?>(null) }
     // A window/ratio change can detach a menu's old tool anchor. Close that menu before reuse.
     LaunchedEffect(layout) { onPanelChange() }
     fun close() {
@@ -44,14 +41,18 @@ internal fun LandscapeMonitorControls(
         dockOpen = false
     }
     BackHandler(dockOpen) { close() }
-    val showParameters = !dockOpen
-    val parameterAnimation = rememberGenieVisibility(showParameters)
-    val dockAnimation = rememberGenieVisibility(dockOpen)
+    // One signed progress: controls fade to zero before Dock gains any opacity.
+    // Reversing cancels only the current animation, retaining its exact visual progress.
+    val panelProgress = remember { Animatable(-1f) }
+    LaunchedEffect(dockOpen) {
+        panelProgress.animateTo(if (dockOpen) 1f else -1f,
+            tween(280, easing = FastOutSlowInEasing))
+    }
     val dockSlot: @Composable () -> Unit = {
         dockButton(dockOpen, {
             onPanelChange()
             dockOpen = !dockOpen
-        }, Modifier.onGloballyPositioned { anchor = it.boundsInRoot() })
+        }, Modifier)
     }
     val header: @Composable () -> Unit = {
         // The caller supplies real bounds wide enough for all navigation hit targets.
@@ -65,8 +66,8 @@ internal fun LandscapeMonitorControls(
         }
     }
     val content: @Composable () -> Unit = {
-        GenieInlinePanel(parameterAnimation, { anchor },
-            Modifier.fillMaxSize().blockMonitorPanelInput { !showParameters || parameterAnimation.progress.value < .999f }) {
+        MonitorDockLayer(panelProgress, dock = false,
+            Modifier.fillMaxSize().blockMonitorPanelInput { dockOpen }) {
             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(if (layout.columns == 1) 2.dp else if (layout.bottomControls) 4.dp else 6.dp, Alignment.CenterVertically)) {
                 (0..3).toList().chunked(layout.columns).forEach { indices ->
@@ -82,8 +83,8 @@ internal fun LandscapeMonitorControls(
         .coerceIn(1, if (layout.bottomControls) Int.MAX_VALUE else 3)
     val dockContent: @Composable () -> Unit = {
         val dockScroll = rememberScrollState()
-        GenieInlinePanel(dockAnimation, { anchor },
-            Modifier.fillMaxSize().blockMonitorPanelInput { !dockOpen || dockAnimation.progress.value < .999f }) {
+        MonitorDockLayer(panelProgress, dock = true,
+            Modifier.fillMaxSize().blockMonitorPanelInput { !dockOpen }) {
             Column(Modifier.fillMaxSize().verticalScrollEdgeFade(dockScroll).verticalScroll(dockScroll).padding(4.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -100,28 +101,27 @@ internal fun LandscapeMonitorControls(
     }
     val captureSlot: @Composable () -> Unit = {
         Box(Modifier.size(layout.shutterSize.dp), contentAlignment = Alignment.Center) {
-            val visible = !dockOpen
-            AnimatedVisibility(visible, enter = fadeIn(tween(160)), exit = fadeOut(tween(160)),
-                modifier = Modifier.blockMonitorPanelInput { !visible }) { shutter() }
+            MonitorDockLayer(panelProgress, dock = false,
+                Modifier.blockMonitorPanelInput { dockOpen }) { shutter() }
         }
     }
     // Horizontal expansion stays in the bottom row, beside rotation.
     val localSlot: @Composable () -> Unit = {
         Box(Modifier.height(36.dp), contentAlignment = Alignment.CenterStart) {
-            AnimatedVisibility(!dockOpen, enter = fadeIn(tween(160)), exit = fadeOut(tween(160)),
-                modifier = Modifier.blockMonitorPanelInput { dockOpen }) { localRecorder() }
+            MonitorDockLayer(panelProgress, dock = false,
+                Modifier.blockMonitorPanelInput { dockOpen }) { localRecorder() }
         }
     }
     val dispSlot: @Composable () -> Unit = {
         Box(Modifier.size(36.dp), contentAlignment = Alignment.Center) {
-            AnimatedVisibility(!dockOpen, enter = fadeIn(tween(160)), exit = fadeOut(tween(160)),
-                modifier = Modifier.blockMonitorPanelInput { dockOpen }) { dispButton() }
+            MonitorDockLayer(panelProgress, dock = false,
+                Modifier.blockMonitorPanelInput { dockOpen }) { dispButton() }
         }
     }
     val rotationSlot: @Composable () -> Unit = {
         Box(Modifier.size(36.dp), contentAlignment = Alignment.Center) {
-            AnimatedVisibility(!dockOpen, enter = fadeIn(tween(160)), exit = fadeOut(tween(160)),
-                modifier = Modifier.blockMonitorPanelInput { dockOpen }) { rotateButton() }
+            MonitorDockLayer(panelProgress, dock = false,
+                Modifier.blockMonitorPanelInput { dockOpen }) { rotateButton() }
         }
     }
     val captureCluster: @Composable () -> Unit = {
@@ -175,5 +175,26 @@ private fun Modifier.blockMonitorPanelInput(blocked: () -> Boolean) = composed {
                 if (currentBlocked()) event.changes.forEach { it.consume() }
             }
         }
+    }
+}
+
+/** Only the zero crossing changes composition; animation frames update the graphics layer. */
+@Composable
+private fun MonitorDockLayer(
+    progress: Animatable<Float, androidx.compose.animation.core.AnimationVector1D>,
+    dock: Boolean,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    val present by remember(progress, dock) {
+        derivedStateOf { if (dock) progress.value > 0f else progress.value < 0f }
+    }
+    val travel = with(LocalDensity.current) { 4.dp.toPx() }
+    if (present) {
+        Box(modifier.graphicsLayer {
+            val visibility = (if (dock) progress.value else -progress.value).coerceIn(0f, 1f)
+            alpha = visibility
+            translationY = (1f - visibility) * travel
+        }) { content() }
     }
 }

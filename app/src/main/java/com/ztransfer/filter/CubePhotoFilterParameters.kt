@@ -2,6 +2,9 @@ package com.ztransfer.filter
 
 import com.ztransfer.lut.CubeLut
 import kotlin.math.roundToInt
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import kotlinx.coroutines.CancellationException
 
 /** Queued recipes reload immutable private snapshots through a bounded shared resource cache. */
 internal class CubePhotoFilterParameters private constructor(
@@ -42,6 +45,47 @@ internal class PhotoCubeMapper(private val table: CubeLut) {
     private val red = Axis(table, 0, 3)
     private val green = Axis(table, 1, table.size * 3)
     private val blue = Axis(table, 2, table.size * table.size * 3)
+
+    // Only active renderers allocate the direct copy. The shared resource cache reserves its
+    // size in advance, so enabling this path cannot silently double that cache's budget.
+    internal val gridSize: Int get() = table.size
+    internal val budgetBytes: Int get() = table.rgb.size * 8 + 3 * 256 * 12 + NativePhotoLut.AXIS_BYTES
+    private val nativeTable: ByteBuffer? by lazy {
+        if (!NativePhotoLut.available) null else try {
+            ByteBuffer.allocateDirect(NativePhotoLut.AXIS_BYTES + table.rgb.size * 4)
+                .order(ByteOrder.nativeOrder()).apply {
+                    for (axis in listOf(red, green, blue)) {
+                        axis.low.forEach { putInt(it) }
+                        axis.high.forEach { putInt(it) }
+                    }
+                    for (axis in listOf(red, green, blue)) {
+                        axis.fraction.forEach { putFloat(it) }
+                        axis.fraction.forEach { putFloat(1f - it) }
+                    }
+                    asFloatBuffer().put(table.rgb)
+                    rewind()
+                }.asReadOnlyBuffer()
+        } catch (_: OutOfMemoryError) { null } // Original exact Kotlin path remains usable.
+    }
+
+    internal fun prepareBulk(requested: PhotoLutExecution = PhotoLutExecution.NATIVE_16K): PhotoLutExecution =
+        if (requested != PhotoLutExecution.KOTLIN && nativeTable != null) requested else PhotoLutExecution.KOTLIN
+
+    /** Bounded synchronous batches keep cancellation responsive without adding compute workers. */
+    internal fun mapRange(pixels: IntArray, start: Int, end: Int, strength: Float,
+        preserveAlpha: Boolean, execution: PhotoLutExecution = PhotoLutExecution.NATIVE_16K,
+        isCancelled: () -> Boolean) {
+        require(start >= 0 && end >= start && end <= pixels.size)
+        val native = if (execution == PhotoLutExecution.KOTLIN) null else nativeTable
+        var offset = start
+        while (offset < end) {
+            if (isCancelled()) throw CancellationException("Photo filter render superseded")
+            val count = minOf(if (native != null) execution.batchPixels else 4096, end - offset)
+            if (native != null) NativePhotoLut.mapBatch(native, pixels, offset, count, strength, preserveAlpha)
+            else for (i in offset until offset + count) pixels[i] = map(pixels[i], strength, preserveAlpha)
+            offset += count
+        }
+    }
 
     fun map(color: Int, strength: Float, preserveAlpha: Boolean): Int {
         val alpha = if (preserveAlpha) color ushr 24 else 255

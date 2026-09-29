@@ -17,6 +17,8 @@ import com.ztransfer.ui.theme.AppTheme
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 
+internal val MonitorDispInformationInset = 32.dp
+
 internal enum class MonitorDispMode {
     CAMERA, EXPOSURE, CLEAN;
     fun next() = entries[(ordinal + 1) % entries.size]
@@ -69,11 +71,11 @@ internal fun rememberMonitorDetails(
     return if (enabled) details else emptyMap()
 }
 
-/** Compact exposure overlay takes no space away from the live image. */
+/** Compact DISP mode summary; exposure values remain in the adjustment wheels. */
 @Composable
-internal fun MonitorExposureSummary(
+internal fun MonitorDispSummary(
     mode: MonitorDispMode,
-    exposure: List<String>,
+    information: List<String>,
     connected: Boolean,
     modifier: Modifier = Modifier,
 ) {
@@ -81,7 +83,7 @@ internal fun MonitorExposureSummary(
         Text(
             modifier = modifier,
             text = if (!connected) stringResource(R.string.connection_lost)
-                else if (mode != MonitorDispMode.EXPOSURE) "" else exposure.joinToString("   "),
+                else if (mode != MonitorDispMode.EXPOSURE) "" else information.joinToString("   "),
             color = if (connected) androidx.compose.ui.graphics.Color.White else colors.statusError,
             fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
             style = androidx.compose.ui.text.TextStyle(shadow = androidx.compose.ui.graphics.Shadow(
@@ -139,14 +141,21 @@ internal fun CameraMonitorDisp(cells: List<Pair<String, String>>, storage: List<
             color = white, fontSize = 12.sp, style = shadow, maxLines = 1, overflow = TextOverflow.Ellipsis)
         if (movie && !recording) Text("STBY", Modifier.align(Alignment.TopEnd),
             color = white.copy(alpha = .8f), fontSize = 11.sp, style = shadow)
-        Row(Modifier.align(Alignment.BottomCenter).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+        Row(
+            Modifier.align(Alignment.BottomStart).widthIn(max = 400.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             cells.forEach { (label, value) ->
-                Column(Modifier.weight(1f).padding(horizontal = 3.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(value, color = white, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
-                        maxLines = 1, overflow = TextOverflow.Ellipsis, style = shadow)
-                    Spacer(Modifier.height(3.dp))
+                Row(Modifier.weight(1f, fill = false),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
                     Text(label, color = white.copy(alpha = .65f), fontSize = 9.sp,
-                        maxLines = 1, overflow = TextOverflow.Ellipsis, style = shadow)
+                        maxLines = 1, softWrap = false, style = shadow,
+                        modifier = Modifier.alignByBaseline())
+                    Text(value, color = white, fontSize = 12.sp, fontWeight = FontWeight.Medium,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis, style = shadow,
+                        modifier = Modifier.weight(1f, fill = false).alignByBaseline())
                 }
             }
         }

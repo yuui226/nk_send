@@ -1,6 +1,7 @@
 {
   global:
     Java_com_ztransfer_crop_LosslessJpeg_nativeCrop;
+    Java_com_ztransfer_filter_NativePhotoLut_mapBatch;
   local:
     *;
 };

@@ -12,7 +12,7 @@ internal class PhotoCubeResourceCache(
 ) {
     class Loaded(val table: CubeLut) {
         val mapper = PhotoCubeMapper(table)
-        val bytes: Int = table.rgb.size * 4 + 3 * 256 * 12 + 24
+        val bytes: Int = mapper.budgetBytes
     }
 
     private val lock = Any()

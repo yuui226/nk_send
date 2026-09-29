@@ -1051,10 +1051,14 @@ object PhotoFrameExporter {
             val renderContext = currentCoroutineContext()
             renderContext.ensureActive()
             if (filter != null) {
+                val preparationStarted = generationProbeClock()
+                val preparedFilter = PhotoFilterRenderer.prepareOriginalFilter(filter) { !renderContext.isActive }
+                recordGenerationStage(probeSessionId, "filter_lookup_prepare",
+                    generationProbeClock() - preparationStarted) { "kernel=${preparedFilter.cubeExecution.label} grid=${preparedFilter.cubeMapper?.gridSize ?: 0}" }
                 val filterStartedAtMs = generationProbeClock()
                 PhotoFilterRenderer.renderInPlace(
                     decoded,
-                    filter,
+                    preparedFilter,
                     isCancelled = { !renderContext.isActive },
                 )
                 recordGenerationStage(
@@ -3492,7 +3496,7 @@ object PhotoFrameExporter {
                 probeSessionId,
                 "filter_lookup_prepare",
                 generationProbeClock() - filterPreparationStartedAtMs,
-            ) { "mode=${prepared.mode.name}" }
+            ) { "mode=${prepared.mode.name} kernel=${prepared.cubeExecution.label} grid=${prepared.cubeMapper?.gridSize ?: 0}" }
         }
         val sourceTriangle = FloatArray(6)
         val destinationTriangle = FloatArray(6)

@@ -3112,7 +3112,8 @@ private fun RemoteContent(
                     levelRoll = levelRoll,
                 levelPitch = levelPitch,
                     showEmbeddedAudioMeter = false,
-                    informationBottomInset = if (dispMode == MonitorDispMode.CAMERA) 48.dp else 0.dp,
+                    informationBottomInset = if (dispMode == MonitorDispMode.CAMERA && connected)
+                        MonitorDispInformationInset else 0.dp,
                     // Sit directly below STBY; navigation stays outside the image.
                     meterTopInset = landscapeMeterTop,
                     desqueezeMultiplier = desqueezeMultiplier,
@@ -3133,19 +3134,6 @@ private fun RemoteContent(
                 )
 
 
-                val activeProps = if (movieMode) MOVIE_EXPOSURE_PROPS else EXPOSURE_PROPS
-                val activeIsoProp = if (movieMode) Lab.PROP_NK_MOVIE_ISO else Lab.PROP_ISO
-                // Both DISP styles use the same ISO source and unknown state as the wheel.
-                val exposureCells = listOf(3, 2, 1, 0).mapNotNull { index ->
-                    val prop = activeProps[index]
-                    params[prop]?.let { param ->
-                        val text = if (prop == activeIsoProp && autoIsoAvailable && autoIsoEnabled == true) {
-                            effectiveAutoIsoValue?.let { rcFormat(Lab.PROP_ISO, it) } ?: "—"
-                        } else rcFormat(param.prop, param.current)
-                        paramLabel(prop) to text
-                    }
-                }
-                val exposureInfo = listOfNotNull(modeText) + exposureCells.map { (label, value) -> "$label $value" }
                 val cameraDisp = dispMode == MonitorDispMode.CAMERA
                 val detailValues = rememberMonitorDetails(
                     cameraViewModel.getCamera(), movieMode,
@@ -3158,7 +3146,7 @@ private fun RemoteContent(
                     pollingAllowed = !probing && !diagnosticControlBusy && !recBusy && !capturing && !recording,
                 )
                 if (cameraDisp && connected) {
-                    val cells = listOfNotNull(modeText?.let { "MODE" to it }) + exposureCells + listOfNotNull(
+                    val cells = listOfNotNull(modeText?.let { "MODE" to it }) + listOfNotNull(
                             detailValues[RemoteCameraTool.WHITE_BALANCE]?.let { "WB" to it },
                             focusModeText?.let { "AF" to it })
                     CameraMonitorDisp(cells, storageValues, movieMode,
@@ -3166,8 +3154,8 @@ private fun RemoteContent(
                         Modifier.offset(x = imageX, y = imageY).size(imageWidth, imageHeight),
                         storageSlotCount = camState.storageIds.filter { it != 0 && it != -1 }.distinct().size)
                 }
-                MonitorExposureSummary(
-                    if (cameraDisp && connected) MonitorDispMode.CLEAN else dispMode, exposureInfo, connected,
+                MonitorDispSummary(
+                    if (cameraDisp && connected) MonitorDispMode.CLEAN else dispMode, listOfNotNull(modeText), connected,
                     Modifier.offset(x = imageX + 8.dp, y = imageY + 9.dp)
                         .width((imageWidth - if (recording) 104.dp else 16.dp).coerceAtLeast(0.dp)),
                 )
@@ -3182,7 +3170,7 @@ private fun RemoteContent(
                         devPanel = false
                     },
                     dockButton = { active, click, modifier ->
-                        MonitorHeaderButton(click, modifier.semantics { contentDescription = services.context.getString(R.string.remote_tool_dock) }, active) {
+                        MonitorHeaderButton({ services.haptics.tick(); click() }, modifier.semantics { contentDescription = services.context.getString(R.string.remote_tool_dock) }, active) {
                             DockToolMark()
                         }
                     },
@@ -3826,7 +3814,7 @@ private fun RemoteViewfinderPanel(
                 fontFamily = FontFamily.Monospace,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 8.dp + animatedInformationInset)
+                    .padding(8.dp)
                     .background(MonitorOverlayBackground, RoundedCornerShape(8.dp))
                     .padding(horizontal = 6.dp, vertical = 2.dp)
             )

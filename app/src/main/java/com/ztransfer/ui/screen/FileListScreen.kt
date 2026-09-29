@@ -3987,6 +3987,9 @@ private fun ThumbnailCell(
     Box(
         modifier = modifier
             .graphicsLayer {
+                // 动画与圆角共用一个图层，避免每个缩略图再嵌套一层 clip 图层。
+                shape = thumbnailShape
+                clip = true
                 val revealP = revealProgress.value
                 val exitP = exitProgress.value
                 alpha = (if (reveal) revealP else 1f) * exitP
@@ -3999,7 +4002,6 @@ private fun ThumbnailCell(
                 scaleX = s * returnScale
                 scaleY = s * returnScale
             }
-            .clip(thumbnailShape)
             .background(colors.thumbPlaceholder)
             .border(
                 width = thumbnailBorderWidth,

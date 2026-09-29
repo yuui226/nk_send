@@ -62,6 +62,7 @@ object PhotoFilterRenderer {
         internal val exactRgbMemo: ExactRgbMemo?,
         internal val mode: PreparationMode,
         internal val cubeMapper: PhotoCubeMapper? = null,
+        internal val cubeExecution: PhotoLutExecution = PhotoLutExecution.KOTLIN,
     )
 
     internal enum class PreparationMode { EXACT_CACHE, EXACT_ALLOCATED, DIRECT_FALLBACK }
@@ -209,8 +210,10 @@ object PhotoFilterRenderer {
         if (selection.preset.parameters is CubePhotoFilterParameters) {
             synchronized(exactMemoLock) { cachedExactMemo = null }
             // Pin only for this render: later regions must not reload an evicted/oversized LUT.
+            val mapper = selection.preset.parameters.mapper
+            val execution = mapper.prepareBulk()
             return PreparedOriginalFilter(selection, null, PreparationMode.DIRECT_FALLBACK,
-                cubeMapper = selection.preset.parameters.mapper)
+                cubeMapper = mapper, cubeExecution = execution)
         }
         if (exactMemoDisabledAfterOom) {
             return PreparedOriginalFilter(
@@ -291,13 +294,15 @@ object PhotoFilterRenderer {
                     preserveAlpha = preserveAlpha,
                     isCancelled = isCancelled,
                 )
-            } ?: filterPixelRange(
-                pixels = pixels,
-                start = 0,
-                end = count,
-                compiled = compiled,
-                isCancelled = isCancelled,
-            )
+            } ?: run {
+                if (compiled.cubeMapper != null && prepared.cubeExecution != PhotoLutExecution.KOTLIN) {
+                    compiled.cubeMapper.mapRange(pixels, 0, count, compiled.strength,
+                        preserveAlpha, prepared.cubeExecution, isCancelled)
+                } else {
+                    // Keep the actual original loop for the baseline and native-unavailable fallback.
+                    filterPixelRange(pixels, 0, count, compiled, isCancelled)
+                }
+            }
             if (isCancelled()) throw CancellationException("Photo filter render superseded")
             source.setPixels(pixels, 0, width, 0, top, width, rows)
             top += rows

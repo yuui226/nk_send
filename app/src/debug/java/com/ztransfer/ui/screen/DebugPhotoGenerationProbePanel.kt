@@ -32,6 +32,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -57,13 +58,11 @@ internal fun DebugPhotoGenerationProbePanel(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     var open by remember { mutableStateOf(false) }
-    var lines by remember { mutableStateOf<List<String>>(emptyList()) }
 
     Box(modifier = modifier) {
         if (!open) {
             GlassButton(
                 onClick = {
-                    lines = PhotoGenerationProbe.displayLines()
                     open = true
                 },
                 modifier = Modifier
@@ -90,6 +89,8 @@ internal fun DebugPhotoGenerationProbePanel(modifier: Modifier = Modifier) {
                 )
             }
         } else {
+            val version by PhotoGenerationProbe.version.collectAsState()
+            val lines = remember(version) { PhotoGenerationProbe.displayLines() }
             BackHandler { open = false }
             Box(
                 modifier = Modifier
@@ -121,13 +122,13 @@ internal fun DebugPhotoGenerationProbePanel(modifier: Modifier = Modifier) {
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                "Debug 耗时与协议日志",
+                                "Debug 生成性能",
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.SemiBold,
                                 color = colors.onBackground,
                             )
                             Text(
-                                "记录照片生成耗时和 STA 协议探索结果",
+                                "仅保留关键耗时；建议清空后测 2–3 张",
                                 fontSize = 11.sp,
                                 color = colors.onSurfaceVariant,
                             )
@@ -149,8 +150,7 @@ internal fun DebugPhotoGenerationProbePanel(modifier: Modifier = Modifier) {
                         GlassButton(
                             onClick = {
                                 PhotoGenerationProbe.clear()
-                                lines = PhotoGenerationProbe.displayLines()
-                            },
+                                        },
                             contentPadding = PaddingValues(8.dp),
                         ) {
                             Icon(

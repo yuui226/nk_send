@@ -3004,9 +3004,15 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             PhotoGenerationProbe.begin(
                 sourceName = sourceName,
                 configuration = buildString {
-                    append("preset=${preset.name} border=$borderEnabled")
-                    append(" filter=${filterRequested?.preset?.name ?: "none"}")
-                    filterRequested?.let { append(" intensity=${it.normalizedIntensityPercent}") }
+                    val kind = when (filterRequested?.preset?.parameters) {
+                        is com.ztransfer.filter.CubePhotoFilterParameters -> "LUT"
+                        null -> "无颜色效果"
+                        else -> "滤镜"
+                    }
+                    append("$kind ${filterRequested?.normalizedIntensityPercent ?: 0}%")
+                    append(" frame=${if (borderEnabled) preset.name else "off"}")
+                    append(" meta=${if (!needsMetadata) "ready/none" else if (capturedHeader != null) "captured" else "read"}")
+                    filterRequested?.let { append(" name=${it.preset.name}") }
                 },
             )
         } else {
@@ -3228,6 +3234,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             }
         }
         fun finishPreparation(result: PreparedPhotoMetadata<PhotoFrameMetadata>?) {
+            if (PhotoGenerationProbe.enabled) PhotoGenerationProbe.stage(probeSession,
+                "metadata_prepare", android.os.SystemClock.elapsedRealtime() - probeStartedAtMs)
             metadataResult.set(result)
             metadataReady.set(true)
             photoGenerationQueue.markReady(taskId)
@@ -3276,8 +3284,14 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         val sourceCamera = metadataCamera?.takeIf {
                             metadataIdentity != null && it.photoMetadataIdentity == metadataIdentity
                         }
-                        val header = readCameraFrameMetadataHeader(sourceCamera, metadataFile.handle,
-                            "prepare", maxBytes, expectedFile = metadataFile.takeIf { verifyReconnectedFile })
+                        val readStarted = if (PhotoGenerationProbe.enabled) android.os.SystemClock.elapsedRealtime() else 0L
+                        val header = try {
+                            readCameraFrameMetadataHeader(sourceCamera, metadataFile.handle,
+                                "prepare", maxBytes, expectedFile = metadataFile.takeIf { verifyReconnectedFile })
+                        } finally {
+                            if (PhotoGenerationProbe.enabled) PhotoGenerationProbe.stage(probeSession,
+                                "metadata_fetch", android.os.SystemClock.elapsedRealtime() - readStarted)
+                        }
                         // Expanded reads belong to the same preparation and camera transaction stream.
                         if (header != null) verifyReconnectedFile = false
                         header

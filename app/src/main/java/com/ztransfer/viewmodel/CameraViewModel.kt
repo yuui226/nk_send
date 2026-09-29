@@ -3326,6 +3326,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 val dynamicDualCardSchedule = activeSnapshot.handleOrders.count {
                     it.newestFirstHandles.isNotEmpty()
                 } > 1
+                val scanBatchPolicy = CachedThumbnailBatchPolicy()
+                val nextScanBatchSize: () -> Int = {
+                    // Foreground work may start after the preceding batch has completed.
+                    if (transfersBusyFlow.value || remoteActiveFlow.value || fhdActiveFlow.value ||
+                        effectPreviewActiveFlow.value
+                    ) scanBatchPolicy.complete(0, false)
+                    scanBatchPolicy.size
+                }
                 val publishBatch: suspend (List<NikonCamera.FileInfo>, Int, Int) -> Unit =
                     { rawBatch, loaded, total ->
                     val batch = if (cam.staDirectObjectReadValidated &&
@@ -3405,13 +3413,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                                 file.handle in newHandlesToReport && isAutoTransferMedia(file)
                             }
                         }
-                        prefetchPublishedFileBatch(
+                        val allCached = prefetchPublishedFileBatch(
                             // 双卡备份模式下，原始 batch 可能包含不会单独显示的重复副本；
                             // 只为本批真正加入列表的逻辑照片获取一次缩略图。
                             batch = additions,
                             expectedCamera = cam,
                             expectedGeneration = generation,
                         )
+                        scanBatchPolicy.complete(additions.size, allCached)
+                    } else {
+                        scanBatchPolicy.complete(0, false)
                     }
                 }
                 if (PhotoGenerationProbe.enabled && cam.staDirectObjectReadValidated) {
@@ -3429,12 +3440,15 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         },
                         storageIds = storageIds,
                         batchSize = FILE_THUMBNAIL_PIPELINE_BATCH_SIZE,
+                        nextBatchSize = nextScanBatchSize,
                         onBatch = publishBatch,
                     )
                 } else if (nonEmptyRemainingOrders.size == 1) {
                     cam.streamFileInfo(
                         handles = nonEmptyRemainingOrders.single().newestFirstHandles,
                         batchSize = FILE_THUMBNAIL_PIPELINE_BATCH_SIZE,
+                        fastFirstBatch = true,
+                        nextBatchSize = nextScanBatchSize,
                         onBatch = publishBatch,
                     )
                 } else {
@@ -3443,6 +3457,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                             it.newestFirstHandles
                         },
                         batchSize = FILE_THUMBNAIL_PIPELINE_BATCH_SIZE,
+                        fastFirstBatch = true,
+                        nextBatchSize = nextScanBatchSize,
                         onBatch = publishBatch,
                     )
                 }
@@ -3622,7 +3638,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * 解码入内存，扫到后面会把前面（以及视口附近）的全部挤出去——扫描白跑，还破坏
      * 可见区缓存。落盘不占堆内存，几千张也只有几十 MB；格子滚到时从磁盘毫秒级解码。
      */
-    suspend fun prefetchThumbnail(file: NikonCamera.FileInfo): Boolean {
+    suspend fun prefetchThumbnail(file: NikonCamera.FileInfo, onCacheHit: () -> Unit = {}): Boolean {
         val handle = file.handle
         if (handle in noThumbHandles) return true
         val expectedCamera = camera ?: return false
@@ -3639,7 +3655,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         if (expectedCamera.staDirectObjectReadValidated) {
             if (cached != null) staScanThumbnailDiskHits++ else staScanThumbnailDiskMisses++
         }
-        if (cached != null) return true
+        if (cached != null) {
+            onCacheHit()
+            return true
+        }
         // 所有格式都随当前批次取图；STA 的 NEF/视频同样走有界读取，不跳过或假报完成。
         if (thumbnailDiskWritesBlocked) return false
         // 可见格子正在取同一张：共乘同一次请求（结果会自动落盘）。作为共同等待者，
@@ -3678,30 +3697,35 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         batch: List<NikonCamera.FileInfo>,
         expectedCamera: NikonCamera,
         expectedGeneration: Long,
-    ) = withContext(Dispatchers.Main.immediate) {
+    ): Boolean = withContext(Dispatchers.Main.immediate) {
+        var allCached = batch.isNotEmpty()
         for (file in batch) {
             if (camera !== expectedCamera || fileLoadGeneration != expectedGeneration ||
                 !state.value.isConnectedToCamera
             ) {
-                return@withContext
+                return@withContext false
             }
             // 用户前台任务优先；本批未完成项会在完整扫描后的补漏阶段重试。
             if (transfersBusyFlow.value || remoteActiveFlow.value || fhdActiveFlow.value ||
                 effectPreviewActiveFlow.value
             ) {
-                return@withContext
+                return@withContext false
             }
             try {
-                val cached = prefetchThumbnail(file)
+                var hit = false
+                val cached = prefetchThumbnail(file) { hit = true }
+                allCached = allCached && hit
                 if (cached) thumbnailFillQueue.markSettled(file.handle)
-                if (!cached && thumbnailDiskWritesBlocked) return@withContext
+                if (!cached && thumbnailDiskWritesBlocked) return@withContext false
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
+                allCached = false
                 // 单张瞬时失败不阻塞后续文件信息；完整扫描结束后还会统一补漏。
                 log { "THUMB_PIPELINE item failed handle=${file.handle}: $e" }
             }
         }
+        allCached
     }
 
     private suspend fun fetchThumbnailToDisk(
@@ -3975,9 +3999,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         expectedCacheGeneration: Long,
     ): ImageBitmap? {
         val image = withContext(Dispatchers.Default) {
-            // 解码后立即精确裁掉烘焙在缩略图里的黑边（3:2/16:9 塞 4:3 的上下黑条），
-            // 裁好的位图进缓存——列表格子/队列小图/预览全都拿到无黑边的图，
-            // UI 层不再需要"放大遮边"的近似 hack。
+            // 解码后裁除黑边再缓存，列表、队列和预览共用同一份图片。
             postProcessThumbnail(file, BitmapFactory.decodeByteArray(data, 0, data.size))
         }
         return publishDecodedThumbnail(
@@ -4001,7 +4023,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         expectedCacheGeneration: Long,
     ): ImageBitmap? {
         val image = withContext(Dispatchers.Default) {
-            // 直接从缓存文件解码，避免 readBytes() 先额外分配一份完整 JPEG ByteArray。
+            // 直接从缓存文件解码，避免分配完整 JPEG ByteArray。
             postProcessThumbnail(file, BitmapFactory.decodeFile(disk.absolutePath))
         }
         return publishDecodedThumbnail(
@@ -4054,6 +4076,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     ): ImageBitmap? = decoded
         ?.let { cropLetterbox(it) }
         ?.let { if (file.extension in VIDEO_EXTENSIONS) cropVideoBars(it) else it }
+        // 在后台请求纹理准备，减少新缩略图进入视口时首次绘制的上传开销。
+        ?.also { it.prepareToDraw() }
         ?.asImageBitmap()
 
     /** Crop reuses the visible FHD. Only a missing EXIF orientation may need a small metadata read. */

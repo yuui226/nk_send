@@ -2458,13 +2458,21 @@ class NikonCamera(private val context: Context) {
     suspend fun streamFileInfo(
         handles: List<Int>,
         batchSize: Int = 20,
+        fastFirstBatch: Boolean = false,
+        nextBatchSize: (() -> Int)? = null,
         onBatch: suspend (List<FileInfo>, Int, Int) -> Unit
     ): Boolean = withContext(Dispatchers.IO) {
         val loadContext = coroutineContext
         val total = handles.size
         var loaded = 0
         var allObjectInfoSucceeded = true
-        handles.chunked(batchSize).forEach { batch ->
+        require(batchSize > 0)
+        var cursor = 0
+        while (cursor < total) {
+            val count = fileScanBatchSize(cursor, if (allObjectInfoSucceeded) nextBatchSize?.invoke() ?: batchSize else batchSize, fastFirstBatch)
+            val end = cursor + minOf(count, total - cursor)
+            val batch = handles.subList(cursor, end)
+            cursor = end
             val probeStartedAtMs = if (FileOrderProbe.enabled) SystemClock.elapsedRealtime() else 0L
             // 每批单独持锁，批间释放 ioMutex：缩略图模式下缩略图请求可在批间插入，
             // 从而随列表一起渐进出图，而不是等整份列表加载完才开始。
@@ -2561,6 +2569,7 @@ class NikonCamera(private val context: Context) {
         newestFirstHandlesByStorage: List<Pair<Int, List<Int>>>,
         storageIds: List<Int> = newestFirstHandlesByStorage.map { it.first },
         batchSize: Int = 12,
+        nextBatchSize: (() -> Int)? = null,
         onBatch: suspend (List<FileInfo>, Int, Int) -> Unit,
     ): Boolean = withContext(Dispatchers.IO) {
         check(staDirectObjectReadValidated) { "STA direct object reads were not validated" }
@@ -2585,7 +2594,7 @@ class NikonCamera(private val context: Context) {
             val currentBatchSize = when {
                 completed == 0 -> 1
                 completed < 4 -> minOf(3, batchSize)
-                else -> batchSize
+                else -> (if (allSucceeded) nextBatchSize?.invoke() ?: batchSize else batchSize).coerceAtLeast(1)
             }
             var requestedHandles = 0
             val completedBeforeBatch = completed
@@ -3738,6 +3747,8 @@ class NikonCamera(private val context: Context) {
     suspend fun streamMergedFileInfo(
         newestFirstHandlesByStorage: List<List<Int>>,
         batchSize: Int = 20,
+        fastFirstBatch: Boolean = false,
+        nextBatchSize: (() -> Int)? = null,
         onBatch: suspend (List<FileInfo>, Int, Int) -> Unit,
     ): Boolean = withContext(Dispatchers.IO) {
         require(batchSize > 0) { "batchSize must be positive" }
@@ -3752,20 +3763,25 @@ class NikonCamera(private val context: Context) {
         var allObjectInfoSucceeded = true
 
         while (completed < total) {
-            val requestedHandles = ArrayList<Int>(batchSize)
-            val observedFiles = ArrayList<FileInfo>(batchSize)
+            val currentBatchSize = fileScanBatchSize(completed,
+                if (allObjectInfoSucceeded) nextBatchSize?.invoke() ?: batchSize else batchSize, fastFirstBatch)
+            // 首张也必须先取得各卡的 head，才能保持跨卡时间顺序。
+            val requestBudget = if (fastFirstBatch && completed < 4)
+                maxOf(groups.size, currentBatchSize + groups.size - 1) else currentBatchSize
+            val requestedHandles = ArrayList<Int>(currentBatchSize)
+            val observedFiles = ArrayList<FileInfo>(currentBatchSize)
             val probeStartedAtMs = if (FileOrderProbe.enabled) SystemClock.elapsedRealtime() else 0L
             val completedBeforeBatch = completed
 
             val output = ioMutex.withLock {
                 var objectInfoRequests = 0
                 buildList {
-                    while (size < batchSize && completed < total) {
+                    while (size < currentBatchSize && completed < total) {
                         groups.indices.forEach { groupIndex ->
                             if (heads[groupIndex] != null) return@forEach
                             val handles = groups[groupIndex]
                             while (cursors[groupIndex] < handles.size) {
-                                if (objectInfoRequests >= batchSize) return@forEach
+                                if (objectInfoRequests >= requestBudget) return@forEach
                                 loadContext.ensureActive()
                                 val handle = handles[cursors[groupIndex]++]
                                 objectInfoRequests++

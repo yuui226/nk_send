@@ -51,6 +51,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -232,63 +233,45 @@ private fun FilesQueueWorkspace(
             .distinctUntilChanged()
             .collect { settled -> currentOnFilesSettledChanged(settled) }
     }
+    val travelPx = with(LocalDensity.current) { 24.dp.toPx() }
+    val pageProgress = transition.animateFloat(
+        transitionSpec = { tween(300, easing = FastOutSlowInEasing) },
+        label = "filesQueuePosition",
+    ) { if (it) 1f else 0f }
     val topControlsProgress = transition.animateFloat(
         transitionSpec = {
-            if (targetState) {
-                tween(
-                    durationMillis = 140,
-                    delayMillis = Motion.QUEUE_PAGE_SLIDE_MS,
-                    easing = FastOutSlowInEasing,
-                )
-            } else {
-                tween(durationMillis = 80, easing = FastOutSlowInEasing)
-            }
+            if (targetState) tween(140, delayMillis = 320, easing = FastOutSlowInEasing)
+            else tween(80, easing = FastOutSlowInEasing)
         },
         label = "queueTopControls",
-    ) { showingQueue ->
-        if (showingQueue) 1f else 0f
-    }
+    ) { if (it) 1f else 0f }
 
     Box(Modifier.fillMaxSize()) {
         transition.AnimatedContent(
             modifier = Modifier.fillMaxSize(),
             transitionSpec = {
-                if (targetState) {
-                    val enterQueue = slideInHorizontally(Motion.queuePageSlide) { it } +
-                        fadeIn(
-                            tween(220, easing = FastOutSlowInEasing),
-                            initialAlpha = 0.72f,
-                        )
-                    val exitFiles = slideOutHorizontally(Motion.queuePageSlide) { -it / 3 } +
-                        fadeOut(
-                            tween(Motion.PAGE_FADE_MS),
-                            targetAlpha = 0.5f,
-                        )
-                    (enterQueue togetherWith exitFiles).apply { targetContentZIndex = 1f }
-                } else {
-                    val enterFiles = slideInHorizontally(Motion.queuePageSlide) { -it / 3 } +
-                        fadeIn(
-                            tween(Motion.PAGE_FADE_MS),
-                            initialAlpha = 0.5f,
-                        )
-                    val exitQueue = slideOutHorizontally(Motion.queuePageSlide) { it } +
-                        fadeOut(
-                            tween(140, easing = FastOutSlowInEasing),
-                            targetAlpha = 0.72f,
-                        )
-                    (enterFiles togetherWith exitQueue).apply { targetContentZIndex = 0f }
-                }
+                // 短距离淡入淡出，不再让有实底的页面横跨整屏露出硬边。
+                // 固定尺寸页面关闭 SizeTransform；位移在下方图层中读取，不逐帧重排列表。
+                (fadeIn(tween(200, delayMillis = 100, easing = FastOutSlowInEasing)) togetherWith
+                    fadeOut(tween(140, easing = FastOutSlowInEasing))).using(null)
             },
             contentKey = { it },
         ) { showingQueue ->
             val stateKey = if (showingQueue) "transferQueue" else "cameraFiles"
             stateHolder.SaveableStateProvider(stateKey) {
-                if (showingQueue) queueContent() else filesContent()
+                Box(Modifier.fillMaxSize().graphicsLayer {
+                    translationX = if (showingQueue) {
+                        (1f - pageProgress.value) * travelPx
+                    } else {
+                        -pageProgress.value * travelPx
+                    }
+                }) {
+                    if (showingQueue) queueContent() else filesContent()
+                }
             }
         }
 
-        // 顶栏不参与横向位移或缩放。等正文横向转场彻底完成后才在原位淡入，避免
-        // 返回/信号按钮与仍在滑出的照片页重叠；返回时则立即淡出。
+        // 左侧顶栏恢复原位淡入：正文转场完成后出现，返回时立即淡出。
         if (transition.currentState || transition.targetState) {
             Box(
                 modifier = Modifier

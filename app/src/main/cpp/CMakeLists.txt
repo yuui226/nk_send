@@ -40,7 +40,9 @@ ExternalProject_Add(jpeg_external
 add_library(turbojpeg-static STATIC IMPORTED)
 set_target_properties(turbojpeg-static PROPERTIES IMPORTED_LOCATION "${JPEG_BUILD}/libturbojpeg.a")
 add_dependencies(turbojpeg-static jpeg_external)
-add_library(ztransfer_crop SHARED jpeg_crop.cpp)
+add_library(ztransfer_crop SHARED jpeg_crop.cpp photo_lut.cpp)
+# Keep the hot LUT loop optimized in Debug too; preserve the existing float rounding.
+set_source_files_properties(photo_lut.cpp PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off;-fno-fast-math")
 # JNI reports failures as Java exceptions; this wrapper uses neither C++
 # exceptions nor RTTI and requires no C++ standard-library objects.
 target_compile_options(ztransfer_crop PRIVATE -fno-exceptions -fno-rtti)
@@ -50,7 +52,7 @@ if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
 endif()
 target_include_directories(ztransfer_crop PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/vendor/libjpeg-turbo-3.1.2/src")
 target_link_libraries(ztransfer_crop turbojpeg-static)
-# Only the JNI entry point is public. Keeping the entire codec API exported
+# Only the JNI entry points are public. Keeping the entire codec API exported
 # prevents the linker from removing unused compression/decompression helpers.
 set(CROP_EXPORTS "${CMAKE_CURRENT_SOURCE_DIR}/crop.exports")
 set_property(TARGET ztransfer_crop APPEND PROPERTY LINK_DEPENDS "${CROP_EXPORTS}")
