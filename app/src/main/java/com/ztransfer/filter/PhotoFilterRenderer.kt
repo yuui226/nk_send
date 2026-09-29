@@ -16,6 +16,12 @@ object PhotoFilterRenderer {
     private const val PIXELS_PER_TASK = 64 * 1024
     /** Four-megapixel stripes amortize bitmap access while remaining bounded for large photos. */
     private const val IN_PLACE_PIXELS_PER_STRIPE = 4 * 1024 * 1024
+
+    /** A short image/region only needs its actual pixels, not an entire four-megapixel stripe. */
+    internal fun scratchPixelCount(width: Int, height: Int): Int {
+        require(width > 0 && height > 0)
+        return width * min((IN_PLACE_PIXELS_PER_STRIPE / width).coerceAtLeast(1), height)
+    }
     private const val CANCELLATION_CHECK_INTERVAL = 4 * 1024
     private const val NCP_MAX_MANUAL_STEP = 3f
     // Nikon does not publish its post-RAW sRGB transform. Manual hue controls are mapped linearly,
@@ -260,7 +266,7 @@ object PhotoFilterRenderer {
         val height = source.height
         val preserveAlpha = source.hasAlpha()
         val rowsPerStripe = (IN_PLACE_PIXELS_PER_STRIPE / width).coerceAtLeast(1)
-        val requiredPixels = width * min(rowsPerStripe, height)
+        val requiredPixels = scratchPixelCount(width, height)
         val pixels = scratchPixels?.also {
             require(it.size >= requiredPixels) { "Filter scratch buffer is too small" }
         } ?: IntArray(requiredPixels)

@@ -4188,9 +4188,10 @@ class NikonCamera(private val context: Context) {
                     ),
                 )
                 if (resp != PtpConstants.RESPONSE_OK) return@withContext failed(resp)
-                // 相机异常提前结束数据阶段：声明大小与实收不符则判残缺。SIZE_UNKNOWN/未声明放行。
-                if (expected > 0 && expected != PtpConstants.SIZE_UNKNOWN && totalDownloaded != expected) {
-                    return@withContext incomplete(totalDownloaded, expected)
+                // Also check ObjectInfo/GetObjectSize: a short data phase can declare its own
+                // short length correctly. Unknown sizes remain valid for streaming transfers.
+                mismatchedFullObjectSize(totalDownloaded, expected, effectiveSize)?.let {
+                    return@withContext incomplete(totalDownloaded, it)
                 }
                 Result.success(buildStats())
             } catch (e: CancellationException) {

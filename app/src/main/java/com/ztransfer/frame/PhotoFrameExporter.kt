@@ -3102,9 +3102,12 @@ object PhotoFrameExporter {
                 )
             else -> calculateOriginalQualityPhotoFrameLayout(orientedSize.width, orientedSize.height)
         }
-        val tileBytes = maxOf(PHOTO_FRAME_REGION_TARGET_PIXELS.toLong(), decoder.width.toLong()) * 4L
+        val regionHeight = minOf(photoFrameRegionRows(decoder.width), decoder.height)
+        val tileBytes = decoder.width.toLong() * regionHeight * 4L
+        val scratchBytes = if (filter != null)
+            PhotoFilterRenderer.scratchPixelCount(decoder.width, regionHeight).toLong() * 4L else 0L
         ensurePhotoAllocation(layout.canvasWidth, layout.canvasHeight,
-            extraBytes = tileBytes + if (filter != null) tileBytes + 8L * 1024 * 1024 else 0L)
+            extraBytes = tileBytes + scratchBytes + if (filter != null) 8L * 1024 * 1024 else 0L)
         val output = Bitmap.createBitmap(
             layout.canvasWidth,
             layout.canvasHeight,
@@ -3476,7 +3479,7 @@ object PhotoFrameExporter {
         val rowsPerRegion = photoFrameRegionRows(decoder.width)
         val paint = Paint(Paint.DITHER_FLAG)
         val filterScratch = filter?.let {
-            IntArray(maxOf(PHOTO_FRAME_REGION_TARGET_PIXELS, decoder.width))
+            IntArray(PhotoFilterRenderer.scratchPixelCount(decoder.width, minOf(rowsPerRegion, decoder.height)))
         }
         val renderContext = currentCoroutineContext()
         val isRenderCancelled = { !renderContext.isActive }
