@@ -497,7 +497,7 @@ internal fun orientedPhotoRegion(
     }
 }
 
-internal data class PhotoFrameMetadata(
+data class PhotoFrameMetadata(
     val make: String?,
     val model: String?,
     val aperture: String?,
@@ -635,6 +635,7 @@ object PhotoFrameExporter {
         probeSessionId: Long = PhotoGenerationProbe.NO_SESSION,
         metadataSnapshot: PhotoFrameMetadata? = null,
         allowLocalMetadataRead: Boolean = true,
+        placeAlreadyPrepared: Boolean = false,
     ): Result<PhotoFrameExportResult> {
         return try {
             currentCoroutineContext().ensureActive()
@@ -659,6 +660,7 @@ object PhotoFrameExporter {
                 filter = filter,
                 probeSessionId = probeSessionId,
                 allowLocalMetadataRead = allowLocalMetadataRead,
+                placeAlreadyPrepared = placeAlreadyPrepared,
             )
             recordGenerationStage(
                 probeSessionId,
@@ -917,6 +919,7 @@ object PhotoFrameExporter {
         filter: PhotoFilterSelection?,
         probeSessionId: Long = PhotoGenerationProbe.NO_SESSION,
         allowLocalMetadataRead: Boolean = true,
+        placeAlreadyPrepared: Boolean = false,
     ): Bitmap {
         val metadataStartedAtMs = generationProbeClock()
         val metadataTrace: ((String) -> Unit)? =
@@ -932,7 +935,11 @@ object PhotoFrameExporter {
                 }
         }
         suspend fun resolvePlace(metadata: PhotoFrameMetadata): PhotoFrameMetadata =
-            PhotoFrameLocationResolver.resolve(context, metadata, metadataSettings, metadataTrace)
+            if (placeAlreadyPrepared) {
+                // A mode/network transition after preparation must still hide cached addresses.
+                if (PhotoFrameLocationResolver.allowed(context)) metadata
+                else metadata.copy(city = null, region = null, address = null)
+            } else PhotoFrameLocationResolver.resolve(context, metadata, metadataSettings, metadataTrace)
         val metadata = if (borderEnabled) {
             if (metadataSnapshot != null || !allowLocalMetadataRead) {
                 val authoritativeMetadata = metadataSnapshot ?: EMPTY_METADATA
@@ -1032,7 +1039,8 @@ object PhotoFrameExporter {
             )
         }
         val decodeStartedAtMs = generationProbeClock()
-        val decoded = decodeOriginal(resolver, sourceUri)
+        val decoded = decodeOriginal(resolver, sourceUri,
+            extraBytes = if (filter != null) 24L * 1024 * 1024 else 0L)
             ?: error("Cannot decode source photo")
         recordGenerationStage(
             probeSessionId,
@@ -1040,15 +1048,22 @@ object PhotoFrameExporter {
             generationProbeClock() - decodeStartedAtMs,
         ) { "source=${decoded.width}x${decoded.height}" }
         return try {
+            val renderContext = currentCoroutineContext()
+            renderContext.ensureActive()
             if (filter != null) {
                 val filterStartedAtMs = generationProbeClock()
-                PhotoFilterRenderer.renderInPlace(decoded, filter)
+                PhotoFilterRenderer.renderInPlace(
+                    decoded,
+                    filter,
+                    isCancelled = { !renderContext.isActive },
+                )
                 recordGenerationStage(
                     probeSessionId,
                     "filter_pixels",
                     generationProbeClock() - filterStartedAtMs,
                 ) { "pixels=${decoded.width.toLong() * decoded.height}" }
             }
+            renderContext.ensureActive()
             val composeStartedAtMs = generationProbeClock()
             val rendered = renderFrame(
                 context,
@@ -1380,9 +1395,14 @@ object PhotoFrameExporter {
     internal fun metadataFromExifHeader(
         context: Context?,
         bytes: ByteArray,
-    ): PhotoFrameMetadata = runCatching {
+    ): PhotoFrameMetadata = metadataFromExifHeaderResult(context, bytes).getOrDefault(EMPTY_METADATA)
+
+    internal fun metadataFromExifHeaderResult(
+        context: Context?,
+        bytes: ByteArray,
+    ): Result<PhotoFrameMetadata> = runCatching {
         metadataFrom(ExifInterface(ByteArrayInputStream(bytes)), context)
-    }.getOrDefault(EMPTY_METADATA)
+    }
 
     private fun parseExifCoordinate(value: String?, reference: String?): Double? {
         val parts = value
@@ -1431,12 +1451,14 @@ object PhotoFrameExporter {
     private fun decodeOriginal(
         resolver: ContentResolver,
         uri: Uri,
+        extraBytes: Long = 0L,
     ): Bitmap? = decodeBitmap(
         resolver = resolver,
         uri = uri,
         maxEdge = null,
         mutable = true,
         honorExifOrientation = true,
+        allocationExtraBytes = extraBytes,
     )
 
     private fun decodeBitmap(
@@ -1445,6 +1467,7 @@ object PhotoFrameExporter {
         maxEdge: Int?,
         mutable: Boolean,
         honorExifOrientation: Boolean,
+        allocationExtraBytes: Long = 0L,
     ): Bitmap? {
         require(maxEdge == null || maxEdge > 0)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && honorExifOrientation) {
@@ -1454,6 +1477,7 @@ object PhotoFrameExporter {
                 ) { decoder, info, _ ->
                     val width = info.size.width
                     val height = info.size.height
+                    if (maxEdge == null) ensurePhotoAllocation(width, height, extraBytes = allocationExtraBytes)
                     if (maxEdge != null) {
                         val scale = min(1f, maxEdge.toFloat() / maxOf(width, height))
                         decoder.setTargetSize(
@@ -1486,17 +1510,6 @@ object PhotoFrameExporter {
                 sample *= 2
             }
         }
-        val decoded = resolver.openFileDescriptor(uri, "r")?.use {
-            BitmapFactory.decodeFileDescriptor(
-                it.fileDescriptor,
-                null,
-                BitmapFactory.Options().apply {
-                    inSampleSize = sample
-                    inPreferredConfig = Bitmap.Config.ARGB_8888
-                    inMutable = mutable
-                },
-            )
-        } ?: return null
         val orientation = if (honorExifOrientation) {
             runCatching {
                 resolver.openFileDescriptor(uri, "r")?.use {
@@ -1509,6 +1522,20 @@ object PhotoFrameExporter {
         } else {
             ExifInterface.ORIENTATION_NORMAL
         }
+        if (maxEdge == null) ensurePhotoAllocation(bounds.outWidth, bounds.outHeight,
+            copies = if (orientation == ExifInterface.ORIENTATION_NORMAL) 1 else 2,
+            extraBytes = allocationExtraBytes)
+        val decoded = resolver.openFileDescriptor(uri, "r")?.use {
+            BitmapFactory.decodeFileDescriptor(
+                it.fileDescriptor,
+                null,
+                BitmapFactory.Options().apply {
+                    inSampleSize = sample
+                    inPreferredConfig = Bitmap.Config.ARGB_8888
+                    inMutable = mutable
+                },
+            )
+        } ?: return null
         var oriented: Bitmap? = null
         return try {
             oriented = applyExifOrientation(decoded, orientation)
@@ -1647,6 +1674,7 @@ object PhotoFrameExporter {
             )
             return source
         }
+        if (longEdge == null) ensurePhotoAllocation(layout.canvasWidth, layout.canvasHeight)
         val output = Bitmap.createBitmap(
             layout.canvasWidth,
             layout.canvasHeight,
@@ -3074,6 +3102,9 @@ object PhotoFrameExporter {
                 )
             else -> calculateOriginalQualityPhotoFrameLayout(orientedSize.width, orientedSize.height)
         }
+        val tileBytes = maxOf(PHOTO_FRAME_REGION_TARGET_PIXELS.toLong(), decoder.width.toLong()) * 4L
+        ensurePhotoAllocation(layout.canvasWidth, layout.canvasHeight,
+            extraBytes = tileBytes + if (filter != null) tileBytes + 8L * 1024 * 1024 else 0L)
         val output = Bitmap.createBitmap(
             layout.canvasWidth,
             layout.canvasHeight,

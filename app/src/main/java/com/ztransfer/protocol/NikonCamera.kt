@@ -1424,6 +1424,12 @@ class NikonCamera(private val context: Context) {
                 ?: "unknown-device"
             return "$manufacturer\u0000$model\u0000$physicalId"
         }
+    internal val metadataSessionIdentity = java.util.UUID.randomUUID().toString()
+
+    /** Unlike thumbnails, metadata must never treat two unidentified bodies as the same source. */
+    internal val photoMetadataIdentity: String
+        get() = scopedPhotoMetadataIdentity(thumbnailCacheIdentity, metadataSessionIdentity)
+
     val connectionType: CameraConnectionType
         get() = if (usbPtp != null) CameraConnectionType.USB else CameraConnectionType.WIFI
 
@@ -2393,12 +2399,17 @@ class NikonCamera(private val context: Context) {
      * 串行化。任何失败返回 null——EXIF 是纯体验增强，不应为失败产生视觉噪音。
      */
     suspend fun readExifHeader(handle: Int, maxSize: Int = 128 * 1024, bypassCache: Boolean = false,
-        retryDeviceBusy: Boolean = false): ByteArray? =
-        ioGate.withInteractive {
+        retryDeviceBusy: Boolean = false, background: Boolean = false,
+        expectedFile: FileInfo? = null): ByteArray? {
+        val read: suspend () -> ByteArray? = {
             withContext(Dispatchers.IO) {
                 try {
+                    if (expectedFile != null) {
+                        val current = staDirectFiles[handle] ?: getObjectInfoInternal(handle).takeIf { it.successful }?.file
+                        if (!samePhotoMetadataSource(expectedFile, current)) return@withContext null
+                    }
                     if (staDirectObjectReadValidated && !bypassCache) {
-                        staDirectRecentHeaders[handle]?.let { cached ->
+                        staDirectRecentHeaders[handle]?.takeIf { !background || it.size >= maxSize }?.let { cached ->
                             return@withContext if (cached.size <= maxSize) {
                                 cached
                             } else {
@@ -2429,6 +2440,10 @@ class NikonCamera(private val context: Context) {
                 }
             }
         }
+
+        // Background metadata gets a fair transaction slot, without interactive priority.
+        return if (background) ioGate.withTransferSlice(read) else ioGate.withInteractive(read)
+    }
 
     /**
      * 为当前大图的 FHD + EXIF 组合保留交互优先级，但不持续占用 [ioMutex]：两项之间的

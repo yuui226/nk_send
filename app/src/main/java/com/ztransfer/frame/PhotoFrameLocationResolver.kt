@@ -159,13 +159,14 @@ internal object PhotoFrameLocationResolver {
         metadata: PhotoFrameMetadata,
         settings: PhotoFrameMetadataSettings,
         trace: ((String) -> Unit)? = null,
+        timeoutMillis: Long = 1_000L,
     ): PhotoFrameMetadata = resolveFramePlace(metadata, settings, { allowed(context) }) { lat, lon ->
         val locale = context.resources.configuration.locales[0] ?: Locale.getDefault()
         val key = locale.toLanguageTag() + String.format(Locale.US, ":%.4f,%.4f", lat, lon)
         // Completed cache hits never wait behind an unrelated in-flight lookup.
         cachedEntry(key)?.let { return@resolveFramePlace it.place }
         // The one-second budget covers both queueing and the backend, not just network time.
-        withTimeoutOrNull(1_000L) {
+        withTimeoutOrNull(timeoutMillis.coerceIn(0L, 1_000L)) {
             lookupMutex.withLock {
                 cachedEntry(key)?.let { return@withLock it.place }
                 if (!allowed(context) || !Geocoder.isPresent()) return@withLock null

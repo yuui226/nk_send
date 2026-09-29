@@ -8,6 +8,16 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class TransferQueueActionVisibilityTest {
+    @Test
+    fun generationFailureHasErrorBadgeAndRetryEvenThoughDownloadCompleted() {
+        val failed = task(1, TransferStatus.COMPLETED).copy(frameGenerationError = "output error")
+        org.junit.Assert.assertEquals(TransferCardVisualState.FAILED, transferCardVisualState(failed))
+        assertTrue(transferQueueActionVisibility(listOf(failed), false, emptySet()).hasRetryable)
+        val running = failed.copy(isGeneratingFrame = true)
+        assertFalse(transferQueueActionVisibility(listOf(running), false, emptySet()).hasRetryable)
+        org.junit.Assert.assertEquals(TransferCardVisualState.GENERATING, transferCardVisualState(running))
+    }
+
     private fun task(
         handle: Int,
         status: TransferStatus,

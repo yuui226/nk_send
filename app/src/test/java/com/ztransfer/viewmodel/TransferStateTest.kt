@@ -20,6 +20,53 @@ import org.junit.Test
 
 class TransferStateTest {
     @Test
+    fun cropThenPreparationWaitDoesNotCountWaitingAsGenerationTime() {
+        val task = TransferTask(file(1), status = TransferStatus.COMPLETED)
+            .queueFrameGeneration().startFrameGeneration(1_000)
+            .pauseFrameGeneration(1_200)
+        assertTrue(task.isGeneratingFrame)
+        assertNull(task.frameGenerationStartedAtElapsedMs)
+        assertEquals(200L, task.frameGenerationAccumulatedMs)
+        val finished = task.startFrameGeneration(5_000).finishFrameGeneration(5_300)
+        assertEquals(500L, finished.frameGenerationElapsedMs)
+    }
+
+    @Test
+    fun generationRetryRetainsSuccessfulDownloadAndMetadataWithoutReenteringDownloadQueue() {
+        val source = SavedOriginalOutput("content://source", "content://tree", "content://parent", "DSC_1.JPG")
+        val metadata = com.ztransfer.frame.PhotoFrameMetadata("Nikon", "Z 30", "f/4", "1/100", "100", "50mm")
+        val failed = TransferTask(file(1), status = TransferStatus.COMPLETED,
+            downloaded = 100, progress = 1f, elapsedMs = 500, downloadMBps = 12f,
+            framePreset = PhotoFramePreset.MIST, frameGenerationError = "encoder failed",
+            savedOriginalOutput = source, sourceMetadataSnapshot = metadata,
+            sourceMetadataPrepared = true, metadataCameraIdentity = "body-a")
+        val retry = failed.newAttempt()
+        assertNotEquals(failed.taskId, retry.taskId)
+        assertEquals(TransferStatus.COMPLETED, retry.status)
+        assertEquals(failed.downloaded, retry.downloaded)
+        assertEquals(failed.elapsedMs, retry.elapsedMs)
+        assertEquals(failed.downloadMBps, retry.downloadMBps)
+        assertEquals(source, retry.savedOriginalOutput)
+        org.junit.Assert.assertSame(metadata, retry.sourceMetadataSnapshot)
+        assertTrue(retry.sourceMetadataPrepared)
+        assertEquals("body-a", retry.metadataCameraIdentity)
+        assertTrue(retry.isGeneratingFrame)
+        assertNull(retry.frameGenerationStartedAtElapsedMs)
+        assertNull(retry.frameGenerationError)
+        org.junit.Assert.assertFalse(retry.canRetry)
+    }
+
+    @Test
+    fun generationFailureIsRetryableButCompletedOrRunningGenerationIsNot() {
+        val completed = TransferTask(file(1), status = TransferStatus.COMPLETED)
+        val failed = completed.copy(frameGenerationError = "disk full")
+        assertEquals(setOf(failed.taskId), retryableTransferTaskIds(listOf(failed), emptySet()))
+        org.junit.Assert.assertFalse(completed.canRetry)
+        org.junit.Assert.assertFalse(failed.copy(isGeneratingFrame = true).canRetry)
+        assertTrue(retryableTransferTaskIds(listOf(failed), setOf(failed.taskId)).isEmpty())
+    }
+
+    @Test
     fun lutRecipeStaysInQueuedTaskWhenCurrentEffectChanges() {
         val table = com.ztransfer.lut.CubeLutParser.parse(("LUT_3D_SIZE 2\n" +
             "0 0 0\n1 0 0\n0 1 0\n1 1 0\n0 0 1\n1 0 1\n0 1 1\n1 1 1\n").byteInputStream())
@@ -190,8 +237,8 @@ class TransferStateTest {
     )
 
     @Test
-    fun photoEffectsUseABoundedMultiWorkerPool() {
-        assertEquals(2, PHOTO_FRAME_EXPORT_PARALLELISM)
+    fun photoEffectsUseASingleExportWorker() {
+        assertEquals(1, PHOTO_FRAME_EXPORT_PARALLELISM)
     }
 
     @Test

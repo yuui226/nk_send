@@ -12,8 +12,8 @@ import androidx.activity.compose.setContent
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.graphics.asImageBitmap
 import com.ztransfer.MainActivity
-import com.ztransfer.R
 import com.ztransfer.ui.screen.CropEditor
+import com.ztransfer.ui.screen.CropEditorGeometry
 import com.ztransfer.ui.theme.ThemeMode
 import com.ztransfer.ui.theme.ZTransferTheme
 import java.io.File
@@ -32,11 +32,12 @@ class CropEditorInstrumentation : Instrumentation() {
             val preview=CropPreview(JpegCropSource(6000,4000,16,8,1),bitmap.asImageBitmap())
             val theme=mutableStateOf(ThemeMode.LIGHT)
             var accepted:JpegCropSelection?=null
+            val geometry=CropEditorGeometry(preview.source)
             activity=startActivitySync(Intent(targetContext,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
             runOnMainSync { activity.setContent {
                 ZTransferTheme(themeMode=theme.value) {
-                    CropEditor(preview=preview, failed=false, onRetry={}, onCancel={},
-                        onConfirm={ selection, _ -> accepted=selection; false }, onFeedback={})
+                    CropEditor(preview=preview, failed=false, geometry=geometry, confirming=false,
+                        onRetry={}, onCancel={}, onFeedback={})
                 }
             } }
             waitForIdleSync(); SystemClock.sleep(350)
@@ -46,7 +47,7 @@ class CropEditorInstrumentation : Instrumentation() {
             clickDescription("1:1")
             pinch(w*.5f,h*.5f,w*.10f,w*.23f)
             drag(w*.45f,h*.50f,w*.6f,h*.48f)
-            clickDescription(activity.getString(R.string.crop_confirm))
+            runOnMainSync { accepted=geometry.selection(preview.source.orientation) }
             check(accepted!=null)
             preview.source.validate(checkNotNull(accepted).resolve(preview.source).rect)
             check(accepted!!.resolve(preview.source).rect.width == accepted!!.resolve(preview.source).rect.height)
@@ -57,11 +58,12 @@ class CropEditorInstrumentation : Instrumentation() {
             uiAutomation.setRotation(android.app.UiAutomation.ROTATION_FREEZE_90)
             SystemClock.sleep(600)
             screenshot("crop-editor-landscape.png")
-            clickDescription(activity.getString(R.string.crop_reset))
-            clickDescription(activity.getString(R.string.crop_confirm))
+            // Confirmation/reset now belong to the preview host, not CropEditor.
+            runOnMainSync { geometry.reset() }
+            runOnMainSync { accepted=geometry.selection(preview.source.orientation) }
             check(accepted!!.resolve(preview.source).rect.width == preview.source.width && accepted!!.resolve(preview.source).rect.height == preview.source.height)
             uiAutomation.setRotation(android.app.UiAutomation.ROTATION_UNFREEZE)
-            result.putString("result","PASS: crop editor renders both themes, touch and confirmation; screenshots saved")
+            result.putString("result","PASS: crop editor renders both themes, touch geometry and reset; screenshots saved")
             code=Activity.RESULT_OK
         } catch(failure:Throwable) { result.putString("failure",failure.stackTraceToString()) }
         finally { uiAutomation.setRotation(android.app.UiAutomation.ROTATION_UNFREEZE); activity?.let { runOnMainSync { it.finish() } } }

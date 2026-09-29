@@ -1,5 +1,7 @@
 package com.ztransfer.ui.screen
 
+import com.ztransfer.viewmodel.canRetry
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
@@ -104,7 +106,7 @@ private val TRANSFER_CARD_WAVE_AMPLITUDE = 3.dp
 
 private enum class TransferCardPillTone { SIZE, SPEED, EFFECT, TRANSFER_DURATION, GENERATION_DURATION }
 
-private enum class TransferCardVisualState { WAITING, TRANSFERRING, GENERATING, COMPLETED, FAILED, CANCELLED }
+internal enum class TransferCardVisualState { WAITING, TRANSFERRING, GENERATING, COMPLETED, FAILED, CANCELLED }
 
 internal data class TransferQueueActionVisibility(
     val hasRetryable: Boolean,
@@ -119,7 +121,7 @@ internal fun transferQueueActionVisibility(
 ): TransferQueueActionVisibility = TransferQueueActionVisibility(
     hasRetryable = !suppressAll && !isTransferring && tasks.any { task ->
         task.taskId !in removingTaskIds &&
-            (task.status == TransferStatus.FAILED || task.status == TransferStatus.CANCELLED)
+            task.canRetry
     },
     hasClearable = !suppressAll && tasks.any { task ->
         task.taskId !in removingTaskIds &&
@@ -239,8 +241,8 @@ fun TransferScreen(
     val hasRetryable = actionVisibility.hasRetryable
     val retryNeedsCamera = transferState.tasks.any {
         it.taskId !in removingTaskIds &&
-            (it.status == TransferStatus.FAILED || it.status == TransferStatus.CANCELLED) &&
-            !isTransferredOriginal(
+            it.canRetry &&
+            it.savedOriginalOutput == null && !isTransferredOriginal(
                 it.file,
                 transferState.existingExportIndex,
                 it.destinationFolderName,
@@ -362,7 +364,7 @@ fun TransferScreen(
                     }
                     val displayedFrameGenerationElapsedMs = if (task.isGeneratingFrame) {
                         task.frameGenerationStartedAtElapsedMs?.let { startedAt ->
-                            (generationClockMs - startedAt).coerceAtLeast(0L)
+                            task.frameGenerationAccumulatedMs + (generationClockMs - startedAt).coerceAtLeast(0L)
                         }
                     } else {
                         task.frameGenerationElapsedMs
@@ -513,9 +515,9 @@ fun TransferScreen(
                                     )
                                     TransferRetryButton(
                                         visible = cardActionsVisible &&
-                                            task.status == TransferStatus.FAILED,
+                                            task.canRetry && task.status != TransferStatus.CANCELLED,
                                         enabled = cardActionsVisible &&
-                                            (connected || isTransferredOriginal(
+                                            (task.savedOriginalOutput != null || connected || isTransferredOriginal(
                                                 task.file,
                                                 transferState.existingExportIndex,
                                                 task.destinationFolderName,
@@ -707,12 +709,12 @@ fun TransferScreen(
     }
 }
 
-private fun transferCardVisualState(task: TransferTask): TransferCardVisualState = when {
+internal fun transferCardVisualState(task: TransferTask): TransferCardVisualState = when {
     task.isGeneratingFrame -> TransferCardVisualState.GENERATING
     task.status == TransferStatus.WAITING -> TransferCardVisualState.WAITING
     task.status == TransferStatus.TRANSFERING -> TransferCardVisualState.TRANSFERRING
+    task.status == TransferStatus.FAILED || task.frameGenerationError != null -> TransferCardVisualState.FAILED
     task.status == TransferStatus.COMPLETED -> TransferCardVisualState.COMPLETED
-    task.status == TransferStatus.FAILED -> TransferCardVisualState.FAILED
     else -> TransferCardVisualState.CANCELLED
 }
 
@@ -824,7 +826,7 @@ private fun TransferTaskCardContent(
     modifier: Modifier = Modifier,
 ) {
     val colors = AppTheme.colors
-    val isFailed = task.status == TransferStatus.FAILED
+    val isFailed = task.status == TransferStatus.FAILED || task.frameGenerationError != null
     val transferred = task.status == TransferStatus.COMPLETED
     val speedText = when {
         task.status == TransferStatus.TRANSFERING && displayedSpeed > 0L -> formatSpeed(displayedSpeed)
@@ -897,7 +899,9 @@ private fun TransferTaskCardContent(
         if (isFailed) {
             Spacer(modifier = Modifier.height(7.dp))
             Text(
-                text = task.error ?: stringResource(R.string.transfer_failed),
+                text = task.frameGenerationError?.let {
+                    stringResource(R.string.local_photo_batch_failed) + ": " + it
+                } ?: task.error ?: stringResource(R.string.transfer_failed),
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.statusError,
                 maxLines = 2,

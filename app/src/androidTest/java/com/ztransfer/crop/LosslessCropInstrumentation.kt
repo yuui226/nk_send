@@ -6,6 +6,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.os.Bundle
+import android.net.Uri
 import androidx.exifinterface.media.ExifInterface
 import kotlinx.coroutines.runBlocking
 import java.io.File
@@ -39,6 +40,16 @@ class LosslessCropInstrumentation : Instrumentation() {
                     val source = checkNotNull(LosslessJpeg.readSource(input))
                     val crop = CropRect(32, 32, 192, 160)
                     LosslessJpeg.crop(input, output, JpegCropRecipe(source, crop))
+                    val directOutput = File(directory, "crop-direct.jpg")
+                    val fallback = File(directory, "fallback-source.jpg")
+                    withCropSource(targetContext.contentResolver, Uri.fromFile(input), fallback) { alias ->
+                        check(alias.path.startsWith("/proc/self/fd/"))
+                        check(!fallback.exists())
+                        LosslessJpeg.crop(alias, directOutput, JpegCropRecipe(source, crop))
+                    }
+                    check(output.readBytes().contentEquals(directOutput.readBytes()))
+                    check(!fallback.exists())
+                    directOutput.delete()
                     val original = checkNotNull(BitmapFactory.decodeFile(input.path))
                     val cropped = checkNotNull(BitmapFactory.decodeFile(output.path))
                     try {

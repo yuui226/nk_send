@@ -9,6 +9,26 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ExistingFileNameIndexTest {
+    @org.junit.Test
+    fun concurrentWritersReserveDifferentNamesAndIncompleteFilesAreNotReadable() {
+        val index = ExistingFileNameIndex<Int>()
+        val pool = java.util.concurrent.Executors.newFixedThreadPool(4)
+        val suffix: (String, Int) -> String = { name, n -> "$name ($n)" }
+        try {
+            val names = (0 until 64).map {
+                pool.submit<String> { index.reserveDisplayName("photo.jpg", suffix) }
+            }.map { it.get(5, java.util.concurrent.TimeUnit.SECONDS) }
+            org.junit.Assert.assertEquals(64, names.toSet().size)
+            org.junit.Assert.assertNull(index.find("photo.jpg", 100))
+            org.junit.Assert.assertTrue(index.containsDisplayName("PHOTO.JPG"))
+            val original = names.first { it == "photo.jpg" }
+            index.add(original, 100, 7)
+            names.forEach(index::releaseDisplayName)
+            org.junit.Assert.assertEquals(7, index.find(original, 100)?.value)
+            org.junit.Assert.assertEquals("PHOTO.JPG (1)", index.reserveDisplayName("PHOTO.JPG", suffix))
+        } finally { pool.shutdownNow() }
+    }
+
     private fun file(name: String, size: Long) = NikonCamera.FileInfo(
         handle = 1,
         size = size,

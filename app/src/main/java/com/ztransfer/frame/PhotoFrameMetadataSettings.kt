@@ -51,6 +51,12 @@ data class PhotoFrameMetadataSettings(
     val brandStyle: PhotoFrameBrandStyle = PhotoFrameBrandStyle.TEXT,
 )
 
+/** Pure decoration needs no camera header; model/logo dependencies are covered by their flags. */
+internal val PhotoFrameMetadataSettings.requiresCameraMetadata: Boolean
+    get() = showDate || showTime || showFocalLength || showExposure || showBrand || showModel ||
+        showLensModel || showCoordinates || showAltitude || showCity || showRegion ||
+        (PHOTO_FRAME_ADDRESS_METADATA_ENABLED && showAddress)
+
 internal fun defaultPhotoFrameMetadataSettings(
     preset: PhotoFramePreset,
 ): PhotoFrameMetadataSettings = when (preset) {

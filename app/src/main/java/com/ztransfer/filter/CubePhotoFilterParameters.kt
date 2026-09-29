@@ -4,10 +4,21 @@ import com.ztransfer.lut.CubeLut
 import kotlin.math.roundToInt
 
 /** Parsed content is owned by this immutable recipe, shared by queued tasks, never an external URI. */
-internal class CubePhotoFilterParameters(source: () -> CubeLut) : PhotoFilterParameters {
-    val table: CubeLut by lazy(source)
-    val mapper by lazy { PhotoCubeMapper(table) }
-    constructor(table: CubeLut) : this({ table })
+internal class CubePhotoFilterParameters private constructor(
+    private val acquire: () -> PhotoCubeResourceCache.Loaded,
+) : PhotoFilterParameters {
+    val table: CubeLut get() = acquire().table
+    val mapper: PhotoCubeMapper get() = acquire().mapper
+
+    constructor(table: CubeLut) : this(PhotoCubeResourceCache.Loaded(table))
+    private constructor(loaded: PhotoCubeResourceCache.Loaded) : this({ loaded })
+
+    companion object {
+        private val resources = PhotoCubeResourceCache()
+        fun fromSnapshot(key: String, cache: PhotoCubeResourceCache = resources, read: () -> CubeLut) =
+            CubePhotoFilterParameters { cache.acquire(key, read) }
+        fun seedSnapshot(key: String, table: CubeLut) = resources.seed(key, table)
+    }
 }
 
 /** Full float table, trilinear interpolation, one final 8-bit quantization; no HSL conversion. */

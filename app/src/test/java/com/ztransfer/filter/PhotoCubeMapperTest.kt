@@ -43,10 +43,10 @@ class PhotoCubeMapperTest {
         assertEquals(0xff00ff80.toInt(), mapper.map(0xff804020.toInt(),1f,false))
         assertEquals(0xff40a050.toInt(), mapper.map(0xff804020.toInt(),.5f,false))
     }
-    @Test fun cubeExportNeverBuildsThe64MiBExactRgbCache() {
+    @Test fun cubeExportDoesNotAllocateAnExactColorMemo() {
         val selection=PhotoFilterSelection(PhotoFilterPreset("cube:test","Identity",CubePhotoFilterParameters(cube(2){r,g,b->listOf(r,g,b)})),100)
         val prepared=PhotoFilterRenderer.prepareOriginalFilter(selection)
-        assertNull(prepared.exactRgbLut)
+        assertNull(prepared.exactRgbMemo)
         assertSame(selection,prepared.selection)
     }
 }

@@ -36,7 +36,8 @@ internal class PhotoLutStore(context: Context) {
         val name = preferences.getString("$role:name", null) ?: return null
         val parameters = synchronized(live) {
             live.keys.firstOrNull { live[it] == file.absolutePath }
-                ?: CubePhotoFilterParameters { readSnapshot(file, digest) }.also { live[it] = file.absolutePath }
+                ?: CubePhotoFilterParameters.fromSnapshot(file.absolutePath) { readSnapshot(file, digest) }
+                    .also { live[it] = file.absolutePath }
         }
         return PhotoFilterSelection(PhotoFilterPreset("cube:$digest", name, parameters),
             preferences.getInt("$role:strength", 80))
@@ -60,11 +61,13 @@ internal class PhotoLutStore(context: Context) {
     fun snapshot(file: LutFile, table: CubeLut): PhotoFilterSelection {
         directory.mkdirs()
         val target = File(directory, "${table.digest}.bin")
+        val digest = table.digest
         // Keep a strong owner before writing. Cleanup must retain this path, while UI restore
         // never waits for a provider-sized disk write under the live-recipe lock.
         val parameters = synchronized(live) {
             live.keys.firstOrNull { live[it] == target.absolutePath }
-                ?: CubePhotoFilterParameters(table).also { live[it] = target.absolutePath }
+                ?: CubePhotoFilterParameters.fromSnapshot(target.absolutePath) { readSnapshot(target, digest) }
+                    .also { live[it] = target.absolutePath }
         }
         if (!target.isFile) {
             val atomic = AtomicFile(target)
@@ -74,6 +77,7 @@ internal class PhotoLutStore(context: Context) {
                 atomic.finishWrite(output)
             } catch (failure: Throwable) { atomic.failWrite(output); throw failure }
         }
+        CubePhotoFilterParameters.seedSnapshot(target.absolutePath, table)
         return PhotoFilterSelection(PhotoFilterPreset("cube:${table.digest}", file.label.ifBlank { file.name }, parameters), intensity(file.uri.toString()))
     }
 
