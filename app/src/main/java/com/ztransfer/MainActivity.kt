@@ -39,6 +39,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
@@ -240,7 +241,7 @@ private fun FilesQueueWorkspace(
     ) { if (it) 1f else 0f }
     val topControlsProgress = transition.animateFloat(
         transitionSpec = {
-            if (targetState) tween(140, delayMillis = 320, easing = FastOutSlowInEasing)
+            if (targetState) tween(200, delayMillis = 100, easing = FastOutSlowInEasing)
             else tween(80, easing = FastOutSlowInEasing)
         },
         label = "queueTopControls",
@@ -271,15 +272,19 @@ private fun FilesQueueWorkspace(
             }
         }
 
-        // 左侧顶栏恢复原位淡入：正文转场完成后出现，返回时立即淡出。
+        // 左侧顶栏与队列正文同步淡入、同时落稳；返回时先快速淡出。
         if (transition.currentState || transition.targetState) {
             Box(
                 modifier = Modifier
                     .align(Alignment.TopStart)
                     .fillMaxWidth()
                     .graphicsLayer {
+                        // 保持淡入前后相同的合成方式，避免 alpha=1 时阴影切换绘制路径。
+                        compositingStrategy = CompositingStrategy.Offscreen
                         alpha = topControlsProgress.value
-                    },
+                    }
+                    // 只扩展悬浮层底部，不移动按钮；给投影留出合成空间。
+                    .padding(bottom = 16.dp),
             ) {
                 queueTopContent()
             }
