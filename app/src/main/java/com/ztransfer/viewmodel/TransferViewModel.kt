@@ -65,6 +65,7 @@ import com.ztransfer.filter.PhotoFilterSelection
 import com.ztransfer.filter.DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT
 import com.ztransfer.filter.normalizePhotoFilterIntensity
 import com.ztransfer.license.LicenseManager
+import com.ztransfer.protocol.supportsVideoResume
 import com.ztransfer.protocol.CameraConnectionType
 import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.protocol.PtpConstants
@@ -2181,9 +2182,14 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         continue
                     }
 
+                    val videoTransfer = supportsVideoResume(task.file.fileName)
                     // 断点续传：检查是否存在上次传输留下的、【身份令牌匹配】的半成品文件。
                     var resumeOffset = 0L
                     var fileDocUri: Uri? = null
+                    if (!videoTransfer) {
+                        directoryIndex.partFor(task.file.fileName)?.let { deleteQuietly(it.uri) }
+                        directoryIndex.removePart(task.file.fileName)
+                    }
                     val partFile = directoryIndex.partFor(task.file.fileName)
                         ?.takeIf { it.token == identityToken(task.file) }
                     if (partFile != null) {
@@ -2334,6 +2340,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                             )
                                         }
                                     },
+                                    videoTransfer = videoTransfer,
                                     resumeOffset = resumeOffset,
                                     totalSize = task.file.size,
                                     // 协议层在首个数据命令前读取一次，随后整张文件固定该策略。
@@ -2384,6 +2391,9 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                         }
                                     }
                                     if (renamedUri != null) {
+                                        // Some providers retain the URI across rename. It is now a
+                                        // published original, never a deletable download partial.
+                                        fileDocUri = null
                                         if (originalSaveMode == "rename") savedName = displayNameOf(renamedUri) ?: savedName
                                         PhotoGenerationProbe.note(
                                             category = "FRAME-META",
@@ -2477,13 +2487,12 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                 } finally { directoryIndex.releaseDisplayName(finalName) }
                             },
                             onFailure = { e ->
-                                if (e is ResumeUnavailableException) {
-                                    // 走不了续传（相机不支持分块 / >4GB 拿不到真实大小）：删掉半成品，
-                                    // 本次标记失败，重试将从头全新下载——绝不用错位的全量数据续写。
+                                if (!videoTransfer || e is ResumeUnavailableException) {
+                                    // 照片一律删除半成品；视频无法续传时也从头重试。
                                     deleteQuietly(fileDocUri)
                                     directoryIndex.removePart(task.file.fileName)
                                     updateTask(taskId) {
-                                        it.copy(status = TransferStatus.FAILED, error = str(R.string.transfer_failed), speed = 0)
+                                        it.copy(status = TransferStatus.FAILED, error = friendlyError(e), speed = 0)
                                     }
                                 } else {
                                     // 普通传输失败：保留半成品，重试时从块边界续传。
@@ -2502,8 +2511,11 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     } catch (e: CancellationException) {
                         // 协程取消只发生在 ViewModel 销毁（App 退出）时——界面上的"停止"
                         // 不再取消协程（正在传的文件自然传完，见 withdrawPending）。
-                        // 此处【不】就地删除半成品：半成品交给 App 启动的 sweep 统一清扫
-                        //（.nkpart_ 前缀带前导点，相册中本就不可见），也是断点续传的基础。
+                        // Only videos retain partial files for resume; photos always restart.
+                        if (!videoTransfer) {
+                            deleteQuietly(fileDocUri)
+                            directoryIndex.removePart(task.file.fileName)
+                        }
                         throw e
                     } catch (e: Exception) {
                         // 异常保留半成品——不是传输层错误（如目录失效），但半成品仍有价值
@@ -2511,11 +2523,16 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         if (BuildConfig.DEBUG) {
                             android.util.Log.e(TAG, "DL_FAIL: ${task.file.fileName} - ${e.javaClass.simpleName}: ${e.message}", e)
                         }
-                        refreshPartIndexForRetry(
-                            directoryIndex = directoryIndex,
-                            file = task.file,
-                            partUri = fileDocUri,
-                        )
+                        if (videoTransfer) {
+                            refreshPartIndexForRetry(
+                                directoryIndex = directoryIndex,
+                                file = task.file,
+                                partUri = fileDocUri,
+                            )
+                        } else {
+                            deleteQuietly(fileDocUri)
+                            directoryIndex.removePart(task.file.fileName)
+                        }
                         updateTask(taskId) {
                             it.copy(status = TransferStatus.FAILED, error = friendlyError(e), speed = 0)
                         }

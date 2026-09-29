@@ -256,7 +256,8 @@ internal fun shouldUsePartialObjectDownload(
     isUsbConnection: Boolean = false,
     preferHighThroughput: Boolean = false,
     forcePartial: Boolean = false,
-): Boolean = partialObjectSupported != false &&
+    videoTransfer: Boolean = true,
+): Boolean = (videoTransfer || forcePartial) && partialObjectSupported != false &&
     effectiveSize > 0L && effectiveSize != PtpConstants.SIZE_UNKNOWN &&
     (
         forcePartial ||
@@ -269,8 +270,10 @@ internal fun downloadChunkSize(
     effectiveSize: Long,
     isUsbConnection: Boolean = false,
     preferHighThroughput: Boolean = false,
+    videoTransfer: Boolean = true,
 ): Long =
-    if (isUsbConnection || preferHighThroughput) {
+    if (!videoTransfer) effectiveSize
+    else if (isUsbConnection || preferHighThroughput) {
         NikonCamera.HIGH_THROUGHPUT_CHUNK_SIZE
     } else if (effectiveSize > NikonCamera.LARGE_FILE_THRESHOLD) {
         NikonCamera.LARGE_FILE_CHUNK_SIZE
@@ -3893,14 +3896,10 @@ class NikonCamera(private val context: Context) {
      * [preferHighThroughputAtStart] 在首个文件数据命令前仅取值一次，之后页面切换不会改变当前文件。
      * [captureHeader] 在新文件传输时保留有限的文件头，供效果图导出复用；不会额外发起相机请求。
      *
-     * 两条数据相位路径共用同一个 [pump] 循环，只是驱动它的命令不同：
-     * - 分块（GetPartialObjectEx）：浏览模式的 Wi-Fi 已知大小文件，以及高吞吐模式下的
-     *   大文件/续传；每块是完整 PTP 事务，块间可供 FHD / EXIF 插入。
-     * - 全量（GetObject）：高吞吐模式的普通新文件，或分块不支持/大小未知时的回退。
-     *
-     * 续传是一等契约：若请求了 resumeOffset 但走不了分块（相机不支持 / 大小未知），
-     * 绝不用"从 0 全量"去填一个已定位到偏移的流（会写出错位的损坏文件），而是抛
-     * [ResumeUnavailableException] 让调用方删半成品重下。
+     * 照片不续传：AP/USB 用 GetObject，STA 用一次 GetPartialObjectEx 请求整个范围；
+     * 两者都使用固定缓冲的 pump 流式写盘，不将整张照片放进内存。
+     * 只有 [videoTransfer] 使用循环分块及 [resumeOffset]，块间可供交互命令插入。
+     * 视频请求续传却无法分块时返回 [ResumeUnavailableException]，不得向已定位的流写入全量文件。
      */
     suspend fun downloadToFile(
         handle: Int,
@@ -3910,14 +3909,14 @@ class NikonCamera(private val context: Context) {
         totalSize: Long = 0L,
         preferHighThroughputAtStart: () -> Boolean = { false },
         captureHeader: Boolean = false,
+        videoTransfer: Boolean = false,
     ): Result<DownloadStats> = ioGate.withDownloadActivity {
         withContext(Dispatchers.IO) {
             val scope = this
+            if (!videoTransfer && resumeOffset != 0L) return@withContext Result.failure(ResumeUnavailableException())
             var totalDownloaded = resumeOffset
-            // A resumed file already has bytes on disk; only fresh downloads can capture a
-            // complete header without another camera request. Keep the prefix bounded and release
-            // it with DownloadStats after the export task receives its parsed snapshot.
-            val headerCapture = if (captureHeader && resumeOffset == 0L) {
+            // Only photos capture metadata; they always start at zero. Videos never allocate it.
+            val headerCapture = if (captureHeader && !videoTransfer) {
                 ByteArrayOutputStream(EXIF_HEADER_CAPTURE_BYTES)
             } else {
                 null
@@ -4084,6 +4083,7 @@ class NikonCamera(private val context: Context) {
                     isUsbConnection = usbPtp != null,
                     preferHighThroughput = preferHighThroughput,
                     forcePartial = staDirectObjectReadValidated,
+                    videoTransfer = videoTransfer,
                 )
 
                 fun noteStaDownload(message: String) {
@@ -4115,7 +4115,11 @@ class NikonCamera(private val context: Context) {
                         effectiveSize = effectiveSize,
                         isUsbConnection = usbPtp != null,
                         preferHighThroughput = preferHighThroughput,
+                        videoTransfer = videoTransfer,
                     )
+                    if (!videoTransfer && effectiveSize > Int.MAX_VALUE) {
+                        return@withContext Result.failure(java.io.IOException("Photo exceeds single-request size limit"))
+                    }
                     while (offset < effectiveSize) {
                         scope.ensureActive()
                         val reqSize = minOf(chunkSize, effectiveSize - offset).toInt()
@@ -4156,6 +4160,7 @@ class NikonCamera(private val context: Context) {
                         if (got == 0L) return@withContext incomplete(totalDownloaded, effectiveSize)
                         // 按【实收字节】推进，而非请求量——短读也不会跳过未收到的区间。
                         offset += got
+                        if (!videoTransfer && offset != effectiveSize) return@withContext incomplete(offset, effectiveSize)
                         first = false
                     }
                     if (!fellBack) {
