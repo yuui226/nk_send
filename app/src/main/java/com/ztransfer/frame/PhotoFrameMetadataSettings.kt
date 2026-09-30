@@ -50,6 +50,8 @@ data class PhotoFrameMetadataSettings(
     val showRegion: Boolean = false,
     val brandStyle: PhotoFrameBrandStyle = PhotoFrameBrandStyle.TEXT,
     val widthPercent: Int = 100,
+    val backgroundBlurPercent: Int = 100,
+    val backgroundMaskPercent: Int = 100,
 )
 
 /** Pure decoration needs no camera header; model/logo dependencies are covered by their flags. */
@@ -121,6 +123,8 @@ internal fun normalizePhotoFrameMetadataSettings(
     settings: PhotoFrameMetadataSettings,
 ): PhotoFrameMetadataSettings = settings.copy(
     widthPercent = normalizePhotoFrameWidthPercent(settings.widthPercent),
+    backgroundBlurPercent = normalizeBackdropPercent(settings.backgroundBlurPercent),
+    backgroundMaskPercent = normalizeBackdropPercent(settings.backgroundMaskPercent),
     // Never restore the old full street-address option.
     showAddress = settings.showAddress && PHOTO_FRAME_ADDRESS_METADATA_ENABLED,
     datePattern = normalizePhotoFrameDatePattern(settings.datePattern),
@@ -355,6 +359,7 @@ internal fun encodePhotoFrameMetadataSettings(
         value.timePattern,
     ).let { fields ->
         when {
+            value.backgroundBlurPercent != 100 || value.backgroundMaskPercent != 100 -> fields + listOf(value.showCity, value.showRegion, value.brandStyle.name, value.widthPercent, value.backgroundBlurPercent, value.backgroundMaskPercent)
             value.widthPercent != 100 -> fields + listOf(value.showCity, value.showRegion, value.brandStyle.name, value.widthPercent)
             value.brandStyle == PhotoFrameBrandStyle.LOGO -> fields + listOf(value.showCity, value.showRegion, value.brandStyle.name)
             value.showCity || value.showRegion -> fields + listOf(value.showCity, value.showRegion)
@@ -372,8 +377,8 @@ internal fun decodePhotoFrameMetadataSettings(
         val fields = entry.split(FIELD_SEPARATOR)
         // Older versions stored six or seven visibility flags. Accept those entries forever;
         // the former 13-field location format had an address slot which is deliberately skipped.
-        // 14-field entries append city/district; 15-field entries append brand style; 16 adds width.
-        if (fields.size != 9 && fields.size != 10 && fields.size != 12 && fields.size != 13 && fields.size != 14 && fields.size != 15 && fields.size != 16) {
+        // 14 fields add city/district, 15 brand style, 16 width, 18 backdrop controls.
+        if (fields.size != 9 && fields.size != 10 && fields.size != 12 && fields.size != 13 && fields.size != 14 && fields.size != 15 && fields.size != 16 && fields.size != 18) {
             return@forEach
         }
         val preset = PhotoFramePreset.entries.firstOrNull { it.name == fields[0] }
@@ -404,7 +409,9 @@ internal fun decodePhotoFrameMetadataSettings(
                 showFocalLength = checkNotNull(booleans[2]),
                 showExposure = checkNotNull(booleans[3]),
                 showBrand = checkNotNull(booleans[4]),
-                widthPercent = if (fields.size == 16) fields[15].toIntOrNull() ?: return@forEach else 100,
+                backgroundBlurPercent = if (fields.size == 18) fields[16].toIntOrNull() ?: return@forEach else 100,
+                backgroundMaskPercent = if (fields.size == 18) fields[17].toIntOrNull() ?: return@forEach else 100,
+                widthPercent = if (fields.size >= 16) fields[15].toIntOrNull() ?: return@forEach else 100,
                 brandStyle = if (fields.size >= 15) PhotoFrameBrandStyle.entries.firstOrNull { it.name == fields[14] } ?: return@forEach else PhotoFrameBrandStyle.TEXT,
                 showModel = checkNotNull(booleans[5]),
                 showLensModel = if (hasLensModel) checkNotNull(booleans[6]) else false,
@@ -436,6 +443,8 @@ internal fun photoFrameMetadataSettingsFingerprintToken(
     // Hidden format choices are remembered for the next time the field is enabled, but they do
     // not change pixels and therefore must not create a different output name.
     val rendered = normalized.copy(
+        backgroundBlurPercent = if (preset.supportsBackdropControls()) normalized.backgroundBlurPercent else 100,
+        backgroundMaskPercent = if (preset.supportsBackdropControls()) normalized.backgroundMaskPercent else 100,
         widthPercent = if (preset == PhotoFramePreset.IMMERSIVE) 100 else normalized.widthPercent,
         datePattern = normalized.datePattern.takeIf { normalized.showDate }
             ?: defaults.datePattern,
@@ -456,3 +465,21 @@ internal fun PhotoFrameMetadataSettings.nextBrandStyle(): PhotoFrameMetadataSett
 /** UI and persisted values use the same bounded ten-percent detents. */
 internal fun normalizePhotoFrameWidthPercent(value: Int): Int =
     ((value.coerceIn(100, 200) + 5) / 10) * 10
+
+internal fun PhotoFramePreset.supportsBackdropControls(): Boolean = when (this) {
+    PhotoFramePreset.MIST, PhotoFramePreset.FROSTED, PhotoFramePreset.CINEMA,
+    PhotoFramePreset.FILM_GALLERY, PhotoFramePreset.PARAMETER_POSTER -> true
+    else -> false
+}
+
+/** Relative to the original preset: 100 keeps the shipped effect. */
+internal fun normalizeBackdropPercent(value: Int): Int =
+    ((value.coerceIn(0, 200) + 5) / 10) * 10
+
+/** Decorative proxy only; never changes the full-resolution photo region. */
+internal fun backdropPreviewLongEdge(preset: PhotoFramePreset, blurPercent: Int): Int = when {
+    !preset.supportsBackdropControls() -> 192
+    normalizeBackdropPercent(blurPercent) == 0 -> 1024
+    normalizeBackdropPercent(blurPercent) < 50 -> 384
+    else -> 192
+}

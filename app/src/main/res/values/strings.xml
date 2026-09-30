@@ -657,4 +657,7 @@
     <string name="photo_frame_width">Width</string>
     <string name="lut_uncategorized">Uncategorized</string>
     <string name="lut_turn_off">Turn off LUT</string>
+    <string name="photo_filter_turn_off">Turn off filter</string>
+    <string name="photo_frame_background_blur">Background blur</string>
+    <string name="photo_frame_background_mask">Overlay strength</string>
 </resources>

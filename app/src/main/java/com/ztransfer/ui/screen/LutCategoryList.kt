@@ -73,8 +73,8 @@ internal fun LutCategoryList(
 
 /** Shared compact header; global actions never scroll with either list. */
 @Composable
-internal fun LutChooserHeader(off: Boolean, folderLabel: String, enabled: Boolean = true,
-    onOff: () -> Unit, onFolder: () -> Unit) {
+internal fun LutChooserHeader(off: Boolean, folderLabel: String? = null, enabled: Boolean = true,
+    onOff: () -> Unit, onFolder: () -> Unit = {}, offLabel: String? = null) {
     val colors = AppTheme.colors
     Row(Modifier.fillMaxWidth().padding(bottom = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -83,11 +83,11 @@ internal fun LutChooserHeader(off: Boolean, folderLabel: String, enabled: Boolea
             .clickable(enabled = enabled, role = Role.Button, onClick = onOff)
             .heightIn(min = 30.dp).padding(horizontal = 6.dp, vertical = 5.dp),
             contentAlignment = Alignment.CenterStart) {
-            Text(stringResource(R.string.lut_turn_off), maxLines = 1, overflow = TextOverflow.Ellipsis,
+            Text(offLabel ?: stringResource(R.string.lut_turn_off), maxLines = 1, overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.labelMedium,
                 color = if (off) colors.accentBlue else colors.onSurfaceVariant)
         }
-        Box(Modifier.weight(1f).clip(RoundedCornerShape(6.dp))
+        if (folderLabel != null) Box(Modifier.weight(1f).clip(RoundedCornerShape(6.dp))
             .clickable(enabled = enabled, role = Role.Button, onClick = onFolder)
             .heightIn(min = 30.dp).padding(horizontal = 6.dp, vertical = 5.dp),
             contentAlignment = Alignment.CenterEnd) {

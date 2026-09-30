@@ -1532,7 +1532,9 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             current.filterNot { it.framePreset == preset }
         } else {
             current + FavoriteFrameWatermarkEffect.capture(preset, watermark,
-                    resolvedPhotoFrameMetadataSettings(_state.value.photoFrameMetadataSettings, preset).widthPercent)
+                    resolvedPhotoFrameMetadataSettings(_state.value.photoFrameMetadataSettings, preset).widthPercent,
+                    resolvedPhotoFrameMetadataSettings(_state.value.photoFrameMetadataSettings, preset).backgroundBlurPercent,
+                    resolvedPhotoFrameMetadataSettings(_state.value.photoFrameMetadataSettings, preset).backgroundMaskPercent)
         }
         persistFavoriteFrameEffects(updated)
     }
@@ -1546,7 +1548,9 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         val updated = current.map { favorite ->
             if (favorite.framePreset == preset) {
                 FavoriteFrameWatermarkEffect.capture(preset, watermark,
-                    resolvedPhotoFrameMetadataSettings(_state.value.photoFrameMetadataSettings, preset).widthPercent)
+                    resolvedPhotoFrameMetadataSettings(_state.value.photoFrameMetadataSettings, preset).widthPercent,
+                    resolvedPhotoFrameMetadataSettings(_state.value.photoFrameMetadataSettings, preset).backgroundBlurPercent,
+                    resolvedPhotoFrameMetadataSettings(_state.value.photoFrameMetadataSettings, preset).backgroundMaskPercent)
             } else {
                 favorite
             }
@@ -1710,9 +1714,9 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         _state.update { it.copy(photoFrameMetadataSettings = updated) }
         val width = normalized?.widthPercent ?: 100
         val favorites = _state.value.favoriteFrameEffects
-        if (favorites.any { it.framePreset == preset && it.frameWidthPercent != width }) {
+        if (favorites.any { it.framePreset == preset && (it.frameWidthPercent != width || it.backgroundBlurPercent != (normalized?.backgroundBlurPercent ?: 100) || it.backgroundMaskPercent != (normalized?.backgroundMaskPercent ?: 100)) }) {
             persistFavoriteFrameEffects(favorites.map {
-                if (it.framePreset == preset) it.copy(frameWidthPercent = width) else it
+                if (it.framePreset == preset) it.copy(frameWidthPercent = width, backgroundBlurPercent = normalized?.backgroundBlurPercent ?: 100, backgroundMaskPercent = normalized?.backgroundMaskPercent ?: 100) else it
             })
         }
     }

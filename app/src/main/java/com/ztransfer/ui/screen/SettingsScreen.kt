@@ -1,5 +1,9 @@
 package com.ztransfer.ui.screen
 
+import androidx.compose.animation.animateContentSize
+
+import com.ztransfer.frame.supportsBackdropControls
+
 import com.ztransfer.viewmodel.AutoTransferMode
 
 import android.Manifest
@@ -847,7 +851,7 @@ fun SettingsOverlay(
                         state.favoriteFrameEffects.firstOrNull { it.framePreset == selected }?.let { favorite ->
                             viewModel.setPhotoFrameMetadataSettings(selected,
                                 resolvedPhotoFrameMetadataSettings(state.photoFrameMetadataSettings, selected)
-                                    .copy(widthPercent = favorite.frameWidthPercent))
+                                    .copy(widthPercent = favorite.frameWidthPercent, backgroundBlurPercent = favorite.backgroundBlurPercent, backgroundMaskPercent = favorite.backgroundMaskPercent))
                         }
                     },
                     onMetadataSettingsChanged = { updated ->
@@ -1671,101 +1675,74 @@ internal fun PhotoFilterEditor(
         val chooserFilters = filters.orderForCategory(category, favoriteKeys) {
             BuiltInPhotoFilters.catalogKey(it.id) ?: it.id
         }
-        val dialogMaxHeight = (LocalConfiguration.current.screenHeightDp - 160)
-            .coerceIn(360, 440)
-            .dp
-        Dialog(
-            onDismissRequest = { showFullChooser = false },
-            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
-        ) {
+        val dialogMaxHeight = (LocalConfiguration.current.screenHeightDp - 120).coerceIn(120, 440).dp
+        Dialog(onDismissRequest = { showFullChooser = false },
+            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
             Surface(
-                modifier = Modifier.padding(horizontal = 24.dp).width(280.dp),
+                modifier = Modifier.padding(horizontal = 24.dp).width(320.dp),
                 shape = RoundedCornerShape(18.dp),
-                color = colors.glassSurface.copy(alpha = 0.92f),
+                color = colors.glassSurface.copy(alpha = .92f),
                 border = BorderStroke(1.dp, colors.glassPanelBorder),
                 shadowElevation = 6.dp,
             ) {
-                CompositionLocalProvider(LocalMinimumInteractiveComponentEnforcement provides false) {
-                    Row(
-                        Modifier.padding(10.dp).heightIn(max = dialogMaxHeight).fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Column(
-                            modifier = Modifier.width(84.dp).verticalScroll(rememberScrollState()),
-                            verticalArrangement = Arrangement.spacedBy(2.dp),
-                        ) {
-                            PhotoFilterCategory.entries.forEach { item ->
-                                val selectedCategory = item == category
-                                Surface(
-                                    onClick = { chooserCategory = item.name },
+                Column(Modifier.padding(10.dp).heightIn(max = dialogMaxHeight)) {
+                    LutChooserHeader(off = !enabled,
+                        offLabel = stringResource(R.string.photo_filter_turn_off),
+                        onOff = { haptics.tick(); onDisabled(); showFullChooser = false })
+                    Row(Modifier.weight(1f, fill = false).fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        androidx.compose.foundation.lazy.LazyColumn(Modifier.weight(.36f),
+                            verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            items(PhotoFilterCategory.entries.size) { index ->
+                                val item = PhotoFilterCategory.entries[index]
+                                Surface(onClick = { chooserCategory = item.name },
                                     shape = RoundedCornerShape(8.dp),
-                                    color = if (selectedCategory) filterAccent.copy(alpha = 0.18f)
-                                    else Color.Transparent,
-                                    modifier = Modifier.fillMaxWidth().heightIn(min = 40.dp),
-                                ) {
-                                    Box(contentAlignment = Alignment.CenterStart) {
-                                        Text(
-                                            text = item.title,
-                                            color = if (selectedCategory) filterAccent
-                                            else colors.onSurfaceVariant,
-                                            fontWeight = if (selectedCategory) FontWeight.SemiBold
-                                            else FontWeight.Normal,
-                                            style = MaterialTheme.typography.labelLarge,
-                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                                        )
-                                    }
+                                    color = if (item == category) filterAccent.copy(alpha = .14f) else Color.Transparent,
+                                    modifier = Modifier.fillMaxWidth()) {
+                                    Text(item.title, style = MaterialTheme.typography.labelLarge,
+                                        color = if (item == category) filterAccent else colors.onSurfaceVariant,
+                                        maxLines = 2, overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 10.dp))
                                 }
                             }
                         }
-                        Column(
-                            modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            chooserFilters.forEach { preset ->
-                                val isSelected = enabled && preset.id == selectedId
-                                val isFavorite = favoriteKeys.contains(
-                                    BuiltInPhotoFilters.catalogKey(preset.id)
-                                )
-                                Surface(
-                                    onClick = {
+                        key(category) {
+                            val scroll = androidx.compose.foundation.lazy.rememberLazyListState(
+                                initialFirstVisibleItemIndex = chooserFilters.indexOfFirst {
+                                    enabled && it.id == selectedId
+                                }.coerceAtLeast(0))
+                            androidx.compose.foundation.lazy.LazyColumn(Modifier.weight(.64f), state = scroll,
+                                verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                items(chooserFilters.size, key = { chooserFilters[it].id }) { index ->
+                                    val preset = chooserFilters[index]
+                                    val isSelected = enabled && preset.id == selectedId
+                                    val isFavorite = BuiltInPhotoFilters.catalogKey(preset.id) in favoriteKeys
+                                    Surface(onClick = {
+                                        haptics.tick()
                                         onSelected(preset.id)
                                         onIntensityChanged(preset.id, rememberedIntensity(preset.id))
                                         showFullChooser = false
-                                    },
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = if (isSelected) filterAccent.copy(alpha = 0.14f)
-                                    else Color.Transparent,
-                                    modifier = Modifier.fillMaxWidth().heightIn(min = 40.dp),
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        if (isFavorite) {
-                                            Icon(
-                                                Icons.Rounded.Star,
-                                                contentDescription = null,
-                                                tint = colors.accentYellow,
-                                                modifier = Modifier.size(18.dp),
-                                            )
-                                            Spacer(Modifier.width(8.dp))
-                                        }
-                                        Text(
-                                            text = photoFilterDisplayName(preset),
-                                            color = colors.onBackground,
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            modifier = Modifier.weight(1f),
-                                        )
+                                    }, shape = RoundedCornerShape(8.dp),
+                                        color = if (isSelected) filterAccent.copy(alpha = .18f) else Color.Transparent,
+                                        modifier = Modifier.fillMaxWidth()) {
+                                        Text(photoFilterDisplayName(preset),
+                                            color = when {
+                                                isFavorite -> colors.accentYellow
+                                                isSelected -> filterAccent
+                                                else -> colors.onBackground
+                                            }, style = MaterialTheme.typography.labelLarge,
+                                            maxLines = 2, overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp))
                                     }
                                 }
                             }
                         }
                     }
                 }
-                }
             }
         }
     }
+}
 
 internal fun nextPhotoFilterSelections(
     filters: List<PhotoFilterPreset>,
@@ -2541,24 +2518,62 @@ private fun PhotoFrameMetadataInlineSettings(
         modifier = modifier
             .fillMaxWidth()
             .bringIntoViewRequester(bringIntoViewRequester)
+            .animateContentSize(tween(240))
             .clip(RoundedCornerShape(12.dp))
             .background(colors.glassSurface.copy(alpha = 0.58f))
             .border(1.dp, colors.glassPanelBorder, RoundedCornerShape(12.dp))
             .padding(8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        if (preset != PhotoFramePreset.IMMERSIVE) {
-            ReleaseCommitWheel(
-                options = remember { (100..200 step 10).toList() },
-                selected = settings.widthPercent,
-                optionLabel = { "$it%" },
-                onValueCommitted = { onSettingsChanged(settings.copy(widthPercent = it)) },
-                onDetent = onDetent,
-                label = stringResource(R.string.photo_frame_width),
-                wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
-                accentColor = colors.accentOrange,
-                modifier = Modifier.fillMaxWidth(),
-            )
+        androidx.compose.animation.AnimatedVisibility(
+            visible = preset != PhotoFramePreset.IMMERSIVE,
+            enter = androidx.compose.animation.fadeIn(tween(180, delayMillis = 60)) +
+                androidx.compose.animation.expandVertically(tween(240)),
+            exit = androidx.compose.animation.fadeOut(tween(120)) +
+                androidx.compose.animation.shrinkVertically(tween(240)),
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                ReleaseCommitWheel(
+                    options = remember { (100..200 step 10).toList() },
+                    selected = settings.widthPercent,
+                    optionLabel = { "$it%" },
+                    onValueCommitted = { onSettingsChanged(settings.copy(widthPercent = it)) },
+                    onDetent = onDetent,
+                    enabled = preset != PhotoFramePreset.IMMERSIVE,
+                    label = stringResource(R.string.photo_frame_width),
+                    wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
+                    accentColor = colors.accentOrange,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = preset.supportsBackdropControls(),
+                    enter = androidx.compose.animation.fadeIn(tween(180, delayMillis = 60)) +
+                        androidx.compose.animation.expandVertically(tween(240)),
+                    exit = androidx.compose.animation.fadeOut(tween(120)) +
+                        androidx.compose.animation.shrinkVertically(tween(240)),
+                ) {
+                    // Switching presets discards any unfinished gesture belonging to the old settings.
+                    key(preset) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            val levels = remember { (0..200 step 10).toList() }
+                            ReleaseCommitWheel(options = levels, selected = settings.backgroundBlurPercent,
+                                optionLabel = { "$it%" }, label = stringResource(R.string.photo_frame_background_blur),
+                                onValueCommitted = { onSettingsChanged(settings.copy(backgroundBlurPercent = it)) },
+                                onDetent = onDetent, enabled = preset.supportsBackdropControls(), wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
+                                accentColor = colors.accentOrange, modifier = Modifier.weight(1f))
+                            ReleaseCommitWheel(options = levels, selected = settings.backgroundMaskPercent,
+                                optionLabel = { "$it%" }, label = stringResource(R.string.photo_frame_background_mask),
+                                onValueCommitted = { onSettingsChanged(settings.copy(backgroundMaskPercent = it)) },
+                                onDetent = onDetent, enabled = preset.supportsBackdropControls(), wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
+                                accentColor = colors.accentOrange, modifier = Modifier.weight(1f))
+                        }
+                    }
+                }
+                Box(
+                    Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp)
+                        .height(1.dp).background(colors.glassPanelBorder)
+                )
+            }
         }
         if (com.ztransfer.BuildConfig.DEBUG && debugBrandLabel != null && onCycleDebugBrand != null) {
             FilterChip(

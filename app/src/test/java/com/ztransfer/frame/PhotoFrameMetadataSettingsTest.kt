@@ -9,6 +9,56 @@ import java.time.LocalDate
 import java.util.Locale
 
 class PhotoFrameMetadataSettingsTest {
+    @Test fun backdropDefaultsCompatibilityAndBoundedPreviewResolution() {
+        val preset = PhotoFramePreset.MIST
+        val original = defaultPhotoFrameMetadataSettings(preset).copy(widthPercent = 130)
+        val oldEncoding = encodePhotoFrameMetadataSettings(mapOf(preset to original))
+        val restored = decodePhotoFrameMetadataSettings(oldEncoding).getValue(preset)
+        assertEquals(100, restored.backgroundBlurPercent)
+        assertEquals(100, restored.backgroundMaskPercent)
+        assertEquals(130, restored.widthPercent)
+        assertEquals(0, normalizeBackdropPercent(Int.MIN_VALUE))
+        assertEquals(200, normalizeBackdropPercent(Int.MAX_VALUE))
+        assertEquals(70, normalizeBackdropPercent(73))
+        assertEquals(192, backdropPreviewLongEdge(preset, 100))
+        assertEquals(1024, backdropPreviewLongEdge(preset, 0))
+        assertEquals(384, backdropPreviewLongEdge(preset, 10))
+        PhotoFramePreset.entries.forEach { style ->
+            (0..200 step 10).forEach { level ->
+                val edge = backdropPreviewLongEdge(style, level)
+                assertTrue(edge in 192..1024)
+                if (!style.supportsBackdropControls()) assertEquals(192, edge)
+            }
+        }
+    }
+
+    @Test fun backdropChangesOutputIdentityIndependentlyWithoutChangingMetadataNeeds() {
+        for (preset in PhotoFramePreset.entries.filter { it.supportsBackdropControls() }) {
+            val original = defaultPhotoFrameMetadataSettings(preset)
+            val blur = original.copy(backgroundBlurPercent = 30)
+            val mask = original.copy(backgroundMaskPercent = 30)
+            val name = photoFrameOutputName("DSC_0001.JPG", preset, metadataSettings = original)
+            assertTrue(name != photoFrameOutputName("DSC_0001.JPG", preset, metadataSettings = blur))
+            assertTrue(name != photoFrameOutputName("DSC_0001.JPG", preset, metadataSettings = mask))
+            assertTrue(photoFrameOutputName("DSC_0001.JPG", preset, metadataSettings = blur) !=
+                photoFrameOutputName("DSC_0001.JPG", preset, metadataSettings = mask))
+            assertEquals(original.requiresCameraMetadata, blur.requiresCameraMetadata)
+            assertEquals(original.requiresCameraMetadata, mask.requiresCameraMetadata)
+        }
+    }
+
+    @Test fun backdropSettingsRoundTripAndInactiveStylesDoNotChangeFingerprint() {
+        PhotoFramePreset.entries.forEach { preset ->
+            val defaults = defaultPhotoFrameMetadataSettings(preset)
+            val adjusted = defaults.copy(backgroundBlurPercent = 0, backgroundMaskPercent = 170)
+            assertEquals(adjusted, decodePhotoFrameMetadataSettings(encodePhotoFrameMetadataSettings(mapOf(preset to adjusted)))[preset])
+            if (!preset.supportsBackdropControls()) {
+                assertEquals(photoFrameMetadataSettingsFingerprintToken(preset, defaults),
+                    photoFrameMetadataSettingsFingerprintToken(preset, adjusted))
+            } else assertTrue(photoFrameMetadataSettingsFingerprintToken(preset, adjusted) != null)
+        }
+    }
+
     @Test
     fun brandCycleAndLogoSettingsSurvivePersistenceForEveryPreset() {
         PhotoFramePreset.entries.forEach { preset ->

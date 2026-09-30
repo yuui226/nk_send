@@ -651,4 +651,7 @@
     <string name="photo_frame_width">寬度</string>
     <string name="lut_uncategorized">未分類</string>
     <string name="lut_turn_off">關閉 LUT</string>
+    <string name="photo_filter_turn_off">關閉濾鏡</string>
+    <string name="photo_frame_background_blur">背景模糊</string>
+    <string name="photo_frame_background_mask">遮罩濃度</string>
 </resources>

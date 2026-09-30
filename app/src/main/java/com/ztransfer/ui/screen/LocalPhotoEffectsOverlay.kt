@@ -428,12 +428,12 @@ fun LocalPhotoEffectsPage(
                     favoriteFrameEffects.firstOrNull { it.framePreset == selected }?.let { favorite ->
                         metadataSettings = metadataSettings + (selected to
                             resolvedPhotoFrameMetadataSettings(metadataSettings, selected)
-                                .copy(widthPercent = favorite.frameWidthPercent))
+                                .copy(widthPercent = favorite.frameWidthPercent, backgroundBlurPercent = favorite.backgroundBlurPercent, backgroundMaskPercent = favorite.backgroundMaskPercent))
                     }
                 },
                 onMetadataSettingsChanged = { updated ->
                     favoriteFrameEffects = favoriteFrameEffects.map {
-                        if (it.framePreset == preset) it.copy(frameWidthPercent = updated.widthPercent) else it
+                        if (it.framePreset == preset) it.copy(frameWidthPercent = updated.widthPercent, backgroundBlurPercent = updated.backgroundBlurPercent, backgroundMaskPercent = updated.backgroundMaskPercent) else it
                     }
                     val normalized = normalizePhotoFrameMetadataSettings(updated)
                         .withoutLocationFields()
@@ -477,6 +477,8 @@ fun LocalPhotoEffectsPage(
                             favoritePreset,
                             favoriteWatermark,
                             resolvedPhotoFrameMetadataSettings(metadataSettings, favoritePreset).widthPercent,
+                            resolvedPhotoFrameMetadataSettings(metadataSettings, favoritePreset).backgroundBlurPercent,
+                            resolvedPhotoFrameMetadataSettings(metadataSettings, favoritePreset).backgroundMaskPercent,
                         )
                     }
                 },
@@ -487,6 +489,8 @@ fun LocalPhotoEffectsPage(
                                 favoritePreset,
                                 favoriteWatermark,
                                 resolvedPhotoFrameMetadataSettings(metadataSettings, favoritePreset).widthPercent,
+                            resolvedPhotoFrameMetadataSettings(metadataSettings, favoritePreset).backgroundBlurPercent,
+                            resolvedPhotoFrameMetadataSettings(metadataSettings, favoritePreset).backgroundMaskPercent,
                             )
                         } else {
                             favorite

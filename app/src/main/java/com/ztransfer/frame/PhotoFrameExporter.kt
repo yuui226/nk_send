@@ -1042,6 +1042,7 @@ object PhotoFrameExporter {
                 filter = filter,
                 probeSessionId = probeSessionId,
                 widthPercent = metadataSettings.widthPercent,
+                backdropSettings = metadataSettings,
             )
         }
         val decodeStartedAtMs = generationProbeClock()
@@ -1083,6 +1084,7 @@ object PhotoFrameExporter {
                 watermark,
                 borderEnabled,
                 widthPercent = metadataSettings.widthPercent,
+                backdropSettings = metadataSettings,
             )
             recordGenerationStage(
                 probeSessionId,
@@ -1595,6 +1597,7 @@ object PhotoFrameExporter {
                 backdropSource = source,
                 longEdge = longEdge,
                 widthPercent = metadataSettings.widthPercent,
+                backdropSettings = metadataSettings,
             )
         } finally {
             if (input !== source) input.recycle()
@@ -1611,6 +1614,7 @@ object PhotoFrameExporter {
         backdropSource: Bitmap = source,
         longEdge: Int? = null,
         widthPercent: Int = 100,
+        backdropSettings: PhotoFrameMetadataSettings = defaultPhotoFrameMetadataSettings(preset),
     ): Bitmap {
         require(longEdge == null || longEdge > 0)
         if (!borderEnabled) {
@@ -1644,13 +1648,14 @@ object PhotoFrameExporter {
             calculateOriginalQualityFrameLayout(source.width, source.height, preset)
         }
         val expandedLayout = layout.withFrameWidth(preset, widthPercent).fitPreview(longEdge)
-        return renderFrameWithLayout(context, source, metadata, preset, watermark, backdropSource, longEdge, expandedLayout)
+        return renderFrameWithLayout(context, source, metadata, preset, watermark, backdropSource, longEdge, expandedLayout, backdropSettings)
     }
 
     private fun renderFrameWithLayout(
         context: Context, source: Bitmap, metadata: PhotoFrameMetadata,
         preset: PhotoFramePreset, watermark: PhotoFrameWatermark, backdropSource: Bitmap,
         longEdge: Int?, layout: PhotoFrameLayout,
+        backdropSettings: PhotoFrameMetadataSettings,
     ): Bitmap {
         if (
             longEdge == null &&
@@ -1698,10 +1703,11 @@ object PhotoFrameExporter {
                     metadata,
                     preset,
                     watermark,
+                    backdropSettings,
                 )
                 return output
             }
-            drawBackdrop(canvas, backdropSource, preset)
+            drawBackdrop(canvas, backdropSource, preset, backdropSettings)
 
             val photoRect = RectF(
                 layout.photoLeft,
@@ -1826,7 +1832,10 @@ object PhotoFrameExporter {
         }
     }
 
-    private fun drawBackdrop(canvas: Canvas, source: Bitmap, preset: PhotoFramePreset) {
+    private fun drawBackdrop(canvas: Canvas, source: Bitmap, preset: PhotoFramePreset,
+        backdropSettings: PhotoFrameMetadataSettings) {
+        val blur = backdropSettings.backgroundBlurPercent.coerceIn(0, 200)
+        fun mask(alpha: Int) = (alpha * backdropSettings.backgroundMaskPercent.coerceIn(0, 200) / 100f).roundToInt().coerceIn(0, 255)
         when (preset) {
             PhotoFramePreset.MINIMAL -> {
                 // 极轻的暖纸渐变比纯白更耐看，也能让白色照片边缘和阴影保持可见。
@@ -1855,7 +1864,7 @@ object PhotoFrameExporter {
             PhotoFramePreset.FILM_GALLERY -> {
                 // 先缩图，再做两轮可控盒式模糊，最后双线性放大。相比单纯把 72px 图硬拉大，
                 // 渐变更连续、没有色块，同时不依赖仅 API 31 可用的 RenderEffect。
-                val blurLongEdge = 192
+                val blurLongEdge = if (blur in 1..49) 384 else 192
                 val blurWidth: Int
                 val blurHeight: Int
                 if (canvas.width >= canvas.height) {
@@ -1867,37 +1876,44 @@ object PhotoFrameExporter {
                     blurWidth =
                         (blurLongEdge * canvas.width.toFloat() / canvas.height).roundToInt().coerceAtLeast(96)
                 }
-                val tiny = Bitmap.createBitmap(blurWidth, blurHeight, Bitmap.Config.ARGB_8888)
-                try {
-                    val tinyCanvas = Canvas(tiny)
-                    tinyCanvas.drawCenterCrop(
-                        source,
-                        RectF(0f, 0f, blurWidth.toFloat(), blurHeight.toFloat()),
-                    )
-                    blurBitmapInPlace(tiny, radius = 8, passes = 2)
-                    // CINEMA overlays have no high-frequency detail. Compositing them on the
-                    // 192px proxy before its single upscale avoids two extra 31MP canvas passes.
-                    if (
-                        preset == PhotoFramePreset.CINEMA ||
-                        preset == PhotoFramePreset.FILM_GALLERY
-                    ) {
-                        drawCinemaBackdropTreatment(tinyCanvas)
+                if (blur == 0) {
+                    canvas.drawCenterCrop(source, RectF(0f, 0f, canvas.width.toFloat(), canvas.height.toFloat()))
+                    if (preset == PhotoFramePreset.CINEMA || preset == PhotoFramePreset.FILM_GALLERY) {
+                        drawCinemaBackdropTreatment(canvas, backdropSettings.backgroundMaskPercent)
                     }
-                    canvas.drawBitmap(
-                        tiny,
-                        null,
-                        RectF(0f, 0f, canvas.width.toFloat(), canvas.height.toFloat()),
-                        Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG),
-                    )
-                } finally {
-                    tiny.recycle()
+                } else {
+                    val tiny = Bitmap.createBitmap(blurWidth, blurHeight, Bitmap.Config.ARGB_8888)
+                    try {
+                        val tinyCanvas = Canvas(tiny)
+                        tinyCanvas.drawCenterCrop(
+                            source,
+                            RectF(0f, 0f, blurWidth.toFloat(), blurHeight.toFloat()),
+                        )
+                        blurBitmapInPlace(tiny, radius = (8f * blur / 100f * blurLongEdge / 192f).roundToInt().coerceAtLeast(1), passes = 2)
+                        // CINEMA overlays have no high-frequency detail. Compositing them on the
+                        // 192px proxy before its single upscale avoids two extra 31MP canvas passes.
+                        if (
+                            preset == PhotoFramePreset.CINEMA ||
+                            preset == PhotoFramePreset.FILM_GALLERY
+                        ) {
+                            drawCinemaBackdropTreatment(tinyCanvas, backdropSettings.backgroundMaskPercent)
+                        }
+                        canvas.drawBitmap(
+                            tiny,
+                            null,
+                            RectF(0f, 0f, canvas.width.toFloat(), canvas.height.toFloat()),
+                            Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG),
+                        )
+                    } finally {
+                        tiny.recycle()
+                    }
                 }
 
                 when (preset) {
                     PhotoFramePreset.MIST -> {
                         // 只轻提亮，不抹掉照片本身的主色；底部连续暗化，为白色品牌/参数提供
                         // 稳定对比度。雪景会得到银灰质感，蓝天则保留克制的蓝色氛围。
-                        canvas.drawColor(Color.argb(62, 238, 244, 248))
+                        canvas.drawColor(Color.argb(mask(62), 238, 244, 248))
                         Paint(Paint.ANTI_ALIAS_FLAG).apply {
                             shader = LinearGradient(
                                 0f,
@@ -1919,7 +1935,7 @@ object PhotoFrameExporter {
                     }
                     PhotoFramePreset.CINEMA -> Unit
                     PhotoFramePreset.FILM_GALLERY -> {
-                        canvas.drawColor(Color.argb(66, 18, 12, 10))
+                        canvas.drawColor(Color.argb(mask(66), 18, 12, 10))
                         Paint(Paint.ANTI_ALIAS_FLAG).apply {
                             shader = LinearGradient(
                                 0f,
@@ -1927,7 +1943,7 @@ object PhotoFrameExporter {
                                 0f,
                                 canvas.height.toFloat(),
                                 Color.argb(0, 0, 0, 0),
-                                Color.argb(92, 15, 10, 8),
+                                Color.argb(mask(92), 15, 10, 8),
                                 Shader.TileMode.CLAMP,
                             )
                             canvas.drawRect(
@@ -1948,8 +1964,8 @@ object PhotoFrameExporter {
                                 0f,
                                 0f,
                                 canvas.height.toFloat(),
-                                Color.argb(92, 250, 253, 255),
-                                Color.argb(132, 231, 239, 245),
+                                Color.argb(mask(92), 250, 253, 255),
+                                Color.argb(mask(132), 231, 239, 245),
                                 Shader.TileMode.CLAMP,
                             )
                             canvas.drawRect(
@@ -1981,7 +1997,7 @@ object PhotoFrameExporter {
             PhotoFramePreset.GALLERY_MAT,
             PhotoFramePreset.COLOR_ARCHIVE -> canvas.drawColor(Color.WHITE)
             PhotoFramePreset.FILM_EDGE -> canvas.drawColor(Color.rgb(8, 8, 9))
-            PhotoFramePreset.PARAMETER_POSTER -> drawBackdrop(canvas, source, PhotoFramePreset.CINEMA)
+            PhotoFramePreset.PARAMETER_POSTER -> drawBackdrop(canvas, source, PhotoFramePreset.CINEMA, backdropSettings)
         }
     }
 
@@ -2588,8 +2604,8 @@ object PhotoFrameExporter {
         }
     }
 
-    private fun drawCinemaBackdropTreatment(canvas: Canvas) {
-        canvas.drawColor(Color.argb(150, 3, 9, 15))
+    private fun drawCinemaBackdropTreatment(canvas: Canvas, maskPercent: Int) {
+        canvas.drawColor(Color.argb((150 * maskPercent.coerceIn(0, 200) / 100f).roundToInt().coerceIn(0, 255), 3, 9, 15))
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
             shader = LinearGradient(
                 0f,
@@ -3071,6 +3087,7 @@ object PhotoFrameExporter {
         filter: PhotoFilterSelection?,
         probeSessionId: Long,
         widthPercent: Int = 100,
+        backdropSettings: PhotoFrameMetadataSettings = defaultPhotoFrameMetadataSettings(preset),
     ): Bitmap = withRegionDecoder(
         context = context,
         resolver = resolver,
@@ -3086,8 +3103,13 @@ object PhotoFrameExporter {
         val tileBytes = decoder.width.toLong() * regionHeight * 4L
         val scratchBytes = if (filter != null)
             PhotoFilterRenderer.scratchPixelCount(decoder.width, regionHeight).toLong() * 4L else 0L
+        val backdropEdge = backdropPreviewLongEdge(preset, backdropSettings.backgroundBlurPercent)
+        // A low-blur background needs a sharper proxy, including a temporary orientation copy.
+        // Default effects retain their original allocation threshold.
+        val extraBackdropBytes = if (backdropEdge > 192) backdropEdge.toLong() * backdropEdge * 8L else 0L
         ensurePhotoAllocation(layout.canvasWidth, layout.canvasHeight,
-            extraBytes = tileBytes + scratchBytes + if (filter != null) 8L * 1024 * 1024 else 0L)
+            extraBytes = tileBytes + scratchBytes + extraBackdropBytes +
+                (if (filter != null) 8L * 1024 * 1024 else 0L))
         val output = Bitmap.createBitmap(
             layout.canvasWidth,
             layout.canvasHeight,
@@ -3165,7 +3187,7 @@ object PhotoFrameExporter {
                 val basePreview = when (preset) {
                     PhotoFramePreset.FILM_GALLERY,
                     PhotoFramePreset.COLOR_ARCHIVE,
-                    PhotoFramePreset.PARAMETER_POSTER -> decodeRegionPreview(decoder, orientation)
+                    PhotoFramePreset.PARAMETER_POSTER -> decodeRegionPreview(decoder, orientation, backdropEdge)
                     else -> null
                 }
                 val preview = if (
@@ -3182,7 +3204,7 @@ object PhotoFrameExporter {
                     basePreview
                 }
                 try {
-                    drawEditorialFrameBase(canvas, preview, layout, preset)
+                    drawEditorialFrameBase(canvas, preview, layout, preset, backdropSettings)
                 } finally {
                     preview?.recycle()
                 }
@@ -3233,7 +3255,7 @@ object PhotoFrameExporter {
 
             // Backdrop color/blur must describe the original photo, not the filtered photo layer.
             val previewStartedAtMs = generationProbeClock()
-            val unfilteredPreview = decodeRegionPreview(decoder, orientation)
+            val unfilteredPreview = decodeRegionPreview(decoder, orientation, backdropEdge)
             recordGenerationStage(
                 probeSessionId,
                 "backdrop_preview_decode",
@@ -3241,7 +3263,7 @@ object PhotoFrameExporter {
             ) { "preview=${unfilteredPreview.width}x${unfilteredPreview.height}" }
             try {
                 val backdropStartedAtMs = generationProbeClock()
-                drawBackdrop(canvas, unfilteredPreview, preset)
+                drawBackdrop(canvas, unfilteredPreview, preset, backdropSettings)
                 recordGenerationStage(
                     probeSessionId,
                     "backdrop_draw",
@@ -3433,9 +3455,10 @@ object PhotoFrameExporter {
     private fun decodeRegionPreview(
         decoder: BitmapRegionDecoder,
         orientation: Int,
+        longEdge: Int,
     ): Bitmap {
         var sample = 1
-        while (maxOf(decoder.width / sample, decoder.height / sample) > 192) sample *= 2
+        while (maxOf(decoder.width / sample, decoder.height / sample) > longEdge) sample *= 2
         val preview = decoder.decodeRegion(
             Rect(0, 0, decoder.width, decoder.height),
             BitmapFactory.Options().apply {
@@ -3610,12 +3633,14 @@ object PhotoFrameExporter {
         metadata: PhotoFrameMetadata,
         preset: PhotoFramePreset,
         watermark: PhotoFrameWatermark,
+        backdropSettings: PhotoFrameMetadataSettings,
     ) {
         drawEditorialFrameBase(
             canvas,
             if (preset == PhotoFramePreset.COLOR_ARCHIVE) source else backdropSource,
             layout,
             preset,
+            backdropSettings,
         )
         val photo = layout.photoRect()
         val photoPaint = Paint(
@@ -3644,6 +3669,7 @@ object PhotoFrameExporter {
         backdropSource: Bitmap?,
         layout: PhotoFrameLayout,
         preset: PhotoFramePreset,
+        backdropSettings: PhotoFrameMetadataSettings,
     ) {
         require(preset.isEditorialFrame())
         val photo = layout.photoRect()
@@ -3675,13 +3701,14 @@ object PhotoFrameExporter {
                     canvas,
                     requireNotNull(backdropSource) { "Film gallery needs a backdrop source" },
                     preset,
+                    backdropSettings,
                 )
                 canvas.drawRect(filmGalleryOuterRect(layout), Paint(Paint.ANTI_ALIAS_FLAG).apply {
                     color = Color.rgb(13, 14, 16)
                 })
             }
             PhotoFramePreset.PARAMETER_POSTER -> {
-                drawBackdrop(canvas, requireNotNull(backdropSource), PhotoFramePreset.CINEMA)
+                drawBackdrop(canvas, requireNotNull(backdropSource), PhotoFramePreset.CINEMA, backdropSettings)
                 drawPhotoElevation(canvas, photo, parameterPosterCornerRadius(layout), preset)
             }
             PhotoFramePreset.FILM_EDGE -> canvas.drawColor(Color.rgb(7, 7, 8))
