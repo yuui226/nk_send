@@ -2,6 +2,10 @@ package com.ztransfer.ui.screen
 
 import android.net.Uri
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -63,6 +67,32 @@ internal fun LutCategoryList(
             LazyColumn(Modifier.weight(.64f), state = optionScroll, verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 items(visible, key = { it.uri.toString() }) { content(it) }
             }
+        }
+    }
+}
+
+/** Shared compact header; global actions never scroll with either list. */
+@Composable
+internal fun LutChooserHeader(off: Boolean, folderLabel: String, enabled: Boolean = true,
+    onOff: () -> Unit, onFolder: () -> Unit) {
+    val colors = AppTheme.colors
+    Row(Modifier.fillMaxWidth().padding(bottom = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.weight(1f).clip(RoundedCornerShape(6.dp))
+            .clickable(enabled = enabled, role = Role.Button, onClick = onOff)
+            .heightIn(min = 30.dp).padding(horizontal = 6.dp, vertical = 5.dp),
+            contentAlignment = Alignment.CenterStart) {
+            Text(stringResource(R.string.lut_turn_off), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.labelMedium,
+                color = if (off) colors.accentBlue else colors.onSurfaceVariant)
+        }
+        Box(Modifier.weight(1f).clip(RoundedCornerShape(6.dp))
+            .clickable(enabled = enabled, role = Role.Button, onClick = onFolder)
+            .heightIn(min = 30.dp).padding(horizontal = 6.dp, vertical = 5.dp),
+            contentAlignment = Alignment.CenterEnd) {
+            Text(folderLabel, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant)
         }
     }
 }

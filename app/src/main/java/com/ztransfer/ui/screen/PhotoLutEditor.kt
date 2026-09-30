@@ -9,7 +9,6 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.window.Dialog
@@ -133,8 +132,9 @@ internal fun PhotoLutEditor(state: PhotoLutEditorState, hapticsEnabled: Boolean)
                 shadowElevation = 6.dp,
             ) {
                 Column(Modifier.padding(10.dp).heightIn(max = maxHeight)) {
-                    TextButton(onClick = { haptics.tick(); state.choose(null); showChooser = false },
-                        modifier = Modifier.fillMaxWidth()) { Text(off, color = if (current == null) lutAccent else colors.onBackground) }
+                    LutChooserHeader(current == null, stringResource(R.string.lut_change_folder),
+                        onOff = { haptics.tick(); state.choose(null); showChooser = false },
+                        onFolder = { showChooser = false; openFolder() })
                     LutCategoryList(ordered, current, modifier = Modifier.weight(1f, fill = false).fillMaxWidth()) { file ->
                         Surface(
                             onClick = { haptics.tick(); state.choose(file.uri); showChooser = false },
@@ -142,15 +142,17 @@ internal fun PhotoLutEditor(state: PhotoLutEditorState, hapticsEnabled: Boolean)
                             color = if (file.uri == current) lutAccent.copy(alpha = .18f) else Color.Transparent,
                             modifier = Modifier.fillMaxWidth(),
                         ) {
-                            Text(file.label, maxLines = 2, overflow = TextOverflow.Ellipsis, color = if (file.uri == current) lutAccent else colors.onBackground,
+                            Text(file.label, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                                color = when {
+                                    file.uri.toString() in state.favorites -> colors.accentYellow
+                                    file.uri == current -> lutAccent
+                                    else -> colors.onBackground
+                                },
                                 style = MaterialTheme.typography.labelLarge,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 12.dp))
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp))
                         }
                     }
-                    TextButton(onClick = { showChooser = false; openFolder() },
-                        modifier = Modifier.fillMaxWidth()) {
-                        Text(stringResource(R.string.lut_change_folder), color = lutAccent)
-                    }
+
                 }
             }
         }

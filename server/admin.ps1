@@ -840,37 +840,47 @@ function Get-OssCredentials {
     }
 }
 
+function Get-OssProxy {
+    # Finder does not inherit terminal proxy settings; fall back to macOS system proxies.
+    foreach ($name in @('https_proxy', 'HTTPS_PROXY', 'all_proxy', 'ALL_PROXY', 'http_proxy', 'HTTP_PROXY')) {
+        $value = [Environment]::GetEnvironmentVariable($name, 'Process')
+        if (-not [string]::IsNullOrWhiteSpace($value)) { return $value.Trim() }
+    }
+    if ($AdminIsMac) {
+        $settings = @{}
+        & /usr/sbin/scutil --proxy | ForEach-Object {
+            if ($_ -match '^\s*(\w+)\s*:\s*(.*?)\s*$') { $settings[$Matches[1]] = $Matches[2] }
+        }
+        foreach ($kind in @('HTTPS', 'HTTP', 'SOCKS')) {
+            if ($settings["${kind}Enable"] -eq '1' -and $settings["${kind}Proxy"] -and $settings["${kind}Port"]) {
+                $scheme = if ($kind -eq 'SOCKS') { 'socks5' } else { 'http' }
+                $builder = [UriBuilder]::new($scheme, $settings["${kind}Proxy"], [int]$settings["${kind}Port"])
+                return $builder.Uri.AbsoluteUri
+            }
+        }
+    }
+    return $null
+}
+
 function Invoke-OssUtilAuthenticated($ossutil, $commandArgs) {
     $credential = Get-OssCredentials
     if (-not $credential) { return 97 }
     $previousAccessKeyId = $env:OSS_ACCESS_KEY_ID
     $previousAccessKeySecret = $env:OSS_ACCESS_KEY_SECRET
-    # ossutil inherits shell proxy variables (including lowercase variants on macOS).
-    # Scope direct access to this invocation; restore the admin process even on failure.
-    $proxyNames = @('HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy', 'NO_PROXY', 'no_proxy')
-    $previousProxyEnvironment = @($proxyNames | ForEach-Object {
-        [pscustomobject]@{ Name = $_; Value = [Environment]::GetEnvironmentVariable($_, 'Process') }
-    })
+    $proxy = Get-OssProxy
+    # Do not print the proxy URL: it can contain authentication information.
+    if ($proxy) { Write-Host "OSS 网络：使用已配置的代理。" -ForegroundColor DarkGray }
+    else { Write-Host "OSS 网络：未配置代理，使用直连。" -ForegroundColor DarkGray }
     try {
-        foreach ($name in $proxyNames) {
-            [Environment]::SetEnvironmentVariable($name, $null, 'Process')
-        }
-        [Environment]::SetEnvironmentVariable('NO_PROXY', '*', 'Process')
-        [Environment]::SetEnvironmentVariable('no_proxy', '*', 'Process')
         $env:OSS_ACCESS_KEY_ID = $credential.AccessKeyId
         $env:OSS_ACCESS_KEY_SECRET = $credential.AccessKeySecret
-        # Shared by CLI/GUI setup, upload and same-bucket copy. Explicit env mode prevents
-        # a user-level ossutil proxy setting from overriding the direct-access environment.
-        $directArgs = @($commandArgs) + @(
-            '--addressing-style', 'cname', '--proxy', 'env',
+        $networkArgs = @($commandArgs) + @(
+            '--addressing-style', 'cname', '--proxy', $(if ($proxy) { $proxy } else { 'env' }),
             '--connect-timeout', '10', '--read-timeout', '30', '--retry-times', '2'
         )
-        & $ossutil @directArgs | Out-Host
+        & $ossutil @networkArgs | Out-Host
         return $LASTEXITCODE
     } finally {
-        foreach ($entry in $previousProxyEnvironment) {
-            [Environment]::SetEnvironmentVariable($entry.Name, $entry.Value, 'Process')
-        }
         if ($null -eq $previousAccessKeyId) { Remove-Item Env:OSS_ACCESS_KEY_ID -ErrorAction SilentlyContinue }
         else { $env:OSS_ACCESS_KEY_ID = $previousAccessKeyId }
         if ($null -eq $previousAccessKeySecret) { Remove-Item Env:OSS_ACCESS_KEY_SECRET -ErrorAction SilentlyContinue }
@@ -1092,8 +1102,7 @@ function Upload-ApkToOss(
         "--content-type", "application/vnd.android.package-archive",
         "--cache-control", $cacheControl,
         "--content-disposition", $contentDisposition,
-        "--metadata", "sha256=$($meta.Sha256)",
-        "--no-progress"
+        "--metadata", "sha256=$($meta.Sha256)"
     )
     # 版本化对象由用户可见版本名 + 内容哈希命名，存在后必须保持不可变；固定地址才允许覆盖。
     $uploadArgs += if ($allowOverwrite) { "--force" } else { "--ignore-existing" }
@@ -1155,6 +1164,17 @@ function Copy-VersionedApkToLatest($meta, $target) {
     return $true
 }
 
+function Get-OssVerificationNetworkArgs {
+    $proxy = Get-OssProxy
+    if ($proxy) {
+        Write-Host "OSS 校验网络：使用已配置的代理。" -ForegroundColor DarkGray
+        # Override inherited NO_PROXY=* just as the explicit ossutil proxy does.
+        return @('--proxy', $proxy, '--noproxy', 'localhost,127.0.0.1,::1', '--connect-timeout', '10')
+    }
+    Write-Host "OSS 校验网络：未配置代理，使用直连。" -ForegroundColor DarkGray
+    return @('--noproxy', '*', '--connect-timeout', '10')
+}
+
 function Test-PublicOssApkFull($url, $expectedMeta) {
     $tmp = Join-Path ([IO.Path]::GetTempPath()) ("ztransfer-oss-verify-{0}.apk" -f [guid]::NewGuid().ToString("N"))
     try {
@@ -1162,7 +1182,8 @@ function Test-PublicOssApkFull($url, $expectedMeta) {
         $previousErrorAction = $ErrorActionPreference
         try {
             $ErrorActionPreference = "Continue"
-            & $CurlExecutable -f -sS -L --max-time 300 -H "Cache-Control: no-cache" -o $tmp -- $url
+            $networkArgs = @(Get-OssVerificationNetworkArgs)
+            & $CurlExecutable @networkArgs -f --progress-bar -S -L --max-time 300 -H "Cache-Control: no-cache" -o $tmp -- $url
             $curlExit = $LASTEXITCODE
         } finally {
             $ErrorActionPreference = $previousErrorAction
@@ -1199,7 +1220,8 @@ function Test-PublicOssApk($url, $expectedMeta) {
         $previousErrorAction = $ErrorActionPreference
         try {
             $ErrorActionPreference = "Continue"
-            & $CurlExecutable -f -sS -L --head --max-time 60 `
+            $networkArgs = @(Get-OssVerificationNetworkArgs)
+            & $CurlExecutable @networkArgs -f -sS -L --head --max-time 60 `
                 -H "Cache-Control: no-cache" -o $tmp -- $url
             $curlExit = $LASTEXITCODE
         } finally {

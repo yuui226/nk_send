@@ -3,6 +3,8 @@ package com.ztransfer.ui.screen
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -24,8 +26,6 @@ import com.ztransfer.ui.theme.AppTheme
 internal fun RemoteLutPanel(state: LutMonitorState, anchor: Rect?, landscape: Boolean,
     onFolder: () -> Unit, onFeedback: () -> Unit) {
     val colors = AppTheme.colors
-    val style = MaterialTheme.typography.bodyMedium
-    val off = stringResource(R.string.lut_off)
     val folderLabel = stringResource(if (state.folder == null || state.folderFailure == LutFolderFailure.MISSING || state.folderFailure == LutFolderFailure.DENIED) R.string.lut_choose_folder else R.string.lut_change_folder)
     val guidance = when {
         state.folder == null -> stringResource(R.string.lut_choose_hint)
@@ -37,15 +37,17 @@ internal fun RemoteLutPanel(state: LutMonitorState, anchor: Rect?, landscape: Bo
     val accessible = state.folderFailure != LutFolderFailure.MISSING && state.folderFailure != LutFolderFailure.DENIED
     RemoteChoicePopup(anchor, landscape, if (state.files.isEmpty()) 260.dp else 320.dp,
         state.closeMenuRequested, state::dismissMenu) { _, closing ->
+        Column(Modifier.weight(1f, fill = false).fillMaxWidth()
+            .padding(horizontal = 10.dp, vertical = 6.dp)) {
+        LutChooserHeader(state.active == null, folderLabel, !closing,
+            onOff = { onFeedback(); state.chooseOff() },
+            onFolder = { onFeedback(); onFolder() })
         if (guidance != null) {
             Text(guidance, color = colors.onSurfaceVariant, style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(12.dp))
             if (state.folder == null) Text(stringResource(R.string.lut_monitor_only),
                 color = colors.onSurfaceVariant, style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(horizontal = 12.dp))
-        }
-        if ((accessible && state.files.isNotEmpty()) || state.active != null || state.loading != null) {
-            LutChoice(off, state.active == null, false, !closing) { onFeedback(); state.chooseOff() }
         }
         if (accessible && state.files.isNotEmpty()) {
             LutCategoryList(state.files, state.active?.file?.uri, !closing,
@@ -54,9 +56,8 @@ internal fun RemoteLutPanel(state: LutMonitorState, anchor: Rect?, landscape: Bo
                     state.loading == file.uri, !closing) { onFeedback(); state.select(file) }
             }
         }
-        Text(folderLabel, style = style, color = colors.accentBlue,
-            modifier = Modifier.fillMaxWidth().clickable(enabled = !closing) { onFeedback(); onFolder() }
-                .padding(horizontal = 12.dp, vertical = 10.dp))
+
+        }
     }
 }
 
@@ -69,10 +70,10 @@ private fun LutChoice(text: String, selected: Boolean, pending: Boolean, enabled
             infiniteRepeatable(tween(600, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "lutOpacity")
         Modifier.graphicsLayer { this.alpha = alpha.value }
     } else Modifier
-    Text(text, style = MaterialTheme.typography.bodyMedium,
+    Text(text, style = MaterialTheme.typography.labelLarge,
         color = if (selected || pending) colors.accentBlue else colors.onBackground,
         maxLines = 2, overflow = TextOverflow.Ellipsis,
-        modifier = Modifier.fillMaxWidth().then(breathing)
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).then(breathing)
             .background(if (selected) colors.accentBlue.copy(alpha = .08f) else Color.Transparent)
             .clickable(enabled = enabled, onClick = onClick).padding(horizontal = 12.dp, vertical = 8.dp))
 }

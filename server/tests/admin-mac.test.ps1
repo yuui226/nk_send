@@ -51,18 +51,15 @@ try {
     }
     function Mock-OssUtil {
         Assert ($args[[array]::IndexOf($args, '--addressing-style') + 1] -eq 'cname') 'CNAME addressing missing'
-        Assert ($args[[array]::IndexOf($args, '--proxy') + 1] -eq 'env') 'Explicit direct proxy policy missing'
+        Assert ($args[[array]::IndexOf($args, '--proxy') + 1] -eq $(if ($script:ExpectedProxy) { $script:ExpectedProxy } else { 'env' })) 'Proxy selection incorrect'
         Assert ($args[[array]::IndexOf($args, '--retry-times') + 1] -eq '2') 'Bounded retry policy missing'
         Assert ($env:OSS_ACCESS_KEY_ID -eq 'fake-id') 'OSS access ID not passed'
         Assert ($env:OSS_ACCESS_KEY_SECRET -eq 'fake-secret') 'OSS secret not passed'
-        foreach ($name in @('HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy')) {
-            Assert ([string]::IsNullOrEmpty([Environment]::GetEnvironmentVariable($name, 'Process'))) "Proxy inherited: $name"
-        }
-        Assert ($env:NO_PROXY -eq '*') 'NO_PROXY must bypass all hosts'
-        Assert ($env:no_proxy -eq '*') 'Lowercase no_proxy must bypass all hosts'
         $global:LASTEXITCODE = $script:OssExit
     }
     function Get-OssUtilPath { return 'Mock-OssUtil' }
+    function Get-OssProxy { return $script:ExpectedProxy }
+    $script:ExpectedProxy = $null
     function Read-Host { $script:Answers.Dequeue() }
     $script:Answers = [Collections.Generic.Queue[string]]::new()
     $Answers.Enqueue(' fake-id ')
@@ -76,6 +73,7 @@ try {
     $script:OssExit = 42
     $env:HTTPS_PROXY = 'http://127.0.0.1:9999'
     $env:https_proxy = 'http://127.0.0.1:8888'
+    $script:ExpectedProxy = $env:https_proxy
     $env:NO_PROXY = 'localhost'
     Assert ((Invoke-OssUtilAuthenticated 'Mock-OssUtil' @('ls')) -eq 42) 'OSS exit code lost'
     Assert ($env:HTTPS_PROXY -eq 'http://127.0.0.1:9999') 'Uppercase proxy was not restored'
@@ -84,6 +82,13 @@ try {
     Assert ($env:OSS_ACCESS_KEY_ID -eq 'previous-id') 'OSS ID was not restored'
     Assert ($env:OSS_ACCESS_KEY_SECRET -eq 'previous-secret') 'OSS secret was not restored'
     Write-Host 'PASS: Mac keychain flow and OSS environment restoration'
+    $verifyArgs = @(Get-OssVerificationNetworkArgs)
+    Assert ($verifyArgs[[array]::IndexOf($verifyArgs, '--proxy') + 1] -eq $script:ExpectedProxy) 'Verification must share OSS proxy'
+    Assert ($verifyArgs[[array]::IndexOf($verifyArgs, '--noproxy') + 1] -ne '*') 'Verification must not bypass proxy'
+    $script:ExpectedProxy = $null
+    $verifyArgs = @(Get-OssVerificationNetworkArgs)
+    Assert ($verifyArgs[[array]::IndexOf($verifyArgs, '--noproxy') + 1] -eq '*') 'Verification direct fallback missing'
+
 
     # Native dialog cancellation must return directly, without another prompt.
     $apk = Join-Path $testDir '中文 相册 (test).apk'

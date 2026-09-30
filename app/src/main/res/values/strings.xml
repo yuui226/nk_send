@@ -632,7 +632,7 @@
     <string name="lut_off">Off</string>
     <string name="lut_choose_folder">Choose folder</string>
     <string name="lut_change_folder">Change folder</string>
-    <string name="lut_choose_hint">Choose a folder containing .cube files</string>
+    <string name="lut_choose_hint">Choose a folder containing .cube files; one level of subfolders is supported as categories.</string>
     <string name="lut_monitor_only">Monitor only; camera originals are unchanged</string>
     <string name="lut_folder_empty">No .cube files found</string>
     <string name="lut_folder_missing">Folder not found</string>
@@ -653,7 +653,8 @@
     <string name="remote_parameters">Exposure controls</string>
     <string name="remote_tool_dock">Tools</string>
     <string name="photo_lut_set_folder">Set LUT folder</string>
-    <string name="photo_lut_help">LUT: Choose a folder containing .cube files. Long-press the LUT wheel to open the list and change folders.</string>
+    <string name="photo_lut_help">LUT: Choose a folder containing .cube files; one level of subfolders is supported as categories. Long-press the wheel to choose LUTs by category or change folders.</string>
     <string name="photo_frame_width">Width</string>
     <string name="lut_uncategorized">Uncategorized</string>
+    <string name="lut_turn_off">Turn off LUT</string>
 </resources>
