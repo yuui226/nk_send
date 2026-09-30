@@ -6,6 +6,16 @@ import org.junit.Test
 
 class HomeWorkspacePagerTest {
     @Test
+    fun `quick return requires both minimum distance and downward speed`() {
+        assertFalse(shouldReturnFromWorkspace(0.14f, 5000f))
+        assertFalse(shouldReturnFromWorkspace(0.20f, 1199f))
+        assertFalse(shouldReturnFromWorkspace(0.20f, -2000f))
+        assertTrue(shouldReturnFromWorkspace(0.15f, 1200f))
+        assertTrue(shouldReturnFromWorkspace(0.30f, 0f))
+        assertFalse(shouldReturnFromWorkspace(0f, 5000f))
+    }
+
+    @Test
     fun `camera discovery pauses for the whole trip to and from local effects`() {
         assertFalse(shouldPauseConnectionDiscovery(settledPage = 0, targetPage = 0))
         assertTrue(shouldPauseConnectionDiscovery(settledPage = 0, targetPage = 1))
@@ -24,8 +34,8 @@ class HomeWorkspacePagerTest {
 
     @Test
     fun `return threshold is easier than entry threshold`() {
-        assertTrue(WORKSPACE_RETURN_SNAP_THRESHOLD >= 0.08f)
-        assertTrue(WORKSPACE_RETURN_SNAP_THRESHOLD <= 0.12f)
+        assertTrue(WORKSPACE_RETURN_SNAP_THRESHOLD >= 0.30f)
+        assertTrue(WORKSPACE_RETURN_SNAP_THRESHOLD <= 0.35f)
         assertTrue(WORKSPACE_ENTRY_SNAP_THRESHOLD >= 0.40f)
         assertTrue(WORKSPACE_RETURN_SNAP_THRESHOLD < WORKSPACE_ENTRY_SNAP_THRESHOLD)
     }
