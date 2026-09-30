@@ -668,23 +668,18 @@ fun FileListScreen(
     }
     // 监看入口离开顶部后缩进左侧；用户点开后保持完整，继续滚动或回到顶部时重置手动状态。
     var remoteExpandedAwayFromTop by remember { mutableStateOf(false) }
-    // 同一照片列表导航实例只尝试一次；跨启动累计播放六次后永久停止自动展开。
-    val remoteIntroEligible = remember(transferViewModel) {
-        transferViewModel.shouldShowRemoteEntryIntro()
-    }
+    // Each list entry offers one reminder; V2 preferences reset the old campaign once.
     var remoteIntroHandledForEntry by rememberSaveable { mutableStateOf(false) }
     var remoteIntroExpanded by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
-        if (!remoteIntroHandledForEntry && remoteIntroEligible) {
-            // 避开页面自身的入场首帧，让入口像随后自然舒展开，而不是同时抢动画焦点。
-            delay(160)
-            // 用户已经开始浏览照片时不再强行展开，避免引导态覆盖“离开顶部即收起”的规则。
-            if (!atTop) return@LaunchedEffect
-            // 真正开始展开时再记次数；此前离页既不消耗次数，回来也仍有机会看到提示。
+        if (!remoteIntroHandledForEntry && transferViewModel.shouldShowRemoteEntryIntro()) {
+            delay(800)
+            // A click during the delay permanently cancels this and future reminders.
+            if (!transferViewModel.shouldShowRemoteEntryIntro()) return@LaunchedEffect
             remoteIntroHandledForEntry = true
             transferViewModel.recordRemoteEntryIntroPlayed()
             remoteIntroExpanded = true
-            delay(2200)
+            delay(4000)
             remoteIntroExpanded = false
         }
     }
@@ -1618,8 +1613,19 @@ fun FileListScreen(
         val density = LocalDensity.current
         val hiddenTravelPx = with(density) { 48.dp.toPx() }
         val playfulLiftPx = with(density) { 6.dp.toPx() }
+        val introLabel = stringResource(R.string.remote_entry_intro)
+        val introTextStyle = MaterialTheme.typography.labelMedium.copy(
+            fontSize = 13.sp, fontWeight = FontWeight.Bold,
+        )
+        val introTextMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
+        val introLabelWidth = remember(introLabel, introTextStyle, density) {
+            with(density) {
+                introTextMeasurer.measure(introLabel, introTextStyle, softWrap = false).size.width.toDp()
+            }
+        }
+        val introButtonWidth = maxOf(140.dp, introLabelWidth + 62.dp)
         val remoteButtonWidth by animateDpAsState(
-            targetValue = if (remoteIntroExpanded) 108.dp else 52.dp,
+            targetValue = if (remoteIntroExpanded) introButtonWidth else 52.dp,
             animationSpec = if (remoteIntroExpanded) {
                 Motion.bouncy()
             } else {
@@ -1645,11 +1651,13 @@ fun FileListScreen(
                 .align(Alignment.BottomStart)
                 .navigationBarsPadding()
                 .padding(bottom = 40.dp)
-                .size(width = 140.dp, height = 56.dp),
+                .size(width = introButtonWidth + 24.dp, height = 56.dp),
             contentAlignment = Alignment.CenterStart
         ) {
             GlassButton(
                 onClick = {
+                    transferViewModel.markRemoteEntryUsed()
+                    remoteIntroExpanded = false
                     if (remoteExpanded) {
                         openRemote()
                     } else {
@@ -1710,21 +1718,27 @@ fun FileListScreen(
                             shrinkTowards = Alignment.Start,
                         ),
                 ) {
-                    Text(
-                        text = stringResource(R.string.remote_entry_intro),
+                    Box(
                         modifier = Modifier.clearAndSetSemantics { },
-                        color = if (transfersBusyVisual) {
-                            colors.onSurfaceVariant.copy(alpha = 0.62f)
-                        } else {
-                            colors.onBackground
-                        },
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontSize = 10.sp,
-                            lineHeight = 11.sp,
-                        ),
-                        fontWeight = FontWeight.SemiBold,
-                        textAlign = TextAlign.Center,
-                    )
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        val introStyle = introTextStyle
+                        // Identical text geometry for the outline and fill; no extra animation.
+                        Text(
+                            text = stringResource(R.string.remote_entry_intro),
+                            color = Color(0xFF302713),
+                            style = introStyle.copy(drawStyle = androidx.compose.ui.graphics.drawscope.Stroke(width = with(density) { 1.dp.toPx() })),
+                            maxLines = 1,
+                            softWrap = false,
+                        )
+                        Text(
+                            text = stringResource(R.string.remote_entry_intro),
+                            color = Color(0xFFFFD45A),
+                            style = introStyle,
+                            maxLines = 1,
+                            softWrap = false,
+                        )
+                    }
                 }
             }
             if (!remoteExpanded) {
@@ -1740,6 +1754,8 @@ fun FileListScreen(
                             indication = null,
                             role = Role.Button
                         ) {
+                            transferViewModel.markRemoteEntryUsed()
+                            remoteIntroExpanded = false
                             haptics.tick()
                             remoteExpandedAwayFromTop = true
                         }

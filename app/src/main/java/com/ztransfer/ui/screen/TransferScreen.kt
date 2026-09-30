@@ -509,31 +509,28 @@ fun TransferScreen(
 
                                 Spacer(modifier = Modifier.width(12.dp))
 
-                                Box(modifier = Modifier.weight(1f)) {
-                                    TransferTaskCardContent(
-                                        task = task,
-                                        displayedSpeed = displayedSpeed,
-                                        displayedFrameGenerationElapsedMs = displayedFrameGenerationElapsedMs,
-                                        modifier = Modifier.fillMaxWidth(),
-                                    )
-                                    TransferRetryButton(
-                                        visible = cardActionsVisible &&
-                                            task.canRetry && task.status != TransferStatus.CANCELLED,
-                                        enabled = cardActionsVisible &&
-                                            (task.savedOriginalOutput != null || connected || isTransferredOriginal(
-                                                task.file,
-                                                transferState.existingExportIndex,
-                                                task.destinationFolderName,
-                                            )),
-                                        onClick = {
-                                            transferViewModel.retrySingleTask(
-                                                taskId,
-                                                cameraViewModel::getCamera,
-                                            )
-                                        },
-                                        modifier = Modifier.align(Alignment.TopEnd),
-                                    )
-                                }
+                                TransferTaskCardContent(
+                                    task = task,
+                                    displayedSpeed = displayedSpeed,
+                                    displayedFrameGenerationElapsedMs = displayedFrameGenerationElapsedMs,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                TransferRetryButton(
+                                    visible = cardActionsVisible &&
+                                        task.canRetry && task.status != TransferStatus.CANCELLED,
+                                    enabled = cardActionsVisible &&
+                                        (task.savedOriginalOutput != null || connected || isTransferredOriginal(
+                                            task.file,
+                                            transferState.existingExportIndex,
+                                            task.destinationFolderName,
+                                        )),
+                                    onClick = {
+                                        transferViewModel.retrySingleTask(
+                                            taskId,
+                                            cameraViewModel::getCamera,
+                                        )
+                                    },
+                                )
 
                                 // 最尾：毛玻璃移除按钮——把本卡从队列移除。正在传输的
                                 // 不可移除（中途打断会让相机关 Wi-Fi），传完变可移除时淡入。
@@ -730,19 +727,14 @@ private fun TransferRetryButton(
 ) {
     AnimatedVisibility(
         visible = visible,
-        enter = fadeIn() + scaleIn(
-            initialScale = 0.75f,
-            transformOrigin = TransformOrigin(1f, 0f),
-        ),
-        exit = fadeOut() + scaleOut(
-            targetScale = 0.75f,
-            transformOrigin = TransformOrigin(1f, 0f),
-        ),
+        enter = fadeIn() + expandHorizontally(expandFrom = Alignment.Start),
+        exit = fadeOut() + shrinkHorizontally(shrinkTowards = Alignment.Start),
         modifier = modifier,
     ) {
         GlassButton(
             onClick = onClick,
             enabled = enabled,
+            modifier = Modifier.padding(start = 10.dp),
             shape = CircleShape,
             contentPadding = PaddingValues(6.dp),
         ) {
@@ -847,8 +839,7 @@ private fun TransferTaskCardContent(
 
     Column(modifier = modifier) {
         Row(verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            modifier = if (isFailed) Modifier.padding(end = 42.dp) else Modifier) {
+            horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             if (task.cropRecipe != null) Icon(Icons.Default.ContentCut,
                 contentDescription = stringResource(R.string.crop_task),
                 tint = colors.accentBlue, modifier = Modifier.size(14.dp))

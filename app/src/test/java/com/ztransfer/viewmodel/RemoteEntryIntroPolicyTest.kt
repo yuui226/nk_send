@@ -6,6 +6,15 @@ import org.junit.Test
 
 class RemoteEntryIntroPolicyTest {
     @Test
+    fun clickingEntryPermanentlyOverridesRemainingReminders() {
+        for (count in listOf(-1, 0, 1, 19, 20, 100)) {
+            assertFalse(isRemoteEntryIntroEligible(count, entryUsed = true))
+        }
+        assertTrue(isRemoteEntryIntroEligible(19, entryUsed = false))
+        assertFalse(isRemoteEntryIntroEligible(20, entryUsed = false))
+    }
+
+    @Test
     fun introStopsAtConfiguredPlayLimit() {
         assertTrue(isRemoteEntryIntroEligible(-1))
         assertTrue(isRemoteEntryIntroEligible(0))

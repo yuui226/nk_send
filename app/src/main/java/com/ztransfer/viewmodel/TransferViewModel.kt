@@ -782,10 +782,10 @@ internal fun createQueueTasks(
     }
     .toList()
 
-internal const val REMOTE_ENTRY_INTRO_MAX_PLAYS = 6
+internal const val REMOTE_ENTRY_INTRO_MAX_PLAYS = 20
 
-internal fun isRemoteEntryIntroEligible(playCount: Int): Boolean =
-    playCount.coerceAtLeast(0) < REMOTE_ENTRY_INTRO_MAX_PLAYS
+internal fun isRemoteEntryIntroEligible(playCount: Int, entryUsed: Boolean = false): Boolean =
+    !entryUsed && playCount.coerceAtLeast(0) < REMOTE_ENTRY_INTRO_MAX_PLAYS
 
 class TransferViewModel(application: Application) : AndroidViewModel(application) {
     private val _state = MutableStateFlow(TransferState())
@@ -920,7 +920,10 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         const val PART_PREFIX = ".nkpart_"
         // 分块大小引用协议层常量，保证断点续传偏移与分块下载粒度的严格一致。
         val RESUME_CHUNK_SIZE: Long get() = NikonCamera.CHUNK_SIZE
-        const val KEY_REMOTE_ENTRY_INTRO_PLAY_COUNT = "remote_entry_intro_play_count"
+        // V2 intentionally starts a fresh, bounded introduction for existing installations.
+        // Keep these keys stable in later releases so upgrades do not reset it again.
+        const val KEY_REMOTE_ENTRY_INTRO_PLAY_COUNT = "remote_entry_intro_v2_play_count"
+        const val KEY_REMOTE_ENTRY_INTRO_USED = "remote_entry_intro_v2_used"
         const val KEY_MAIN_SETTINGS_HELP_VIEWED = "main_settings_help_viewed"
         const val KEY_PHOTO_EFFECTS_HELP_VIEWED = "photo_effects_help_viewed"
         const val KEY_AP_CONNECTION_HELP_VIEWED = "ap_connection_help_viewed"
@@ -990,15 +993,20 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         preferHighThroughputTransfers = enabled
     }
 
-    /** 监看入口自解释动画最多跨启动展示六次，之后不再打扰已经熟悉入口的用户。 */
+    /** 监看入口自解释动画最多跨启动展示二十次，之后不再打扰已经熟悉入口的用户。 */
     internal fun shouldShowRemoteEntryIntro(): Boolean = isRemoteEntryIntroEligible(
         prefs.getInt(KEY_REMOTE_ENTRY_INTRO_PLAY_COUNT, 0),
+        prefs.getBoolean(KEY_REMOTE_ENTRY_INTRO_USED, false),
     )
 
-    /** 仅在动画真正开始时调用；apply 先同步更新内存值，再异步落盘，不阻塞主线程。 */
+    internal fun markRemoteEntryUsed() {
+        prefs.edit().putBoolean(KEY_REMOTE_ENTRY_INTRO_USED, true).apply()
+    }
+
+    /** Count once when the reminder starts; no screen-visibility bookkeeping. */
     internal fun recordRemoteEntryIntroPlayed() {
         val playCount = prefs.getInt(KEY_REMOTE_ENTRY_INTRO_PLAY_COUNT, 0).coerceAtLeast(0)
-        if (!isRemoteEntryIntroEligible(playCount)) return
+        if (!shouldShowRemoteEntryIntro()) return
         prefs.edit()
             .putInt(KEY_REMOTE_ENTRY_INTRO_PLAY_COUNT, playCount + 1)
             .apply()
