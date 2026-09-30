@@ -31,6 +31,10 @@ class PhotoFrameWidthTest {
         }
         assertEquals(60, normalizePhotoFrameWidthPercent(Int.MIN_VALUE))
         assertEquals(200, normalizePhotoFrameWidthPercent(Int.MAX_VALUE))
-        assertEquals(150, normalizePhotoFrameWidthPercent(147))
+        assertEquals(145, normalizePhotoFrameWidthPercent(147))
+        assertEquals(150, normalizePhotoFrameWidthPercent(148))
+        for (percent in 60..200 step 5) {
+            assertEquals(percent, normalizePhotoFrameWidthPercent(percent))
+        }
     }
 }

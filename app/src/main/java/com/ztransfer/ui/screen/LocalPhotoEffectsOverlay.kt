@@ -1,5 +1,9 @@
 package com.ztransfer.ui.screen
 
+import com.ztransfer.effects.effectivePhotoEffectModules
+import com.ztransfer.effects.PhotoEffectModule
+import com.ztransfer.effects.showsPhotoEffect
+
 import android.app.Activity
 import android.content.Intent
 import android.net.Uri
@@ -88,6 +92,10 @@ fun LocalPhotoEffectsPage(
     var previewPage by remember { mutableIntStateOf(0) }
     var expandedEffectsPreview by remember { mutableStateOf<ExpandedEffectsPreview?>(null) }
     var photoEffectsInfoAnchorBounds by remember { mutableStateOf<Rect?>(null) }
+    var localModules by remember(settingsPreferences) { mutableIntStateOf(settingsPreferences.restoreModules()) }
+    val visibleModules = effectivePhotoEffectModules(localModules, isPro)
+    var showModuleMenu by remember { mutableStateOf(false) }
+    var moduleMenuAnchor by remember { mutableStateOf<Rect?>(null) }
 
     var decorationEnabled by remember { mutableStateOf(initialSettings.decorationEnabled) }
     var borderEnabled by remember { mutableStateOf(initialSettings.borderEnabled) }
@@ -203,6 +211,22 @@ fun LocalPhotoEffectsPage(
     val photoLutDraft = rememberPhotoLutDraft("local", initialLut) {
         filterEnabled = false
     }
+    fun applyModuleVisibility(mask: Int) {
+        if (!mask.showsPhotoEffect(PhotoEffectModule.FILTER)) filterEnabled = false
+        if (!mask.showsPhotoEffect(PhotoEffectModule.LUT)) photoLutDraft.off()
+        if (!mask.showsPhotoEffect(PhotoEffectModule.FRAME)) borderEnabled = false
+        if (!mask.showsPhotoEffect(PhotoEffectModule.WATERMARK)) watermarkDraft = watermarkDraft.copy(enabled = false)
+        decorationEnabled = decorationEnabled && (borderEnabled || (isPro && watermarkDraft.enabled))
+    }
+    LaunchedEffect(visibleModules, localModules) {
+        applyModuleVisibility(visibleModules)
+        // Persist the bound pair after a Pro -> free transition, so future saves use
+        // the same visibility as the editor and cannot revive a hidden section later.
+        if (localModules != visibleModules) {
+            settingsPreferences.saveModules(visibleModules)
+            localModules = visibleModules
+        }
+    }
     LaunchedEffect(photoLutDraft.selection, photoLutDraft.selectedUri) {
         photoLutDraft.store.save("local", photoLutDraft.selection, photoLutDraft.selectedUri?.toString())
     }
@@ -288,17 +312,11 @@ fun LocalPhotoEffectsPage(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
                     )
-                    if (batch.photos.isNotEmpty()) {
-                        GlassButton(
-                            onClick = launchPhotoPicker,
-                            enabled = !saving,
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 7.dp),
-                            modifier = Modifier.height(38.dp),
-                        ) {
-                            Text(stringResource(R.string.local_photo_replace), style = MaterialTheme.typography.labelMedium, color = colors.onBackground)
-                        }
-                        Spacer(Modifier.width(8.dp))
-                    }
+                    PhotoEffectModuleButton(
+                        onClick = { showModuleMenu = true },
+                        modifier = Modifier.size(38.dp).onGloballyPositioned { moduleMenuAnchor = it.boundsInRoot() },
+                    )
+                    Spacer(Modifier.width(8.dp))
                     TipLightbulbButton(
                         onClick = {
                             viewModel.markLocalPhotoEffectsHelpViewed()
@@ -394,7 +412,7 @@ fun LocalPhotoEffectsPage(
                 }
 
                 Spacer(Modifier.height(10.dp))
-                PhotoColorEffectGroup(visible = photoLutDraft.selection == null) {
+                PhotoColorEffectGroup(visible = visibleModules.showsPhotoEffect(PhotoEffectModule.FILTER) && photoLutDraft.selection == null) {
                     PhotoFilterEditor(
                         filters = state.photoFilters,
                         favoriteFilters = favoritePhotoFilters,
@@ -429,11 +447,13 @@ fun LocalPhotoEffectsPage(
                     )
                 }
                 PhotoColorEffectGroup(
-                    visible = !(filterEnabled && state.photoFilters.any { it.id == filterId }) || photoLutDraft.selection != null,
+                    visible = visibleModules.showsPhotoEffect(PhotoEffectModule.LUT) && (!(filterEnabled && state.photoFilters.any { it.id == filterId }) || photoLutDraft.selection != null),
                 ) {
                     PhotoLutEditor(photoLutDraft, state.hapticsEnabled)
                 }
                 PhotoFrameWatermarkEditor(
+                    showFrame = visibleModules.showsPhotoEffect(PhotoEffectModule.FRAME),
+                    showWatermark = visibleModules.showsPhotoEffect(PhotoEffectModule.WATERMARK),
                     favoriteEffects = favoriteFrameEffects,
                     borderEnabled = decorationEnabled && borderEnabled,
                     preset = preset,
@@ -489,8 +509,8 @@ fun LocalPhotoEffectsPage(
                     },
                     onFavoriteWatermarkApplied = { favoriteWatermark ->
                         if (isPro) {
-                            watermarkDraft = favoriteWatermark
-                            decorationEnabled = borderEnabled || favoriteWatermark.enabled
+                            watermarkDraft = favoriteWatermark.copy(enabled = favoriteWatermark.enabled && visibleModules.showsPhotoEffect(PhotoEffectModule.WATERMARK))
+                            decorationEnabled = borderEnabled || watermarkDraft.enabled
                         }
                     },
                     onWatermarkPositionChanged = { position ->
@@ -567,6 +587,19 @@ fun LocalPhotoEffectsPage(
                         modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
                     )
                 }
+            }
+            if (showModuleMenu) {
+                PhotoEffectModuleMenu(visibleModules, moduleMenuAnchor,
+                    isPro = isPro,
+                    onChange = { mask ->
+                        applyModuleVisibility(mask)
+                        settingsPreferences.saveModules(mask)
+                        localModules = mask
+                    },
+                    onDismiss = { showModuleMenu = false },
+                    hapticsEnabled = state.hapticsEnabled,
+                    parentTopInset = pageTopInset,
+                )
             }
             if (showPhotoEffectsInfo) {
                 PhotoEffectsInfoBubble(

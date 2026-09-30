@@ -556,8 +556,7 @@
     <string name="local_photo_effects_exif_hint">Frame: Images without EXIF data, such as screenshots, won’t show shooting details</string>
     <string name="local_photo_effects_gesture_hint">Preview: Swipe between photos · Hold to compare with the unfiltered version</string>
     <string name="local_photo_multi_select">(Select multiple photos)</string>
-    <string name="local_photo_reselect">Choose again</string>
-    <string name="local_photo_batch_generate">Generate and save (%1$d)</string>
+    <string name="local_photo_reselect">Choose again (%1$d)</string>
     <string name="local_photo_batch_generating">Generating</string>
     <string name="local_photo_batch_saved">Saved %1$d photos</string>
     <string name="local_photo_batch_partial">Saved %1$d/%2$d photos</string>
@@ -565,9 +564,8 @@
     <string name="local_photo_batch_failure_detail">%1$d photos could not be saved. Originals are unchanged.</string>
     <string name="local_photo_preview_failed">Preview unavailable. Swipe to view other photos.</string>
     <string name="local_photo_choose_short">Choose photo</string>
-    <string name="local_photo_replace">Replace photo</string>
     <string name="local_photo_same_folder_hint">Saved beside the original, or to Pictures/ZTransfer when needed</string>
-    <string name="local_photo_generate">Generate and save</string>
+    <string name="local_photo_generate">Generate</string>
     <string name="local_photo_generating">Generating…</string>
     <string name="local_photo_saved">Saved to: %1$s</string>
     <string name="local_photo_select_failed">Choose a writable photo stored on this phone</string>
@@ -669,4 +667,9 @@
     <string name="local_photo_error_missing">The file is unavailable. Check that the photo and any LUT or logo files are still accessible.</string>
     <string name="local_photo_error_space">Storage is full. Free some space and retry.</string>
     <string name="local_photo_error_unknown">Processing failed. Copy the details below and send them to support.</string>
+    <string name="photo_effect_modules">Manage modules</string>
+    <string name="photo_effect_module_filter">Filter</string>
+    <string name="photo_effect_module_lut">LUT</string>
+    <string name="photo_effect_module_frame">Frame</string>
+    <string name="photo_effect_module_watermark">Watermark</string>
 </resources>

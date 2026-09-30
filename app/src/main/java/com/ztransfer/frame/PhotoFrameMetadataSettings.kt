@@ -464,10 +464,11 @@ internal fun PhotoFrameMetadataSettings.nextBrandStyle(): PhotoFrameMetadataSett
 
 internal const val MIN_PHOTO_FRAME_WIDTH_PERCENT = 60
 internal const val MAX_PHOTO_FRAME_WIDTH_PERCENT = 200
+internal const val PHOTO_FRAME_WIDTH_STEP = 5
 
-/** UI and persisted values use the same bounded ten-percent detents. */
+/** UI and persisted values use the same bounded five-percent detents. */
 internal fun normalizePhotoFrameWidthPercent(value: Int): Int =
-    ((value.coerceIn(MIN_PHOTO_FRAME_WIDTH_PERCENT, MAX_PHOTO_FRAME_WIDTH_PERCENT) + 5) / 10) * 10
+    ((value.coerceIn(MIN_PHOTO_FRAME_WIDTH_PERCENT, MAX_PHOTO_FRAME_WIDTH_PERCENT) + PHOTO_FRAME_WIDTH_STEP / 2) / PHOTO_FRAME_WIDTH_STEP) * PHOTO_FRAME_WIDTH_STEP
 
 internal fun PhotoFramePreset.supportsBackdropControls(): Boolean = when (this) {
     PhotoFramePreset.MIST, PhotoFramePreset.FROSTED, PhotoFramePreset.CINEMA,

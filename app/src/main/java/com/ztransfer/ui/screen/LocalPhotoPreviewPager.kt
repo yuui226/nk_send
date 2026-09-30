@@ -68,6 +68,7 @@ internal fun LocalPhotoPreviewPager(
         val pager = rememberPagerState { photos.size }
         Column {
             HorizontalPager(
+                userScrollEnabled = photos.size > 1,
                 state = pager,
                 key = { photos[it].toString() },
                 beyondViewportPageCount = 0,

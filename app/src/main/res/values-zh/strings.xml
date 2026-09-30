@@ -554,8 +554,7 @@
     <string name="local_photo_effects_exif_hint">边框：截图等无 EXIF 的图片不显示拍摄参数</string>
     <string name="local_photo_effects_gesture_hint">预览：左右滑动切换照片 · 长按对比滤镜前后</string>
     <string name="local_photo_multi_select">（可多选）</string>
-    <string name="local_photo_reselect">重新选择</string>
-    <string name="local_photo_batch_generate">生成并保存（%1$d）</string>
+    <string name="local_photo_reselect">重新选择（%1$d）</string>
     <string name="local_photo_batch_generating">生成中</string>
     <string name="local_photo_batch_saved">已保存 %1$d 张</string>
     <string name="local_photo_batch_partial">已保存 %1$d/%2$d 张</string>
@@ -563,9 +562,8 @@
     <string name="local_photo_batch_failure_detail">%1$d 张未能保存，原照片未受影响</string>
     <string name="local_photo_preview_failed">这张照片暂时无法预览，可滑动查看其他照片</string>
     <string name="local_photo_choose_short">选择图片</string>
-    <string name="local_photo_replace">更换图片</string>
     <string name="local_photo_same_folder_hint">优先保存到原目录；不可写时自动保存到 Pictures/ZTransfer</string>
-    <string name="local_photo_generate">生成并保存</string>
+    <string name="local_photo_generate">生成</string>
     <string name="local_photo_generating">正在生成…</string>
     <string name="local_photo_saved">已保存到：%1$s</string>
     <string name="local_photo_select_failed">请选择保存在本机相册中且可写入的照片</string>
@@ -667,4 +665,9 @@
     <string name="local_photo_error_missing">文件无法访问，请确认照片以及使用的 LUT、Logo 文件仍可读取。</string>
     <string name="local_photo_error_space">存储空间不足，请清理空间后重试。</string>
     <string name="local_photo_error_unknown">处理失败，请复制下方详细信息反馈客服。</string>
+    <string name="photo_effect_modules">管理模块</string>
+    <string name="photo_effect_module_filter">滤镜</string>
+    <string name="photo_effect_module_lut">LUT</string>
+    <string name="photo_effect_module_frame">边框</string>
+    <string name="photo_effect_module_watermark">水印</string>
 </resources>

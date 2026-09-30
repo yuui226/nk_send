@@ -1,6 +1,12 @@
 package com.ztransfer.viewmodel
 
 
+import com.ztransfer.effects.effectivePhotoEffectModules
+import com.ztransfer.effects.PhotoEffectModule
+import com.ztransfer.effects.ALL_PHOTO_EFFECT_MODULES
+import com.ztransfer.effects.normalizePhotoEffectModules
+import com.ztransfer.effects.showsPhotoEffect
+
 import com.ztransfer.util.HistogramMode
 
 import android.app.Application
@@ -511,6 +517,7 @@ data class TransferState(
     // 照片预览直方图的可见状态。跨照片、跨预览会话与 App 重启持久化。
     val previewHistogramMode: HistogramMode = HistogramMode.OFF,
     // 开启后：受支持的原图落盘成功，再派生一张保留原片细节的边框/水印效果图。
+    val transferPhotoEffectModules: Int = ALL_PHOTO_EFFECT_MODULES,
     val photoEffectsEnabled: Boolean = true,
     val photoFrameEnabled: Boolean = false,
     // 总开关开启时，边框与水印可以独立组合；false 允许只在原照片上叠水印。
@@ -1210,6 +1217,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     prefs.getString("preview_histogram_mode", null),
                     prefs.getBoolean("preview_histogram_enabled", false),
                 ),
+                transferPhotoEffectModules = normalizePhotoEffectModules(prefs.getInt("photo_effect_modules", ALL_PHOTO_EFFECT_MODULES)),
                 photoEffectsEnabled = prefs.getBoolean("photo_effects_enabled", true),
                 photoFrameEnabled = prefs.getBoolean("photo_frame_enabled", false),
                 photoFrameBorderEnabled = prefs.getBoolean("photo_frame_border_enabled", true),
@@ -1390,6 +1398,30 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     fun setPreviewHistogramMode(mode: HistogramMode) {
         prefs.edit().putString("preview_histogram_mode", mode.name).apply()
         _state.update { it.copy(previewHistogramMode = mode) }
+    }
+
+    /** Camera-photo editor visibility; hiding clears enabled flags but preserves tuning values. */
+    fun setTransferPhotoEffectModules(mask: Int) {
+        val next = effectivePhotoEffectModules(mask, LicenseManager.isPro.value)
+        if (next == _state.value.transferPhotoEffectModules) return
+        prefs.edit().putInt("photo_effect_modules", next).apply()
+        _state.update { it.copy(transferPhotoEffectModules = next) }
+        val snapshot = _state.value
+        setPhotoFilterConfiguration(
+            snapshot.selectedPhotoFilterId, snapshot.photoFilterIntensityPercent,
+            snapshot.photoFilterEnabled && next.showsPhotoEffect(PhotoEffectModule.FILTER),
+            snapshot.photoLut.takeIf { next.showsPhotoEffect(PhotoEffectModule.LUT) },
+            com.ztransfer.lut.PhotoLutStore(getApplication()).uri("transfer"),
+        )
+        val border = snapshot.photoFrameBorderEnabled && next.showsPhotoEffect(PhotoEffectModule.FRAME)
+        val watermark = snapshot.photoFrameWatermarkEnabled && next.showsPhotoEffect(PhotoEffectModule.WATERMARK)
+        val decoration = snapshot.photoFrameEnabled && (border || (LicenseManager.isPro.value && watermark))
+        prefs.edit().putBoolean("photo_frame_enabled", decoration)
+            .putBoolean("photo_frame_border_enabled", border)
+            .putBoolean("photo_frame_branding_enabled", watermark).apply()
+        _state.update { it.copy(photoFrameEnabled = decoration, photoFrameBorderEnabled = border,
+            photoFrameWatermarkEnabled = watermark) }
+
     }
 
     /** A runtime gate, not a destructive edit of the user's saved effect recipe. */

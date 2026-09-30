@@ -161,7 +161,7 @@ internal fun PhotoLutEditor(state: PhotoLutEditorState, hapticsEnabled: Boolean)
 
 /** Keep the row and its spacing in the same transition so the frame section follows smoothly. */
 @Composable
-internal fun PhotoColorEffectGroup(visible: Boolean, content: @Composable () -> Unit) {
+internal fun PhotoColorEffectGroup(visible: Boolean, spacing: androidx.compose.ui.unit.Dp = 10.dp, content: @Composable () -> Unit) {
     AnimatedVisibility(
         visible = visible,
         enter = expandVertically(
@@ -175,7 +175,7 @@ internal fun PhotoColorEffectGroup(visible: Boolean, content: @Composable () -> 
     ) {
         Column {
             content()
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(spacing))
         }
     }
 }
