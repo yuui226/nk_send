@@ -251,7 +251,7 @@
     <string name="photo_frame_position_photo_bottom_left">Photo bottom left</string>
     <string name="photo_frame_position_photo_bottom_center">Photo bottom center</string>
     <string name="photo_frame_position_photo_bottom_right">Photo bottom right</string>
-    <string name="photo_frame_watermark_content">Watermark type</string>
+    <string name="photo_frame_watermark_content">Type</string>
     <string name="photo_frame_content_text">Text</string>
     <string name="photo_frame_content_image">Logo</string>
     <string name="photo_frame_image_watermark">Logo</string>
@@ -654,7 +654,7 @@
     <string name="remote_tool_dock">Tools</string>
     <string name="photo_lut_set_folder">Set LUT folder</string>
     <string name="photo_lut_help">LUT: Choose a folder containing .cube files; one level of subfolders is supported as categories. Long-press the wheel to choose LUTs by category or change folders.</string>
-    <string name="photo_frame_width">Width</string>
+    <string name="photo_frame_width">Frame width</string>
     <string name="lut_uncategorized">Uncategorized</string>
     <string name="lut_turn_off">Turn off LUT</string>
     <string name="photo_filter_turn_off">Turn off filter</string>

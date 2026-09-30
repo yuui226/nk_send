@@ -1677,10 +1677,12 @@ internal fun PhotoPreviewOverlay(
 @Composable
 internal fun SinglePhotoPreviewOverlay(
     bitmap: ImageBitmap,
+    comparisonBitmap: ImageBitmap? = null,
     title: String,
     anchorRect: Rect?,
     onDismiss: () -> Unit,
 ) {
+    var comparing by remember(bitmap) { mutableStateOf(false) }
     var overlayBounds by remember { mutableStateOf<Rect?>(null) }
     val progress = remember { Animatable(0f) }
     var closing by remember { mutableStateOf(false) }
@@ -1750,9 +1752,11 @@ internal fun SinglePhotoPreviewOverlay(
                 zoomEnabled = true,
                 onZoomedChange = {},
                 onTap = startClose,
+                comparisonEnabled = comparisonBitmap != null && !closing,
+                onComparisonChange = { comparing = it },
             ) { imageTransform ->
                 Image(
-                    bitmap = bitmap,
+                    bitmap = if (comparing) comparisonBitmap ?: bitmap else bitmap,
                     contentDescription = title,
                     contentScale = ContentScale.Fit,
                     modifier = imageTransform,
@@ -2334,6 +2338,8 @@ private fun ZoomablePreviewViewport(
     zoomEnabled: Boolean,
     onZoomedChange: (Boolean) -> Unit,
     onTap: () -> Unit,
+    comparisonEnabled: Boolean = false,
+    onComparisonChange: (Boolean) -> Unit = {},
     content: @Composable BoxScope.(Modifier) -> Unit,
 ) {
     val animatedRotation by animateFloatAsState(
@@ -2341,6 +2347,10 @@ private fun ZoomablePreviewViewport(
         animationSpec = tween(220),
         label = "previewRotation",
     )
+    val comparisonFeedback = if (comparisonEnabled) {
+        com.ztransfer.ui.util.rememberLongPressFeedback()
+    } else null
+    val latestOnComparisonChange by rememberUpdatedState(onComparisonChange)
     val localState=remember(stateKey) { PreviewViewportState() }
     val viewportState=externalState ?: localState
     var scale by viewportState.scale
@@ -2508,10 +2518,21 @@ private fun ZoomablePreviewViewport(
                     } while (event.changes.any { it.pressed })
                 }
             }
-            .pointerInput(viewportState, imageAspect, zoomEnabled, baseShiftY, viewportSize, maximumZoom) {
+            .pointerInput(viewportState, imageAspect, zoomEnabled, baseShiftY, viewportSize, maximumZoom, comparisonEnabled, comparisonFeedback) {
                 val containerWidth = size.width.toFloat()
                 val containerHeight = size.height.toFloat()
                 detectTapGestures(
+                    onPress = {
+                        try {
+                            if (comparisonFeedback != null) comparisonFeedback.trackPress(this)
+                            else tryAwaitRelease()
+                        } finally {
+                            latestOnComparisonChange(false)
+                        }
+                    },
+                    onLongPress = if (comparisonEnabled) ({
+                        comparisonFeedback?.trigger { latestOnComparisonChange(true) }
+                    }) else null,
                     onTap = { if (scale <= 1.01f) onTap() },
                     onDoubleTap = { tap ->
                         val aspect = imageAspect

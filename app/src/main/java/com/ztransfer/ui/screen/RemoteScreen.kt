@@ -4487,16 +4487,11 @@ private fun ParamTile(
                 modifier = Modifier.align(Alignment.TopEnd).padding(end = 8.dp, top = if (compact) 2.dp else 6.dp).size(11.dp)
             )
         }
-        // 每个参数项右下角固定保留小型上下调节提示；不可调或 AUTO 接管时压暗。
-        if (param != null) {
-            Text(
-                "↕",
-                color = colors.onSurfaceVariant.copy(alpha = if (writable) 0.35f else 0.16f),
-                fontSize = 10.sp,
-                lineHeight = 10.sp,
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(end = 8.dp, bottom = 5.dp)
+        // 仅在可调且超过三档时提示拖动；锁定和 AUTO 接管时不显示。
+        if (writable && wheelDragEnabled(values.size)) {
+            WheelDragHint(
+                color = colors.onSurfaceVariant.copy(alpha = 0.42f),
+                modifier = Modifier.align(Alignment.CenterEnd).padding(end = 8.dp),
             )
         }
         if (autoIsoOn) {

@@ -27,6 +27,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.layout.boundsInRoot
@@ -85,6 +86,7 @@ fun LocalPhotoEffectsPage(
     var watermarkImageImporting by remember { mutableStateOf(false) }
     var showPhotoEffectsInfo by remember { mutableStateOf(false) }
     var previewPage by remember { mutableIntStateOf(0) }
+    var expandedEffectsPreview by remember { mutableStateOf<ExpandedEffectsPreview?>(null) }
     var photoEffectsInfoAnchorBounds by remember { mutableStateOf<Rect?>(null) }
 
     var decorationEnabled by remember { mutableStateOf(initialSettings.decorationEnabled) }
@@ -335,6 +337,11 @@ fun LocalPhotoEffectsPage(
                 prefetchFilters = previewFilterPrefetch,
                 generating = saving,
                 onChoose = launchPhotoPicker,
+                onOpen = { bitmap, anchorRect, comparison ->
+                    focusManager.clearFocus()
+                    keyboardController?.hide()
+                    expandedEffectsPreview = ExpandedEffectsPreview(bitmap, anchorRect, comparison)
+                },
                 onPageChanged = { previewPage = it },
                 debugBrand = debugBrand,
             )
@@ -549,4 +556,15 @@ fun LocalPhotoEffectsPage(
             )
         }
     }
+    expandedEffectsPreview?.let { preview ->
+        val previewImage = remember(preview.bitmap) { preview.bitmap.asImageBitmap() }
+        SinglePhotoPreviewOverlay(
+            bitmap = previewImage,
+            comparisonBitmap = preview.comparison()?.let { remember(it) { it.asImageBitmap() } },
+            title = stringResource(R.string.photo_effects),
+            anchorRect = preview.anchorRect,
+            onDismiss = { expandedEffectsPreview = null },
+        )
+    }
+
 }

@@ -13,6 +13,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -35,6 +36,7 @@ internal fun LocalPhotoPreviewPager(
     prefetchFilters: List<PhotoFilterSelection>,
     generating: Boolean,
     onChoose: () -> Unit,
+    onOpen: (Bitmap, Rect, () -> Bitmap?) -> Unit,
     onPageChanged: (Int) -> Unit = {},
     debugBrand: String? = null,
 ) {
@@ -74,6 +76,7 @@ internal fun LocalPhotoPreviewPager(
             ) { index ->
                 LocalPhotoPreviewPage(
                     uri = photos[index],
+                    onOpen = onOpen,
                     debugBrand = debugBrand,
                     effects = effects,
                     prefetchFilters = if (index == pager.settledPage && !generating) prefetchFilters else emptyList(),
@@ -87,6 +90,7 @@ internal fun LocalPhotoPreviewPager(
 @Composable
 private fun LocalPhotoPreviewPage(
     uri: Uri,
+    onOpen: (Bitmap, Rect, () -> Bitmap?) -> Unit,
     debugBrand: String?,
     effects: LocalPhotoBatchEffects,
     prefetchFilters: List<PhotoFilterSelection>,
@@ -131,7 +135,7 @@ private fun LocalPhotoPreviewPage(
                 watermark = effects.watermark,
                 filter = effects.filter,
                 prefetchFilters = prefetchFilters,
-                onOpen = null,
+                onOpen = onOpen,
             )
             preview == null -> CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
             else -> Text(stringResource(R.string.local_photo_preview_failed),

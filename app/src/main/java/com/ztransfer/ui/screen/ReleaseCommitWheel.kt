@@ -36,6 +36,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -106,6 +107,7 @@ internal fun <T> ReleaseCommitWheel(
     optionRowHeight: Dp = SETTINGS_WHEEL_ROW_HEIGHT,
     optionFontSize: TextUnit = 14.sp,
     optionTextStyle: TextStyle? = null,
+    optionTextColor: Color? = null,
     optionFontWeight: FontWeight? = null,
     optionMaxLines: Int = 1,
     optionFontSizeFor: ((T) -> TextUnit)? = null,
@@ -321,16 +323,21 @@ internal fun <T> ReleaseCommitWheel(
         }
 
         if (label != null) {
+            val compactBadge = wheelHeight <= 34.dp
             ControlTileCornerBadge(
                 text = label,
                 textColor = badgeText,
                 backgroundColor = badgeBackground,
                 borderColor = badgeBorder,
                 borderWidth = 0.5.dp,
-                shape = RoundedCornerShape(bottomEnd = 5.dp),
+                fontSize = if (compactBadge) 8.sp else 9.sp,
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                    horizontal = if (compactBadge) 4.dp else 6.dp,
+                ),
+                shape = RoundedCornerShape(bottomEnd = if (compactBadge) 4.dp else 5.dp),
                 modifier = Modifier
                     .align(Alignment.TopStart)
-                    .height(15.dp)
+                    .height(if (compactBadge) 11.dp else 15.dp)
                     .graphicsLayer { alpha = labelAlpha },
             )
         }
@@ -404,7 +411,9 @@ internal fun <T> ReleaseCommitWheel(
                         )
                     }
                 } else {
-                    val textColor = if (emphasized && distance < 0.5f) {
+                    val textColor = if (optionTextColor != null) {
+                        optionTextColor.copy(alpha = optionTextColor.alpha * itemAlpha)
+                    } else if (emphasized && distance < 0.5f) {
                         resolvedAccent.copy(alpha = itemAlpha)
                     } else {
                         colors.onBackground.copy(alpha = itemAlpha)
@@ -450,19 +459,42 @@ internal fun <T> ReleaseCommitWheel(
             }
         }
 
-        if (showDragHint && wheelDragEnabled(options.size)) {
+        if (showDragHint && enabled && !readOnly && wheelDragEnabled(options.size)) {
             // 纯视觉拖动提示：不安装任何手势或点击处理，事件仍完整交给外层波轮。
-            Text(
-                text = "↕",
-                color = colors.onBackground.copy(alpha = 0.30f),
-                fontSize = 10.sp,
-                lineHeight = 10.sp,
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(end = 8.dp, bottom = 5.dp)
-                    .graphicsLayer { alpha = labelAlpha }
-                    .clearAndSetSemantics { },
+            WheelDragHint(
+                color = colors.onSurfaceVariant.copy(alpha = 0.42f),
+                modifier = Modifier.align(Alignment.CenterEnd)
+                    .padding(end = 8.dp)
+                    .graphicsLayer { alpha = labelAlpha },
             )
         }
     }
+}
+
+/** Decorative only: the whole wheel remains the gesture target. */
+@Composable
+internal fun WheelDragHint(color: Color, modifier: Modifier = Modifier) {
+    Box(
+        modifier.size(width = 6.dp, height = 20.dp).clearAndSetSemantics { }
+            .drawWithCache {
+                val stroke = 1.dp.toPx()
+                val inset = stroke / 2f
+                val midX = size.width / 2f
+                val rise = 2.5.dp.toPx()
+                val chevrons = androidx.compose.ui.graphics.Path().apply {
+                    moveTo(inset, inset + rise)
+                    lineTo(midX, inset)
+                    lineTo(size.width - inset, inset + rise)
+                    moveTo(inset, size.height - inset - rise)
+                    lineTo(midX, size.height - inset)
+                    lineTo(size.width - inset, size.height - inset - rise)
+                }
+                val style = androidx.compose.ui.graphics.drawscope.Stroke(
+                    width = stroke,
+                    cap = androidx.compose.ui.graphics.StrokeCap.Round,
+                    join = androidx.compose.ui.graphics.StrokeJoin.Round,
+                )
+                onDrawBehind { drawPath(chevrons, color, style = style) }
+            },
+    )
 }

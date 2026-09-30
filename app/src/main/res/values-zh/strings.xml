@@ -251,7 +251,7 @@
     <string name="photo_frame_position_photo_bottom_left">图内·左下</string>
     <string name="photo_frame_position_photo_bottom_center">图内·中下</string>
     <string name="photo_frame_position_photo_bottom_right">图内·右下</string>
-    <string name="photo_frame_watermark_content">水印类型</string>
+    <string name="photo_frame_watermark_content">类型</string>
     <string name="photo_frame_content_text">文字</string>
     <string name="photo_frame_content_image">Logo</string>
     <string name="photo_frame_image_watermark">Logo</string>
@@ -652,7 +652,7 @@
     <string name="remote_tool_dock">工具栏</string>
     <string name="photo_lut_set_folder">设置LUT文件目录</string>
     <string name="photo_lut_help">LUT：选择含 .cube 文件的文件夹，支持一层子文件夹分类。长按拨轮可按分类选择 LUT 或更换文件夹。</string>
-    <string name="photo_frame_width">宽度</string>
+    <string name="photo_frame_width">边框宽度</string>
     <string name="lut_uncategorized">未分类</string>
     <string name="lut_turn_off">关闭 LUT</string>
     <string name="photo_filter_turn_off">关闭滤镜</string>

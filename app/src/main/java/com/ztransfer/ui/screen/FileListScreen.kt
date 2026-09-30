@@ -1615,7 +1615,7 @@ fun FileListScreen(
         val playfulLiftPx = with(density) { 6.dp.toPx() }
         val introLabel = stringResource(R.string.remote_entry_intro)
         val introTextStyle = MaterialTheme.typography.labelMedium.copy(
-            fontSize = 13.sp, fontWeight = FontWeight.Bold,
+            fontSize = 13.sp, fontWeight = FontWeight.Medium,
         )
         val introTextMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
         val introLabelWidth = remember(introLabel, introTextStyle, density) {
@@ -1718,27 +1718,14 @@ fun FileListScreen(
                             shrinkTowards = Alignment.Start,
                         ),
                 ) {
-                    Box(
+                    Text(
+                        text = introLabel,
+                        color = if (transfersBusyVisual) colors.onSurfaceVariant else colors.onBackground,
+                        style = introTextStyle,
+                        maxLines = 1,
+                        softWrap = false,
                         modifier = Modifier.clearAndSetSemantics { },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        val introStyle = introTextStyle
-                        // Identical text geometry for the outline and fill; no extra animation.
-                        Text(
-                            text = stringResource(R.string.remote_entry_intro),
-                            color = Color(0xFF302713),
-                            style = introStyle.copy(drawStyle = androidx.compose.ui.graphics.drawscope.Stroke(width = with(density) { 1.dp.toPx() })),
-                            maxLines = 1,
-                            softWrap = false,
-                        )
-                        Text(
-                            text = stringResource(R.string.remote_entry_intro),
-                            color = Color(0xFFFFD45A),
-                            style = introStyle,
-                            maxLines = 1,
-                            softWrap = false,
-                        )
-                    }
+                    )
                 }
             }
             if (!remoteExpanded) {
@@ -4809,75 +4796,49 @@ private fun formatLocalDate(date: LocalDate): String =
 private fun Int.twoDigits(): String = toString().padStart(2, '0')
 
 /**
- * 筛选面板的选中态胶囊：选中 = 主题蓝底 + 反色加粗字；未选 = surfaceVariant 底。
- * 与设置面板的选择胶囊同族语言。
+ * 筛选与边框信息共用的紧凑选择项：复用拨轮材质，仅点击，选中颜色平滑过渡。
  */
 @Composable
 internal fun FilterChip(
-    label: String? = null,
+    label: String,
     selected: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     icon: ImageVector? = null,
-    fitLabel: Boolean = false,
-    // 自定义前导内容（如连拍的 BurstGlyph）；给定内容色，优先于 [icon]。
-    leading: (@Composable (Color) -> Unit)? = null
+    leading: (@Composable (Color) -> Unit)? = null,
+    accentColor: Color? = null,
 ) {
     val colors = AppTheme.colors
-    val contentColor = if (selected) colors.onAccent else colors.onSurfaceVariant
-    Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape(9.dp),
-        color = if (selected) colors.accentBlue else colors.surfaceVariant,
-        modifier = modifier.height(38.dp)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(5.dp, Alignment.CenterHorizontally),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            when {
-                leading != null -> leading(contentColor)
-                icon != null -> Icon(icon, contentDescription = null, tint = contentColor, modifier = Modifier.size(14.dp))
+    val activeColor = accentColor ?: colors.accentBlue
+    val tint by animateColorAsState(
+        targetValue = if (selected) activeColor else colors.onSurfaceVariant,
+        animationSpec = tween(180),
+        label = "compactChoiceTint",
+    )
+    ReleaseCommitWheel(
+        options = listOf(label),
+        selected = label,
+        optionLabel = { it },
+        onValueCommitted = {},
+        onActivated = onClick,
+        wheelHeight = 34.dp,
+        cornerRadius = 10.dp,
+        optionFontSize = 12.sp,
+        optionFontWeight = FontWeight.Medium,
+        optionTextColor = tint,
+        accentColor = tint,
+        emphasized = selected,
+        showEmphasisBorder = false,
+        showDragHint = false,
+        centerIcon = if (leading != null || icon != null) {
+            { color ->
+                if (leading != null) leading(color)
+                else if (icon != null) Icon(icon, contentDescription = null,
+                    tint = color, modifier = Modifier.size(14.dp))
             }
-            if (label != null && fitLabel) {
-                val textMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
-                val density = LocalDensity.current
-                val labelStyle = MaterialTheme.typography.labelLarge.copy(
-                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                )
-                BoxWithConstraints(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                    val measuredWidth = textMeasurer.measure(
-                        text = label,
-                        style = labelStyle,
-                        softWrap = false,
-                        maxLines = 1,
-                    ).size.width
-                    val availableWidth = with(density) { maxWidth.toPx() }
-                    val scale = if (measuredWidth > 0) (availableWidth / measuredWidth).coerceAtMost(1f) else 1f
-                    Text(
-                        text = label,
-                        style = labelStyle,
-                        fontSize = labelStyle.fontSize * scale,
-                        maxLines = 1,
-                        softWrap = false,
-                        color = contentColor,
-                        textAlign = TextAlign.Center,
-                    )
-                }
-            } else if (label != null) {
-                Text(
-                    label,
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                    maxLines = 1,
-                    color = contentColor
-                )
-            }
-        }
-    }
+        } else null,
+        modifier = modifier,
+    )
 }
 
 /**
