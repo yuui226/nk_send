@@ -43,7 +43,7 @@ android {
         minSdk = 26
         targetSdk = 35
         versionCode = 64
-        versionName = "1.90"
+        versionName = "1.91"
         // Keep the default explicit: AGP otherwise rewrites the first manifest entry when several
         // standalone instrumentation suites are registered.
         testInstrumentationRunner = "com.ztransfer.frame.FramePlaceLayoutInstrumentation"
