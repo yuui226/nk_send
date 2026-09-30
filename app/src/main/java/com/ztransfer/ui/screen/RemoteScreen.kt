@@ -4938,10 +4938,31 @@ internal fun TopIconToggle(
     content: @Composable () -> Unit
 ) {
     val colors = AppTheme.colors
+    val skin = LocalButtonTexturePalette.current?.skin ?: SkinPreset.FROSTED_GLASS
+    val dark = colors.background.luminance() < 0.5f
+    // Solid materials redraw the icon; pass the same tint to both drawing layers.
+    val inactiveColor = when (skin) {
+        SkinPreset.TITANIUM -> if (dark) Color(0xFFE4ECEF) else Color(0xFF344149)
+        SkinPreset.WOOD -> if (dark) Color(0xFFF1D6A7) else Color(0xFF472A18)
+        SkinPreset.CAMERA_CONTROLS -> Color(0xFFD5D8DA)
+        SkinPreset.FROSTED_GLASS -> colors.onSurfaceVariant
+    }
+    val activeColor = when (skin) {
+        SkinPreset.TITANIUM, SkinPreset.WOOD ->
+            if (dark) Color(0xFF80D8FF) else Color(0xFF005B83)
+        SkinPreset.CAMERA_CONTROLS -> Color(0xFF80D8FF)
+        SkinPreset.FROSTED_GLASS -> colors.accentBlue
+    }
+    val markColor by animateColorAsState(
+        if (active) activeColor else inactiveColor,
+        animationSpec = tween(180), label = "monitorToolTint"
+    )
     GlassButton(
         onClick = onClick,
         enabled = enabled,
         active = active,
+        activeOutline = true,
+        materialContentColor = markColor,
         shape = CircleShape,
         raised = true,
         showSheen = true,
@@ -4952,7 +4973,7 @@ internal fun TopIconToggle(
             .semantics { this.contentDescription = contentDescription }
     ) {
         CompositionLocalProvider(
-            LocalContentColor provides if (active) colors.accentBlue else colors.onSurfaceVariant
+            LocalContentColor provides markColor
         ) {
             Box(
                 modifier = Modifier.defaultMinSize(minWidth = 20.dp, minHeight = 20.dp),

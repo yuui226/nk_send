@@ -37,7 +37,6 @@ class MonitorInteractionInstrumentation : Instrumentation() {
             var origin = Offset.Zero
             var tap = Offset.Unspecified
             val roll = mutableFloatStateOf(4f)
-            val disp = mutableStateOf(MonitorDispMode.EXPOSURE)
             activity = startActivitySync(Intent(targetContext, MainActivity::class.java)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
             runOnMainSync {
@@ -57,8 +56,6 @@ class MonitorInteractionInstrumentation : Instrumentation() {
                             Box(Modifier.fillMaxWidth().height(180.dp)) {
                                 ViewfinderLevelOverlay(roll.floatValue, Modifier.fillMaxSize())
                             }
-                            MonitorExposureSummary(disp.value,
-                                listOf("M", "1/250", "F2.8", "ISO 100"), true, Modifier.fillMaxWidth())
                         }
                     }
                 }

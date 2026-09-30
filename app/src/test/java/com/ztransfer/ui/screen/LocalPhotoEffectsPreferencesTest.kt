@@ -14,7 +14,7 @@ class LocalPhotoEffectsPreferencesTest {
     @Test
     fun widthsAreIndependentForEveryPresetAndSurviveWorkbenchNormalization() {
         val values = com.ztransfer.frame.PhotoFramePreset.entries.associateWith {
-            com.ztransfer.frame.defaultPhotoFrameMetadataSettings(it).copy(widthPercent = 100 + it.ordinal % 11 * 10)
+            com.ztransfer.frame.defaultPhotoFrameMetadataSettings(it).copy(widthPercent = 60 + it.ordinal % 15 * 10)
         }
         val settings = defaultLocalPhotoEffectsSettings(defaultFilterId = null).copy(metadataSettings = values)
         val normalized = normalizeLocalPhotoEffectsSettings(settings, emptySet()) { false }

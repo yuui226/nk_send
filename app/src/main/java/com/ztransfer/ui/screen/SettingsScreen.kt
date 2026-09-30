@@ -140,6 +140,8 @@ import com.ztransfer.frame.PhotoFrameExporter
 import com.ztransfer.frame.PhotoFrameMetadata
 import com.ztransfer.frame.PhotoFrameBrandStyle
 import com.ztransfer.frame.nextBrandStyle
+import com.ztransfer.frame.MIN_PHOTO_FRAME_WIDTH_PERCENT
+import com.ztransfer.frame.MAX_PHOTO_FRAME_WIDTH_PERCENT
 import com.ztransfer.frame.PhotoFrameMetadataSettings
 import com.ztransfer.frame.PhotoFramePreset
 import com.ztransfer.frame.PhotoFrameWatermark
@@ -2553,7 +2555,7 @@ private fun PhotoFrameMetadataInlineSettings(
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 ReleaseCommitWheel(
-                    options = remember { (100..200 step 10).toList() },
+                    options = remember { (MIN_PHOTO_FRAME_WIDTH_PERCENT..MAX_PHOTO_FRAME_WIDTH_PERCENT step 10).toList() },
                     selected = settings.widthPercent,
                     optionLabel = { "$it%" },
                     onValueCommitted = { onSettingsChanged(settings.copy(widthPercent = it)) },

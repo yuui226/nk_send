@@ -1142,6 +1142,9 @@ fun GlassButton(
                     active = activeProgress,
                     press = pressLight
                 )
+                .then(
+                    activeOutlineBorder?.let { Modifier.border(it, shape) } ?: Modifier
+                )
                 .clickable(
                     enabled = enabled,
                     role = Role.Button,
