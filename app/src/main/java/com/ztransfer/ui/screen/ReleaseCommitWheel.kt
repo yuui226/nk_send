@@ -1,5 +1,7 @@
 package com.ztransfer.ui.screen
 
+import androidx.compose.ui.graphics.lerp
+
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -184,7 +186,7 @@ internal fun <T> ReleaseCommitWheel(
             .background(
                 resolvedAccent.copy(
                     alpha = (if (darkTheme) 0.045f else 0.035f) +
-                        (if (darkTheme) 0.105f else 0.075f) * emphasisProgress +
+                        (if (darkTheme) 0.20f else 0.14f) * emphasisProgress +
                         0.18f * normalizedBurst,
                 )
             )
@@ -196,25 +198,20 @@ internal fun <T> ReleaseCommitWheel(
                         (1f + 0.35f * borderEmphasisProgress).dp
                     else -> 1.dp
                 },
-                brush = if (
-                    dragging || borderEmphasisProgress > 0f || normalizedBurst > 0f
-                ) {
-                    Brush.verticalGradient(
-                        listOf(
-                            resolvedAccent.copy(
-                                alpha = (0.92f + 0.08f * normalizedBurst).coerceAtMost(1f),
-                            ),
-                            resolvedAccent.copy(
-                                alpha = (0.38f + 0.30f * borderEmphasisProgress +
-                                    0.28f * normalizedBurst).coerceAtMost(1f),
-                            ),
-                        )
+                brush = Brush.verticalGradient(
+                    listOf(
+                        lerp(
+                            colors.glassBorderTop,
+                            resolvedAccent.copy(alpha = (0.92f + 0.08f * normalizedBurst).coerceAtMost(1f)),
+                            if (dragging || normalizedBurst > 0f) 1f else borderEmphasisProgress,
+                        ),
+                        lerp(
+                            colors.glassBorderBottom,
+                            resolvedAccent.copy(alpha = (0.68f + 0.28f * normalizedBurst).coerceAtMost(1f)),
+                            if (dragging || normalizedBurst > 0f) 1f else borderEmphasisProgress,
+                        ),
                     )
-                } else {
-                    Brush.verticalGradient(
-                        listOf(colors.glassBorderTop, colors.glassBorderBottom)
-                    )
-                },
+                ),
                 shape = shape,
             )
     Box(

@@ -4840,11 +4840,11 @@ internal fun FilterChip(
         wheelHeight = 34.dp,
         cornerRadius = 10.dp,
         optionFontSize = 12.sp,
-        optionFontWeight = FontWeight.Medium,
+        optionFontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
         optionTextColor = tint,
-        accentColor = tint,
+        accentColor = activeColor,
         emphasized = selected,
-        showEmphasisBorder = false,
+        showEmphasisBorder = true,
         showDragHint = false,
         centerIcon = if (leading != null || icon != null) {
             { color ->

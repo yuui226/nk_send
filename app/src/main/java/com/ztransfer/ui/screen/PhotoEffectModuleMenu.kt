@@ -45,18 +45,19 @@ internal fun PhotoEffectModuleMenu(
         panelAlignment = Alignment.TopEnd,
         shape = RoundedCornerShape(18.dp),
         panelModifier = Modifier.padding(start = 18.dp, end = 18.dp, top = top)
-            .widthIn(max = 300.dp),
+            .widthIn(max = 180.dp),
     ) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            PhotoEffectModule.entries.chunked(2).forEach { modules ->
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    modules.forEach { module ->
-                        FilterChip(stringResource(labels[module.ordinal]), mask.showsPhotoEffect(module), {
-                            val next = togglePhotoEffectModule(mask, module, isPro)
-                            if (next != mask) { haptics.tick(); onChange(next) }
-                        }, modifier = Modifier.weight(1f))
-                    }
-                }
+            PhotoEffectModule.entries.forEach { module ->
+                FilterChip(
+                    label = stringResource(labels[module.ordinal]),
+                    selected = mask.showsPhotoEffect(module),
+                    onClick = {
+                        val next = togglePhotoEffectModule(mask, module, isPro)
+                        if (next != mask) { haptics.tick(); onChange(next) }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
         }
     }

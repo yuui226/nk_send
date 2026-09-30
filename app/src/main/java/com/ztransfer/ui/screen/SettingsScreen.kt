@@ -4,7 +4,6 @@ import com.ztransfer.effects.effectivePhotoEffectModules
 import com.ztransfer.effects.PhotoEffectModule
 import com.ztransfer.effects.showsPhotoEffect
 
-import androidx.compose.animation.animateContentSize
 
 import com.ztransfer.frame.supportsBackdropControls
 
@@ -1987,14 +1986,6 @@ internal fun PhotoFrameWatermarkEditor(
 ) {
     val colors = AppTheme.colors
     val frameAccent = colors.accentOrange
-    // Let the outer card own the exit when both sections disappear, avoiding nested shrink.
-    var lastVisibleSections by remember { mutableStateOf(showFrame to showWatermark) }
-    val anySectionVisible = showFrame || showWatermark
-    if (anySectionVisible) {
-        SideEffect { lastVisibleSections = showFrame to showWatermark }
-    }
-    val frameSectionVisible = if (anySectionVisible) showFrame else lastVisibleSections.first
-    val watermarkSectionVisible = if (anySectionVisible) showWatermark else lastVisibleSections.second
     val watermarkAccent = colors.accentPurple
     val favoritePalette = rememberPhotoEffectFavoriteButtonPalette()
     val haptics = rememberHaptics(hapticsEnabled)
@@ -2111,12 +2102,12 @@ internal fun PhotoFrameWatermarkEditor(
         }
     }
 
-    PhotoColorEffectGroup(anySectionVisible, spacing = 0.dp) {
+    PhotoColorEffectGroup(showFrame || showWatermark, spacing = 0.dp) {
         SettingsCard(
             borderColor = frameAccent.copy(alpha = 0.24f),
             tintColor = frameAccent,
         ) {
-            PhotoColorEffectGroup(frameSectionVisible, spacing = 0.dp) {
+            PhotoColorEffectGroup(showFrame, spacing = 0.dp) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -2189,10 +2180,9 @@ internal fun PhotoFrameWatermarkEditor(
                     )
                 }
 
-                AnimatedVisibility(
+                PhotoColorEffectGroup(
                     visible = borderEnabled && metadataSettingsExpanded,
-                    enter = fadeIn() + expandVertically(),
-                    exit = fadeOut() + shrinkVertically(),
+                    spacing = 0.dp,
                 ) {
                     PhotoFrameMetadataInlineSettings(
                         preset = preset,
@@ -2207,8 +2197,10 @@ internal fun PhotoFrameWatermarkEditor(
                 }
 
             }
-            PhotoColorEffectGroup(watermarkSectionVisible, spacing = 0.dp) {
-                if (frameSectionVisible) Spacer(Modifier.height(8.dp))
+            PhotoColorEffectGroup(showWatermark, spacing = 0.dp) {
+                PhotoColorEffectGroup(showFrame, spacing = 0.dp) {
+                    Spacer(Modifier.height(8.dp))
+                }
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -2274,10 +2266,9 @@ internal fun PhotoFrameWatermarkEditor(
                         )
                     }
 
-                    AnimatedVisibility(
+                    PhotoColorEffectGroup(
                         visible = watermark.enabled && watermarkSettingsExpanded,
-                        enter = fadeIn() + expandVertically(),
-                        exit = fadeOut() + shrinkVertically(),
+                        spacing = 0.dp,
                     ) {
                         Column(
                             modifier = Modifier
@@ -2595,19 +2586,15 @@ private fun PhotoFrameMetadataInlineSettings(
         modifier = modifier
             .fillMaxWidth()
             .bringIntoViewRequester(bringIntoViewRequester)
-            .animateContentSize(tween(240))
             .clip(RoundedCornerShape(12.dp))
             .background(colors.glassSurface.copy(alpha = 0.58f))
             .border(1.dp, colors.glassPanelBorder, RoundedCornerShape(12.dp))
             .padding(8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        androidx.compose.animation.AnimatedVisibility(
+        PhotoColorEffectGroup(
             visible = preset != PhotoFramePreset.IMMERSIVE,
-            enter = androidx.compose.animation.fadeIn(tween(180, delayMillis = 60)) +
-                androidx.compose.animation.expandVertically(tween(240)),
-            exit = androidx.compose.animation.fadeOut(tween(120)) +
-                androidx.compose.animation.shrinkVertically(tween(240)),
+            spacing = 0.dp,
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 ReleaseCommitWheel(
@@ -2625,12 +2612,9 @@ private fun PhotoFrameMetadataInlineSettings(
                     accentColor = colors.accentOrange,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                androidx.compose.animation.AnimatedVisibility(
+                PhotoColorEffectGroup(
                     visible = preset.supportsBackdropControls(),
-                    enter = androidx.compose.animation.fadeIn(tween(180, delayMillis = 60)) +
-                        androidx.compose.animation.expandVertically(tween(240)),
-                    exit = androidx.compose.animation.fadeOut(tween(120)) +
-                        androidx.compose.animation.shrinkVertically(tween(240)),
+                    spacing = 0.dp,
                 ) {
                     // Switching presets discards any unfinished gesture belonging to the old settings.
                     key(preset) {

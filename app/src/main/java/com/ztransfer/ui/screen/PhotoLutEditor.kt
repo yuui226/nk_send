@@ -159,22 +159,28 @@ internal fun PhotoLutEditor(state: PhotoLutEditorState, hapticsEnabled: Boolean)
     }
 }
 
-/** Keep the row and its spacing in the same transition so the frame section follows smoothly. */
+/** Plain holder: retaining exit content does not schedule another composition or allocate a bitmap. */
+private class RetainedPhotoEffectContent(var content: @Composable () -> Unit)
+
+/** One layout transition owns both the section and its spacing, including its outgoing contents. */
 @Composable
 internal fun PhotoColorEffectGroup(visible: Boolean, spacing: androidx.compose.ui.unit.Dp = 10.dp, content: @Composable () -> Unit) {
+    val retained = remember { RetainedPhotoEffectContent(content) }
+    if (visible) SideEffect { retained.content = content }
+    val displayedContent = if (visible) content else retained.content
     AnimatedVisibility(
         visible = visible,
         enter = expandVertically(
-            animationSpec = tween(280, easing = FastOutSlowInEasing),
+            animationSpec = tween(240, easing = FastOutSlowInEasing),
             expandFrom = Alignment.Top,
-        ) + fadeIn(tween(180, delayMillis = 90)),
-        exit = fadeOut(tween(100)) + shrinkVertically(
-            animationSpec = tween(240, delayMillis = 40, easing = FastOutSlowInEasing),
+        ) + fadeIn(tween(200)),
+        exit = fadeOut(tween(200)) + shrinkVertically(
+            animationSpec = tween(240, easing = FastOutSlowInEasing),
             shrinkTowards = Alignment.Top,
         ),
     ) {
         Column {
-            content()
+            displayedContent()
             Spacer(Modifier.height(spacing))
         }
     }
