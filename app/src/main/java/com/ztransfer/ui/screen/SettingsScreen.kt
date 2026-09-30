@@ -595,21 +595,13 @@ fun SettingsOverlay(
             // ---------- 标题栏：二级页复用全局 GlassButton 返回；主设置保留原关闭入口 ----------
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (page != SettingsPage.MAIN) {
-                    GlassButton(
+                    GlassBackButton(
                         onClick = {
                             focusManager.clearFocus()
                             if (page == SettingsPage.EFFECTS) commitPhotoEffectsDraft()
                             settingsPage = SettingsPage.MAIN
                         },
-                        modifier = Modifier.height(36.dp),
-                    ) {
-                        Icon(
-                            Icons.Default.ArrowBack,
-                            contentDescription = stringResource(R.string.cd_back),
-                            tint = colors.onBackground,
-                            modifier = Modifier.size(20.dp),
-                        )
-                    }
+                    )
                     Spacer(Modifier.width(10.dp))
                 }
                 Text(
@@ -2589,12 +2581,16 @@ private fun PhotoFrameMetadataInlineSettings(
                             ReleaseCommitWheel(options = levels, selected = settings.backgroundBlurPercent,
                                 optionLabel = { "$it%" }, label = stringResource(R.string.photo_frame_background_blur),
                                 onValueCommitted = { onSettingsChanged(settings.copy(backgroundBlurPercent = it)) },
-                                onDetent = onDetent, enabled = preset.supportsBackdropControls(), wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
+                                onDetent = onDetent, enabled = preset.supportsBackdropControls(),
+                                wheelHeight = 34.dp, cornerRadius = 10.dp,
+                                optionFontSize = 12.sp, optionFontWeight = FontWeight.Medium,
                                 accentColor = colors.accentOrange, modifier = Modifier.weight(1f))
                             ReleaseCommitWheel(options = levels, selected = settings.backgroundMaskPercent,
                                 optionLabel = { "$it%" }, label = stringResource(R.string.photo_frame_background_mask),
                                 onValueCommitted = { onSettingsChanged(settings.copy(backgroundMaskPercent = it)) },
-                                onDetent = onDetent, enabled = preset.supportsBackdropControls(), wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
+                                onDetent = onDetent, enabled = preset.supportsBackdropControls(),
+                                wheelHeight = 34.dp, cornerRadius = 10.dp,
+                                optionFontSize = 12.sp, optionFontWeight = FontWeight.Medium,
                                 accentColor = colors.accentOrange, modifier = Modifier.weight(1f))
                         }
                     }

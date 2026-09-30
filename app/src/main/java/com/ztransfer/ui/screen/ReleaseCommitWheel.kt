@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -333,11 +334,12 @@ internal fun <T> ReleaseCommitWheel(
                 fontSize = if (compactBadge) 8.sp else 9.sp,
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(
                     horizontal = if (compactBadge) 4.dp else 6.dp,
+                    vertical = 1.dp,
                 ),
                 shape = RoundedCornerShape(bottomEnd = if (compactBadge) 4.dp else 5.dp),
                 modifier = Modifier
                     .align(Alignment.TopStart)
-                    .height(if (compactBadge) 11.dp else 15.dp)
+                    .heightIn(min = if (compactBadge) 11.dp else 15.dp)
                     .graphicsLayer { alpha = labelAlpha },
             )
         }

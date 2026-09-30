@@ -214,6 +214,7 @@ internal fun shouldPreferHighThroughputTransfers(route: String?): Boolean =
 @Composable
 private fun FilesQueueWorkspace(
     queueVisible: Boolean,
+    topControlsAlpha: () -> Float,
     onFilesSettledChanged: (Boolean) -> Unit,
     filesContent: @Composable () -> Unit,
     queueContent: @Composable () -> Unit,
@@ -234,9 +235,9 @@ private fun FilesQueueWorkspace(
             .distinctUntilChanged()
             .collect { settled -> currentOnFilesSettledChanged(settled) }
     }
-    val travelPx = with(LocalDensity.current) { 24.dp.toPx() }
+    val travelPx = with(LocalDensity.current) { Motion.WORKSPACE_TRAVEL_DP.dp.toPx() }
     val pageProgress = transition.animateFloat(
-        transitionSpec = { tween(300, easing = FastOutSlowInEasing) },
+        transitionSpec = { Motion.workspaceProgress },
         label = "filesQueuePosition",
     ) { if (it) 1f else 0f }
     val topControlsProgress = transition.animateFloat(
@@ -253,8 +254,8 @@ private fun FilesQueueWorkspace(
             transitionSpec = {
                 // 短距离淡入淡出，不再让有实底的页面横跨整屏露出硬边。
                 // 固定尺寸页面关闭 SizeTransform；位移在下方图层中读取，不逐帧重排列表。
-                (fadeIn(tween(200, delayMillis = 100, easing = FastOutSlowInEasing)) togetherWith
-                    fadeOut(tween(140, easing = FastOutSlowInEasing))).using(null)
+                (fadeIn(Motion.workspaceEnter) togetherWith
+                    fadeOut(Motion.workspaceExit)).using(null)
             },
             contentKey = { it },
         ) { showingQueue ->
@@ -281,7 +282,7 @@ private fun FilesQueueWorkspace(
                     .graphicsLayer {
                         // 保持淡入前后相同的合成方式，避免 alpha=1 时阴影切换绘制路径。
                         compositingStrategy = CompositingStrategy.Offscreen
-                        alpha = topControlsProgress.value
+                        alpha = topControlsProgress.value * topControlsAlpha()
                     }
                     // 只扩展悬浮层底部，不移动按钮；给投影留出合成空间。
                     .padding(bottom = 16.dp),
@@ -401,6 +402,7 @@ private fun SharedQueueControls(
     heldCount: Int,
     catchNonce: Long,
     filePreviewVisible: Boolean,
+    visibilityAlpha: () -> Float,
     onBoundsChanged: (Rect) -> Unit,
     onNavigateToTransfer: () -> Unit,
     onControlAction: () -> Unit,
@@ -440,8 +442,11 @@ private fun SharedQueueControls(
     }
 
     val catchScale = remember { Animatable(1f) }
+    // Recreating the controls after monitor exit must not replay an old queue arrival.
+    var lastAnimatedCatchNonce by remember { mutableLongStateOf(catchNonce) }
     LaunchedEffect(catchNonce) {
-        if (catchNonce > 0L) {
+        if (catchNonce != lastAnimatedCatchNonce) {
+            lastAnimatedCatchNonce = catchNonce
             catchScale.animateTo(1.18f, tween(110, easing = FastOutSlowInEasing))
             catchScale.animateTo(1f, Motion.bouncy())
         }
@@ -482,6 +487,11 @@ private fun SharedQueueControls(
         Box(
             modifier = Modifier
                 .align(Alignment.TopEnd)
+                .graphicsLayer {
+                    compositingStrategy = CompositingStrategy.Offscreen
+                    alpha = visibilityAlpha()
+                }
+                .padding(bottom = 16.dp)
                 .statusBarsPadding()
                 .padding(horizontal = 12.dp, vertical = 6.dp),
         ) {
@@ -589,6 +599,16 @@ fun MainScreen(transferViewModel: TransferViewModel) {
     val currentBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = currentBackStackEntry?.destination?.route
     val currentDestinationResumed = rememberBackStackEntryResumed(currentBackStackEntry)
+    val workspaceTravelPx = with(LocalDensity.current) { Motion.WORKSPACE_TRAVEL_DP.dp.roundToPx() }
+    val workspaceTopAlpha = remember { Animatable(0f) }
+    val workspaceTopVisible = currentRoute == Screen.Files.route
+    LaunchedEffect(workspaceTopVisible) {
+        workspaceTopAlpha.animateTo(
+            if (workspaceTopVisible) 1f else 0f,
+            if (workspaceTopVisible) tween(180, easing = FastOutSlowInEasing) else Motion.workspaceExit,
+        )
+    }
+    val workspaceTopFading by remember { derivedStateOf { workspaceTopAlpha.value > 0f } }
     var queuePageVisible by rememberSaveable { mutableStateOf(false) }
     val context = LocalContext.current
     val exitHintBottomPadding = (LocalConfiguration.current.screenHeightDp * 0.12f).dp
@@ -824,23 +844,23 @@ fun MainScreen(transferViewModel: TransferViewModel) {
                 }
                 composable(
                     Screen.Files.route,
-                    // 空间隐喻：队列页位于本页右侧，遥控页位于本页左侧。去队列页时本页作为
-                    // 底层向左 1/3 视差退场并轻微压暗（营造被上层卡片盖住的纵深），返回时反向
-                    // 浮现回来；去遥控页方向相反（向右 1/3）。
-                    // enter/popEnter（自连接页）不设，仍走 NavHost 默认的缩放淡入转场。
+                    // 监看在左侧；复用列表/队列的短距离淡变，不再整页横滑或保留半透明底层。
                     exitTransition = {
-                        val toRemote = targetState.destination.route == Screen.Remote.route
-                        slideOutHorizontally(Motion.pageSlide) { if (toRemote) it / 3 else -it / 3 } +
-                                fadeOut(tween(Motion.PAGE_FADE_MS), targetAlpha = 0.5f)
+                        if (targetState.destination.route == Screen.Remote.route) {
+                            slideOutHorizontally(Motion.workspaceSlide) { workspaceTravelPx } +
+                                fadeOut(Motion.workspaceExit)
+                        } else null
                     },
                     popEnterTransition = {
-                        val fromRemote = initialState.destination.route == Screen.Remote.route
-                        slideInHorizontally(Motion.pageSlide) { if (fromRemote) it / 3 else -it / 3 } +
-                                fadeIn(tween(Motion.PAGE_FADE_MS), initialAlpha = 0.5f)
+                        if (initialState.destination.route == Screen.Remote.route) {
+                            slideInHorizontally(Motion.workspaceSlide) { workspaceTravelPx } +
+                                fadeIn(Motion.workspaceEnter)
+                        } else null
                     }
                 ) {
                     FilesQueueWorkspace(
                         queueVisible = queuePageVisible,
+                        topControlsAlpha = { workspaceTopAlpha.value },
                         onFilesSettledChanged = { filesWorkspaceSettled = it },
                         filesContent = {
                             FileListScreen(
@@ -867,6 +887,7 @@ fun MainScreen(transferViewModel: TransferViewModel) {
                                     if (index >= 0) autoQueueFlightRequests.removeAt(index)
                                 },
                                 onPreviewVisibilityChanged = { filePreviewVisible = it },
+                                topControlsAlpha = { workspaceTopAlpha.value },
                                 backHandlerEnabled = !queuePageVisible,
                                 onRequestExitConfirmation = requestExitConfirmation,
                                 onNavigateToRemote = {
@@ -895,9 +916,14 @@ fun MainScreen(transferViewModel: TransferViewModel) {
                 }
                 composable(
                     Screen.Remote.route,
-                    // 遥控页作为上层卡片从左侧滑入，返回时向左滑出。
-                    enterTransition = { slideInHorizontally(Motion.pageSlide) { -it } },
-                    popExitTransition = { slideOutHorizontally(Motion.pageSlide) { -it } }
+                    enterTransition = {
+                        slideInHorizontally(Motion.workspaceSlide) { -workspaceTravelPx } +
+                            fadeIn(Motion.workspaceEnter)
+                    },
+                    popExitTransition = {
+                        slideOutHorizontally(Motion.workspaceSlide) { -workspaceTravelPx } +
+                            fadeOut(Motion.workspaceExit)
+                    }
                 ) {
                     RemoteScreen(
                         cameraViewModel = cameraViewModel,
@@ -907,14 +933,17 @@ fun MainScreen(transferViewModel: TransferViewModel) {
                 }
             }
         }
-        if (currentRoute == Screen.Files.route) {
+        // Keep the controls composed through fade-out; both header sides share one alpha.
+        // Fade in with navigation rather than leaving the header empty until it settles.
+        if (currentRoute == Screen.Files.route || workspaceTopFading) {
             SharedQueueControls(
-                route = activeWorkspaceRoute ?: Screen.Files.route,
+                route = if (queuePageVisible) Screen.Transfer.route else Screen.Files.route,
                 transferViewModel = transferViewModel,
                 cameraViewModel = cameraViewModel,
                 heldCount = queueHeldCount,
                 catchNonce = queueCatchNonce,
                 filePreviewVisible = filePreviewVisible,
+                visibilityAlpha = { workspaceTopAlpha.value },
                 onBoundsChanged = { queueTargetBounds = it },
                 onNavigateToTransfer = {
                     queuePageVisible = true

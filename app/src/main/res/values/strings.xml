@@ -660,4 +660,13 @@
     <string name="photo_filter_turn_off">Turn off filter</string>
     <string name="photo_frame_background_blur">Background blur</string>
     <string name="photo_frame_background_mask">Overlay strength</string>
+    <string name="local_photo_error_item">Photo %1$d · %2$s</string>
+    <string name="local_photo_error_prepare">Reading photo</string>
+    <string name="local_photo_error_render">Generating effects</string>
+    <string name="local_photo_error_save">Saving to album</string>
+    <string name="local_photo_error_memory">Not enough memory to generate this photo. Please try again later.</string>
+    <string name="local_photo_error_permission">Photo access was denied. Select the photo again and check photo permissions.</string>
+    <string name="local_photo_error_missing">The file is unavailable. Check that the photo and any LUT or logo files are still accessible.</string>
+    <string name="local_photo_error_space">Storage is full. Free some space and retry.</string>
+    <string name="local_photo_error_unknown">Processing failed. Copy the details below and send them to support.</string>
 </resources>

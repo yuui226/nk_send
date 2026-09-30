@@ -64,7 +64,6 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
@@ -2951,11 +2950,14 @@ private fun RemoteContent(
             modifier = Modifier
                 .fillMaxSize()
                 .systemBarsPadding()
-                .padding(horizontal = 12.dp, vertical = 8.dp),
+                .padding(horizontal = 12.dp, vertical = 6.dp),
             header = {
             // 顶栏返回常驻；信号随其他工具淡变，监看工具统一放到取景器下方。
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     SignalPill(
                         rssi = camState.wifiRssi,
                         connected = connected,
@@ -2966,9 +2968,10 @@ private fun RemoteContent(
                     BatteryPill(percent = rcBatteryPercentage(batteryParam))
                 }
                 Spacer(Modifier.weight(1f))
-                MonitorHeaderButton(onNavigateBack) {
-                    Icon(Icons.Default.ArrowForward, stringResource(R.string.cd_back), Modifier.size(18.dp))
-                }
+                GlassBackButton(
+                    onClick = onNavigateBack,
+                    forward = true,
+                )
             }
             },
             viewfinder = {
@@ -3178,9 +3181,7 @@ private fun RemoteContent(
                     },
                     rotateButton = { renderTool(RemoteTool.ROTATE) },
                     backButton = {
-                        MonitorHeaderButton(onNavigateBack) {
-                            Icon(Icons.Default.ArrowForward, stringResource(R.string.cd_back), Modifier.size(18.dp))
-                        }
+                        GlassBackButton(onClick = onNavigateBack, forward = true)
                     },
                     dispButton = {
                         TopIconToggle(false, "DISP", { dispMode = dispMode.next() }) {
@@ -3542,8 +3543,9 @@ private fun BatteryPill(percent: Int?) {
     GlassButton(
         onClick = { expanded = !expanded },
         shape = RoundedCornerShape(22.dp),
-        // Collapsed width: 21dp icon + 21dp padding = back button's 18dp + 24dp.
-        contentPadding = PaddingValues(horizontal = 10.5.dp, vertical = 9.dp),
+        // Match the 40 × 36dp back/idle queue button without an extra layout touch inset.
+        contentPadding = PaddingValues(horizontal = 9.5.dp, vertical = 7.dp),
+        enforceMinimumTouchTarget = false,
         modifier = Modifier
             .height(36.dp)
             .semantics {

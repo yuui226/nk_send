@@ -58,6 +58,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -76,6 +77,10 @@ import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.ztransfer.R
@@ -168,19 +173,7 @@ fun TransferTopControls(
             .padding(horizontal = 12.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        GlassButton(
-            onClick = onNavigateBack,
-            contentPadding = PaddingValues(horizontal = 9.dp, vertical = 7.dp),
-            enforceMinimumTouchTarget = false,
-            modifier = Modifier.height(36.dp),
-        ) {
-            Icon(
-                Icons.Default.ArrowBack,
-                contentDescription = stringResource(R.string.cd_back),
-                tint = colors.onBackground,
-                modifier = Modifier.size(22.dp),
-            )
-        }
+        GlassBackButton(onClick = onNavigateBack)
 
         Spacer(modifier = Modifier.width(8.dp))
         SignalPill(
@@ -295,6 +288,9 @@ fun TransferScreen(
     Box(modifier = Modifier.fillMaxSize().background(rememberAppBackgroundBrush())) {
         // ---------- 内容（铺满，延伸到系统栏后面）----------
         if (transferState.tasks.isEmpty()) {
+            // Enter only when the queue becomes empty; ordinary recomposition never restarts it.
+            val emptyReveal = remember { Animatable(0f) }
+            LaunchedEffect(Unit) { emptyReveal.animateTo(1f, Motion.overlayExpand) }
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     // 空状态只保留品牌双 Z 的低对比度剪影。透明度与尺寸做极轻的慢呼吸，
@@ -322,7 +318,7 @@ fun TransferScreen(
                         modifier = Modifier
                             .height(58.dp)
                             .graphicsLayer {
-                                alpha = breatheAlpha
+                                alpha = breatheAlpha * emptyReveal.value
                                 scaleX = breatheScale
                                 scaleY = breatheScale
                         },
@@ -402,17 +398,42 @@ fun TransferScreen(
                         label = "transferCardStateAccent",
                     )
                     val cardContainerColor = lerp(colors.surface, cardAccent, 0.09f)
-                    val cardBorderColor = lerp(colors.cardHairline, cardAccent, 0.32f)
+                    // Light from above: a quiet bright rim, neutral sides, soft lower edge.
+                    val cardBorder = remember(colors) {
+                        Brush.verticalGradient(listOf(
+                            colors.glassSheen.copy(alpha = 0.32f),
+                            colors.cardHairline,
+                            Color.Black.copy(alpha = 0.08f),
+                        ))
+                    }
+                    val removeLabel = stringResource(R.string.cd_remove_from_queue)
                     Box(
                         modifier = Modifier
                             // 上方卡片增删/长矮时，本卡平滑让位而不是硬跳。
                             .animateItemPlacement(Motion.itemPlacement)
-                            .collapseHeight { removeProgress.value }
+                            .collapseHeight(clip = false) { removeProgress.value }
                             .padding(bottom = 8.dp)
                     ) {
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .queueCardSwipe(
+                                enabled = cardActionsVisible && task.status != TransferStatus.TRANSFERING &&
+                                    !task.isGeneratingFrame,
+                                removing = removing,
+                                removeLabel = removeLabel,
+                                onRemove = {
+                                    transferViewModel.withdrawTask(taskId)
+                                    removingTaskIds[taskId] = Unit
+                                },
+                            )
+                            .shadow(
+                                elevation = 6.dp,
+                                shape = RoundedCornerShape(16.dp),
+                                clip = false,
+                                ambientColor = Color.Black.copy(alpha = 0.08f),
+                                spotColor = Color.Black.copy(alpha = 0.12f),
+                            )
                             .then(
                                 if (task.status == TransferStatus.TRANSFERING) {
                                     Modifier.semantics {
@@ -425,10 +446,10 @@ fun TransferScreen(
                                     Modifier
                                 },
                             ),
-                        // 14dp 与列表页卡片/监看页 tile 的中型控件圆角一致（原 12dp 家族外）。
-                        shape = RoundedCornerShape(14.dp),
-                        // 浅色下白卡浮在浅灰背景上需要发丝线定界；深色 token 为透明，视觉不变。
-                        border = BorderStroke(1.dp, cardBorderColor),
+                        shape = RoundedCornerShape(16.dp),
+                        // Use the faint, wider shadow above; avoid stacking a second Material shadow.
+                        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                        border = BorderStroke(1.dp, cardBorder),
                         colors = CardDefaults.cardColors(
                             containerColor = cardContainerColor,
                         )
@@ -475,17 +496,17 @@ fun TransferScreen(
                             modifier = Modifier
                                 .background(cardSheen)
                                 .drawBehind {
-                                    val width = 3.dp.toPx()
-                                    val inset = 16.dp.toPx()
+                                    val width = 2.5.dp.toPx()
+                                    val markerHeight = 32.dp.toPx()
                                     drawRoundRect(
-                                        color = cardAccent.copy(alpha = 0.8f),
-                                        topLeft = Offset(0f, inset),
-                                        size = Size(width, (size.height - inset * 2).coerceAtLeast(0f)),
+                                        color = cardAccent.copy(alpha = 0.65f),
+                                        topLeft = Offset(5.dp.toPx(), (size.height - markerHeight) / 2f),
+                                        size = Size(width, markerHeight),
                                         cornerRadius = CornerRadius(width, width),
                                     )
                                 }
                                 .animateContentSize(tween(250, easing = FastOutSlowInEasing))
-                                .padding(12.dp)
+                                .padding(horizontal = 12.dp, vertical = 10.dp)
                         ) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -493,7 +514,7 @@ fun TransferScreen(
                             ) {
                                 // 缩略图：屏幕内的卡片始终允许取图（传输中请求排到
                                 // 文件间隙执行），isTransferring 仅作传输结束后的补载重试键。
-                                Box(modifier = Modifier.size(56.dp)) {
+                                Box(modifier = Modifier.size(72.dp)) {
                                     QueueThumbnail(
                                         file = task.file,
                                         retryNudge = transferState.isTransferring,
@@ -532,37 +553,7 @@ fun TransferScreen(
                                     },
                                 )
 
-                                // 最尾：毛玻璃移除按钮——把本卡从队列移除。正在传输的
-                                // 不可移除（中途打断会让相机关 Wi-Fi），传完变可移除时淡入。
-                                AnimatedVisibility(
-                                    visible = cardActionsVisible &&
-                                        task.status != TransferStatus.TRANSFERING &&
-                                        !task.isGeneratingFrame,
-                                    // 水平展开/收起：出现消失时行内其它内容平滑让位，不硬跳。
-                                    enter = fadeIn() + expandHorizontally(expandFrom = Alignment.Start),
-                                    exit = fadeOut() + shrinkHorizontally(shrinkTowards = Alignment.Start)
-                                ) {
-                                    Row {
-                                        Spacer(modifier = Modifier.width(10.dp))
-                                        GlassButton(
-                                            onClick = {
-                                                // 等待中的先撤下（置 CANCELLED），动画期间队列不会开始传它。
-                                                transferViewModel.withdrawTask(taskId)
-                                                removingTaskIds[taskId] = Unit
-                                            },
-                                            enabled = cardActionsVisible,
-                                            shape = CircleShape,
-                                            contentPadding = PaddingValues(6.dp)
-                                        ) {
-                                            // 与右下角"清空队列"同款自绘扫帚——同一动作同一符号。
-                                            BroomMark(
-                                                modifier = Modifier.size(16.dp),
-                                                color = colors.onSurfaceVariant,
-                                                contentDescription = stringResource(R.string.cd_remove_from_queue)
-                                            )
-                                        }
-                                    }
-                                }
+
                             }
 
                         }
@@ -837,28 +828,21 @@ private fun TransferTaskCardContent(
     val animateTransferPills = task.status == TransferStatus.TRANSFERING
     val animateGenerationPills = task.isGeneratingFrame && !task.frameGenerationSkipped
 
+    val rowGap = 5.dp
     Column(modifier = modifier) {
         Row(verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             if (task.cropRecipe != null) Icon(Icons.Default.ContentCut,
                 contentDescription = stringResource(R.string.crop_task),
                 tint = colors.accentBlue, modifier = Modifier.size(14.dp))
-        Text(
-            text = task.file.fileName,
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.Medium,
-            color = if (task.status == TransferStatus.CANCELLED) {
-                colors.onSurfaceVariant
-            } else {
-                colors.onBackground
-            },
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
+            TransferFileTitle(
+                name = task.file.fileName,
+                cancelled = task.status == TransferStatus.CANCELLED,
+                modifier = Modifier.weight(1f),
+            )
         }
 
-        Spacer(modifier = Modifier.height(6.dp))
+        Spacer(modifier = Modifier.height(rowGap))
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(5.dp),
@@ -871,6 +855,7 @@ private fun TransferTaskCardContent(
             TransferPillVisibility(
                 visible = speedText != null,
                 delayMillis = 60,
+                modifier = Modifier.weight(1f, fill = false),
             ) {
                 speedText?.let {
                     TransferInfoPill(
@@ -891,7 +876,7 @@ private fun TransferTaskCardContent(
         }
 
         if (isFailed) {
-            Spacer(modifier = Modifier.height(7.dp))
+            Spacer(modifier = Modifier.height(rowGap))
             Text(
                 text = task.frameGenerationError?.let {
                     stringResource(R.string.local_photo_batch_failed) + ": " + it
@@ -902,7 +887,7 @@ private fun TransferTaskCardContent(
                 overflow = TextOverflow.Ellipsis,
             )
         } else if (effectText != null) {
-            Spacer(modifier = Modifier.height(7.dp))
+            Spacer(modifier = Modifier.height(rowGap))
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(5.dp),
@@ -928,10 +913,53 @@ private fun TransferTaskCardContent(
     }
 }
 
+/** Title remains one line; preserve both the file number and extension when space is tight. */
+@Composable
+private fun TransferFileTitle(name: String, cancelled: Boolean, modifier: Modifier = Modifier) {
+    val colors = AppTheme.colors
+    val style = MaterialTheme.typography.bodyMedium
+    val measurer = rememberTextMeasurer()
+    BoxWithConstraints(modifier) {
+        val widthPx = with(LocalDensity.current) { maxWidth.roundToPx() }
+        val title = remember(name, widthPx, style, colors, cancelled, measurer) {
+            val dot = name.lastIndexOf('.').takeIf { it > 0 } ?: name.length
+            val stem = name.substring(0, dot)
+            val extension = name.substring(dot)
+            fun label(value: String) = buildAnnotatedString {
+                withStyle(SpanStyle(
+                    color = if (cancelled) colors.onSurfaceVariant else colors.onBackground,
+                    fontWeight = FontWeight.SemiBold,
+                )) { append(value) }
+                withStyle(SpanStyle(color = colors.onSurfaceVariant, fontWeight = FontWeight.Normal)) {
+                    append(extension)
+                }
+            }
+            val full = label(stem)
+            if (measurer.measure(full, style, maxLines = 1, softWrap = false).size.width <= widthPx) full
+            else {
+                var low = 0
+                var high = (stem.length - 1).coerceAtLeast(0)
+                var fitted = label("…")
+                while (low <= high) {
+                    val kept = (low + high) / 2
+                    val candidate = label(stem.take((kept + 1) / 2) + "…" + stem.takeLast(kept / 2))
+                    if (measurer.measure(candidate, style, maxLines = 1, softWrap = false).size.width <= widthPx) {
+                        fitted = candidate
+                        low = kept + 1
+                    } else high = kept - 1
+                }
+                fitted
+            }
+        }
+        Text(title, style = style, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+    }
+}
+
 @Composable
 private fun TransferPillVisibility(
     visible: Boolean,
     delayMillis: Int,
+    modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
     // 初次组合时直接采用真实状态；只有当前卡片留在组合内发生 false → true，才播放
@@ -944,8 +972,9 @@ private fun TransferPillVisibility(
     }
     AnimatedVisibility(
         visibleState = visibilityState,
+        modifier = modifier,
         enter = transferCardPillEnter(delayMillis),
-        exit = fadeOut(tween(100)) + shrinkHorizontally(shrinkTowards = Alignment.Start),
+        exit = fadeOut(tween(100)) + shrinkHorizontally(shrinkTowards = Alignment.Start, clip = false),
     ) { content() }
 }
 
@@ -953,6 +982,7 @@ private fun transferCardPillEnter(delayMillis: Int) =
     fadeIn(tween(200, delayMillis = delayMillis)) +
         expandHorizontally(
             expandFrom = Alignment.Start,
+            clip = false,
             animationSpec = Motion.bouncy(),
         ) +
         slideInHorizontally(
@@ -978,7 +1008,7 @@ private fun TransferInfoPill(
 ) {
     val colors = AppTheme.colors
     val pillHeight = with(LocalDensity.current) {
-        MaterialTheme.typography.labelSmall.lineHeight.toDp().coerceAtLeast(16.dp) + 6.dp
+        MaterialTheme.typography.labelSmall.lineHeight.toDp().coerceAtLeast(16.dp) + 4.dp
     }
     val accent = when (tone) {
         TransferCardPillTone.SIZE -> colors.onSurfaceVariant
@@ -986,6 +1016,21 @@ private fun TransferInfoPill(
         TransferCardPillTone.EFFECT -> colors.accentPurple
         TransferCardPillTone.TRANSFER_DURATION -> colors.accentBlue
         TransferCardPillTone.GENERATION_DURATION -> colors.accentYellow
+    }
+    val pillShape = remember { RoundedCornerShape(6.dp) }
+    val pillFill = remember(accent, colors.glassSheen) {
+        Brush.verticalGradient(listOf(
+            lerp(accent.copy(alpha = 0.10f), colors.glassSheen.copy(alpha = 0.15f), 0.30f),
+            accent.copy(alpha = 0.09f),
+            accent.copy(alpha = 0.12f),
+        ))
+    }
+    val pillEdge = remember(accent, colors.glassSheen) {
+        Brush.verticalGradient(listOf(
+            lerp(accent.copy(alpha = 0.22f), colors.glassSheen.copy(alpha = 0.32f), 0.45f),
+            accent.copy(alpha = 0.16f),
+            accent.copy(alpha = 0.25f),
+        ))
     }
     val sourceScale = remember { Animatable(1f) }
     var previouslyResponding by remember { mutableStateOf(respond) }
@@ -1006,9 +1051,11 @@ private fun TransferInfoPill(
                 transformOrigin = TransformOrigin(0f, 0.5f)
                 scaleX = sourceScale.value
             }
-            .clip(RoundedCornerShape(999.dp))
-            .background(accent.copy(alpha = 0.10f))
-            .border(1.dp, accent.copy(alpha = 0.22f), RoundedCornerShape(999.dp))
+            .clip(pillShape)
+            .background(pillFill)
+            .border(1.dp, pillEdge, pillShape)
+            // Draw the shell around the animated size, not inside a shrinking clip layer.
+            .animateContentSize(tween(140, easing = FastOutSlowInEasing))
             .padding(horizontal = 7.dp),
         contentAlignment = Alignment.Center,
     ) {
@@ -1193,8 +1240,8 @@ private fun QueueThumbnail(
     }
     Box(
         modifier = modifier
-            .size(52.dp)
-            .clip(RoundedCornerShape(8.dp))
+            .size(68.dp)
+            .clip(RoundedCornerShape(10.dp))
             .background(AppTheme.colors.thumbPlaceholder),
         contentAlignment = Alignment.Center
     ) {

@@ -246,325 +246,352 @@ fun LocalPhotoEffectsPage(
         onDispose { view.keepScreenOn = previous }
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .statusBarsPadding()
-            .navigationBarsPadding(),
-    ) {
-        Column(
+    // A pager page must expose one root; the preview overlays the editor inside it.
+    Box(Modifier.fillMaxSize()) {
+        Box(
             modifier = Modifier
-                .widthIn(max = 680.dp)
                 .fillMaxSize()
-                .align(Alignment.TopCenter)
-                .clearFocusOnBackgroundTap(enabled = true) {
-                    focusManager.clearFocus()
-                }
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp, vertical = 16.dp),
+                .statusBarsPadding()
+                .navigationBarsPadding(),
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                GlassButton(
-                    onClick = onNavigateUp,
-                    modifier = Modifier.size(38.dp),
-                    contentPadding = PaddingValues(0.dp),
-                ) {
-                    Icon(
-                        Icons.Default.KeyboardArrowUp,
-                        contentDescription = stringResource(R.string.cd_back),
-                        tint = colors.onBackground,
-                        modifier = Modifier.size(23.dp),
+            Column(
+                modifier = Modifier
+                    .widthIn(max = 680.dp)
+                    .fillMaxSize()
+                    .align(Alignment.TopCenter)
+                    .clearFocusOnBackgroundTap(enabled = true) {
+                        focusManager.clearFocus()
+                    }
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 20.dp, vertical = 16.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    GlassButton(
+                        onClick = onNavigateUp,
+                        modifier = Modifier.size(38.dp),
+                        contentPadding = PaddingValues(0.dp),
+                    ) {
+                        Icon(
+                            Icons.Default.KeyboardArrowUp,
+                            contentDescription = stringResource(R.string.cd_back),
+                            tint = colors.onBackground,
+                            modifier = Modifier.size(23.dp),
+                        )
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        text = stringResource(R.string.local_photo_effects_entry),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = colors.onBackground,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (batch.photos.isNotEmpty()) {
+                        GlassButton(
+                            onClick = launchPhotoPicker,
+                            enabled = !saving,
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 7.dp),
+                            modifier = Modifier.height(38.dp),
+                        ) {
+                            Text(stringResource(R.string.local_photo_replace), style = MaterialTheme.typography.labelMedium, color = colors.onBackground)
+                        }
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    TipLightbulbButton(
+                        onClick = {
+                            viewModel.markLocalPhotoEffectsHelpViewed()
+                            showPhotoEffectsInfo = true
+                        },
+                        contentDescription = stringResource(R.string.photo_effects_info_title),
+                        attention = !state.localPhotoEffectsHelpViewed,
+                        modifier = Modifier
+                            .size(38.dp)
+                            .onGloballyPositioned {
+                                photoEffectsInfoAnchorBounds = it.boundsInRoot()
+                            },
                     )
                 }
-                Spacer(Modifier.width(10.dp))
-                Text(
-                    text = stringResource(R.string.local_photo_effects_entry),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = colors.onBackground,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-                if (batch.photos.isNotEmpty()) {
-                    GlassButton(
-                        onClick = launchPhotoPicker,
-                        enabled = !saving,
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 7.dp),
-                        modifier = Modifier.height(38.dp),
-                    ) {
-                        Text(stringResource(R.string.local_photo_replace), style = MaterialTheme.typography.labelMedium, color = colors.onBackground)
-                    }
-                    Spacer(Modifier.width(8.dp))
+
+                Spacer(Modifier.height(14.dp))
+                val previewFilterPrefetch = remember(
+                    state.photoFilters, favoritePhotoFilters, filterIntensities, filterId, filterEnabled, photoLutDraft.selection,
+                ) {
+                    nextPhotoFilterSelections(
+                        filters = state.photoFilters,
+                        favoriteCatalogKeys = favoritePhotoFilters.map { it.catalogKey },
+                        rememberedIntensities = filterIntensities,
+                        selectedId = filterId,
+                        enabled = filterEnabled && photoLutDraft.selection == null,
+                    )
                 }
-                TipLightbulbButton(
-                    onClick = {
-                        viewModel.markLocalPhotoEffectsHelpViewed()
-                        showPhotoEffectsInfo = true
-                    },
-                    contentDescription = stringResource(R.string.photo_effects_info_title),
-                    attention = !state.localPhotoEffectsHelpViewed,
-                    modifier = Modifier
-                        .size(38.dp)
-                        .onGloballyPositioned {
-                            photoEffectsInfoAnchorBounds = it.boundsInRoot()
-                        },
+                val previewEffects = LocalPhotoBatchEffects(
+                    preset = preset,
+                    watermark = renderWatermark,
+                    borderEnabled = decorationEnabled && borderEnabled,
+                    metadataSettings = resolvedPhotoFrameMetadataSettings(metadataSettings, preset).withoutLocationFields(),
+                    filter = selectedFilter,
                 )
-            }
-
-            Spacer(Modifier.height(14.dp))
-            val previewFilterPrefetch = remember(
-                state.photoFilters, favoritePhotoFilters, filterIntensities, filterId, filterEnabled, photoLutDraft.selection,
-            ) {
-                nextPhotoFilterSelections(
-                    filters = state.photoFilters,
-                    favoriteCatalogKeys = favoritePhotoFilters.map { it.catalogKey },
-                    rememberedIntensities = filterIntensities,
-                    selectedId = filterId,
-                    enabled = filterEnabled && photoLutDraft.selection == null,
-                )
-            }
-            val previewEffects = LocalPhotoBatchEffects(
-                preset = preset,
-                watermark = renderWatermark,
-                borderEnabled = decorationEnabled && borderEnabled,
-                metadataSettings = resolvedPhotoFrameMetadataSettings(metadataSettings, preset).withoutLocationFields(),
-                filter = selectedFilter,
-            )
-            LocalPhotoPreviewPager(
-                photos = batch.photos,
-                effects = previewEffects,
-                prefetchFilters = previewFilterPrefetch,
-                generating = saving,
-                onChoose = launchPhotoPicker,
-                onOpen = { bitmap, anchorRect, comparison ->
-                    focusManager.clearFocus()
-                    keyboardController?.hide()
-                    expandedEffectsPreview = ExpandedEffectsPreview(bitmap, anchorRect, comparison)
-                },
-                onPageChanged = { previewPage = it },
-                debugBrand = debugBrand,
-            )
-            Spacer(Modifier.height(10.dp))
-            LocalPhotoBatchButton(
-                batch = batch,
-                hasEffect = hasEffect,
-                onChoose = launchPhotoPicker,
-                onGenerate = {
-                    focusManager.clearFocus()
-                    keyboardController?.hide()
-                    // Capture the latest text, including edits still awaiting preview debounce.
-                    batchModel.generate(previewEffects.copy(watermark = requestedRenderWatermark))
-                },
-                pageLabel = if (batch.photos.isEmpty()) null else "${previewPage + 1} / ${batch.photos.size}",
-            )
-            if (batch.phase == LocalPhotoBatchPhase.PARTIAL || batch.phase == LocalPhotoBatchPhase.FAILED) {
-                Text(
-                    text = stringResource(R.string.local_photo_batch_failure_detail, batch.progress.failed),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = colors.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 6.dp),
-                )
-            }
-
-            Spacer(Modifier.height(10.dp))
-            PhotoColorEffectGroup(visible = photoLutDraft.selection == null) {
-                PhotoFilterEditor(
-                    filters = state.photoFilters,
-                    favoriteFilters = favoritePhotoFilters,
-                    rememberedIntensities = filterIntensities,
-                    selectedId = filterId,
-                    enabled = filterEnabled && photoLutDraft.selection == null,
-                    intensityPercent = filterIntensity,
-                    onDisabled = { filterEnabled = false },
-                    onSelected = {
-                        photoLutDraft.off()
-                        filterId = it
-                        filterEnabled = true
+                LocalPhotoPreviewPager(
+                    photos = batch.photos,
+                    effects = previewEffects,
+                    prefetchFilters = previewFilterPrefetch,
+                    generating = saving,
+                    onChoose = launchPhotoPicker,
+                    onOpen = { bitmap, anchorRect, comparison ->
+                        focusManager.clearFocus()
+                        keyboardController?.hide()
+                        expandedEffectsPreview = ExpandedEffectsPreview(bitmap, anchorRect, comparison)
                     },
-                    onIntensityChanged = { selectedFilterId, intensity ->
-                        filterIntensity = intensity
-                        val catalogKey = BuiltInPhotoFilters.catalogKey(selectedFilterId)
-                            ?: selectedFilterId
-                        filterIntensities = filterIntensities + (catalogKey to intensity)
+                    onPageChanged = { previewPage = it },
+                    debugBrand = debugBrand,
+                )
+                Spacer(Modifier.height(10.dp))
+                LocalPhotoBatchButton(
+                    batch = batch,
+                    hasEffect = hasEffect,
+                    onChoose = launchPhotoPicker,
+                    onGenerate = {
+                        focusManager.clearFocus()
+                        keyboardController?.hide()
+                        // Capture the latest text, including edits still awaiting preview debounce.
+                        batchModel.generate(previewEffects.copy(watermark = requestedRenderWatermark))
                     },
-                    onFavoriteToggled = { selectedFilterId ->
-                        BuiltInPhotoFilters.catalogKey(selectedFilterId)?.let { catalogKey ->
-                            favoritePhotoFilters = if (
-                                favoritePhotoFilters.any { it.catalogKey == catalogKey }
-                            ) {
-                                favoritePhotoFilters.filterNot { it.catalogKey == catalogKey }
-                            } else {
-                                favoritePhotoFilters + FavoritePhotoFilter(catalogKey)
+                    pageLabel = if (batch.photos.isEmpty()) null else "${previewPage + 1} / ${batch.photos.size}",
+                )
+                if (batch.failures.isNotEmpty()) {
+                    androidx.compose.foundation.text.selection.SelectionContainer {
+                        Column(Modifier.padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                stringResource(R.string.local_photo_batch_failure_detail,
+                                    maxOf(batch.progress.failed, batch.failures.size)),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = colors.onSurfaceVariant,
+                            )
+                            batch.failures.forEach { failure ->
+                                val stage = stringResource(when (failure.stage) {
+                                    "save" -> R.string.local_photo_error_save
+                                    "render" -> R.string.local_photo_error_render
+                                    else -> R.string.local_photo_error_prepare
+                                })
+                                val reason = stringResource(when (failure.kind) {
+                                    "memory" -> R.string.local_photo_error_memory
+                                    "permission" -> R.string.local_photo_error_permission
+                                    "missing" -> R.string.local_photo_error_missing
+                                    "space" -> R.string.local_photo_error_space
+                                    else -> R.string.local_photo_error_unknown
+                                })
+                                Text(
+                                    stringResource(R.string.local_photo_error_item, failure.number, stage) +
+                                        "\n" + reason + "\n" + failure.detail,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = colors.statusError,
+                                )
                             }
                         }
-                    },
+                    }
+                }
+
+                Spacer(Modifier.height(10.dp))
+                PhotoColorEffectGroup(visible = photoLutDraft.selection == null) {
+                    PhotoFilterEditor(
+                        filters = state.photoFilters,
+                        favoriteFilters = favoritePhotoFilters,
+                        rememberedIntensities = filterIntensities,
+                        selectedId = filterId,
+                        enabled = filterEnabled && photoLutDraft.selection == null,
+                        intensityPercent = filterIntensity,
+                        onDisabled = { filterEnabled = false },
+                        onSelected = {
+                            photoLutDraft.off()
+                            filterId = it
+                            filterEnabled = true
+                        },
+                        onIntensityChanged = { selectedFilterId, intensity ->
+                            filterIntensity = intensity
+                            val catalogKey = BuiltInPhotoFilters.catalogKey(selectedFilterId)
+                                ?: selectedFilterId
+                            filterIntensities = filterIntensities + (catalogKey to intensity)
+                        },
+                        onFavoriteToggled = { selectedFilterId ->
+                            BuiltInPhotoFilters.catalogKey(selectedFilterId)?.let { catalogKey ->
+                                favoritePhotoFilters = if (
+                                    favoritePhotoFilters.any { it.catalogKey == catalogKey }
+                                ) {
+                                    favoritePhotoFilters.filterNot { it.catalogKey == catalogKey }
+                                } else {
+                                    favoritePhotoFilters + FavoritePhotoFilter(catalogKey)
+                                }
+                            }
+                        },
+                        hapticsEnabled = state.hapticsEnabled,
+                    )
+                }
+                PhotoColorEffectGroup(
+                    visible = !(filterEnabled && state.photoFilters.any { it.id == filterId }) || photoLutDraft.selection != null,
+                ) {
+                    PhotoLutEditor(photoLutDraft, state.hapticsEnabled)
+                }
+                PhotoFrameWatermarkEditor(
+                    favoriteEffects = favoriteFrameEffects,
+                    borderEnabled = decorationEnabled && borderEnabled,
+                    preset = preset,
+                    metadataSettings = resolvedPhotoFrameMetadataSettings(
+                        metadataSettings,
+                        preset,
+                    ).withoutLocationFields(),
+                    showLocationFields = false,
+                    debugBrandLabel = if (com.ztransfer.BuildConfig.DEBUG) {
+                        "Debug: " + (debugBrand ?: "Original") + "  \u21bb"
+                    } else null,
+                    onCycleDebugBrand = if (com.ztransfer.BuildConfig.DEBUG) ({
+                        debugBrandIndex = if (debugBrandIndex + 1 < debugBrands.size) debugBrandIndex + 1 else -1
+                    }) else null,
+                    watermark = editorWatermark,
+                    watermarkContentSource = watermarkDraft,
+                    isPro = isPro,
                     hapticsEnabled = state.hapticsEnabled,
-                )
-            }
-            PhotoColorEffectGroup(
-                visible = !(filterEnabled && state.photoFilters.any { it.id == filterId }) || photoLutDraft.selection != null,
-            ) {
-                PhotoLutEditor(photoLutDraft, state.hapticsEnabled)
-            }
-            PhotoFrameWatermarkEditor(
-                favoriteEffects = favoriteFrameEffects,
-                borderEnabled = decorationEnabled && borderEnabled,
-                preset = preset,
-                metadataSettings = resolvedPhotoFrameMetadataSettings(
-                    metadataSettings,
-                    preset,
-                ).withoutLocationFields(),
-                showLocationFields = false,
-                debugBrandLabel = if (com.ztransfer.BuildConfig.DEBUG) {
-                    "Debug: " + (debugBrand ?: "Original") + "  \u21bb"
-                } else null,
-                onCycleDebugBrand = if (com.ztransfer.BuildConfig.DEBUG) ({
-                    debugBrandIndex = if (debugBrandIndex + 1 < debugBrands.size) debugBrandIndex + 1 else -1
-                }) else null,
-                watermark = editorWatermark,
-                watermarkContentSource = watermarkDraft,
-                isPro = isPro,
-                hapticsEnabled = state.hapticsEnabled,
-                onBorderEnabledChanged = { enabled ->
-                    borderEnabled = enabled
-                    decorationEnabled = enabled || (isPro && watermarkDraft.enabled)
-                },
-                onPresetChanged = { selected ->
-                    preset = selected
-                    favoriteFrameEffects.firstOrNull { it.framePreset == selected }?.let { favorite ->
-                        metadataSettings = metadataSettings + (selected to
-                            resolvedPhotoFrameMetadataSettings(metadataSettings, selected)
-                                .copy(widthPercent = favorite.frameWidthPercent, backgroundBlurPercent = favorite.backgroundBlurPercent, backgroundMaskPercent = favorite.backgroundMaskPercent))
-                    }
-                },
-                onMetadataSettingsChanged = { updated ->
-                    favoriteFrameEffects = favoriteFrameEffects.map {
-                        if (it.framePreset == preset) it.copy(frameWidthPercent = updated.widthPercent, backgroundBlurPercent = updated.backgroundBlurPercent, backgroundMaskPercent = updated.backgroundMaskPercent) else it
-                    }
-                    val normalized = normalizePhotoFrameMetadataSettings(updated)
-                        .withoutLocationFields()
-                    metadataSettings = if (
-                        normalized == defaultPhotoFrameMetadataSettings(preset)
-                    ) {
-                        metadataSettings - preset
-                    } else {
-                        metadataSettings + (preset to normalized)
-                    }
-                },
-                onWatermarkChanged = { updated ->
-                    if (isPro) {
-                        watermarkDraft = mergeWatermarkEditKeepingPreferredPosition(
-                            preferred = watermarkDraft,
-                            edited = updated,
-                        )
-                        decorationEnabled = borderEnabled || updated.enabled
-                    }
-                },
-                onFavoriteWatermarkApplied = { favoriteWatermark ->
-                    if (isPro) {
-                        watermarkDraft = favoriteWatermark
-                        decorationEnabled = borderEnabled || favoriteWatermark.enabled
-                    }
-                },
-                onWatermarkPositionChanged = { position ->
-                    if (isPro) watermarkDraft = watermarkDraft.copy(position = position)
-                },
-                onWatermarkTextCommitted = { text ->
-                    if (isPro) watermarkDraft = watermarkDraft.copy(text = text)
-                },
-                imageImporting = watermarkImageImporting,
-                onFavoriteToggled = { favoritePreset, favoriteWatermark ->
-                    favoriteFrameEffects = if (
-                        favoriteFrameEffects.any { it.framePreset == favoritePreset }
-                    ) {
-                        favoriteFrameEffects.filterNot { it.framePreset == favoritePreset }
-                    } else {
-                        favoriteFrameEffects + FavoriteFrameWatermarkEffect.capture(
-                            favoritePreset,
-                            favoriteWatermark,
-                            resolvedPhotoFrameMetadataSettings(metadataSettings, favoritePreset).widthPercent,
-                            resolvedPhotoFrameMetadataSettings(metadataSettings, favoritePreset).backgroundBlurPercent,
-                            resolvedPhotoFrameMetadataSettings(metadataSettings, favoritePreset).backgroundMaskPercent,
-                        )
-                    }
-                },
-                onFavoriteUpdated = { favoritePreset, favoriteWatermark ->
-                    favoriteFrameEffects = favoriteFrameEffects.map { favorite ->
-                        if (favorite.framePreset == favoritePreset) {
-                            FavoriteFrameWatermarkEffect.capture(
+                    onBorderEnabledChanged = { enabled ->
+                        borderEnabled = enabled
+                        decorationEnabled = enabled || (isPro && watermarkDraft.enabled)
+                    },
+                    onPresetChanged = { selected ->
+                        preset = selected
+                        favoriteFrameEffects.firstOrNull { it.framePreset == selected }?.let { favorite ->
+                            metadataSettings = metadataSettings + (selected to
+                                resolvedPhotoFrameMetadataSettings(metadataSettings, selected)
+                                    .copy(widthPercent = favorite.frameWidthPercent, backgroundBlurPercent = favorite.backgroundBlurPercent, backgroundMaskPercent = favorite.backgroundMaskPercent))
+                        }
+                    },
+                    onMetadataSettingsChanged = { updated ->
+                        favoriteFrameEffects = favoriteFrameEffects.map {
+                            if (it.framePreset == preset) it.copy(frameWidthPercent = updated.widthPercent, backgroundBlurPercent = updated.backgroundBlurPercent, backgroundMaskPercent = updated.backgroundMaskPercent) else it
+                        }
+                        val normalized = normalizePhotoFrameMetadataSettings(updated)
+                            .withoutLocationFields()
+                        metadataSettings = if (
+                            normalized == defaultPhotoFrameMetadataSettings(preset)
+                        ) {
+                            metadataSettings - preset
+                        } else {
+                            metadataSettings + (preset to normalized)
+                        }
+                    },
+                    onWatermarkChanged = { updated ->
+                        if (isPro) {
+                            watermarkDraft = mergeWatermarkEditKeepingPreferredPosition(
+                                preferred = watermarkDraft,
+                                edited = updated,
+                            )
+                            decorationEnabled = borderEnabled || updated.enabled
+                        }
+                    },
+                    onFavoriteWatermarkApplied = { favoriteWatermark ->
+                        if (isPro) {
+                            watermarkDraft = favoriteWatermark
+                            decorationEnabled = borderEnabled || favoriteWatermark.enabled
+                        }
+                    },
+                    onWatermarkPositionChanged = { position ->
+                        if (isPro) watermarkDraft = watermarkDraft.copy(position = position)
+                    },
+                    onWatermarkTextCommitted = { text ->
+                        if (isPro) watermarkDraft = watermarkDraft.copy(text = text)
+                    },
+                    imageImporting = watermarkImageImporting,
+                    onFavoriteToggled = { favoritePreset, favoriteWatermark ->
+                        favoriteFrameEffects = if (
+                            favoriteFrameEffects.any { it.framePreset == favoritePreset }
+                        ) {
+                            favoriteFrameEffects.filterNot { it.framePreset == favoritePreset }
+                        } else {
+                            favoriteFrameEffects + FavoriteFrameWatermarkEffect.capture(
                                 favoritePreset,
                                 favoriteWatermark,
                                 resolvedPhotoFrameMetadataSettings(metadataSettings, favoritePreset).widthPercent,
-                            resolvedPhotoFrameMetadataSettings(metadataSettings, favoritePreset).backgroundBlurPercent,
-                            resolvedPhotoFrameMetadataSettings(metadataSettings, favoritePreset).backgroundMaskPercent,
+                                resolvedPhotoFrameMetadataSettings(metadataSettings, favoritePreset).backgroundBlurPercent,
+                                resolvedPhotoFrameMetadataSettings(metadataSettings, favoritePreset).backgroundMaskPercent,
                             )
-                        } else {
-                            favorite
                         }
-                    }
-                },
-                onFavoriteImageMissing = {
-                    showHint(watermarkFavoriteImageMissingText)
-                },
-                onProRequired = { showHint(watermarkProOnlyText) },
-                onImageRequested = {
-                    if (isPro && !watermarkImageImporting) {
-                        watermarkImagePicker.launch(
-                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                        )
-                    }
-                },
-            )
+                    },
+                    onFavoriteUpdated = { favoritePreset, favoriteWatermark ->
+                        favoriteFrameEffects = favoriteFrameEffects.map { favorite ->
+                            if (favorite.framePreset == favoritePreset) {
+                                FavoriteFrameWatermarkEffect.capture(
+                                    favoritePreset,
+                                    favoriteWatermark,
+                                    resolvedPhotoFrameMetadataSettings(metadataSettings, favoritePreset).widthPercent,
+                                resolvedPhotoFrameMetadataSettings(metadataSettings, favoritePreset).backgroundBlurPercent,
+                                resolvedPhotoFrameMetadataSettings(metadataSettings, favoritePreset).backgroundMaskPercent,
+                                )
+                            } else {
+                                favorite
+                            }
+                        }
+                    },
+                    onFavoriteImageMissing = {
+                        showHint(watermarkFavoriteImageMissingText)
+                    },
+                    onProRequired = { showHint(watermarkProOnlyText) },
+                    onImageRequested = {
+                        if (isPro && !watermarkImageImporting) {
+                            watermarkImagePicker.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                            )
+                        }
+                    },
+                )
 
-            Spacer(Modifier.height(18.dp))
-        }
-        AnimatedVisibility(
-            visible = hintVisible,
-            enter = fadeIn() + slideInVertically { it / 2 },
-            exit = fadeOut() + slideOutVertically { it / 2 },
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 28.dp),
-        ) {
-            Surface(
-                shape = RoundedCornerShape(18.dp),
-                color = colors.glassSurfaceHeavy,
-                shadowElevation = 6.dp,
-                border = BorderStroke(1.dp, colors.glassPanelBorder),
+                Spacer(Modifier.height(18.dp))
+            }
+            AnimatedVisibility(
+                visible = hintVisible,
+                enter = fadeIn() + slideInVertically { it / 2 },
+                exit = fadeOut() + slideOutVertically { it / 2 },
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 28.dp),
             ) {
-                Text(
-                    text = hintText,
-                    textAlign = TextAlign.Center,
-                    style = MaterialTheme.typography.labelLarge,
-                    color = colors.onBackground,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
+                Surface(
+                    shape = RoundedCornerShape(18.dp),
+                    color = colors.glassSurfaceHeavy,
+                    shadowElevation = 6.dp,
+                    border = BorderStroke(1.dp, colors.glassPanelBorder),
+                ) {
+                    Text(
+                        text = hintText,
+                        textAlign = TextAlign.Center,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = colors.onBackground,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
+                    )
+                }
+            }
+            if (showPhotoEffectsInfo) {
+                PhotoEffectsInfoBubble(
+                    anchorBounds = photoEffectsInfoAnchorBounds,
+                    onDismiss = { showPhotoEffectsInfo = false },
+                    description = stringResource(R.string.local_photo_effects_info_description),
+                    gestureHint = stringResource(R.string.local_photo_effects_gesture_hint),
+                    extraHints = listOf(
+                        stringResource(R.string.local_photo_effects_exif_hint),
+                        stringResource(R.string.local_photo_same_folder_hint),
+                    ),
+                    parentTopInset = pageTopInset,
                 )
             }
         }
-        if (showPhotoEffectsInfo) {
-            PhotoEffectsInfoBubble(
-                anchorBounds = photoEffectsInfoAnchorBounds,
-                onDismiss = { showPhotoEffectsInfo = false },
-                description = stringResource(R.string.local_photo_effects_info_description),
-                gestureHint = stringResource(R.string.local_photo_effects_gesture_hint),
-                extraHints = listOf(
-                    stringResource(R.string.local_photo_effects_exif_hint),
-                    stringResource(R.string.local_photo_same_folder_hint),
-                ),
-                parentTopInset = pageTopInset,
+        expandedEffectsPreview?.let { preview ->
+            val previewImage = remember(preview.bitmap) { preview.bitmap.asImageBitmap() }
+            SinglePhotoPreviewOverlay(
+                bitmap = previewImage,
+                comparisonBitmap = preview.comparison()?.let { remember(it) { it.asImageBitmap() } },
+                title = stringResource(R.string.photo_effects),
+                anchorRect = preview.anchorRect,
+                onDismiss = { expandedEffectsPreview = null },
             )
         }
-    }
-    expandedEffectsPreview?.let { preview ->
-        val previewImage = remember(preview.bitmap) { preview.bitmap.asImageBitmap() }
-        SinglePhotoPreviewOverlay(
-            bitmap = previewImage,
-            comparisonBitmap = preview.comparison()?.let { remember(it) { it.asImageBitmap() } },
-            title = stringResource(R.string.photo_effects),
-            anchorRect = preview.anchorRect,
-            onDismiss = { expandedEffectsPreview = null },
-        )
     }
 
 }

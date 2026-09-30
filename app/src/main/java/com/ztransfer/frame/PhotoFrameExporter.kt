@@ -723,6 +723,7 @@ object PhotoFrameExporter {
         metadataSettings: PhotoFrameMetadataSettings = defaultPhotoFrameMetadataSettings(preset),
         filter: PhotoFilterSelection? = null,
     ): Result<PhotoFrameExportResult> {
+        var stage = "render"
         return try {
             currentCoroutineContext().ensureActive()
             val effectiveMetadataSettings = normalizePhotoFrameMetadataSettings(metadataSettings)
@@ -742,6 +743,7 @@ object PhotoFrameExporter {
                 metadataSettings = effectiveMetadataSettings,
                 filter = filter,
             )
+            stage = "save"
             val saved = try {
                 currentCoroutineContext().ensureActive()
                 saveRenderedToMediaStore(
@@ -761,14 +763,14 @@ object PhotoFrameExporter {
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (outOfMemory: OutOfMemoryError) {
-            Result.failure(outOfMemory)
+            Result.failure(LocalPhotoExportException(stage, outOfMemory))
         } catch (error: Exception) {
             Log.e(
                 PHOTO_FRAME_EXPORT_TAG,
                 "Local photo export failed (authority=${source.sourceUri.authority})",
                 error,
             )
-            Result.failure(error)
+            Result.failure(LocalPhotoExportException(stage, error))
         }
     }
 
@@ -1046,7 +1048,7 @@ object PhotoFrameExporter {
             )
         }
         val decodeStartedAtMs = generationProbeClock()
-        val decoded = decodeOriginal(resolver, sourceUri,
+        val decoded = decodeOriginal(context, resolver, sourceUri,
             extraBytes = if (filter != null) 24L * 1024 * 1024 else 0L)
             ?: error("Cannot decode source photo")
         recordGenerationStage(
@@ -1462,6 +1464,7 @@ object PhotoFrameExporter {
     )
 
     private fun decodeOriginal(
+        context: Context,
         resolver: ContentResolver,
         uri: Uri,
         extraBytes: Long = 0L,
@@ -1472,6 +1475,7 @@ object PhotoFrameExporter {
         mutable = true,
         honorExifOrientation = true,
         allocationExtraBytes = extraBytes,
+        allocationContext = context,
     )
 
     private fun decodeBitmap(
@@ -1481,6 +1485,7 @@ object PhotoFrameExporter {
         mutable: Boolean,
         honorExifOrientation: Boolean,
         allocationExtraBytes: Long = 0L,
+        allocationContext: Context? = null,
     ): Bitmap? {
         require(maxEdge == null || maxEdge > 0)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && honorExifOrientation) {
@@ -1490,7 +1495,7 @@ object PhotoFrameExporter {
                 ) { decoder, info, _ ->
                     val width = info.size.width
                     val height = info.size.height
-                    if (maxEdge == null) ensurePhotoAllocation(width, height, extraBytes = allocationExtraBytes)
+                    if (maxEdge == null) ensurePhotoAllocation(requireNotNull(allocationContext), width, height, extraBytes = allocationExtraBytes, javaBytes = allocationExtraBytes)
                     if (maxEdge != null) {
                         val scale = min(1f, maxEdge.toFloat() / maxOf(width, height))
                         decoder.setTargetSize(
@@ -1535,9 +1540,9 @@ object PhotoFrameExporter {
         } else {
             ExifInterface.ORIENTATION_NORMAL
         }
-        if (maxEdge == null) ensurePhotoAllocation(bounds.outWidth, bounds.outHeight,
+        if (maxEdge == null) ensurePhotoAllocation(requireNotNull(allocationContext), bounds.outWidth, bounds.outHeight,
             copies = if (orientation == ExifInterface.ORIENTATION_NORMAL) 1 else 2,
-            extraBytes = allocationExtraBytes)
+            extraBytes = allocationExtraBytes, javaBytes = allocationExtraBytes)
         val decoded = resolver.openFileDescriptor(uri, "r")?.use {
             BitmapFactory.decodeFileDescriptor(
                 it.fileDescriptor,
@@ -1673,7 +1678,7 @@ object PhotoFrameExporter {
             )
             return source
         }
-        if (longEdge == null) ensurePhotoAllocation(layout.canvasWidth, layout.canvasHeight)
+        if (longEdge == null) ensurePhotoAllocation(context, layout.canvasWidth, layout.canvasHeight)
         val output = Bitmap.createBitmap(
             layout.canvasWidth,
             layout.canvasHeight,
@@ -3107,9 +3112,10 @@ object PhotoFrameExporter {
         // A low-blur background needs a sharper proxy, including a temporary orientation copy.
         // Default effects retain their original allocation threshold.
         val extraBackdropBytes = if (backdropEdge > 192) backdropEdge.toLong() * backdropEdge * 8L else 0L
-        ensurePhotoAllocation(layout.canvasWidth, layout.canvasHeight,
+        ensurePhotoAllocation(context, layout.canvasWidth, layout.canvasHeight,
             extraBytes = tileBytes + scratchBytes + extraBackdropBytes +
-                (if (filter != null) 8L * 1024 * 1024 else 0L))
+                (if (filter != null) 8L * 1024 * 1024 else 0L),
+            javaBytes = scratchBytes)
         val output = Bitmap.createBitmap(
             layout.canvasWidth,
             layout.canvasHeight,
@@ -6618,3 +6624,5 @@ internal fun formatShutter(seconds: Double): String = when {
     seconds > 0.0 -> String.format(Locale.US, "1/%.0f", 1.0 / seconds)
     else -> ""
 }
+
+internal class LocalPhotoExportException(val stage: String, cause: Throwable) : Exception(cause)

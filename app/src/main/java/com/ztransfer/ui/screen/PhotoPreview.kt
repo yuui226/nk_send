@@ -1702,7 +1702,8 @@ internal fun SinglePhotoPreviewOverlay(
     val startClose: () -> Unit = {
         if (!closing) closing = true
     }
-    BackHandler(enabled = !closing) { startClose() }
+    // Keep consuming back while collapsing; do not pop the workbench underneath.
+    BackHandler { startClose() }
 
     Box(
         modifier = Modifier

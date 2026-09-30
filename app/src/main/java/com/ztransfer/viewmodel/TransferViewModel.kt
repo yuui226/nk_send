@@ -1195,7 +1195,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     ?: ThemeMode.SYSTEM,
                 skinPreset = restoredSkinPreset,
                 // getStringSet 返回的实例不可直接持有（SharedPreferences 约定），拷贝一份。
-                filterExtensions = prefs.getStringSet("filter_exts", null)?.toSet(),
+                filterExtensions = prefs.getStringSet("filter_exts", null)?.toSet()?.takeIf { it.isNotEmpty() },
                 filterProtectedOnly = prefs.getBoolean("filter_protected", false),
                 filterBurstOnly = prefs.getBoolean("filter_burst", false),
                 filterUntransferredOnly = prefs.getBoolean("filter_untransferred", false),
@@ -1644,7 +1644,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     }
 
     /** 应用筛选（类型/保护/连拍/未传输/卡槽/日期）；卡槽仅当前进程生效，其余持久化。 */
-    fun setFilters(criteria: PhotoFilterCriteria) {
+    fun setFilters(requested: PhotoFilterCriteria) {
+        val criteria = requested.copy(extensions = requested.extensions?.takeIf { it.isNotEmpty() })
         prefs.edit().apply {
             if (criteria.extensions == null) remove("filter_exts")
             else putStringSet("filter_exts", criteria.extensions)

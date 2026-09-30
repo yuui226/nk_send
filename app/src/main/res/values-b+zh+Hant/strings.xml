@@ -654,4 +654,13 @@
     <string name="photo_filter_turn_off">關閉濾鏡</string>
     <string name="photo_frame_background_blur">背景模糊</string>
     <string name="photo_frame_background_mask">遮罩濃度</string>
+    <string name="local_photo_error_item">第 %1$d 張 · %2$s</string>
+    <string name="local_photo_error_prepare">讀取照片</string>
+    <string name="local_photo_error_render">產生效果</string>
+    <string name="local_photo_error_save">儲存至相簿</string>
+    <string name="local_photo_error_memory">目前記憶體不足以產生這張照片，請稍後重試。</string>
+    <string name="local_photo_error_permission">照片存取遭拒，請重新選擇照片並檢查照片存取權限。</string>
+    <string name="local_photo_error_missing">無法存取檔案，請確認照片及使用的 LUT、Logo 檔案仍可讀取。</string>
+    <string name="local_photo_error_space">儲存空間不足，請清理空間後重試。</string>
+    <string name="local_photo_error_unknown">處理失敗，請複製下方詳細資訊回報客服。</string>
 </resources>

@@ -473,8 +473,8 @@ private const val CAMERA_REMOVAL_EXIT_DURATION_MS = 160
  * 动画器，不存在"移出屏幕的条目在边缘悬停"的框架问题。
  * 列表页分组收合与队列页卡片移除共用（包内共享）。
  */
-internal fun Modifier.collapseHeight(progress: () -> Float): Modifier =
-    clipToBounds().layout { measurable, constraints ->
+internal fun Modifier.collapseHeight(clip: Boolean = true, progress: () -> Float): Modifier =
+    then(if (clip) Modifier.clipToBounds() else Modifier).layout { measurable, constraints ->
         val placeable = measurable.measure(constraints)
         val p = progress().coerceIn(0f, 1f)
         layout(placeable.width, (placeable.height * p).roundToInt()) {
@@ -541,6 +541,7 @@ fun FileListScreen(
     autoQueueFlightRequest: AutoQueueFlightRequest? = null,
     onAutoQueueFlightConsumed: (Long) -> Unit = {},
     onPreviewVisibilityChanged: (Boolean) -> Unit,
+    topControlsAlpha: () -> Float = { 1f },
     backHandlerEnabled: Boolean,
     onRequestExitConfirmation: () -> Unit,
     onNavigateToRemote: () -> Unit
@@ -836,16 +837,29 @@ fun FileListScreen(
     val filterActive = filterExts != null || filterProtected || filterBurst ||
         filterUntransferred || filterStorageSlot != null || filterDateRange != null
 
+    // 设备上实际存在的类型（从未过滤的原始列表提取，供下拉选项自动生成）。
+    val availableExts = remember(presentedCameraFiles) {
+        presentedCameraFiles.map { it.extension }.distinct().sorted()
+    }
     // 扫描途中保留当前选择；完整扫描后只有确认存在双卡才允许卡槽筛选。
     // 单卡时筛选没有意义，归回“全部”也能保证入口按钮不会卡在激活状态。
-    LaunchedEffect(state.hasCompletedFileScan, visibleStorageSlots, filterStorageSlot) {
+    LaunchedEffect(state.hasCompletedFileScan, state.isLoadingFiles, visibleStorageSlots, availableExts, filterCriteria) {
         val normalized = normalizeStorageSlotFilter(
             selectedSlot = filterStorageSlot,
             availableSlots = visibleStorageSlots,
             hasCompletedFileScan = state.hasCompletedFileScan,
         )
-        if (normalized != filterStorageSlot) {
-            transferViewModel.setFilters(filterCriteria.copy(storageSlot = normalized))
+        val normalizedExts = filterExts?.takeIf { selected ->
+            selected.isNotEmpty() && (
+                !state.hasCompletedFileScan || state.isLoadingFiles ||
+                    selected.any { it in availableExts }
+                )
+        }
+        if (normalized != filterStorageSlot || normalizedExts != filterExts) {
+            transferViewModel.setFilters(filterCriteria.copy(
+                storageSlot = normalized,
+                extensions = normalizedExts,
+            ))
         }
     }
     // 筛选确定后的级联入场（复用分组展开的入场动画）：tick 每次确定递增（重播存量格子）,
@@ -857,10 +871,6 @@ fun FileListScreen(
             delay(600)
             filterRevealWindow = false
         }
-    }
-    // 设备上实际存在的类型（从未过滤的原始列表提取，供下拉选项自动生成）。
-    val availableExts = remember(presentedCameraFiles) {
-        presentedCameraFiles.map { it.extension }.distinct().sorted()
     }
     val latestKnownDate = remember(presentedCameraFiles) {
         latestCaptureLocalDate(presentedCameraFiles.asSequence().map { it.captureDate })
@@ -1847,6 +1857,11 @@ fun FileListScreen(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .graphicsLayer {
+                    compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen
+                    alpha = topControlsAlpha()
+                }
+                .padding(bottom = 16.dp)
                 .statusBarsPadding()
                 .padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -4461,7 +4476,7 @@ private fun FilterOverlay(
                                 commit(working.copy(extensions = null))
                             }
                         })
-                        availableExts.forEach { ext ->
+                        (availableExts + working.extensions.orEmpty()).distinct().sorted().forEach { ext ->
                             add(Triple(extLabel(ext), working.extensions?.contains(ext) ?: true) { toggle(ext) })
                         }
                     }
