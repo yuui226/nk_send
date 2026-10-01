@@ -16,6 +16,18 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.rememberTextMeasurer
+
+internal val MonitorToolLabelStyle = TextStyle(
+    fontSize = 10.sp, lineHeight = 12.sp, fontWeight = FontWeight.Medium,
+    textAlign = TextAlign.Center,
+)
 
 /** Layout only: all camera actions and tool preference mutations remain in RemoteScreen. */
 @Composable
@@ -30,7 +42,7 @@ internal fun LandscapeMonitorControls(
     shutter: @Composable () -> Unit,
     localRecorder: @Composable () -> Unit,
     parameter: @Composable (Int, Modifier) -> Unit,
-    tool: @Composable (RemoteTool) -> Unit,
+    tool: @Composable (RemoteTool, Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var dockOpen by remember { mutableStateOf(false) }
@@ -78,22 +90,54 @@ internal fun LandscapeMonitorControls(
             }
         }
     }
-    // Tool tiles are narrower than parameter wheels, so they have their own column count.
-    val dockColumns = ((layout.controls.width - 8f) / 48f).toInt()
-        .coerceIn(1, if (layout.bottomControls) Int.MAX_VALUE else 3)
     val dockContent: @Composable () -> Unit = {
         val dockScroll = rememberScrollState()
         MonitorDockLayer(panelProgress, dock = true,
             Modifier.fillMaxSize().blockMonitorPanelInput { !dockOpen }) {
-            Column(Modifier.fillMaxSize().verticalScrollEdgeFade(dockScroll).verticalScroll(dockScroll).padding(4.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                tools.chunked(dockColumns).forEach { row ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        row.forEach { entry -> key(entry) {
-                            Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) { tool(entry) }
-                        } }
-                        repeat(dockColumns - row.size) { Spacer(Modifier.size(44.dp)) }
+            BoxWithConstraints(Modifier.fillMaxSize().padding(horizontal = 4.dp)) {
+                val density = LocalDensity.current
+                val measurer = rememberTextMeasurer()
+                val names = tools.map { stringResource(it.title) }
+                val widthPx = with(density) { maxWidth.roundToPx() }
+                val gapPx = with(density) { 8.dp.roundToPx() }
+                val minCellPx = with(density) { 56.dp.roundToPx() }
+                // Resolve wrapping before the shared reveal animation; never resize from onTextLayout.
+                val measurements = remember(names, widthPx, density.density, density.fontScale, layout.bottomControls, measurer) {
+                    val wordWidth = names.flatMap { it.split(' ', '-') }.maxOfOrNull { word ->
+                        // Keep English words intact; CJK names may wrap between characters.
+                        if (word.any { it in 'A'..'Z' || it in 'a'..'z' })
+                            measurer.measure(word, MonitorToolLabelStyle, softWrap = false).size.width else 0
+                    } ?: 0
+                    val maxColumns = if (layout.bottomControls)
+                        ((widthPx + gapPx) / (maxOf(minCellPx, wordWidth) + gapPx))
+                            .coerceIn(1, tools.size.coerceAtLeast(1))
+                    else 3
+                    val columns = (maxColumns downTo 1).first { count ->
+                        val cell = ((widthPx - gapPx * (count - 1)) / count).coerceAtLeast(1)
+                        count == 1 || (cell >= maxOf(minCellPx, wordWidth) && names.all { name ->
+                            !measurer.measure(name, MonitorToolLabelStyle, maxLines = 2,
+                                constraints = Constraints(maxWidth = cell)).hasVisualOverflow
+                        })
+                    }
+                    val cell = ((widthPx - gapPx * (columns - 1)) / columns).coerceAtLeast(1)
+                    val lines = names.map { name ->
+                        measurer.measure(name, MonitorToolLabelStyle, maxLines = 2,
+                            constraints = Constraints(maxWidth = cell)).lineCount.coerceIn(1, 2)
+                    }
+                    columns to lines
+                }
+                val columns = measurements.first
+                Column(Modifier.fillMaxSize().verticalScrollEdgeFade(dockScroll)
+                    .verticalScroll(dockScroll).padding(vertical = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    tools.chunked(columns).forEachIndexed { rowIndex, row ->
+                        val lines = measurements.second.drop(rowIndex * columns).take(row.size).maxOrNull() ?: 1
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            row.forEach { entry -> key(entry) {
+                                Box(Modifier.weight(1f), contentAlignment = Alignment.TopCenter) { tool(entry, lines) }
+                            } }
+                            repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
+                        }
                     }
                 }
             }

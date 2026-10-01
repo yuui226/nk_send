@@ -17,6 +17,7 @@ internal enum class RemoteTool(val id: String, val title: Int, val fixed: Boolea
     DESQUEEZE("desqueeze", R.string.remote_tool_desqueeze), LEVEL("level", R.string.remote_tool_level),
     RECORD("record", R.string.remote_tool_record), WHITE_BALANCE("white_balance", R.string.remote_tool_wb),
     FOCUS_AREA("focus_area", R.string.remote_tool_focus_area), WAVEFORM("waveform", R.string.remote_tool_waveform),
+    FOCUS_MODE("focus_mode", R.string.remote_tool_focus_mode),
     FOCUS_FRAME("focus_frame", R.string.remote_tool_focus_frame),
     LUT("lut", R.string.remote_tool_lut),
     METER("meter", R.string.remote_tool_meter),

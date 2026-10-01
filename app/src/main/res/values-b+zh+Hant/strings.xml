@@ -422,7 +422,7 @@
     <string name="err_code_revoked">該啟用碼已被停用</string>
     <string name="err_code_expired">訂閱已到期，請續費後繼續使用</string>
     <string name="err_rate_limited">嘗試過於頻繁，請一分鐘後再試</string>
-    <string name="err_server_unreachable">無法連接啟用伺服器，請檢查網路；若網路正常，可能需要更新到新版本（QQ 群取得）。</string>
+    <string name="err_server_unreachable">無法連接啟用伺服器，請檢查網路，或更新至最新版本後重試。</string>
     <string name="err_generic">啟用失敗（%1$s）</string>
     <string name="revert_free">已恢復為免費版（測試）</string>
     <string name="pro_version">高級版</string>
@@ -513,8 +513,8 @@
     <string name="purchase_paid_not_active">已收到付款但自動啟用未成功，請複製上方啟用碼，用「輸入啟用碼」完成啟用。</string>
     <string name="purchase_code_copied">已複製啟用碼</string>
     <string name="purchase_done">完成</string>
-    <string name="err_purchase_no_network">請先連接網際網路</string>
-    <string name="err_purchase_unreachable">無法連接伺服器。若目前連著相機 Wi-Fi，請先斷開，改用有外網的網路重試。</string>
+    <string name="err_purchase_no_network">請檢查網路後重試，仍失敗可改用其他手機熱點或 Wi-Fi。</string>
+    <string name="err_purchase_unreachable">請檢查網路後重試，仍失敗可改用其他手機熱點或 Wi-Fi。</string>
     <string name="err_purchase_failed">下單失敗，請稍後重試或聯絡客服。</string>
     <string name="err_purchase_activation_failed">啟用失敗，請聯絡客服</string>
     <string name="err_purchase_price_missing">無法確認本單金額，已停止付款。請重試。</string>
@@ -673,4 +673,7 @@
     <string name="remote_focus_diagnostic_stop">停止</string>
     <string name="remote_focus_diagnostic_mark">標記步驟</string>
     <string name="remote_focus_diagnostic_hint">被動採樣60秒。移動機內對焦點、切換照片/錄影或對焦區域，每步點一次標記，結束後複製日誌。</string>
+    <string name="remote_tool_focus_mode">對焦模式</string>
+    <string name="remote_focus_manual_fixed">MF（固定）</string>
+    <string name="monitor_disp_remaining_video">可錄 %1$s</string>
 </resources>

@@ -157,6 +157,7 @@ import com.ztransfer.protocol.rcEndSubjectTracking
 import com.ztransfer.protocol.rcFormat
 import com.ztransfer.protocol.rcGetAngleLevel
 import com.ztransfer.protocol.rcGetCompatibleParam
+import com.ztransfer.protocol.focusModeProperties
 import com.ztransfer.protocol.rcGetFocusMode
 import com.ztransfer.protocol.rcGetMovieMode
 import com.ztransfer.protocol.rcGetParam
@@ -169,7 +170,6 @@ import com.ztransfer.protocol.rcSetControlMode
 import com.ztransfer.protocol.rcSetLvSize
 import com.ztransfer.protocol.rcSetValueVerified
 import com.ztransfer.protocol.rcStartMovieDetailed
-import com.ztransfer.protocol.LiveViewFocusDiagnostic
 import com.ztransfer.protocol.movieStartNeedsLiveViewRestart
 import com.ztransfer.protocol.movieProhibitIndicatesRecording
 import com.ztransfer.protocol.diagnosticSummary
@@ -655,40 +655,22 @@ private fun RemoteContent(
     val diagnosticPreferences = remember(services.context) {
         services.context.getSharedPreferences("remote_diagnostics", Context.MODE_PRIVATE)
     }
-    val focusDiagnostic = remember { LiveViewFocusDiagnostic() }
-    var focusDiagnosticRunning by remember { mutableStateOf(false) }
-    var focusDiagnosticReport by remember {
-        mutableStateOf(diagnosticPreferences.getString("focus_report_v1", "").orEmpty())
+    var focusModeReport by remember {
+        mutableStateOf(diagnosticPreferences.getString("focus_mode_report_v1", "").orEmpty())
     }
     var devPanel by remember { mutableStateOf(false) }
-    fun saveFocusReport() {
-        val report = focusDiagnostic.report()
-        if (report.isEmpty()) return
-        focusDiagnosticReport = report
-        diagnosticPreferences.edit().putString("focus_report_v1", focusDiagnosticReport).apply()
+    fun focusModeLog(line: String) {
+        focusModeReport = (focusModeReport.lines() + line).takeLast(80).joinToString("\n")
     }
-    fun startFocusDiagnostic() {
+    fun startFocusModeReport() {
         val cam = cameraViewModel.getCamera()
-        focusDiagnostic.start(SystemClock.elapsedRealtime(),
-            "date=${java.time.OffsetDateTime.now()} app=${BuildConfig.VERSION_NAME}(${BuildConfig.VERSION_CODE}) " +
+        focusModeReport = "Focus mode v1 ${java.time.OffsetDateTime.now()} app=${BuildConfig.VERSION_NAME}(${BuildConfig.VERSION_CODE})\n" +
             "camera=${cam?.deviceModel} firmware=${cam?.cachedDeviceInfo?.deviceVersion} " +
-            "transport=${cam?.connectionType} mode=${if (cam?.connectionType == CameraConnectionType.USB) "USB" else if (camState.isStaConnection) "STA" else "AP"}")
-        focusDiagnosticRunning = true
-        saveFocusReport()
+            "transport=${cam?.connectionType} mode=${if (cam?.connectionType == CameraConnectionType.USB) "USB" else if (camState.isStaConnection) "STA" else "AP"}\n" +
+            "movie=$movieMode current=$focusModeText"
     }
-    LaunchedEffect(focusDiagnosticRunning) {
-        if (!focusDiagnosticRunning) return@LaunchedEffect
-        repeat(60) {
-            delay(1000)
-            saveFocusReport()
-            if (!focusDiagnostic.running) { focusDiagnosticRunning = false; return@LaunchedEffect }
-        }
-        focusDiagnostic.stop("60s")
-        focusDiagnosticRunning = false
-        saveFocusReport()
-    }
-    DisposableEffect(focusDiagnostic) {
-        onDispose { focusDiagnostic.stop("left-monitor"); saveFocusReport() }
+    DisposableEffect(Unit) {
+        onDispose { diagnosticPreferences.edit().putString("focus_mode_report_v1", focusModeReport).apply() }
     }
     // 开发者入口默认隐藏：1.5s 内连按 4 次 FPS 键才现身（FPS 连按 4 次开关状态
     // 恰好复原，不留副作用）。仅本次进页有效，退页复位——这是诊断后门不是常驻功能。
@@ -722,6 +704,8 @@ private fun RemoteContent(
     var cameraToolCloseRequested by remember { mutableStateOf(false) }
     var toolOverlayCoordinates by remember { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
     var whiteBalanceAnchor by remember { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
+    var focusModeAnchor by remember { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
+    var cameraToolWriting by remember { mutableStateOf(false) }
     var focusAreaAnchor by remember { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
     fun setDesqueezeMultiplier(value: Float) { desqueezeMultiplier = value }
     fun toggleAudioLevels() { showAudioLevels = !showAudioLevels }
@@ -913,7 +897,9 @@ private fun RemoteContent(
 
     suspend fun refreshFocusMode() {
         val cam = cameraViewModel.getCamera() ?: return
+        val modeAtRead = movieMode
         val focus = runCatching { cam.rcGetFocusMode() }.getOrNull()
+        if (cameraViewModel.getCamera() !== cam || movieMode != modeAtRead) return
         val changed = !focusModeQueried ||
             focusModeText != focus?.label || focusModeProp != focus?.prop
         focusModeQueried = true
@@ -923,7 +909,7 @@ private fun RemoteContent(
         if (focus != null && changed) {
             devLog("focus mode ${focus.label} prop=0x%04X raw=0x%X".format(focus.prop, focus.raw))
         } else if (focus == null && changed) {
-            devLog("!! focus mode unavailable (0x500A/0xD161)")
+            devLog("!! focus mode unavailable (0x500A/0xD061/0xD161)")
         }
     }
 
@@ -1149,8 +1135,6 @@ private fun RemoteContent(
                             firstFrameLogged = true
                             devLog("LiveView first frame received after ${SystemClock.elapsedRealtime() - stabilizationStartedAt}ms")
                         }
-                        if (focusDiagnostic.running) focusDiagnostic.sample(grabbed,
-                            "movie=$movieMode rec=$recording af=$focusModeText")
                         frameCh.trySend(grabbed)
                         val now = SystemClock.elapsedRealtime()
                         if (!liveViewStable && requiresUsbStabilization) {
@@ -1292,6 +1276,7 @@ private fun RemoteContent(
         val mv = runCatching { cam.rcGetMovieMode() }.getOrNull() ?: return
         val was = movieMode
         movieMode = mv
+        if (mv != was && refreshExposureOnChange) refreshFocusMode()
         if (refreshExposureOnChange && mv && !was) {
             // 切入录像位：拉取录像侧独立参数组（照片/录像两套属性互不相通）
             MOVIE_EXPOSURE_PROPS.forEach { refreshParam(it) }
@@ -1606,7 +1591,7 @@ private fun RemoteContent(
                             }
                             refreshAutoIso()
                         }
-                        if (prop == Lab.PROP_FOCUS_MODE || prop == Lab.PROP_NK_AF_MODE ||
+                        if (prop in focusModeProperties ||
                             prop == focusModeProp
                         ) {
                             refreshFocusMode()
@@ -1694,7 +1679,7 @@ private fun RemoteContent(
     // 拍摄：capturing 从触发一直保持到收到 ObjectAdded（相机确认新照片已生成）——
     // 快门键转圈即"正在等待拍摄确认"，收到确认/超时/失败即停。不读取也不展示缩略图。
     fun shoot(waitForFocus: Job? = null) {
-        if (capturing) return
+        if (capturing || cameraToolWriting) return
         val expectedCamera = cameraViewModel.getCamera() ?: return
         // 在 launch 前同步置位，消除两次快速点按同时通过 capturing=false
         // 而启动两个拍摄事务的小窗口。
@@ -1752,7 +1737,7 @@ private fun RemoteContent(
     // 相机帧头没有可信 AF 框时使用这里保存的应用请求点作为安全回退。
     var confirmedFocusMarker by remember { mutableStateOf<ConfirmedFocusMarker?>(null) }
     fun startFocus() {
-        if (afHeld || tapFocusBusy || focusModeManual || afJob?.isActive == true) return
+        if (cameraToolWriting || afHeld || tapFocusBusy || focusModeManual || afJob?.isActive == true) return
         tapFocusHideJob?.cancel()
         tapFocusFeedback = TapFocusFeedback.IDLE
         confirmedFocusMarker = null
@@ -1814,7 +1799,6 @@ private fun RemoteContent(
     // 录制状态一并复位（相机侧断线会自行停录）。
     LaunchedEffect(connected) {
         if (!connected) {
-            focusDiagnostic.mark(SystemClock.elapsedRealtime(), "disconnected")
             endFocus(cancelPending = true)
             tapFocusJob?.cancel()
             tapFocusHideJob?.cancel()
@@ -1975,7 +1959,7 @@ private fun RemoteContent(
     val rotationResumedHint = stringResource(R.string.remote_rotation_resumed)
 
     fun focusAt(tap: ViewfinderTap) {
-        if (!connected || capturing || tapFocusBusy || afHeld || afJob?.isActive == true) return
+        if (cameraToolWriting || !connected || capturing || tapFocusBusy || afHeld || afJob?.isActive == true) return
         if (focusModeManual) {
             devLog("!! tap AF ignored: camera focus mode is MF")
             showHint(manualFocusHint)
@@ -2253,7 +2237,7 @@ private fun RemoteContent(
     }
 
     fun toggleRecord(waitForFocus: Job? = null) {
-        if (recBusy) return
+        if (recBusy || cameraToolWriting) return
         val expectedCamera = cameraViewModel.getCamera() ?: return
         recBusy = true
         services.scope.launch {
@@ -2653,6 +2637,7 @@ private fun RemoteContent(
                 RemoteTool.LUT -> { lutState.off(); lutState.dismissMenu() }
                 RemoteTool.GRID -> gridPanelOpen = false
                 RemoteTool.WHITE_BALANCE -> if (cameraToolPanel == RemoteCameraTool.WHITE_BALANCE) cameraToolPanel = null
+                RemoteTool.FOCUS_MODE -> if (cameraToolPanel == RemoteCameraTool.FOCUS_MODE) cameraToolPanel = null
                 RemoteTool.FOCUS_AREA -> if (cameraToolPanel == RemoteCameraTool.FOCUS_AREA) cameraToolPanel = null
                 else -> Unit
             }
@@ -2662,7 +2647,7 @@ private fun RemoteContent(
     var dispMode by tools.disp
     val changeToolVisibility: (RemoteTool, Boolean) -> Unit = ::setToolVisible
     ApplyRemoteToolLayout(tools.layout(movieMode), changeToolVisibility, fixedRecorder = landscapeLayout)
-    val renderTool: @Composable (RemoteTool?) -> Unit = { tool ->
+    val renderTool: @Composable (RemoteTool?, Int) -> Unit = { tool, labelLines ->
         if (tool == RemoteTool.RECORD) {
             RecControlBar(viewfinderRecorder != null, recPaused, recElapsed,
                 { startRecorder() }, { togglePauseRecorder() }, { stopRecorder() },
@@ -2687,7 +2672,7 @@ private fun RemoteContent(
             }
             val disabled = (tool?.fixed == true && editingTools) ||
                 (tool == RemoteTool.ROTATE && tools.locked.value)
-            TopIconToggle(active, stringResource(tool?.title ?: if (editingTools) R.string.remote_tool_done else R.string.remote_tool_manage), {
+            val toolClick: () -> Unit = {
                 when (tool) {
                     RemoteTool.HD -> { hdLiveView = !hdLiveView; startSession(hdLiveView) }
                     RemoteTool.FPS -> toggleFpsControl()
@@ -2723,6 +2708,7 @@ private fun RemoteContent(
                     }
                     RemoteTool.ROTATE -> if (!disabled) onCycleRotation()
                     RemoteTool.WHITE_BALANCE -> { lutState.dismissMenu(); gridPanelOpen = false; listProp = null; devPanel = false; if (cameraToolPanel == RemoteCameraTool.WHITE_BALANCE) cameraToolCloseRequested = true else { cameraToolCloseRequested = false; cameraToolPanel = RemoteCameraTool.WHITE_BALANCE } }
+                    RemoteTool.FOCUS_MODE -> { lutState.dismissMenu(); gridPanelOpen = false; listProp = null; devPanel = false; if (cameraToolPanel == RemoteCameraTool.FOCUS_MODE) cameraToolCloseRequested = true else { startFocusModeReport(); cameraToolCloseRequested = false; cameraToolPanel = RemoteCameraTool.FOCUS_MODE } }
                     RemoteTool.FOCUS_AREA -> { lutState.dismissMenu(); gridPanelOpen = false; listProp = null; devPanel = false; if (cameraToolPanel == RemoteCameraTool.FOCUS_AREA) cameraToolCloseRequested = true else { cameraToolCloseRequested = false; cameraToolPanel = RemoteCameraTool.FOCUS_AREA } }
                     else -> {
                         listProp = null
@@ -2731,10 +2717,21 @@ private fun RemoteContent(
                         onEditingTools(!editingTools)
                     }
                 }
-            }, modifier = if (tool == RemoteTool.WHITE_BALANCE) Modifier.onGloballyPositioned {
+            }
+            Column(
+                modifier = if (labelLines > 0) Modifier.clickable(
+                    enabled = !disabled, indication = null,
+                    interactionSource = remember { MutableInteractionSource() }, onClick = toolClick,
+                ) else Modifier,
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+            TopIconToggle(active, stringResource(tool?.title ?: if (editingTools) R.string.remote_tool_done else R.string.remote_tool_manage), toolClick,
+            modifier = if (tool == RemoteTool.WHITE_BALANCE) Modifier.onGloballyPositioned {
                 whiteBalanceAnchor = it
             } else if (tool == RemoteTool.FOCUS_AREA) Modifier.onGloballyPositioned {
                 focusAreaAnchor = it
+            } else if (tool == RemoteTool.FOCUS_MODE) Modifier.size(36.dp).onGloballyPositioned {
+                focusModeAnchor = it
             } else if (tool == RemoteTool.LUT) Modifier.onGloballyPositioned {
                 lutAnchor = it
             } else if (tool == RemoteTool.GRID) Modifier.onGloballyPositioned {
@@ -2743,10 +2740,24 @@ private fun RemoteContent(
                 if (tool == null) Icon(if (editingTools) Icons.Default.Check else Icons.Default.Settings, null, Modifier.size(19.dp))
                 else if (cameraToolLoading && (
                     (tool == RemoteTool.WHITE_BALANCE && cameraToolPanel == RemoteCameraTool.WHITE_BALANCE) ||
-                    (tool == RemoteTool.FOCUS_AREA && cameraToolPanel == RemoteCameraTool.FOCUS_AREA))) {
+                    (tool == RemoteTool.FOCUS_AREA && cameraToolPanel == RemoteCameraTool.FOCUS_AREA) ||
+                    (tool == RemoteTool.FOCUS_MODE && cameraToolPanel == RemoteCameraTool.FOCUS_MODE))) {
                     androidx.compose.material3.CircularProgressIndicator(
                         modifier=Modifier.size(18.dp),strokeWidth=1.5.dp,color=colors.accentBlue)
+                } else if (tool == RemoteTool.FOCUS_MODE) {
+                    Text(if (focusModeManual) "MF" else if (focusModeText == "AF Macro") "AF-M" else focusModeText ?: "MODE", fontSize = 8.sp, maxLines = 1, softWrap = false, fontWeight = FontWeight.Bold)
                 } else RemoteToolMark(tool, tools)
+            }
+            if (labelLines > 0 && tool != null) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    stringResource(tool.title), style = MonitorToolLabelStyle,
+                    color = if (active) colors.accentBlue else colors.onSurfaceVariant,
+                    minLines = labelLines, maxLines = labelLines,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
             }
         }
     }
@@ -2759,7 +2770,7 @@ private fun RemoteContent(
                 if (devUnlocked && !editingTools) TopIconToggle(false, stringResource(R.string.cd_dev_panel), { devPanel = true }) {
                     Icon(Icons.Default.BugReport, null, Modifier.size(18.dp))
                 }
-            }, button = renderTool)
+            }, button = { renderTool(it, 0) })
     }
 
     // ---------- 布局 ----------
@@ -2828,7 +2839,7 @@ private fun RemoteContent(
                 confirmedFocusMarker = confirmedFocusMarker,
                 focusDisplayBlock = focusDisplayBlock,
                 focusValidAfter = focusValidAfter,
-                onFocusDisplay = if (focusDiagnosticRunning) focusDiagnostic::display else null,
+                onFocusDisplay = null,
                 onTapFocus = { focusAt(it) },
                 showFps = showFps,
                 fps = fps,
@@ -2895,7 +2906,7 @@ private fun RemoteContent(
                 ShutterButton(
                     capturing = capturing,
                     focusing = afHeld,
-                    enabled = connected,
+                    enabled = connected && !cameraToolWriting,
                     movie = movieMode,
                     recording = recording,
                     onFocusStart = { startFocus() },
@@ -2940,7 +2951,7 @@ private fun RemoteContent(
                     confirmedFocusMarker = confirmedFocusMarker,
                 focusDisplayBlock = focusDisplayBlock,
                 focusValidAfter = focusValidAfter,
-                onFocusDisplay = if (focusDiagnosticRunning) focusDiagnostic::display else null,
+                onFocusDisplay = null,
                         onTapFocus = { focusAt(it) },
                     showFps = showFps,
                     fps = fps,
@@ -2994,7 +3005,8 @@ private fun RemoteContent(
                     CameraMonitorDisp(cells, storageValues, movieMode,
                         rcBatteryPercentage(batteryParam), recording,
                         Modifier.offset(x = imageX, y = imageY).size(imageWidth, imageHeight),
-                        storageSlotCount = camState.storageIds.filter { it != 0 && it != -1 }.distinct().size)
+                        storageSlotCount = camState.storageIds.filter { it != 0 && it != -1 }.distinct().size,
+                        remainingVideoMs = { frame?.metadata?.remainingVideoTimeMs })
                 }
                 MonitorDispSummary(
                     if (cameraDisp && connected) MonitorDispMode.CLEAN else dispMode, listOfNotNull(modeText), connected,
@@ -3016,7 +3028,7 @@ private fun RemoteContent(
                             DockToolMark()
                         }
                     },
-                    rotateButton = { renderTool(RemoteTool.ROTATE) },
+                    rotateButton = { renderTool(RemoteTool.ROTATE, 0) },
                     backButton = {
                         GlassBackButton(onClick = onNavigateBack, forward = true)
                     },
@@ -3027,12 +3039,12 @@ private fun RemoteContent(
                     },
                     shutter = {
                         ShutterButton(capturing = capturing, focusing = afHeld,
-                            enabled = connected, movie = movieMode, recording = recording,
+                            enabled = connected && !cameraToolWriting, movie = movieMode, recording = recording,
                             onFocusStart = { startFocus() }, onRelease = ::finishShutterGesture,
                             onQuickTap = { if (movieMode) toggleRecord() else shoot() },
                             diameter = landscapeShutterSize)
                     },
-                    localRecorder = { renderTool(RemoteTool.RECORD) },
+                    localRecorder = { renderTool(RemoteTool.RECORD, 0) },
                     parameter = { index, modifier ->
                         val prop = (if (movieMode) MOVIE_EXPOSURE_PROPS else EXPOSURE_PROPS)[index]
                         val isoProp = if (movieMode) Lab.PROP_NK_MOVIE_ISO else Lab.PROP_ISO
@@ -3046,7 +3058,7 @@ private fun RemoteContent(
                             onStep = { stepParam(prop, it) },
                             onOpenList = { if (params[prop]?.values?.isNotEmpty() == true) listProp = prop })
                     },
-                    tool = { renderTool(it) },
+                    tool = { entry, lines -> renderTool(entry, lines) },
                     modifier = Modifier.offset(monitorLayout.interactionBounds.x.dp, monitorLayout.interactionBounds.y.dp)
                         .size(monitorLayout.interactionBounds.width.dp, monitorLayout.interactionBounds.height.dp),
                 )
@@ -3163,8 +3175,7 @@ private fun RemoteContent(
                         Spacer(Modifier.weight(1f))
                         GlassButton(
                             onClick = {
-                                if (focusDiagnosticRunning) saveFocusReport()
-                                services.clipboard.setText(AnnotatedString(focusDiagnosticReport))
+                                services.clipboard.setText(AnnotatedString(focusModeReport))
                                 Toast.makeText(services.context, R.string.code_copied, Toast.LENGTH_SHORT).show()
                             },
                             contentPadding = PaddingValues(8.dp)
@@ -3189,20 +3200,7 @@ private fun RemoteContent(
                     }
                     Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
                         Spacer(Modifier.height(8.dp))
-                        Text(stringResource(R.string.remote_focus_diagnostic_hint),
-                            style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant)
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            GlassButton(onClick = {
-                                if (focusDiagnosticRunning) {
-                                    focusDiagnostic.stop(); focusDiagnosticRunning = false; saveFocusReport()
-                                } else startFocusDiagnostic()
-                            }) { Text(stringResource(if (focusDiagnosticRunning) R.string.remote_focus_diagnostic_stop else R.string.remote_focus_diagnostic_start)) }
-                            GlassButton(onClick = {
-                                focusDiagnostic.mark(SystemClock.elapsedRealtime(), "movie=$movieMode recording=$recording focus=$focusModeText")
-                                saveFocusReport()
-                            }, enabled = focusDiagnosticRunning) { Text(stringResource(R.string.remote_focus_diagnostic_mark)) }
-                        }
-                        val logLines = focusDiagnosticReport.lines()
+                        val logLines = focusModeReport.lines()
                         // 日志跟尾：面板刚打开（尚无布局信息）直接跳到底；此后新行到来时，
                         // 停在底部附近才跟到底，用户上翻查看时不打扰。
                         val logState = rememberLazyListState()
@@ -3266,20 +3264,29 @@ private fun RemoteContent(
     }
     cameraToolPanel?.let { selectedTool ->
         val panelCamera = cameraViewModel.getCamera()
-        val buttonCoordinates = if (selectedTool == RemoteCameraTool.WHITE_BALANCE) whiteBalanceAnchor else focusAreaAnchor
+        val panelMovie = movieMode
+        val buttonCoordinates = when (selectedTool) {
+            RemoteCameraTool.WHITE_BALANCE -> whiteBalanceAnchor
+            RemoteCameraTool.FOCUS_AREA -> focusAreaAnchor
+            RemoteCameraTool.FOCUS_MODE -> focusModeAnchor
+        }
         val localAnchor = toolOverlayCoordinates?.takeIf { it.isAttached }?.let { root ->
             buttonCoordinates?.takeIf { it.isAttached }?.let { root.localBoundingBoxOf(it, clipBounds = false) }
         }
-        key(selectedTool) { RemoteCameraToolPanel(panelCamera, movieMode, selectedTool,
+        key(panelCamera, movieMode, selectedTool) { RemoteCameraToolPanel(panelCamera, movieMode, selectedTool,
             closeRequested = cameraToolCloseRequested,
             onLoadingChanged = { cameraToolLoading = it },
+            onWriteBusyChanged = { busy ->
+                if (busy && cameraToolWriting) false
+                else { cameraToolWriting = busy; true }
+            },
             onUnavailable = { showHint(cameraToolUnavailableHint) },
             landscape = rotation != 0,
             anchor = localAnchor,
             canWrite = connected && initialLoaded && !capturing && !recBusy && !afHeld && !tapFocusBusy && afJob?.isActive != true,
-            isCurrentCamera = { panelCamera != null && cameraViewModel.getCamera() === panelCamera },
+            isCurrentCamera = { panelCamera != null && cameraViewModel.getCamera() === panelCamera && movieMode == panelMovie },
             beforeWrite = {
-                if (selectedTool == RemoteCameraTool.FOCUS_AREA && subjectTrackingActive && panelCamera != null) {
+                if (selectedTool != RemoteCameraTool.WHITE_BALANCE && subjectTrackingActive && panelCamera != null) {
                     val rc = panelCamera.rcEndSubjectTracking()
                     devLog("focus area EndTracking resp=${rc?.let { "0x%04X".format(it and 0xFFFF) } ?: "unavailable"}")
                     if (rc != null && rc != Lab.OK && rc != PtpConstants.OPERATION_NOT_SUPPORTED && rc != Lab.NK_INVALID_STATUS) false else {
@@ -3290,14 +3297,15 @@ private fun RemoteContent(
                 } else true
             },
             onApplied = {
-                if (selectedTool == RemoteCameraTool.FOCUS_AREA) {
+                if (selectedTool != RemoteCameraTool.WHITE_BALANCE) {
+                    tapFocusHideJob?.cancel()
                     focusValidAfter = SystemClock.elapsedRealtime()
                     confirmedFocusMarker = null
                     tapFocusFeedback = TapFocusFeedback.IDLE
                     afLocked = false
                     refreshFocusMode()
                 }
-            }, log = { devLog(it) }, onDismiss = { cameraToolPanel = null; cameraToolCloseRequested = false }) }
+            }, log = { if (selectedTool == RemoteCameraTool.FOCUS_MODE) focusModeLog(it); devLog(it) }, onDismiss = { cameraToolPanel = null; cameraToolCloseRequested = false }) }
     }
     BackHandler(enabled = editingTools) { onEditingTools(false) }
         }
@@ -4820,8 +4828,27 @@ internal fun RemoteToolMark(tool: RemoteTool, preferences: RemoteToolPreferences
         RemoteTool.ROTATE -> RotateMark(mark)
         RemoteTool.LOCK -> Icon(if (preferences.locked.value) Icons.Default.Lock else Icons.Default.LockOpen, null, mark)
         RemoteTool.WHITE_BALANCE -> Text("WB", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-        RemoteTool.FOCUS_FRAME -> Text("AF", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        RemoteTool.FOCUS_MODE -> Text("MODE", fontSize = 9.sp, fontWeight = FontWeight.Bold)
+        RemoteTool.FOCUS_FRAME -> FocusFrameMark()
         RemoteTool.FOCUS_AREA -> Icon(Icons.Default.CenterFocusStrong, null, mark)
         RemoteTool.WAVEFORM -> WaveformMark(mark, rgb = preferences.waveform.value == WaveformMode.RGB)
+    }
+}
+
+/** AF inside a focus rectangle, shared by the toolbar and edit mode. */
+@Composable
+private fun FocusFrameMark() {
+    Box(
+        modifier = Modifier.size(width = 20.dp, height = 18.dp)
+            .border(1.4.dp, LocalContentColor.current, RoundedCornerShape(3.dp)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            "AF", fontSize = 8.sp, lineHeight = 10.sp, fontWeight = FontWeight.Bold,
+            maxLines = 1, softWrap = false,
+            style = androidx.compose.ui.text.TextStyle(
+                platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false)
+            ),
+        )
     }
 }

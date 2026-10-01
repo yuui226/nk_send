@@ -407,24 +407,8 @@ private fun fmtVal(prop: Int, raw: Long): String = when (prop) {
         0x8010L -> "AUTO"
         else -> "0x${raw.toString(16)}"
     }
-    Lab.PROP_FOCUS_MODE -> when (raw) {
-        1L -> "MF"
-        2L -> "AF"
-        3L -> "AF Macro"
-        0x8010L -> "AF-S"
-        0x8011L -> "AF-C"
-        0x8012L -> "AF-A"
-        0x8013L -> "AF-F"
-        else -> "0x${raw.toString(16)}"
-    }
-    Lab.PROP_NK_AF_MODE -> when (raw) {
-        0L -> "AF-S"
-        1L -> "AF-C"
-        2L -> "AF-A"
-        // 3/4 会在部分机型 AF 失败后出现，并不代表用户切到了 MF。
-        // 语义未确认前保留为未知值，由上层隐藏标签。
-        else -> "0x${raw.toString(16)}"
-    }
+    Lab.PROP_FOCUS_MODE, Lab.PROP_NK_STILL_FOCUS_MODE, Lab.PROP_NK_AF_MODE ->
+        rcFocusModeLabel(prop, raw) ?: "0x${raw.toString(16)}"
     else -> "$raw"
 }
 
@@ -838,7 +822,7 @@ suspend fun NikonCamera.rcGetAngleLevel(): RcParam? =
     rcGetParam(Lab.PROP_NK_ANGLE_LEVEL)?.takeIf { rcAngleLevelRoll(it) != null }
 
 suspend fun NikonCamera.rcGetFocusMode(): RcFocusMode? {
-    val candidates = intArrayOf(Lab.PROP_FOCUS_MODE, Lab.PROP_NK_AF_MODE)
+    val candidates = focusModeProperties
     for (prop in candidates) {
         // 对焦模式标签宁缺毋滥：只接受 GetDevicePropValue 成功直读到的当前值。
         // PropDesc 兼容回退在部分机型的失败响应里会带无效默认值 1，曾被误显示成 MF。
@@ -856,11 +840,7 @@ suspend fun NikonCamera.rcGetFocusMode(): RcFocusMode? {
         if (label.startsWith("0x")) continue
         val result = RcFocusMode(
             label = label,
-            manual = when (prop) {
-                Lab.PROP_FOCUS_MODE -> raw == 1L
-                Lab.PROP_NK_AF_MODE -> false
-                else -> false
-            },
+            manual = rcFocusModeManual(prop, raw),
             prop = prop,
             raw = raw
         )

@@ -426,7 +426,7 @@
     <string name="err_code_revoked">This activation code has been revoked</string>
     <string name="err_code_expired">Subscription expired — renew to continue</string>
     <string name="err_rate_limited">Too many attempts — try again in a minute</string>
-    <string name="err_server_unreachable">Couldn\'t reach the activation server. Check your network; if the network is fine, update to the latest version (via QQ group).</string>
+    <string name="err_server_unreachable">Unable to reach the activation server. Check your connection or update to the latest version, then retry.</string>
     <string name="err_generic">Activation failed (%1$s)</string>
     <string name="revert_free">Reverted to free (testing)</string>
     <string name="pro_version">Pro</string>
@@ -519,8 +519,8 @@
     <string name="purchase_paid_not_active">Payment received but auto-activation failed — copy the code above and use "Enter activation code".</string>
     <string name="purchase_code_copied">Activation code copied</string>
     <string name="purchase_done">Done</string>
-    <string name="err_purchase_no_network">Disconnect the camera hotspot before purchasing, then connect to the internet and retry.</string>
-    <string name="err_purchase_unreachable">Couldn\'t reach the server. If you\'re on the camera\'s Wi-Fi, disconnect first and retry on a network with internet access.</string>
+    <string name="err_purchase_no_network">Check your connection and retry. If it still fails, try another phone hotspot or Wi-Fi network.</string>
+    <string name="err_purchase_unreachable">Check your connection and retry. If it still fails, try another phone hotspot or Wi-Fi network.</string>
     <string name="err_purchase_failed">Couldn\'t create the order — try again later or contact support.</string>
     <string name="err_purchase_activation_failed">Activation failed. Please contact support.</string>
     <string name="err_purchase_price_missing">The order total could not be verified. Payment was stopped; please retry.</string>
@@ -679,4 +679,7 @@
     <string name="remote_focus_diagnostic_stop">Stop</string>
     <string name="remote_focus_diagnostic_mark">Mark step</string>
     <string name="remote_focus_diagnostic_hint">Passive focus sampling for 60 seconds. Move the camera focus point, switch photo/video or AF area, and mark each step. Copy the report afterwards.</string>
+    <string name="remote_tool_focus_mode">Focus mode</string>
+    <string name="remote_focus_manual_fixed">MF (fixed)</string>
+    <string name="monitor_disp_remaining_video">Time left %1$s</string>
 </resources>

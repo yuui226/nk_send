@@ -26,6 +26,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -48,6 +51,7 @@ internal fun cameraToolLabelResource(tool: RemoteCameraTool, prop: Int, value: L
         0x8016L -> R.string.remote_wb_natural
         else -> null
     }
+    RemoteCameraTool.FOCUS_MODE -> null // Shared protocol label below.
     RemoteCameraTool.FOCUS_AREA -> focusAreaLabelResource(prop, value, model, dataType)
 }
 
@@ -122,6 +126,7 @@ internal fun RemoteCameraToolPanel(
     onLoadingChanged: (Boolean) -> Unit,
     onUnavailable: () -> Unit,
     anchor: androidx.compose.ui.geometry.Rect? = null,
+    onWriteBusyChanged: (Boolean) -> Boolean = { true },
     closeRequested: Boolean = false,
     landscape: Boolean = false,
 ) {
@@ -137,7 +142,13 @@ internal fun RemoteCameraToolPanel(
     val currentCanWrite by rememberUpdatedState(canWrite)
     val currentCameraCheck by rememberUpdatedState(isCurrentCamera)
     val latestMovie by rememberUpdatedState(movie)
-    fun label(p: RcParam, value: Long): String = cameraToolLabelResource(tool, p.prop, value, camera?.deviceModel, p.dataType)?.let(context::getString)
+    fun label(p: RcParam, value: Long): String =
+        (if (tool == RemoteCameraTool.FOCUS_MODE) {
+            if (p.prop == Lab.PROP_NK_STILL_FOCUS_MODE && value == 3L)
+                context.getString(R.string.remote_focus_manual_fixed)
+            else rcFocusModeLabel(p.prop, value)
+        } else null)
+        ?: cameraToolLabelResource(tool, p.prop, value, camera?.deviceModel, p.dataType)?.let(context::getString)
         ?: context.getString(R.string.remote_camera_option, value.toString())
     val latestDismiss by rememberUpdatedState(onDismiss)
     val latestUnavailable by rememberUpdatedState(onUnavailable)
@@ -156,6 +167,9 @@ internal fun RemoteCameraToolPanel(
                                 camera.rcGetCameraTool(tool, movie, if (loading) log else { _ -> })
                             }
                             if (!currentCameraCheck()) { latestDismiss(); return@LaunchedEffect }
+                            if (loading && tool == RemoteCameraTool.FOCUS_MODE) {
+                                log("focus mode capability selected=${fresh?.prop?.toString(16)} writable=${fresh?.writable} current=${fresh?.current} values=${fresh?.values}")
+                            }
                             if (loading && (fresh == null || !fresh.writable || fresh.values.isEmpty())) {
                                 latestUnavailable()
                                 latestDismiss()
@@ -210,11 +224,13 @@ internal fun RemoteCameraToolPanel(
                     .clickable(enabled = !closing && !busy && canWrite && p.writable && value in p.values) {
                         if (selected) { close(); return@clickable }
                         val cam = camera ?: return@clickable
+                        if (!onWriteBusyChanged(true)) return@clickable
                         pendingValue = value
                         busy = true
                         error = null
-                        scope.launch {
+                        scope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
                             var acquired = false
+                            var writeAttempted = false
                             try {
                                 access.lock()
                                 acquired = true
@@ -242,13 +258,19 @@ internal fun RemoteCameraToolPanel(
                                     error = context.getString(R.string.remote_camera_tool_failed)
                                     return@launch
                                 }
+                                if (!currentCameraCheck() || !currentCanWrite || latestMovie != movie) {
+                                    error = context.getString(R.string.remote_camera_tool_changed)
+                                    return@launch
+                                }
+                                currentCoroutineContext().ensureActive()
                                 withContext(NonCancellable) {
+                                    writeAttempted = true
                                     val result = cam.rcSetValueVerified(fresh, value)
                                     log("camera tool write ${tool.name} prop=0x%04X target=%d confirmed=%s response=0x%04X".format(fresh.prop, value, result.confirmed, result.responseCode))
-                                    if (currentCameraCheck() && latestMovie == movie) {
+                                    if (scope.isActive && currentCameraCheck() && latestMovie == movie) {
                                         param = result.actual ?: cam.rcGetCameraTool(tool, movie)
+                                        if (tool != RemoteCameraTool.FOCUS_MODE && result.confirmed) onApplied()
                                         if (result.confirmed) {
-                                            onApplied()
                                             close()
                                         }
                                         else error = context.getString(R.string.remote_camera_tool_failed)
@@ -259,8 +281,15 @@ internal fun RemoteCameraToolPanel(
                                 error = context.getString(R.string.remote_camera_tool_failed)
                                 log("!! camera tool write ${tool.name}: ${e.javaClass.simpleName}")
                             } finally {
+                                if (writeAttempted && tool == RemoteCameraTool.FOCUS_MODE && currentCameraCheck() && latestMovie == movie) {
+                                    withContext(NonCancellable) {
+                                        try { onApplied() }
+                                        catch (e: Exception) { log("!! focus mode refresh: ${e.javaClass.simpleName}") }
+                                    }
+                                }
                                 if (acquired) access.unlock()
                                 busy = false
+                                onWriteBusyChanged(false)
                                 pendingValue = null
                             }
                         }

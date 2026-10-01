@@ -74,7 +74,8 @@ data class LiveViewMetadata(
     val attitude: LiveViewAttitude? = null,
     val focusFrameStatus: String = "legacy",
     val focusDisplayArea: LiveViewDisplayArea? = null,
-    val focusFrames: List<LiveViewFocusFrame> = listOfNotNull(selectedFocusFrame)
+    val focusFrames: List<LiveViewFocusFrame> = listOfNotNull(selectedFocusFrame),
+    val remainingVideoTimeMs: Long? = null
 )
 
 /** 一帧完整 Live View 载荷；JPEG 直接从 [jpegOffset] 解码，避免热路径复制。 */
@@ -256,7 +257,8 @@ internal fun parseLiveViewMetadata(
         attitude = parseCompactLiveViewAttitude(payload, jpegOffset),
         focusFrameStatus = frameStatus,
         focusDisplayArea = displayArea,
-        focusFrames = visibleFrames
+        focusFrames = visibleFrames,
+        remainingVideoTimeMs = parseLiveViewRemainingVideoTime(payload, jpegOffset)
     )
 }
 
@@ -326,4 +328,16 @@ internal fun parseCompactLiveViewAttitude(payload: ByteArray, headerSize: Int): 
     } else degrees(pitch)
     if (kotlin.math.abs(p) > 90f) return null
     return LiveViewAttitude(degrees(roll), p)
+}
+
+/** Versioned video block immediately follows the AF table; not the LV shutdown countdown. */
+internal fun parseLiveViewRemainingVideoTime(payload: ByteArray, headerSize: Int): Long? {
+    val offset = when (headerSize) { 512 -> 380; 1024 -> 816; else -> return null }
+    if (payload.size < headerSize || payload.be16(0) != 1 || payload.be16(2) != 0 ||
+        payload.be32(8) != headerSize.toLong()) return null
+    val recording = payload[offset + 12].toInt() and 0xFF
+    if (recording !in 0..1) return null
+    val millis = payload.be32(offset)
+    // Reserved zero-filled standby blocks do not mean the card is full.
+    return millis.takeIf { it in 0L..86_400_000L && (it > 0 || recording == 1) }
 }

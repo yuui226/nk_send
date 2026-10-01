@@ -123,11 +123,20 @@ internal fun rememberMonitorStorage(camera: NikonCamera?, storageIds: List<Int>,
     return if (enabled) values else emptyList()
 }
 
+internal fun monitorRemainingTimeLabel(seconds: Long): String =
+    if (seconds >= 3600) String.format(java.util.Locale.ROOT, "%d:%02d:%02d", seconds / 3600, seconds / 60 % 60, seconds % 60)
+    else String.format(java.util.Locale.ROOT, "%02d:%02d", seconds / 60, seconds % 60)
+
 /** Camera-style readout; no background panel over the live image. */
 @Composable
 internal fun CameraMonitorDisp(cells: List<Pair<String, String>>, storage: List<Pair<Int, Long>>,
     movie: Boolean, battery: Int?, recording: Boolean, modifier: Modifier = Modifier,
-    storageSlotCount: Int = storage.size) {
+    storageSlotCount: Int = storage.size,
+    remainingVideoMs: () -> Long? = { null }) {
+    val videoSource by rememberUpdatedState(remainingVideoMs)
+    val videoSeconds by remember(movie) { derivedStateOf { if (movie) videoSource()?.div(1000) else null } }
+    val remaining = if (movie) videoSeconds?.let { stringResource(R.string.monitor_disp_remaining_video, monitorRemainingTimeLabel(it)) }
+        else null
     val shadow = androidx.compose.ui.text.TextStyle(shadow = androidx.compose.ui.graphics.Shadow(
         androidx.compose.ui.graphics.Color.Black.copy(alpha = .85f), blurRadius = 4f))
     val white = androidx.compose.ui.graphics.Color.White
@@ -136,9 +145,13 @@ internal fun CameraMonitorDisp(cells: List<Pair<String, String>>, storage: List<
                 val capacity = String.format(java.util.Locale.getDefault(), "%.1f GB", free / 1_000_000_000.0)
                 if (storageSlotCount <= 1) capacity else stringResource(R.string.monitor_disp_card, number, capacity)
             } + listOfNotNull(battery?.let { "$it%" })
-        Text(topItems.joinToString("   ·   "),
-            Modifier.align(Alignment.TopStart).fillMaxWidth().padding(end = 100.dp),
-            color = white, fontSize = 12.sp, style = shadow, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Column(Modifier.align(Alignment.TopStart).fillMaxWidth().padding(end = 100.dp),
+            verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text(topItems.joinToString("   ·   "),
+                color = white, fontSize = 12.sp, style = shadow, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            remaining?.let { Text(it, color = white.copy(alpha = .85f), fontSize = 11.sp,
+                style = shadow, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+        }
         if (movie && !recording) Text("STBY", Modifier.align(Alignment.TopEnd),
             color = white.copy(alpha = .8f), fontSize = 11.sp, style = shadow)
         Row(
