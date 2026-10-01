@@ -259,6 +259,7 @@
     <string name="photo_frame_effect_outline">描邊</string>
     <string name="photo_filter">照片濾鏡</string>
     <string name="photo_effects">濾鏡·LUT·邊框·浮水印</string>
+    <string name="photo_effects_editor_title">效果</string>
     <string name="photo_effects_open_editor">編輯照片效果</string>
     <string name="photo_effects_info_title">照片效果說明</string>
     <string name="photo_effects_info_description">傳輸原圖後，效果圖另存。</string>

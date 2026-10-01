@@ -642,7 +642,7 @@ fun SettingsOverlay(
                     stringResource(
                         when (page) {
                             SettingsPage.MAIN -> R.string.settings
-                            SettingsPage.EFFECTS -> R.string.photo_effects
+                            SettingsPage.EFFECTS -> R.string.photo_effects_editor_title
                         }
                     ),
                     style = MaterialTheme.typography.titleLarge,

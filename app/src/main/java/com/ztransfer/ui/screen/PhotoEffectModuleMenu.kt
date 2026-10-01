@@ -20,9 +20,12 @@ import com.ztransfer.ui.util.rememberHaptics
 
 @Composable
 internal fun PhotoEffectModuleButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
-    GlassButton(onClick = onClick, contentPadding = PaddingValues(0.dp), modifier = modifier) {
-        Icon(Icons.Outlined.Tune, stringResource(R.string.photo_effect_modules),
-            Modifier.size(19.dp), tint = AppTheme.colors.onBackground)
+    // Measure the fixed slot, not Surface's changing pressed/minimum-touch bounds.
+    Box(modifier = modifier, contentAlignment = Alignment.Center, propagateMinConstraints = true) {
+        GlassButton(onClick = onClick, contentPadding = PaddingValues(0.dp), modifier = Modifier) {
+            Icon(Icons.Outlined.Tune, stringResource(R.string.photo_effect_modules),
+                Modifier.size(19.dp), tint = AppTheme.colors.onBackground)
+        }
     }
 }
 
@@ -45,7 +48,7 @@ internal fun PhotoEffectModuleMenu(
         panelAlignment = Alignment.TopEnd,
         shape = RoundedCornerShape(18.dp),
         panelModifier = Modifier.padding(start = 18.dp, end = 18.dp, top = top)
-            .widthIn(max = 180.dp),
+            .widthIn(max = 156.dp),
     ) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             PhotoEffectModule.entries.forEach { module ->

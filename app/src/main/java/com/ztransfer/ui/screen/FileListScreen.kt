@@ -1426,9 +1426,7 @@ fun FileListScreen(
                                     } catch (_: Exception) {}
                                 }
                             ) {
-                                if (state.isStaConnection) {
-                                    StaSignalIcon(false, colors.statusError, Modifier.size(20.dp))
-                                } else {
+                                if (!state.isStaConnection) {
                                     Icon(Icons.Default.WifiOff, contentDescription = null, tint = colors.statusError, modifier = Modifier.size(20.dp))
                                 }
                                 Text(

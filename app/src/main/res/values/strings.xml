@@ -263,6 +263,7 @@
     <string name="photo_frame_effect_outline">Outline</string>
     <string name="photo_filter">Photo filter</string>
     <string name="photo_effects">Filter · LUT · Frame · Watermark</string>
+    <string name="photo_effects_editor_title">Effects</string>
     <string name="photo_effects_open_editor">Edit photo effects</string>
     <string name="photo_effects_info_title">About photo effects</string>
     <string name="photo_effects_info_description">After the original is transferred, the edited version is saved separately.</string>
