@@ -2138,28 +2138,39 @@ object PhotoFrameExporter {
         val canvasWidth = 1000f + side * 2
         val baseBottom = reference.canvasHeight - reference.photoBottom
         val baseContentHeight = baseBottom * if (preset == PhotoFramePreset.FROSTED) 0.84f else 1f
-        val padding = frameMetadataVerticalPadding(baseContentHeight) * p.coerceIn(0.65f, 1f)
+        val basePadding = frameMetadataVerticalPadding(baseContentHeight) * p.coerceIn(0.65f, 1f)
+        val avoidPhotoShadow = preset == PhotoFramePreset.MINIMAL ||
+            preset == PhotoFramePreset.CINEMA || preset == PhotoFramePreset.MIST
+        // Elevation uses the canvas short edge. Width is its upper bound, so this also
+        // protects wide photographs without coupling the padding to the final band height.
+        val padding = if (avoidPhotoShadow && rows.isNotEmpty())
+            maxOf(basePadding, canvasWidth * 0.012f) else basePadding
+        // Clear the stronger shadow without adding another layer of top whitespace.
+        // Bottom breathing room remains independent; spare band space is centered below.
+        val topPadding = if (avoidPhotoShadow && rows.isNotEmpty()) canvasWidth * 0.020f else padding
+        val preferredGap = reference.designWidth * if (avoidPhotoShadow) 0.010f else 0.0125f
         // Keep the original type sizes; shrinking margins must not be spent on bigger gaps.
         val baselineInkHeight = rows.sumOf { it.height.toDouble() }.toFloat()
         val gapCount = (rows.size - 1).coerceAtLeast(0)
         val defaultGap = if (gapCount == 0) 0f else minOf(
-            reference.designWidth * 0.0125f,
+            preferredGap,
             baseContentHeight * 0.09f,
-            ((baseContentHeight - frameMetadataVerticalPadding(baseContentHeight) * 2 - baselineInkHeight) /
+            ((baseContentHeight - maxOf(frameMetadataVerticalPadding(baseContentHeight), topPadding) -
+                frameMetadataVerticalPadding(baseContentHeight) - baselineInkHeight) /
                 gapCount).coerceAtLeast(0f),
         )
         val measuredRows = rows.map { it.copy(gapAfter = minOf(it.gapAfter, defaultGap * minOf(p, 1f))) }
         val rowHeight = frameRowsHeight(measuredRows)
         val requiredBottom = if (rows.isEmpty()) padding * 2 else
-            (rowHeight + padding * 2) / if (preset == PhotoFramePreset.FROSTED) 0.84f else 1f
+            (rowHeight + topPadding + padding) / if (preset == PhotoFramePreset.FROSTED) 0.84f else 1f
         val bottom = maxOf((reference.canvasHeight - reference.photoBottom) * p, requiredBottom)
         val sourceHeight = height.toDouble().div(width).times(1000).toFloat()
         val bandTop = top + sourceHeight
         val panelInset = if (preset == PhotoFramePreset.FROSTED) bottom * 0.08f else 0f
         val plan = positionFrameRows(measuredRows, (if (frosted) side else 0f) + inset,
-            bandTop + panelInset + padding,
+            bandTop + panelInset + topPadding,
             (if (frosted) 1000f else canvasWidth) - inset * 2,
-            bottom - panelInset * 2 - padding * 2)
+            bottom - panelInset * 2 - topPadding - padding)
         val scale = width / 1000f
         fun px(value: Float): Int {
             val result = kotlin.math.ceil(value.toDouble() * scale)
@@ -5743,7 +5754,7 @@ internal fun photoFrameWatermarkFingerprint(
         identity
     }
     val layoutVersion = if (preset == PhotoFramePreset.IMMERSIVE) "" else
-        "\u0000measured-layout-v=4" + (if (preset == PhotoFramePreset.FROSTED) "\u0000glass-panel-v=2" else "")
+        "\u0000measured-layout-v=6" + (if (preset == PhotoFramePreset.FROSTED) "\u0000glass-panel-v=2" else "")
     return MessageDigest.getInstance("SHA-256")
         .digest((versionedIdentity + layoutVersion + if (effectiveMetadataSettings.brandStyle == PhotoFrameBrandStyle.LOGO) "\u0000brand-logo-v=3" else "").toByteArray(Charsets.UTF_8))
         .take(6)
