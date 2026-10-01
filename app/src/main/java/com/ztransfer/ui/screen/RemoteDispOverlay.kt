@@ -144,14 +144,11 @@ internal fun CameraMonitorDisp(cells: List<Pair<String, String>>, storage: List<
         val topItems = storage.map { (number, free) ->
                 val capacity = String.format(java.util.Locale.getDefault(), "%.1f GB", free / 1_000_000_000.0)
                 if (storageSlotCount <= 1) capacity else stringResource(R.string.monitor_disp_card, number, capacity)
-            } + listOfNotNull(battery?.let { "$it%" })
-        Column(Modifier.align(Alignment.TopStart).fillMaxWidth().padding(end = 100.dp),
-            verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Text(topItems.joinToString("   ·   "),
-                color = white, fontSize = 12.sp, style = shadow, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            remaining?.let { Text(it, color = white.copy(alpha = .85f), fontSize = 11.sp,
-                style = shadow, maxLines = 1, overflow = TextOverflow.Ellipsis) }
-        }
+            } + listOfNotNull(remaining, battery?.let { "$it%" })
+        Text(topItems.joinToString("   ·   "),
+            modifier = Modifier.align(Alignment.TopStart).fillMaxWidth().padding(end = 100.dp),
+            color = white, fontSize = 12.sp, style = shadow,
+            maxLines = 1, overflow = TextOverflow.Ellipsis)
         if (movie && !recording) Text("STBY", Modifier.align(Alignment.TopEnd),
             color = white.copy(alpha = .8f), fontSize = 11.sp, style = shadow)
         Row(

@@ -1,5 +1,7 @@
 package com.ztransfer.ui.screen
 
+import com.ztransfer.protocol.probeLegacyVideoTime
+import com.ztransfer.protocol.LiveViewVideoDiagnostic
 import com.ztransfer.util.HistogramMode
 import com.ztransfer.lut.LutFolderRepository
 import com.ztransfer.lut.LutMonitorState
@@ -919,6 +921,28 @@ private fun RemoteContent(
     // recording 以事件为准（0xC10A 开始 / 0xC108 完成 / 0xC105 中断），发命令成功时
     // 乐观置位让 UI 立即响应；lastStopCmdAt 用于滤掉停止后才轮询到的迟到"已开始"回声。
     var recording by remember { mutableStateOf(false) }
+    var legacyVideoReport by remember { mutableStateOf("") }
+    var legacyVideoBusy by remember { mutableStateOf(false) }
+    val videoProbeScope = rememberCoroutineScope()
+    var videoTimeReport by remember { mutableStateOf("") }
+    val videoDiagnosticState by rememberUpdatedState(newValue = {
+        val current = frame
+        val meta = current?.metadata
+        "Video remaining v2: movie=$movieMode recording=$recording disp=${tools.disp.value} landscape=$landscapeLayout\n" +
+            "ageMs=${current?.let { SystemClock.elapsedRealtime() - it.receivedAtElapsedMs }} metadata=${meta != null} rawMs=${meta?.videoRemainingRaw} recFlag=${meta?.videoRecordingRaw} acceptedMs=${meta?.remainingVideoTimeMs}\n" +
+            LiveViewVideoDiagnostic.latest
+    })
+    LaunchedEffect(devPanel) {
+        if (!devPanel) return@LaunchedEffect
+        LiveViewVideoDiagnostic.start()
+        try {
+            while (true) {
+                videoTimeReport = videoDiagnosticState()
+                delay(1_000)
+            }
+        } finally { LiveViewVideoDiagnostic.stop() }
+    }
+
     var recBusy by remember { mutableStateOf(false) }
     var lastStopCmdAt by remember { mutableLongStateOf(0L) }
     // Nikon Z 系远程开录前需要进入应用模式。USB 优先走已验证的 0x9435，
@@ -3175,7 +3199,7 @@ private fun RemoteContent(
                         Spacer(Modifier.weight(1f))
                         GlassButton(
                             onClick = {
-                                services.clipboard.setText(AnnotatedString(focusModeReport))
+                                services.clipboard.setText(AnnotatedString(videoTimeReport + "\n\n" + legacyVideoReport + "\n\n" + focusModeReport))
                                 Toast.makeText(services.context, R.string.code_copied, Toast.LENGTH_SHORT).show()
                             },
                             contentPadding = PaddingValues(8.dp)
@@ -3198,9 +3222,31 @@ private fun RemoteContent(
                             )
                         }
                     }
+                    GlassButton(
+                        enabled = connected && !legacyVideoBusy,
+                        onClick = {
+                            val cam = cameraViewModel.getCamera() ?: return@GlassButton
+                            legacyVideoBusy = true
+                            val context = "${java.time.OffsetDateTime.now()} movie=$movieMode recording=$recording"
+                            videoProbeScope.launch {
+                                try {
+                                    val result = cam.probeLegacyVideoTime()
+                                    legacyVideoReport = (legacyVideoReport.split("\n\n").filter { it.isNotBlank() } +
+                                        "$context\n$result").takeLast(4).joinToString("\n\n")
+                                } catch (e: CancellationException) {
+                                    throw e
+                                } catch (e: Exception) {
+                                    legacyVideoReport = "$context\nlegacy read failed: ${e.javaClass.simpleName}: ${e.message}"
+                                } finally { legacyVideoBusy = false }
+                            }
+                        },
+                        contentPadding = PaddingValues(8.dp)
+                    ) {
+                        Text(stringResource(R.string.probe_video_remaining))
+                    }
                     Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
                         Spacer(Modifier.height(8.dp))
-                        val logLines = focusModeReport.lines()
+                        val logLines = (videoTimeReport + "\n\n" + legacyVideoReport + "\n\n" + focusModeReport).lines()
                         // 日志跟尾：面板刚打开（尚无布局信息）直接跳到底；此后新行到来时，
                         // 停在底部附近才跟到底，用户上翻查看时不打扰。
                         val logState = rememberLazyListState()

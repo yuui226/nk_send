@@ -682,4 +682,5 @@
     <string name="remote_tool_focus_mode">Focus mode</string>
     <string name="remote_focus_manual_fixed">MF (fixed)</string>
     <string name="monitor_disp_remaining_video">Time left %1$s</string>
+    <string name="probe_video_remaining">Probe recording time left</string>
 </resources>

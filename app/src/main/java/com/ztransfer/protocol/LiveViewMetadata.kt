@@ -75,7 +75,10 @@ data class LiveViewMetadata(
     val focusFrameStatus: String = "legacy",
     val focusDisplayArea: LiveViewDisplayArea? = null,
     val focusFrames: List<LiveViewFocusFrame> = listOfNotNull(selectedFocusFrame),
-    val remainingVideoTimeMs: Long? = null
+    val remainingVideoTimeMs: Long? = null,
+    val videoHeaderSize: Int = 0,
+    val videoRemainingRaw: Long? = null,
+    val videoRecordingRaw: Int? = null
 )
 
 /** 一帧完整 Live View 载荷；JPEG 直接从 [jpegOffset] 解码，避免热路径复制。 */
@@ -131,6 +134,7 @@ internal fun parseLiveViewMetadata(
     jpegOffset: Int,
     operation: Int
 ): LiveViewMetadata? {
+    LiveViewVideoDiagnostic.capture(payload, jpegOffset, operation)
     if (
         operation != Lab.NK_GET_LIVE_VIEW_IMG_EX ||
         (jpegOffset != 512 && jpegOffset != 1024) ||
@@ -258,7 +262,10 @@ internal fun parseLiveViewMetadata(
         focusFrameStatus = frameStatus,
         focusDisplayArea = displayArea,
         focusFrames = visibleFrames,
-        remainingVideoTimeMs = parseLiveViewRemainingVideoTime(payload, jpegOffset)
+        remainingVideoTimeMs = parseLiveViewRemainingVideoTime(payload, jpegOffset),
+        videoHeaderSize = jpegOffset,
+        videoRemainingRaw = payload.be32(if (jpegOffset == 512) 384 else 816),
+        videoRecordingRaw = payload[frameTableEnd + 12].toInt() and 0xFF
     )
 }
 
@@ -330,12 +337,16 @@ internal fun parseCompactLiveViewAttitude(payload: ByteArray, headerSize: Int): 
     return LiveViewAttitude(degrees(roll), p)
 }
 
-/** Versioned video block immediately follows the AF table; not the LV shutdown countdown. */
+/** Video block, separate from the LV shutdown countdown.
+ * Z30 V1.20 compact sample: +384 matches legacy 0x9203 +64 exactly (7,500,000).
+ * +380 is not the remaining-time field. Recording flag remains +392, audio +388.
+ * 1024-byte layout follows the darkgrade Nikon codec independently.
+ */
 internal fun parseLiveViewRemainingVideoTime(payload: ByteArray, headerSize: Int): Long? {
-    val offset = when (headerSize) { 512 -> 380; 1024 -> 816; else -> return null }
+    val offset = when (headerSize) { 512 -> 384; 1024 -> 816; else -> return null }
     if (payload.size < headerSize || payload.be16(0) != 1 || payload.be16(2) != 0 ||
         payload.be32(8) != headerSize.toLong()) return null
-    val recording = payload[offset + 12].toInt() and 0xFF
+    val recording = payload[if (headerSize == 512) 392 else 828].toInt() and 0xFF
     if (recording !in 0..1) return null
     val millis = payload.be32(offset)
     // Reserved zero-filled standby blocks do not mean the card is full.

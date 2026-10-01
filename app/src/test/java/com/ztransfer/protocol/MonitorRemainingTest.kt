@@ -10,15 +10,22 @@ class MonitorRemainingTest {
     private fun packet(size: Int, millis: Long, recording: Int): ByteArray = ByteArray(size).also {
         it[1] = 1
         put32(it, 8, size.toLong())
-        val offset = if (size == 512) 380 else 816
+        val offset = if (size == 512) 384 else 816
         put32(it, offset, millis)
-        it[offset + 12] = recording.toByte()
+        it[if (size == 512) 392 else 828] = recording.toByte()
     }
     @Test fun remainingMovieTimeUsesVideoBlockInBothHeaderLayouts() {
         for (size in listOf(512, 1024)) {
             assertEquals(125_000L, parseLiveViewRemainingVideoTime(packet(size, 125_000, 0), size))
             assertEquals(0L, parseLiveViewRemainingVideoTime(packet(size, 0, 1), size))
         }
+    }
+    @Test fun z30CapturedStandbyTailReadsRemainingTimeAfterZeroField() {
+        val bytes = packet(512, 0, 0)
+        val captured = "00000000007270E00A0A060600000000"
+            .chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+        captured.copyInto(bytes, 380)
+        assertEquals(7_500_000L, parseLiveViewRemainingVideoTime(bytes, 512))
     }
     @Test fun unknownTimeOrStructureDoesNotBecomeAVisibleCountdown() {
         assertNull(parseLiveViewRemainingVideoTime(packet(512, 0, 0), 512))
