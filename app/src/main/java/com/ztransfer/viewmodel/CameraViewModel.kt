@@ -173,7 +173,7 @@ private val EFFECT_PREVIEW_VIDEO_EXTENSIONS = setOf(".mov", ".mp4")
 internal val NIKON_RAW_EXTENSIONS = setOf(".nef", ".nrw")
 internal val TIFF_EXTENSIONS = setOf(".tif", ".tiff")
 private val LARGE_EXIF_HEADER_EXTENSIONS = NIKON_RAW_EXTENSIONS + TIFF_EXTENSIONS
-private val AUTO_TRANSFER_MEDIA_EXTENSIONS = PtpConstants.FORMAT_EXT.values.toSet()
+private val AUTO_TRANSFER_MEDIA_EXTENSIONS = PtpConstants.FORMAT_EXT.values.toSet() + ".jpeg"
 
 /** 未知 PTP 对象(.bin 等)仍显示在列表，但不会被“照片/视频自动传输”误收。 */
 internal fun isAutoTransferMedia(file: NikonCamera.FileInfo): Boolean =
@@ -405,6 +405,8 @@ data class CameraState(
     val wirelessMode: WirelessMode = WirelessMode.STA,
     /** True when the active/most recent Wi-Fi session was reached through STA discovery. */
     val isStaConnection: Boolean = false,
+    /** Display/retry fallback after process recreation; never evidence of an active transport. */
+    val rememberedConnectionMode: CameraConnectionMode? = null,
     val staConnectionStatus: StaConnectionStatus = StaConnectionStatus.IDLE,
     val staDiscoveryProgress: String? = null,
     val staConnectionError: String? = null,
@@ -444,6 +446,7 @@ data class PhotoExif(
     val longitude: Double? = null,
     val altitudeMeters: Double? = null,
     val address: String? = null,
+    val orientation: Int? = null,
 )
 
 internal fun formatExposureCompensation(value: Float?): String? {
@@ -477,6 +480,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         CameraState(
             wirelessMode = restoredWirelessMode(
                 connectionPreferences.getString(WIRELESS_MODE_PREFERENCE, null),
+            ),
+            rememberedConnectionMode = restoredConnectionMode(
+                connectionPreferences.getString(CONNECTION_MODE_PREFERENCE, null),
             ),
         ),
     )
@@ -903,6 +909,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                             camera = cam
                             activateThumbnailDiskCache(cam)
                             activeUsbDeviceId = device.deviceId
+                            rememberConnectionMode(CameraConnectionMode.USB)
                             _state.update {
                                 it.copy(
                                     isConnectedToCamera = true,
@@ -1205,6 +1212,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     init {
+        viewModelScope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            state.collect { current ->
+                com.ztransfer.frame.PhotoFrameLocationResolver.apBlocked.value =
+                    current.connectionType != CameraConnectionType.USB && current.wirelessMode == WirelessMode.AP
+            }
+        }
         registerUsbReceiver()
         scanAttachedUsbCamera()
         if (!gpsConnectionPaused &&
@@ -1362,8 +1375,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     }
                     // Fetch EXIF only after the FHD succeeds. If a foreground task cancels this
                     // step, do not latch the attempt: the same photo can retry when IO is idle.
-                    // Border address metadata is intentionally disabled.  Keep the preview
-                    // camera-header read limited to local EXIF fields; never geocode here.
+                    // Keep camera-header prefetch local; place lookup is opt-in during rendering.
                     val exif = loadExif(latest)
                     effectPreviewAttemptKey = key
                     if (_state.value.isConnectedToCamera &&
@@ -1685,6 +1697,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     fun selectApMode() {
         val current = _state.value
         if (current.isConnectedToCamera || current.connectionType == CameraConnectionType.USB) return
+        com.ztransfer.frame.PhotoFrameLocationResolver.apBlocked.value = true
         persistWirelessMode(WirelessMode.AP)
         if (current.wirelessMode == WirelessMode.AP) {
             resumeApDiscovery()
@@ -1736,7 +1749,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    private fun rememberConnectionMode(mode: CameraConnectionMode) {
+        connectionPreferences.edit().putString(CONNECTION_MODE_PREFERENCE, mode.name).apply()
+        _state.update { it.copy(rememberedConnectionMode = mode) }
+    }
+
     private fun persistWirelessMode(mode: WirelessMode) {
+        // An explicit selection supersedes a previous session, including a restored USB session.
+        rememberConnectionMode(if (mode == WirelessMode.STA) CameraConnectionMode.STA else CameraConnectionMode.AP)
         connectionPreferences.edit()
             .putString(WIRELESS_MODE_PREFERENCE, mode.name)
             .apply()
@@ -1782,10 +1802,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     fun retryStaConnection() {
         val current = _state.value
         if (connectionDiscoveryPaused || purchaseHold ||
-            current.isConnectedToCamera ||
-            current.connectionType != CameraConnectionType.WIFI ||
-            current.wirelessMode != WirelessMode.STA ||
-            !current.isStaConnection
+            !current.canRetryStaConnection
         ) return
 
         // The shared signal button exists on the files, queue and monitor pages. A retry may
@@ -2274,6 +2291,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         camera = candidateCamera
         acquireSessionWifiLock()
         rememberStaCameraProfile(candidateCamera, ip, identity)
+        rememberConnectionMode(CameraConnectionMode.STA)
         _state.update {
             it.copy(
                 isConnectedToCamera = true,
@@ -2457,6 +2475,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         camera = cam
                         activateThumbnailDiskCache(cam)
                         acquireSessionWifiLock()   // 会话保活：连着就不让 Wi-Fi 打盹
+                        rememberConnectionMode(CameraConnectionMode.AP)
                         _state.update {
                             it.copy(
                                 isConnectedToCamera = true,
@@ -3307,6 +3326,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 val dynamicDualCardSchedule = activeSnapshot.handleOrders.count {
                     it.newestFirstHandles.isNotEmpty()
                 } > 1
+                val scanBatchPolicy = CachedThumbnailBatchPolicy()
+                val nextScanBatchSize: () -> Int = {
+                    // Foreground work may start after the preceding batch has completed.
+                    if (transfersBusyFlow.value || remoteActiveFlow.value || fhdActiveFlow.value ||
+                        effectPreviewActiveFlow.value
+                    ) scanBatchPolicy.complete(0, false)
+                    scanBatchPolicy.size
+                }
                 val publishBatch: suspend (List<NikonCamera.FileInfo>, Int, Int) -> Unit =
                     { rawBatch, loaded, total ->
                     val batch = if (cam.staDirectObjectReadValidated &&
@@ -3386,13 +3413,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                                 file.handle in newHandlesToReport && isAutoTransferMedia(file)
                             }
                         }
-                        prefetchPublishedFileBatch(
+                        val allCached = prefetchPublishedFileBatch(
                             // 双卡备份模式下，原始 batch 可能包含不会单独显示的重复副本；
                             // 只为本批真正加入列表的逻辑照片获取一次缩略图。
                             batch = additions,
                             expectedCamera = cam,
                             expectedGeneration = generation,
                         )
+                        scanBatchPolicy.complete(additions.size, allCached)
+                    } else {
+                        scanBatchPolicy.complete(0, false)
                     }
                 }
                 if (PhotoGenerationProbe.enabled && cam.staDirectObjectReadValidated) {
@@ -3410,12 +3440,15 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         },
                         storageIds = storageIds,
                         batchSize = FILE_THUMBNAIL_PIPELINE_BATCH_SIZE,
+                        nextBatchSize = nextScanBatchSize,
                         onBatch = publishBatch,
                     )
                 } else if (nonEmptyRemainingOrders.size == 1) {
                     cam.streamFileInfo(
                         handles = nonEmptyRemainingOrders.single().newestFirstHandles,
                         batchSize = FILE_THUMBNAIL_PIPELINE_BATCH_SIZE,
+                        fastFirstBatch = true,
+                        nextBatchSize = nextScanBatchSize,
                         onBatch = publishBatch,
                     )
                 } else {
@@ -3424,6 +3457,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                             it.newestFirstHandles
                         },
                         batchSize = FILE_THUMBNAIL_PIPELINE_BATCH_SIZE,
+                        fastFirstBatch = true,
+                        nextBatchSize = nextScanBatchSize,
                         onBatch = publishBatch,
                     )
                 }
@@ -3603,7 +3638,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * 解码入内存，扫到后面会把前面（以及视口附近）的全部挤出去——扫描白跑，还破坏
      * 可见区缓存。落盘不占堆内存，几千张也只有几十 MB；格子滚到时从磁盘毫秒级解码。
      */
-    suspend fun prefetchThumbnail(file: NikonCamera.FileInfo): Boolean {
+    suspend fun prefetchThumbnail(file: NikonCamera.FileInfo, onCacheHit: () -> Unit = {}): Boolean {
         val handle = file.handle
         if (handle in noThumbHandles) return true
         val expectedCamera = camera ?: return false
@@ -3620,10 +3655,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         if (expectedCamera.staDirectObjectReadValidated) {
             if (cached != null) staScanThumbnailDiskHits++ else staScanThumbnailDiskMisses++
         }
-        if (cached != null) return true
-        // Direct STA RAW/video thumbnails need bounded multi-MiB partial reads. Treat them as lazy-visible
-        // work instead of blocking the progressive 829-object catalog with background prefetch.
-        if (expectedCamera.staDirectObjectReadValidated && file.extension != ".jpg") return true
+        if (cached != null) {
+            onCacheHit()
+            return true
+        }
+        // 所有格式都随当前批次取图；STA 的 NEF/视频同样走有界读取，不跳过或假报完成。
         if (thumbnailDiskWritesBlocked) return false
         // 可见格子正在取同一张：共乘同一次请求（结果会自动落盘）。作为共同等待者，
         // 即使格子滚出屏幕取消了自己的等待，本次共乘也会把请求保活到完成——
@@ -3638,7 +3674,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             val result = fetchThumbnailToDisk(
                 expectedCamera,
                 expectedCacheGeneration,
-                handle,
+                file,
                 diskCache,
                 cacheFileName,
             )
@@ -3661,39 +3697,45 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         batch: List<NikonCamera.FileInfo>,
         expectedCamera: NikonCamera,
         expectedGeneration: Long,
-    ) = withContext(Dispatchers.Main.immediate) {
+    ): Boolean = withContext(Dispatchers.Main.immediate) {
+        var allCached = batch.isNotEmpty()
         for (file in batch) {
             if (camera !== expectedCamera || fileLoadGeneration != expectedGeneration ||
                 !state.value.isConnectedToCamera
             ) {
-                return@withContext
+                return@withContext false
             }
             // 用户前台任务优先；本批未完成项会在完整扫描后的补漏阶段重试。
             if (transfersBusyFlow.value || remoteActiveFlow.value || fhdActiveFlow.value ||
                 effectPreviewActiveFlow.value
             ) {
-                return@withContext
+                return@withContext false
             }
             try {
-                val cached = prefetchThumbnail(file)
+                var hit = false
+                val cached = prefetchThumbnail(file) { hit = true }
+                allCached = allCached && hit
                 if (cached) thumbnailFillQueue.markSettled(file.handle)
-                if (!cached && thumbnailDiskWritesBlocked) return@withContext
+                if (!cached && thumbnailDiskWritesBlocked) return@withContext false
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
+                allCached = false
                 // 单张瞬时失败不阻塞后续文件信息；完整扫描结束后还会统一补漏。
                 log { "THUMB_PIPELINE item failed handle=${file.handle}: $e" }
             }
         }
+        allCached
     }
 
     private suspend fun fetchThumbnailToDisk(
         expectedCamera: NikonCamera,
         expectedCacheGeneration: Long,
-        handle: Int,
+        file: NikonCamera.FileInfo,
         diskCache: ThumbnailDiskCache.CameraCache,
         cacheFileName: String,
     ): Boolean {
+        val handle = file.handle
         val bytes = remoteThumbGate.withPermit {
             if (camera !== expectedCamera) return@withPermit null
             if (FileOrderProbe.enabled) {
@@ -3706,6 +3748,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             thumbnailCacheSessionGeneration != expectedCacheGeneration
         ) return false
         if (bytes == null || bytes.isEmpty()) {
+            // 与可见格子的取图规则一致：STA RAW/视频的有界探测可能只是暂未取到，
+            // 不能写入“确认无图”缓存或标记完成；保留后续补漏/可见加载的重试机会。
+            if (expectedCamera.staDirectObjectReadValidated && file.extension != ".jpg") {
+                return false
+            }
             noThumbHandles.add(handle)
             return true
         }
@@ -3952,9 +3999,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         expectedCacheGeneration: Long,
     ): ImageBitmap? {
         val image = withContext(Dispatchers.Default) {
-            // 解码后立即精确裁掉烘焙在缩略图里的黑边（3:2/16:9 塞 4:3 的上下黑条），
-            // 裁好的位图进缓存——列表格子/队列小图/预览全都拿到无黑边的图，
-            // UI 层不再需要"放大遮边"的近似 hack。
+            // 解码后裁除黑边再缓存，列表、队列和预览共用同一份图片。
             postProcessThumbnail(file, BitmapFactory.decodeByteArray(data, 0, data.size))
         }
         return publishDecodedThumbnail(
@@ -3978,7 +4023,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         expectedCacheGeneration: Long,
     ): ImageBitmap? {
         val image = withContext(Dispatchers.Default) {
-            // 直接从缓存文件解码，避免 readBytes() 先额外分配一份完整 JPEG ByteArray。
+            // 直接从缓存文件解码，避免分配完整 JPEG ByteArray。
             postProcessThumbnail(file, BitmapFactory.decodeFile(disk.absolutePath))
         }
         return publishDecodedThumbnail(
@@ -4031,7 +4076,27 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     ): ImageBitmap? = decoded
         ?.let { cropLetterbox(it) }
         ?.let { if (file.extension in VIDEO_EXTENSIONS) cropVideoBars(it) else it }
+        // 在后台请求纹理准备，减少新缩略图进入视口时首次绘制的上传开销。
+        ?.also { it.prepareToDraw() }
         ?.asImageBitmap()
+
+    /** Crop reuses the visible FHD. Only a missing EXIF orientation may need a small metadata read. */
+    internal suspend fun prepareCrop(file: NikonCamera.FileInfo, image: ImageBitmap,
+        previewOrientation: Int? = null, rotation: Float = 0f): com.ztransfer.crop.CropPreview {
+        val cached = exifCache[exifKey(file)]?.orientation
+        val orientation = cached ?: run {
+            val cam = camera ?: throw com.ztransfer.crop.CropPreparationException(
+                com.ztransfer.crop.CropPreparationException.Reason.CONNECTION)
+            val bytes = cam.readExifHeader(file.handle, retryDeviceBusy = true)
+                ?: throw com.ztransfer.crop.CropPreparationException(com.ztransfer.crop.CropPreparationException.Reason.ORIENTATION)
+            com.ztransfer.crop.parseJpegCropOrientation(bytes)
+                ?: throw com.ztransfer.crop.CropPreparationException(com.ztransfer.crop.CropPreparationException.Reason.ORIENTATION)
+        }
+        return withContext(Dispatchers.Default) {
+            // The displayed bitmap is borrowed from the preview cache; never recycle it here.
+            com.ztransfer.crop.prepareCropPreview(image.asAndroidBitmap(), orientation, previewOrientation, rotation)
+        }
+    }
 
     /**
      * 长按预览专用：加载 FHD (1920×1080) 预览图。直接从相机拉 FHD JPEG 并解码。
@@ -4045,12 +4110,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * 的像素方向，继续由既有手动旋转功能负责。
      * 调用方应先通过 [setFhdActive] 暂停后台缩略图填充，再调用本方法。
      */
-    suspend fun loadFhdPreview(file: NikonCamera.FileInfo): ImageBitmap? {
+    suspend fun loadFhdPreview(
+        file: NikonCamera.FileInfo,
+        onPreviewJpeg: ((ByteArray) -> Unit)? = null,
+    ): ImageBitmap? {
         return loadFhdBitmap(
             file,
             Bitmap.Config.RGB_565,
             honorExifOrientation = false,
             retryDeviceBusy = true,
+            onPreviewJpeg = onPreviewJpeg,
         )?.asImageBitmap()
     }
 
@@ -4066,6 +4135,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         honorExifOrientation: Boolean,
         retryDeviceBusy: Boolean,
         maxLongEdge: Int = MAX_FHD_PREVIEW_EDGE,
+        onPreviewJpeg: ((ByteArray) -> Unit)? = null,
     ): Bitmap? {
         val cam = camera ?: return null
         val startedAt = android.os.SystemClock.elapsedRealtime()
@@ -4089,6 +4159,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
         return withContext(Dispatchers.Default) {
             try {
+                // Analyse the same response before display decoding; never retain JPEG bytes.
+                onPreviewJpeg?.invoke(bytes)
                 // FHD 预览图是相机直出的 1920×1080 JPEG，非缩略图，不做黑边裁切。
                 // 交互式长按使用 RGB_565 控制内存；设置演示图使用 ARGB_8888，确保连续
                 // 调色计算不会先被 565 量化。两者共用同一条可靠的取图/解码路径。
@@ -4172,30 +4244,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
         return parseExif(bytes)?.also { exifCache[key] = it }
             ?: run { exifCache[key] = null; null }
-    }
-
-    /** Reads EXIF from an already-transferred local original without touching the camera session. */
-    suspend fun loadLocalExif(file: NikonCamera.FileInfo, sourceUri: Uri): PhotoExif? {
-        val key = exifKey(file)
-        if (key in exifCache) return exifCache[key]
-        if (file.extension !in EXIF_SUPPORTED_EXTENSIONS) {
-            exifCache[key] = null
-            return null
-        }
-        val parsed = withContext(Dispatchers.IO) {
-            val resolver = getApplication<Application>().contentResolver
-            runCatching {
-                resolver.openFileDescriptor(sourceUri, "r")?.use { descriptor ->
-                    parseExifImpl(ExifInterface(descriptor.fileDescriptor))
-                }
-            }.getOrNull() ?: runCatching {
-                resolver.openInputStream(sourceUri)?.use { input ->
-                    parseExifImpl(ExifInterface(java.io.BufferedInputStream(input)))
-                }
-            }.getOrNull()
-        }
-        exifCache[key] = parsed
-        return parsed
     }
 
     /**
@@ -4320,6 +4368,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             latitude = latitude.takeIf { validCoordinates },
             longitude = longitude.takeIf { validCoordinates },
             altitudeMeters = altitude,
+            orientation = exif.getAttribute(ExifInterface.TAG_ORIENTATION)?.toIntOrNull()?.takeIf { it in 1..8 },
         )
     }
 
@@ -4352,7 +4401,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         useStaKeys: Boolean = activeThumbnailDiskCacheUsesStaKeys,
     ): String =
         if (useStaKeys) {
-            staThumbnailCacheFileName(file.handle, file.size)
+            if (file.extension == ".jpg") staJpegThumbnailCacheFileName(file.handle, file.size)
+            else staThumbnailCacheFileName(file.handle, file.size)
         } else {
             thumbnailCacheFileName(file.fileName, file.size, file.captureDate)
         }
@@ -4361,14 +4411,15 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         file: NikonCamera.FileInfo,
         useStaKeys: Boolean = activeThumbnailDiskCacheUsesStaKeys,
     ): String? =
-        if (useStaKeys) {
+        if (useStaKeys && file.extension != ".jpg") {
             thumbnailCacheFileName(file.fileName, file.size, file.captureDate)
         } else {
             null
         }
 
-    private fun legacyThumbnailDiskCacheFileName(file: NikonCamera.FileInfo): String =
-        legacyThumbnailCacheFileName(file.fileName, file.size, file.captureDate)
+    private fun legacyThumbnailDiskCacheFileName(file: NikonCamera.FileInfo): String? =
+        if (activeThumbnailDiskCacheUsesStaKeys && file.extension == ".jpg") null
+        else legacyThumbnailCacheFileName(file.fileName, file.size, file.captureDate)
 
     private suspend fun reconcileThumbnailCache(
         diskCache: ThumbnailDiskCache.CameraCache,
@@ -4392,6 +4443,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     override fun onCleared() {
+        com.ztransfer.frame.PhotoFrameLocationResolver.apBlocked.value = true
         super.onCleared()
         CameraSessionService.stop(getApplication())
         releaseSessionWifiLock()
@@ -4439,6 +4491,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val STA_RECONNECT_DELAYS_MS = longArrayOf(3_000L, 8_000L, 15_000L, 30_000L)
         private const val CONNECTION_PREFERENCES = "sta_connection"
         private const val WIRELESS_MODE_PREFERENCE = "wireless_mode"
+        private const val CONNECTION_MODE_PREFERENCE = "last_connection_mode"
         internal const val FILE_THUMBNAIL_PIPELINE_BATCH_SIZE = 12
         const val EFFECT_PREVIEW_SOURCE_EDGE = 1_920
         const val MAX_FHD_PREVIEW_EDGE = 1_920

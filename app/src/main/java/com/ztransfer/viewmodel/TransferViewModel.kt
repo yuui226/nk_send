@@ -1,5 +1,14 @@
 package com.ztransfer.viewmodel
 
+
+import com.ztransfer.effects.effectivePhotoEffectModules
+import com.ztransfer.effects.PhotoEffectModule
+import com.ztransfer.effects.ALL_PHOTO_EFFECT_MODULES
+import com.ztransfer.effects.normalizePhotoEffectModules
+import com.ztransfer.effects.showsPhotoEffect
+
+import com.ztransfer.util.HistogramMode
+
 import android.app.Application
 import android.content.Context
 import android.net.Uri
@@ -22,8 +31,11 @@ import com.ztransfer.effects.decodePhotoFilterIntensities
 import com.ztransfer.effects.encodeFavoriteFrameEffects
 import com.ztransfer.effects.encodeFavoritePhotoFilters
 import com.ztransfer.effects.encodePhotoFilterIntensities
+import com.ztransfer.frame.requiresCameraMetadata
+import com.ztransfer.frame.boundedForQueue
 import com.ztransfer.frame.PhotoFrameDestination
 import com.ztransfer.frame.PhotoFrameExporter
+import com.ztransfer.frame.PhotoFrameLocationResolver
 import com.ztransfer.frame.PhotoFrameMetadata
 import com.ztransfer.frame.PhotoFrameMetadataSettings
 import com.ztransfer.frame.PhotoFramePreset
@@ -55,11 +67,11 @@ import com.ztransfer.frame.normalizePhotoFrameMetadataSettings
 import com.ztransfer.frame.resolvedPhotoFrameMetadataSettings
 import com.ztransfer.filter.PhotoFilterPreset
 import com.ztransfer.filter.BuiltInPhotoFilters
-import com.ztransfer.filter.PhotoFilterRenderer
 import com.ztransfer.filter.PhotoFilterSelection
 import com.ztransfer.filter.DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT
 import com.ztransfer.filter.normalizePhotoFilterIntensity
 import com.ztransfer.license.LicenseManager
+import com.ztransfer.protocol.supportsVideoResume
 import com.ztransfer.protocol.CameraConnectionType
 import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.protocol.PtpConstants
@@ -82,6 +94,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
@@ -97,18 +111,25 @@ enum class TransferStatus {
 }
 
 private val transferTaskIds = AtomicLong(0L)
+private val cropSessionName = "crop-${java.util.UUID.randomUUID()}"
 private const val PHOTO_FRAME_WATERMARK_SIZE_SCALE_VERSION = 2
 private const val PHOTO_FRAME_WATERMARK_SIZE_SCALE_VERSION_KEY =
     "photo_frame_watermark_size_scale_version"
 private const val PHOTO_FRAME_METADATA_SETTINGS_KEY = "photo_frame_metadata_settings_v1"
-internal const val PHOTO_FRAME_EXPORT_PARALLELISM = 2
+internal const val PHOTO_FRAME_EXPORT_PARALLELISM = 1
 private val COPY_SUFFIX_REGEX = Regex(""" \(\d+\)(?=\.[^.]*$|$)""")
 private val IDENTITY_TOKEN_UNSAFE_CHARS = Regex("[^A-Za-z0-9.]")
 
 internal fun exportedOriginalBaseName(name: String): String = name.replace(COPY_SUFFIX_REGEX, "")
 
-private fun directoryLookupKey(name: String): String =
-    exportedOriginalBaseName(name).lowercase(Locale.ROOT)
+private val CAMERA_FILE_NUMBER_SUFFIX = Regex("""([0-9]+)\.([a-z0-9]+)$""")
+
+/** AP 的真实前缀与 STA 的推导前缀可能不同；目录与大小仍由调用方独立校验。 */
+private fun directoryLookupKey(name: String): String {
+    val baseName = exportedOriginalBaseName(name).lowercase(Locale.ROOT)
+    val suffix = CAMERA_FILE_NUMBER_SUFFIX.find(baseName)
+    return if (suffix != null) "number:${suffix.value}" else "name:$baseName"
+}
 
 internal data class IndexedExistingFile<T>(
     val displayName: String,
@@ -121,9 +142,12 @@ internal class ExistingFileNameIndex<T> {
     private val lock = Any()
     private val byDisplayName = HashMap<String, IndexedExistingFile<T>>()
     private val byBaseName = HashMap<String, MutableList<IndexedExistingFile<T>>>()
+    private val occupiedNames = HashSet<String>()
+    private val reservations = HashSet<String>()
 
     fun add(displayName: String, size: Long, value: T) = synchronized(lock) {
         val entry = IndexedExistingFile(displayName, size, value)
+        occupiedNames.add(displayName.lowercase(Locale.ROOT))
         byDisplayName.put(displayName, entry)?.let { previous ->
             byBaseName[directoryLookupKey(previous.displayName)]?.removeAll {
                 it.displayName == previous.displayName
@@ -133,7 +157,22 @@ internal class ExistingFileNameIndex<T> {
     }
 
     fun containsDisplayName(displayName: String): Boolean = synchronized(lock) {
-        byDisplayName.containsKey(displayName)
+        val key = displayName.lowercase(Locale.ROOT)
+        key in occupiedNames || key in reservations
+    }
+
+    fun reserveDisplayName(preferred: String, suffix: (String, Int) -> String): String = synchronized(lock) {
+        var candidate = preferred
+        var number = 1
+        while (candidate.lowercase(Locale.ROOT) in occupiedNames || candidate.lowercase(Locale.ROOT) in reservations) {
+            candidate = suffix(preferred, number++)
+        }
+        reservations.add(candidate.lowercase(Locale.ROOT))
+        candidate
+    }
+
+    fun releaseDisplayName(name: String) = synchronized(lock) {
+        reservations.remove(name.lowercase(Locale.ROOT))
     }
 
     fun find(fileName: String, fileSize: Long): IndexedExistingFile<T>? = synchronized(lock) {
@@ -148,6 +187,13 @@ internal class ExistingFileNameIndex<T> {
         byDisplayName.values.toList()
     }
 }
+
+/** A published lossless crop survives effect-generation failures and explicit retries. */
+data class SavedCropOutput(val uri: Uri, val parent: Uri, val name: String)
+
+/** Published source retained by the task; generation retries do not depend on camera presence. */
+data class SavedOriginalOutput(val uri: String, val tree: String, val parent: String, val name: String)
+
 
 data class TransferTask(
     val file: NikonCamera.FileInfo,
@@ -177,23 +223,62 @@ data class TransferTask(
     val elapsedMs: Long? = null,
     // 原片已成功落盘后的派生步骤；失败不改变 COMPLETED，原片始终保留。
     val isGeneratingFrame: Boolean = false,
-    /** 用户看到“生成中”的单调时钟起点；仅在生成期间保留。 */
+    /** 实际取得处理名额后的单调时钟起点；排队时为空。 */
     val frameGenerationStartedAtElapsedMs: Long? = null,
-    /** 单次派生从显示“生成中”到结束的用户可感知耗时。 */
+    /** 实际生成至保存结束的耗时，不包含排队等待。 */
     val frameGenerationElapsedMs: Long? = null,
+    val frameGenerationAccumulatedMs: Long = 0L,
+    /** 本次任务因照片效果总开关关闭而跳过生成；与原片查重跳过相互独立。 */
+    val frameGenerationSkipped: Boolean = false,
+    val cropRecipe: com.ztransfer.crop.JpegCropSelection? = null,
+    val cropEffectsSkipped: Boolean = false,
+    val savedCropOutput: SavedCropOutput? = null,
+    val savedOriginalOutput: SavedOriginalOutput? = null,
+    val frameGenerationError: String? = null,
+    val sourceMetadataSnapshot: PhotoFrameMetadata? = null,
+    val sourceMetadataPrepared: Boolean = false,
+    val metadataCameraIdentity: String? = null,
+    val metadataCameraSession: String? = null,
+)
+
+/** Pending work retains its busy state but has no running stopwatch. */
+internal fun TransferTask.queueFrameGeneration(): TransferTask = copy(
+    frameGenerationError = null,
+    frameGenerationSkipped = false,
+    isGeneratingFrame = true,
+    frameGenerationStartedAtElapsedMs = null,
+    frameGenerationElapsedMs = null,
+    frameGenerationAccumulatedMs = 0L,
 )
 
 internal fun TransferTask.startFrameGeneration(nowElapsedMs: Long): TransferTask = copy(
+    frameGenerationError = null,
+    frameGenerationSkipped = false,
     isGeneratingFrame = true,
     frameGenerationStartedAtElapsedMs = nowElapsedMs,
     frameGenerationElapsedMs = null,
 )
 
+/** Preserve the queued recipe so future tasks and explicit retries still use their snapshot. */
+internal fun TransferTask.skipFrameGeneration(): TransferTask = copy(
+    frameGenerationError = null,
+    frameGenerationSkipped = framePreset != null || photoFilterRequested != null,
+    isGeneratingFrame = false,
+    frameGenerationStartedAtElapsedMs = null,
+    frameGenerationElapsedMs = null,
+)
+
+internal fun TransferTask.pauseFrameGeneration(nowElapsedMs: Long): TransferTask = copy(
+    frameGenerationAccumulatedMs = frameGenerationAccumulatedMs +
+        (frameGenerationStartedAtElapsedMs?.let { (nowElapsedMs - it).coerceAtLeast(0L) } ?: 0L),
+    frameGenerationStartedAtElapsedMs = null,
+)
+
 internal fun TransferTask.finishFrameGeneration(nowElapsedMs: Long): TransferTask {
     if (!isGeneratingFrame) return this
     val elapsed = frameGenerationStartedAtElapsedMs?.let { startedAt ->
-        (nowElapsedMs - startedAt).coerceAtLeast(0L)
-    }
+        frameGenerationAccumulatedMs + (nowElapsedMs - startedAt).coerceAtLeast(0L)
+    } ?: frameGenerationAccumulatedMs.takeIf { it > 0L }
     return copy(
         isGeneratingFrame = false,
         frameGenerationStartedAtElapsedMs = null,
@@ -260,23 +345,6 @@ class ExportedOriginalIndex internal constructor() {
             ?: return false
         return file.size == PtpConstants.SIZE_UNKNOWN ||
             filesBySize.keys.any { it < 0L || it == file.size }
-    }
-
-    internal fun localUriString(
-        file: NikonCamera.FileInfo,
-        destinationFolderName: String? = null,
-    ): String? {
-        val filesBySize = filesByDestination[exportDestinationKey(destinationFolderName)]
-            ?.get(directoryLookupKey(file.fileName))
-            ?: return null
-        return if (file.size == PtpConstants.SIZE_UNKNOWN) {
-            filesBySize.values.firstOrNull { it.isNotEmpty() }
-        } else {
-            filesBySize[file.size]?.takeIf { it.isNotEmpty() }
-                ?: filesBySize.entries.firstOrNull {
-                    it.key < 0L && it.value.isNotEmpty()
-                }?.value
-        }
     }
 
     private fun exportDestinationKey(destinationFolderName: String?): String =
@@ -347,20 +415,37 @@ internal class PendingTransferQueue {
     }
 }
 
-private fun TransferTask.newAttempt(): TransferTask = copy(
-    taskId = transferTaskIds.incrementAndGet(),
-    status = TransferStatus.WAITING,
-    progress = 0f,
-    speed = 0L,
-    downloaded = 0L,
-    error = null,
-    skipped = false,
-    downloadMBps = 0f,
-    elapsedMs = null,
-    isGeneratingFrame = false,
-    frameGenerationStartedAtElapsedMs = null,
-    frameGenerationElapsedMs = null,
-)
+internal val TransferTask.canRetry: Boolean
+    get() = !isGeneratingFrame && (status == TransferStatus.FAILED ||
+        status == TransferStatus.CANCELLED || frameGenerationError != null)
+
+internal fun TransferTask.newAttempt(): TransferTask {
+    if (frameGenerationError != null && savedOriginalOutput != null) return copy(
+        taskId = transferTaskIds.incrementAndGet(),
+        status = TransferStatus.COMPLETED,
+        error = null,
+        cropEffectsSkipped = false,
+        skipped = false,
+    ).queueFrameGeneration()
+    return copy(
+        taskId = transferTaskIds.incrementAndGet(),
+        status = TransferStatus.WAITING,
+        progress = 0f,
+        speed = 0L,
+        downloaded = 0L,
+        error = null,
+        skipped = false,
+        cropEffectsSkipped = false,
+        frameGenerationSkipped = false,
+        downloadMBps = 0f,
+        elapsedMs = null,
+        isGeneratingFrame = false,
+        frameGenerationStartedAtElapsedMs = null,
+        frameGenerationElapsedMs = null,
+        frameGenerationError = null,
+        frameGenerationAccumulatedMs = 0L,
+    )
+}
 
 internal fun retryableTransferTaskIds(
     tasks: List<TransferTask>,
@@ -368,7 +453,7 @@ internal fun retryableTransferTaskIds(
 ): Set<Long> = tasks.asSequence()
     .filter { task ->
         task.taskId !in excludedTaskIds &&
-            (task.status == TransferStatus.FAILED || task.status == TransferStatus.CANCELLED)
+            task.canRetry
     }
     .mapTo(HashSet()) { it.taskId }
 
@@ -405,7 +490,7 @@ data class TransferState(
     val staConnectionHelpViewed: Boolean = false,
     val localPhotoEffectsHelpViewed: Boolean = false,
     // 连接期间确认新增的照片和视频自动入队；默认关闭以保持旧版行为。
-    val autoTransferNewMedia: Boolean = false,
+    val autoTransferMode: AutoTransferMode = AutoTransferMode.OFF,
     // 待传模式：空闲时入队只保留 WAITING，由传输页的开始按钮显式放行；默认关闭。
     val deferTransferStart: Boolean = false,
     // 原图按拍摄日写入 ZTyyyy-MM-dd 子目录，派生效果图位于该目录的 ZTFrames 中；默认开启。
@@ -430,8 +515,10 @@ data class TransferState(
     // 预览大图的全局逆时针旋转方向（0..3 个 90°）。跨照片、跨会话持久化。
     val previewRotationQuarterTurns: Int = 0,
     // 照片预览直方图的可见状态。跨照片、跨预览会话与 App 重启持久化。
-    val previewHistogramEnabled: Boolean = false,
+    val previewHistogramMode: HistogramMode = HistogramMode.OFF,
     // 开启后：受支持的原图落盘成功，再派生一张保留原片细节的边框/水印效果图。
+    val transferPhotoEffectModules: Int = ALL_PHOTO_EFFECT_MODULES,
+    val photoEffectsEnabled: Boolean = true,
     val photoFrameEnabled: Boolean = false,
     // 总开关开启时，边框与水印可以独立组合；false 允许只在原照片上叠水印。
     val photoFrameBorderEnabled: Boolean = true,
@@ -453,6 +540,7 @@ data class TransferState(
     val favoritePhotoFilters: List<FavoritePhotoFilter> = emptyList(),
     val favoriteFrameEffects: List<FavoriteFrameWatermarkEffect> = emptyList(),
     val photoFilterEnabled: Boolean = false,
+    val photoLut: PhotoFilterSelection? = null,
     val selectedPhotoFilterId: String? = null,
     val photoFilterIntensityPercent: Int = DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT,
     val transferPhotoFilterIntensities: Map<String, Int> = emptyMap(),
@@ -570,6 +658,7 @@ internal fun freeEditionPhotoFrameWatermark(): PhotoFrameWatermark = PhotoFrameW
 
 internal val TransferState.photoFilterSelection: PhotoFilterSelection?
     get() {
+        photoLut?.let { return it }
         if (!photoFilterEnabled) return null
         val preset = photoFilters.firstOrNull { it.id == selectedPhotoFilterId } ?: return null
         return PhotoFilterSelection(preset, photoFilterIntensityPercent)
@@ -658,19 +747,6 @@ internal fun isTransferredOriginal(
     ),
 )
 
-/** Returns the already-indexed local original for preview, using the exact same destination rule. */
-internal fun transferredOriginalUri(
-    file: NikonCamera.FileInfo,
-    existingExportIndex: ExportedOriginalIndex,
-    organizeTransfersByDate: Boolean,
-): Uri? = existingExportIndex.localUriString(
-    file = file,
-    destinationFolderName = transferDestinationFolderName(
-        captureDate = file.captureDate,
-        organizeTransfersByDate = organizeTransfersByDate,
-    ),
-)?.let(Uri::parse)
-
 /** 已入队任务使用入队时锁定的目标目录，不受之后的“按天保存”开关变化影响。 */
 internal fun isTransferredOriginal(
     file: NikonCamera.FileInfo,
@@ -713,10 +789,10 @@ internal fun createQueueTasks(
     }
     .toList()
 
-internal const val REMOTE_ENTRY_INTRO_MAX_PLAYS = 6
+internal const val REMOTE_ENTRY_INTRO_MAX_PLAYS = 20
 
-internal fun isRemoteEntryIntroEligible(playCount: Int): Boolean =
-    playCount.coerceAtLeast(0) < REMOTE_ENTRY_INTRO_MAX_PLAYS
+internal fun isRemoteEntryIntroEligible(playCount: Int, entryUsed: Boolean = false): Boolean =
+    !entryUsed && playCount.coerceAtLeast(0) < REMOTE_ENTRY_INTRO_MAX_PLAYS
 
 class TransferViewModel(application: Application) : AndroidViewModel(application) {
     private val _state = MutableStateFlow(TransferState())
@@ -733,15 +809,13 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     private val datedTransferDirectories = ConcurrentHashMap<String, Uri>()
 
     private var transferJob: Job? = null
-    private var photoFilterPrewarmJob: Job? = null
-    private var photoFilterPrewarmSelection: PhotoFilterSelection? = null
     @Volatile
     private var preferHighThroughputTransfers: Boolean = false
     private val prefs = application.getSharedPreferences("ztransfer", Context.MODE_PRIVATE)
     private val contentResolver = application.contentResolver
     /**
-     * 原图品质效果导出使用两个低优先级工作线程：既能并行生成，又把完整位图的并发
-     * 内存峰值限制在两张，不随 CPU 核数盲目扩大。相机传输仍使用原来的高优先级通道。
+     * 原图品质效果导出使用一个低优先级工作线程，避免多张完整输出画布同时驻留。
+     * 生成与相机下载仍独立并行；排队照片不各自创建等待协程。
      */
     private val photoFrameWorkerIds = AtomicInteger(0)
     private val photoFrameDispatcher = Executors.newFixedThreadPool(
@@ -755,7 +829,49 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             "photo-frame-export-${photoFrameWorkerIds.incrementAndGet()}",
         )
     }.asCoroutineDispatcher()
+    private val photoGenerationQueue = PhotoGenerationQueue(viewModelScope, photoFrameDispatcher)
+    private data class CameraMetadataKey(
+        val sourceUri: String,
+        val cameraIdentity: String?,
+        val handle: Int,
+        val size: Long,
+        val name: String,
+        val captureDate: String?,
+    )
+    private val photoMetadataDispatcher = Executors.newSingleThreadExecutor { task ->
+        Thread({
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
+            task.run()
+        }, "photo-metadata").apply { isDaemon = true }
+    }.asCoroutineDispatcher()
+    private val photoMetadataPreparation = PhotoMetadataPreparation<CameraMetadataKey, PhotoFrameMetadata>(
+        viewModelScope,
+        photoMetadataDispatcher,
+        java.io.File(application.cacheDir, "photo-metadata-headers"),
+        ::parseCameraFrameMetadata,
+        merge = { previous, next ->
+            if (previous == null) next else if (next == null) previous else next.copy(
+                make = next.make?.takeIf(String::isNotBlank) ?: previous.make,
+                model = next.model?.takeIf(String::isNotBlank) ?: previous.model,
+                aperture = next.aperture?.takeIf(String::isNotBlank) ?: previous.aperture,
+                shutter = next.shutter?.takeIf(String::isNotBlank) ?: previous.shutter,
+                iso = next.iso?.takeIf(String::isNotBlank) ?: previous.iso,
+                focalLength = next.focalLength?.takeIf(String::isNotBlank) ?: previous.focalLength,
+                lensModel = next.lensModel?.takeIf(String::isNotBlank) ?: previous.lensModel,
+                dateTime = next.dateTime?.takeIf(String::isNotBlank) ?: previous.dateTime,
+                latitude = next.latitude ?: previous.latitude,
+                longitude = next.longitude ?: previous.longitude,
+                altitudeMeters = next.altitudeMeters ?: previous.altitudeMeters,
+                address = next.address?.takeIf(String::isNotBlank) ?: previous.address,
+                city = next.city?.takeIf(String::isNotBlank) ?: previous.city,
+                region = next.region?.takeIf(String::isNotBlank) ?: previous.region,
+            )
+        },
+    )
+    private val photoPlacePreparation = PhotoGenerationQueue(viewModelScope, photoMetadataDispatcher)
     private val activePhotoFrameExports = AtomicInteger(0)
+    private val activeGenerationAdmissions = AtomicInteger(0)
+    private val activePhotoMetadataPreparations = AtomicInteger(0)
     // 第一张派生图才创建/扫描专用子目录；同一根目录后续任务复用，避免逐张遍历文件夹。
     private val photoFrameDestinations =
         ConcurrentHashMap<String, PhotoFrameDestination>()
@@ -811,7 +927,10 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         const val PART_PREFIX = ".nkpart_"
         // 分块大小引用协议层常量，保证断点续传偏移与分块下载粒度的严格一致。
         val RESUME_CHUNK_SIZE: Long get() = NikonCamera.CHUNK_SIZE
-        const val KEY_REMOTE_ENTRY_INTRO_PLAY_COUNT = "remote_entry_intro_play_count"
+        // V2 intentionally starts a fresh, bounded introduction for existing installations.
+        // Keep these keys stable in later releases so upgrades do not reset it again.
+        const val KEY_REMOTE_ENTRY_INTRO_PLAY_COUNT = "remote_entry_intro_v2_play_count"
+        const val KEY_REMOTE_ENTRY_INTRO_USED = "remote_entry_intro_v2_used"
         const val KEY_MAIN_SETTINGS_HELP_VIEWED = "main_settings_help_viewed"
         const val KEY_PHOTO_EFFECTS_HELP_VIEWED = "photo_effects_help_viewed"
         const val KEY_AP_CONNECTION_HELP_VIEWED = "ap_connection_help_viewed"
@@ -838,6 +957,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         fun addFile(displayName: String, size: Long, uri: Uri) = files.add(displayName, size, uri)
 
         fun containsDisplayName(displayName: String): Boolean = files.containsDisplayName(displayName)
+        fun reserveDisplayName(name: String, suffix: (String, Int) -> String): String = files.reserveDisplayName(name, suffix)
+        fun releaseDisplayName(name: String) = files.releaseDisplayName(name)
 
         fun findOriginal(file: NikonCamera.FileInfo): LocalOriginal? = files
             .find(file.fileName, file.size)
@@ -879,15 +1000,20 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         preferHighThroughputTransfers = enabled
     }
 
-    /** 监看入口自解释动画最多跨启动展示六次，之后不再打扰已经熟悉入口的用户。 */
+    /** 监看入口自解释动画最多跨启动展示二十次，之后不再打扰已经熟悉入口的用户。 */
     internal fun shouldShowRemoteEntryIntro(): Boolean = isRemoteEntryIntroEligible(
         prefs.getInt(KEY_REMOTE_ENTRY_INTRO_PLAY_COUNT, 0),
+        prefs.getBoolean(KEY_REMOTE_ENTRY_INTRO_USED, false),
     )
 
-    /** 仅在动画真正开始时调用；apply 先同步更新内存值，再异步落盘，不阻塞主线程。 */
+    internal fun markRemoteEntryUsed() {
+        prefs.edit().putBoolean(KEY_REMOTE_ENTRY_INTRO_USED, true).apply()
+    }
+
+    /** Count once when the reminder starts; no screen-visibility bookkeeping. */
     internal fun recordRemoteEntryIntroPlayed() {
         val playCount = prefs.getInt(KEY_REMOTE_ENTRY_INTRO_PLAY_COUNT, 0).coerceAtLeast(0)
-        if (!isRemoteEntryIntroEligible(playCount)) return
+        if (!shouldShowRemoteEntryIntro()) return
         prefs.edit()
             .putInt(KEY_REMOTE_ENTRY_INTRO_PLAY_COUNT, playCount + 1)
             .apply()
@@ -908,6 +1034,11 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         PART_PREFIX + identityToken(file) + "_" + file.fileName
 
     init {
+        viewModelScope.launch(Dispatchers.IO) {
+            getApplication<Application>().cacheDir.listFiles()?.filter {
+                it.isDirectory && it.name.startsWith("crop-") && it.name != cropSessionName && it.name.length == 41
+            }?.forEach { it.deleteRecursively() }
+        }
         val dir = prefs.getString("transfer_dir", null)
         val restoredPhotoFilters = BuiltInPhotoFilters.all
         val validPhotoFilterCatalogKeys = restoredPhotoFilters
@@ -1063,7 +1194,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     KEY_LOCAL_PHOTO_EFFECTS_HELP_VIEWED,
                     false,
                 ),
-                autoTransferNewMedia = prefs.getBoolean("auto_transfer_new_media", false),
+                autoTransferMode = AutoTransferMode.restored(prefs.getString("auto_transfer_mode", null), prefs.getBoolean("auto_transfer_new_media", false)),
                 deferTransferStart = prefs.getBoolean("defer_transfer_start", false),
                 organizeTransfersByDate = prefs.getBoolean("organize_transfers_by_date", false),
                 themeMode = prefs.getString("theme_mode", null)
@@ -1071,7 +1202,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     ?: ThemeMode.SYSTEM,
                 skinPreset = restoredSkinPreset,
                 // getStringSet 返回的实例不可直接持有（SharedPreferences 约定），拷贝一份。
-                filterExtensions = prefs.getStringSet("filter_exts", null)?.toSet(),
+                filterExtensions = prefs.getStringSet("filter_exts", null)?.toSet()?.takeIf { it.isNotEmpty() },
                 filterProtectedOnly = prefs.getBoolean("filter_protected", false),
                 filterBurstOnly = prefs.getBoolean("filter_burst", false),
                 filterUntransferredOnly = prefs.getBoolean("filter_untransferred", false),
@@ -1082,10 +1213,12 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 previewRotationQuarterTurns = Math.floorMod(
                     prefs.getInt("preview_rotation_quarter_turns", 0), 4
                 ),
-                previewHistogramEnabled = prefs.getBoolean(
-                    "preview_histogram_enabled",
-                    false,
+                previewHistogramMode = HistogramMode.restore(
+                    prefs.getString("preview_histogram_mode", null),
+                    prefs.getBoolean("preview_histogram_enabled", false),
                 ),
+                transferPhotoEffectModules = normalizePhotoEffectModules(prefs.getInt("photo_effect_modules", ALL_PHOTO_EFFECT_MODULES)),
+                photoEffectsEnabled = prefs.getBoolean("photo_effects_enabled", true),
                 photoFrameEnabled = prefs.getBoolean("photo_frame_enabled", false),
                 photoFrameBorderEnabled = prefs.getBoolean("photo_frame_border_enabled", true),
                 photoFramePreset = runCatching {
@@ -1137,6 +1270,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         ) ?: PhotoFrameWatermarkEffect.AUTO.name,
                     )
                 }.getOrDefault(PhotoFrameWatermarkEffect.AUTO),
+                photoLut = com.ztransfer.lut.PhotoLutStore(getApplication()).restore("transfer"),
                 photoFilters = restoredPhotoFilters,
                 favoritePhotoFilters = decodedFavoritePhotoFilters,
                 favoriteFrameEffects = restoredFavoriteFrameEffects,
@@ -1151,6 +1285,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 appLanguage = prefs.getString(AppLocale.PREF_KEY, AppLocale.SYSTEM) ?: AppLocale.SYSTEM
             )
         }
+        viewModelScope.launch(Dispatchers.IO) { com.ztransfer.lut.PhotoLutStore(getApplication()).prune() }
         // 开 App 时清扫上次崩溃/被杀留下的半成品（.nkpart_ 临时文件）。
         if (dir != null) {
             val uri = Uri.parse(dir)
@@ -1236,9 +1371,10 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         _state.update { it.copy(localPhotoEffectsHelpViewed = true) }
     }
 
-    fun setAutoTransferNewMedia(enabled: Boolean) {
-        prefs.edit().putBoolean("auto_transfer_new_media", enabled).apply()
-        _state.update { it.copy(autoTransferNewMedia = enabled) }
+    fun setAutoTransferMode(mode: AutoTransferMode) {
+        prefs.edit().putString("auto_transfer_mode", mode.name)
+            .putBoolean("auto_transfer_new_media", mode != AutoTransferMode.OFF).apply()
+        _state.update { it.copy(autoTransferMode = mode) }
     }
 
     fun setDeferTransferStart(enabled: Boolean) {
@@ -1258,10 +1394,41 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         _state.update { it.copy(previewRotationQuarterTurns = normalized) }
     }
 
-    /** 保存照片预览直方图开关；退出预览或重启 App 后继续沿用。 */
-    fun setPreviewHistogramEnabled(enabled: Boolean) {
-        prefs.edit().putBoolean("preview_histogram_enabled", enabled).apply()
-        _state.update { it.copy(previewHistogramEnabled = enabled) }
+    /** 保存照片预览直方图档位；退出预览或重启 App 后继续沿用。 */
+    fun setPreviewHistogramMode(mode: HistogramMode) {
+        prefs.edit().putString("preview_histogram_mode", mode.name).apply()
+        _state.update { it.copy(previewHistogramMode = mode) }
+    }
+
+    /** Camera-photo editor visibility; hiding clears enabled flags but preserves tuning values. */
+    fun setTransferPhotoEffectModules(mask: Int) {
+        val next = effectivePhotoEffectModules(mask, LicenseManager.isPro.value)
+        if (next == _state.value.transferPhotoEffectModules) return
+        prefs.edit().putInt("photo_effect_modules", next).apply()
+        _state.update { it.copy(transferPhotoEffectModules = next) }
+        val snapshot = _state.value
+        setPhotoFilterConfiguration(
+            snapshot.selectedPhotoFilterId, snapshot.photoFilterIntensityPercent,
+            snapshot.photoFilterEnabled && next.showsPhotoEffect(PhotoEffectModule.FILTER),
+            snapshot.photoLut.takeIf { next.showsPhotoEffect(PhotoEffectModule.LUT) },
+            com.ztransfer.lut.PhotoLutStore(getApplication()).uri("transfer"),
+        )
+        val border = snapshot.photoFrameBorderEnabled && next.showsPhotoEffect(PhotoEffectModule.FRAME)
+        val watermark = snapshot.photoFrameWatermarkEnabled && next.showsPhotoEffect(PhotoEffectModule.WATERMARK)
+        val decoration = snapshot.photoFrameEnabled && (border || (LicenseManager.isPro.value && watermark))
+        prefs.edit().putBoolean("photo_frame_enabled", decoration)
+            .putBoolean("photo_frame_border_enabled", border)
+            .putBoolean("photo_frame_branding_enabled", watermark).apply()
+        _state.update { it.copy(photoFrameEnabled = decoration, photoFrameBorderEnabled = border,
+            photoFrameWatermarkEnabled = watermark) }
+
+    }
+
+    /** A runtime gate, not a destructive edit of the user's saved effect recipe. */
+    fun setPhotoEffectsEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean("photo_effects_enabled", enabled).apply()
+        _state.update { it.copy(photoEffectsEnabled = enabled) }
+        photoGenerationQueue.reconsider()
     }
 
     fun setPhotoFrameEnabled(enabled: Boolean) {
@@ -1365,7 +1532,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     fun setPhotoFilterEnabled(enabled: Boolean) {
         val canEnable = enabled && _state.value.selectedPhotoFilterId != null
         prefs.edit().putBoolean("photo_filter_enabled", canEnable).apply()
-        _state.update { it.copy(photoFilterEnabled = canEnable) }
+        if (canEnable) com.ztransfer.lut.PhotoLutStore(getApplication()).save("transfer", null, null)
+        _state.update { it.copy(photoFilterEnabled = canEnable, photoLut = if (canEnable) null else it.photoLut) }
     }
 
     fun toggleFavoritePhotoFilter(filterId: String) {
@@ -1403,7 +1571,10 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         val updated = if (current.any { it.framePreset == preset }) {
             current.filterNot { it.framePreset == preset }
         } else {
-            current + FavoriteFrameWatermarkEffect.capture(preset, watermark)
+            current + FavoriteFrameWatermarkEffect.capture(preset, watermark,
+                    resolvedPhotoFrameMetadataSettings(_state.value.photoFrameMetadataSettings, preset).widthPercent,
+                    resolvedPhotoFrameMetadataSettings(_state.value.photoFrameMetadataSettings, preset).backgroundBlurPercent,
+                    resolvedPhotoFrameMetadataSettings(_state.value.photoFrameMetadataSettings, preset).backgroundMaskPercent)
         }
         persistFavoriteFrameEffects(updated)
     }
@@ -1416,7 +1587,10 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         if (current.none { it.framePreset == preset }) return
         val updated = current.map { favorite ->
             if (favorite.framePreset == preset) {
-                FavoriteFrameWatermarkEffect.capture(preset, watermark)
+                FavoriteFrameWatermarkEffect.capture(preset, watermark,
+                    resolvedPhotoFrameMetadataSettings(_state.value.photoFrameMetadataSettings, preset).widthPercent,
+                    resolvedPhotoFrameMetadataSettings(_state.value.photoFrameMetadataSettings, preset).backgroundBlurPercent,
+                    resolvedPhotoFrameMetadataSettings(_state.value.photoFrameMetadataSettings, preset).backgroundMaskPercent)
             } else {
                 favorite
             }
@@ -1448,10 +1622,13 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         selectedId: String?,
         intensityPercent: Int,
         enabled: Boolean,
+        lut: PhotoFilterSelection? = null,
+        lutUri: String? = null,
     ) {
         val validId = selectedId?.takeIf { id -> _state.value.photoFilters.any { it.id == id } }
         val intensity = normalizePhotoFilterIntensity(intensityPercent)
-        val active = enabled && validId != null
+        val active = enabled && validId != null && lut == null
+        com.ztransfer.lut.PhotoLutStore(getApplication()).save("transfer", lut, lutUri)
         validId?.let { rememberTransferPhotoFilterIntensity(it, intensity) }
         prefs.edit().apply {
             if (validId == null) remove("photo_filter_selected_id")
@@ -1463,6 +1640,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 selectedPhotoFilterId = validId,
                 photoFilterIntensityPercent = intensity,
                 photoFilterEnabled = active,
+                photoLut = lut,
             )
         }
     }
@@ -1498,7 +1676,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     }
 
     /** 应用筛选（类型/保护/连拍/未传输/卡槽/日期）；卡槽仅当前进程生效，其余持久化。 */
-    fun setFilters(criteria: PhotoFilterCriteria) {
+    fun setFilters(requested: PhotoFilterCriteria) {
+        val criteria = requested.copy(extensions = requested.extensions?.takeIf { it.isNotEmpty() })
         prefs.edit().apply {
             if (criteria.extensions == null) remove("filter_exts")
             else putStringSet("filter_exts", criteria.extensions)
@@ -1574,6 +1753,13 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             )
             .apply()
         _state.update { it.copy(photoFrameMetadataSettings = updated) }
+        val width = normalized?.widthPercent ?: 100
+        val favorites = _state.value.favoriteFrameEffects
+        if (favorites.any { it.framePreset == preset && (it.frameWidthPercent != width || it.backgroundBlurPercent != (normalized?.backgroundBlurPercent ?: 100) || it.backgroundMaskPercent != (normalized?.backgroundMaskPercent ?: 100)) }) {
+            persistFavoriteFrameEffects(favorites.map {
+                if (it.framePreset == preset) it.copy(frameWidthPercent = width, backgroundBlurPercent = normalized?.backgroundBlurPercent ?: 100, backgroundMaskPercent = normalized?.backgroundMaskPercent ?: 100) else it
+            })
+        }
     }
 
     private fun rootDocumentUri(treeUri: Uri): Uri =
@@ -1801,7 +1987,9 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    fun addToQueue(files: List<NikonCamera.FileInfo>, cameraProvider: () -> NikonCamera?) {
+    fun addToQueue(files: List<NikonCamera.FileInfo>, cameraProvider: () -> NikonCamera?,
+        cropRecipe: com.ztransfer.crop.JpegCropSelection? = null) {
+        require(cropRecipe == null || (files.size == 1 && isJpegPhotoName(files.single().fileName)))
         val snapshot = _state.value
         val dirUri = snapshot.transferDirUri ?: return
         val newTasks = createQueueTasks(
@@ -1817,11 +2005,12 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             photoFilter = snapshot.photoFilterSelection,
             organizeTransfersByDate = snapshot.organizeTransfersByDate,
         )
-        if (newTasks.isEmpty()) return
+        val admittedTasks = if (cropRecipe == null) newTasks else newTasks.map { it.copy(cropRecipe = cropRecipe) }
+        if (admittedTasks.isEmpty()) return
         _state.update { state ->
-            state.withTaskStructure(state.tasks + newTasks)
+            state.withTaskStructure(state.tasks + admittedTasks)
         }
-        pendingTransferQueue.addAll(newTasks)
+        pendingTransferQueue.addAll(admittedTasks)
         val queueState = _state.value
         if (
             shouldRunQueueAfterEnqueue(
@@ -1830,7 +2019,6 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 pauseAfterCurrent = queueState.pauseAfterCurrent,
             )
         ) {
-            prewarmPhotoFilterFor(newTasks)
             processQueue(dirUri, cameraProvider)
         }
     }
@@ -1841,20 +2029,17 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         cameraProvider: () -> NikonCamera?,
     ): List<NikonCamera.FileInfo> {
         val snapshot = _state.value
-        if (!snapshot.autoTransferNewMedia || snapshot.transferDirUri == null) return emptyList()
+        if (snapshot.autoTransferMode == AutoTransferMode.OFF || snapshot.transferDirUri == null) return emptyList()
         if (cameraProvider() == null) return emptyList()
-        val queued = snapshot.tasks.asSequence()
+        val queued = snapshot.tasks.asSequence().filter { it.cropRecipe == null }
             .mapTo(HashSet()) { it.file.autoTransferIdentity() }
         val candidates = files.asSequence()
+            .filter { snapshot.autoTransferMode.accepts(it.fileName) }
             .distinctBy { it.autoTransferIdentity() }
             .filterNot { it.autoTransferIdentity() in queued }
             .toList()
         if (candidates.isNotEmpty()) addToQueue(candidates, cameraProvider)
         return candidates
-    }
-
-    private fun prewarmPhotoFilterFor(tasks: Collection<TransferTask>) {
-        tasks.firstNotNullOfOrNull { it.photoFilterRequested }?.let(::prewarmPhotoFilter)
     }
 
     /** Starts every existing WAITING task. This explicit action also releases a manual pause. */
@@ -1865,7 +2050,6 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         val waiting = snapshot.tasks.filter { it.status == TransferStatus.WAITING }
         if (waiting.isEmpty()) return
         _state.update { it.copy(pauseAfterCurrent = false) }
-        prewarmPhotoFilterFor(waiting)
         processQueue(dirUri, cameraProvider)
     }
 
@@ -1873,24 +2057,6 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     fun requestPauseAfterCurrent() {
         _state.update { state ->
             if (state.isTransferring) state.copy(pauseAfterCurrent = true) else state
-        }
-    }
-
-    /**
-     * 用户确认传输时便开始建立精确 RGB 映射表，让这项一次性计算与首张照片下载并行。
-     * 第一张进入生成流程时只需等待尚未完成的尾段，之后同滤镜、同强度全部直接复用。
-     */
-    private fun prewarmPhotoFilter(selection: PhotoFilterSelection) {
-        if (
-            photoFilterPrewarmSelection == selection &&
-            photoFilterPrewarmJob?.isActive == true
-        ) {
-            return
-        }
-        photoFilterPrewarmJob?.cancel()
-        photoFilterPrewarmSelection = selection
-        photoFilterPrewarmJob = viewModelScope.launch(Dispatchers.IO) {
-            PhotoFilterRenderer.prepareOriginalFilter(selection) { !isActive }
         }
     }
 
@@ -1902,7 +2068,6 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 val self = coroutineContext[Job]
                 var serviceStarted = false
                 var stoppedAfterCurrent = false
-                val cameraMetadataCache = mutableMapOf<Int, PhotoFrameMetadata>()
 
                 try {
                     val uri = Uri.parse(dirUri)
@@ -1971,6 +2136,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                             getOrCreateTransferDirectory(uri, rootDirectoryUri, folderName)
                         }
                     } ?: rootDirectoryUri
+
                     val directoryIndex = if (destinationDirectoryUri == rootDirectoryUri) {
                         rootDirectoryIndex
                     } else {
@@ -1988,112 +2154,50 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                             size = localOriginal.size,
                             localUri = localOriginal.uri,
                         )
+                        if (pendingTransferQueue.consumeWithdrawal(taskId)) continue
                         val preset = task.framePreset
                         val filter = task.photoFilterRequested
-                        if (preset == null && filter == null) {
-                            updateTask(taskId) {
-                                it.copy(
-                                    status = TransferStatus.COMPLETED,
-                                    skipped = true,
-                                    progress = 1f,
-                                    downloaded = localOriginal.size,
-                                    speed = 0,
-                                )
+                        val needsGeneration = preset != null || filter != null || task.cropRecipe != null
+                        updateTask(taskId) {
+                            it.copy(
+                                status = TransferStatus.COMPLETED,
+                                skipped = !needsGeneration,
+                                progress = 1f,
+                                downloaded = localOriginal.size,
+                                savedOriginalOutput = SavedOriginalOutput(localOriginal.uri.toString(), uri.toString(), destinationDirectoryUri.toString(), localOriginal.displayName),
+                                speed = 0,
+                            ).let { completed ->
+                                if (needsGeneration) completed.queueFrameGeneration() else completed
                             }
-                        } else {
-                            // 第二查必须发生在启动前台服务之前。若派生图已经存在，任务会瞬间
-                            // 完成；此时先 startForegroundService 再立即 stop，会在部分系统上
-                            // 触发 ForegroundServiceDidNotStartInTimeException，直接杀掉 App。
-                            val decorationRequested = preset != null
-                            val effectivePreset = preset ?: PhotoFramePreset.MIST
-                            val effectiveBorder = decorationRequested && task.frameBorderRequested
-                            val effectiveMetadataSettings = task.frameMetadataSettings
-                                ?: defaultPhotoFrameMetadataSettings(effectivePreset)
-                            val effectiveWatermark = if (decorationRequested) {
-                                effectivePhotoFrameWatermark(
-                                    isPro = LicenseManager.isPro.value,
-                                    preference = task.frameWatermarkRequested,
-                                    borderEnabled = effectiveBorder,
-                                )
-                            } else {
-                                PhotoFrameWatermark(enabled = false)
-                            }
-                            val frameExists = withContext(photoFrameDispatcher) {
-                                val destination = getOrPreparePhotoFrameDestination(
-                                    uri,
-                                    destinationDirectoryUri,
-                                )
-                                destination.hasFrameFor(
-                                    localOriginal.displayName,
-                                    effectivePreset,
-                                    effectiveWatermark,
-                                    borderEnabled = effectiveBorder,
-                                    metadataSettings = effectiveMetadataSettings,
-                                    filter = filter,
-                                )
-                            }
-                            // 预检查挂起期间用户可能撤回这项；此时不得继续派生或传输。
-                            if (pendingTransferQueue.consumeWithdrawal(taskId)) continue
-                            if (frameExists) {
-                                log {
-                                        "DERIVATIVE_SKIP existing: ${localOriginal.displayName} " +
-                                        "border=$effectiveBorder preset=${effectivePreset.name} " +
-                                        "filter=${filter?.preset?.name}"
-                                }
-                                updateTask(taskId) {
-                                    it.copy(
-                                        status = TransferStatus.COMPLETED,
-                                        skipped = true,
-                                        progress = 1f,
-                                        downloaded = localOriginal.size,
-                                        speed = 0,
-                                    )
-                                }
-                                continue
-                            }
-                            updateTask(taskId) {
-                                it.copy(
-                                    status = TransferStatus.COMPLETED,
-                                    progress = 1f,
-                                    downloaded = localOriginal.size,
-                                    speed = 0,
-                                ).startFrameGeneration(android.os.SystemClock.elapsedRealtime())
-                            }
+                        }
+                        if (needsGeneration) {
+                            // TransferService defers an early stop until startForeground succeeds.
+                            // Directory preparation and derivative checks now belong to generation.
                             if (!serviceStarted) {
                                 TransferService.start(getApplication(), useWifi = false)
                                 serviceStarted = true
                             }
-                            val cameraMetadata = if (effectiveBorder &&
-                                isJpegPhotoName(task.file.fileName)
-                            ) {
-                                cameraMetadataCache[task.file.handle] ?: readCameraFrameMetadataHeader(
-                                    camera = cameraProvider(),
-                                    handle = task.file.handle,
-                                    mode = "existing",
-                                )?.let { header ->
-                                    withContext(Dispatchers.Default) {
-                                        parseCameraFrameMetadata(header, mode = "existing")
-                                    }
-                                }?.also { cameraMetadataCache[task.file.handle] = it }
-                            } else {
-                                null
+                            handoffPhotoGeneration(taskId) {
+                                launchPhotoFrameExport(
+                                    taskId = taskId,
+                                    treeUri = uri,
+                                    destinationParentUri = destinationDirectoryUri,
+                                    sourceUri = localOriginal.uri,
+                                    sourceName = localOriginal.displayName,
+                                    preset = preset ?: PhotoFramePreset.MIST,
+                                    borderEnabled = preset != null && task.frameBorderRequested,
+                                    metadataSettings = task.frameMetadataSettings
+                                        ?: defaultPhotoFrameMetadataSettings(preset ?: PhotoFramePreset.MIST),
+                                    watermarkRequested = task.frameWatermarkRequested,
+                                    decorationRequested = preset != null,
+                                    filterRequested = filter,
+                                    skipIfExisting = true,
+                                    metadataFile = task.file,
+                                    metadataCamera = cameraProvider(),
+                                    cropRecipe = task.cropRecipe,
+                                    savedCropOutput = task.savedCropOutput,
+                                )
                             }
-                            launchPhotoFrameExport(
-                                taskId = taskId,
-                                treeUri = uri,
-                                destinationParentUri = destinationDirectoryUri,
-                                sourceUri = localOriginal.uri,
-                                sourceName = localOriginal.displayName,
-                                preset = effectivePreset,
-                                borderEnabled = effectiveBorder,
-                                metadataSettings = effectiveMetadataSettings,
-                                watermarkRequested = task.frameWatermarkRequested,
-                                decorationRequested = decorationRequested,
-                                filterRequested = filter,
-                                skipIfExisting = true,
-                                failTaskOnError = true,
-                                cameraMetadata = cameraMetadata,
-                            )
                         }
                         continue
                     }
@@ -2138,9 +2242,14 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         continue
                     }
 
+                    val videoTransfer = supportsVideoResume(task.file.fileName)
                     // 断点续传：检查是否存在上次传输留下的、【身份令牌匹配】的半成品文件。
                     var resumeOffset = 0L
                     var fileDocUri: Uri? = null
+                    if (!videoTransfer) {
+                        directoryIndex.partFor(task.file.fileName)?.let { deleteQuietly(it.uri) }
+                        directoryIndex.removePart(task.file.fileName)
+                    }
                     val partFile = directoryIndex.partFor(task.file.fileName)
                         ?.takeIf { it.token == identityToken(task.file) }
                     if (partFile != null) {
@@ -2291,12 +2400,15 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                             )
                                         }
                                     },
+                                    videoTransfer = videoTransfer,
                                     resumeOffset = resumeOffset,
                                     totalSize = task.file.size,
                                     // 协议层在首个数据命令前读取一次，随后整张文件固定该策略。
                                     preferHighThroughputAtStart = { preferHighThroughputTransfers },
                                     captureHeader = task.framePreset != null &&
                                         task.frameBorderRequested &&
+                                        (task.frameMetadataSettings ?: defaultPhotoFrameMetadataSettings(task.framePreset))
+                                            .requiresCameraMetadata &&
                                         isJpegPhotoName(task.file.fileName),
                                 )
                             }
@@ -2305,14 +2417,6 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         }
                         // withContext 正常返回则 fileDocUri 必已赋值。
                         val createdUri = checkNotNull(fileDocUri)
-                        // Parse the small immutable metadata object in parallel with the provider
-                        // rename/copy below. This releases the 256 KiB prefix promptly instead of
-                        // retaining one byte array per queued frame task.
-                        val cameraMetadataDeferred = cameraHeaderPrefix?.let { header ->
-                            async(Dispatchers.Default) {
-                                parseCameraFrameMetadata(header, mode = "download")
-                            }
-                        }
 
                         result.fold(
                             onSuccess = { stats ->
@@ -2322,165 +2426,136 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                         "headerBytes=${cameraHeaderPrefix?.size ?: 0}",
                                 )
                                 // 下载完整 → 把临时名改成真正文件名（相机上报的文件名即为准）。
-                                val finalName = task.file.fileName
-                                var savedName = finalName
-                                var originalSaveMode = if (renameBroken) "full_copy" else "rename"
-                                var renamedUri = if (renameBroken) null else renameQuietly(createdUri, finalName)
-                                if (renamedUri == null && !renameBroken) {
-                                    for (n in 1..99) {
-                                        val candidate = suffixedName(finalName, n)
-                                        if (directoryIndex.containsDisplayName(candidate)) continue
-                                        renamedUri = renameQuietly(createdUri, candidate)
-                                        if (renamedUri != null) {
-                                            savedName = candidate
-                                            break
+                                val finalName = directoryIndex.reserveDisplayName(task.file.fileName, ::suffixedName)
+                                try {
+                                    var savedName = finalName
+                                    var originalSaveMode = if (renameBroken) "full_copy" else "rename"
+                                    var renamedUri = if (renameBroken) null else renameQuietly(createdUri, finalName) {
+                                        // Execute before returning across the cancellable dispatcher boundary.
+                                        fileDocUri = null
+                                    }
+                                    var saveError: Throwable? = null
+                                    if (renamedUri == null) {
+                                        val copyName = finalName
+                                        val copied = copyAsFallback(
+                                            destinationDirectoryUri, createdUri, copyName,
+                                            getMimeType(finalName), stats.bytes
+                                        )
+                                        val copiedUri = copied.getOrNull()
+                                        if (copiedUri != null) {
+                                            renameBroken = true
+                                            originalSaveMode = "full_copy"
+                                            deleteQuietly(createdUri)
+                                            savedName = displayNameOf(copiedUri) ?: copyName
+                                            renamedUri = copiedUri
+                                            log { "DL_SAVE via copy fallback: $savedName (rename broken)" }
+                                        } else {
+                                            saveError = copied.exceptionOrNull()
                                         }
                                     }
-                                }
-                                var saveError: Throwable? = null
-                                if (renamedUri == null) {
-                                    var copyName = finalName
-                                    if (directoryIndex.containsDisplayName(copyName)) {
-                                        for (n in 1..99) {
-                                            val candidate = suffixedName(finalName, n)
-                                            if (!directoryIndex.containsDisplayName(candidate)) {
-                                                copyName = candidate
-                                                break
-                                            }
-                                        }
-                                    }
-                                    val copied = copyAsFallback(
-                                        destinationDirectoryUri, createdUri, copyName,
-                                        getMimeType(finalName), stats.bytes
-                                    )
-                                    val copiedUri = copied.getOrNull()
-                                    if (copiedUri != null) {
-                                        renameBroken = true
-                                        originalSaveMode = "full_copy"
-                                        deleteQuietly(createdUri)
-                                        savedName = displayNameOf(copiedUri) ?: copyName
-                                        renamedUri = copiedUri
-                                        log { "DL_SAVE via copy fallback: $savedName (rename broken)" }
-                                    } else {
-                                        saveError = copied.exceptionOrNull()
-                                    }
-                                }
-                                if (renamedUri != null) {
-                                    PhotoGenerationProbe.note(
-                                        category = "FRAME-META",
-                                        message = "original saved mode=$originalSaveMode " +
-                                            "name=$savedName bytes=${stats.bytes}",
-                                    )
-                                    directoryIndex.addFile(savedName, stats.bytes, renamedUri)
-                                    directoryIndex.removePart(task.file.fileName)
-                                    recordExistingExport(
-                                        uri = uri,
-                                        destinationFolderName = task.destinationFolderName,
-                                        name = savedName,
-                                        size = stats.bytes,
-                                        localUri = renamedUri,
-                                    )
-                                    val framePreset = task.framePreset
-                                    val photoFilter = task.photoFilterRequested
-                                    val shouldGenerateFrame = framePreset != null || photoFilter != null
-                                    // 起点由协议层在本文件进入下载流程时记录（包含为大图/EXIF
-                                    // 让路的块间时间）；这里仍是正式文件已落盘并完成改名/复制后的完成点。
-                                    val elapsed = android.os.SystemClock.elapsedRealtime() -
-                                        stats.startedAtElapsedMs
-                                    val endToEndMBps = endToEndBytesPerSecond(
-                                        transferredBytes = stats.transferredBytes,
-                                        elapsedMs = elapsed,
-                                    ) / (1024f * 1024f)
-                                    // 免费额度按"真正传输完成"计数(此处是唯一完成点;
-                                    // 跳过/续传改名捷径都不经过这里,不计)。
-                                    LicenseManager.recordTransferDone()
-                                    updateTask(taskId) {
-                                        it.copy(
-                                            status = TransferStatus.COMPLETED, progress = 1f,
-                                            downloaded = stats.bytes, speed = 0,
-                                            downloadMBps = endToEndMBps,
+                                    if (renamedUri != null) {
+                                        // Some providers retain the URI across rename. It is now a
+                                        // published original, never a deletable download partial.
+                                        fileDocUri = null
+                                        if (originalSaveMode == "rename") savedName = displayNameOf(renamedUri) ?: savedName
+                                        PhotoGenerationProbe.note(
+                                            category = "FRAME-META",
+                                            message = "original saved mode=$originalSaveMode " +
+                                                "name=$savedName bytes=${stats.bytes}",
+                                        )
+                                        directoryIndex.addFile(savedName, stats.bytes, renamedUri)
+                                        directoryIndex.removePart(task.file.fileName)
+                                        recordExistingExport(
+                                            uri = uri,
+                                            destinationFolderName = task.destinationFolderName,
+                                            name = savedName,
+                                            size = stats.bytes,
+                                            localUri = renamedUri,
+                                        )
+                                        val effectsEnabled = _state.value.photoEffectsEnabled
+                                        val framePreset = task.framePreset
+                                        val photoFilter = task.photoFilterRequested
+                                        val shouldGenerateFrame = framePreset != null || photoFilter != null || task.cropRecipe != null
+                                        // 起点由协议层在本文件进入下载流程时记录（包含为大图/EXIF
+                                        // 让路的块间时间）；这里仍是正式文件已落盘并完成改名/复制后的完成点。
+                                        val elapsed = android.os.SystemClock.elapsedRealtime() -
+                                            stats.startedAtElapsedMs
+                                        val endToEndMBps = endToEndBytesPerSecond(
+                                            transferredBytes = stats.transferredBytes,
                                             elapsedMs = elapsed,
-                                        ).let { completed ->
-                                            if (shouldGenerateFrame) {
-                                                completed.startFrameGeneration(
-                                                    android.os.SystemClock.elapsedRealtime(),
-                                                )
-                                            } else {
-                                                completed
-                                            }
-                                        }
-                                    }
-                                    if (shouldGenerateFrame) {
-                                        var cameraMetadata = cameraMetadataCache[task.file.handle]
-                                            ?: cameraMetadataDeferred?.await()
-                                        if (resumeOffset > 0 && framePreset != null &&
-                                            task.frameBorderRequested &&
-                                            isJpegPhotoName(task.file.fileName) &&
-                                            cameraMetadata == null
-                                        ) {
-                                            cameraMetadata = readCameraFrameMetadataHeader(
-                                                camera = camera,
-                                                handle = task.file.handle,
-                                                mode = "resume",
-                                            )?.let { header ->
-                                                withContext(Dispatchers.Default) {
-                                                    parseCameraFrameMetadata(
-                                                        header,
-                                                        mode = "resume",
-                                                    )
+                                        ) / (1024f * 1024f)
+                                        // 免费额度按"真正传输完成"计数(此处是唯一完成点;
+                                        // 跳过/续传改名捷径都不经过这里,不计)。
+                                        LicenseManager.recordTransferDone()
+                                        updateTask(taskId) {
+                                            it.copy(
+                                                status = TransferStatus.COMPLETED, progress = 1f,
+                                                downloaded = stats.bytes, speed = 0,
+                                                savedOriginalOutput = SavedOriginalOutput(renamedUri.toString(), uri.toString(), destinationDirectoryUri.toString(), savedName),
+                                                downloadMBps = endToEndMBps,
+                                                elapsedMs = elapsed,
+                                            ).let { completed ->
+                                                if (shouldGenerateFrame) {
+                                                    completed.queueFrameGeneration()
+                                                } else {
+                                                    if (!effectsEnabled) completed.skipFrameGeneration() else completed
                                                 }
                                             }
                                         }
-                                        cameraMetadata?.let {
-                                            cameraMetadataCache[task.file.handle] = it
+                                        if (shouldGenerateFrame) {
+                                            // 派生严格发生在正式原片落盘之后。导出器只读取原片并创建
+                                            // 新文件；独立低优先级工作池立即接管，传输循环直接处理下一张。
+                                            // 无论解码/写入是否失败，都不回滚、不删除原片。
+                                            handoffPhotoGeneration(taskId) {
+                                                launchPhotoFrameExport(
+                                                    taskId = taskId,
+                                                    treeUri = uri,
+                                                    destinationParentUri = destinationDirectoryUri,
+                                                    sourceUri = renamedUri,
+                                                    sourceName = savedName,
+                                                    preset = framePreset ?: PhotoFramePreset.MIST,
+                                                    borderEnabled = framePreset != null &&
+                                                        task.frameBorderRequested,
+                                                    metadataSettings = task.frameMetadataSettings
+                                                        ?: defaultPhotoFrameMetadataSettings(
+                                                            framePreset ?: PhotoFramePreset.MIST,
+                                                        ),
+                                                    watermarkRequested = task.frameWatermarkRequested,
+                                                    decorationRequested = framePreset != null,
+                                                    filterRequested = photoFilter,
+                                                    skipIfExisting = true,
+                                                    metadataFile = task.file,
+                                                    metadataCamera = camera,
+                                                    capturedHeader = cameraHeaderPrefix,
+                                                    cropRecipe = task.cropRecipe,
+                                                    savedCropOutput = task.savedCropOutput,
+                                                )
+                                            }
                                         }
-                                        // 派生严格发生在正式原片落盘之后。导出器只读取原片并创建
-                                        // 新文件；独立低优先级工作池立即接管，传输循环直接处理下一张。
-                                        // 无论解码/写入是否失败，都不回滚、不删除原片。
-                                        launchPhotoFrameExport(
-                                            taskId = taskId,
-                                            treeUri = uri,
-                                            destinationParentUri = destinationDirectoryUri,
-                                            sourceUri = renamedUri,
-                                            sourceName = savedName,
-                                            preset = framePreset ?: PhotoFramePreset.MIST,
-                                            borderEnabled = framePreset != null &&
-                                                task.frameBorderRequested,
-                                            metadataSettings = task.frameMetadataSettings
-                                                ?: defaultPhotoFrameMetadataSettings(
-                                                    framePreset ?: PhotoFramePreset.MIST,
-                                                ),
-                                            watermarkRequested = task.frameWatermarkRequested,
-                                            decorationRequested = framePreset != null,
-                                            filterRequested = photoFilter,
-                                            skipIfExisting = true,
-                                            cameraMetadata = cameraMetadata,
-                                        )
+                                    } else {
+                                        // 改名与复制均失败：删掉临时文件并标记失败——
+                                        // 重试时从头下载（改名失败不是传输层问题，续传解决不了）。
+                                        deleteQuietly(createdUri)
+                                        directoryIndex.removePart(task.file.fileName)
+                                        val reason = when {
+                                            saveError is java.io.FileNotFoundException ->
+                                                str(R.string.error_dir_invalid)
+                                            saveError?.message != null -> saveError.message
+                                            else -> str(R.string.error_rename_copy_refused)
+                                        }
+                                        updateTask(taskId) {
+                                            it.copy(status = TransferStatus.FAILED, error = str(R.string.error_save_failed, reason), speed = 0)
+                                        }
                                     }
-                                } else {
-                                    // 改名与复制均失败：删掉临时文件并标记失败——
-                                    // 重试时从头下载（改名失败不是传输层问题，续传解决不了）。
-                                    deleteQuietly(createdUri)
-                                    directoryIndex.removePart(task.file.fileName)
-                                    val reason = when {
-                                        saveError is java.io.FileNotFoundException ->
-                                            str(R.string.error_dir_invalid)
-                                        saveError?.message != null -> saveError.message
-                                        else -> str(R.string.error_rename_copy_refused)
-                                    }
-                                    updateTask(taskId) {
-                                        it.copy(status = TransferStatus.FAILED, error = str(R.string.error_save_failed, reason), speed = 0)
-                                    }
-                                }
+                                } finally { directoryIndex.releaseDisplayName(finalName) }
                             },
                             onFailure = { e ->
-                                if (e is ResumeUnavailableException) {
-                                    // 走不了续传（相机不支持分块 / >4GB 拿不到真实大小）：删掉半成品，
-                                    // 本次标记失败，重试将从头全新下载——绝不用错位的全量数据续写。
+                                if (!videoTransfer || e is ResumeUnavailableException) {
+                                    // 照片一律删除半成品；视频无法续传时也从头重试。
                                     deleteQuietly(fileDocUri)
                                     directoryIndex.removePart(task.file.fileName)
                                     updateTask(taskId) {
-                                        it.copy(status = TransferStatus.FAILED, error = str(R.string.transfer_failed), speed = 0)
+                                        it.copy(status = TransferStatus.FAILED, error = friendlyError(e), speed = 0)
                                     }
                                 } else {
                                     // 普通传输失败：保留半成品，重试时从块边界续传。
@@ -2499,8 +2574,11 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     } catch (e: CancellationException) {
                         // 协程取消只发生在 ViewModel 销毁（App 退出）时——界面上的"停止"
                         // 不再取消协程（正在传的文件自然传完，见 withdrawPending）。
-                        // 此处【不】就地删除半成品：半成品交给 App 启动的 sweep 统一清扫
-                        //（.nkpart_ 前缀带前导点，相册中本就不可见），也是断点续传的基础。
+                        // Only videos retain partial files for resume; photos always restart.
+                        if (!videoTransfer) {
+                            deleteQuietly(fileDocUri)
+                            directoryIndex.removePart(task.file.fileName)
+                        }
                         throw e
                     } catch (e: Exception) {
                         // 异常保留半成品——不是传输层错误（如目录失效），但半成品仍有价值
@@ -2508,11 +2586,16 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         if (BuildConfig.DEBUG) {
                             android.util.Log.e(TAG, "DL_FAIL: ${task.file.fileName} - ${e.javaClass.simpleName}: ${e.message}", e)
                         }
-                        refreshPartIndexForRetry(
-                            directoryIndex = directoryIndex,
-                            file = task.file,
-                            partUri = fileDocUri,
-                        )
+                        if (videoTransfer) {
+                            refreshPartIndexForRetry(
+                                directoryIndex = directoryIndex,
+                                file = task.file,
+                                partUri = fileDocUri,
+                            )
+                        } else {
+                            deleteQuietly(fileDocUri)
+                            directoryIndex.removePart(task.file.fileName)
+                        }
                         updateTask(taskId) {
                             it.copy(status = TransferStatus.FAILED, error = friendlyError(e), speed = 0)
                         }
@@ -2578,6 +2661,56 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         job.start()
     }
 
+    /** Called only by the generation consumer after the original has been safely published. */
+    private suspend fun generateCrop(
+        taskId: Long,
+        sourceUri: Uri,
+        sourceName: String,
+        treeUri: Uri,
+        destinationUri: Uri,
+        recipe: com.ztransfer.crop.JpegCropSelection,
+        savedCropOutput: SavedCropOutput?,
+    ): SavedCropOutput {
+        savedCropOutput?.takeIf { saved ->
+            saved.parent == destinationUri && runCatching {
+                contentResolver.openInputStream(saved.uri)?.use { it.read() >= 0 } == true
+            }.getOrDefault(false)
+        }?.let { return it }
+        val directory = java.io.File(getApplication<Application>().cacheDir,
+            "$cropSessionName/${java.util.UUID.randomUUID()}")
+        check(directory.mkdirs()) { "Cannot create crop staging directory" }
+        try {
+            val source = java.io.File(directory, "source.jpg")
+            val cropped = java.io.File(directory, "cropped.jpg")
+            val context = currentCoroutineContext()
+            com.ztransfer.crop.withCropSource(contentResolver, sourceUri, source) { input ->
+                com.ztransfer.crop.LosslessJpeg.crop(input, cropped, recipe)
+            }
+            context.ensureActive()
+            val index = getDirectoryIndex(treeUri, destinationUri)
+            val preferred = sourceName.substringBeforeLast('.') + "_crop.jpg"
+            val name = index.reserveDisplayName(preferred, ::suffixedName)
+            try {
+                // Record a publication crossing the cancellation boundary so retries can reuse it.
+                return withContext(NonCancellable) {
+                    val uri = publishCroppedJpeg(cropped, destinationUri, name)
+                    val savedName = displayNameOf(uri) ?: name
+                    index.addFile(savedName, cropped.length(), uri)
+                    SavedCropOutput(uri, destinationUri, savedName).also { saved ->
+                        updateTask(taskId) { it.copy(savedCropOutput = saved) }
+                    }
+                }
+            } finally { index.releaseDisplayName(name) }
+        } finally {
+            directory.deleteRecursively()
+        }
+    }
+
+    private suspend fun publishCroppedJpeg(file: java.io.File, parent: Uri, name: String): Uri {
+        return com.ztransfer.crop.publishCropOutput(contentResolver, file, parent, name,
+            ".nkcrop_${cropSessionName}_${java.util.UUID.randomUUID()}.part")
+    }
+
     /**
      * 单次遍历目标目录：
      * 1) 当 [deleteParts]=true 时删除遗留的半成品（[PART_PREFIX] 开头的临时文件，上次崩溃/被杀留下）；
@@ -2625,7 +2758,13 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         ) {
                             continue
                         }
-                        if (name.startsWith(PHOTO_FRAME_PART_PREFIX)) {
+                        if (name.startsWith(".nkcrop_")) {
+                            if (deleteParts && !name.startsWith(".nkcrop_${cropSessionName}_")) {
+                                val docId = c.getString(idIdx) ?: continue
+                                runCatching { DocumentsContract.deleteDocument(contentResolver,
+                                    DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)) }
+                            }
+                        } else if (name.startsWith(PHOTO_FRAME_PART_PREFIX)) {
                             // 边框派生临时文件不可续传：App 启动时清理；队列运行期间
                             // 只忽略不删除，避免新队列扫描误删仍在后台写入的旧队列任务。
                             if (
@@ -2732,9 +2871,13 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     }
 
     /** 改名；失败（如目标名已存在、部分 provider 返回 null）返回 null。走 IO 线程。 */
-    private suspend fun renameQuietly(uri: Uri, newName: String): Uri? = withContext(Dispatchers.IO) {
+    private suspend fun renameQuietly(
+        uri: Uri,
+        newName: String,
+        onRenamed: (Uri) -> Unit = {},
+    ): Uri? = withContext(Dispatchers.IO) {
         try {
-            DocumentsContract.renameDocument(contentResolver, uri, newName)
+            DocumentsContract.renameDocument(contentResolver, uri, newName)?.also(onRenamed)
         } catch (_: Exception) {
             null
         }
@@ -2809,14 +2952,16 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         camera: NikonCamera?,
         handle: Int,
         mode: String,
+        maxBytes: Int = 256 * 1024,
+        expectedFile: NikonCamera.FileInfo? = null,
     ): ByteArray? {
         PhotoGenerationProbe.note(
             category = "FRAME-META",
-            message = "header request mode=$mode handle=$handle maxBytes=262144 " +
+            message = "header request mode=$mode handle=$handle maxBytes=$maxBytes " +
                 "camera=${camera != null}",
         )
         val header = try {
-            camera?.readExifHeader(handle, maxSize = 256 * 1024)
+            camera?.readExifHeader(handle, maxSize = maxBytes, background = true, expectedFile = expectedFile)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
@@ -2833,40 +2978,25 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         return header
     }
 
-    private fun parseCameraFrameMetadata(
-        header: ByteArray,
-        mode: String,
-    ): PhotoFrameMetadata? {
-        val metadata = PhotoFrameExporter.metadataFromExifHeader(null, header)
-        val hasCoordinates = metadata.latitude?.isFinite() == true &&
-            metadata.longitude?.isFinite() == true &&
-            metadata.latitude != 0.0 && metadata.longitude != 0.0 &&
-            metadata.latitude in -90.0..90.0 && metadata.longitude in -180.0..180.0
-        val hasAltitude = metadata.altitudeMeters?.isFinite() == true &&
-            metadata.altitudeMeters != 0.0
-        val hasCameraField = sequenceOf(
-            metadata.make,
-            metadata.model,
-            metadata.aperture,
-            metadata.shutter,
-            metadata.iso,
-            metadata.focalLength,
-            metadata.lensModel,
-            metadata.dateTime,
-        ).any { !it.isNullOrBlank() }
-        return metadata.takeIf { hasCameraField || hasCoordinates || hasAltitude }.also { parsed ->
-            if (parsed == null) {
-                PhotoGenerationProbe.note(
-                    category = "FRAME-META",
-                    message = "header parse empty mode=$mode bytes=${header.size}",
-                )
-            }
+    private fun parseCameraFrameMetadata(header: ByteArray): PreparedPhotoMetadata<PhotoFrameMetadata> {
+        val structure = inspectJpegMetadataHeader(header)
+        if (structure == JpegMetadataHeader.NO_EXIF) {
+            return PreparedPhotoMetadata(null, PreparedPhotoMetadata.State.NO_EXIF)
         }
+        if (structure == JpegMetadataHeader.INVALID) {
+            return PreparedPhotoMetadata(null, PreparedPhotoMetadata.State.FAILED, "invalid JPEG header")
+        }
+        val parsed = PhotoFrameExporter.metadataFromExifHeaderResult(null, header)
+        return PreparedPhotoMetadata(
+            parsed.getOrNull()?.boundedForQueue(),
+            when {
+                structure == JpegMetadataHeader.INCOMPLETE -> PreparedPhotoMetadata.State.PARTIAL
+                parsed.isFailure -> PreparedPhotoMetadata.State.FAILED
+                else -> PreparedPhotoMetadata.State.COMPLETE
+            },
+            parsed.exceptionOrNull()?.javaClass?.simpleName,
+        )
     }
-
-    private fun PhotoFrameMetadataSettings.hasVisibleMetadata(): Boolean =
-        showDate || showTime || showFocalLength || showExposure || showBrand || showModel ||
-            showLensModel || showCoordinates || showAltitude
 
     private fun isJpegPhotoName(name: String): Boolean {
         val extension = name.substringAfterLast('.', "")
@@ -2875,10 +3005,24 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     }
 
     /**
-     * 把原片派生移出相机传输协程。双线程工作池提供受控并行，低线程优先级让相机 IO
+     * 把原片派生移出相机传输协程。单消费者提供有界排队，低线程优先级让相机 IO
      * 优先；任务数单独计数，使最后一张效果图完成前前台服务不会被提前停止。
      */
-    private fun launchPhotoFrameExport(
+    /** A derivative admission failure must never escape into the original download loop. */
+    private suspend fun handoffPhotoGeneration(taskId: Long, submit: suspend () -> Unit) {
+        try {
+            submit()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            updateTask(taskId) {
+                it.finishFrameGeneration(android.os.SystemClock.elapsedRealtime())
+                    .copy(frameGenerationError = friendlyError(error))
+            }
+        }
+    }
+
+    private suspend fun launchPhotoFrameExport(
         taskId: Long,
         treeUri: Uri,
         destinationParentUri: Uri,
@@ -2891,9 +3035,26 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         decorationRequested: Boolean = true,
         filterRequested: PhotoFilterSelection? = null,
         skipIfExisting: Boolean = false,
-        failTaskOnError: Boolean = false,
-        cameraMetadata: PhotoFrameMetadata? = null,
+        metadataFile: NikonCamera.FileInfo,
+        metadataCamera: NikonCamera?,
+        capturedHeader: ByteArray? = null,
+        cropRecipe: com.ztransfer.crop.JpegCropSelection? = null,
+        savedCropOutput: SavedCropOutput? = null,
     ) {
+        val taskSnapshot = _state.value.tasks.firstOrNull { it.taskId == taskId } ?: return
+        val needsMetadata = borderEnabled && metadataSettings.requiresCameraMetadata &&
+            isJpegPhotoName(sourceName) && !taskSnapshot.sourceMetadataPrepared
+        val needsPlace = borderEnabled && (metadataSettings.showCity || metadataSettings.showRegion)
+        val needsPreparation = needsMetadata || needsPlace
+        val metadataReady = java.util.concurrent.atomic.AtomicBoolean(!needsPreparation)
+        val metadataIdentity = taskSnapshot.metadataCameraIdentity ?: metadataCamera?.photoMetadataIdentity
+        val metadataSession = taskSnapshot.metadataCameraSession ?: metadataCamera?.metadataSessionIdentity
+        var verifyReconnectedFile = metadataSession != null &&
+            metadataSession != metadataCamera?.metadataSessionIdentity
+        updateTask(taskId) { it.copy(metadataCameraIdentity = metadataIdentity, metadataCameraSession = metadataSession) }
+        val metadataResult = java.util.concurrent.atomic.AtomicReference<PreparedPhotoMetadata<PhotoFrameMetadata>?>(
+            taskSnapshot.sourceMetadataSnapshot?.let { PreparedPhotoMetadata(it, PreparedPhotoMetadata.State.COMPLETE) },
+        )
         val probeStartedAtMs = if (PhotoGenerationProbe.enabled) {
             android.os.SystemClock.elapsedRealtime()
         } else {
@@ -2903,9 +3064,15 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             PhotoGenerationProbe.begin(
                 sourceName = sourceName,
                 configuration = buildString {
-                    append("preset=${preset.name} border=$borderEnabled")
-                    append(" filter=${filterRequested?.preset?.name ?: "none"}")
-                    filterRequested?.let { append(" intensity=${it.normalizedIntensityPercent}") }
+                    val kind = when (filterRequested?.preset?.parameters) {
+                        is com.ztransfer.filter.CubePhotoFilterParameters -> "LUT"
+                        null -> "无颜色效果"
+                        else -> "滤镜"
+                    }
+                    append("$kind ${filterRequested?.normalizedIntensityPercent ?: 0}%")
+                    append(" frame=${if (borderEnabled) preset.name else "off"}")
+                    append(" meta=${if (!needsMetadata) "ready/none" else if (capturedHeader != null) "captured" else "read"}")
+                    filterRequested?.let { append(" name=${it.preset.name}") }
                 },
             )
         } else {
@@ -2915,21 +3082,54 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             sessionId = probeSession,
             category = "FRAME-PIPE",
             message = "start source=$sourceName uri=$sourceUri preset=${preset.name} " +
-                "border=$borderEnabled fields=${metadataSettings.showAddress}/" +
+                "border=$borderEnabled fields=${metadataSettings.showCity}/${metadataSettings.showRegion}/" +
                 "${metadataSettings.showCoordinates}/${metadataSettings.showAltitude} " +
                 "filter=${filterRequested?.preset?.name ?: "none"} " +
-                "cameraMetadata=${cameraMetadata != null}",
+                "metadataPreparation=$needsMetadata",
         )
         var probeOutcome = "cancelled"
         var frameExportSaved = false
+        var activeCropOutput: SavedCropOutput? = null
         activePhotoFrameExports.incrementAndGet()
-        val job = viewModelScope.launch(photoFrameDispatcher) {
+        val execute: suspend () -> Unit = execute@ {
+            // Recheck at worker entry: metadata reads and dispatcher queues may have suspended
+            // since transfer completion. A running export is allowed to finish after this point.
+            if (cropRecipe == null && !_state.value.photoEffectsEnabled) {
+                probeOutcome = "skipped:effects-disabled"
+                updateTask(taskId) { it.skipFrameGeneration() }
+                return@execute
+            }
+            if (!metadataReady.get() && _state.value.photoEffectsEnabled) {
+                photoGenerationQueue.deferUntilPrepared()
+            }
+            updateTask(taskId) { it.startFrameGeneration(android.os.SystemClock.elapsedRealtime()) }
             if (PhotoGenerationProbe.enabled) {
                 PhotoGenerationProbe.stage(
                     sessionId = probeSession,
                     name = "worker_wait",
                     durationMs = android.os.SystemClock.elapsedRealtime() - probeStartedAtMs,
                 )
+            }
+            var effectSourceUri = sourceUri
+            var effectSourceName = sourceName
+            if (cropRecipe != null) {
+                val saved = activeCropOutput ?: generateCrop(taskId, sourceUri, sourceName, treeUri,
+                    destinationParentUri, cropRecipe, savedCropOutput).also { activeCropOutput = it }
+                currentCoroutineContext().ensureActive()
+                effectSourceUri = saved.uri
+                effectSourceName = saved.name
+                frameExportSaved = true
+                val effectsEnabled = _state.value.photoEffectsEnabled
+                val hasEffects = decorationRequested || filterRequested != null
+                updateTask(taskId) { it.copy(cropEffectsSkipped = !effectsEnabled && hasEffects) }
+                if (!effectsEnabled || !hasEffects) {
+                    probeOutcome = "saved:crop"
+                    return@execute
+                }
+                if (!metadataReady.get()) {
+                    updateTask(taskId) { it.pauseFrameGeneration(android.os.SystemClock.elapsedRealtime()) }
+                    photoGenerationQueue.deferUntilPrepared()
+                }
             }
             val destinationKey = "${treeUri}|${destinationParentUri}"
             val outcome = try {
@@ -2966,7 +3166,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 if (
                     skipIfExisting &&
                     destination.hasFrameFor(
-                        sourceName,
+                        effectSourceName,
                         preset,
                         effectiveWatermark,
                         borderEnabled = effectiveBorder,
@@ -2975,40 +3175,34 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     )
                 ) {
                     FrameExportOutcome.AlreadyExists
-                } else if (effectiveBorder && isJpegPhotoName(sourceName) &&
-                    metadataSettings.hasVisibleMetadata() &&
-                    cameraMetadata == null
-                ) {
-                    FrameExportOutcome.Failed(
-                        IllegalStateException(str(R.string.error_camera_metadata_unavailable)),
-                    )
                 } else {
                     PhotoGenerationProbe.frameNote(
                         sessionId = probeSession,
                         category = "FRAME-EXPORT",
                         message = "begin source=$sourceName " +
-                            "fields=${metadataSettings.showAddress}/" +
+                            "fields=${metadataSettings.showCity}/${metadataSettings.showRegion}/" +
                             "${metadataSettings.showCoordinates}/${metadataSettings.showAltitude}",
                     )
                     log {
                         "DERIVATIVE_BEGIN: $sourceName source=$sourceUri " +
-                            "fields=${metadataSettings.showAddress}/" +
+                            "fields=${metadataSettings.showCity}/${metadataSettings.showRegion}/" +
                             "${metadataSettings.showCoordinates}/${metadataSettings.showAltitude}"
                     }
                     PhotoFrameExporter.export(
                         context = getApplication(),
                         resolver = contentResolver,
                         destination = destination,
-                        sourceUri = sourceUri,
-                        sourceName = sourceName,
+                        sourceUri = effectSourceUri,
+                        sourceName = effectSourceName,
                         preset = preset,
                         watermark = effectiveWatermark,
                         borderEnabled = effectiveBorder,
                         metadataSettings = metadataSettings,
                         filter = filterRequested,
                         probeSessionId = probeSession,
-                        metadataSnapshot = cameraMetadata,
+                        metadataSnapshot = metadataResult.get()?.value,
                         allowLocalMetadataRead = false,
+                        placeAlreadyPrepared = true,
                     ).fold(
                         onSuccess = { FrameExportOutcome.Saved(it.displayName) },
                         onFailure = { FrameExportOutcome.Failed(it) },
@@ -3035,13 +3229,13 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         sessionId = probeSession,
                         category = "FRAME-EXPORT",
                         message = "skipped existing source=$sourceName " +
-                            "fields=${metadataSettings.showAddress}/" +
+                            "fields=${metadataSettings.showCity}/${metadataSettings.showRegion}/" +
                             "${metadataSettings.showCoordinates}/${metadataSettings.showAltitude}",
                     )
                     log {
                         "DERIVATIVE_SKIP existing: $sourceName " +
                             "border=$borderEnabled preset=${preset.name} " +
-                            "fields=${metadataSettings.showAddress}/" +
+                            "fields=${metadataSettings.showCity}/${metadataSettings.showRegion}/" +
                             "${metadataSettings.showCoordinates}/${metadataSettings.showAltitude}"
                     }
                     updateTask(taskId) { task ->
@@ -3059,52 +3253,146 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         "DERIVATIVE_FAILED: $sourceName " +
                             "${outcome.error.javaClass.simpleName}: ${outcome.error.message}"
                     }
-                    if (failTaskOnError) {
-                        updateTask(taskId) { task ->
-                            task.copy(
-                                status = TransferStatus.FAILED,
-                                error = friendlyError(outcome.error),
-                                speed = 0,
-                            )
-                        }
-                    }
+                    updateTask(taskId) { it.copy(frameGenerationError = friendlyError(outcome.error)) }
                 }
             }
         }
-        // invokeOnCompletion 即使任务排队期间就被取消也必定执行，计数和 UI 不会泄漏。
-        job.invokeOnCompletion { cause ->
-            if (cause != null) {
-                probeOutcome = if (cause is CancellationException) {
-                    "cancelled:${cause.javaClass.simpleName}"
-                } else {
-                    "aborted:${cause.javaClass.simpleName}"
+        // 单消费者对排队取消、运行结束各回调一次，计数和 UI 不会泄漏。
+        val complete: (Throwable?) -> Unit = { cause ->
+            try {
+                if (cause != null) {
+                    probeOutcome = if (cause is CancellationException) {
+                        "cancelled:${cause.javaClass.simpleName}"
+                    } else {
+                        "aborted:${cause.javaClass.simpleName}"
+                    }
+                    if (cause !is CancellationException) {
+                        updateTask(taskId) { it.copy(frameGenerationError = friendlyError(cause)) }
+                    }
+                }
+                if (PhotoGenerationProbe.enabled) {
+                    PhotoGenerationProbe.finish(
+                        sessionId = probeSession,
+                        outcome = probeOutcome,
+                        totalMs = android.os.SystemClock.elapsedRealtime() - probeStartedAtMs,
+                    )
+                }
+                updateTask(taskId) { task ->
+                    val finished = task.finishFrameGeneration(
+                        android.os.SystemClock.elapsedRealtime(),
+                    )
+                    if (frameExportSaved) {
+                        finished
+                    } else {
+                        finished.copy(frameGenerationElapsedMs = null)
+                    }
+                }
+            } finally {
+                if (activePhotoFrameExports.decrementAndGet() == 0) {
+                    stopTransferServiceIfIdle()
                 }
             }
-            if (PhotoGenerationProbe.enabled) {
-                PhotoGenerationProbe.finish(
-                    sessionId = probeSession,
-                    outcome = probeOutcome,
-                    totalMs = android.os.SystemClock.elapsedRealtime() - probeStartedAtMs,
-                )
+        }
+        fun finishPreparation(result: PreparedPhotoMetadata<PhotoFrameMetadata>?) {
+            if (PhotoGenerationProbe.enabled) PhotoGenerationProbe.stage(probeSession,
+                "metadata_prepare", android.os.SystemClock.elapsedRealtime() - probeStartedAtMs)
+            metadataResult.set(result)
+            metadataReady.set(true)
+            photoGenerationQueue.markReady(taskId)
+        }
+        fun preparePlace(result: PreparedPhotoMetadata<PhotoFrameMetadata>?) {
+            val metadata = result?.value
+            if (!needsPlace || metadata == null) {
+                finishPreparation(result)
+                return
             }
-            updateTask(taskId) { task ->
-                val finished = task.finishFrameGeneration(
-                    android.os.SystemClock.elapsedRealtime(),
-                )
-                if (frameExportSaved) {
-                    finished
-                } else {
-                    finished.copy(frameGenerationElapsedMs = null)
+            val enqueuedAt = android.os.SystemClock.elapsedRealtime()
+            var prepared = metadata
+            activePhotoMetadataPreparations.incrementAndGet()
+            val completed: (Throwable?) -> Unit = {
+                try { finishPreparation(result.copy(value = prepared?.boundedForQueue())) }
+                finally {
+                    activePhotoMetadataPreparations.decrementAndGet()
+                    stopTransferServiceIfIdle()
                 }
             }
-            if (activePhotoFrameExports.decrementAndGet() == 0) {
-                stopTransferServiceIfIdle()
+            val admission = photoPlacePreparation.submit(taskId, execute = {
+                if (_state.value.tasks.any { it.taskId == taskId && it.isGeneratingFrame }) {
+                    val budget = (1_000L - (android.os.SystemClock.elapsedRealtime() - enqueuedAt))
+                        .coerceAtLeast(0L)
+                    // Cache hits remain useful even after queue waiting used the network budget.
+                    prepared = PhotoFrameLocationResolver.resolve(getApplication(), metadata,
+                        metadataSettings, timeoutMillis = budget)
+                }
+            }, complete = completed)
+            if (admission != PhotoGenerationQueue.Admission.ACCEPTED) completed(null)
+        }
+        when (photoGenerationQueue.submit(taskId, ready = !needsPreparation,
+            runWhilePreparing = { !_state.value.photoEffectsEnabled }, execute = execute, complete = complete)) {
+            PhotoGenerationQueue.Admission.ACCEPTED -> if (needsMetadata) {
+                val key = CameraMetadataKey(
+                    sourceUri.toString(), metadataIdentity,
+                    metadataFile.handle, metadataFile.size, metadataFile.fileName,
+                    metadataFile.captureDate,
+                )
+                activePhotoMetadataPreparations.incrementAndGet()
+                photoMetadataPreparation.prepare(
+                    key = key,
+                    header = capturedHeader,
+                    readMore = { maxBytes ->
+                        // Recheck for each expanded read, not only when the task was admitted.
+                        val sourceCamera = metadataCamera?.takeIf {
+                            metadataIdentity != null && it.photoMetadataIdentity == metadataIdentity
+                        }
+                        val readStarted = if (PhotoGenerationProbe.enabled) android.os.SystemClock.elapsedRealtime() else 0L
+                        val header = try {
+                            readCameraFrameMetadataHeader(sourceCamera, metadataFile.handle,
+                                "prepare", maxBytes, expectedFile = metadataFile.takeIf { verifyReconnectedFile })
+                        } finally {
+                            if (PhotoGenerationProbe.enabled) PhotoGenerationProbe.stage(probeSession,
+                                "metadata_fetch", android.os.SystemClock.elapsedRealtime() - readStarted)
+                        }
+                        // Expanded reads belong to the same preparation and camera transaction stream.
+                        if (header != null) verifyReconnectedFile = false
+                        header
+                    },
+                    complete = { result ->
+                        try {
+                            val retained = result.copy(value = result.value ?: taskSnapshot.sourceMetadataSnapshot)
+                            updateTask(taskId) { it.copy(
+                                sourceMetadataSnapshot = retained.value,
+                                sourceMetadataPrepared = result.state != PreparedPhotoMetadata.State.FAILED,
+                            ) }
+                            PhotoGenerationProbe.note("FRAME-META", "prepared state=${result.state} reason=${result.detail}")
+                            preparePlace(retained)
+                        } finally {
+                            activePhotoMetadataPreparations.decrementAndGet()
+                            stopTransferServiceIfIdle()
+                        }
+                    },
+                )
+            } else if (needsPlace) {
+                preparePlace(metadataResult.get())
             }
+            PhotoGenerationQueue.Admission.DUPLICATE -> {
+                // The existing attempt owns its UI state and completion callback.
+                activePhotoFrameExports.decrementAndGet()
+            }
+            PhotoGenerationQueue.Admission.FULL -> {
+                val error = IllegalStateException("Photo generation queue capacity reached")
+                updateTask(taskId) {
+                    it.copy(frameGenerationError = friendlyError(error))
+                }
+                complete(error)
+            }
+            PhotoGenerationQueue.Admission.CLOSED -> complete(
+                CancellationException("Photo generation queue closed"),
+            )
         }
     }
 
     private fun stopTransferServiceIfIdle() {
-        if (!_state.value.isTransferring && activePhotoFrameExports.get() == 0) {
+        if (!_state.value.isTransferring && activePhotoFrameExports.get() == 0 && activeGenerationAdmissions.get() == 0 && activePhotoMetadataPreparations.get() == 0) {
             TransferService.stop(getApplication())
         }
     }
@@ -3237,8 +3525,11 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         excludedTaskIds: Set<Long> = emptySet(),
     ) {
         val snapshot = _state.value
-        val dirUri = snapshot.transferDirUri ?: return
-        val retryIds = retryableTransferTaskIds(snapshot.tasks, excludedTaskIds)
+        val dirUri = snapshot.transferDirUri
+        val excludedForMissingDirectory = if (dirUri != null) emptySet() else snapshot.tasks
+            .filter { it.frameGenerationError == null || it.savedOriginalOutput == null }
+            .mapTo(HashSet()) { it.taskId }
+        val retryIds = retryableTransferTaskIds(snapshot.tasks, excludedTaskIds + excludedForMissingDirectory)
         if (retryIds.isEmpty()) return
         val attemptsByOldTaskId = snapshot.tasks.asSequence()
             .filter { it.taskId in retryIds }
@@ -3247,7 +3538,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             val updatedTasks = state.tasks.map {
                 if (
                     it.taskId in retryIds &&
-                    (it.status == TransferStatus.FAILED || it.status == TransferStatus.CANCELLED)
+                    it.canRetry
                 ) {
                     attemptsByOldTaskId.getValue(it.taskId)
                 } else {
@@ -3265,11 +3556,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             it.taskId in appliedTaskIds
         }
         if (appliedAttempts.isNotEmpty()) {
-            pendingTransferQueue.addAll(appliedAttempts)
-            if (!_state.value.pauseAfterCurrent) {
-                prewarmPhotoFilterFor(appliedAttempts)
-                processQueue(dirUri, cameraProvider)
-            }
+            dispatchRetryAttempts(appliedAttempts, dirUri, cameraProvider)
         }
     }
 
@@ -3277,14 +3564,15 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     fun retrySingleTask(taskId: Long, cameraProvider: () -> NikonCamera?) {
         val snapshot = _state.value
         val task = snapshot.tasks.firstOrNull { it.taskId == taskId } ?: return
-        if (task.status != TransferStatus.FAILED && task.status != TransferStatus.CANCELLED) return
-        val dirUri = snapshot.transferDirUri ?: return
+        if (!task.canRetry) return
+        val dirUri = snapshot.transferDirUri
+        if (dirUri == null && (task.frameGenerationError == null || task.savedOriginalOutput == null)) return
         val attempt = task.newAttempt()
         _state.update { state ->
             val updatedTasks = state.tasks.map {
                 if (
                     it.taskId == taskId &&
-                    (it.status == TransferStatus.FAILED || it.status == TransferStatus.CANCELLED)
+                    it.canRetry
                 ) {
                     attempt
                 } else {
@@ -3298,20 +3586,70 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             }
         }
         if (_state.value.tasks.any { it.taskId == attempt.taskId }) {
-            pendingTransferQueue.addAll(listOf(attempt))
-            if (!_state.value.pauseAfterCurrent) {
-                prewarmPhotoFilterFor(listOf(attempt))
-                processQueue(dirUri, cameraProvider)
+            dispatchRetryAttempts(listOf(attempt), dirUri, cameraProvider)
+        }
+    }
+
+    private fun dispatchRetryAttempts(
+        attempts: List<TransferTask>,
+        dirUri: String?,
+        cameraProvider: () -> NikonCamera?,
+    ) {
+        val (generationOnly, downloads) = attempts.partition {
+            it.status == TransferStatus.COMPLETED && it.isGeneratingFrame && it.savedOriginalOutput != null
+        }
+        if (downloads.isNotEmpty()) {
+            pendingTransferQueue.addAll(downloads)
+            if (!_state.value.pauseAfterCurrent && dirUri != null) processQueue(dirUri, cameraProvider)
+        }
+        if (generationOnly.isEmpty()) return
+        activeGenerationAdmissions.incrementAndGet()
+        TransferService.start(getApplication(), useWifi = _state.value.isTransferring)
+        val admission = viewModelScope.launch(Dispatchers.Default) {
+            for (task in generationOnly) {
+                val source = checkNotNull(task.savedOriginalOutput)
+                handoffPhotoGeneration(task.taskId) {
+                    launchPhotoFrameExport(
+                        taskId = task.taskId,
+                        treeUri = Uri.parse(source.tree),
+                        destinationParentUri = Uri.parse(source.parent),
+                        sourceUri = Uri.parse(source.uri),
+                        sourceName = source.name,
+                        preset = task.framePreset ?: PhotoFramePreset.MIST,
+                        borderEnabled = task.framePreset != null && task.frameBorderRequested,
+                        metadataSettings = task.frameMetadataSettings
+                            ?: defaultPhotoFrameMetadataSettings(task.framePreset ?: PhotoFramePreset.MIST),
+                        watermarkRequested = task.frameWatermarkRequested,
+                        decorationRequested = task.framePreset != null,
+                        filterRequested = task.photoFilterRequested,
+                        skipIfExisting = true,
+                        metadataFile = task.file,
+                        // Supplement only from the same body, never reinterpret a handle on a
+                        // different camera connected since this original was downloaded.
+                        metadataCamera = cameraProvider()?.takeIf {
+                            task.metadataCameraIdentity != null && it.photoMetadataIdentity == task.metadataCameraIdentity
+                        },
+                        cropRecipe = task.cropRecipe,
+                        savedCropOutput = task.savedCropOutput,
+                    )
+                }
             }
+        }
+        admission.invokeOnCompletion {
+            activeGenerationAdmissions.decrementAndGet()
+            stopTransferServiceIfIdle()
         }
     }
 
     override fun onCleared() {
         super.onCleared()
         transferJob?.cancel()
-        photoFilterPrewarmJob?.cancel()
         pendingTransferQueue.clear()
         invalidateDirectoryIndexes()
+        photoMetadataPreparation.close()
+        photoPlacePreparation.close()
+        photoGenerationQueue.close()
+        photoMetadataDispatcher.close()
         photoFrameDispatcher.close()
         // 兜底停止前台服务，防止 VM 销毁后通知残留。
         TransferService.stop(getApplication())

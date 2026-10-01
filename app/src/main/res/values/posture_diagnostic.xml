@@ -1,0 +1,15 @@
+<resources>
+    <string name="posture_title">Posture diagnostic</string>
+    <string name="posture_hint">Keep each pose still, then capture for 2 seconds. Header only; copy before leaving monitoring.</string>
+    <string name="posture_level">Camera level</string>
+    <string name="posture_up">Lens tilted up about 20°</string>
+    <string name="posture_down">Lens tilted down about 20°</string>
+    <string name="posture_left">Camera tilted left about 20°</string>
+    <string name="posture_right">Camera tilted right about 20°</string>
+    <string name="posture_done">All five poses captured. Copy the report for support.</string>
+    <string name="posture_error">Capture failed: keep live view connected and retry. If camera or mode changed, restart.</string>
+    <string name="posture_collecting">Capturing…</string>
+    <string name="posture_capture">Capture</string>
+    <string name="posture_copy">Copy report</string>
+    <string name="posture_reset">Restart</string>
+</resources>

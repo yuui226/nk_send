@@ -256,7 +256,8 @@ internal fun shouldUsePartialObjectDownload(
     isUsbConnection: Boolean = false,
     preferHighThroughput: Boolean = false,
     forcePartial: Boolean = false,
-): Boolean = partialObjectSupported != false &&
+    videoTransfer: Boolean = true,
+): Boolean = (videoTransfer || forcePartial) && partialObjectSupported != false &&
     effectiveSize > 0L && effectiveSize != PtpConstants.SIZE_UNKNOWN &&
     (
         forcePartial ||
@@ -269,8 +270,10 @@ internal fun downloadChunkSize(
     effectiveSize: Long,
     isUsbConnection: Boolean = false,
     preferHighThroughput: Boolean = false,
+    videoTransfer: Boolean = true,
 ): Long =
-    if (isUsbConnection || preferHighThroughput) {
+    if (!videoTransfer) effectiveSize
+    else if (isUsbConnection || preferHighThroughput) {
         NikonCamera.HIGH_THROUGHPUT_CHUNK_SIZE
     } else if (effectiveSize > NikonCamera.LARGE_FILE_THRESHOLD) {
         NikonCamera.LARGE_FILE_CHUNK_SIZE
@@ -1312,6 +1315,7 @@ class NikonCamera(private val context: Context) {
     private val staDirectNoThumbnail = HashSet<Int>()
     private val staDirectFiles = HashMap<Int, FileInfo>()
     private val staDirectJpegMpfPreviews = HashMap<Int, List<JpegMpfPreviewReference>>()
+    private val staDirectJpegThumbnailChecked = HashSet<Int>()
     private val staDirectRawPreviews = HashMap<Int, List<NefPreviewReference>>()
     // Same-camera NEFs usually place their grid JPEG at a stable offset. This session-only hint is
     // always JPEG-validated and falls back to the full prefix parser on the first mismatch.
@@ -1390,6 +1394,9 @@ class NikonCamera(private val context: Context) {
     // USB 录像期间持有的尼康完整远控模式（0x90C2）。开录前设 1，停录回待机时
     // 成对清 0；放在连接对象上可跨横竖屏重建记账，断线换实例则自然清空。
     @Volatile internal var remoteControlModeSet = false
+    // 调试窗手动持有的 PC 控制模式；普通 USB 录像恢复不能提前释放它。
+    // 仅当前连接有效，退监看时与 remoteControlModeSet 一起清理。
+    @Volatile internal var remoteDiagnosticControlModeSet = false
     /** Identity reported by PTP DeviceInfo for the current camera session. */
     @Volatile var deviceManufacturer: String? = null
         private set
@@ -1420,6 +1427,12 @@ class NikonCamera(private val context: Context) {
                 ?: "unknown-device"
             return "$manufacturer\u0000$model\u0000$physicalId"
         }
+    internal val metadataSessionIdentity = java.util.UUID.randomUUID().toString()
+
+    /** Unlike thumbnails, metadata must never treat two unidentified bodies as the same source. */
+    internal val photoMetadataIdentity: String
+        get() = scopedPhotoMetadataIdentity(thumbnailCacheIdentity, metadataSessionIdentity)
+
     val connectionType: CameraConnectionType
         get() = if (usbPtp != null) CameraConnectionType.USB else CameraConnectionType.WIFI
 
@@ -1638,6 +1651,7 @@ class NikonCamera(private val context: Context) {
             staDirectNoThumbnail.clear()
             staDirectFiles.clear()
             staDirectJpegMpfPreviews.clear()
+            staDirectJpegThumbnailChecked.clear()
             staDirectRawPreviews.clear()
             staDirectRawThumbnailHint = null
             staDirectRawIndexedPreviews.clear()
@@ -1902,6 +1916,7 @@ class NikonCamera(private val context: Context) {
 
                         transport.readTimeoutMs = SO_TIMEOUT_MS
                         remoteControlModeSet = false
+                        remoteDiagnosticControlModeSet = false
                         remoteMovieApplicationPropSet = false
                         remoteMovieApplicationOpSet = false
                         return@withContext buildString {
@@ -2141,6 +2156,9 @@ class NikonCamera(private val context: Context) {
     suspend fun getThumbnail(handle: Int): ByteArray? = ioMutex.withLock {
         withContext(Dispatchers.IO) {
             if (staDirectObjectReadValidated) {
+                if ((staDirectFiles[handle]?.extension ?: staDirectExtensionFromHandle(handle)) == ".jpg") {
+                    return@withContext readStaDirectJpegThumbnailInternal(handle)
+                }
                 staDirectThumbnails[handle]?.let { return@withContext it }
                 if (handle in staDirectNoThumbnail) return@withContext null
                 val file = staDirectFiles[handle]
@@ -2383,12 +2401,18 @@ class NikonCamera(private val context: Context) {
      * [maxSize] 字节（默认 128KB，足以覆盖绝大多数 JPEG 的 EXIF 段）；与 [ioMutex]
      * 串行化。任何失败返回 null——EXIF 是纯体验增强，不应为失败产生视觉噪音。
      */
-    suspend fun readExifHeader(handle: Int, maxSize: Int = 128 * 1024): ByteArray? =
-        ioGate.withInteractive {
+    suspend fun readExifHeader(handle: Int, maxSize: Int = 128 * 1024, bypassCache: Boolean = false,
+        retryDeviceBusy: Boolean = false, background: Boolean = false,
+        expectedFile: FileInfo? = null): ByteArray? {
+        val read: suspend () -> ByteArray? = {
             withContext(Dispatchers.IO) {
                 try {
-                    if (staDirectObjectReadValidated) {
-                        staDirectRecentHeaders[handle]?.let { cached ->
+                    if (expectedFile != null) {
+                        val current = staDirectFiles[handle] ?: getObjectInfoInternal(handle).takeIf { it.successful }?.file
+                        if (!samePhotoMetadataSource(expectedFile, current)) return@withContext null
+                    }
+                    if (staDirectObjectReadValidated && !bypassCache) {
+                        staDirectRecentHeaders[handle]?.takeIf { !background || it.size >= maxSize }?.let { cached ->
                             return@withContext if (cached.size <= maxSize) {
                                 cached
                             } else {
@@ -2396,13 +2420,20 @@ class NikonCamera(private val context: Context) {
                             }
                         }
                     }
-                    sendCmd(PtpConstants.NK_GET_PARTIAL_OBJECT_EX, handle, 0, 0, maxSize, 0)
-                    val (respCode, data) = recvRespWithPayload()
-                    if (respCode == PtpConstants.RESPONSE_OK && data != null && data.isNotEmpty()) data
-                    else {
+                    var retries = if (retryDeviceBusy) FHD_DEVICE_BUSY_RETRIES else 0
+                    var result: ByteArray? = null
+                    while (true) {
+                        sendCmd(PtpConstants.NK_GET_PARTIAL_OBJECT_EX, handle, 0, 0, maxSize, 0)
+                        val (respCode, data) = recvRespWithPayload()
+                        if (respCode == PtpConstants.RESPONSE_OK && data != null && data.isNotEmpty()) {
+                            result = data
+                            break
+                        }
                         log { "ReadExifHeader handle=$handle resp=0x${respCode.toString(16)} len=${data?.size ?: 0}" }
-                        null
+                        if (respCode != PtpConstants.DEVICE_BUSY || retries-- <= 0) break
+                        delay(FHD_DEVICE_BUSY_RETRY_DELAY_MS)
                     }
+                    result
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -2412,6 +2443,10 @@ class NikonCamera(private val context: Context) {
                 }
             }
         }
+
+        // Background metadata gets a fair transaction slot, without interactive priority.
+        return if (background) ioGate.withTransferSlice(read) else ioGate.withInteractive(read)
+    }
 
     /**
      * 为当前大图的 FHD + EXIF 组合保留交互优先级，但不持续占用 [ioMutex]：两项之间的
@@ -2423,13 +2458,21 @@ class NikonCamera(private val context: Context) {
     suspend fun streamFileInfo(
         handles: List<Int>,
         batchSize: Int = 20,
+        fastFirstBatch: Boolean = false,
+        nextBatchSize: (() -> Int)? = null,
         onBatch: suspend (List<FileInfo>, Int, Int) -> Unit
     ): Boolean = withContext(Dispatchers.IO) {
         val loadContext = coroutineContext
         val total = handles.size
         var loaded = 0
         var allObjectInfoSucceeded = true
-        handles.chunked(batchSize).forEach { batch ->
+        require(batchSize > 0)
+        var cursor = 0
+        while (cursor < total) {
+            val count = fileScanBatchSize(cursor, if (allObjectInfoSucceeded) nextBatchSize?.invoke() ?: batchSize else batchSize, fastFirstBatch)
+            val end = cursor + minOf(count, total - cursor)
+            val batch = handles.subList(cursor, end)
+            cursor = end
             val probeStartedAtMs = if (FileOrderProbe.enabled) SystemClock.elapsedRealtime() else 0L
             // 每批单独持锁，批间释放 ioMutex：缩略图模式下缩略图请求可在批间插入，
             // 从而随列表一起渐进出图，而不是等整份列表加载完才开始。
@@ -2526,6 +2569,7 @@ class NikonCamera(private val context: Context) {
         newestFirstHandlesByStorage: List<Pair<Int, List<Int>>>,
         storageIds: List<Int> = newestFirstHandlesByStorage.map { it.first },
         batchSize: Int = 12,
+        nextBatchSize: (() -> Int)? = null,
         onBatch: suspend (List<FileInfo>, Int, Int) -> Unit,
     ): Boolean = withContext(Dispatchers.IO) {
         check(staDirectObjectReadValidated) { "STA direct object reads were not validated" }
@@ -2550,7 +2594,7 @@ class NikonCamera(private val context: Context) {
             val currentBatchSize = when {
                 completed == 0 -> 1
                 completed < 4 -> minOf(3, batchSize)
-                else -> batchSize
+                else -> (if (allSucceeded) nextBatchSize?.invoke() ?: batchSize else batchSize).coerceAtLeast(1)
             }
             var requestedHandles = 0
             val completedBeforeBatch = completed
@@ -2723,7 +2767,10 @@ class NikonCamera(private val context: Context) {
     private fun cacheStaDirectObjectHeader(handle: Int, result: StaDirectObjectHeader) {
         result.file?.let { file ->
             staDirectFiles[handle] = file
-            result.thumbnail?.let { bytes -> rememberStaDirectThumbnail(handle, bytes) }
+            // A later EXIF/FHD header read must not replace the enhanced grid JPEG with its tiny EXIF image.
+            if (handle !in staDirectJpegThumbnailChecked || handle !in staDirectThumbnails) {
+                result.thumbnail?.let { bytes -> rememberStaDirectThumbnail(handle, bytes) }
+            }
             // RAW/video bounded probes are lazy and non-authoritative. JPEG's parsed EXIF envelope is
             // authoritative, so a missing thumbnail can retain the existing session negative cache.
             if (result.thumbnailChecked && result.thumbnail == null && file.extension == ".jpg") {
@@ -2735,6 +2782,7 @@ class NikonCamera(private val context: Context) {
     /** Keeps recent encoded thumbnails under a strict byte budget; STA PTP IO serializes access. */
     private fun rememberStaDirectThumbnail(handle: Int, bytes: ByteArray) {
         if (bytes.size > STA_DIRECT_THUMBNAIL_CACHE_BYTES) {
+            staDirectJpegThumbnailChecked.remove(handle)
             staDirectThumbnails.remove(handle)?.let { previous ->
                 staDirectThumbnailBytes -= previous.size
             }
@@ -2747,6 +2795,7 @@ class NikonCamera(private val context: Context) {
         ) {
             val eldest = staDirectThumbnails.entries.iterator().next()
             staDirectThumbnailBytes -= eldest.value.size
+            staDirectJpegThumbnailChecked.remove(eldest.key)
             staDirectThumbnails.remove(eldest.key)
         }
     }
@@ -3210,7 +3259,57 @@ class NikonCamera(private val context: Context) {
         return null
     }
 
-    /** Must be called while [ioMutex] is held; invoked only for a visible RAW thumbnail. */
+    /** One bounded MPF preview per JPG; absence/oversize/invalid JPEG keeps the EXIF thumbnail. */
+    private fun readStaDirectJpegThumbnailInternal(handle: Int): ByteArray? {
+        val cached = staDirectThumbnails[handle]
+        if (handle in staDirectJpegThumbnailChecked && cached != null) return cached
+        val startedAt = SystemClock.elapsedRealtime()
+        // Complete only the 128 KiB header/index, not the primary JPEG image stream.
+        val header = readStaDirectObjectHeaderInternal(handle, requireJpegPreviewIndex = true)
+        cacheStaDirectObjectHeader(handle, header)
+        val fallback = header.thumbnail ?: cached
+        val fallbackEdge = jpegThumbnailLongEdge(fallback)
+        val reference = if (fallbackEdge < STA_JPEG_THUMBNAIL_EDGE) {
+            selectStaJpegThumbnailPreview(staDirectJpegMpfPreviews[handle].orEmpty())
+        } else null
+        var readBytes = 0
+        var reason = if (fallbackEdge >= STA_JPEG_THUMBNAIL_EDGE) "already-large" else "no-bounded-preview"
+        val enhanced = reference?.let {
+            val bytes = readStaDirectPartialInternal(handle, it.offset, it.length)
+            readBytes = bytes?.size ?: 0
+            if (bytes == null || bytes.size != it.length) {
+                reason = "preview-read-incomplete"
+                null
+            } else {
+                try {
+                    createStaJpegThumbnail(bytes, fallbackEdge).also { result ->
+                        reason = if (result != null) "enhanced" else "invalid-or-not-larger"
+                    }
+                } catch (error: Exception) {
+                    reason = "decode-${error.javaClass.simpleName}"
+                    null
+                }
+            }
+        }
+        val result = enhanced ?: fallback
+        if (result != null) {
+            rememberStaDirectThumbnail(handle, result)
+            staDirectJpegThumbnailChecked += handle
+            staDirectNoThumbnail.remove(handle)
+        }
+        if (PhotoGenerationProbe.enabled) {
+            PhotoGenerationProbe.note(
+                "STA-THUMB",
+                "JPG handle=0x%08X source=%s reason=%s originalEdge=%d outputEdge=%d previewBytes=%d totalMs=%d".format(
+                    handle, if (enhanced != null) "mpf" else "exif", reason, fallbackEdge,
+                    jpegThumbnailLongEdge(result), readBytes, SystemClock.elapsedRealtime() - startedAt,
+                ),
+            )
+        }
+        return result
+    }
+
+    /** Must be called while [ioMutex] is held; used by visible cells and sequential batch loading. */
     private fun readStaDirectRawThumbnailInternal(file: FileInfo): ByteArray? {
         fun readReference(reference: NefPreviewReference): ByteArray? =
             readStaDirectPartialInternal(
@@ -3648,6 +3747,8 @@ class NikonCamera(private val context: Context) {
     suspend fun streamMergedFileInfo(
         newestFirstHandlesByStorage: List<List<Int>>,
         batchSize: Int = 20,
+        fastFirstBatch: Boolean = false,
+        nextBatchSize: (() -> Int)? = null,
         onBatch: suspend (List<FileInfo>, Int, Int) -> Unit,
     ): Boolean = withContext(Dispatchers.IO) {
         require(batchSize > 0) { "batchSize must be positive" }
@@ -3662,20 +3763,25 @@ class NikonCamera(private val context: Context) {
         var allObjectInfoSucceeded = true
 
         while (completed < total) {
-            val requestedHandles = ArrayList<Int>(batchSize)
-            val observedFiles = ArrayList<FileInfo>(batchSize)
+            val currentBatchSize = fileScanBatchSize(completed,
+                if (allObjectInfoSucceeded) nextBatchSize?.invoke() ?: batchSize else batchSize, fastFirstBatch)
+            // 首张也必须先取得各卡的 head，才能保持跨卡时间顺序。
+            val requestBudget = if (fastFirstBatch && completed < 4)
+                maxOf(groups.size, currentBatchSize + groups.size - 1) else currentBatchSize
+            val requestedHandles = ArrayList<Int>(currentBatchSize)
+            val observedFiles = ArrayList<FileInfo>(currentBatchSize)
             val probeStartedAtMs = if (FileOrderProbe.enabled) SystemClock.elapsedRealtime() else 0L
             val completedBeforeBatch = completed
 
             val output = ioMutex.withLock {
                 var objectInfoRequests = 0
                 buildList {
-                    while (size < batchSize && completed < total) {
+                    while (size < currentBatchSize && completed < total) {
                         groups.indices.forEach { groupIndex ->
                             if (heads[groupIndex] != null) return@forEach
                             val handles = groups[groupIndex]
                             while (cursors[groupIndex] < handles.size) {
-                                if (objectInfoRequests >= batchSize) return@forEach
+                                if (objectInfoRequests >= requestBudget) return@forEach
                                 loadContext.ensureActive()
                                 val handle = handles[cursors[groupIndex]++]
                                 objectInfoRequests++
@@ -3806,14 +3912,10 @@ class NikonCamera(private val context: Context) {
      * [preferHighThroughputAtStart] 在首个文件数据命令前仅取值一次，之后页面切换不会改变当前文件。
      * [captureHeader] 在新文件传输时保留有限的文件头，供效果图导出复用；不会额外发起相机请求。
      *
-     * 两条数据相位路径共用同一个 [pump] 循环，只是驱动它的命令不同：
-     * - 分块（GetPartialObjectEx）：浏览模式的 Wi-Fi 已知大小文件，以及高吞吐模式下的
-     *   大文件/续传；每块是完整 PTP 事务，块间可供 FHD / EXIF 插入。
-     * - 全量（GetObject）：高吞吐模式的普通新文件，或分块不支持/大小未知时的回退。
-     *
-     * 续传是一等契约：若请求了 resumeOffset 但走不了分块（相机不支持 / 大小未知），
-     * 绝不用"从 0 全量"去填一个已定位到偏移的流（会写出错位的损坏文件），而是抛
-     * [ResumeUnavailableException] 让调用方删半成品重下。
+     * 照片不续传：AP/USB 用 GetObject，STA 用一次 GetPartialObjectEx 请求整个范围；
+     * 两者都使用固定缓冲的 pump 流式写盘，不将整张照片放进内存。
+     * 只有 [videoTransfer] 使用循环分块及 [resumeOffset]，块间可供交互命令插入。
+     * 视频请求续传却无法分块时返回 [ResumeUnavailableException]，不得向已定位的流写入全量文件。
      */
     suspend fun downloadToFile(
         handle: Int,
@@ -3823,14 +3925,14 @@ class NikonCamera(private val context: Context) {
         totalSize: Long = 0L,
         preferHighThroughputAtStart: () -> Boolean = { false },
         captureHeader: Boolean = false,
+        videoTransfer: Boolean = false,
     ): Result<DownloadStats> = ioGate.withDownloadActivity {
         withContext(Dispatchers.IO) {
             val scope = this
+            if (!videoTransfer && resumeOffset != 0L) return@withContext Result.failure(ResumeUnavailableException())
             var totalDownloaded = resumeOffset
-            // A resumed file already has bytes on disk; only fresh downloads can capture a
-            // complete header without another camera request. Keep the prefix bounded and release
-            // it with DownloadStats after the export task receives its parsed snapshot.
-            val headerCapture = if (captureHeader && resumeOffset == 0L) {
+            // Only photos capture metadata; they always start at zero. Videos never allocate it.
+            val headerCapture = if (captureHeader && !videoTransfer) {
                 ByteArrayOutputStream(EXIF_HEADER_CAPTURE_BYTES)
             } else {
                 null
@@ -3997,6 +4099,7 @@ class NikonCamera(private val context: Context) {
                     isUsbConnection = usbPtp != null,
                     preferHighThroughput = preferHighThroughput,
                     forcePartial = staDirectObjectReadValidated,
+                    videoTransfer = videoTransfer,
                 )
 
                 fun noteStaDownload(message: String) {
@@ -4028,7 +4131,11 @@ class NikonCamera(private val context: Context) {
                         effectiveSize = effectiveSize,
                         isUsbConnection = usbPtp != null,
                         preferHighThroughput = preferHighThroughput,
+                        videoTransfer = videoTransfer,
                     )
+                    if (!videoTransfer && effectiveSize > Int.MAX_VALUE) {
+                        return@withContext Result.failure(java.io.IOException("Photo exceeds single-request size limit"))
+                    }
                     while (offset < effectiveSize) {
                         scope.ensureActive()
                         val reqSize = minOf(chunkSize, effectiveSize - offset).toInt()
@@ -4069,6 +4176,7 @@ class NikonCamera(private val context: Context) {
                         if (got == 0L) return@withContext incomplete(totalDownloaded, effectiveSize)
                         // 按【实收字节】推进，而非请求量——短读也不会跳过未收到的区间。
                         offset += got
+                        if (!videoTransfer && offset != effectiveSize) return@withContext incomplete(offset, effectiveSize)
                         first = false
                     }
                     if (!fellBack) {
@@ -4096,9 +4204,10 @@ class NikonCamera(private val context: Context) {
                     ),
                 )
                 if (resp != PtpConstants.RESPONSE_OK) return@withContext failed(resp)
-                // 相机异常提前结束数据阶段：声明大小与实收不符则判残缺。SIZE_UNKNOWN/未声明放行。
-                if (expected > 0 && expected != PtpConstants.SIZE_UNKNOWN && totalDownloaded != expected) {
-                    return@withContext incomplete(totalDownloaded, expected)
+                // Also check ObjectInfo/GetObjectSize: a short data phase can declare its own
+                // short length correctly. Unknown sizes remain valid for streaming transfers.
+                mismatchedFullObjectSize(totalDownloaded, expected, effectiveSize)?.let {
+                    return@withContext incomplete(totalDownloaded, it)
                 }
                 Result.success(buildStats())
             } catch (e: CancellationException) {

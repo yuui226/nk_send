@@ -1,5 +1,8 @@
 package com.ztransfer.effects
 
+import com.ztransfer.frame.normalizeBackdropPercent
+
+import com.ztransfer.frame.normalizePhotoFrameWidthPercent
 import com.ztransfer.frame.PhotoFramePreset
 import com.ztransfer.frame.PhotoFrameWatermark
 import com.ztransfer.frame.PhotoFrameWatermarkColor
@@ -24,6 +27,9 @@ data class FavoriteFrameWatermarkEffect(
     val watermarkColor: PhotoFrameWatermarkColor,
     val watermarkOpacityPercent: Int,
     val watermarkEffect: PhotoFrameWatermarkEffect,
+    val frameWidthPercent: Int = 100,
+    val backgroundBlurPercent: Int = 100,
+    val backgroundMaskPercent: Int = 100,
 ) {
     /**
      * Applies only presentation settings. Text and image identity always come from the current
@@ -60,8 +66,14 @@ data class FavoriteFrameWatermarkEffect(
         fun capture(
             framePreset: PhotoFramePreset,
             watermark: PhotoFrameWatermark,
+            frameWidthPercent: Int = 100,
+            backgroundBlurPercent: Int = 100,
+            backgroundMaskPercent: Int = 100,
         ): FavoriteFrameWatermarkEffect = FavoriteFrameWatermarkEffect(
             framePreset = framePreset,
+            frameWidthPercent = normalizePhotoFrameWidthPercent(frameWidthPercent),
+            backgroundBlurPercent = normalizeBackdropPercent(backgroundBlurPercent),
+            backgroundMaskPercent = normalizeBackdropPercent(backgroundMaskPercent),
             watermarkEnabled = watermark.enabled,
             watermarkContent = watermark.content,
             watermarkFont = watermark.font,
@@ -146,7 +158,11 @@ internal fun encodeFavoriteFrameEffects(
         favorite.watermarkColor.name,
         normalizePhotoFrameWatermarkOpacityPercent(favorite.watermarkOpacityPercent),
         favorite.watermarkEffect.name,
-    ).joinToString(FIELD_SEPARATOR)
+        normalizePhotoFrameWidthPercent(favorite.frameWidthPercent),
+    ).let { fields ->
+        if (favorite.backgroundBlurPercent == 100 && favorite.backgroundMaskPercent == 100) fields
+        else fields + listOf(normalizeBackdropPercent(favorite.backgroundBlurPercent), normalizeBackdropPercent(favorite.backgroundMaskPercent))
+    }.joinToString(FIELD_SEPARATOR)
 }
 
 internal fun decodeFavoriteFrameEffects(
@@ -156,7 +172,7 @@ internal fun decodeFavoriteFrameEffects(
     val seen = mutableSetOf<PhotoFramePreset>()
     return encoded.split(ENTRY_SEPARATOR).mapNotNull { entry ->
         val fields = entry.split(FIELD_SEPARATOR)
-        if (fields.size != 9) return@mapNotNull null
+        if (fields.size != 9 && fields.size != 10 && fields.size != 12) return@mapNotNull null
         val preset = fields[0].enumOrNull<PhotoFramePreset>() ?: return@mapNotNull null
         if (!seen.add(preset)) return@mapNotNull null
         val enabled = fields[1].toBooleanStrictOrNull() ?: return@mapNotNull null
@@ -172,6 +188,9 @@ internal fun decodeFavoriteFrameEffects(
             ?: return@mapNotNull null
         FavoriteFrameWatermarkEffect(
             framePreset = preset,
+            backgroundBlurPercent = if (fields.size == 12) normalizeBackdropPercent(fields[10].toIntOrNull() ?: return@mapNotNull null) else 100,
+            backgroundMaskPercent = if (fields.size == 12) normalizeBackdropPercent(fields[11].toIntOrNull() ?: return@mapNotNull null) else 100,
+            frameWidthPercent = if (fields.size >= 10) normalizePhotoFrameWidthPercent(fields[9].toIntOrNull() ?: return@mapNotNull null) else 100,
             watermarkEnabled = enabled,
             watermarkContent = content,
             watermarkFont = font,

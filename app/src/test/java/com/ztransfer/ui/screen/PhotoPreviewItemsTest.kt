@@ -97,40 +97,6 @@ class PhotoPreviewItemsTest {
     }
 
     @Test
-    fun localOriginalSourcesStayFrozenUntilThePreviewIsReopened() {
-        val collection = PhotoPreviewItem.BurstCollection(
-            id = "burst-a",
-            files = listOf(file(2), file(3)),
-        )
-        val items = listOf(
-            PhotoPreviewItem.Photo(file(1)),
-            collection,
-            PhotoPreviewItem.Photo(file(4)),
-        )
-        var transferredHandles = setOf(1)
-
-        val openSession = snapshotPreviewSessionSources(items) { candidate ->
-            candidate.handle.takeIf(transferredHandles::contains)?.let { "content://photo/$it" }
-        }
-        transferredHandles = setOf(1, 2, 3, 4)
-
-        assertEquals("content://photo/1", openSession[1])
-        assertTrue(openSession.containsKey(2))
-        assertTrue(openSession.containsKey(3))
-        assertTrue(openSession.containsKey(4))
-        assertNull(openSession[2])
-        assertNull(openSession[3])
-        assertNull(openSession[4])
-
-        val reopenedSession = snapshotPreviewSessionSources(items) { candidate ->
-            candidate.handle.takeIf(transferredHandles::contains)?.let { "content://photo/$it" }
-        }
-        assertEquals("content://photo/2", reopenedSession[2])
-        assertEquals("content://photo/3", reopenedSession[3])
-        assertEquals("content://photo/4", reopenedSession[4])
-    }
-
-    @Test
     fun videoMetadataUsesObjectInfoSizeAndCaptureTime() {
         assertEquals(
             "1.5 MB  ·  2026-07-24 12:34:56",

@@ -98,6 +98,7 @@ internal fun genieRow(
 internal fun genieBandMatrix(
     sourceWidth: Float, sourceTop: Float, sourceBottom: Float,
     top: GenieRow, bottom: GenieRow, upper: Boolean,
+    destination: Matrix = Matrix(),
 ): Matrix {
     val height = sourceBottom - sourceTop
     require(sourceWidth > 0f && height > 0f && top.right > top.left && bottom.right > bottom.left)
@@ -107,7 +108,8 @@ internal fun genieBandMatrix(
     val yDown = if (upper) (bottom.leftY - top.leftY) / height else (bottom.rightY - top.rightY) / height
     val originX = if (upper) top.left - xDown * sourceTop else bottom.left - xDown * sourceBottom
     val originY = if (upper) top.leftY - yDown * sourceTop else bottom.leftY - yDown * sourceBottom
-    return Matrix().apply {
+    return destination.apply {
+        reset()
         this[0, 0] = xAcross
         this[0, 1] = yAcross
         this[1, 0] = xDown
@@ -124,3 +126,10 @@ private fun genieSmooth(value: Float): Float {
 
 private fun mix(start: Float, end: Float, fraction: Float): Float =
     start + (end - start) * fraction
+
+/** Reflect the same settings animation vertically for a menu opening above its button. */
+internal fun genieRowAbove(progress: Float, fraction: Float, anchor: Rect, panel: Rect, mouthWidth: Float): GenieRow {
+    fun mirrored(rect: Rect) = Rect(rect.left,-rect.bottom,rect.right,-rect.top)
+    val row=genieRow(progress,1f-fraction,mirrored(anchor),mirrored(panel),mouthWidth)
+    return GenieRow(row.left,row.right,panel.height-row.y,-row.tilt)
+}

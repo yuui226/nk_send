@@ -1,5 +1,7 @@
 package com.ztransfer.ui.screen
 
+import com.ztransfer.util.HistogramMode
+
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
@@ -127,6 +129,8 @@ import com.ztransfer.ui.util.formatSpeed
 import com.ztransfer.ui.util.rememberHaptics
 import com.ztransfer.viewmodel.ActiveTransferProgress
 import com.ztransfer.viewmodel.CameraState
+import com.ztransfer.viewmodel.presentationConnectionType
+import com.ztransfer.viewmodel.presentationIsSta
 import com.ztransfer.viewmodel.CameraViewModel
 import com.ztransfer.viewmodel.ExportedOriginalIndex
 import com.ztransfer.viewmodel.PhotoExif
@@ -140,7 +144,6 @@ import com.ztransfer.viewmodel.compactDateRangeLabel
 import com.ztransfer.viewmodel.isTransferredOriginal
 import com.ztransfer.viewmodel.latestCaptureLocalDate
 import com.ztransfer.viewmodel.storageIdsBySlot
-import com.ztransfer.viewmodel.transferredOriginalUri
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.math.sin
@@ -204,8 +207,8 @@ internal data class FileListCameraUiState(
 internal fun CameraState.toFileListCameraUiState(): FileListCameraUiState =
     FileListCameraUiState(
         isConnectedToCamera = isConnectedToCamera,
-        connectionType = connectionType,
-        isStaConnection = isStaConnection,
+        connectionType = presentationConnectionType,
+        isStaConnection = presentationIsSta,
         files = files,
         storageIds = storageIds,
         isLoadingFiles = isLoadingFiles,
@@ -236,7 +239,7 @@ internal data class FileListTransferUiState(
     val filterStorageSlot: Int?,
     val filterDateRange: PhotoDateRange?,
     val previewRotationQuarterTurns: Int,
-    val previewHistogramEnabled: Boolean,
+    val previewHistogramMode: HistogramMode,
 )
 
 internal fun TransferState.toFileListTransferUiState(): FileListTransferUiState =
@@ -259,7 +262,7 @@ internal fun TransferState.toFileListTransferUiState(): FileListTransferUiState 
         filterStorageSlot = filterStorageSlot,
         filterDateRange = filterDateRange,
         previewRotationQuarterTurns = previewRotationQuarterTurns,
-        previewHistogramEnabled = previewHistogramEnabled,
+        previewHistogramMode = previewHistogramMode,
     )
 
 internal data class FileListSignalUiState(
@@ -273,8 +276,8 @@ internal fun CameraState.toFileListSignalUiState(): FileListSignalUiState =
     FileListSignalUiState(
         rssi = wifiRssi,
         connected = isConnectedToCamera,
-        connectionType = connectionType,
-        staMode = isStaConnection,
+        connectionType = presentationConnectionType,
+        staMode = presentationIsSta,
     )
 
 /** 一段真实连拍。它只描述检测结果；是否折成虚拟卡位由列表设置决定。 */
@@ -470,8 +473,8 @@ private const val CAMERA_REMOVAL_EXIT_DURATION_MS = 160
  * 动画器，不存在"移出屏幕的条目在边缘悬停"的框架问题。
  * 列表页分组收合与队列页卡片移除共用（包内共享）。
  */
-internal fun Modifier.collapseHeight(progress: () -> Float): Modifier =
-    clipToBounds().layout { measurable, constraints ->
+internal fun Modifier.collapseHeight(clip: Boolean = true, progress: () -> Float): Modifier =
+    then(if (clip) Modifier.clipToBounds() else Modifier).layout { measurable, constraints ->
         val placeable = measurable.measure(constraints)
         val p = progress().coerceIn(0f, 1f)
         layout(placeable.width, (placeable.height * p).roundToInt()) {
@@ -538,6 +541,7 @@ fun FileListScreen(
     autoQueueFlightRequest: AutoQueueFlightRequest? = null,
     onAutoQueueFlightConsumed: (Long) -> Unit = {},
     onPreviewVisibilityChanged: (Boolean) -> Unit,
+    topControlsAlpha: () -> Float = { 1f },
     backHandlerEnabled: Boolean,
     onRequestExitConfirmation: () -> Unit,
     onNavigateToRemote: () -> Unit
@@ -665,23 +669,18 @@ fun FileListScreen(
     }
     // 监看入口离开顶部后缩进左侧；用户点开后保持完整，继续滚动或回到顶部时重置手动状态。
     var remoteExpandedAwayFromTop by remember { mutableStateOf(false) }
-    // 同一照片列表导航实例只尝试一次；跨启动累计播放六次后永久停止自动展开。
-    val remoteIntroEligible = remember(transferViewModel) {
-        transferViewModel.shouldShowRemoteEntryIntro()
-    }
+    // Each list entry offers one reminder; V2 preferences reset the old campaign once.
     var remoteIntroHandledForEntry by rememberSaveable { mutableStateOf(false) }
     var remoteIntroExpanded by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
-        if (!remoteIntroHandledForEntry && remoteIntroEligible) {
-            // 避开页面自身的入场首帧，让入口像随后自然舒展开，而不是同时抢动画焦点。
-            delay(160)
-            // 用户已经开始浏览照片时不再强行展开，避免引导态覆盖“离开顶部即收起”的规则。
-            if (!atTop) return@LaunchedEffect
-            // 真正开始展开时再记次数；此前离页既不消耗次数，回来也仍有机会看到提示。
+        if (!remoteIntroHandledForEntry && transferViewModel.shouldShowRemoteEntryIntro()) {
+            delay(800)
+            // A click during the delay permanently cancels this and future reminders.
+            if (!transferViewModel.shouldShowRemoteEntryIntro()) return@LaunchedEffect
             remoteIntroHandledForEntry = true
             transferViewModel.recordRemoteEntryIntroPlayed()
             remoteIntroExpanded = true
-            delay(2200)
+            delay(4000)
             remoteIntroExpanded = false
         }
     }
@@ -838,16 +837,29 @@ fun FileListScreen(
     val filterActive = filterExts != null || filterProtected || filterBurst ||
         filterUntransferred || filterStorageSlot != null || filterDateRange != null
 
+    // 设备上实际存在的类型（从未过滤的原始列表提取，供下拉选项自动生成）。
+    val availableExts = remember(presentedCameraFiles) {
+        presentedCameraFiles.map { it.extension }.distinct().sorted()
+    }
     // 扫描途中保留当前选择；完整扫描后只有确认存在双卡才允许卡槽筛选。
     // 单卡时筛选没有意义，归回“全部”也能保证入口按钮不会卡在激活状态。
-    LaunchedEffect(state.hasCompletedFileScan, visibleStorageSlots, filterStorageSlot) {
+    LaunchedEffect(state.hasCompletedFileScan, state.isLoadingFiles, visibleStorageSlots, availableExts, filterCriteria) {
         val normalized = normalizeStorageSlotFilter(
             selectedSlot = filterStorageSlot,
             availableSlots = visibleStorageSlots,
             hasCompletedFileScan = state.hasCompletedFileScan,
         )
-        if (normalized != filterStorageSlot) {
-            transferViewModel.setFilters(filterCriteria.copy(storageSlot = normalized))
+        val normalizedExts = filterExts?.takeIf { selected ->
+            selected.isNotEmpty() && (
+                !state.hasCompletedFileScan || state.isLoadingFiles ||
+                    selected.any { it in availableExts }
+                )
+        }
+        if (normalized != filterStorageSlot || normalizedExts != filterExts) {
+            transferViewModel.setFilters(filterCriteria.copy(
+                storageSlot = normalized,
+                extensions = normalizedExts,
+            ))
         }
     }
     // 筛选确定后的级联入场（复用分组展开的入场动画）：tick 每次确定递增（重播存量格子）,
@@ -859,10 +871,6 @@ fun FileListScreen(
             delay(600)
             filterRevealWindow = false
         }
-    }
-    // 设备上实际存在的类型（从未过滤的原始列表提取，供下拉选项自动生成）。
-    val availableExts = remember(presentedCameraFiles) {
-        presentedCameraFiles.map { it.extension }.distinct().sorted()
     }
     val latestKnownDate = remember(presentedCameraFiles) {
         latestCaptureLocalDate(presentedCameraFiles.asSequence().map { it.captureDate })
@@ -1042,6 +1050,8 @@ fun FileListScreen(
 
     // 长按预览：全屏翻页 + 从被长按格子的位置放大展开。
     var previewIndex by remember { mutableStateOf<Int?>(null) }
+    // Every explicit open owns a new pager/cache/gesture lifetime, including close→open races.
+    var previewSessionId by remember { mutableStateOf(0L) }
     val latestPreviewVisibilityChanged by rememberUpdatedState(onPreviewVisibilityChanged)
     val updatePreviewIndex: (Int?) -> Unit = { nextIndex ->
         previewIndex = nextIndex
@@ -1143,6 +1153,7 @@ fun FileListScreen(
                 it is PhotoPreviewItem.Photo && it.file.handle == file.handle
             }
             if (idx >= 0 && currentPreviewSourceIdentity === sourceAtOpen) {
+                previewSessionId++
                 previewItems = snapshot
                 updatePreviewIndex(idx)
                 previewAnchor = rect
@@ -1167,6 +1178,7 @@ fun FileListScreen(
                     it is PhotoPreviewItem.Photo && it.file.handle == first.handle
                 }
                 if (idx >= 0 && currentPreviewSourceIdentity === sourceAtOpen) {
+                    previewSessionId++
                     previewItems = snapshot
                     updatePreviewIndex(idx)
                     previewAnchor = rect
@@ -1345,7 +1357,7 @@ fun FileListScreen(
             }
     ) {
         // ---------- 内容（铺满，延伸到系统栏后面）----------
-        if (state.isLoadingFiles && presentedCameraFiles.isEmpty()) {
+        if (state.isConnectedToCamera && state.isLoadingFiles && presentedCameraFiles.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     CircularProgressIndicator(color = colors.accentBlue)
@@ -1355,9 +1367,9 @@ fun FileListScreen(
             }
         }
 
-        if (!state.isLoadingFiles && presentedCameraFiles.isEmpty() &&
+        if (presentedCameraFiles.isEmpty() &&
             !cameraRemovalReflowActive &&
-            (state.hasCompletedFileScan || !state.isConnectedToCamera)
+            (!state.isConnectedToCamera || (!state.isLoadingFiles && state.hasCompletedFileScan))
         ) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(
@@ -1365,63 +1377,60 @@ fun FileListScreen(
                     modifier = Modifier.padding(horizontal = 32.dp)
                 ) {
                     if (!state.isConnectedToCamera) {
-                        // 兜底：断开且列表从未加载成功（掉线不再清列表，正常断开时网格保留、
-                        // 由顶栏信号按钮指示状态，不会走到这里）。提示与本次会话的传输方式
-                        // 绑定，避免 USB 相机关机时短暂闪出 Wi-Fi 文案和系统设置按钮。
+                        // 首次加载失败、重连后再次掉线、进程恢复都可能进入空列表断开态。
+                        // 与顶栏使用同一套会话/恢复模式，不能把所有无线连接都当作 AP。
                         val usbMode =
                             disconnectedConnectionType(state.connectionType) ==
                                 CameraConnectionType.USB
+                        val presentation = disconnectedCameraPresentation(state.connectionType, state.isStaConnection)
                         if (usbMode) {
                             ClassicUsbIcon(
-                                tint = colors.accentOrange,
+                                tint = colors.statusError,
                                 modifier = Modifier.size(64.dp)
+                            )
+                        } else if (state.isStaConnection) {
+                            StaSignalIcon(
+                                connected = false,
+                                tint = colors.statusError,
+                                modifier = Modifier.size(64.dp),
                             )
                         } else {
                             Icon(
                                 Icons.Default.WifiOff,
                                 contentDescription = null,
                                 modifier = Modifier.size(64.dp),
-                                tint = colors.accentOrange
+                                tint = colors.statusError
                             )
                         }
                         Spacer(modifier = Modifier.height(16.dp))
                         Text(
-                            stringResource(
-                                if (usbMode) {
-                                    R.string.usb_connection_lost
-                                } else {
-                                    R.string.connection_lost
-                                }
-                            ),
+                            stringResource(presentation.title),
                             color = colors.onBackground,
                             style = MaterialTheme.typography.titleMedium
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            stringResource(
-                                if (usbMode) {
-                                    R.string.reconnect_camera_usb
-                                } else {
-                                    R.string.connect_camera_wifi
-                                }
-                            ),
+                            stringResource(presentation.hint),
                             color = colors.onSurfaceVariant,
                             style = MaterialTheme.typography.bodySmall,
                             textAlign = TextAlign.Center
                         )
-                        // 一键直达系统 Wi-Fi 设置（与连接页同款按钮），不必退回连接页。
-                        if (!usbMode) {
+                        presentation.actionLabel?.let { actionLabel ->
                             Spacer(modifier = Modifier.height(20.dp))
                             GlassButton(
                                 onClick = {
-                                    try {
+                                    if (state.isStaConnection) {
+                                        cameraViewModel.retryStaConnection()
+                                    } else try {
                                         context.startActivity(Intent(Settings.ACTION_WIFI_SETTINGS))
                                     } catch (_: Exception) {}
                                 }
                             ) {
-                                Icon(Icons.Default.Wifi, contentDescription = null, tint = colors.accentBlue, modifier = Modifier.size(20.dp))
+                                if (!state.isStaConnection) {
+                                    Icon(Icons.Default.WifiOff, contentDescription = null, tint = colors.statusError, modifier = Modifier.size(20.dp))
+                                }
                                 Text(
-                                    stringResource(R.string.open_wifi_settings),
+                                    stringResource(actionLabel),
                                     style = MaterialTheme.typography.labelLarge,
                                     fontWeight = FontWeight.Medium,
                                     color = colors.onBackground
@@ -1612,8 +1621,19 @@ fun FileListScreen(
         val density = LocalDensity.current
         val hiddenTravelPx = with(density) { 48.dp.toPx() }
         val playfulLiftPx = with(density) { 6.dp.toPx() }
+        val introLabel = stringResource(R.string.remote_entry_intro)
+        val introTextStyle = MaterialTheme.typography.labelMedium.copy(
+            fontSize = 13.sp, fontWeight = FontWeight.Medium,
+        )
+        val introTextMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
+        val introLabelWidth = remember(introLabel, introTextStyle, density) {
+            with(density) {
+                introTextMeasurer.measure(introLabel, introTextStyle, softWrap = false).size.width.toDp()
+            }
+        }
+        val introButtonWidth = maxOf(140.dp, introLabelWidth + 62.dp)
         val remoteButtonWidth by animateDpAsState(
-            targetValue = if (remoteIntroExpanded) 108.dp else 52.dp,
+            targetValue = if (remoteIntroExpanded) introButtonWidth else 52.dp,
             animationSpec = if (remoteIntroExpanded) {
                 Motion.bouncy()
             } else {
@@ -1639,11 +1659,13 @@ fun FileListScreen(
                 .align(Alignment.BottomStart)
                 .navigationBarsPadding()
                 .padding(bottom = 40.dp)
-                .size(width = 140.dp, height = 56.dp),
+                .size(width = introButtonWidth + 24.dp, height = 56.dp),
             contentAlignment = Alignment.CenterStart
         ) {
             GlassButton(
                 onClick = {
+                    transferViewModel.markRemoteEntryUsed()
+                    remoteIntroExpanded = false
                     if (remoteExpanded) {
                         openRemote()
                     } else {
@@ -1705,19 +1727,12 @@ fun FileListScreen(
                         ),
                 ) {
                     Text(
-                        text = stringResource(R.string.remote_entry_intro),
+                        text = introLabel,
+                        color = if (transfersBusyVisual) colors.onSurfaceVariant else colors.onBackground,
+                        style = introTextStyle,
+                        maxLines = 1,
+                        softWrap = false,
                         modifier = Modifier.clearAndSetSemantics { },
-                        color = if (transfersBusyVisual) {
-                            colors.onSurfaceVariant.copy(alpha = 0.62f)
-                        } else {
-                            colors.onBackground
-                        },
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontSize = 10.sp,
-                            lineHeight = 11.sp,
-                        ),
-                        fontWeight = FontWeight.SemiBold,
-                        textAlign = TextAlign.Center,
                     )
                 }
             }
@@ -1734,6 +1749,8 @@ fun FileListScreen(
                             indication = null,
                             role = Role.Button
                         ) {
+                            transferViewModel.markRemoteEntryUsed()
+                            remoteIntroExpanded = false
                             haptics.tick()
                             remoteExpandedAwayFromTop = true
                         }
@@ -1838,6 +1855,11 @@ fun FileListScreen(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .graphicsLayer {
+                    compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen
+                    alpha = topControlsAlpha()
+                }
+                .padding(bottom = 16.dp)
                 .statusBarsPadding()
                 .padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -2046,6 +2068,8 @@ fun FileListScreen(
         // 长按预览层：全屏翻页，从被长按格子的位置放大展开/收回。
         previewIndex?.let { idx ->
             if (idx in previewItems.indices) {
+                val openedSession=previewSessionId
+                androidx.compose.runtime.key(openedSession) {
                 PhotoPreviewOverlay(
                     items = previewItems,
                     initialIndex = idx,
@@ -2056,7 +2080,7 @@ fun FileListScreen(
                     hapticsEnabled = transferState.hapticsEnabled,
                     transfersBusy = transfersBusy,
                     initialRotationQuarterTurns = transferState.previewRotationQuarterTurns,
-                    histogramVisible = transferState.previewHistogramEnabled,
+                    histogramMode = transferState.previewHistogramMode,
                     burstHandles = burstHandles,
                     queueTaskFor = { file ->
                         queuedIndexByHandle[file.handle]
@@ -2064,13 +2088,6 @@ fun FileListScreen(
                             ?.takeIf { it.file.handle == file.handle }
                     },
                     isTransferred = hasLocalOriginal,
-                    localOriginalUriFor = { file ->
-                        transferredOriginalUri(
-                            file = file,
-                            existingExportIndex = transferState.existingExportIndex,
-                            organizeTransfersByDate = transferState.organizeTransfersByDate,
-                        )
-                    },
                     activeProgressFlow = transferViewModel.activeTransferProgress,
                     queueTargetBounds = queueTargetBounds,
                     onQueueFlightStarted = onQueueFlightStarted,
@@ -2078,16 +2095,34 @@ fun FileListScreen(
                     onQueueFlightsCancelled = onQueueFlightsCancelled,
                     onQueueFlightCaught = onQueueFlightCaught,
                     onTransfer = onTransferFromPreview,
+                    onCropTransfer = { file, recipe ->
+                        when {
+                            transferState.transferDirUri == null -> {
+                                updatePreviewIndex(null)
+                                previewItems = emptyList()
+                                previewSourceAtOpen = null
+                                requestTransferDirectory()
+                                false
+                            }
+                            !state.isConnectedToCamera -> { showHint(notConnectedHint); false }
+                            else -> {
+                                transferViewModel.addToQueue(listOf(file), cameraViewModel::getCamera, recipe)
+                                showHint(context.getString(R.string.crop_added))
+                                true
+                            }
+                        }
+                    },
                     onTransferBurst = onTransferBurstPreview,
                     onBurstExpandedChange = { id, expanded ->
                         if (expanded) expandedBurstCollections[id] = true
                         else expandedBurstCollections.remove(id)
                     },
                     onRotationChanged = transferViewModel::setPreviewRotationQuarterTurns,
-                    onHistogramVisibleChanged =
-                        transferViewModel::setPreviewHistogramEnabled,
+                    onHistogramModeChanged =
+                        transferViewModel::setPreviewHistogramMode,
                     prepareDismissTarget = preparePreviewDismissTarget,
-                    onDismiss = { returnFile ->
+                    onDismiss = dismissPreview@{ returnFile ->
+                        if(openedSession!=previewSessionId) return@dismissPreview
                         updatePreviewIndex(null)
                         previewItems = emptyList()
                         previewSourceAtOpen = null
@@ -2102,6 +2137,7 @@ fun FileListScreen(
                         }
                     }
                 )
+                }
             }
         }
 
@@ -2167,8 +2203,12 @@ internal fun summarizeQueuePillTasks(tasks: List<TransferTask>): QueuePillTaskSu
                 if (firstWaitingTaskId == null) firstWaitingTaskId = task.taskId
             }
             TransferStatus.TRANSFERING -> {
-                downloadRemaining++
-                if (activeDownloadTaskId == null) activeDownloadTaskId = task.taskId
+                // Crop tasks remain TRANSFERING until crop/effects finish; the network
+                // download has already ended once their generation stage starts.
+                if (!task.isGeneratingFrame) {
+                    downloadRemaining++
+                    if (activeDownloadTaskId == null) activeDownloadTaskId = task.taskId
+                }
             }
             TransferStatus.CANCELLED -> hasCancelled = true
             TransferStatus.COMPLETED,
@@ -2373,8 +2413,17 @@ fun QueuePill(
     // 取消导致的"归零"不是完成：不闪 done、不震成功震（否则取消后出现庆祝反馈，误导）。
     // sawTransfer 在每次归零时都复位，取消那轮的记录不能污染下一轮的完成判定。
     val hasCancelled = taskSummary.hasCancelled
+    // Keep the active pill mounted on the very first completion frame, before the effect runs.
+    // Otherwise it briefly becomes GlassButton, destroying AnimatedContent before Done appears.
+    val completionPending = allDone && !prevAllDone && !hasCancelled
     LaunchedEffect(allDone) {
-        if (allDone && !prevAllDone) {
+        val justCompleted = allDone && !prevAllDone
+        // Commit the edge before suspension; a new task may cancel the Done hold at any time.
+        prevAllDone = allDone
+        if (!allDone) {
+            showDoneLabel = false
+            finishProgressVisible = false
+        } else if (justCompleted) {
             val celebrate = !hasCancelled && sawTransfer
             sawTransfer = false
             finishProgressVisible = celebrate
@@ -2386,7 +2435,6 @@ fun QueuePill(
             }
             finishProgressVisible = false
         }
-        prevAllDone = allDone
     }
     // 尚无飞行卡片落袋时显示默认图标而不是数字 0；这条优先于 PAUSED，确保“选完再传”
     // 模式也遵循相同叙事。其余情况保持原有规则：完成或尚未准许显示数字时收为图标。
@@ -2396,7 +2444,7 @@ fun QueuePill(
     )
     val collapsedToIcon = allRemainingTasksAreInFlight ||
         (mode != PillMode.PAUSED && (
-            (allDone && !showDoneLabel) || (!allDone && !countingVisible)
+            (allDone && !showDoneLabel && !completionPending) || (!allDone && !countingVisible)
         ))
 
     // 进度条 = 当前单文件进度（复用传输页语义）。保留最近的进度归属，让最后一张
@@ -2406,7 +2454,7 @@ fun QueuePill(
         taskSummary.activeProgressTaskId?.let { retainedProgressTaskId = it }
     }
     val barFraction = when {
-        allDone && finishProgressVisible -> 1f
+        allDone && (finishProgressVisible || (completionPending && sawTransfer)) -> 1f
         allDone -> 0f // 静止图标态不预热动画，避免下一轮等待阶段错误继承满格。
         activeProgress != null -> activeProgress.fraction
         generationRemaining > 0 -> 1f
@@ -2500,7 +2548,7 @@ fun QueuePill(
     ) {
         Box(contentAlignment = Alignment.CenterEnd) {
             // 1) 单文件进度填充（填满当前动画宽度；收起为图标后不显示）。
-            if (!allDone || finishProgressVisible) {
+            if (!allDone || finishProgressVisible || (completionPending && sawTransfer)) {
                 LiquidProgressFill(
                     progress = { animatedBar.value },
                     waveEligible = taskSummary.activeDownloadTaskId != null ||
@@ -2541,28 +2589,23 @@ fun QueuePill(
                         activeQueueMaxWidthPx = it.size.width
                     }
                 }) {
-                    // 胶囊内部的 Done / 计数切换用交叉淡化 + 轻微缩放过渡，不硬切。
+                    // 模式切换用轻柔交叉淡化；退场内容持有自己的数量/速度快照，不先跳到 0。
                     // 尺寸动画交给外层的弹性宽度弹簧（snap 禁用 AnimatedContent 自带的尺寸
                     // 动画，避免两套叠加）；计数态内部的数字/速度更新不触发转场，原地刷新。
                     AnimatedContent(
-                        targetState = mode,
+                        targetState = Triple(mode, remaining, activeSpeedText),
+                        contentKey = { it.first },
                         // 胶囊右缘钉死、向左伸缩：新旧内容必须都锚定右缘（CenterEnd），
                         // 否则容器 snap 到新宽度时，退场内容会从右对齐跳成左对齐（文字漂移）。
                         contentAlignment = Alignment.CenterEnd,
                         transitionSpec = {
-                            (fadeIn(tween(200, delayMillis = 60)) +
-                                    scaleIn(
-                                        initialScale = 0.85f,
-                                        animationSpec = tween(200, delayMillis = 60),
-                                        // 缩放原点同样锚在右缘中点，与布局语义一致
-                                        transformOrigin = TransformOrigin(1f, 0.5f)
-                                    ))
-                                .togetherWith(fadeOut(tween(120)))
+                            fadeIn(tween(220, delayMillis = 35))
+                                .togetherWith(fadeOut(tween(160)))
                                 .using(SizeTransform(clip = false, sizeAnimationSpec = { _, _ -> snap() }))
                         },
                         label = "pillContent"
-                    ) { m ->
-                        when (m) {
+                    ) { (displayedMode, displayedCount, displayedSpeed) ->
+                        when (displayedMode) {
                             PillMode.DONE ->
                                 Text(
                                     // 刻意不走字符串资源:所有语言统一显示 "Done"(短暂闪现的
@@ -2575,7 +2618,7 @@ fun QueuePill(
                                 )
                             PillMode.PAUSED ->
                                 AnimatedQueuePillCount(
-                                    count = remaining,
+                                    count = displayedCount,
                                     color = colors.onBackground,
                                     label = "pausedCount",
                                     modifier = Modifier.padding(horizontal = 16.dp),
@@ -2586,14 +2629,14 @@ fun QueuePill(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                                 ) {
-                                    Text(
-                                        text = stringResource(R.string.queue_pill_generating),
-                                        style = MaterialTheme.typography.labelLarge,
-                                        color = colors.accentBlue,
-                                        fontWeight = FontWeight.Bold,
+                                    Icon(
+                                        imageVector = Icons.Default.AutoAwesome,
+                                        contentDescription = stringResource(R.string.queue_pill_generating),
+                                        tint = colors.accentPurple,
+                                        modifier = Modifier.size(16.dp),
                                     )
                                     AnimatedQueuePillCount(
-                                        count = generationRemaining,
+                                        count = displayedCount,
                                         color = colors.onBackground,
                                         label = "generationCount",
                                     )
@@ -2605,9 +2648,9 @@ fun QueuePill(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     // 速度在前（仅传输且有速度时显示）。tnum：等宽数字，位数相同则宽度恒定。
-                                    if (activeSpeedText != null) {
+                                    if (displayedSpeed != null) {
                                         Text(
-                                            text = activeSpeedText,
+                                            text = displayedSpeed,
                                             style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
                                             color = colors.accentBlue,
                                             fontWeight = FontWeight.Bold
@@ -2616,7 +2659,7 @@ fun QueuePill(
                                     // 数字滚动：减少（传输推进）时旧数上滑、新数自下滑入；增加（新入队）反向。
                                     // 尺寸仍 snap 交给外层宽度弹簧；clip 让滑动的数字在行内裁切，像里程表。
                                     AnimatedQueuePillCount(
-                                        count = remaining,
+                                        count = displayedCount,
                                         color = colors.onBackground,
                                         label = "downloadCount",
                                     )
@@ -2636,6 +2679,27 @@ fun QueuePill(
 internal fun disconnectedConnectionType(
     connectionType: CameraConnectionType?
 ): CameraConnectionType = connectionType ?: CameraConnectionType.WIFI
+
+internal data class DisconnectedCameraPresentation(
+    val title: Int,
+    val hint: Int,
+    val actionLabel: Int?,
+)
+
+internal fun disconnectedCameraPresentation(
+    connectionType: CameraConnectionType?,
+    staMode: Boolean,
+): DisconnectedCameraPresentation = when {
+    connectionType == CameraConnectionType.USB -> DisconnectedCameraPresentation(
+        R.string.usb_connection_lost, R.string.reconnect_camera_usb, null,
+    )
+    staMode -> DisconnectedCameraPresentation(
+        R.string.connection_lost, R.string.reconnect_camera_sta, R.string.reconnect_camera,
+    )
+    else -> DisconnectedCameraPresentation(
+        R.string.connection_lost, R.string.connect_camera_wifi, R.string.open_wifi_settings,
+    )
+}
 
 internal data class FilterButtonPalette(
     val inactiveIcon: Color,
@@ -2772,7 +2836,7 @@ private fun FileListSignalPill(
 
 /**
  * 连接状态毛玻璃按钮：AP 显示信号格与 dBm，STA 显示专属拓扑状态，USB 显示经典三叉标；
- * AP 断开进入 Wi-Fi 设置，STA 断开进入个人热点设置，USB 断开则等待重新插线。
+ * AP 断开进入 Wi-Fi 设置，STA 断开重试局域网发现，USB 断开则等待重新插线。
  * [pulseTrigger] 递增时按钮轻微放大再弹性缩回（断开时点缩略图的"病因指向"反馈）。
  * "Z传"页与队列页顶栏共用。
  */
@@ -2788,7 +2852,10 @@ fun SignalPill(
     val colors = AppTheme.colors
     var expanded by remember { mutableStateOf(false) }
     val usbMode = connectionType == CameraConnectionType.USB
-    val online = connected && (usbMode || staMode || rssi != null)
+    val mode = signalPillMode(connectionType, staMode, connected, rssi)
+    val online = mode == SignalPillMode.USB_ONLINE ||
+        mode == SignalPillMode.STA_ONLINE || mode == SignalPillMode.WIFI_ONLINE
+    LaunchedEffect(online) { if (!online) expanded = false }
     val r = rssi ?: -999
     // dBm 越接近 0 越强。判定从严：满格只给极好信号，稍差立刻掉格。
     //  -30↑ 满格 / -45↑ 三格 / -55↑ 两格 / -65↑ 一格 / 更弱 0 格。
@@ -2800,10 +2867,8 @@ fun SignalPill(
         else -> 0
     }
     val color = when {
-        usbMode && connected -> colors.accentBlue
-        usbMode -> colors.statusError
-        staMode && connected -> colors.accentBlue
-        staMode -> colors.statusError
+        !online -> colors.statusError
+        usbMode || staMode -> colors.accentBlue
         level == 4 -> colors.statusConnected
         level >= 2 -> colors.accentOrange
         else -> colors.statusError
@@ -2842,7 +2907,9 @@ fun SignalPill(
     val context = LocalContext.current
     GlassButton(
         onClick = {
-            if (staMode) {
+            if (usbMode) {
+                if (online) expanded = !expanded
+            } else if (staMode) {
                 expanded = false
                 if (!connected) {
                     onStaDisconnectedClick()
@@ -2880,19 +2947,14 @@ fun SignalPill(
         ) {
             // AP、STA、USB 各自使用独立图形；连接状态变化时交叉淡化切换。
             Crossfade(
-                targetState = when {
-                    usbMode -> SignalPillMode.USB
-                    staMode && connected -> SignalPillMode.STA_ONLINE
-                    staMode -> SignalPillMode.STA_OFFLINE
-                    online -> SignalPillMode.WIFI_ONLINE
-                    else -> SignalPillMode.WIFI_OFFLINE
-                },
+                targetState = mode,
                 animationSpec = tween(220),
                 label = "signalMode"
             ) { mode ->
                 when (mode) {
-                    SignalPillMode.USB -> ClassicUsbIcon(
-                            tint = color,
+                    SignalPillMode.USB_ONLINE,
+                    SignalPillMode.USB_OFFLINE -> ClassicUsbIcon(
+                            tint = if (mode == SignalPillMode.USB_ONLINE) colors.accentBlue else colors.statusError,
                             modifier = Modifier
                                 .wrapContentHeight(unbounded = true)
                                 .size(18.dp),
@@ -2963,12 +3025,25 @@ fun SignalPill(
     }
 }
 
-private enum class SignalPillMode {
+internal enum class SignalPillMode {
     WIFI_OFFLINE,
     WIFI_ONLINE,
     STA_OFFLINE,
     STA_ONLINE,
-    USB,
+    USB_ONLINE,
+    USB_OFFLINE,
+}
+
+internal fun signalPillMode(
+    connectionType: CameraConnectionType?,
+    staMode: Boolean,
+    connected: Boolean,
+    rssi: Int?,
+): SignalPillMode = when {
+    connectionType == CameraConnectionType.USB -> if (connected) SignalPillMode.USB_ONLINE else SignalPillMode.USB_OFFLINE
+    staMode -> if (connected) SignalPillMode.STA_ONLINE else SignalPillMode.STA_OFFLINE
+    connected && rssi != null -> SignalPillMode.WIFI_ONLINE
+    else -> SignalPillMode.WIFI_OFFLINE
 }
 
 /** STA does not expose a meaningful client-Wi-Fi RSSI, so connected state stays visually full. */
@@ -2985,10 +3060,11 @@ private fun StaSignalIcon(
     Canvas(
         modifier = modifier.semantics { contentDescription = description },
     ) {
-        val barWidth = 3.2.dp.toPx()
-        val gap = 1.65.dp.toPx()
+        val unit = size.minDimension / 19f
+        val barWidth = 3.2f * unit
+        val gap = 1.65f * unit
         val bottom = size.height * 0.88f
-        val barHeights = floatArrayOf(5.dp.toPx(), 8.dp.toPx(), 11.dp.toPx(), 14.dp.toPx())
+        val barHeights = floatArrayOf(5f, 8f, 11f, 14f).map { it * unit }
         val totalWidth = barWidth * barHeights.size + gap * (barHeights.size - 1)
         val startX = (size.width - totalWidth) / 2f
         val barColor = if (connected) tint else tint.copy(alpha = 0.28f)
@@ -2998,7 +3074,7 @@ private fun StaSignalIcon(
                 color = barColor,
                 topLeft = Offset(startX + index * (barWidth + gap), bottom - height),
                 size = Size(barWidth, height),
-                cornerRadius = CornerRadius(1.35.dp.toPx()),
+                cornerRadius = CornerRadius(1.35f * unit),
             )
         }
 
@@ -3007,7 +3083,7 @@ private fun StaSignalIcon(
                 color = tint,
                 start = Offset(size.width * 0.15f, size.height * 0.12f),
                 end = Offset(size.width * 0.87f, size.height * 0.88f),
-                strokeWidth = 2.15.dp.toPx(),
+                strokeWidth = 2.15f * unit,
                 cap = StrokeCap.Round,
             )
         }
@@ -3701,7 +3777,9 @@ private fun BurstCollectionCell(
                         onLongPress = {
                             // 长按只建立“合集 + 成员”的预览快照并直达第一张；底层列表不在
                             // 预览出现前重排，从而不会短暂闪出展开成员或箭头旋转。
-                            collectionBoundsRef[0]?.let(latestOnPreviewFirst)
+                            collectionBoundsRef[0]?.let { bounds ->
+                                latestOnPreviewFirst(bounds)
+                            }
                         }
                     )
                 }
@@ -3859,6 +3937,9 @@ private fun ThumbnailCell(
     returnFocusNonce: Int? = null,
     onExitFinished: (Int) -> Unit = {}
 ) {
+    // Preview emits its one-shot feedback in onPreview, never while a press is pending.
+    val longPressFeedback = if (tapToPreview) com.ztransfer.ui.util.rememberLongPressFeedback() else null
+    val previewInteractions = remember { MutableInteractionSource() }
     val colors = AppTheme.colors
     // 展开/筛选入场：本组刚被展开或筛选刚确定时淡入+轻微放大、按 revealDelayMs 级联错峰；
     // 平时（滚动进入）revealProgress 初始即 1，直接全显、零开销。
@@ -3922,6 +4003,9 @@ private fun ThumbnailCell(
     Box(
         modifier = modifier
             .graphicsLayer {
+                // 动画与圆角共用一个图层，避免每个缩略图再嵌套一层 clip 图层。
+                shape = thumbnailShape
+                clip = true
                 val revealP = revealProgress.value
                 val exitP = exitProgress.value
                 alpha = (if (reveal) revealP else 1f) * exitP
@@ -3934,7 +4018,6 @@ private fun ThumbnailCell(
                 scaleX = s * returnScale
                 scaleY = s * returnScale
             }
-            .clip(thumbnailShape)
             .background(colors.thumbPlaceholder)
             .border(
                 width = thumbnailBorderWidth,
@@ -3953,6 +4036,8 @@ private fun ThumbnailCell(
             }
             // 只在这里交换两个既有动作的手势入口；传输校验、入队和预览逻辑保持单一来源。
             .combinedClickable(
+                interactionSource = longPressFeedback?.interactions ?: previewInteractions,
+                indication = androidx.compose.foundation.LocalIndication.current,
                 enabled = !exiting,
                 onClick = {
                     if (tapToPreview) {
@@ -3960,8 +4045,11 @@ private fun ThumbnailCell(
                     } else onTapFile(file)
                 },
                 onLongClick = {
-                    if (tapToPreview) onTapFile(file)
-                    else cellBoundsRegistry[file.handle]?.let { onPreview(file, it) }
+                    if (tapToPreview) {
+                        longPressFeedback?.trigger { onTapFile(file) }
+                    } else {
+                        cellBoundsRegistry[file.handle]?.let { onPreview(file, it) }
+                    }
                 }
             )
     ) {
@@ -4332,8 +4420,6 @@ private fun FilterOverlay(
         panelModifier = Modifier
             .padding(start = panelStart, top = panelTop)
             .width(panelWidth),
-        animateScale = false,
-        genieFromAnchor = true,
         shape = RoundedCornerShape(16.dp),
         dim = false,
     ) { _ ->
@@ -4389,7 +4475,7 @@ private fun FilterOverlay(
                                 commit(working.copy(extensions = null))
                             }
                         })
-                        availableExts.forEach { ext ->
+                        (availableExts + working.extensions.orEmpty()).distinct().sorted().forEach { ext ->
                             add(Triple(extLabel(ext), working.extensions?.contains(ext) ?: true) { toggle(ext) })
                         }
                     }
@@ -4724,49 +4810,49 @@ private fun formatLocalDate(date: LocalDate): String =
 private fun Int.twoDigits(): String = toString().padStart(2, '0')
 
 /**
- * 筛选面板的选中态胶囊：选中 = 主题蓝底 + 反色加粗字；未选 = surfaceVariant 底。
- * 与设置面板的选择胶囊同族语言。
+ * 筛选与边框信息共用的紧凑选择项：复用拨轮材质，仅点击，选中颜色平滑过渡。
  */
 @Composable
 internal fun FilterChip(
-    label: String? = null,
+    label: String,
     selected: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     icon: ImageVector? = null,
-    // 自定义前导内容（如连拍的 BurstGlyph）；给定内容色，优先于 [icon]。
-    leading: (@Composable (Color) -> Unit)? = null
+    leading: (@Composable (Color) -> Unit)? = null,
+    accentColor: Color? = null,
 ) {
     val colors = AppTheme.colors
-    val contentColor = if (selected) colors.onAccent else colors.onSurfaceVariant
-    Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape(9.dp),
-        color = if (selected) colors.accentBlue else colors.surfaceVariant,
-        modifier = modifier.height(38.dp)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(5.dp, Alignment.CenterHorizontally),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            when {
-                leading != null -> leading(contentColor)
-                icon != null -> Icon(icon, contentDescription = null, tint = contentColor, modifier = Modifier.size(14.dp))
+    val activeColor = accentColor ?: colors.accentBlue
+    val tint by animateColorAsState(
+        targetValue = if (selected) activeColor else colors.onSurfaceVariant,
+        animationSpec = tween(180),
+        label = "compactChoiceTint",
+    )
+    ReleaseCommitWheel(
+        options = listOf(label),
+        selected = label,
+        optionLabel = { it },
+        onValueCommitted = {},
+        onActivated = onClick,
+        wheelHeight = 34.dp,
+        cornerRadius = 10.dp,
+        optionFontSize = 12.sp,
+        optionFontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+        optionTextColor = tint,
+        accentColor = activeColor,
+        emphasized = selected,
+        showEmphasisBorder = true,
+        showDragHint = false,
+        centerIcon = if (leading != null || icon != null) {
+            { color ->
+                if (leading != null) leading(color)
+                else if (icon != null) Icon(icon, contentDescription = null,
+                    tint = color, modifier = Modifier.size(14.dp))
             }
-            if (label != null) {
-                Text(
-                    label,
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                    maxLines = 1,
-                    color = contentColor
-                )
-            }
-        }
-    }
+        } else null,
+        modifier = modifier,
+    )
 }
 
 /**

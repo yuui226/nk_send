@@ -25,16 +25,14 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
-import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.dp
 import com.ztransfer.ui.theme.AppTheme
-import com.ztransfer.ui.theme.Motion
 import kotlinx.coroutines.launch
 
 /** 布局/开合热路径专用的非观察状态；更新它不会让弹窗的大型内容树重新组合。 */
@@ -47,18 +45,8 @@ private class PopupAnimationState(
     var layerRecorded: Boolean = false,
 )
 
-/**
- * 通用「从按钮变形弹出」的毛玻璃浮层外壳（设置面板与筛选面板共用）。
- *
- * 默认以触发按钮 [anchorBounds]（同一 Compose 根坐标系）为原点轻量缩放淡入。
- * [genieFromAnchor] 用于设置和筛选：整块内容向按钮下缘斜向收束。
- * 内容始终按最终尺寸排版，动画只更新绘制和图层，不逐帧重排大型设置内容树。
- * 遮罩随进度淡入，点击遮罩 / 返回键触发收回。
- *
- * 位置与尺寸由调用方经 [panelModifier] 决定（相对根 Box 左上角，用 padding 贴到按钮下方、
- * fillMaxWidth 或 width 定宽），[panelAlignment] 可改变父 Box 内的对齐基准。大型面板可关闭
- * [animateScale]，只保留淡入淡出，避免整块内容在入场期间持续重采样。[content] 收到 close 回调；
- * [overlayContent] 渲染在遮罩与面板之上（如底部玻璃提示），可用 align 自行定位。
+/** Shared button-anchored genie shell. Content keeps its final layout throughout the animation.
+ * Missing/invalid anchors use the renderer's fade fallback. Outside taps and back close it.
  */
 @Composable
 fun AnchorPopup(
@@ -66,8 +54,6 @@ fun AnchorPopup(
     onDismiss: () -> Unit,
     panelModifier: Modifier,
     panelAlignment: Alignment = Alignment.TopStart,
-    animateScale: Boolean = true,
-    genieFromAnchor: Boolean = false,
     shape: Shape = RoundedCornerShape(20.dp),
     // 遮罩是否压暗背景：大面板（设置）保持压暗聚焦；小面板（筛选下拉）传 false——
     // 全屏变暗对几个胶囊的下拉太兴师动众，遮罩仍在（点外部收起、拦滚动穿透），只是透明。
@@ -76,7 +62,7 @@ fun AnchorPopup(
     content: @Composable BoxScope.(close: () -> Unit) -> Unit
 ) {
     val colors = AppTheme.colors
-    val genieLayer = if (genieFromAnchor) rememberGraphicsLayer() else null
+    val genieLayer = rememberGraphicsLayer()
 
     // 入场进度：0=不可见，1=完全展开。
     val progress = remember { Animatable(0f) }
@@ -89,10 +75,9 @@ fun AnchorPopup(
         if (!animationState.closing) {
             animationState.closing = true
             animationScope.launch {
-                progress.animateTo(0f, if (genieFromAnchor) {
+                progress.animateTo(0f,
                     tween((GENIE_COLLAPSE_DURATION_MS * progress.value).toInt().coerceAtLeast(1),
-                        easing = GenieCollapseEasing)
-                } else Motion.overlayCollapse)
+                        easing = GenieCollapseEasing))
                 // 收起期间调用方状态仍可能更新，始终执行最新回调，避免捕获关闭开始前的旧闭包。
                 currentOnDismiss()
             }
@@ -121,16 +106,16 @@ fun AnchorPopup(
                 .align(panelAlignment)
                 .then(panelModifier)
                 .onGloballyPositioned { coordinates ->
-                    animationState.panelBounds = coordinates.boundsInRoot()
+                    val bounds = coordinates.boundsInRoot()
+                    if (animationState.panelBounds?.size != bounds.size) animationState.layerRecorded = false
+                    animationState.panelBounds = bounds
                     if (!animationState.expansionStarted && !animationState.closing) {
                         animationState.expansionStarted = true
                         animationScope.launch {
                             withFrameNanos { }
                             if (!animationState.closing) {
-                                progress.animateTo(1f, if (genieFromAnchor) {
-                                    tween(GENIE_EXPAND_DURATION_MS,
-                                        easing = GenieExpandEasing)
-                                } else Motion.overlayExpand)
+                                progress.animateTo(1f,
+                                    tween(GENIE_EXPAND_DURATION_MS,easing = GenieExpandEasing))
                             }
                         }
                     }
@@ -139,38 +124,21 @@ fun AnchorPopup(
         ) {
             Surface(
                 modifier = Modifier
-                    .then(if (genieLayer != null) Modifier.geniePopupLayer(
+                    .geniePopupLayer(
                         layer = genieLayer,
                         progress = { progress.value },
                         anchor = { anchorBounds },
                         panel = { animationState.panelBounds },
                         layerRecorded = { animationState.layerRecorded },
                         setLayerRecorded = { animationState.layerRecorded = it },
-                    ) else Modifier)
+                        allowAboveAnchor = true,
+                    )
+                    // Preserve the original settings-content render boundary beneath the warp.
                     .graphicsLayer {
-                        val b = animationState.panelBounds
-                        val p = progress.value
-                        // Group alpha in BOTH directions: nested badge/shadow/sheen must not
-                        // accumulate opacity independently and appear before the surrounding text.
                         compositingStrategy = CompositingStrategy.Auto
-                        if (genieFromAnchor) {
-                            // The complete, unscaled surface is warped by the outer layer.
-                            alpha = 1f
-                            scaleX = 1f
-                            scaleY = 1f
-                        } else {
-                            if (animateScale && b != null && b.width > 0f && b.height > 0f &&
-                                anchorBounds != null) {
-                                transformOrigin = TransformOrigin(
-                                    (anchorBounds.center.x - b.left) / b.width,
-                                    (anchorBounds.center.y - b.top) / b.height,
-                                )
-                            }
-                            val s = if (animateScale) 0.96f + 0.04f * p else 1f
-                            scaleX = s
-                            scaleY = s
-                            alpha = p
-                        }
+                        alpha = 1f
+                        scaleX = 1f
+                        scaleY = 1f
                     }
                     .pointerInput(Unit) { detectTapGestures { } },
                 shape = shape,

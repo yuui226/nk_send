@@ -6,6 +6,15 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PhotoFilterRendererTest {
+    @Test fun scratchBufferFitsSmallCropsWithoutChangingLargeImageStripeSize() {
+        assertEquals(600 * 400, PhotoFilterRenderer.scratchPixelCount(600, 400))
+        assertEquals(6000 * (4 * 1024 * 1024 / 6000),
+            PhotoFilterRenderer.scratchPixelCount(6000, 4000))
+        assertEquals(9000, PhotoFilterRenderer.scratchPixelCount(9000, 1))
+        assertEquals(5 * 1024 * 1024,
+            PhotoFilterRenderer.scratchPixelCount(5 * 1024 * 1024, 2))
+    }
+
     @Test
     fun neutralProtectionRejectsNoiseAndPreservesEstablishedColor() {
         assertEquals(0f, PhotoFilterRenderer.neutralProtectionWeight(0f), 0f)

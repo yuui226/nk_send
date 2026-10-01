@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="crop_title">裁切</string>
+    <string name="crop_task">裁切照片</string>
+    <string name="crop_confirm">裁切並加入佇列</string>
+    <string name="crop_reset">重設裁切</string>
+    <string name="crop_cancel">取消裁切</string>
+    <string name="crop_free">自由</string>
+    <string name="crop_original">原比例</string>
+    <string name="crop_swap">切換橫直比例</string>
+    <string name="crop_loading">正在準備裁切…</string>
+    <string name="crop_unavailable">暫時無法準備裁切，請重試</string>
+    <string name="crop_retry">重試</string>
+    <string name="crop_added">已加入佇列</string>
+    <string name="crop_effects_skipped">照片效果已略過</string>
+    <string name="crop_preview_read_failed">無法讀取高清預覽，請重試</string>
+    <string name="crop_orientation_failed">無法讀取照片方向，請重試</string>
+</resources>

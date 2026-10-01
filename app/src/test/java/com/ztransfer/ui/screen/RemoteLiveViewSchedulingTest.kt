@@ -117,6 +117,30 @@ class RemoteLiveViewSchedulingTest {
     }
 
     @Test
+    fun diagnosticControlSurvivesUsbStandbyRecoveryUntilExplicitlyReleased() {
+        // A live-view interruption or movie-complete event must not silently undo
+        // the user's diagnostic switch. Normal USB recording cleanup still applies.
+        assertFalse(
+            shouldReturnUsbMovieSessionToStandby(
+                CameraConnectionType.USB, remoteControlModeSet = true,
+                diagnosticControlModeSet = true
+            )
+        )
+        assertTrue(
+            shouldReturnUsbMovieSessionToStandby(
+                CameraConnectionType.USB, remoteControlModeSet = true,
+                diagnosticControlModeSet = false
+            )
+        )
+        assertFalse(
+            shouldReturnUsbMovieSessionToStandby(
+                CameraConnectionType.WIFI, remoteControlModeSet = true,
+                diagnosticControlModeSet = true
+            )
+        )
+    }
+
+    @Test
     fun startupBatchDropsOnlyPropertyChanges() {
         val objectEvent = Lab.EVT_OBJECT_ADDED to 42L
         val events = listOf(

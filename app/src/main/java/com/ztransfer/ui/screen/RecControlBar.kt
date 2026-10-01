@@ -84,7 +84,8 @@ fun RecControlBar(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     isFinalizing: Boolean = false,
-    showDone: Boolean = false
+    showDone: Boolean = false,
+    compactSaved: Boolean = false,
 ) {
     val colors = AppTheme.colors
     val recRed = colors.statusError
@@ -105,7 +106,7 @@ fun RecControlBar(
     val expanded = isRecording || isFinalizing || showDone
     val animatedLayoutWidth by animateDpAsState(
         targetValue = when {
-            showDone -> savedLayoutWidth
+            showDone -> if (compactSaved) collapsedLayoutWidth else savedLayoutWidth
             expanded -> expandedLayoutWidth
             else -> collapsedLayoutWidth
         },
@@ -114,7 +115,7 @@ fun RecControlBar(
     )
     val animatedSurfaceWidth by animateDpAsState(
         targetValue = when {
-            showDone -> savedSurfaceWidth
+            showDone -> if (compactSaved) collapsedSurfaceWidth else savedSurfaceWidth
             expanded -> expandedSurfaceWidth
             else -> collapsedSurfaceWidth
         },
@@ -141,8 +142,7 @@ fun RecControlBar(
     Box(modifier = modifier.width(animatedLayoutWidth)) {
         GlassSurface(
             modifier = Modifier
-                .width(animatedSurfaceWidth)
-                .fillMaxHeight(),
+                .width(animatedSurfaceWidth).fillMaxHeight(),
             shape = RoundedCornerShape(18.dp),
             panel = true,
             borderColor = Color.Transparent
@@ -298,7 +298,7 @@ fun RecControlBar(
                 // 保存完成后复用暂停键让出的右侧槽位：对号先弹入，短标签随后从左缘
                 // 轻微放大淡入；胶囊随内容再舒展一点，节奏与传输队列的 Done 一致。
                 AnimatedVisibility(
-                    visible = showDone,
+                    visible = showDone && !compactSaved,
                     enter = fadeIn(tween(200, delayMillis = 60)) +
                         scaleIn(
                             initialScale = 0.82f,

@@ -23,6 +23,10 @@ internal fun thumbnailCacheFileName(
 internal fun staThumbnailCacheFileName(handle: Int, size: Long): String =
     sha256("sta\u0000${handle.toLong() and 0xFFFFFFFFL}\u0000$size") + ".jpg"
 
+/** New JPG quality policy gets its own key; old EXIF-only thumbnails cannot satisfy this lookup. */
+internal fun staJpegThumbnailCacheFileName(handle: Int, size: Long): String =
+    sha256("sta-jpeg-640-v1\u0000${handle.toLong() and 0xFFFFFFFFL}\u0000$size") + ".jpg"
+
 internal fun legacyThumbnailCacheFileName(
     fileName: String,
     size: Long,
@@ -164,7 +168,7 @@ internal class ThumbnailDiskCache(
         /** 返回真实存在的缓存；旧版扁平文件命中时尽量无损迁入当前相机目录。 */
         fun findCachedFile(
             cacheFileName: String,
-            legacyFileName: String,
+            legacyFileName: String?,
             alternateCameraFileName: String? = null,
         ): File? =
             synchronized(lock) {
@@ -192,7 +196,7 @@ internal class ThumbnailDiskCache(
                     if (alternate.exists()) alternate.delete()
                 }
 
-                val legacy = File(legacyRoot, legacyFileName)
+                val legacy = File(legacyRoot, legacyFileName ?: return@synchronized null)
                 if (!legacy.isFile || legacy.length() <= 0L) return@synchronized null
                 if (legacy.renameTo(target) && target.isFile && target.length() > 0L) {
                     index += cacheFileName

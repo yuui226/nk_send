@@ -2,6 +2,8 @@ package com.ztransfer.ui.screen
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.gestures.ScrollScope
+import androidx.compose.foundation.gestures.TargetedFlingBehavior
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -19,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Velocity
 import com.ztransfer.gps.NikonGpsRuntime
 import com.ztransfer.viewmodel.CameraViewModel
@@ -26,12 +29,19 @@ import com.ztransfer.viewmodel.TransferViewModel
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
-import kotlin.math.abs
 
 private const val CONNECTION_PAGE = 0
 private const val LOCAL_EFFECTS_PAGE = 1
 internal const val WORKSPACE_ENTRY_SNAP_THRESHOLD = 0.50f
-internal const val WORKSPACE_RETURN_SNAP_THRESHOLD = 0.10f
+internal const val WORKSPACE_RETURN_SNAP_THRESHOLD = 0.30f
+
+internal const val WORKSPACE_RETURN_FLING_DISTANCE = 0.15f
+internal const val WORKSPACE_RETURN_FLING_VELOCITY_DP = 1200f
+
+internal fun shouldReturnFromWorkspace(distance: Float, downwardVelocityDp: Float): Boolean =
+    distance >= WORKSPACE_RETURN_SNAP_THRESHOLD ||
+        (distance >= WORKSPACE_RETURN_FLING_DISTANCE &&
+            downwardVelocityDp >= WORKSPACE_RETURN_FLING_VELOCITY_DP)
 
 private class WorkspaceReturnDragTracker {
     var consumed = false
@@ -98,15 +108,39 @@ fun HomeWorkspacePager(
     }
     val pagerFlingBehavior = PagerDefaults.flingBehavior(
         state = pagerState,
-        // 进入工作台保留 50% 阈值；返回连接页放宽到 10%，仍由 Pager 原生动画跟手处理。
+        // 进入工作台保留 50% 阈值；返回连接页需要滑过 30%，仍由 Pager 原生动画跟手处理。
         snapPositionalThreshold = snapThreshold,
     )
+    val quickReturnFling = PagerDefaults.flingBehavior(
+        state = pagerState,
+        snapPositionalThreshold = WORKSPACE_RETURN_FLING_DISTANCE,
+    )
+    val density = LocalDensity.current.density
+    // Both paths settle by position after deciding whether the quick-return rule applies.
+    val distanceBasedFling = remember(pagerFlingBehavior, quickReturnFling, density) {
+        object : TargetedFlingBehavior {
+            override suspend fun ScrollScope.performFling(
+                initialVelocity: Float,
+                onRemainingDistanceUpdated: (Float) -> Unit,
+            ): Float {
+                val returning = pagerState.settledPage == LOCAL_EFFECTS_PAGE
+                val distance = LOCAL_EFFECTS_PAGE -
+                    (pagerState.currentPage + pagerState.currentPageOffsetFraction)
+                val behavior = if (returning && shouldReturnFromWorkspace(
+                        distance, -initialVelocity / density,
+                    )) quickReturnFling else pagerFlingBehavior
+                return with(behavior) {
+                    performFling(if (returning) 0f else initialVelocity, onRemainingDistanceUpdated)
+                }
+            }
+        }
+    }
     val pagerNestedScrollConnection = PagerDefaults.pageNestedScrollConnection(
         state = pagerState,
         orientation = Orientation.Vertical,
     )
     val returnDragTracker = remember { WorkspaceReturnDragTracker() }
-    val returnNestedScrollConnection = remember(pagerNestedScrollConnection) {
+    val returnNestedScrollConnection = remember(pagerNestedScrollConnection, density) {
         object : NestedScrollConnection {
             override fun onPreScroll(
                 available: Offset,
@@ -139,15 +173,32 @@ fun HomeWorkspacePager(
                 return Offset(x = delegated.x, y = delegated.y + pagerConsumed)
             }
 
-            override suspend fun onPreFling(available: Velocity): Velocity =
-                pagerNestedScrollConnection.onPreFling(available)
+            override suspend fun onPreFling(available: Velocity): Velocity {
+                if (!returnDragTracker.consumed) {
+                    return pagerNestedScrollConnection.onPreFling(available)
+                }
+                // Settle before delegating a fling: residual scroll velocity must not bypass
+                // the return distance or move the page before the decision is made.
+                val shouldReturn = shouldReturnFromWorkspace(
+                    LOCAL_EFFECTS_PAGE - (pagerState.currentPage + pagerState.currentPageOffsetFraction),
+                    available.y / density,
+                )
+                returnDragTracker.reset()
+                scope.launch {
+                    pagerState.animateScrollToPage(
+                        if (shouldReturn) CONNECTION_PAGE else LOCAL_EFFECTS_PAGE
+                    )
+                }
+                return available
+            }
 
             override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
                 val delegated = pagerNestedScrollConnection.onPostFling(consumed, available)
                 if (returnDragTracker.consumed) {
-                    val shouldReturn = pagerState.currentPage == CONNECTION_PAGE ||
-                        abs(pagerState.currentPageOffsetFraction) >= WORKSPACE_RETURN_SNAP_THRESHOLD ||
-                        available.y > 0f
+                    val shouldReturn = shouldReturnFromWorkspace(
+                        LOCAL_EFFECTS_PAGE - (pagerState.currentPage + pagerState.currentPageOffsetFraction),
+                        available.y / density,
+                    )
                     scope.launch {
                         pagerState.animateScrollToPage(
                             if (shouldReturn) CONNECTION_PAGE else LOCAL_EFFECTS_PAGE
@@ -186,7 +237,7 @@ fun HomeWorkspacePager(
 
     VerticalPager(
         state = pagerState,
-        flingBehavior = pagerFlingBehavior,
+        flingBehavior = distanceBasedFling,
         userScrollEnabled = workspacePagerUserScrollEnabled(
             gpsEnabled = gpsEnabled,
             currentPage = pagerState.currentPage,

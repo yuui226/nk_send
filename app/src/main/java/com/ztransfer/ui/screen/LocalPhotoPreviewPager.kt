@@ -13,6 +13,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -35,7 +36,9 @@ internal fun LocalPhotoPreviewPager(
     prefetchFilters: List<PhotoFilterSelection>,
     generating: Boolean,
     onChoose: () -> Unit,
+    onOpen: (Bitmap, Rect, () -> Bitmap?) -> Unit,
     onPageChanged: (Int) -> Unit = {},
+    debugBrand: String? = null,
 ) {
     val colors = AppTheme.colors
     if (photos.isEmpty()) {
@@ -65,6 +68,7 @@ internal fun LocalPhotoPreviewPager(
         val pager = rememberPagerState { photos.size }
         Column {
             HorizontalPager(
+                userScrollEnabled = photos.size > 1,
                 state = pager,
                 key = { photos[it].toString() },
                 beyondViewportPageCount = 0,
@@ -73,6 +77,8 @@ internal fun LocalPhotoPreviewPager(
             ) { index ->
                 LocalPhotoPreviewPage(
                     uri = photos[index],
+                    onOpen = onOpen,
+                    debugBrand = debugBrand,
                     effects = effects,
                     prefetchFilters = if (index == pager.settledPage && !generating) prefetchFilters else emptyList(),
                 )
@@ -85,6 +91,8 @@ internal fun LocalPhotoPreviewPager(
 @Composable
 private fun LocalPhotoPreviewPage(
     uri: Uri,
+    onOpen: (Bitmap, Rect, () -> Bitmap?) -> Unit,
+    debugBrand: String?,
     effects: LocalPhotoBatchEffects,
     prefetchFilters: List<PhotoFilterSelection>,
 ) {
@@ -110,7 +118,9 @@ private fun LocalPhotoPreviewPage(
             loaded != null -> PhotoEffectsRenderedPreview(
                 source = loaded.bitmap,
                 resetOnSourceChange = true,
-                metadata = loaded.metadata,
+                metadata = if (com.ztransfer.BuildConfig.DEBUG && debugBrand != null) {
+                    loaded.metadata.copy(make = debugBrand, model = "Model")
+                } else loaded.metadata,
                 sourceRotationQuarterTurns = 0,
                 requestedRotationQuarterTurns = 0,
                 // A stable viewport prevents vertical jumps while paging portrait/landscape photos.
@@ -118,12 +128,15 @@ private fun LocalPhotoPreviewPage(
                 onRotate = null,
                 borderEnabled = effects.borderEnabled,
                 preset = effects.preset,
-                metadataSettings = effects.metadataSettings,
+                metadataSettings = if (com.ztransfer.BuildConfig.DEBUG && debugBrand != null) {
+                    effects.metadataSettings.copy(showBrand = true,
+                        brandStyle = com.ztransfer.frame.PhotoFrameBrandStyle.LOGO)
+                } else effects.metadataSettings,
                 previewPlaceholders = true,
                 watermark = effects.watermark,
                 filter = effects.filter,
                 prefetchFilters = prefetchFilters,
-                onOpen = null,
+                onOpen = onOpen,
             )
             preview == null -> CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
             else -> Text(stringResource(R.string.local_photo_preview_failed),

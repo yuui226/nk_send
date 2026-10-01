@@ -599,7 +599,7 @@ class PhotoFrameExporterTest {
     @Test
     fun locationRowsPairCoordinatesWithAltitudeAndIgnoreAddress() {
         assertEquals(
-            listOf("30.1235°N, 120.9877°E  520m"),
+            listOf("N 30°07.407', E 120°59.259'  520m"),
             frameLocationRows(
                 PhotoFrameMetadata(
                     make = null,

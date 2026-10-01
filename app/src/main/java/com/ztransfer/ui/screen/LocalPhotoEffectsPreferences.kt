@@ -1,5 +1,10 @@
 package com.ztransfer.ui.screen
 
+import com.ztransfer.effects.PhotoEffectModule
+import com.ztransfer.effects.ALL_PHOTO_EFFECT_MODULES
+import com.ztransfer.effects.normalizePhotoEffectModules
+import com.ztransfer.effects.showsPhotoEffect
+
 import android.content.Context
 import com.ztransfer.effects.FAVORITE_FRAME_EFFECTS_PREFERENCE_KEY
 import com.ztransfer.effects.FAVORITE_PHOTO_FILTERS_PREFERENCE_KEY
@@ -126,6 +131,22 @@ internal class LocalPhotoEffectsPreferences(context: Context) {
     private val appContext = context.applicationContext
     private val preferences = appContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
 
+    fun restoreModules(): Int = normalizePhotoEffectModules(
+        preferences.getInt(KEY_MODULES, ALL_PHOTO_EFFECT_MODULES))
+
+    fun saveModules(mask: Int) {
+        val next = normalizePhotoEffectModules(mask)
+        preferences.edit().apply {
+            putInt(KEY_MODULES, next)
+            if (!next.showsPhotoEffect(PhotoEffectModule.FILTER)) putBoolean(KEY_FILTER_ENABLED, false)
+            if (!next.showsPhotoEffect(PhotoEffectModule.FRAME)) putBoolean(KEY_BORDER_ENABLED, false)
+            if (!next.showsPhotoEffect(PhotoEffectModule.WATERMARK)) putBoolean(KEY_WATERMARK_ENABLED, false)
+        }.apply()
+        if (!next.showsPhotoEffect(PhotoEffectModule.LUT)) {
+            com.ztransfer.lut.PhotoLutStore(appContext).save("local", null, null)
+        }
+    }
+
     fun restore(availableFilterIds: List<String>): LocalPhotoEffectsSettings {
         val fallback = defaultLocalPhotoEffectsSettings(availableFilterIds.firstOrNull())
         val availableFilterIdSet = availableFilterIds.toSet()
@@ -206,7 +227,8 @@ internal class LocalPhotoEffectsPreferences(context: Context) {
         return normalize(restored, availableFilterIdSet)
     }
 
-    fun save(settings: LocalPhotoEffectsSettings) {
+    fun save(value: LocalPhotoEffectsSettings) {
+        val settings = visibleSettings(value)
         preferences.edit().apply {
             putInt(KEY_VERSION, SETTINGS_VERSION)
             putBoolean(KEY_DECORATION_ENABLED, settings.decorationEnabled)
@@ -246,11 +268,21 @@ internal class LocalPhotoEffectsPreferences(context: Context) {
         }.apply()
     }
 
+    private fun visibleSettings(settings: LocalPhotoEffectsSettings): LocalPhotoEffectsSettings {
+        val mask = restoreModules()
+        val border = settings.borderEnabled && mask.showsPhotoEffect(PhotoEffectModule.FRAME)
+        val watermark = settings.watermark.copy(enabled = settings.watermark.enabled &&
+            mask.showsPhotoEffect(PhotoEffectModule.WATERMARK))
+        return settings.copy(borderEnabled = border, watermark = watermark,
+            decorationEnabled = settings.decorationEnabled && (border || watermark.enabled),
+            filterEnabled = settings.filterEnabled && mask.showsPhotoEffect(PhotoEffectModule.FILTER))
+    }
+
     private fun normalize(
         settings: LocalPhotoEffectsSettings,
         availableFilterIds: Set<String>,
     ): LocalPhotoEffectsSettings = normalizeLocalPhotoEffectsSettings(
-        settings = settings,
+        settings = visibleSettings(settings),
         availableFilterIds = availableFilterIds,
         watermarkImageExists = { hash -> photoFrameWatermarkImageFile(appContext, hash).isFile },
     )
@@ -270,6 +302,7 @@ internal class LocalPhotoEffectsPreferences(context: Context) {
         const val LEGACY_SHARED_PREFERENCES_NAME = "ztransfer"
         const val SETTINGS_VERSION = 3
         const val KEY_VERSION = "settings_version"
+        const val KEY_MODULES = "visible_modules"
         const val KEY_DECORATION_ENABLED = "decoration_enabled"
         const val KEY_BORDER_ENABLED = "border_enabled"
         const val KEY_PRESET = "frame_preset"

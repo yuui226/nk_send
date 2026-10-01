@@ -1,11 +1,11 @@
 package com.ztransfer.ui.theme
 
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.FiniteAnimationSpec
+import androidx.compose.animation.core.VisibilityThreshold
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.SpringSpec
 import androidx.compose.animation.core.TweenSpec
-import androidx.compose.animation.core.VisibilityThreshold
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.ui.unit.IntOffset
@@ -15,6 +15,13 @@ import androidx.compose.ui.unit.IntOffset
  * 一次性的微交互（如信号按钮 dBm 收起的干脆利落 tween）留在使用处，不强行入库。
  */
 object Motion {
+    /** 照片列表、队列、监看共用的短距离页面转场。 */
+    const val WORKSPACE_TRAVEL_DP = 24
+    val workspaceProgress: TweenSpec<Float> = tween(300, easing = FastOutSlowInEasing)
+    val workspaceSlide: TweenSpec<IntOffset> = tween(300, easing = FastOutSlowInEasing)
+    val workspaceEnter: TweenSpec<Float> = tween(200, delayMillis = 100, easing = FastOutSlowInEasing)
+    val workspaceExit: TweenSpec<Float> = tween(140, easing = FastOutSlowInEasing)
+
     /** 弹性尺寸变化（顶栏胶囊宽度、信号按钮展开等"内容变了、容器跟着弹"）。 */
     fun <T> bouncy(): SpringSpec<T> = spring(
         dampingRatio = Spring.DampingRatioMediumBouncy,
@@ -39,31 +46,9 @@ object Motion {
     val sheetSlideIn: TweenSpec<IntOffset> = tween(340, easing = FastOutSlowInEasing)
     val sheetSlideOut: TweenSpec<IntOffset> = tween(260, easing = FastOutSlowInEasing)
 
-    /**
-     * "Z传"页 ↔ 队列页左右滑动转场：进/出双方共用同一弹簧——弹簧位移与初始距离成正比，
-     * 上层整页与底层 1/3 视差才全程同步；临界阻尼，横向整页滑动过冲会露出屏幕边缘。
-     */
-    val pageSlide: FiniteAnimationSpec<IntOffset> = spring(
-        dampingRatio = Spring.DampingRatioNoBouncy,
-        stiffness = 380f,
-        visibilityThreshold = IntOffset.VisibilityThreshold
-    )
-
-    /**
-     * 照片列表 ↔ 传输队列允许在转场中立即反向。这里不能复用弹簧：弹簧被打断后会
-     * 继承上一方向的速度，连续切换时可能先冲向旧目标。定时插值始终从当前偏移平滑
-     * 转向新目标，前景整页与底层 1/3 视差仍使用同一规格，因而不会错位。
-     */
-    const val QUEUE_PAGE_SLIDE_MS = 320
-    val queuePageSlide: TweenSpec<IntOffset> = tween(
-        QUEUE_PAGE_SLIDE_MS,
-        easing = FastOutSlowInEasing,
-    )
-
     /** NavHost 默认缩放淡入转场（连接页 ↔ "Z传"页）与滑动转场的配套淡变时长。 */
     const val NAV_ENTER_MS = 420
     const val NAV_EXIT_MS = 280
-    const val PAGE_FADE_MS = 320
 
     /**
      * 列表条目的位移动画（分组收起时下方内容"弹上来"、传输页卡片高度变化让位）。

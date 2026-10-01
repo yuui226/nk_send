@@ -9,6 +9,96 @@ import java.time.LocalDate
 import java.util.Locale
 
 class PhotoFrameMetadataSettingsTest {
+    @Test fun backdropDefaultsCompatibilityAndBoundedPreviewResolution() {
+        val preset = PhotoFramePreset.MIST
+        val original = defaultPhotoFrameMetadataSettings(preset).copy(widthPercent = 130)
+        val oldEncoding = encodePhotoFrameMetadataSettings(mapOf(preset to original))
+        val restored = decodePhotoFrameMetadataSettings(oldEncoding).getValue(preset)
+        assertEquals(100, restored.backgroundBlurPercent)
+        assertEquals(100, restored.backgroundMaskPercent)
+        assertEquals(130, restored.widthPercent)
+        assertEquals(0, normalizeBackdropPercent(Int.MIN_VALUE))
+        assertEquals(200, normalizeBackdropPercent(Int.MAX_VALUE))
+        assertEquals(70, normalizeBackdropPercent(73))
+        assertEquals(192, backdropPreviewLongEdge(preset, 100))
+        assertEquals(1024, backdropPreviewLongEdge(preset, 0))
+        assertEquals(384, backdropPreviewLongEdge(preset, 10))
+        PhotoFramePreset.entries.forEach { style ->
+            (0..200 step 10).forEach { level ->
+                val edge = backdropPreviewLongEdge(style, level)
+                assertTrue(edge in 192..1024)
+                if (!style.supportsBackdropControls()) assertEquals(192, edge)
+            }
+        }
+    }
+
+    @Test fun backdropChangesOutputIdentityIndependentlyWithoutChangingMetadataNeeds() {
+        for (preset in PhotoFramePreset.entries.filter { it.supportsBackdropControls() }) {
+            val original = defaultPhotoFrameMetadataSettings(preset)
+            val blur = original.copy(backgroundBlurPercent = 30)
+            val mask = original.copy(backgroundMaskPercent = 30)
+            val name = photoFrameOutputName("DSC_0001.JPG", preset, metadataSettings = original)
+            assertTrue(name != photoFrameOutputName("DSC_0001.JPG", preset, metadataSettings = blur))
+            assertTrue(name != photoFrameOutputName("DSC_0001.JPG", preset, metadataSettings = mask))
+            assertTrue(photoFrameOutputName("DSC_0001.JPG", preset, metadataSettings = blur) !=
+                photoFrameOutputName("DSC_0001.JPG", preset, metadataSettings = mask))
+            assertEquals(original.requiresCameraMetadata, blur.requiresCameraMetadata)
+            assertEquals(original.requiresCameraMetadata, mask.requiresCameraMetadata)
+        }
+    }
+
+    @Test fun backdropSettingsRoundTripAndInactiveStylesDoNotChangeFingerprint() {
+        PhotoFramePreset.entries.forEach { preset ->
+            val defaults = defaultPhotoFrameMetadataSettings(preset)
+            val adjusted = defaults.copy(backgroundBlurPercent = 0, backgroundMaskPercent = 170)
+            assertEquals(adjusted, decodePhotoFrameMetadataSettings(encodePhotoFrameMetadataSettings(mapOf(preset to adjusted)))[preset])
+            if (!preset.supportsBackdropControls()) {
+                assertEquals(photoFrameMetadataSettingsFingerprintToken(preset, defaults),
+                    photoFrameMetadataSettingsFingerprintToken(preset, adjusted))
+            } else assertTrue(photoFrameMetadataSettingsFingerprintToken(preset, adjusted) != null)
+        }
+    }
+
+    @Test
+    fun brandCycleAndLogoSettingsSurvivePersistenceForEveryPreset() {
+        PhotoFramePreset.entries.forEach { preset ->
+            val off = defaultPhotoFrameMetadataSettings(preset).copy(showBrand = false)
+            val text = off.nextBrandStyle()
+            val logo = text.nextBrandStyle()
+            assertTrue(text.showBrand)
+            assertEquals(PhotoFrameBrandStyle.TEXT, text.brandStyle)
+            assertTrue(logo.showBrand)
+            assertEquals(PhotoFrameBrandStyle.LOGO, logo.brandStyle)
+            for (locations in listOf(false, true)) {
+                val value = logo.copy(showCity = locations, showRegion = locations)
+                assertEquals(value, decodePhotoFrameMetadataSettings(
+                    encodePhotoFrameMetadataSettings(mapOf(preset to value))
+                )[preset])
+            }
+            assertFalse(logo.nextBrandStyle().showBrand)
+        }
+    }
+
+    @Test
+    fun logoRequiresSupportedBrandAndRespectsHiddenBrand() {
+        val options = defaultPhotoFrameMetadataSettings(PhotoFramePreset.MIST)
+            .copy(showBrand = true, brandStyle = PhotoFrameBrandStyle.LOGO)
+        fun metadata(make: String?, model: String?) = PhotoFrameMetadata(make, model, null, null, null, null)
+        assertTrue(metadata("NIKON CORPORATION", "NIKON Z 30").withPresentation(options).useBrandLogo)
+        assertTrue(metadata(null, "NIKON Z 30").withPresentation(options).useBrandLogo)
+        assertFalse(metadata("Canon", "EOS R5").withPresentation(options).useBrandLogo)
+        listOf("SONY", "FUJIFILM", "Panasonic", "Leica", "DJI", "Apple", "SAMSUNG",
+            "HUAWEI", "Xiaomi", "OPPO", "vivo", "HONOR", "OnePlus", "Google",
+            "Motorola", "Nokia Corporation").forEach { brand ->
+            assertTrue(brand, metadata(brand, "Model").withPresentation(options).useBrandLogo)
+            assertFalse(brand, metadata(brand, "Model").withPresentation(options.copy(showBrand = false)).useBrandLogo)
+            assertFalse(brand, metadata(brand, "Model").withPresentation(options.copy(brandStyle = PhotoFrameBrandStyle.TEXT)).useBrandLogo)
+        }
+        assertFalse(metadata("Unknown Camera", "Model").withPresentation(options).useBrandLogo)
+        assertFalse(metadata(null, null).withPresentation(options).useBrandLogo)
+        assertFalse(metadata("NIKON", "NIKON Z 30").withPresentation(options.copy(showBrand = false)).useBrandLogo)
+    }
+
     @Test
     fun defaultsPreserveEachExistingFrameStyle() {
         val standard = listOf(

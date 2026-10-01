@@ -1,5 +1,7 @@
 package com.ztransfer.ui.screen
 
+import androidx.compose.ui.graphics.lerp
+
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -15,6 +17,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -36,6 +39,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -106,8 +110,10 @@ internal fun <T> ReleaseCommitWheel(
     optionRowHeight: Dp = SETTINGS_WHEEL_ROW_HEIGHT,
     optionFontSize: TextUnit = 14.sp,
     optionTextStyle: TextStyle? = null,
+    optionTextColor: Color? = null,
     optionFontWeight: FontWeight? = null,
     optionMaxLines: Int = 1,
+    optionFontSizeFor: ((T) -> TextUnit)? = null,
     showDragHint: Boolean = true,
     accentColor: Color? = null,
     emphasized: Boolean = false,
@@ -133,6 +139,7 @@ internal fun <T> ReleaseCommitWheel(
     val latestDetent by rememberUpdatedState(onDetent)
     val latestActivated by rememberUpdatedState(onActivated)
     val latestLongClick by rememberUpdatedState(onLongClick)
+    val longPressFeedback = if (onLongClick != null) com.ztransfer.ui.util.rememberLongPressFeedback() else null
     val latestFavoriteOption by rememberUpdatedState(favoriteOption)
 
     var dragging by remember { mutableStateOf(false) }
@@ -179,7 +186,7 @@ internal fun <T> ReleaseCommitWheel(
             .background(
                 resolvedAccent.copy(
                     alpha = (if (darkTheme) 0.045f else 0.035f) +
-                        (if (darkTheme) 0.105f else 0.075f) * emphasisProgress +
+                        (if (darkTheme) 0.20f else 0.14f) * emphasisProgress +
                         0.18f * normalizedBurst,
                 )
             )
@@ -191,25 +198,20 @@ internal fun <T> ReleaseCommitWheel(
                         (1f + 0.35f * borderEmphasisProgress).dp
                     else -> 1.dp
                 },
-                brush = if (
-                    dragging || borderEmphasisProgress > 0f || normalizedBurst > 0f
-                ) {
-                    Brush.verticalGradient(
-                        listOf(
-                            resolvedAccent.copy(
-                                alpha = (0.92f + 0.08f * normalizedBurst).coerceAtMost(1f),
-                            ),
-                            resolvedAccent.copy(
-                                alpha = (0.38f + 0.30f * borderEmphasisProgress +
-                                    0.28f * normalizedBurst).coerceAtMost(1f),
-                            ),
-                        )
+                brush = Brush.verticalGradient(
+                    listOf(
+                        lerp(
+                            colors.glassBorderTop,
+                            resolvedAccent.copy(alpha = (0.92f + 0.08f * normalizedBurst).coerceAtMost(1f)),
+                            if (dragging || normalizedBurst > 0f) 1f else borderEmphasisProgress,
+                        ),
+                        lerp(
+                            colors.glassBorderBottom,
+                            resolvedAccent.copy(alpha = (0.68f + 0.28f * normalizedBurst).coerceAtMost(1f)),
+                            if (dragging || normalizedBurst > 0f) 1f else borderEmphasisProgress,
+                        ),
                     )
-                } else {
-                    Brush.verticalGradient(
-                        listOf(colors.glassBorderTop, colors.glassBorderBottom)
-                    )
-                },
+                ),
                 shape = shape,
             )
     Box(
@@ -221,7 +223,7 @@ internal fun <T> ReleaseCommitWheel(
                     append(optionLabel(options[selectedIndex]))
                 }
             }
-            .pointerInput(options.size, rowPx, enabled, readOnly) {
+            .pointerInput(options, rowPx, enabled, readOnly) {
                 if (!enabled || readOnly || !wheelDragEnabled(options.size)) return@pointerInput
                 var accumulatedDy = 0f
                 try {
@@ -271,6 +273,8 @@ internal fun <T> ReleaseCommitWheel(
             .then(
                 if (onLongClick != null) {
                     Modifier.combinedClickable(
+                        interactionSource = longPressFeedback!!.interactions,
+                        indication = androidx.compose.foundation.LocalIndication.current,
                         enabled = enabled && !readOnly,
                         onClick = {
                             if (latestActivated != null) {
@@ -284,7 +288,7 @@ internal fun <T> ReleaseCommitWheel(
                                 }
                             }
                         },
-                        onLongClick = { latestLongClick?.invoke() },
+                        onLongClick = { longPressFeedback.trigger { latestLongClick?.invoke() } },
                     )
                 } else {
                     Modifier.clickable(enabled = enabled && !readOnly) {
@@ -317,16 +321,22 @@ internal fun <T> ReleaseCommitWheel(
         }
 
         if (label != null) {
+            val compactBadge = wheelHeight <= 34.dp
             ControlTileCornerBadge(
                 text = label,
                 textColor = badgeText,
                 backgroundColor = badgeBackground,
                 borderColor = badgeBorder,
                 borderWidth = 0.5.dp,
-                shape = RoundedCornerShape(bottomEnd = 5.dp),
+                fontSize = if (compactBadge) 8.sp else 9.sp,
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                    horizontal = if (compactBadge) 4.dp else 6.dp,
+                    vertical = 1.dp,
+                ),
+                shape = RoundedCornerShape(bottomEnd = if (compactBadge) 4.dp else 5.dp),
                 modifier = Modifier
                     .align(Alignment.TopStart)
-                    .height(15.dp)
+                    .heightIn(min = if (compactBadge) 11.dp else 15.dp)
                     .graphicsLayer { alpha = labelAlpha },
             )
         }
@@ -335,16 +345,19 @@ internal fun <T> ReleaseCommitWheel(
             modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.Center,
         ) {
-            val firstVisible = floor(position).toInt() - 1
-            val lastVisible = ceil(position).toInt() + 1
-            val idleCenter = wheelReleaseIndex(position, options.lastIndex)
+            // Reordering (favorites) and external commits must render the selected identity
+            // immediately, not the previous numeric position until LaunchedEffect runs.
+            val displayPosition = if (dragging) position else selectedIndex.toFloat()
+            val firstVisible = floor(displayPosition).toInt() - 1
+            val lastVisible = ceil(displayPosition).toInt() + 1
+            val idleCenter = selectedIndex
             for (index in firstVisible..lastVisible) {
                 if (index !in options.indices) continue
                 // 与监看参数拨轮一致：静止时只显示中心真值，只有实际拖动后才显示邻档。
                 if (!dragging && index != idleCenter) continue
-                val distance = abs(index - position)
+                val distance = abs(index - displayPosition)
                 val itemAlpha = if (distance < 0.5f) 1f else 0.38f
-                val itemOffsetY = (rowPx * (index - position)).roundToInt()
+                val itemOffsetY = (rowPx * (index - displayPosition)).roundToInt()
                 val itemModifier = if (wheelDragEnabled(options.size)) {
                     Modifier
                         .fillMaxWidth()
@@ -363,6 +376,7 @@ internal fun <T> ReleaseCommitWheel(
                     // band on devices with imperfect layer compositing.
                     Modifier.fillMaxWidth()
                 }
+                val itemFontSize = optionFontSizeFor?.invoke(options[index]) ?: optionFontSize
                 val textStyle = optionTextStyle ?: MaterialTheme.typography.labelMedium
                 val textWeight = optionFontWeight ?: if (distance < 0.5f) {
                     FontWeight.SemiBold
@@ -385,9 +399,9 @@ internal fun <T> ReleaseCommitWheel(
                         Text(
                             text = optionLabel(options[index]),
                             style = textStyle,
-                            fontSize = optionFontSize,
+                            fontSize = itemFontSize,
                             lineHeight = (
-                                optionFontSize.value + if (optionMaxLines > 1) 1f else 2f
+                                itemFontSize.value + if (optionMaxLines > 1) 1f else 2f
                             ).sp,
                             fontWeight = textWeight,
                             color = colors.onBackground.copy(alpha = itemAlpha),
@@ -396,7 +410,9 @@ internal fun <T> ReleaseCommitWheel(
                         )
                     }
                 } else {
-                    val textColor = if (emphasized && distance < 0.5f) {
+                    val textColor = if (optionTextColor != null) {
+                        optionTextColor.copy(alpha = optionTextColor.alpha * itemAlpha)
+                    } else if (emphasized && distance < 0.5f) {
                         resolvedAccent.copy(alpha = itemAlpha)
                     } else {
                         colors.onBackground.copy(alpha = itemAlpha)
@@ -405,9 +421,9 @@ internal fun <T> ReleaseCommitWheel(
                         Text(
                             text = optionLabel(options[index]),
                             style = textStyle,
-                            fontSize = optionFontSize,
+                            fontSize = itemFontSize,
                             lineHeight = (
-                                optionFontSize.value + if (optionMaxLines > 1) 1f else 2f
+                                itemFontSize.value + if (optionMaxLines > 1) 1f else 2f
                             ).sp,
                             fontWeight = textWeight,
                             color = textColor,
@@ -427,9 +443,9 @@ internal fun <T> ReleaseCommitWheel(
                             Text(
                                 text = optionLabel(options[index]),
                                 style = textStyle,
-                                fontSize = optionFontSize,
+                                fontSize = itemFontSize,
                                 lineHeight = (
-                                    optionFontSize.value + if (optionMaxLines > 1) 1f else 2f
+                                    itemFontSize.value + if (optionMaxLines > 1) 1f else 2f
                                 ).sp,
                                 fontWeight = textWeight,
                                 color = textColor,
@@ -442,19 +458,42 @@ internal fun <T> ReleaseCommitWheel(
             }
         }
 
-        if (showDragHint && wheelDragEnabled(options.size)) {
+        if (showDragHint && enabled && !readOnly && wheelDragEnabled(options.size)) {
             // 纯视觉拖动提示：不安装任何手势或点击处理，事件仍完整交给外层波轮。
-            Text(
-                text = "↕",
-                color = colors.onBackground.copy(alpha = 0.30f),
-                fontSize = 10.sp,
-                lineHeight = 10.sp,
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(end = 8.dp, bottom = 5.dp)
-                    .graphicsLayer { alpha = labelAlpha }
-                    .clearAndSetSemantics { },
+            WheelDragHint(
+                color = colors.onSurfaceVariant.copy(alpha = 0.42f),
+                modifier = Modifier.align(Alignment.CenterEnd)
+                    .padding(end = 8.dp)
+                    .graphicsLayer { alpha = labelAlpha },
             )
         }
     }
+}
+
+/** Decorative only: the whole wheel remains the gesture target. */
+@Composable
+internal fun WheelDragHint(color: Color, modifier: Modifier = Modifier) {
+    Box(
+        modifier.size(width = 6.dp, height = 20.dp).clearAndSetSemantics { }
+            .drawWithCache {
+                val stroke = 1.dp.toPx()
+                val inset = stroke / 2f
+                val midX = size.width / 2f
+                val rise = 2.5.dp.toPx()
+                val chevrons = androidx.compose.ui.graphics.Path().apply {
+                    moveTo(inset, inset + rise)
+                    lineTo(midX, inset)
+                    lineTo(size.width - inset, inset + rise)
+                    moveTo(inset, size.height - inset - rise)
+                    lineTo(midX, size.height - inset)
+                    lineTo(size.width - inset, size.height - inset - rise)
+                }
+                val style = androidx.compose.ui.graphics.drawscope.Stroke(
+                    width = stroke,
+                    cap = androidx.compose.ui.graphics.StrokeCap.Round,
+                    join = androidx.compose.ui.graphics.StrokeJoin.Round,
+                )
+                onDrawBehind { drawPath(chevrons, color, style = style) }
+            },
+    )
 }

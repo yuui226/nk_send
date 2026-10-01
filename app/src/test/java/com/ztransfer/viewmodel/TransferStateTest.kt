@@ -12,11 +12,78 @@ import com.ztransfer.filter.NcpPhotoFilterParameters
 import com.ztransfer.filter.PhotoFilterPreset
 import com.ztransfer.filter.PhotoFilterSelection
 import com.ztransfer.protocol.NikonCamera
+import org.junit.Assert.assertTrue
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Test
 
 class TransferStateTest {
+    @Test
+    fun cropThenPreparationWaitDoesNotCountWaitingAsGenerationTime() {
+        val task = TransferTask(file(1), status = TransferStatus.COMPLETED)
+            .queueFrameGeneration().startFrameGeneration(1_000)
+            .pauseFrameGeneration(1_200)
+        assertTrue(task.isGeneratingFrame)
+        assertNull(task.frameGenerationStartedAtElapsedMs)
+        assertEquals(200L, task.frameGenerationAccumulatedMs)
+        val finished = task.startFrameGeneration(5_000).finishFrameGeneration(5_300)
+        assertEquals(500L, finished.frameGenerationElapsedMs)
+    }
+
+    @Test
+    fun generationRetryRetainsSuccessfulDownloadAndMetadataWithoutReenteringDownloadQueue() {
+        val source = SavedOriginalOutput("content://source", "content://tree", "content://parent", "DSC_1.JPG")
+        val metadata = com.ztransfer.frame.PhotoFrameMetadata("Nikon", "Z 30", "f/4", "1/100", "100", "50mm")
+        val failed = TransferTask(file(1), status = TransferStatus.COMPLETED,
+            downloaded = 100, progress = 1f, elapsedMs = 500, downloadMBps = 12f,
+            framePreset = PhotoFramePreset.MIST, frameGenerationError = "encoder failed",
+            savedOriginalOutput = source, sourceMetadataSnapshot = metadata,
+            sourceMetadataPrepared = true, metadataCameraIdentity = "body-a")
+        val retry = failed.newAttempt()
+        assertNotEquals(failed.taskId, retry.taskId)
+        assertEquals(TransferStatus.COMPLETED, retry.status)
+        assertEquals(failed.downloaded, retry.downloaded)
+        assertEquals(failed.elapsedMs, retry.elapsedMs)
+        assertEquals(failed.downloadMBps, retry.downloadMBps)
+        assertEquals(source, retry.savedOriginalOutput)
+        org.junit.Assert.assertSame(metadata, retry.sourceMetadataSnapshot)
+        assertTrue(retry.sourceMetadataPrepared)
+        assertEquals("body-a", retry.metadataCameraIdentity)
+        assertTrue(retry.isGeneratingFrame)
+        assertNull(retry.frameGenerationStartedAtElapsedMs)
+        assertNull(retry.frameGenerationError)
+        org.junit.Assert.assertFalse(retry.canRetry)
+    }
+
+    @Test
+    fun generationFailureIsRetryableButCompletedOrRunningGenerationIsNot() {
+        val completed = TransferTask(file(1), status = TransferStatus.COMPLETED)
+        val failed = completed.copy(frameGenerationError = "disk full")
+        assertEquals(setOf(failed.taskId), retryableTransferTaskIds(listOf(failed), emptySet()))
+        org.junit.Assert.assertFalse(completed.canRetry)
+        org.junit.Assert.assertFalse(failed.copy(isGeneratingFrame = true).canRetry)
+        assertTrue(retryableTransferTaskIds(listOf(failed), setOf(failed.taskId)).isEmpty())
+    }
+
+    @Test
+    fun lutRecipeStaysInQueuedTaskWhenCurrentEffectChanges() {
+        val table = com.ztransfer.lut.CubeLutParser.parse(("LUT_3D_SIZE 2\n" +
+            "0 0 0\n1 0 0\n0 1 0\n1 1 0\n0 0 1\n1 0 1\n0 1 1\n1 1 1\n").byteInputStream())
+        val recipe = PhotoFilterSelection(PhotoFilterPreset("cube:${table.digest}", "Test LUT",
+            com.ztransfer.filter.CubePhotoFilterParameters(table)), 76)
+        val initial = TransferState(photoLut = recipe)
+        val task = createQueueTasks(listOf(file(1)), false, photoFramePreset = PhotoFramePreset.MIST,
+            photoFrameWatermark = PhotoFrameWatermark(enabled = false), photoFilter = initial.photoFilterSelection).single()
+        val disabled = initial.copy(photoLut = null)
+        assertEquals(null, disabled.photoFilterSelection)
+        org.junit.Assert.assertSame(recipe, task.photoFilterRequested)
+        org.junit.Assert.assertSame(table, (task.photoFilterRequested!!.preset.parameters as
+            com.ztransfer.filter.CubePhotoFilterParameters).table)
+        assertEquals(76, task.photoFilterRequested!!.normalizedIntensityPercent)
+        assertEquals(true, task.skipFrameGeneration().frameGenerationSkipped)
+    }
+
     @Test
     fun deferredTransferAndPauseAreOptInByDefault() {
         val state = TransferState()
@@ -107,6 +174,16 @@ class TransferStateTest {
     }
 
     @Test
+    fun queuedGenerationDoesNotCountWaitingTime() {
+        val queued = TransferTask(file(1)).queueFrameGeneration()
+        assertTrue(queued.isGeneratingFrame)
+        assertNull(queued.frameGenerationStartedAtElapsedMs)
+        assertNull(queued.finishFrameGeneration(9_000L).frameGenerationElapsedMs)
+        val finished = queued.startFrameGeneration(10_000L).finishFrameGeneration(12_500L)
+        assertEquals(2_500L, finished.frameGenerationElapsedMs)
+    }
+
+    @Test
     fun frameGenerationTimingUsesUserVisibleMonotonicInterval() {
         val started = TransferTask(file(1)).startFrameGeneration(nowElapsedMs = 1_000L)
 
@@ -128,6 +205,30 @@ class TransferStateTest {
         assertEquals(task, task.finishFrameGeneration(nowElapsedMs = 10_000L))
     }
 
+    @Test
+    fun skippedGenerationKeepsQueuedRecipeAndClearsOnlyGenerationTiming() {
+        val task = TransferTask(file(1), framePreset = PhotoFramePreset.IMMERSIVE,
+            frameMetadataSettings = defaultPhotoFrameMetadataSettings(PhotoFramePreset.IMMERSIVE),
+            status = TransferStatus.COMPLETED, downloaded = 100L, elapsedMs = 200L)
+        val skipped = task.startFrameGeneration(1_000L).skipFrameGeneration()
+        assertEquals(true, skipped.frameGenerationSkipped)
+        assertEquals(false, skipped.isGeneratingFrame)
+        assertEquals(null, skipped.frameGenerationStartedAtElapsedMs)
+        assertEquals(null, skipped.frameGenerationElapsedMs)
+        assertEquals(task.framePreset, skipped.framePreset)
+        assertEquals(task.frameMetadataSettings, skipped.frameMetadataSettings)
+        assertEquals(task.frameWatermarkRequested, skipped.frameWatermarkRequested)
+        assertEquals(task.elapsedMs, skipped.elapsedMs)
+        assertEquals(task.downloaded, skipped.downloaded)
+        // The worker completion callback must not turn a skip into a timed generation.
+        assertEquals(skipped, skipped.finishFrameGeneration(2_000L))
+    }
+
+    @Test
+    fun originalOnlyTaskDoesNotAcquireASkippedGenerationStage() {
+        assertEquals(false, TransferTask(file(1)).skipFrameGeneration().frameGenerationSkipped)
+    }
+
     private fun file(handle: Int) = NikonCamera.FileInfo(
         handle = handle,
         size = 100L,
@@ -136,8 +237,8 @@ class TransferStateTest {
     )
 
     @Test
-    fun photoEffectsUseABoundedMultiWorkerPool() {
-        assertEquals(2, PHOTO_FRAME_EXPORT_PARALLELISM)
+    fun photoEffectsUseASingleExportWorker() {
+        assertEquals(1, PHOTO_FRAME_EXPORT_PARALLELISM)
     }
 
     @Test
@@ -532,6 +633,10 @@ class TransferStateTest {
         assertEquals(null, task.framePreset)
         assertEquals(filter, task.photoFilterRequested)
         assertEquals(64, task.photoFilterRequested?.normalizedIntensityPercent)
+        val skipped = task.skipFrameGeneration()
+        assertEquals(true, skipped.frameGenerationSkipped)
+        assertEquals(filter, skipped.photoFilterRequested)
+        assertEquals(false, task.frameGenerationSkipped)
     }
 
     @Test

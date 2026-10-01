@@ -1,6 +1,12 @@
 package com.ztransfer.recorder
 
 import android.annotation.SuppressLint
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.RectF
+import androidx.compose.ui.graphics.asAndroidBitmap
+import kotlin.math.roundToInt
 import android.media.AudioDeviceInfo
 import android.media.AudioFormat
 import android.media.AudioRecord
@@ -57,11 +63,12 @@ class ViewfinderRecorder(
     private val srcHeight: Int,
     private val frameRate: Int = 60,
     private val withAudio: Boolean = false,
-    private val preferredAudioInput: AudioDeviceInfo? = null
+    private val preferredAudioInput: AudioDeviceInfo? = null,
+    private val desqueezeMultiplier: Float = 1f
 ) {
     // 编码尺寸向下取偶：YUV420 色度按 2x2 块下采样，奇数宽高会让转换时数组越界。
-    // 帧尺寸校验仍按 srcWidth/srcHeight 比对，取像素时只读左上角偶数区域。
-    private val width = srcWidth and -2
+    // 编码器尺寸在开录时确定；后续 HD/反挤压变化按比例适配到同一输出画布。
+    private val width = (srcWidth * desqueezeMultiplier.takeIf { it.isFinite() && it in 1f..2f }.let { it ?: 1f }).roundToInt() and -2
     private val height = srcHeight and -2
 
     @Volatile
@@ -113,6 +120,9 @@ class ViewfinderRecorder(
 
     private var yuvBuffer: ByteArray? = null
     private var pixelBuffer: IntArray? = null
+    private var scaledFrame: Bitmap? = null
+    private var scaledCanvas: Canvas? = null
+    private val scalePaint = Paint(Paint.FILTER_BITMAP_FLAG)
 
     // ---- public API -------------------------------------------------------
 
@@ -210,13 +220,10 @@ class ViewfinderRecorder(
      * 时钟，即 receivedAtElapsedMs * 1_000_000），PTS 按它落盘；传负值退回取当前
      * 时刻（兼容无时间戳来源）。
      */
-    fun encodeFrame(bitmap: ImageBitmap, frameTimeNs: Long = -1L): Boolean {
+    @Synchronized
+    fun encodeFrame(bitmap: ImageBitmap, frameTimeNs: Long = -1L, desqueeze: Float = desqueezeMultiplier): Boolean {
         val c = videoCodec ?: return false
         if (!isRecording) return false
-        if (bitmap.width != srcWidth || bitmap.height != srcHeight) {
-            Log.w(TAG, "Frame size mismatch: expected ${srcWidth}x${srcHeight}, got ${bitmap.width}x${bitmap.height}")
-            return false
-        }
         if (isPaused) return true  // 暂停中不喂帧；PTS 由挂钟扣除暂停时段保证连续
 
         return try {
@@ -224,7 +231,7 @@ class ViewfinderRecorder(
             drainVideo(c)
 
             // Convert and feed.
-            argbToYuv420(bitmap)
+            argbToYuv420(bitmap, desqueeze)
             val buf = yuvBuffer ?: return false
             val pts = computeVideoPts(frameTimeNs)
 
@@ -275,6 +282,7 @@ class ViewfinderRecorder(
      * Finalise both encoders and the muxer, then return the completed file's
      * display name. Returns null if recording never produced a playable file.
      */
+    @Synchronized
     fun stop(): String? {
         if (!isRecording) return displayName
         isRecording = false
@@ -305,12 +313,18 @@ class ViewfinderRecorder(
                 // Drain until EOS (内部另有 2s 兜底超时).
                 drainVideo(c, endOfStream = queuedEos)
             }
-            // muxer 从未启动（一帧都没写成）说明文件是空壳，按失败上报。
-            if (muxerStarted) name else null
+            // Report success only after the MP4 index has actually been finalized.
+            synchronized(muxerLock) {
+                if (!muxerStarted) null else {
+                    muxer!!.stop()
+                    muxerStarted = false
+                    name
+                }
+            }
         } catch (e: Exception) {
             Log.e(TAG, "stop error", e)
-            // Return the name anyway -- the file may be partially playable.
-            if (muxerStarted) name else null
+            // Keep any partial file for recovery, but do not report a successful save.
+            null
         } finally {
             releaseInternal()
         }
@@ -702,14 +716,33 @@ class ViewfinderRecorder(
      * coefficients. Writes into [yuvBuffer] as three contiguous planes:
      * Y (w*h), U (w*h/4), V (w*h/4).
      */
-    private fun argbToYuv420(bitmap: ImageBitmap) {
+    private fun argbToYuv420(bitmap: ImageBitmap, desqueeze: Float) {
         val pixels = pixelBuffer ?: return
         val yuv = yuvBuffer ?: return
         val w = width
         val h = height
         val ySize = w * h
 
-        bitmap.readPixels(pixels, 0, 0, w, h, 0, w)
+        val multiplier = desqueeze.takeIf { it.isFinite() && it in 1f..2f } ?: 1f
+        if (bitmap.width == w && bitmap.height == h && multiplier == 1f) {
+            bitmap.readPixels(pixels, 0, 0, w, h, 0, w)
+        } else {
+            // Keep encoder geometry fixed for the file. HD changes and de-squeeze changes
+            // are fitted into that viewport, with reusable storage and no UI overlays.
+            if (scaledFrame == null) {
+                scaledFrame = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+                scaledCanvas = Canvas(scaledFrame!!)
+            }
+            val canvas = scaledCanvas!!
+            canvas.drawColor(android.graphics.Color.BLACK)
+            val aspect = bitmap.width.toFloat() * multiplier / bitmap.height
+            val drawWidth = minOf(w.toFloat(), h * aspect)
+            val drawHeight = drawWidth / aspect
+            val left = (w - drawWidth) / 2f
+            val top = (h - drawHeight) / 2f
+            canvas.drawBitmap(bitmap.asAndroidBitmap(), null, RectF(left, top, left + drawWidth, top + drawHeight), scalePaint)
+            scaledFrame!!.getPixels(pixels, 0, w, 0, 0, w, h)
+        }
 
         // --- Y plane (full resolution) ---
         var yi = 0
@@ -798,7 +831,7 @@ class ViewfinderRecorder(
         // muxer 置空放在 muxerLock 里：万一音频线程 join 超时还活着，
         // 它后续的 writeSample 会看到 null 直接返回，不摸已释放的 muxer。
         synchronized(muxerLock) {
-            runCatching { muxer?.stop() }
+            if (muxerStarted) runCatching { muxer?.stop() }
             runCatching { muxer?.release() }
             muxer = null
             muxerStarted = false
@@ -822,6 +855,9 @@ class ViewfinderRecorder(
         lastAudioPtsUs = -1L
         yuvBuffer = null
         pixelBuffer = null
+        scaledCanvas = null
+        scaledFrame?.recycle()
+        scaledFrame = null
     }
 
     private fun bitRate(w: Int, h: Int, fps: Int): Int {

@@ -115,43 +115,46 @@ internal fun TipLightbulbButton(
     } else {
         1f to 1f
     }
-    GlassButton(
-        onClick = onClick,
-        shape = RoundedCornerShape(12.dp),
-        contentPadding = PaddingValues(0.dp),
-        textureSeed = TIP_LIGHTBULB_TEXTURE_SEED,
-        materialContentColor = iconColor,
-        modifier = modifier.graphicsLayer {
-            scaleX = attentionScale
-            scaleY = attentionScale
-        },
-    ) {
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center,
+    // Keep popup anchors independent from press/attention animation and touch expansion.
+    Box(modifier = modifier, contentAlignment = Alignment.Center, propagateMinConstraints = true) {
+        GlassButton(
+            onClick = onClick,
+            shape = RoundedCornerShape(12.dp),
+            contentPadding = PaddingValues(0.dp),
+            textureSeed = TIP_LIGHTBULB_TEXTURE_SEED,
+            materialContentColor = iconColor,
+            modifier = Modifier.graphicsLayer {
+                scaleX = attentionScale
+                scaleY = attentionScale
+            },
         ) {
-            Icon(
-                Icons.Default.Lightbulb,
-                contentDescription = contentDescription,
-                tint = iconColor,
-                modifier = Modifier.fillMaxSize(0.45f),
-            )
-            if (attention) {
-                // 一次性未读引导：红点补足单靠缩放不易察觉的问题；点击后由持久化状态移除。
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        // Keep the unread marker inside the rounded button surface. Placing it
-                        // on the edge lets the button's corner clip the marker into a crescent.
-                        .padding(top = 5.dp, end = 5.dp)
-                        .size(7.dp)
-                        .background(Color(0xFFFF4D3D), CircleShape)
-                        .graphicsLayer {
-                            scaleX = attentionDot.first
-                            scaleY = attentionDot.first
-                            alpha = attentionDot.second
-                        },
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Default.Lightbulb,
+                    contentDescription = contentDescription,
+                    tint = iconColor,
+                    modifier = Modifier.fillMaxSize(0.45f),
                 )
+                if (attention) {
+                    // 一次性未读引导：红点补足单靠缩放不易察觉的问题；点击后由持久化状态移除。
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            // Keep the unread marker inside the rounded button surface. Placing it
+                            // on the edge lets the button's corner clip the marker into a crescent.
+                            .padding(top = 5.dp, end = 5.dp)
+                            .size(7.dp)
+                            .background(Color(0xFFFF4D3D), CircleShape)
+                            .graphicsLayer {
+                                scaleX = attentionDot.first
+                                scaleY = attentionDot.first
+                                alpha = attentionDot.second
+                            },
+                    )
+                }
             }
         }
     }
@@ -274,6 +277,7 @@ internal fun TipBubbleContent(
     title: String,
     items: List<TipBubbleItem>,
     modifier: Modifier = Modifier,
+    bulleted: Boolean = false,
 ) {
     val colors = AppTheme.colors
     Column(modifier = modifier.padding(18.dp)) {
@@ -305,7 +309,18 @@ internal fun TipBubbleContent(
                 if (hasText) Spacer(Modifier.height(5.dp))
             }
             if (!hasText) return@forEachIndexed
-            if (item.emphasized) {
+            if (bulleted) {
+                Row(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "·",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.onSurfaceVariant,
+                    )
+                    Box(Modifier.weight(1f)) {
+                        TipBubbleItemText(item, colors.onSurfaceVariant, null)
+                    }
+                }
+            } else if (item.emphasized) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()

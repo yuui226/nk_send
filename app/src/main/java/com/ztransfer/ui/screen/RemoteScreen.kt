@@ -1,5 +1,10 @@
 package com.ztransfer.ui.screen
 
+import com.ztransfer.util.HistogramMode
+import com.ztransfer.lut.LutFolderRepository
+import com.ztransfer.lut.LutMonitorState
+import com.ztransfer.lut.LutPreferences
+
 import android.Manifest
 import android.content.Context
 import android.content.pm.ActivityInfo
@@ -10,11 +15,13 @@ import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.net.Uri
 import android.os.SystemClock
+import android.widget.Toast
 import android.provider.DocumentsContract
 import android.view.OrientationEventListener
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Animatable
@@ -35,6 +42,8 @@ import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -55,11 +64,14 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.CenterFocusStrong
+import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.outlined.AspectRatio
@@ -68,9 +80,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
@@ -89,7 +103,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.Layout
-import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.layoutId
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -102,11 +116,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.ztransfer.BuildConfig
 import com.ztransfer.R
 import com.ztransfer.license.LicenseManager
 import com.ztransfer.protocol.CameraConnectionType
@@ -119,6 +135,7 @@ import com.ztransfer.protocol.LiveViewSoundLevels
 import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.protocol.PtpConstants
 import com.ztransfer.protocol.RcParam
+import com.ztransfer.protocol.RemoteCameraTool
 import com.ztransfer.protocol.labEndLiveView
 import com.ztransfer.protocol.labGrabFrame
 import com.ztransfer.protocol.labStartLiveView
@@ -126,6 +143,10 @@ import com.ztransfer.protocol.liveViewWarmupRemainingMs
 import com.ztransfer.protocol.rcAfDriveAndWait
 import com.ztransfer.protocol.rcAngleLevelRoll
 import com.ztransfer.protocol.rcAutoIsoCandidateProps
+import com.ztransfer.protocol.NIKON_EXPOSURE_INDICATE
+import com.ztransfer.protocol.NIKON_LIGHT_METER
+import com.ztransfer.protocol.rcExposureMeterEv
+import com.ztransfer.protocol.rcReadExposureMeter
 import com.ztransfer.protocol.rcBatteryPercentage
 import com.ztransfer.protocol.rcCapture
 import com.ztransfer.protocol.rcFocusAt
@@ -158,6 +179,8 @@ import com.ztransfer.ui.theme.Motion
 import com.ztransfer.ui.theme.SkinPreset
 import com.ztransfer.ui.theme.rememberAppBackgroundBrush
 import com.ztransfer.ui.util.rememberHaptics
+import com.ztransfer.viewmodel.presentationConnectionType
+import com.ztransfer.viewmodel.presentationIsSta
 import com.ztransfer.viewmodel.CameraViewModel
 import com.ztransfer.recorder.RecordingSink
 import com.ztransfer.recorder.ViewfinderRecorder
@@ -262,8 +285,10 @@ internal fun shouldPrepareUsbMovieSessionForRecord(
 
 internal fun shouldReturnUsbMovieSessionToStandby(
     connectionType: CameraConnectionType,
-    remoteControlModeSet: Boolean
-): Boolean = connectionType == CameraConnectionType.USB && remoteControlModeSet
+    remoteControlModeSet: Boolean,
+    diagnosticControlModeSet: Boolean = false
+): Boolean = connectionType == CameraConnectionType.USB && remoteControlModeSet &&
+    !diagnosticControlModeSet
 
 /**
  * A single GetEvent can repeat the same property change many times while Live View starts.
@@ -291,6 +316,7 @@ private data class RemoteLiveFrame(
     val histogram: LuminanceHistogram?,
     /** 过曝斑马掩码；斑马纹关闭或尚未计算时为 null，叠加层一笔不画。 */
     val zebraMask: ZebraMask?,
+    val analysis: MonitorAnalysis?,
     val metadata: LiveViewMetadata?,
     val receivedAtElapsedMs: Long
 )
@@ -310,7 +336,7 @@ private class HistogramThrottle {
     var cached: LuminanceHistogram? = null
 }
 
-/** 斑马掩码与直方图同一套节流：250ms 算一次，节流间隔内复用缓存实例。 */
+/** 斑马掩码最多 20Hz 更新，节流间隔内复用缓存实例。 */
 private class ZebraThrottle {
     var lastCalculatedAtMs: Long = 0L
     var cached: ZebraMask? = null
@@ -347,7 +373,6 @@ fun RemoteScreen(
     onNavigateBack: () -> Unit
 ) {
     val backgroundBrush = rememberAppBackgroundBrush()
-    val transferState by transferViewModel.state.collectAsState()
     val context = LocalContext.current
     val activity = context.findActivity()
     val originalOrientation = remember(activity) {
@@ -355,8 +380,13 @@ fun RemoteScreen(
     }
     val lifecycleOwner = LocalLifecycleOwner.current
     val screenScope = rememberCoroutineScope()
-    // 每次进入监看页都从竖向布局开始；横向只由本次会话中的手动旋转或陀螺仪触发。
-    var rotation by remember { mutableIntStateOf(0) }
+    val tools = remember(context) { RemoteToolPreferences(context.getSharedPreferences("ztransfer", Context.MODE_PRIVATE)) }
+    var rotation by remember { mutableIntStateOf(if (tools.locked.value) tools.lockedRotation.value else 0) }
+    val orientationLocked by tools.locked
+    var editingTools by remember { mutableStateOf(false) }
+    // Keep the portrait editor stable while the user rearranges tools.
+    val orientationFrozen = orientationLocked || editingTools
+    val currentOrientationLocked by rememberUpdatedState(orientationFrozen)
     var switchingRotation by remember { mutableStateOf(false) }
     val rotationFade = remember { Animatable(1f) }
     val rotationRequests = remember { Channel<RemoteRotationRequest>(Channel.CONFLATED) }
@@ -374,14 +404,16 @@ fun RemoteScreen(
 
     LaunchedEffect(rotationRequests) {
         for (request in rotationRequests) {
-            if (request.rotation == rotation) continue
+            if (currentOrientationLocked || request.rotation == rotation) continue
             switchingRotation = true
             try {
                 rotationFade.animateTo(
                     targetValue = 0f,
                     animationSpec = tween(REMOTE_ROTATION_FADE_OUT_MS),
                 )
-                rotation = request.rotation
+                if (!currentOrientationLocked) {
+                    rotation = request.rotation
+                }
                 // Let the new constraints/layout reach composition while the host is invisible.
                 withFrameNanos { }
                 rotationFade.animateTo(
@@ -394,9 +426,10 @@ fun RemoteScreen(
         }
     }
 
-    DisposableEffect(context, lifecycleOwner, orientationSession, rotationRequests) {
+    DisposableEffect(context, lifecycleOwner, orientationSession, rotationRequests, orientationFrozen) {
         val listener = object : OrientationEventListener(context, SensorManager.SENSOR_DELAY_NORMAL) {
             override fun onOrientationChanged(orientation: Int) {
+                if (currentOrientationLocked) return
                 val candidate = remoteRotationForDeviceOrientation(orientation)
                 if (candidate == orientationSession.candidateRotation) return
 
@@ -419,7 +452,7 @@ fun RemoteScreen(
         val canDetectOrientation = listener.canDetectOrientation()
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_RESUME -> if (canDetectOrientation) listener.enable()
+                Lifecycle.Event.ON_RESUME -> if (canDetectOrientation && !currentOrientationLocked) listener.enable()
                 Lifecycle.Event.ON_PAUSE -> {
                     listener.disable()
                     orientationSession.pause()
@@ -428,6 +461,11 @@ fun RemoteScreen(
             }
         }
 
+        if (orientationFrozen) {
+            listener.disable()
+            orientationSession.pause()
+            while (rotationRequests.tryReceive().isSuccess) { /* discard queued rotations */ }
+        }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
             listener.disable()
@@ -437,7 +475,7 @@ fun RemoteScreen(
     }
 
     fun cycleRotation() {
-        if (switchingRotation) return
+        if (switchingRotation || currentOrientationLocked) return
         orientationSession.suppressCurrentDirection()
         rotationRequests.trySend(
             RemoteRotationRequest(rotation = (rotation + 1) % 3)
@@ -502,8 +540,21 @@ fun RemoteScreen(
                     RemoteContent(
                         cameraViewModel = cameraViewModel,
                         transferViewModel = transferViewModel,
-                        onNavigateBack = onNavigateBack,
+                        onNavigateBack = { if (editingTools) editingTools = false else onNavigateBack() },
                         rotation = rotation,
+                        tools = tools,
+                        editingTools = editingTools,
+                        onEditingTools = { editing ->
+                            orientationSession.pause()
+                            while (rotationRequests.tryReceive().isSuccess) { }
+                            editingTools = editing && rotation == 0
+                        },
+                        onLockRotation = { lock ->
+                            orientationSession.pause()
+                            while (rotationRequests.tryReceive().isSuccess) { }
+                            if (lock) tools.lockedRotation.value = rotation
+                            tools.locked.value = lock
+                        },
                         onCycleRotation = ::cycleRotation,
                         onReady = { trialArmed = true },
                         trialLeftSeconds = if (!isPro) ((trialLeftMs / 1000).coerceAtLeast(0)).toInt() else null,
@@ -527,8 +578,6 @@ object RemoteTrialNotice {
 /** 首帧到达前的取景器占位宽高比（尼康监看常见 3:2）；有帧后一律用帧的真实比例。 */
 private const val DEFAULT_VIEWFINDER_ASPECT = 3f / 2f
 private const val BATTERY_REFRESH_INTERVAL_MS = 120_000L
-private const val REMOTE_AUDIO_LEVELS_VISIBLE_KEY = "remote_audio_levels_visible"
-private const val REMOTE_DESQUEEZE_MULTIPLIER_KEY = "remote_desqueeze_multiplier"
 private val REMOTE_DESQUEEZE_OPTIONS = listOf(1f, 1.33f, 1.5f, 1.8f, 2f)
 
 private fun desqueezeDisplayValue(value: Float): String =
@@ -540,18 +589,19 @@ private fun RemoteContent(
     transferViewModel: TransferViewModel,
     onNavigateBack: () -> Unit,
     rotation: Int,
+    tools: RemoteToolPreferences,
+    editingTools: Boolean,
+    onEditingTools: (Boolean) -> Unit,
+    onLockRotation: (Boolean) -> Unit,
     onCycleRotation: () -> Unit,
     onReady: () -> Unit = {},
     trialLeftSeconds: Int? = null,
     isPro: Boolean = false
 ) {
     val colors = AppTheme.colors
-    val scope = rememberCoroutineScope()
-    val context = LocalContext.current
-    val clipboard = LocalClipboardManager.current
     val camState by cameraViewModel.state.collectAsState()
     val transferState by transferViewModel.state.collectAsState()
-    val haptics = rememberHaptics(transferState.hapticsEnabled)
+    val services = rememberRemoteScreenServices(transferState.hapticsEnabled)
     val connected = camState.isConnectedToCamera
 
     // ---------- 会话状态 ----------
@@ -582,7 +632,7 @@ private fun RemoteContent(
     var batteryParam by remember { mutableStateOf<RcParam?>(null) }
     val params = remember { mutableStateMapOf<Int, RcParam>() }
     // 每个参数一个待发送任务：乐观更新后合并发送最终值（声明在前，事件循环要引用）
-    val pendingSets = remember { mutableMapOf<Int, Job>() }
+    val pendingSets = remember { mutableStateMapOf<Int, Job>() }
     var autoIsoProp by remember { mutableStateOf<Int?>(null) }
     var autoIsoPropMovieMode by remember { mutableStateOf<Boolean?>(null) }
     var autoIsoBusy by remember { mutableStateOf(false) }
@@ -601,57 +651,71 @@ private fun RemoteContent(
     }
     // 弹出完整值表的参数（点胶囊中间值触发）
     var listProp by remember { mutableStateOf<Int?>(null) }
+    val parameterAnchors = remember { mutableMapOf<Int, androidx.compose.ui.layout.LayoutCoordinates>() }
 
     // ---------- 开发者面板 ----------
-    val logLines = remember { mutableStateListOf<String>() }
+    val diagnosticPreferences = remember(services.context) {
+        services.context.getSharedPreferences("remote_diagnostics", Context.MODE_PRIVATE)
+    }
+    val logLines = remember {
+        mutableStateListOf<String>().apply {
+            diagnosticPreferences.getString("last_report", null)?.lineSequence()
+                ?.filter { it.isNotBlank() && "] meter " !in it }?.forEach { appendRemoteDiagnosticLine(this, it) }
+        }
+    }
+    var diagnosticReportStarted by remember { mutableStateOf(false) }
+    var diagnosticCapture by remember { mutableStateOf(false) }
     var devPanel by remember { mutableStateOf(false) }
+    var diagnosticControlEnabled by remember { mutableStateOf(false) }
+    var diagnosticControlBusy by remember { mutableStateOf(false) }
+    var diagnosticControlJob by remember { mutableStateOf<Job?>(null) }
+    var diagnosticControlStatus by remember { mutableStateOf<String?>(null) }
+    // 切换后关掉调试窗仍记录快门写入和回读，方便实际调节后复制整份反馈。
+    var diagnosticControlLogging by remember { mutableStateOf(false) }
     // 开发者入口默认隐藏：1.5s 内连按 4 次 FPS 键才现身（FPS 连按 4 次开关状态
     // 恰好复原，不留副作用）。仅本次进页有效，退页复位——这是诊断后门不是常驻功能。
     var devUnlocked by remember { mutableStateOf(false) }
     var fpsTaps by remember { mutableIntStateOf(0) }
     var lastFpsTapAt by remember { mutableLongStateOf(0L) }
-    var showFps by remember { mutableStateOf(true) }    // 帧率覆盖默认显示（右下角）
-    var hdLiveView by remember { mutableStateOf(false) } // 高清监看(XGA)开关
-    var showHistogram by remember { mutableStateOf(false) }
-    var framingGrid by remember { mutableStateOf(ViewfinderGrid.OFF) }
-    var showZebra by remember { mutableStateOf(false) }
-    var showLevel by remember { mutableStateOf(false) }
-    val remotePreferences = remember(context) {
-        context.getSharedPreferences("ztransfer", Context.MODE_PRIVATE)
-    }
-    var showAudioLevels by remember {
-        mutableStateOf(
-            remotePreferences.getBoolean(REMOTE_AUDIO_LEVELS_VISIBLE_KEY, true)
-        )
-    }
-    var desqueezeMultiplier by remember {
-        mutableFloatStateOf(remotePreferences.getFloat(REMOTE_DESQUEEZE_MULTIPLIER_KEY, 1f).coerceIn(1f, 2f))
-    }
-    fun setDesqueezeMultiplier(value: Float) {
-        desqueezeMultiplier = value
-        remotePreferences.edit().putFloat(REMOTE_DESQUEEZE_MULTIPLIER_KEY, value).apply()
-    }
-    fun toggleAudioLevels() {
-        showAudioLevels = !showAudioLevels
-        remotePreferences.edit()
-            .putBoolean(REMOTE_AUDIO_LEVELS_VISIBLE_KEY, showAudioLevels)
-            .apply()
-    }
+    var showFps by tools.fps
+    var hdLiveView by tools.hd
+    var histogramMode by tools.histogram
+    val showHistogram = histogramMode != HistogramMode.OFF
+    var framingGrid by tools.grid
+    var exposureAssist by tools.exposure
+    val showZebra = exposureAssist == ExposureAssist.ZEBRA
+    var showLevel by tools.level
+    var showMeter by tools.meter
+    var meterSample by remember { mutableStateOf<Pair<Float, Long>?>(null) }
+    val meterGeneration = remember { longArrayOf(0L) }
+    var showAudioLevels by tools.audio
+    var desqueezeMultiplier by tools.desqueeze
+    var waveformMode by tools.waveform
+    val showWaveform = waveformMode != WaveformMode.OFF
+    var gridPanelOpen by remember { mutableStateOf(false) }
+    var gridPanelCloseRequested by remember { mutableStateOf(false) }
+    var gridAnchor by remember { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
+    var cameraToolPanel by remember { mutableStateOf<RemoteCameraTool?>(null) }
+    val cameraToolUnavailableHint = stringResource(R.string.remote_camera_tool_unavailable)
+    var cameraToolLoading by remember(cameraToolPanel) { mutableStateOf(cameraToolPanel != null) }
+    var cameraToolCloseRequested by remember { mutableStateOf(false) }
+    var toolOverlayCoordinates by remember { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
+    var whiteBalanceAnchor by remember { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
+    var focusAreaAnchor by remember { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
+    fun setDesqueezeMultiplier(value: Float) { desqueezeMultiplier = value }
+    fun toggleAudioLevels() { showAudioLevels = !showAudioLevels }
     // 相机机身的滚转角（0xD067），null=还没读到/机身不支持，此时水平仪一笔都不画
     var levelRoll by remember { mutableStateOf<Float?>(null) }
+    var levelPitch by remember { mutableStateOf<Float?>(null) }
     var probing by remember { mutableStateOf(false) }
-    // 全屏监看：沿用同一个取景器实例做边界动画，只保留右上角返回。
-    var immersiveFullscreen by remember { mutableStateOf(false) }
-    fun enterFullscreen() {
-        // 竖屏入口先沿用页面现有的转屏动画进入横屏；退出全屏后停留在横屏常规布局。
-        if (rotation == 0) onCycleRotation()
-        listProp = null
-        devPanel = false
-        immersiveFullscreen = true
+    val landscapeLayout = rotation != 0
+    LaunchedEffect(rotation, editingTools) {
+        gridPanelOpen = false
+        gridPanelCloseRequested = false
+        cameraToolPanel = null
+        cameraToolCloseRequested = false
     }
-    BackHandler(enabled = immersiveFullscreen) {
-        immersiveFullscreen = false
-    }
+    BackHandler(enabled = devPanel) { devPanel = false }
     var viewfinderRecorder by remember { mutableStateOf<ViewfinderRecorder?>(null) }
     var recElapsed by remember { mutableIntStateOf(0) }
     var recJob by remember { mutableStateOf<Job?>(null) }
@@ -661,20 +725,41 @@ private fun RemoteContent(
     // 暂停态用 Compose 状态镜像：recorder.isPaused 是普通 @Volatile 字段，
     // 直接读它不会触发重组，暂停/继续按钮图标会卡住不切换。
     var recPaused by remember { mutableStateOf(false) }
+    fun appendDiagnostic(line: String) {
+        val stamp = java.time.LocalTime.now().toString().take(12)
+        appendRemoteDiagnosticLine(logLines, "[$stamp] $line")
+        // apply 在内存立即更新并异步落盘；退出清理也走此路径，重进页仍能复制失败报告。
+        diagnosticPreferences.edit().putString("last_report", logLines.joinToString("\n")).apply()
+    }
     fun devLog(line: String) {
-        logLines.add(line)
-        // 全量能力探测会为每个属性保留 DESC/VALUE 原始载荷，通常有数百行。
-        // 留足容量，确保用户点“复制日志”时开头的机型与完整码表没有被环形淘汰。
-        if (logLines.size > 5_000) logLines.removeAt(0)
+        if (!diagnosticCapture && !diagnosticControlLogging) return
+        if (!isRemoteDiagnosticLine(line)) return
+        appendDiagnostic(line)
+    }
+
+    fun beginDiagnosticReport(cam: NikonCamera) {
+        diagnosticControlLogging = true
+        if (diagnosticReportStarted) return
+        diagnosticReportStarted = true
+        logLines.clear()
+        devLog("diagnostic report v2 date=${java.time.OffsetDateTime.now()} " +
+            "app=${BuildConfig.VERSION_NAME}(${BuildConfig.VERSION_CODE}) " +
+            "android=${android.os.Build.VERSION.RELEASE}")
+        devLog("diagnostic camera=${cam.deviceModel ?: "unknown"} " +
+            "firmware=${cam.cachedDeviceInfo?.deviceVersion ?: "unknown"} " +
+            "transport=${cam.connectionType} wifiMode=${if (cam.connectionType == CameraConnectionType.USB) "n/a" else if (camState.isStaConnection) "STA" else "AP"}")
     }
 
     // 事件总线：单一轮询协程独占 GetEvent（事件是取走即消费的，多处轮询会互相偷事件），
     // 拍摄流程从这里等 ObjectAdded。
     val eventFlow = remember { MutableSharedFlow<Pair<Int, Long>>(extraBufferCapacity = 32) }
 
-    val currentHistogramEnabled = rememberUpdatedState(showHistogram)
+    val currentHistogramMode = rememberUpdatedState(histogramMode)
     val histogramThrottle = remember { HistogramThrottle() }
     val currentZebraEnabled = rememberUpdatedState(showZebra)
+    val currentFalseColorEnabled = rememberUpdatedState(exposureAssist == ExposureAssist.FALSE_COLOR)
+    val currentWaveformMode = rememberUpdatedState(waveformMode)
+    val analysisThrottle = remember { MonitorAnalysisThrottle() }
     val zebraThrottle = remember { ZebraThrottle() }
     suspend fun decode(
         bytes: ByteArray,
@@ -684,12 +769,14 @@ private fun RemoteContent(
     ): RemoteLiveFrame? =
         withContext(Dispatchers.Default) {
             BitmapFactory.decodeByteArray(bytes, offset, bytes.size - offset)?.let { bitmap ->
-                val histogram = if (currentHistogramEnabled.value) {
+                val histogram = if (currentHistogramMode.value != HistogramMode.OFF) {
                     val now = SystemClock.elapsedRealtime()
+                    val includeRgb = currentHistogramMode.value == HistogramMode.RGB
                     if (histogramThrottle.cached == null ||
+                        (includeRgb && histogramThrottle.cached?.rgb == null) ||
                         now - histogramThrottle.lastCalculatedAtMs >= 250L
                     ) {
-                        histogramThrottle.cached = calculateLuminanceHistogram(bitmap)
+                        histogramThrottle.cached = calculateLuminanceHistogram(bitmap, includeRgb = includeRgb)
                         histogramThrottle.lastCalculatedAtMs = now
                     }
                     histogramThrottle.cached
@@ -697,11 +784,11 @@ private fun RemoteContent(
                     histogramThrottle.cached = null
                     null
                 }
-                // 斑马掩码与直方图同一节奏：解码线程上按 250ms 节流计算，关闭时零开销。
+                // 斑马掩码独立以最多 20Hz 更新，避免高光区域跟随动作明显滞后。
                 val zebraMask = if (currentZebraEnabled.value) {
                     val now = SystemClock.elapsedRealtime()
                     if (zebraThrottle.cached == null ||
-                        now - zebraThrottle.lastCalculatedAtMs >= 250L
+                        now - zebraThrottle.lastCalculatedAtMs >= 50L
                     ) {
                         zebraThrottle.cached = calculateZebraMask(bitmap)
                         zebraThrottle.lastCalculatedAtMs = now
@@ -711,10 +798,14 @@ private fun RemoteContent(
                     zebraThrottle.cached = null
                     null
                 }
+                val falseColor = currentFalseColorEnabled.value
+                val waveform = currentWaveformMode.value
+                val analysis = analysisThrottle.analyze(bitmap, falseColor, waveform != WaveformMode.OFF, SystemClock.elapsedRealtime(), rgb = waveform == WaveformMode.RGB)
                 RemoteLiveFrame(
                     image = bitmap.asImageBitmap(),
                     histogram = histogram,
                     zebraMask = zebraMask,
+                    analysis = analysis,
                     metadata = metadata,
                     receivedAtElapsedMs = receivedAtElapsedMs
                 )
@@ -723,7 +814,48 @@ private fun RemoteContent(
 
     suspend fun refreshParam(prop: Int) {
         val cam = cameraViewModel.getCamera() ?: return
-        runCatching { cam.rcGetCompatibleParam(prop) }.getOrNull()?.let { params[prop] = it }
+        val exposureDiagnostic = prop in setOf(
+            Lab.PROP_NK_SHUTTER, Lab.PROP_F_NUMBER,
+            Lab.PROP_EXP_COMPENSATION, Lab.PROP_ISO,
+            Lab.PROP_NK_MOVIE_SHUTTER, Lab.PROP_NK_MOVIE_F_NUMBER,
+            Lab.PROP_NK_MOVIE_EXP_COMP, Lab.PROP_NK_MOVIE_ISO
+        )
+        if ((diagnosticCapture || diagnosticControlLogging) && exposureDiagnostic && prop != Lab.PROP_NK_SHUTTER) {
+            devLog("exposure capability logical=0x%04X: querying".format(prop))
+        }
+        val shutterLogical = prop == Lab.PROP_NK_SHUTTER || prop == Lab.PROP_NK_MOVIE_SHUTTER
+        val selected = try {
+            cam.rcGetCompatibleParam(prop, if (diagnosticCapture || diagnosticControlLogging) ::devLog else null)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            devLog("!! capability logical=0x%04X error=%s: %s".format(prop, e.javaClass.simpleName, e.message))
+            null
+        }
+        if ((diagnosticCapture || diagnosticControlLogging) && exposureDiagnostic && prop != Lab.PROP_NK_SHUTTER) {
+            devLog(
+                "exposure selected logical=0x%04X %s".format(
+                    prop,
+                    selected?.let {
+                        "prop=0x%04X writable=%s current=%d values=%d first=%s last=%s".format(
+                            it.prop, it.writable, it.current, it.values.size,
+                            it.values.firstOrNull()?.toString() ?: "-",
+                            it.values.lastOrNull()?.toString() ?: "-"
+                        )
+                    } ?: "none"
+                )
+            )
+        }
+        if (shutterLogical) {
+            devLog(
+                "shutter selected=" + (selected?.let {
+                    "prop=0x%04X writable=%s current=%d values=%d".format(
+                        it.prop, it.writable, it.current, it.values.size
+                    )
+                } ?: "none")
+            )
+        }
+        selected?.let { params[prop] = it }
     }
 
     suspend fun refreshBattery(forceDescribe: Boolean = false) {
@@ -887,13 +1019,15 @@ private fun RemoteContent(
         adoptActiveLiveView: NikonCamera? = null,
         suppressStartupPropertyEvents: Boolean = false
     ) {
+        if (diagnosticControlBusy) return
         val prev = lvJob
-        lvJob = scope.launch {
+        lvJob = services.scope.launch {
             prev?.cancelAndJoin()
             subjectTrackingActive = false
             liveViewStable = false
             startupEventBaselinePending = suppressStartupPropertyEvents
             var adoptedCamera = adoptActiveLiveView
+            var liveViewCamera: NikonCamera? = null
             fps = 0f   // 换会话（HD 切换/重启）时清掉上一会话的陈旧读数
             // 解码流水线：取帧（网络 IO）与解码（Default 线程）并行——取下一帧的同时
             // 解上一帧；CONFLATED 只留最新帧，解码偶尔跟不上时丢旧帧而不排队积压。
@@ -913,6 +1047,7 @@ private fun RemoteContent(
                     // 每轮现取相机实例：断线重连后拿到的是新连接，旧会话自然淘汰
                     val cam = cameraViewModel.getCamera()
                     if (cam == null) { delay(2000); continue }
+                    liveViewCamera = cam
                     // 录像兼容恢复可能已经按“应用模式 → StartLiveView → StartMovie”
                     // 完成了相机侧启动；首轮直接接管这个 LV，不能重复发送 StartLiveView。
                     val started = if (cam === adoptedCamera) {
@@ -946,6 +1081,8 @@ private fun RemoteContent(
                     var frameIntervals = 0
                     var windowStart = 0L
                     var errStreak = 0
+                    var firstFrameLogged = false
+                    var noFrameLogged = false
                     val startupDiagnosticsEndAt =
                         SystemClock.elapsedRealtime() + if (requiresUsbStabilization) 15_000L else 0L
                     var diagnosticWindowStart = SystemClock.elapsedRealtime()
@@ -1016,6 +1153,12 @@ private fun RemoteContent(
                         val pollElapsedNanos =
                             SystemClock.elapsedRealtimeNanos() - pollStartedAtNanos
                         if (grabbed == null) {
+                            if (!firstFrameLogged && !noFrameLogged &&
+                                SystemClock.elapsedRealtime() - stabilizationStartedAt >= 10_000L
+                            ) {
+                                noFrameLogged = true
+                                devLog("!! LiveView no frame for 10s after start; camera remains busy")
+                            }
                             recordStartupPoll(elapsedNanos = pollElapsedNanos, busy = true)
                             if (!liveViewStable) startupBusyResponses++
                             delay(40)
@@ -1023,6 +1166,10 @@ private fun RemoteContent(
                         }
                         recordStartupPoll(elapsedNanos = pollElapsedNanos, success = true)
                         errStreak = 0
+                        if (!firstFrameLogged) {
+                            firstFrameLogged = true
+                            devLog("LiveView first frame received after ${SystemClock.elapsedRealtime() - stabilizationStartedAt}ms")
+                        }
                         frameCh.trySend(grabbed)
                         val now = SystemClock.elapsedRealtime()
                         if (!liveViewStable && requiresUsbStabilization) {
@@ -1061,7 +1208,9 @@ private fun RemoteContent(
             } finally {
                 liveViewStable = false
                 withContext(NonCancellable) {
-                    runCatching { cameraViewModel.getCamera()?.labEndLiveView() }
+                    runCatching { liveViewCamera?.labEndLiveView() }
+                        .onSuccess { rc -> if (rc != null) devLog("EndLiveView resp=0x%04X".format(rc and 0xFFFF)) }
+                        .onFailure { devLog("!! EndLiveView error=${it.javaClass.simpleName}: ${it.message}") }
                 }
                 subjectTrackingActive = false
             }
@@ -1145,6 +1294,8 @@ private fun RemoteContent(
     }
 
     suspend fun returnUsbMovieSessionToStandby(cam: NikonCamera) {
+        // 恢复分支可能已在 delay 中，必须在真正执行前再检查调试模式的所有权。
+        if (diagnosticControlBusy || cam.remoteDiagnosticControlModeSet) return
         initialLoaded = false
         val rebuildLiveView = releaseUsbMovieSession(cam)
         if (cameraViewModel.getCamera() === cam) {
@@ -1156,8 +1307,10 @@ private fun RemoteContent(
     }
 
     suspend fun refreshMovieMode(refreshExposureOnChange: Boolean = true) {
+        if (diagnosticControlBusy) return
         val cam = cameraViewModel.getCamera() ?: return
         val mv = runCatching { cam.rcGetMovieMode() }.getOrNull() ?: return
+        if (diagnosticControlBusy) return
         val was = movieMode
         movieMode = mv
         if (refreshExposureOnChange && mv && !was) {
@@ -1217,6 +1370,9 @@ private fun RemoteContent(
                 // 避免重进页面时先按错误模式加载整套参数。
                 refreshMovieMode(refreshExposureOnChange = false)
             }
+            diagnosticControlEnabled = sessionCamera.remoteDiagnosticControlModeSet &&
+                sessionCamera.remoteControlModeSet
+            if (diagnosticControlEnabled) diagnosticControlLogging = true
             val initialExposureProps =
                 if (movieMode) MOVIE_EXPOSURE_PROPS else EXPOSURE_PROPS
             initialExposureProps.forEach { refreshParam(it) }
@@ -1229,11 +1385,15 @@ private fun RemoteContent(
             startSession(hdLiveView)
             awaitCancellation()
         } finally {
-            if (sessionCamera.connectionType == CameraConnectionType.USB &&
-                sessionCamera.remoteControlModeSet
-            ) {
-                withContext(NonCancellable) {
-                    // 异常退出兜底：正常停录已经归还控制，这里只处理页面在录像中退出。
+            withContext(NonCancellable) {
+                // 先等调试切换完成记账，防止退页清理后才迟到地开启 PC 控制。
+                diagnosticControlJob?.cancelAndJoin()
+                initialLoaded = false
+                if ((sessionCamera.connectionType == CameraConnectionType.USB ||
+                        sessionCamera.remoteDiagnosticControlModeSet) &&
+                    sessionCamera.remoteControlModeSet
+                ) {
+                    // USB 录像与手动调试（含 Wi-Fi）都必须成对归还机身控制。
                     if (recording) {
                         runCatching { sessionCamera.rcEndMovie() }
                         recording = false
@@ -1241,12 +1401,22 @@ private fun RemoteContent(
                     val oldLvJob = lvJob
                     oldLvJob?.cancelAndJoin()
                     if (lvJob === oldLvJob) lvJob = null
+                    if (oldLvJob == null) runCatching { sessionCamera.labEndLiveView() }
                     clearAppMode(sessionCamera, force = true)
-                    val rc = runCatching {
-                        sessionCamera.rcSetControlMode(false)
-                    }.getOrDefault(-1)
-                    devLog("SetControlMode(0) resp=0x%04X".format(rc and 0xFFFF))
+                    for (attempt in 0 until 3) {
+                        val rc = runCatching {
+                            sessionCamera.rcSetControlMode(false)
+                        }.getOrDefault(-1)
+                        devLog("control mode exit SetControlMode(0) resp=0x%04X".format(rc and 0xFFFF))
+                        if (rc == Lab.OK) break
+                        if (attempt < 2) delay(300L)
+                    }
+                    if (sessionCamera.remoteControlModeSet) {
+                        devLog("!! control mode release unconfirmed; reconnect or restart camera if body remains locked")
+                    }
                 }
+                devLog("diagnostic monitor session ended connected=$connected")
+                diagnosticControlEnabled = false
             }
         }
     }
@@ -1305,55 +1475,55 @@ private fun RemoteContent(
     // 角度取自【相机机身】而非手机传感器：相机在架子上、手机在手里，只有相机自身姿态
     // 对构图有意义。只在水平仪打开时轮询，关掉就一条命令都不发——本页所有相机 I/O
     // 共用 ioMutex，多一个常驻轮询就是白占取帧通道。250ms 对水平指示足够跟手。
-    // 机身不支持该属性（GetDevicePropDesc 失败）时把开关弹回去，绝不显示假角度。
+    // 机身不支持时停止轮询、不显示假角度，保留用户偏好供下次连接使用。
     LaunchedEffect(showLevel, connected) {
-        if (!showLevel || !connected) {
-            levelRoll = null
-            return@LaunchedEffect
-        }
-        // 与进页首批参数读取错开，别抢 ioMutex 拖慢参数首显（同事件轮询的处理）。
+        levelRoll = null
+        levelPitch = null
+        if (!showLevel || !connected) return@LaunchedEffect
         while (isActive && !initialLoaded) delay(150)
         val cam = cameraViewModel.getCamera() ?: return@LaunchedEffect
-        val described = runCatching { cam.rcGetAngleLevel() }.getOrNull()
-        if (described == null) {
-            levelRoll = null
-            showLevel = false
-            devLog("!! angle level unavailable (0xD067 poll)")
-            return@LaunchedEffect
-        }
-        // 首次读到就把原始值打进开发者面板：编码（16.16 定点度数）与正负方向都要
-        // 真机核对，日志里同时留 raw 和换算值才能对着机身自己的水平仪校准。
-        var param: RcParam = described
-        var loggedRoll = Float.NaN
+        var param: RcParam? = null
         var failures = 0
-        while (isActive) {
-            val roll = rcAngleLevelRoll(param)?.let {
-                // 量化到 0.1°：机身读数的细微抖动就不会每 250ms 触发一次无意义重组。
-                (it * 10f).roundToInt() / 10f
+        var fallbackUnavailable = false
+        var source = ""
+        while (isActive && cameraViewModel.getCamera() === cam) {
+            val current = frame
+            val attitude = current?.metadata?.attitude?.takeIf {
+                SystemClock.elapsedRealtime() - current.receivedAtElapsedMs in 0L..1500L
             }
-            if (roll != null) {
-                if (levelRoll != roll) levelRoll = roll
-                // 每次变化都打会刷爆 300 行的面板；变化超过 0.5° 才记一条。
-                if (loggedRoll.isNaN() || abs(roll - loggedRoll) >= 0.5f) {
-                    loggedRoll = roll
-                    devLog(
-                        "angle level 0xD067 poll type=0x%04X raw=%d roll=%+.1f°"
-                            .format(param.dataType, param.current, roll)
-                    )
+            if (attitude != null) {
+                levelRoll = (attitude.roll * 10f).roundToInt() / 10f
+                levelPitch = (attitude.pitch * 10f).roundToInt() / 10f
+                if (source != "header") {
+                    devLog("angle source=liveview compact-v1 offsets=404/(408-or-412) roll=${attitude.roll} pitch=${attitude.pitch}; property polling suspended")
+                    source = "header"
+                }
+            } else {
+                levelPitch = null
+                if (source == "header") levelRoll = null
+                if (source != "property") {
+                    devLog("angle source=0xD067 fallback; no valid fresh dual-axis header")
+                    source = "property"
+                }
+                if (!fallbackUnavailable) {
+                    val previous = param
+                    param = try {
+                        if (previous == null) cam.rcGetAngleLevel() else cam.rcRefreshParam(previous)
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) { null }
+                    val roll = param?.let(::rcAngleLevelRoll)
+                    if (roll != null) {
+                        levelRoll = (roll * 10f).roundToInt() / 10f
+                        failures = 0
+                    } else if (++failures >= 3) {
+                        levelRoll = null
+                        fallbackUnavailable = true
+                        devLog("!! angle property unavailable; still watching liveview attitude")
+                    }
                 }
             }
             delay(250)
-            // 偶发读失败（忙/抖动）留着上一次的角度继续试；连续失败则收回读数，
-            // 不让画面停在一条早已过时的水平线上。
-            val refreshed = runCatching { cam.rcRefreshParam(param) }.getOrNull()
-            if (refreshed != null) {
-                param = refreshed
-                failures = 0
-            } else if (++failures >= 3) {
-                levelRoll = null
-                devLog("!! angle level 0xD067 poll read failed 3x, stopping")
-                break
-            }
         }
     }
 
@@ -1362,7 +1532,7 @@ private fun RemoteContent(
         var pollTick = 0
         while (isActive) {
             // 让初始参数先加载完再开始轮询，避免抢锁拖慢进页
-            if (!initialLoaded) { delay(150); continue }
+            if (!initialLoaded || diagnosticControlBusy) { delay(150); continue }
             val cam = cameraViewModel.getCamera()
             if (cam == null) { delay(1500); continue }
             if (!liveViewStable) {
@@ -1370,7 +1540,8 @@ private fun RemoteContent(
                 // 一旦成功便重建普通 LV，避免一次瞬时忙永久锁住机身拨杆。
                 if (!recording && !recBusy && shouldReturnUsbMovieSessionToStandby(
                         cam.connectionType,
-                        cam.remoteControlModeSet
+                        cam.remoteControlModeSet,
+                        cam.remoteDiagnosticControlModeSet
                     )
                 ) {
                     delay(600)
@@ -1391,6 +1562,8 @@ private fun RemoteContent(
                 continue
             }
             val polledEvents = runCatching { cam.rcPollEvents() }
+            // 切换开始前已发出的事件读取也不能在模式转换中触发 USB 自动恢复。
+            if (diagnosticControlBusy) continue
             if (polledEvents.isFailure) {
                 // GetEvent 异常不能连带禁用拨杆兜底；否则部分 USB 会话虽然仍能读取
                 // D1A6，却会因为事件通道暂时失败而永远停留在旧模式界面。
@@ -1409,6 +1582,7 @@ private fun RemoteContent(
             )
             var movieModeRefreshRequested = false
             for (e in events) {
+                if (diagnosticControlBusy) break
                 eventFlow.emit(e)
                 when (e.first) {
                     // 录像状态以相机事件为准（卡满/过热等相机自行停录也能收到）。
@@ -1425,7 +1599,8 @@ private fun RemoteContent(
                         if (!recBusy) {
                             if (shouldReturnUsbMovieSessionToStandby(
                                     cam.connectionType,
-                                    cam.remoteControlModeSet
+                                    cam.remoteControlModeSet,
+                                    cam.remoteDiagnosticControlModeSet
                                 )
                             ) {
                                 returnUsbMovieSessionToStandby(cam)
@@ -1439,15 +1614,8 @@ private fun RemoteContent(
                         val prop = rcCanonicalExposureProp(reportedProp)
                         if (reportedProp == Lab.PROP_BATTERY_LEVEL) refreshBattery()
                         if (reportedProp in ALL_AUTO_ISO_PROPS) refreshAutoIso()
-                        if (reportedProp == Lab.PROP_NK_ISO_CONTROL_SENSITIVITY &&
-                            autoIsoProp?.let { params[it]?.current != 0L } == true
-                        ) {
-                            params[reportedProp]?.let { current ->
-                                runCatching { cam.rcRefreshParam(current) }.getOrNull()?.let {
-                                    params[reportedProp] = it
-                                }
-                            }
-                        }
+                        // D0B5 is owned by the 500ms effective-ISO poll above. Reading it
+                        // again for property events only competes with live-view frame requests.
                         // 本地还有未发出的乐观值时不刷新——自己刚设的值触发的事件
                         // 会把正在连调的显示值拽回去。照片/录像两套参数都听。
                         if (prop in ALL_EXPOSURE_PROPS && pendingSets[prop]?.isActive != true) {
@@ -1495,11 +1663,12 @@ private fun RemoteContent(
     // 步进采用"乐观更新 + 尾值合并"：本地值立即跟手（长按连调不卡），停手 160ms 后
     // 只把最终值发给相机——逐档发送会在 ioMutex 上排队，连调十几档要追几秒。
     fun sendValue(prop: Int, value: Long, immediate: Boolean) {
+        if (diagnosticControlBusy) return
         val p = params[prop] ?: return
         params[prop] = p.copy(current = value)
-        haptics.tick()
+        services.haptics.tick()
         pendingSets[prop]?.cancel()
-        pendingSets[prop] = scope.launch {
+        val job = services.scope.launch {
             if (!immediate) delay(160)
             val cam = cameraViewModel.getCamera() ?: return@launch
             val result = try {
@@ -1507,9 +1676,19 @@ private fun RemoteContent(
             } catch (e: CancellationException) {
                 throw e   // 被更新一步的 sendValue 顶掉，不是写失败：别记日志、别回读
             } catch (e: Exception) {
+                devLog("!! shutter write prop=0x%04X error=%s: %s".format(p.prop, e.javaClass.simpleName, e.message))
                 null
             }
             result?.actual?.let { params[prop] = it }
+            if (prop == Lab.PROP_NK_SHUTTER || prop == Lab.PROP_NK_MOVIE_SHUTTER) {
+                devLog(
+                    "shutter write prop=0x%04X target=%d confirmed=%s read=%s resp=0x%04X".format(
+                        p.prop, value, result?.confirmed == true,
+                        result?.actual?.current?.toString() ?: "unreadable",
+                        (result?.responseCode ?: -1) and 0xFFFF
+                    )
+                )
+            }
             if (result?.confirmed != true) {
                 val rc = result?.responseCode ?: -1
                 val actual = result?.actual?.current?.toString() ?: "unreadable"
@@ -1520,6 +1699,10 @@ private fun RemoteContent(
                 // 包括返回 OK 但机身没有采用的情况：重新读取描述和值域，显示真实状态。
                 refreshParam(prop)
             }
+        }
+        pendingSets[prop] = job
+        job.invokeOnCompletion {
+            if (pendingSets[prop] === job) pendingSets.remove(prop)
         }
     }
 
@@ -1542,7 +1725,7 @@ private fun RemoteContent(
         // 在 launch 前同步置位，消除两次快速点按同时通过 capturing=false
         // 而启动两个拍摄事务的小窗口。
         capturing = true
-        scope.launch {
+        services.scope.launch {
             try {
                 // 快速松手时 AF 可能仍在轮询 DeviceReady。先收完对焦事务，
                 // 再开始 ObjectAdded 的 12s 倒计，避免把 AF 等待时间错算进拍摄超时。
@@ -1550,7 +1733,7 @@ private fun RemoteContent(
                 // 等待期间若发生了断线/重连，绝不把旧手势意外发给新会话。
                 if (cameraViewModel.getCamera() !== expectedCamera) return@launch
                 val cam = expectedCamera
-                haptics.longPress()   // 快门触发反馈（经全局震动设置门控）
+                services.haptics.longPress()   // 快门触发反馈（经全局震动设置门控）
                 // 先挂事件等待、再触发拍摄：ObjectAdded 是取走即消费的，
                 // 订阅晚于轮询取走就永远等不到了。
                 val pending = async {
@@ -1603,9 +1786,9 @@ private fun RemoteContent(
         afHeld = true
         afLocked = false
         val requestedPoint = focusAreaPoint
-        haptics.tick()   // 开始半按的轻反馈
+        services.haptics.tick()   // 开始半按的轻反馈
         afJob?.cancel()
-        afJob = scope.launch {
+        afJob = services.scope.launch {
             val cam = cameraViewModel.getCamera() ?: return@launch
             val result = try {
                 cam.rcAfDriveAndWait()
@@ -1628,7 +1811,7 @@ private fun RemoteContent(
                     )
                     // 用户已松手/滑出时仍把协议终态收完，但不再给迟到的
                     // 合焦震动，避免“取消后手机又震一下”。
-                    if (stillHeld) haptics.tick()
+                    if (stillHeld) services.haptics.tick()
                 }
                 result.responseCode == Lab.NK_OUT_OF_FOCUS ->
                     devLog("!! AF out of focus ($suffix)")
@@ -1671,21 +1854,153 @@ private fun RemoteContent(
         }
     }
 
-    fun runProbe() {
-        if (probing) return
+    fun setDiagnosticControlMode(enabled: Boolean) {
         val cam = cameraViewModel.getCamera() ?: return
-        scope.launch {
-            probing = true
-            // 一次探测对应一份可直接回传的完整报告，避免混入旧会话日志。
-            logLines.clear()
+        if (!connected || !initialLoaded || probing || diagnosticControlBusy ||
+            capturing || recording || recBusy || autoIsoBusy || afHeld || tapFocusBusy ||
+            afJob?.isActive == true || pendingSets.values.any { it.isActive }
+        ) return
+        // 不能用调试开关接管录像流程已持有的控制模式。
+        if (enabled && cam.remoteControlModeSet && !cam.remoteDiagnosticControlModeSet) return
+        diagnosticControlBusy = true
+        probing = true
+        initialLoaded = false
+        beginDiagnosticReport(cam)
+        devLog("control mode request enabled=$enabled")
+        diagnosticControlStatus = services.context.getString(R.string.remote_pc_control_switching)
+        diagnosticControlJob = services.scope.launch {
+            var adoptedCamera: NikonCamera? = null
+            suspend fun snapshot(stage: String) {
+                if (cameraViewModel.getCamera() !== cam) return
+                modeText = "?"
+                refreshMode()
+                devLog(
+                    "control mode $stage model=${cam.deviceModel ?: "unknown"} " +
+                        "connection=${cam.connectionType} exposure=$modeText " +
+                        "movie=$movieMode enabled=${cam.remoteControlModeSet} " +
+                        "applicationProp=${cam.remoteMovieApplicationPropSet} " +
+                        "applicationOp=${cam.remoteMovieApplicationOpSet}"
+                )
+                val activeProps = if (movieMode) MOVIE_EXPOSURE_PROPS else EXPOSURE_PROPS
+                activeProps.forEach {
+                    // 查询失败时不能沿用切换前的可写状态和值域。
+                    params.remove(it)
+                    refreshParam(it)
+                }
+            }
             try {
-                lvJob?.cancelAndJoin()   // 探测自带 LV 测试，先停会话
-                cam.runLabProbe({ devLog(it) }, { bytes -> decode(bytes)?.let { frame = it } })
+                snapshot("before")
+                if (!isActive || cameraViewModel.getCamera() !== cam) return@launch
+                val oldLvJob = lvJob
+                oldLvJob?.cancelAndJoin()
+                if (lvJob === oldLvJob) lvJob = null
+                if (oldLvJob == null) {
+                    val endRc = cam.labEndLiveView()
+                    devLog("control mode EndLiveView resp=0x%04X".format(endRc and 0xFFFF))
+                }
+                if (cameraViewModel.getCamera() !== cam) return@launch
+
+                // 命令和所有权记账不可被退页取消拆开；退出清理先 join 本任务。
+                val rc = withContext(NonCancellable) {
+                    // 调试开关本身不启用 ApplicationMode；若期间录过视频，关闭时
+                    // 先成对清理录像流程持有的应用模式，避免留下半套远控状态。
+                    if (!enabled &&
+                        (cam.remoteMovieApplicationPropSet || cam.remoteMovieApplicationOpSet)
+                    ) {
+                        devLog("control mode releasing movie application mode before disable")
+                        clearAppMode(cam, force = true)
+                        check(!cam.remoteMovieApplicationPropSet && !cam.remoteMovieApplicationOpSet) {
+                            "Movie application mode release failed"
+                        }
+                    }
+                    cam.rcSetControlMode(enabled).also { response ->
+                        if (response == Lab.OK) cam.remoteDiagnosticControlModeSet = enabled
+                    }
+                }
+                diagnosticControlEnabled = cam.remoteDiagnosticControlModeSet && cam.remoteControlModeSet
+                devLog(
+                    "control mode SetControlMode(${if (enabled) 1 else 0}) " +
+                        "resp=0x%04X enabled=%s; no ApplicationMode enable requested".format(
+                            rc and 0xFFFF, cam.remoteControlModeSet
+                        )
+                )
+                diagnosticControlStatus = if (rc == Lab.OK) {
+                    services.context.getString(
+                        if (enabled) R.string.remote_pc_control_on else R.string.remote_pc_control_off
+                    )
+                } else {
+                    services.context.getString(R.string.remote_pc_control_failed, "0x%04X".format(rc and 0xFFFF))
+                }
+                if (!isActive || cameraViewModel.getCamera() !== cam) return@launch
+                snapshot("after-command")
+                val sizeRc = cam.rcSetLvSize(if (hdLiveView) 3 else 2)
+                devLog("control mode SetLiveViewSize resp=0x%04X".format(sizeRc and 0xFFFF))
+                // 完成启动后才查询最终能力，随后让常规取帧任务接管同一个 LV。
+                withContext(NonCancellable) {
+                    if (cam.labStartLiveView { devLog(it) }) adoptedCamera = cam
+                }
+                if (adoptedCamera == null) {
+                    diagnosticControlStatus = services.context.getString(R.string.remote_pc_control_failed, "LiveView")
+                }
+                if (!isActive || cameraViewModel.getCamera() !== cam) return@launch
+                snapshot("after-liveview")
+                refreshAutoIso()
+                refreshFocusMode()
+                val shutter = params[if (movieMode) Lab.PROP_NK_MOVIE_SHUTTER else Lab.PROP_NK_SHUTTER]
+                val canTry = canTryRemoteShutter(shutter)
+                devLog("probe complete: control mode=$diagnosticControlEnabled " +
+                    "shutterCanTry=$canTry writable=${shutter?.writable} values=${shutter?.values?.size} " +
+                    "liveViewStarted=${adoptedCamera != null}; copy log even if still locked")
+                if (rc == Lab.OK && enabled && adoptedCamera != null && !canTry) {
+                    diagnosticControlStatus = services.context.getString(R.string.remote_pc_control_locked)
+                }
+            } catch (e: CancellationException) {
+                devLog("!! control mode switch cancelled; lastConfirmed=${cam.remoteControlModeSet}")
+                throw e
             } catch (e: Exception) {
-                devLog("!! probe: $e")
+                diagnosticControlStatus = services.context.getString(
+                    R.string.remote_pc_control_failed, e.javaClass.simpleName
+                )
+                devLog("!! control mode error=${e.javaClass.simpleName}: ${e.message} enabled=${cam.remoteControlModeSet}")
+                if (e is SocketTimeoutException) cameraViewModel.onCameraTransportLost(cam)
+            } finally {
+                diagnosticControlEnabled = cameraViewModel.getCamera() === cam &&
+                    cam.remoteDiagnosticControlModeSet && cam.remoteControlModeSet
+                diagnosticControlBusy = false
+                probing = false
+                if (isActive && cameraViewModel.getCamera() === cam) {
+                    initialLoaded = true
+                    startSession(hdLiveView, adoptActiveLiveView = adoptedCamera)
+                } else if (adoptedCamera != null) {
+                    withContext(NonCancellable) { runCatching { cam.labEndLiveView() } }
+                }
+            }
+        }
+    }
+
+    fun runProbe() {
+        if (probing || diagnosticControlBusy) return
+        val cam = cameraViewModel.getCamera() ?: return
+        probing = true
+        beginDiagnosticReport(cam)
+        services.scope.launch {
+            diagnosticCapture = true
+            try {
+                modeText = "?"
+                refreshMode()
+                devLog("diagnostic probe exposure=$modeText movie=$movieMode controlMode=${cam.remoteControlModeSet}")
+                // 只读取当前模式下的曝光能力，不停止监看、不执行全量协议探测。
+                val props = if (movieMode) MOVIE_EXPOSURE_PROPS else EXPOSURE_PROPS
+                props.forEach { refreshParam(it) }
+                devLog("probe complete: 请点击复制按钮反馈以上日志")
+            } catch (e: CancellationException) {
+                devLog("!! diagnostic probe cancelled")
+                throw e
+            } catch (e: Exception) {
+                devLog("probe capability error: $e")
             } finally {
                 probing = false
-                startSession(hdLiveView)
+                diagnosticCapture = false
             }
         }
     }
@@ -1710,6 +2025,110 @@ private fun RemoteContent(
             hintVisible = false
         }
     }
+    val lutState = remember {
+        LutMonitorState(
+            repository = LutFolderRepository(services.context.applicationContext.contentResolver) { uri ->
+                val photoFolders = com.ztransfer.lut.PhotoLutStore(services.context).folders
+                (photoFolders.folder == uri).also { shared -> if (shared) photoFolders.markFolderGrantOwned() }
+            },
+            preferences = LutPreferences(services.context.getSharedPreferences("monitor_lut", Context.MODE_PRIVATE)),
+            scope = services.scope,
+            closeFalseColor = {
+                if (tools.exposure.value == ExposureAssist.FALSE_COLOR) tools.exposure.value = ExposureAssist.OFF
+            },
+            notice = { showHint(services.context.getString(it)) },
+        )
+    }
+    var lutAnchor by remember { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
+    val lutLifecycle = LocalLifecycleOwner.current
+    var lutResumed by remember { mutableStateOf(lutLifecycle.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
+    DisposableEffect(lutLifecycle, lutState) {
+        val observer = LifecycleEventObserver { _, _ ->
+            lutResumed = lutLifecycle.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
+            if (!lutResumed) lutState.suspendRendering()
+        }
+        lutLifecycle.lifecycle.addObserver(observer)
+        onDispose { lutLifecycle.lifecycle.removeObserver(observer) }
+    }
+    DisposableEffect(lutState) { onDispose { lutState.close() } }
+    var lutPickerActive by remember { mutableStateOf(false) }
+    var lutPickedFolder by remember { mutableStateOf<Uri?>(null) }
+    val lutFolderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        lutPickedFolder = uri
+        lutPickerActive = false
+    }
+    val lutFrameReady = connected && initialLoaded && frame != null && lutResumed && !lutPickerActive
+    val lutVisible = tools.layout(movieMode).visible(RemoteTool.LUT)
+    LaunchedEffect(movieMode, lutFrameReady, lutVisible, lutResumed, lutPickedFolder) {
+        lutState.environment(movieMode, lutFrameReady, lutVisible)
+        if (lutResumed) lutPickedFolder?.let { uri ->
+            lutPickedFolder = null
+            lutState.changeFolder(uri)
+        }
+    }
+    LaunchedEffect(rotation, editingTools) { lutState.dismissMenu() }
+
+    // Read-only metering. No camera control-mode changes or per-frame protocol work.
+    val meterEnabled = showMeter && tools.layout(movieMode).visible(RemoteTool.METER)
+    LaunchedEffect(meterEnabled, connected, initialLoaded, liveViewStable, lutResumed, movieMode) {
+        val generation = ++meterGeneration[0]
+        meterSample = null
+        if (!meterEnabled || !connected || !initialLoaded || !liveViewStable || !lutResumed) return@LaunchedEffect
+        val cam = cameraViewModel.getCamera() ?: return@LaunchedEffect
+        fun busy() = capturing || recBusy || diagnosticControlBusy || probing || autoIsoBusy ||
+            afHeld || tapFocusBusy || afJob?.isActive == true || pendingSets.values.any { it.isActive }
+        var capability: RcParam? = null
+        try {
+            for (attempt in 0 until 3) {
+                while (busy()) delay(250)
+                capability = cam.rcGetParam(NIKON_LIGHT_METER)
+                if (capability != null) break
+                delay(700)
+            }
+            var descriptor = capability
+            if (descriptor == null || descriptor.dataType != 0x0001 || descriptor.writable) {
+                while (busy()) delay(250)
+                descriptor = cam.rcGetParam(NIKON_EXPOSURE_INDICATE)
+            }
+            if (descriptor == null || descriptor.dataType != 0x0001 || descriptor.writable) {
+                return@LaunchedEffect
+            }
+            var failures = 0
+            while (isActive) {
+                if (busy()) {
+                    // Preserve the last indicator while camera writes temporarily pause polling.
+                    meterSample = meterSample?.let { it.first to SystemClock.elapsedRealtime() }
+                    delay(500)
+                    continue
+                }
+                val startedAt = SystemClock.elapsedRealtime()
+                val value = cam.rcReadExposureMeter(descriptor)
+                if (!isActive || meterGeneration[0] != generation) return@LaunchedEffect
+                val ev = rcExposureMeterEv(value)
+                val now = SystemClock.elapsedRealtime()
+                val fresh = com.ztransfer.protocol.rcExposureMeterFresh(startedAt, now) && !busy()
+                if (ev != null && fresh) meterSample = ev to startedAt
+                failures = if (value == null) failures + 1 else 0
+                if (failures >= 3) {
+                    break
+                }
+                delay(500)
+            }
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            // Unsupported/interrupted reads leave the meter unavailable, never stale.
+        } finally {
+            if (meterGeneration[0] == generation) meterSample = null
+        }
+    }
+    // Briefly retain the last reading between writes/reads; disconnect and terminal failure still clear it.
+    LaunchedEffect(meterSample) {
+        val sample = meterSample ?: return@LaunchedEffect
+        delay((3_000L - (SystemClock.elapsedRealtime() - sample.second)).coerceAtLeast(0L))
+        if (meterSample == sample) meterSample = null
+    }
+
     // ---------- 录像开关 ----------
     // 开始：命令成功即乐观置位（UI 立即变停止键），事件 0xC10A 再确认；失败弹瞬时提示。
     // 停止：只有 EndMovieRec 成功才切换 UI；失败时保留录像态，避免 UI 与相机相反。
@@ -1718,7 +2137,10 @@ private fun RemoteContent(
     val recFailHint = stringResource(R.string.remote_rec_start_failed)
     val recStopFailHint = stringResource(R.string.remote_rec_stop_failed)
     val manualFocusHint = stringResource(R.string.remote_tap_focus_manual)
-    val trackingAreaModeHint = stringResource(R.string.remote_tracking_area_mode_required)
+    val trackingAreaModeHint = stringResource(R.string.remote_tap_focus_area_retry)
+    val tapFocusFailedHint = stringResource(R.string.remote_tap_focus_retry)
+    val rotationStoppedHint = stringResource(R.string.remote_rotation_stopped)
+    val rotationResumedHint = stringResource(R.string.remote_rotation_resumed)
 
     fun focusAt(tap: ViewfinderTap) {
         if (!connected || capturing || tapFocusBusy || afHeld || probing || afJob?.isActive == true) return
@@ -1736,16 +2158,16 @@ private fun RemoteContent(
             tapFocusFeedback = TapFocusFeedback.IDLE
             tapFocusNonce++
             tapFocusBusy = true
-            haptics.tick()
+            services.haptics.tick()
             devLog("subject tracking cancel requested")
             val cancelNonce = tapFocusNonce
-            tapFocusHideJob = scope.launch {
+            tapFocusHideJob = services.scope.launch {
                 delay(TRACKING_CANCEL_EXIT_MS)
                 if (tapFocusNonce == cancelNonce && !subjectTrackingActive) {
                     confirmedFocusMarker = null
                 }
             }
-            tapFocusJob = scope.launch {
+            tapFocusJob = services.scope.launch {
                 try {
                     val rc = cam.rcEndSubjectTracking()
                     if (
@@ -1774,14 +2196,14 @@ private fun RemoteContent(
         tapFocusFeedback = TapFocusFeedback.FOCUSING
         tapFocusNonce++
         tapFocusBusy = true
-        haptics.tick()
+        services.haptics.tick()
         devLog(
             "tap tracking=(${tap.trackingX},${tap.trackingY})/" +
                 "${tap.trackingCoordinateWidth}x${tap.trackingCoordinateHeight} " +
                 "focus=(${tap.focusX},${tap.focusY})/" +
                 "${tap.focusCoordinateWidth}x${tap.focusCoordinateHeight}"
         )
-        tapFocusJob = scope.launch {
+        tapFocusJob = services.scope.launch {
             try {
                 val result = cam.rcFocusAt(
                     trackingX = tap.trackingX,
@@ -1798,7 +2220,7 @@ private fun RemoteContent(
                     val suffix = af?.let { "polls=${it.polls} elapsed=${it.elapsedMs}ms" }
                     if (af?.responseCode == Lab.OK) {
                         devLog("subject tracking focused ($suffix)")
-                        haptics.tick()
+                        services.haptics.tick()
                         confirmedFocusMarker = ConfirmedFocusMarker(
                             fallbackPoint = tap.normalized,
                             confirmedAtElapsedMs = SystemClock.elapsedRealtime(),
@@ -1822,9 +2244,6 @@ private fun RemoteContent(
                     result.trackingResponseCode != null &&
                     result.trackingResponseCode != PtpConstants.OPERATION_NOT_SUPPORTED
                 ) {
-                    if (result.trackingResponseCode == Lab.NK_INVALID_STATUS) {
-                        showHint(trackingAreaModeHint)
-                    }
                     devLog(
                         "!! StartTracking resp=0x%04X".format(
                             result.trackingResponseCode and 0xFFFF
@@ -1849,7 +2268,7 @@ private fun RemoteContent(
                     when {
                         af.responseCode == Lab.OK -> {
                             devLog("tap AF locked ($suffix)")
-                            haptics.tick()
+                            services.haptics.tick()
                             confirmedFocusMarker = ConfirmedFocusMarker(
                                 fallbackPoint = tap.normalized,
                                 confirmedAtElapsedMs = SystemClock.elapsedRealtime()
@@ -1874,10 +2293,16 @@ private fun RemoteContent(
                         }
                     }
                 }
+                if (tapFocusFeedback == TapFocusFeedback.FAILED) {
+                    // Area rejection differs from an accepted AF operation that could not lock.
+                    showHint(if (!result.trackingStarted && result.moveResponseCode != Lab.OK) {
+                        trackingAreaModeHint
+                    } else tapFocusFailedHint)
+                }
                 val completedNonce = tapFocusNonce
                 val focusLocked = tapFocusFeedback == TapFocusFeedback.LOCKED
                 val trackingStarted = result.trackingStarted
-                tapFocusHideJob = scope.launch {
+                tapFocusHideJob = services.scope.launch {
                     delay(if (focusLocked) TAP_FOCUS_LOCKED_FEEDBACK_MS else 1_300L)
                     if (tapFocusNonce == completedNonce) {
                         tapFocusFeedback = TapFocusFeedback.IDLE
@@ -1897,8 +2322,9 @@ private fun RemoteContent(
                 confirmedFocusMarker = null
                 subjectTrackingActive = false
                 devLog("!! tap AF exception: ${e.message}")
+                showHint(tapFocusFailedHint)
                 val completedNonce = tapFocusNonce
-                tapFocusHideJob = scope.launch {
+                tapFocusHideJob = services.scope.launch {
                     delay(1_300)
                     if (tapFocusNonce == completedNonce) {
                         tapFocusFeedback = TapFocusFeedback.IDLE
@@ -1912,6 +2338,7 @@ private fun RemoteContent(
     }
 
     fun setAutoIso(enabled: Boolean) {
+        if (diagnosticControlBusy) return
         val p = autoIsoProp?.let { params[it] } ?: return
         if (!p.writable || autoIsoBusy) return
         val target = if (enabled) {
@@ -1925,8 +2352,8 @@ private fun RemoteContent(
         autoIsoBusy = true
         params[p.prop] = p.copy(current = target)
         params.remove(Lab.PROP_NK_ISO_CONTROL_SENSITIVITY)
-        haptics.tick()
-        scope.launch {
+        services.haptics.tick()
+        services.scope.launch {
             try {
                 val cam = cameraViewModel.getCamera()
                 if (cam == null) {
@@ -1998,12 +2425,12 @@ private fun RemoteContent(
         if (recBusy || probing) return
         val expectedCamera = cameraViewModel.getCamera() ?: return
         recBusy = true
-        scope.launch {
+        services.scope.launch {
             try {
                 waitForFocus?.join()
                 if (cameraViewModel.getCamera() !== expectedCamera) return@launch
                 val cam = expectedCamera
-                haptics.longPress()   // 与拍照同级的触发反馈（经全局震动设置门控）
+                services.haptics.longPress()   // 与拍照同级的触发反馈（经全局震动设置门控）
                 if (!recording) {
                     var restartedLiveView = false
                     var adoptedLiveView: NikonCamera? = null
@@ -2078,7 +2505,8 @@ private fun RemoteContent(
                         devLog("!! movie start resp=0x%04X".format(rc and 0xFFFF))
                         if (shouldReturnUsbMovieSessionToStandby(
                                 cam.connectionType,
-                                cam.remoteControlModeSet
+                                cam.remoteControlModeSet,
+                                cam.remoteDiagnosticControlModeSet
                             )
                         ) {
                             // 开录失败也必须立即归还机身；否则录像待机仍会锁住拨杆。
@@ -2130,7 +2558,8 @@ private fun RemoteContent(
                         // 再按需进入电脑远控，不在两次录像之间长期锁住机身。
                         if (shouldReturnUsbMovieSessionToStandby(
                                 cam.connectionType,
-                                cam.remoteControlModeSet
+                                cam.remoteControlModeSet,
+                                cam.remoteDiagnosticControlModeSet
                             )
                         ) {
                             returnUsbMovieSessionToStandby(cam)
@@ -2180,7 +2609,8 @@ private fun RemoteContent(
     }
 
     // ---------- 取景器录像（画面录制为 MP4）----------
-    val recOutputDir = File(context.filesDir, "recordings")
+    val recOutputDir = File(services.context.filesDir, "recordings")
+    val recordingDesqueeze = rememberUpdatedState(desqueezeMultiplier)
 
     fun stopRecorder() {
         val r = viewfinderRecorder ?: return
@@ -2191,7 +2621,7 @@ private fun RemoteContent(
         recJob?.cancel()
         recJob = null
         recFinalizing = true
-        scope.launch {
+        services.scope.launch(NonCancellable) {
             // NonCancellable：用户停录后立刻退出页面时也要把 muxer 收尾写完，
             // 否则 mp4 缺 moov 无法播放。
             val name = withContext(Dispatchers.IO + NonCancellable) {
@@ -2202,9 +2632,9 @@ private fun RemoteContent(
                 // 保存成功不再弹系统 Toast：对号与“已保存”短标签留在用户刚操作的
                 // 胶囊上，配合成功触感短暂停留后再自动收回。
                 recSaveFeedbackJob?.cancel()
-                haptics.success()
+                services.haptics.success()
                 recSaveSuccess = true
-                recSaveFeedbackJob = scope.launch {
+                recSaveFeedbackJob = services.scope.launch {
                     delay(1_800)
                     recSaveSuccess = false
                 }
@@ -2212,8 +2642,8 @@ private fun RemoteContent(
                 recSaveFeedbackJob?.cancel()
                 recSaveSuccess = false
                 android.widget.Toast.makeText(
-                    context,
-                    context.getString(R.string.cd_remote_rec_toast_failed),
+                    services.context,
+                    services.context.getString(R.string.cd_remote_rec_toast_failed),
                     android.widget.Toast.LENGTH_SHORT
                 ).show()
             }
@@ -2223,11 +2653,11 @@ private fun RemoteContent(
     // 真正开录（麦克风权限结果已知）。录像优先落到用户配置的 SAF 传输目录
     // （相册/文件管理器可见）；未配置或建档失败回退应用私有目录，录制照常。
     fun startRecorderResolved(withAudio: Boolean) {
-        if (viewfinderRecorder != null) return   // 已在录制，忽略重复触发
+        if (viewfinderRecorder != null || recFinalizing || !tools.layout(movieMode).visible(RemoteTool.RECORD)) return
         val f = frame
         if (f == null) {
             // 还没有取景画面（尺寸未知）就不开录，给提示而不是静默失败。
-            showHint(context.getString(R.string.remote_rec_start_failed), durationMs = 3000L)
+            showHint(services.context.getString(R.string.remote_rec_start_failed), durationMs = 3000L)
             return
         }
         val w = f.image.width
@@ -2246,17 +2676,17 @@ private fun RemoteContent(
                 )
                 val name = ViewfinderRecorder.newFileName()
                 val docUri = DocumentsContract.createDocument(
-                    context.contentResolver, parentUri, "video/mp4", name
+                    services.context.contentResolver, parentUri, "video/mp4", name
                 )
                 if (docUri != null) {
-                    val pfd = context.contentResolver.openFileDescriptor(docUri, "rw")
+                    val pfd = services.context.contentResolver.openFileDescriptor(docUri, "rw")
                     if (pfd != null) {
                         // pfd 所有权自此归 recorder：start 失败或 stop 收尾都由它关闭。
                         sink = RecordingSink.Saf(pfd, name)
                         createdDocUri = docUri
                     } else {
                         runCatching {
-                            DocumentsContract.deleteDocument(context.contentResolver, docUri)
+                            DocumentsContract.deleteDocument(services.context.contentResolver, docUri)
                         }
                     }
                 }
@@ -2268,7 +2698,7 @@ private fun RemoteContent(
             "录像输出：${if (sink is RecordingSink.Saf) "SAF 传输目录" else "应用私有目录"}")
 
         val builtInMic = if (withAudio) {
-            context.getSystemService(AudioManager::class.java)
+            services.context.getSystemService(AudioManager::class.java)
                 ?.getDevices(AudioManager.GET_DEVICES_INPUTS)
                 ?.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_MIC }
         } else {
@@ -2279,14 +2709,15 @@ private fun RemoteContent(
             srcWidth = w,
             srcHeight = h,
             withAudio = withAudio,
-            preferredAudioInput = builtInMic
+            preferredAudioInput = builtInMic,
+            desqueezeMultiplier = desqueezeMultiplier
         )
         if (!recorder.start()) {
             // 开录失败：SAF 模式下把刚建的空文档删掉，别在用户目录留 0 字节垃圾。
             createdDocUri?.let { uri ->
-                runCatching { DocumentsContract.deleteDocument(context.contentResolver, uri) }
+                runCatching { DocumentsContract.deleteDocument(services.context.contentResolver, uri) }
             }
-            showHint(context.getString(R.string.remote_rec_start_failed), durationMs = 3000L)
+            showHint(services.context.getString(R.string.remote_rec_start_failed), durationMs = 3000L)
             return
         }
         recSaveFeedbackJob?.cancel()
@@ -2295,7 +2726,7 @@ private fun RemoteContent(
         viewfinderRecorder = recorder
         recPaused = false
         recElapsed = 0
-        recJob = scope.launch(Dispatchers.Default) {
+        recJob = services.scope.launch(Dispatchers.Default) {
             var failStreak = 0
             // 帧驱动 VFR：同一帧只编一次（按对象身份判新），PTS 用帧的真实到达
             // 时刻——有线 ~70fps 全收，无线 ~20fps 不再重复编码同帧浪费码率。
@@ -2305,14 +2736,14 @@ private fun RemoteContent(
                 if (currentFrame != null && currentFrame !== lastEncoded && !recorder.isPaused) {
                     if (recorder.encodeFrame(
                             currentFrame.image,
-                            currentFrame.receivedAtElapsedMs * 1_000_000L
+                            currentFrame.receivedAtElapsedMs * 1_000_000L,
+                            recordingDesqueeze.value
                         )
                     ) {
                         lastEncoded = currentFrame
                         failStreak = 0
                     } else if (++failStreak >= 30) {
-                        // 连续编码失败（典型：录制中切换 HD 监看导致帧尺寸变化，编码器
-                        // 从此整段拒收）——自动停录保存已有片段，避免"看着在录、
+                        // 连续编码失败时自动停录保存已有片段，避免"看着在录、
                         // 实际一帧没写"的死录制。注意只有真正的编码失败会累计，
                         // "暂无新帧"的空转轮询不进这个计数。
                         withContext(Dispatchers.Main) { stopRecorder() }
@@ -2329,7 +2760,7 @@ private fun RemoteContent(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (!granted) {
-            showHint(context.getString(R.string.remote_rec_no_audio), durationMs = 3000L)
+            showHint(services.context.getString(R.string.remote_rec_no_audio), durationMs = 3000L)
         }
         startRecorderResolved(withAudio = granted)
     }
@@ -2338,12 +2769,12 @@ private fun RemoteContent(
         // isPro 门控：免费版绝无可能进入录制路径（RecControlBar 已压暗 + 拦截点击，
         // 此处为防御纵深——任何跳过 UI 直调本函数的路径仍被拦截）。
         if (!isPro) {
-            showHint(context.getString(R.string.remote_rec_pro_only))
+            showHint(services.context.getString(R.string.remote_rec_pro_only))
             return
         }
-        if (viewfinderRecorder != null) return   // 已在录制，忽略重复触发
+        if (viewfinderRecorder != null || recFinalizing || !tools.layout(movieMode).visible(RemoteTool.RECORD)) return
         val granted = ContextCompat.checkSelfPermission(
-            context, Manifest.permission.RECORD_AUDIO
+            services.context, Manifest.permission.RECORD_AUDIO
         ) == PackageManager.PERMISSION_GRANTED
         if (granted) {
             startRecorderResolved(withAudio = true)
@@ -2369,7 +2800,7 @@ private fun RemoteContent(
     }
 
     // 离开页面自动停录：不停会泄漏 MediaCodec/MediaMuxer，且 mp4 不收尾无法播放。
-    // 此时 scope 已随组合取消，收尾放到普通线程做（muxer 收尾不能在主线程）。
+    // 此时 services.scope 已随组合取消，收尾放到普通线程做（muxer 收尾不能在主线程）。
     DisposableEffect(Unit) {
         onDispose {
             recJob?.cancel()
@@ -2379,8 +2810,128 @@ private fun RemoteContent(
         }
     }
 
+    fun setToolVisible(tool: RemoteTool, visible: Boolean) {
+        if (!visible) {
+            when (tool) {
+                RemoteTool.RECORD -> if (viewfinderRecorder != null) stopRecorder()
+                RemoteTool.HD -> if (hdLiveView) {
+                    hdLiveView = false
+                    startSession(false)
+                }
+                RemoteTool.LOCK -> onLockRotation(false)
+                RemoteTool.LUT -> { lutState.off(); lutState.dismissMenu() }
+                RemoteTool.GRID -> gridPanelOpen = false
+                RemoteTool.WHITE_BALANCE -> if (cameraToolPanel == RemoteCameraTool.WHITE_BALANCE) cameraToolPanel = null
+                RemoteTool.FOCUS_AREA -> if (cameraToolPanel == RemoteCameraTool.FOCUS_AREA) cameraToolPanel = null
+                else -> Unit
+            }
+        }
+        tools.layout(movieMode).setVisible(tool, visible)
+    }
+    var dispMode by tools.disp
+    val changeToolVisibility: (RemoteTool, Boolean) -> Unit = ::setToolVisible
+    ApplyRemoteToolLayout(tools.layout(movieMode), changeToolVisibility, fixedRecorder = landscapeLayout)
+    val renderTool: @Composable (RemoteTool?) -> Unit = { tool ->
+        if (tool == RemoteTool.RECORD) {
+            RecControlBar(viewfinderRecorder != null, recPaused, recElapsed,
+                { startRecorder() }, { togglePauseRecorder() }, { stopRecorder() },
+                modifier = Modifier.height(36.dp), enabled = isPro,
+                isFinalizing = recFinalizing, showDone = recSaveSuccess, compactSaved = landscapeLayout)
+        } else {
+            val active = when (tool) {
+                RemoteTool.HD -> hdLiveView
+                RemoteTool.FPS -> showFps
+                RemoteTool.AUDIO -> showAudioLevels
+                RemoteTool.HISTOGRAM -> showHistogram
+                RemoteTool.LUT -> lutState.active != null
+                RemoteTool.GRID -> framingGrid != ViewfinderGrid.OFF
+                RemoteTool.EXPOSURE -> exposureAssist != ExposureAssist.OFF
+                RemoteTool.DESQUEEZE -> desqueezeMultiplier > 1.001f
+                RemoteTool.METER -> showMeter
+                RemoteTool.LEVEL -> showLevel
+                RemoteTool.WAVEFORM -> showWaveform
+                RemoteTool.LOCK -> tools.locked.value
+                else -> false
+            }
+            val disabled = (tool?.fixed == true && editingTools) ||
+                (tool == RemoteTool.ROTATE && tools.locked.value)
+            TopIconToggle(active, stringResource(tool?.title ?: if (editingTools) R.string.remote_tool_done else R.string.remote_tool_manage), {
+                when (tool) {
+                    RemoteTool.HD -> { hdLiveView = !hdLiveView; startSession(hdLiveView) }
+                    RemoteTool.FPS -> toggleFpsControl()
+                    RemoteTool.AUDIO -> toggleAudioLevels()
+                    RemoteTool.HISTOGRAM -> histogramMode = histogramMode.next()
+                    RemoteTool.LUT -> {
+                        listProp = null; devPanel = false; cameraToolPanel = null; gridPanelOpen = false
+                        lutState.openMenu()
+                    }
+                    RemoteTool.GRID -> {
+                        lutState.dismissMenu()
+                        listProp=null; devPanel=false; cameraToolPanel=null
+                        if(gridPanelOpen) gridPanelCloseRequested=true
+                        else { gridPanelCloseRequested=false; gridPanelOpen=true }
+                    }
+                    RemoteTool.EXPOSURE -> {
+                        val next = exposureAssist.next()
+                        if (next == ExposureAssist.FALSE_COLOR) lutState.falseColorEnabled()
+                        exposureAssist = next
+                    }
+                    RemoteTool.DESQUEEZE -> {
+                        val i = REMOTE_DESQUEEZE_OPTIONS.indices.minByOrNull { abs(REMOTE_DESQUEEZE_OPTIONS[it] - desqueezeMultiplier) } ?: 0
+                        setDesqueezeMultiplier(REMOTE_DESQUEEZE_OPTIONS[(i + 1) % REMOTE_DESQUEEZE_OPTIONS.size])
+                    }
+                    RemoteTool.METER -> showMeter = !showMeter
+                    RemoteTool.LEVEL -> showLevel = !showLevel
+                    RemoteTool.WAVEFORM -> waveformMode = waveformMode.next()
+                    RemoteTool.LOCK -> {
+                        val locked = !tools.locked.value
+                        onLockRotation(locked)
+                        showHint(if (locked) rotationStoppedHint else rotationResumedHint)
+                    }
+                    RemoteTool.ROTATE -> if (!disabled) onCycleRotation()
+                    RemoteTool.WHITE_BALANCE -> { lutState.dismissMenu(); gridPanelOpen = false; listProp = null; devPanel = false; if (cameraToolPanel == RemoteCameraTool.WHITE_BALANCE) cameraToolCloseRequested = true else { cameraToolCloseRequested = false; cameraToolPanel = RemoteCameraTool.WHITE_BALANCE } }
+                    RemoteTool.FOCUS_AREA -> { lutState.dismissMenu(); gridPanelOpen = false; listProp = null; devPanel = false; if (cameraToolPanel == RemoteCameraTool.FOCUS_AREA) cameraToolCloseRequested = true else { cameraToolCloseRequested = false; cameraToolPanel = RemoteCameraTool.FOCUS_AREA } }
+                    else -> {
+                        listProp = null
+                        devPanel = false
+                        cameraToolPanel = null
+                        onEditingTools(!editingTools)
+                    }
+                }
+            }, modifier = if (tool == RemoteTool.WHITE_BALANCE) Modifier.onGloballyPositioned {
+                whiteBalanceAnchor = it
+            } else if (tool == RemoteTool.FOCUS_AREA) Modifier.onGloballyPositioned {
+                focusAreaAnchor = it
+            } else if (tool == RemoteTool.LUT) Modifier.onGloballyPositioned {
+                lutAnchor = it
+            } else if (tool == RemoteTool.GRID) Modifier.onGloballyPositioned {
+                gridAnchor = it
+            } else Modifier, enabled = !disabled) {
+                if (tool == null) Icon(if (editingTools) Icons.Default.Check else Icons.Default.Settings, null, Modifier.size(19.dp))
+                else if (cameraToolLoading && (
+                    (tool == RemoteTool.WHITE_BALANCE && cameraToolPanel == RemoteCameraTool.WHITE_BALANCE) ||
+                    (tool == RemoteTool.FOCUS_AREA && cameraToolPanel == RemoteCameraTool.FOCUS_AREA))) {
+                    androidx.compose.material3.CircularProgressIndicator(
+                        modifier=Modifier.size(18.dp),strokeWidth=1.5.dp,color=colors.accentBlue)
+                } else RemoteToolMark(tool, tools)
+            }
+        }
+    }
+
+
+    val renderTools: @Composable (androidx.compose.ui.unit.Dp, Modifier) -> Unit = { gap, modifier ->
+        RemoteToolBar(tools, editingTools, movieMode, changeToolVisibility,
+            modifier.fillMaxWidth(), gap,
+            leading = {
+                if (devUnlocked && !editingTools) TopIconToggle(false, stringResource(R.string.cd_dev_panel), { devPanel = true }) {
+                    Icon(Icons.Default.BugReport, null, Modifier.size(18.dp))
+                }
+            }, button = renderTool)
+    }
+
     // ---------- 布局 ----------
-    Box(modifier = Modifier.fillMaxSize().background(rememberAppBackgroundBrush())) {
+    Box(modifier = Modifier.fillMaxSize().background(rememberAppBackgroundBrush())
+        .onGloballyPositioned { toolOverlayCoordinates = it }) {
         AnimatedContent(
             targetState = rotation,
             transitionSpec = {
@@ -2394,63 +2945,41 @@ private fun RemoteContent(
         ) { renderedRotation ->
         val landscape = renderedRotation != 0
         if (!landscape) {
-        Column(
+        PortraitMonitorLayout(
+            aspectRatio = viewfinderAspect * desqueezeMultiplier,
             modifier = Modifier
                 .fillMaxSize()
                 .systemBarsPadding()
-                .padding(horizontal = 12.dp, vertical = 8.dp)
-        ) {
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            header = {
             // 顶栏返回常驻；信号随其他工具淡变，监看工具统一放到取景器下方。
             Row(verticalAlignment = Alignment.CenterVertically) {
-                AnimatedVisibility(
-                    visible = !immersiveFullscreen,
-                    enter = fadeIn(tween(260, easing = FastOutSlowInEasing)),
-                    exit = fadeOut(tween(180, easing = FastOutSlowInEasing))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        SignalPill(
-                            rssi = camState.wifiRssi,
-                            connected = connected,
-                            connectionType = camState.connectionType,
-                            staMode = camState.isStaConnection,
-                            onStaDisconnectedClick = cameraViewModel::retryStaConnection,
-                        )
-                        BatteryPill(percent = rcBatteryPercentage(batteryParam))
-                    }
+                    SignalPill(
+                        rssi = camState.wifiRssi,
+                        connected = connected,
+                        connectionType = camState.presentationConnectionType,
+                        staMode = camState.presentationIsSta,
+                        onStaDisconnectedClick = cameraViewModel::retryStaConnection,
+                    )
+                    BatteryPill(percent = rcBatteryPercentage(batteryParam))
                 }
                 Spacer(Modifier.weight(1f))
-                GlassButton(
-                    onClick = {
-                        if (immersiveFullscreen) {
-                            immersiveFullscreen = false
-                        } else {
-                            onNavigateBack()
-                        }
-                    },
-                    shape = RoundedCornerShape(22.dp),
-                    showSheen = false,
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                    modifier = Modifier.height(36.dp)
-                ) {
-                    Icon(
-                        Icons.Default.ArrowForward,
-                        contentDescription = stringResource(
-                            if (immersiveFullscreen) {
-                                R.string.cd_remote_fullscreen_exit
-                            } else {
-                                R.string.cd_back
-                            }
-                        ),
-                        tint = colors.onBackground, modifier = Modifier.size(18.dp)
-                    )
-                }
+                GlassBackButton(
+                    onClick = onNavigateBack,
+                    forward = true,
+                )
             }
-            Spacer(Modifier.height(12.dp))
-
+            },
+            viewfinder = {
             RemoteViewfinderPanel(
                 frameProvider = { frame },
+                lutState = lutState,
                 grid = framingGrid,
-                showHistogram = showHistogram,
+                histogramMode = histogramMode,
                 modeText = modeText,
                 focusModeText = focusModeText,
                 movieMode = movieMode,
@@ -2470,133 +2999,23 @@ private fun RemoteContent(
                 fps = fps,
                 connected = connected,
                 showZebra = showZebra,
+                    showFalseColor = exposureAssist == ExposureAssist.FALSE_COLOR,
+                    showWaveform = showWaveform,
                 showLevel = showLevel,
+                showMeter = meterEnabled,
+                meterEv = meterSample?.first,
                 levelRoll = levelRoll,
+                levelPitch = levelPitch,
                 desqueezeMultiplier = desqueezeMultiplier,
-                modifier = Modifier.fillMaxWidth().aspectRatio(viewfinderAspect * desqueezeMultiplier)
+                modifier = Modifier.fillMaxSize()
             )
-            Spacer(Modifier.height(8.dp))
-            // Row 1: overlay tools (left) + screen actions (right)
-            // Row 不会自动折行，窄屏上这排按钮会直接顶出屏幕外。这里做一次「量宽再
-            // 分行」：右端永久留给【进全屏 / 转屏】两颗，监看工具从左往右填第一行，
-            // 填不下的整颗挪到第二行左对齐（仍与取景器同一左边界）。
-            // 按钮宽度不能靠查表估算——GlassButton 底层的 M3 Surface 会把可点击
-            // 宽度撑到至少 48dp 的无障碍下限，HD/FPS 又是文字标（宽度随系统字体
-            // 缩放变化），估宽在部分机型上必然偏小、把右端两颗挤出屏幕。下面改用
-            // 自定义 Layout 拿每颗按钮的真实测量宽度分行，任何字号/密度下都精确装填。
-            val toolGap = 6.dp
-            val overlayTools: List<@Composable () -> Unit> = buildList {
-                if (devUnlocked) {
-                    add(@Composable {
-                        TopIconToggle(
-                            active = false,
-                            contentDescription = stringResource(R.string.cd_dev_panel),
-                            onClick = { devPanel = true }
-                        ) {
-                            Icon(
-                                Icons.Default.BugReport,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    })
-                }
-                add(@Composable {
-                    TopIconToggle(
-                        active = hdLiveView,
-                        contentDescription = stringResource(R.string.dev_hd_liveview),
-                        onClick = {
-                            hdLiveView = !hdLiveView
-                            startSession(hdLiveView)
-                        }
-                    ) { HdMark() }
-                })
-                add(@Composable {
-                    TopIconToggle(
-                        active = showFps,
-                        contentDescription = stringResource(R.string.dev_fps_overlay),
-                        onClick = { toggleFpsControl() }
-                    ) { FpsMark() }
-                })
-                add(@Composable {
-                    AudioLevelsToolButton(
-                        visible = movieMode,
-                        active = showAudioLevels,
-                        onClick = ::toggleAudioLevels
-                    )
-                })
-                add(@Composable {
-                    TopIconToggle(
-                        active = showHistogram,
-                        contentDescription = stringResource(R.string.cd_remote_histogram),
-                        onClick = { showHistogram = !showHistogram }
-                    ) { HistogramMark(Modifier.size(19.dp)) }
-                })
-                add(@Composable {
-                    TopIconToggle(
-                        active = framingGrid != ViewfinderGrid.OFF,
-                        contentDescription = stringResource(R.string.cd_remote_grid),
-                        onClick = { framingGrid = framingGrid.next() }
-                    ) {
-                        GridMark(Modifier.size(18.dp))
-                    }
-                })
-                add(@Composable {
-                    TopIconToggle(
-                        active = showZebra,
-                        contentDescription = stringResource(R.string.cd_remote_zebra),
-                        onClick = { showZebra = !showZebra }
-                    ) { ZebraMark(Modifier.size(18.dp)) }
-                })
-                add(@Composable {
-                    DesqueezeToolButton(desqueezeMultiplier, ::setDesqueezeMultiplier)
-                })
-                add(@Composable {
-                    TopIconToggle(
-                        active = showLevel,
-                        contentDescription = stringResource(R.string.cd_remote_level),
-                        onClick = { showLevel = !showLevel }
-                    ) { LevelMark(Modifier.size(18.dp)) }
-                })
-                add(@Composable {
-                    RecControlBar(
-                        isRecording = viewfinderRecorder != null,
-                        isPaused = recPaused,
-                        elapsedSeconds = recElapsed,
-                        onStart = { startRecorder() },
-                        onPauseResume = { togglePauseRecorder() },
-                        onStop = { stopRecorder() },
-                        modifier = Modifier.height(36.dp),
-                        enabled = isPro,
-                        isFinalizing = recFinalizing,
-                        showDone = recSaveSuccess
-                    )
-                })
-            }
-            // 所有按钮按真实固有宽度顺序折行；窄屏/大字体下宁可增加一行，
-            // 也绝不压窄按钮或让文字换行。
-            val toolRowGap = 4.dp
-            AdaptiveRemoteToolBar(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalGap = toolGap,
-                verticalGap = toolRowGap,
-                pinnedEndCount = 2,
-                content = {
-                    overlayTools.forEach { tool -> tool() }
-                    TopIconToggle(
-                        active = false,
-                        contentDescription = stringResource(R.string.cd_remote_fullscreen_enter),
-                        onClick = { enterFullscreen() }
-                    ) { FullscreenEnterMark(Modifier.size(17.dp)) }
-                    TopIconToggle(
-                        active = false,
-                        contentDescription = stringResource(R.string.cd_remote_rotate),
-                        onClick = onCycleRotation
-                    ) { RotateMark(Modifier.size(20.dp)) }
-                }
-            )
-            Spacer(Modifier.height(12.dp))
-
+            },
+            tools = {
+            // 竖屏按实际按钮宽度换行，旋转固定在第一行右端。
+            // HD/FPS 字号和录制控件宽度变化仍由同一套列轨道处理。
+            renderTools(6.dp, Modifier)
+            },
+            parameters = {
             // 2×2 数值拨轮微调：读数即控件——在数值上【上下拖动】，数值列随手指 1:1
             // 同向滚动、跨档步进、松手吸附最近档（iOS 拨轮手感，无惯性甩动）；
             // 点一下弹全表直跳。只读参数整块压暗 + 锁。第一排 曝光补偿/ISO，第二排 光圈/快门。
@@ -2617,7 +3036,7 @@ private fun RemoteContent(
                                 autoIsoValue = if (hasAutoIso) effectiveAutoIsoValue else null,
                                 autoIsoBusy = hasAutoIso && autoIsoBusy,
                                 onAutoIsoToggle = if (hasAutoIso) ::setAutoIso else null,
-                                modifier = Modifier.weight(1f),
+                                modifier = Modifier.weight(1f).onGloballyPositioned { parameterAnchors[prop] = it },
                                 onStep = { delta -> stepParam(prop, delta) },
                                 onOpenList = {
                                     if (params[prop]?.values?.isNotEmpty() == true) listProp = prop
@@ -2628,8 +3047,8 @@ private fun RemoteContent(
                 }
             }
 
-            Spacer(Modifier.weight(1f))
-
+            },
+            shutter = {
             // 快门键：悬在参数区与屏底之间留白的正中（上下 weight 等分），典型长屏上
             // 约落在屏高 3/4 的拇指自然落点——比贴屏底好按，也离刚调完的参数更近；
             // 固定 padding 保证小屏上下限间距。快按=直接拍摄/切换录制；长按=半按对焦再拍；
@@ -2651,114 +3070,28 @@ private fun RemoteContent(
                     }
                 )
             }
-            Spacer(Modifier.weight(1f))
-        }
+            },
+        )
         } else {
             BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-                val normalHorizontalPadding = 10.dp
-                val normalVerticalPadding = 8.dp
-                val controlsGap = 8.dp
-                val parameterPanelWidth = 170.dp
-                val fallbackToolBarHeight = 40.dp
-                val toolRowGap = 4.dp
-                val fullscreenVerticalBreathingRoom = 4.dp
-                val density = LocalDensity.current
-                var landscapeToolBarHeightPx by remember { mutableIntStateOf(0) }
-                val landscapeToolBarHeight = if (landscapeToolBarHeightPx > 0) {
-                    with(density) { landscapeToolBarHeightPx.toDp() }
-                } else {
-                    fallbackToolBarHeight
-                }
-
-                fun fitWithin(
-                    availableWidth: androidx.compose.ui.unit.Dp,
-                    availableHeight: androidx.compose.ui.unit.Dp,
-                    aspectRatio: Float = viewfinderAspect * desqueezeMultiplier,
-                ): Pair<androidx.compose.ui.unit.Dp, androidx.compose.ui.unit.Dp> {
-                    val width = availableWidth.coerceAtLeast(0.dp)
-                    val height = availableHeight.coerceAtLeast(0.dp)
-                    if (width == 0.dp || height == 0.dp) return 0.dp to 0.dp
-                    val heightAtFullWidth = width / aspectRatio
-                    return if (heightAtFullWidth <= height) {
-                        width to heightAtFullWidth
-                    } else {
-                        (height * aspectRatio) to height
-                    }
-                }
-
-                // 常规横屏中，取景器位于左栏、工具行上方；全屏时用同一个实例扩展到整个
-                // 安全区域。外层 RemoteScreen 已把状态栏、导航栏和挖孔映射成左右 inset，
-                // 所以这里的 maxWidth/maxHeight 正是可以安全使用的最大画布。
-                val normalLeftWidth = (
-                    maxWidth -
-                        normalHorizontalPadding * 2 -
-                        parameterPanelWidth -
-                        controlsGap
-                    ).coerceAtLeast(0.dp)
-                val normalViewfinderHeight = (
-                    maxHeight -
-                        normalVerticalPadding * 2 -
-                        landscapeToolBarHeight -
-                        toolRowGap
-                    ).coerceAtLeast(0.dp)
-                val (normalImageWidth, normalImageHeight) =
-                    fitWithin(normalLeftWidth, normalViewfinderHeight)
-                val normalImageX =
-                    normalHorizontalPadding + (normalLeftWidth - normalImageWidth) / 2
-                val normalImageY =
-                    normalVerticalPadding + (normalViewfinderHeight - normalImageHeight) / 2
-
-                val fullscreenAvailableHeight =
-                    (maxHeight - fullscreenVerticalBreathingRoom * 2).coerceAtLeast(0.dp)
-                val (fullscreenImageWidth, fullscreenImageHeight) =
-                    fitWithin(maxWidth, fullscreenAvailableHeight)
-                val targetImageX = if (immersiveFullscreen) {
-                    (maxWidth - fullscreenImageWidth) / 2
-                } else {
-                    normalImageX
-                }
-                val targetImageY = if (immersiveFullscreen) {
-                    fullscreenVerticalBreathingRoom +
-                        (fullscreenAvailableHeight - fullscreenImageHeight) / 2
-                } else {
-                    normalImageY
-                }
-                val targetImageWidth =
-                    if (immersiveFullscreen) fullscreenImageWidth else normalImageWidth
-                val targetImageHeight =
-                    if (immersiveFullscreen) fullscreenImageHeight else normalImageHeight
-                val boundsDuration = if (immersiveFullscreen) 360 else 300
-                val imageX by animateDpAsState(
-                    targetValue = targetImageX,
-                    animationSpec = tween(boundsDuration, easing = FastOutSlowInEasing),
-                    label = "fullscreenViewfinderX"
-                )
-                val imageY by animateDpAsState(
-                    targetValue = targetImageY,
-                    animationSpec = tween(boundsDuration, easing = FastOutSlowInEasing),
-                    label = "fullscreenViewfinderY"
-                )
-                val imageWidth by animateDpAsState(
-                    targetValue = targetImageWidth,
-                    animationSpec = tween(boundsDuration, easing = FastOutSlowInEasing),
-                    label = "fullscreenViewfinderWidth"
-                )
-                val imageHeight by animateDpAsState(
-                    targetValue = targetImageHeight,
-                    animationSpec = tween(boundsDuration, easing = FastOutSlowInEasing),
-                    label = "fullscreenViewfinderHeight"
-                )
-                // 录像画面按比例适配后，横屏/全屏通常会在取景器左侧留下空白。
-                // 至少 44dp 时把 30dp 宽的电平表放到画面外，并保留 6dp 间隔。
-                val audioMeterSlotWidth = 44.dp
-                val audioMeterOutside = imageX >= audioMeterSlotWidth
+                val monitorLayout = landscapeMonitorLayout(maxWidth.value, maxHeight.value,
+                    viewfinderAspect * desqueezeMultiplier)
+                val imageX = monitorLayout.image.x.dp
+                val imageY = monitorLayout.image.y.dp
+                val imageWidth = monitorLayout.image.width.dp
+                val imageHeight = monitorLayout.image.height.dp
+                val landscapeShutterSize = monitorLayout.shutterSize.dp
+                val landscapeMeterTop = if (movieMode) 34.dp else MonitorInfoTopInset
+                val audioTop = landscapeMeterTop + if (meterEnabled) MonitorExposureMeterHeight + MonitorMeterStackGap else 0.dp
+                val audioHeight = (imageHeight - audioTop - 8.dp).coerceIn(0.dp, 88.dp)
 
                 RemoteViewfinderPanel(
                     frameProvider = { frame },
+                    lutState = lutState,
                     grid = framingGrid,
-                    showHistogram = showHistogram,
-                    modeText = modeText,
-                    focusModeText = focusModeText,
+                    histogramMode = histogramMode,
+                    modeText = null,
+                    focusModeText = null,
                     movieMode = movieMode,
                     showAudioLevels = showAudioLevels,
                     recording = recording,
@@ -2776,285 +3109,136 @@ private fun RemoteContent(
                     fps = fps,
                     connected = connected,
                     showZebra = showZebra,
+                    showFalseColor = exposureAssist == ExposureAssist.FALSE_COLOR,
+                    showWaveform = showWaveform,
                     showLevel = showLevel,
+                showMeter = meterEnabled,
+                meterEv = meterSample?.first,
                     levelRoll = levelRoll,
-                    showEmbeddedAudioMeter = !audioMeterOutside,
+                levelPitch = levelPitch,
+                    showEmbeddedAudioMeter = false,
+                    informationBottomInset = if (dispMode == MonitorDispMode.CAMERA && connected)
+                        MonitorDispInformationInset else 0.dp,
+                    // Sit directly below STBY; navigation stays outside the image.
+                    meterTopInset = landscapeMeterTop,
                     desqueezeMultiplier = desqueezeMultiplier,
                     modifier = Modifier
                         .offset(x = imageX, y = imageY)
                         .size(width = imageWidth, height = imageHeight)
                 )
 
-                if (audioMeterOutside) {
-                    ViewfinderSoundMeterOverlay(
-                        enabled = connected && movieMode && showAudioLevels,
-                        frameProvider = { frame },
-                        bottomInset = 0.dp,
-                        modifier = Modifier
-                            .offset(x = imageX - audioMeterSlotWidth, y = imageY)
-                            .size(width = audioMeterSlotWidth, height = imageHeight)
-                    )
-                }
-
-                // 操作区独立淡出/淡入，取景器尺寸动画不会重建或交叉切换帧画面。
-                AnimatedVisibility(
-                    visible = !immersiveFullscreen,
-                    enter = fadeIn(
-                        animationSpec = tween(
-                            durationMillis = 260,
-                            delayMillis = 70,
-                            easing = FastOutSlowInEasing
-                        )
-                    ),
-                    exit = fadeOut(
-                        animationSpec = tween(
-                            durationMillis = 180,
-                            easing = FastOutSlowInEasing
-                        )
-                    ),
+                // Same right-edge column as the exposure meter, below its 120dp ruler.
+                ViewfinderSoundMeterOverlay(
+                    enabled = connected && movieMode && showAudioLevels,
+                    frameProvider = { frame },
+                    bottomInset = 0.dp,
+                    startInset = 0.dp,
                     modifier = Modifier
-                        .fillMaxSize()
-                        .padding(
-                            horizontal = normalHorizontalPadding,
-                            vertical = normalVerticalPadding
-                        )
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxSize(),
-                        horizontalArrangement = Arrangement.spacedBy(controlsGap)
-                    ) {
-                        Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
-                            Spacer(Modifier.weight(1f))
-                            Spacer(Modifier.height(toolRowGap))
-                            AdaptiveRemoteToolBar(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .onSizeChanged {
-                                        if (landscapeToolBarHeightPx != it.height) {
-                                            landscapeToolBarHeightPx = it.height
-                                        }
-                                },
-                                horizontalGap = 5.dp,
-                                verticalGap = 4.dp,
-                                pinnedEndCount = 2
-                            ) {
-                                if (devUnlocked) {
-                                    TopIconToggle(
-                                        active = false,
-                                        contentDescription = stringResource(R.string.cd_dev_panel),
-                                        onClick = { devPanel = true }
-                                    ) {
-                                        Icon(
-                                            Icons.Default.BugReport,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
-                                }
-                                TopIconToggle(
-                                    active = hdLiveView,
-                                    contentDescription = stringResource(R.string.dev_hd_liveview),
-                                    onClick = {
-                                        hdLiveView = !hdLiveView
-                                        startSession(hdLiveView)
-                                    }
-                                ) { HdMark() }
-                                TopIconToggle(
-                                    active = showFps,
-                                    contentDescription = stringResource(R.string.dev_fps_overlay),
-                                    onClick = { toggleFpsControl() }
-                                ) { FpsMark() }
-                                AudioLevelsToolButton(
-                                    visible = movieMode,
-                                    active = showAudioLevels,
-                                    onClick = ::toggleAudioLevels
-                                )
-                                TopIconToggle(
-                                    active = showHistogram,
-                                    contentDescription = stringResource(R.string.cd_remote_histogram),
-                                    onClick = { showHistogram = !showHistogram }
-                                ) { HistogramMark(Modifier.size(19.dp)) }
-                                TopIconToggle(
-                                    active = framingGrid != ViewfinderGrid.OFF,
-                                    contentDescription = stringResource(R.string.cd_remote_grid),
-                                    onClick = { framingGrid = framingGrid.next() }
-                                ) { GridMark(Modifier.size(18.dp)) }
-                                TopIconToggle(
-                                    active = showZebra,
-                                    contentDescription = stringResource(R.string.cd_remote_zebra),
-                                    onClick = { showZebra = !showZebra }
-                                ) { ZebraMark(Modifier.size(18.dp)) }
-                                DesqueezeToolButton(desqueezeMultiplier, ::setDesqueezeMultiplier)
-                                TopIconToggle(
-                                    active = showLevel,
-                                    contentDescription = stringResource(R.string.cd_remote_level),
-                                    onClick = { showLevel = !showLevel }
-                                ) { LevelMark(Modifier.size(18.dp)) }
-                                RecControlBar(
-                                    isRecording = viewfinderRecorder != null,
-                                    isPaused = recPaused,
-                                    elapsedSeconds = recElapsed,
-                                    onStart = { startRecorder() },
-                                    onPauseResume = { togglePauseRecorder() },
-                                    onStop = { stopRecorder() },
-                                    modifier = Modifier.height(36.dp),
-                                    enabled = isPro,
-                                    isFinalizing = recFinalizing,
-                                    showDone = recSaveSuccess
-                                )
-                                TopIconToggle(
-                                    active = false,
-                                    contentDescription =
-                                        stringResource(R.string.cd_remote_fullscreen_enter),
-                                    onClick = { enterFullscreen() }
-                                ) { FullscreenEnterMark(Modifier.size(17.dp)) }
-                                TopIconToggle(
-                                    active = false,
-                                    contentDescription = stringResource(R.string.cd_remote_rotate),
-                                    onClick = onCycleRotation
-                                ) { RotateMark(Modifier.size(20.dp)) }
-                            }
-                        }
+                        .offset(x = imageX + imageWidth - MonitorMeterEndInset - MonitorMeterWidth, y = imageY + audioTop.coerceAtMost(imageHeight))
+                        .size(width = MonitorMeterWidth, height = audioHeight)
+                )
 
-                        Column(
-                            modifier = Modifier
-                                .width(parameterPanelWidth)
-                                .fillMaxHeight(),
-                            verticalArrangement = Arrangement.Center
-                        ) {
-                            val activeProps =
-                                if (movieMode) MOVIE_EXPOSURE_PROPS else EXPOSURE_PROPS
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                activeProps.chunked(2).forEach { rowProps ->
-                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        rowProps.forEach { prop ->
-                                            val isoProp =
-                                                if (movieMode) {
-                                                    Lab.PROP_NK_MOVIE_ISO
-                                                } else {
-                                                    Lab.PROP_ISO
-                                                }
-                                            val hasAutoIso =
-                                                prop == isoProp && autoIsoAvailable
-                                            ParamTile(
-                                                label = paramLabel(prop),
-                                                param = params[prop],
-                                                autoIsoEnabled =
-                                                    if (hasAutoIso) autoIsoEnabled else null,
-                                                autoIsoValue =
-                                                    if (hasAutoIso) effectiveAutoIsoValue else null,
-                                                autoIsoBusy = hasAutoIso && autoIsoBusy,
-                                                onAutoIsoToggle =
-                                                    if (hasAutoIso) ::setAutoIso else null,
-                                                modifier = Modifier.weight(1f),
-                                                onStep = { delta -> stepParam(prop, delta) },
-                                                onOpenList = {
-                                                    if (
-                                                        params[prop]?.values?.isNotEmpty() == true
-                                                    ) {
-                                                        listProp = prop
-                                                    }
-                                                }
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                            Spacer(Modifier.height(18.dp))
-                            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                                ShutterButton(
-                                    capturing = capturing,
-                                    focusing = afHeld,
-                                    enabled = connected && !probing,
-                                    movie = movieMode,
-                                    recording = recording,
-                                    onFocusStart = { startFocus() },
-                                    onRelease = ::finishShutterGesture,
-                                    onQuickTap = {
-                                        if (movieMode) toggleRecord() else shoot()
-                                    }
-                                )
-                            }
-                        }
-                    }
-                }
 
-                // 返回始终固定在右上角；信号随工具区淡变，全屏时返回只恢复常规横屏布局。
-                Row(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(
-                            horizontal = normalHorizontalPadding,
-                            vertical = normalVerticalPadding
-                        ),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    AnimatedVisibility(
-                        visible = !immersiveFullscreen,
-                        enter = fadeIn(tween(260, easing = FastOutSlowInEasing)),
-                        exit = fadeOut(tween(180, easing = FastOutSlowInEasing))
-                    ) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            SignalPill(
-                                rssi = camState.wifiRssi,
-                                connected = connected,
-                                connectionType = camState.connectionType,
-                                staMode = camState.isStaConnection,
-                                onStaDisconnectedClick = cameraViewModel::retryStaConnection,
-                            )
-                            BatteryPill(percent = rcBatteryPercentage(batteryParam))
-                        }
-                    }
-                    GlassButton(
-                        onClick = {
-                            if (immersiveFullscreen) {
-                                immersiveFullscreen = false
-                            } else {
-                                onNavigateBack()
-                            }
-                        },
-                        shape = RoundedCornerShape(22.dp),
-                        showSheen = false,
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                        modifier = Modifier.height(36.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.ArrowForward,
-                            contentDescription = stringResource(
-                                if (immersiveFullscreen) {
-                                    R.string.cd_remote_fullscreen_exit
-                                } else {
-                                    R.string.cd_back
-                                }
-                            ),
-                            tint = colors.onBackground,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
+                val cameraDisp = dispMode == MonitorDispMode.CAMERA
+                val detailValues = rememberMonitorDetails(
+                    cameraViewModel.getCamera(), movieMode,
+                    enabled = connected && initialLoaded && cameraDisp,
+                    pollingAllowed = !probing && !diagnosticControlBusy && !recBusy && !capturing && !recording,
+                )
+                val storageValues = rememberMonitorStorage(
+                    cameraViewModel.getCamera(), camState.storageIds,
+                    enabled = connected && initialLoaded && cameraDisp,
+                    pollingAllowed = !probing && !diagnosticControlBusy && !recBusy && !capturing && !recording,
+                )
+                if (cameraDisp && connected) {
+                    val cells = listOfNotNull(modeText?.let { "MODE" to it }) + listOfNotNull(
+                            detailValues[RemoteCameraTool.WHITE_BALANCE]?.let { "WB" to it },
+                            focusModeText?.let { "AF" to it })
+                    CameraMonitorDisp(cells, storageValues, movieMode,
+                        rcBatteryPercentage(batteryParam), recording,
+                        Modifier.offset(x = imageX, y = imageY).size(imageWidth, imageHeight),
+                        storageSlotCount = camState.storageIds.filter { it != 0 && it != -1 }.distinct().size)
                 }
+                MonitorDispSummary(
+                    if (cameraDisp && connected) MonitorDispMode.CLEAN else dispMode, listOfNotNull(modeText), connected,
+                    Modifier.offset(x = imageX + 8.dp, y = imageY + 9.dp)
+                        .width((imageWidth - if (recording) 104.dp else 16.dp).coerceAtLeast(0.dp)),
+                )
+                LandscapeMonitorControls(
+                    layout = monitorLayout,
+                    tools = tools.layout(movieMode).shownTools.filter { it != RemoteTool.RECORD },
+                    onPanelChange = {
+                        gridPanelOpen = false
+                        cameraToolPanel = null
+                        lutState.dismissMenu()
+                        listProp = null
+                        devPanel = false
+                    },
+                    dockButton = { active, click, modifier ->
+                        MonitorHeaderButton({ services.haptics.tick(); click() }, modifier.semantics { contentDescription = services.context.getString(R.string.remote_tool_dock) }, active) {
+                            DockToolMark()
+                        }
+                    },
+                    rotateButton = { renderTool(RemoteTool.ROTATE) },
+                    backButton = {
+                        GlassBackButton(onClick = onNavigateBack, forward = true)
+                    },
+                    dispButton = {
+                        TopIconToggle(false, "DISP", { dispMode = dispMode.next() }) {
+                            Text("DISP", fontSize = 8.sp, maxLines = 1, softWrap = false)
+                        }
+                    },
+                    shutter = {
+                        ShutterButton(capturing = capturing, focusing = afHeld,
+                            enabled = connected && !probing, movie = movieMode, recording = recording,
+                            onFocusStart = { startFocus() }, onRelease = ::finishShutterGesture,
+                            onQuickTap = { if (movieMode) toggleRecord() else shoot() },
+                            diameter = landscapeShutterSize)
+                    },
+                    localRecorder = { renderTool(RemoteTool.RECORD) },
+                    parameter = { index, modifier ->
+                        val prop = (if (movieMode) MOVIE_EXPOSURE_PROPS else EXPOSURE_PROPS)[index]
+                        val isoProp = if (movieMode) Lab.PROP_NK_MOVIE_ISO else Lab.PROP_ISO
+                        val hasAutoIso = prop == isoProp && autoIsoAvailable
+                        ParamTile(label = paramLabel(prop), param = params[prop],
+                            autoIsoEnabled = if (hasAutoIso) autoIsoEnabled else null,
+                            autoIsoValue = if (hasAutoIso) effectiveAutoIsoValue else null,
+                            autoIsoBusy = hasAutoIso && autoIsoBusy,
+                            onAutoIsoToggle = if (hasAutoIso) ::setAutoIso else null,
+                            modifier = modifier.onGloballyPositioned { parameterAnchors[prop] = it }, tileHeight = monitorLayout.parameterHeight.dp,
+                            onStep = { stepParam(prop, it) },
+                            onOpenList = { if (params[prop]?.values?.isNotEmpty() == true) listProp = prop })
+                    },
+                    tool = { renderTool(it) },
+                    modifier = Modifier.offset(monitorLayout.interactionBounds.x.dp, monitorLayout.interactionBounds.y.dp)
+                        .size(monitorLayout.interactionBounds.width.dp, monitorLayout.interactionBounds.height.dp),
+                )
             }
         }
         }
 
-        // 免费监看余量属于整页状态，不跟随取景器尺寸或全屏动画。竖屏避开系统
+        // 免费监看余量属于整页状态，不跟随 Dock 内容切换。竖屏避开系统
         // 导航栏；横屏安全区已由外层旋转容器换算成左右 inset，无需重复留白。
         if (trialLeftSeconds != null) {
             RemoteTrialTimeBadge(
                 seconds = trialLeftSeconds,
+                compact = landscapeLayout,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .then(
                         if (rotation == 0) Modifier.navigationBarsPadding() else Modifier
                     )
-                    .padding(end = 16.dp, bottom = 12.dp)
+                    .padding(
+                        end = if (landscapeLayout) 6.dp else 16.dp,
+                        bottom = if (landscapeLayout) 4.dp else 12.dp,
+                    )
             )
         }
 
         // 顶部提示条：视觉与照片列表页的底部玻璃提示条同款（22dp 玻璃 Surface + 投影 +
         // labelLarge）；位置留在顶部——本页底部是快门键，提示不能压它。
         AnimatedVisibility(
-            visible = hintVisible && !immersiveFullscreen,
+            visible = hintVisible,
             enter = fadeIn(tween(200)) + slideInVertically(tween(200)) { -it / 2 },
             exit = fadeOut(tween(300)),
             modifier = Modifier
@@ -3077,84 +3261,17 @@ private fun RemoteContent(
             }
         }
 
-        // 完整值表（点胶囊中间值弹出）：呼出=缩放淡入、消失=淡出（item 9 动画）。
-        // 用 lastListProp 记住最后一次的参数，让消失动画期间仍有数据可渲染。
-        var lastListProp by remember { mutableStateOf<Int?>(null) }
-        LaunchedEffect(listProp) { if (listProp != null) lastListProp = listProp }
-        // 遮罩：淡入淡出（180/140，与面板本体及全局筛选面板同节奏）
-        AnimatedVisibility(
-            visible = listProp != null,
-            enter = fadeIn(tween(180)),
-            exit = fadeOut(tween(140)),
-            modifier = Modifier.fillMaxSize()
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(colors.scrim)
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null
-                    ) { listProp = null }
-            )
-        }
-        // 面板：缩放+淡入呼出、缩放+淡出消失
-        AnimatedVisibility(
-            visible = listProp != null,
-            enter = fadeIn(tween(180)) + scaleIn(initialScale = 0.88f, animationSpec = tween(180)),
-            exit = fadeOut(tween(140)) + scaleOut(targetScale = 0.9f, animationSpec = tween(140)),
-            modifier = Modifier.fillMaxSize()
-        ) {
-            val prop = lastListProp
-            val listParam = prop?.let { params[it] }
-            if (prop != null && listParam != null) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    val valueListState = rememberLazyListState()
-                    LaunchedEffect(prop) {
-                        val idx = listParam.values.indexOf(listParam.current)
-                        if (idx > 3) valueListState.scrollToItem(idx - 3)
-                    }
-                    // 面板走全局玻璃面板惯用法（Surface + 细描边 + 投影，同类型筛选面板）；
-                    // 当前值行用全局选中语言：高亮底 + 蓝色加粗（同 FilterRow）。
-                    Surface(
-                        shape = RoundedCornerShape(16.dp),
-                        color = colors.glassSurfaceHeavy,
-                        border = BorderStroke(1.dp, colors.glassPanelBorder),
-                        shadowElevation = 6.dp,
-                        modifier = Modifier.width(190.dp)
-                    ) {
-                        LazyColumn(
-                            state = valueListState,
-                            modifier = Modifier
-                                .heightIn(max = 340.dp)
-                                .padding(horizontal = 6.dp, vertical = 6.dp)
-                        ) {
-                            items(listParam.values) { v ->
-                                val isCurrent = v == listParam.current
-                                Text(
-                                    rcFormat(prop, v),
-                                    color = if (isCurrent) colors.accentBlue else colors.onBackground,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 15.sp,
-                                    fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal,
-                                    textAlign = TextAlign.Center,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(9.dp))
-                                        .background(
-                                            if (isCurrent) colors.accentBlue.copy(alpha = 0.18f)
-                                            else Color.Transparent
-                                        )
-                                        .clickable {
-                                            sendValue(prop, v, immediate = true)
-                                            listProp = null
-                                        }
-                                        .padding(vertical = 10.dp)
-                                )
-                            }
-                        }
-                    }
+        listProp?.let { prop ->
+            val listParam = params[prop]
+            val localAnchor = toolOverlayCoordinates?.takeIf { it.isAttached }?.let { root ->
+                parameterAnchors[prop]?.takeIf { it.isAttached }?.let {
+                    root.localBoundingBoxOf(it, clipBounds = false)
                 }
+            }
+            if (listParam != null) key(prop) {
+                RemoteParameterPanel(listParam, localAnchor, rotation != 0,
+                    onSelect = { sendValue(prop, it, immediate = true) },
+                    onDismiss = { listProp = null })
             }
         }
 
@@ -3209,7 +3326,8 @@ private fun RemoteContent(
                         Spacer(Modifier.weight(1f))
                         GlassButton(
                             onClick = {
-                                clipboard.setText(AnnotatedString(logLines.joinToString("\n")))
+                                services.clipboard.setText(AnnotatedString(logLines.joinToString("\n")))
+                                Toast.makeText(services.context, R.string.code_copied, Toast.LENGTH_SHORT).show()
                             },
                             contentPadding = PaddingValues(8.dp)
                         ) {
@@ -3231,55 +3349,152 @@ private fun RemoteContent(
                             )
                         }
                     }
-                    Spacer(Modifier.height(8.dp))
-                    // HD / FPS 开关已移到顶栏；此处只保留探测与日志。
-                    GlassButton(onClick = ::runProbe, enabled = connected && !probing) {
-                        Text(
-                            stringResource(R.string.lab_run_probe),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = colors.onBackground
-                        )
-                    }
-                    Text(
-                        text = stringResource(R.string.lab_tracking_probe_hint),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = colors.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 6.dp, bottom = 8.dp)
-                    )
-                    // 日志跟尾：面板刚打开（尚无布局信息）直接跳到底；此后新行到来时，
-                    // 停在底部附近才跟到底，用户上翻查看时不打扰。
-                    val logState = rememberLazyListState()
-                    LaunchedEffect(logLines.size) {
-                        if (logLines.isEmpty()) return@LaunchedEffect
-                        val lastVisible =
-                            logState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
-                        if (lastVisible == -1 || lastVisible >= logLines.size - 3) {
-                            logState.scrollToItem(logLines.size - 1)
-                        }
-                    }
-                    LazyColumn(
-                        state = logState,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(170.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(Color.Black.copy(alpha = 0.35f))
-                            .padding(horizontal = 8.dp, vertical = 6.dp)
-                    ) {
-                        items(logLines) { line ->
-                            Text(
-                                line,
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = 10.sp,
-                                lineHeight = 14.sp,
-                                color = if (line.startsWith("!!")) colors.accentOrange
-                                else Color.White.copy(alpha = 0.76f)
+                    Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(stringResource(R.string.remote_diagnostic_saved_hint), style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f).padding(end = 12.dp)) {
+                                Text(
+                                    stringResource(R.string.remote_pc_control_title),
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = colors.onBackground
+                                )
+                                Text(
+                                    stringResource(R.string.remote_pc_control_hint),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = colors.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = diagnosticControlEnabled,
+                                onCheckedChange = ::setDiagnosticControlMode,
+                                enabled = connected && initialLoaded && !probing && !diagnosticControlBusy &&
+                                    !capturing && !recording && !recBusy && !autoIsoBusy &&
+                                    !afHeld && !tapFocusBusy && afJob?.isActive != true &&
+                                    pendingSets.values.none { it.isActive } &&
+                                    (diagnosticControlEnabled || cameraViewModel.getCamera()?.remoteControlModeSet != true),
+                                modifier = Modifier.semantics {
+                                    contentDescription = services.context.getString(R.string.remote_pc_control_title)
+                                }
                             )
+                        }
+                        diagnosticControlStatus?.let { status ->
+                            Text(
+                                status,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = colors.onSurfaceVariant,
+                                modifier = Modifier.padding(bottom = 8.dp)
+                            )
+                        }
+                        GlassButton(onClick = ::runProbe, enabled = connected && !probing) {
+                            Text(
+                                stringResource(R.string.lab_run_probe),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = colors.onBackground
+                            )
+                        }
+                        Text(
+                            text = stringResource(R.string.remote_shutter_probe_hint),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 6.dp, bottom = 8.dp)
+                        )
+                        // 日志跟尾：面板刚打开（尚无布局信息）直接跳到底；此后新行到来时，
+                        // 停在底部附近才跟到底，用户上翻查看时不打扰。
+                        val logState = rememberLazyListState()
+                        LaunchedEffect(logLines.lastOrNull()) {
+                            if (logLines.isEmpty()) return@LaunchedEffect
+                            val lastVisible =
+                                logState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+                            if (lastVisible == -1 || lastVisible >= logLines.size - 3) {
+                                logState.scrollToItem(logLines.size - 1)
+                            }
+                        }
+                        LazyColumn(
+                            state = logState,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(170.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color.Black.copy(alpha = 0.35f))
+                                .padding(horizontal = 8.dp, vertical = 6.dp)
+                        ) {
+                            items(logLines) { line ->
+                                Text(
+                                    line,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 10.sp,
+                                    lineHeight = 14.sp,
+                                    color = if ("!!" in line) colors.accentOrange
+                                    else Color.White.copy(alpha = 0.76f)
+                                )
+                            }
                         }
                     }
                 }
             }
             }
+    if (lutState.menuOpen) {
+        val localAnchor = toolOverlayCoordinates?.takeIf { it.isAttached }?.let { root ->
+            lutAnchor?.takeIf { it.isAttached }?.let { root.localBoundingBoxOf(it, clipBounds = false) }
+        }
+        RemoteLutPanel(lutState, localAnchor, rotation != 0,
+            onFolder = {
+                lutState.prepareFolderPicker()
+                lutPickerActive = true
+                try {
+                    lutFolderPicker.launch(lutState.folder)
+                } catch (_: android.content.ActivityNotFoundException) {
+                    lutPickerActive = false
+                    showHint(services.context.getString(R.string.lut_folder_denied))
+                } catch (_: SecurityException) {
+                    lutPickerActive = false
+                    showHint(services.context.getString(R.string.lut_folder_denied))
+                }
+            }, onFeedback = { services.haptics.tick() })
+    }
+    if(gridPanelOpen) {
+        val localAnchor=toolOverlayCoordinates?.takeIf { it.isAttached }?.let { root ->
+            gridAnchor?.takeIf { it.isAttached }?.let { root.localBoundingBoxOf(it,clipBounds=false) }
+        }
+        RemoteGridPanel(framingGrid,localAnchor,rotation!=0,gridPanelCloseRequested,
+            onSelect={ framingGrid=it },onDismiss={gridPanelOpen=false;gridPanelCloseRequested=false})
+    }
+    cameraToolPanel?.let { selectedTool ->
+        val panelCamera = cameraViewModel.getCamera()
+        val buttonCoordinates = if (selectedTool == RemoteCameraTool.WHITE_BALANCE) whiteBalanceAnchor else focusAreaAnchor
+        val localAnchor = toolOverlayCoordinates?.takeIf { it.isAttached }?.let { root ->
+            buttonCoordinates?.takeIf { it.isAttached }?.let { root.localBoundingBoxOf(it, clipBounds = false) }
+        }
+        key(selectedTool) { RemoteCameraToolPanel(panelCamera, movieMode, selectedTool,
+            closeRequested = cameraToolCloseRequested,
+            onLoadingChanged = { cameraToolLoading = it },
+            onUnavailable = { showHint(cameraToolUnavailableHint) },
+            landscape = rotation != 0,
+            anchor = localAnchor,
+            canWrite = connected && initialLoaded && !probing && !diagnosticControlBusy && !capturing && !recBusy && !afHeld && !tapFocusBusy && afJob?.isActive != true,
+            isCurrentCamera = { panelCamera != null && cameraViewModel.getCamera() === panelCamera },
+            beforeWrite = {
+                if (selectedTool == RemoteCameraTool.FOCUS_AREA && subjectTrackingActive && panelCamera != null) {
+                    val rc = panelCamera.rcEndSubjectTracking()
+                    devLog("focus area EndTracking resp=${rc?.let { "0x%04X".format(it and 0xFFFF) } ?: "unavailable"}")
+                    if (rc != null && rc != Lab.OK && rc != PtpConstants.OPERATION_NOT_SUPPORTED && rc != Lab.NK_INVALID_STATUS) false else {
+                        subjectTrackingActive = false
+                        confirmedFocusMarker = null
+                        true
+                    }
+                } else true
+            },
+            onApplied = {
+                if (selectedTool == RemoteCameraTool.FOCUS_AREA) {
+                    confirmedFocusMarker = null
+                    tapFocusFeedback = TapFocusFeedback.IDLE
+                    afLocked = false
+                    refreshFocusMode()
+                }
+            }, log = { devLog(it) }, onDismiss = { cameraToolPanel = null; cameraToolCloseRequested = false }) }
+    }
+    BackHandler(enabled = editingTools) { onEditingTools(false) }
         }
     }
 
@@ -3328,10 +3543,11 @@ private fun BatteryPill(percent: Int?) {
     GlassButton(
         onClick = { expanded = !expanded },
         shape = RoundedCornerShape(22.dp),
-        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 9.dp),
+        // Match the 40 × 36dp back/idle queue button without an extra layout touch inset.
+        contentPadding = PaddingValues(horizontal = 9.5.dp, vertical = 7.dp),
+        enforceMinimumTouchTarget = false,
         modifier = Modifier
             .height(36.dp)
-            .widthIn(min = 48.dp)
             .semantics {
                 contentDescription = batteryContentDescription
             }
@@ -3407,22 +3623,23 @@ private fun BatteryPill(percent: Int?) {
 @Composable
 private fun RemoteTrialTimeBadge(
     seconds: Int,
+    compact: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val colors = AppTheme.colors
     val safeSeconds = seconds.coerceAtLeast(0)
     val shape = RoundedCornerShape(9.dp)
     Box(
-        modifier = modifier
-            .background(colors.glassSurfaceHeavy, shape)
-            .border(1.dp, colors.glassPanelBorder, shape)
-            .padding(horizontal = 10.dp, vertical = 5.dp)
+        modifier = modifier.then(
+            if (compact) Modifier else Modifier
+                .background(colors.glassSurfaceHeavy, shape)
+                .border(1.dp, colors.glassPanelBorder, shape)
+                .padding(horizontal = 10.dp, vertical = 5.dp)
+        )
     ) {
+        val countdown = "%d:%02d".format(safeSeconds / 60, safeSeconds % 60)
         Text(
-            text = stringResource(
-                R.string.remote_trial_left,
-                "%d:%02d".format(safeSeconds / 60, safeSeconds % 60)
-            ),
+            text = countdown,
             style = MaterialTheme.typography.labelMedium,
             color = colors.onSurfaceVariant,
             fontFamily = FontFamily.Monospace,
@@ -3442,7 +3659,7 @@ private fun ViewfinderStatusBadge(text: String, weight: FontWeight) {
         fontSize = 11.sp,
         fontWeight = weight,
         modifier = Modifier
-            .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+            .background(MonitorOverlayBackground, RoundedCornerShape(8.dp))
             .padding(horizontal = 7.dp, vertical = 2.dp)
     )
 }
@@ -3450,9 +3667,10 @@ private fun ViewfinderStatusBadge(text: String, weight: FontWeight) {
 /** 包含模式徽标、录制/FPS/对焦反馈的完整取景器；帧更新仍只落在其内部。 */
 @Composable
 private fun RemoteViewfinderPanel(
+    lutState: LutMonitorState,
     frameProvider: () -> RemoteLiveFrame?,
     grid: ViewfinderGrid,
-    showHistogram: Boolean,
+    histogramMode: HistogramMode,
     modeText: String?,
     focusModeText: String?,
     movieMode: Boolean,
@@ -3472,24 +3690,40 @@ private fun RemoteViewfinderPanel(
     fps: Float,
     connected: Boolean,
     showZebra: Boolean = false,
+    showFalseColor: Boolean = false,
+    showWaveform: Boolean = false,
     showLevel: Boolean = false,
+    showMeter: Boolean = false,
+    meterEv: Float? = null,
+    meterTopInset: Dp = if (movieMode) 34.dp else MonitorInfoTopInset,
     /** 相机机身滚转角；null=没有可用角度，水平仪什么都不画。 */
     levelRoll: Float? = null,
+    levelPitch: Float? = null,
     showEmbeddedAudioMeter: Boolean = true,
+    informationBottomInset: Dp = 0.dp,
     desqueezeMultiplier: Float = 1f,
     modifier: Modifier = Modifier
 ) {
     val colors = AppTheme.colors
+    val animatedInformationInset by animateDpAsState(
+        informationBottomInset, tween(180), label = "dispInformationInset")
+    val recordingBorder by animateColorAsState(
+        targetValue = if (connected && movieMode && recording) Color(0xFFFF424D) else Color.Transparent,
+        animationSpec = tween(280),
+        label = "cameraRecordingBorder",
+    )
     val soundMeterEnabled = connected && movieMode && showAudioLevels
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(14.dp))
             .background(Color(0xFF0D0D0D))
+            .border(2.dp, recordingBorder, RoundedCornerShape(14.dp))
     ) {
         ViewfinderImage(
+            lutState = lutState,
             frameProvider = frameProvider,
             grid = grid,
-            showHistogram = showHistogram,
+            histogramMode = histogramMode,
             tapFocusFeedback = tapFocusFeedback,
             tapFocusPoint = tapFocusPoint,
             tapFocusNonce = tapFocusNonce,
@@ -3500,6 +3734,11 @@ private fun RemoteViewfinderPanel(
             subjectTrackingActive = subjectTrackingActive,
             onTapFocus = onTapFocus,
             showZebra = showZebra,
+            showFalseColor = showFalseColor,
+            showWaveform = showWaveform,
+            scopeStartInset = if (soundMeterEnabled && showEmbeddedAudioMeter) 48.dp else 8.dp,
+            informationBottomInset = animatedInformationInset,
+            scopeBottomInset = 8.dp,
             desqueezeMultiplier = desqueezeMultiplier
         )
 
@@ -3507,13 +3746,18 @@ private fun RemoteViewfinderPanel(
             ViewfinderSoundMeterOverlay(
                 enabled = soundMeterEnabled,
                 frameProvider = frameProvider,
-                bottomInset = if (showHistogram) 78.dp else 8.dp,
+                bottomInset = 8.dp + animatedInformationInset,
                 modifier = Modifier.matchParentSize()
             )
         }
 
+        if (showMeter) {
+            ExposureMeterOverlay(meterEv, Modifier.align(Alignment.TopEnd)
+                .padding(top = meterTopInset, end = MonitorMeterEndInset))
+        }
+
         if (showLevel) {
-            ViewfinderLevelOverlay(rollDegrees = levelRoll, modifier = Modifier.matchParentSize())
+            ViewfinderLevelOverlay(rollDegrees = levelRoll, pitchDegrees = levelPitch, modifier = Modifier.matchParentSize())
         }
 
         if (modeText != null || focusModeText != null) {
@@ -3533,7 +3777,7 @@ private fun RemoteViewfinderPanel(
             }
         }
 
-        if (recording) {
+        if (connected && movieMode && recording) {
             val recPulse = rememberInfiniteTransition(label = "recPulse")
             val dotAlpha by recPulse.animateFloat(
                 initialValue = 1f,
@@ -3546,7 +3790,7 @@ private fun RemoteViewfinderPanel(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .padding(8.dp)
-                    .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                    .background(MonitorOverlayBackground, RoundedCornerShape(8.dp))
                     .padding(horizontal = 7.dp, vertical = 2.dp)
             ) {
                 Box(
@@ -3575,7 +3819,7 @@ private fun RemoteViewfinderPanel(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(8.dp)
-                    .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                    .background(MonitorOverlayBackground, RoundedCornerShape(8.dp))
                     .padding(horizontal = 6.dp, vertical = 2.dp)
             )
         }
@@ -3587,7 +3831,7 @@ private fun RemoteViewfinderPanel(
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier
                     .align(Alignment.Center)
-                    .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(8.dp))
+                    .background(MonitorOverlayBackground, RoundedCornerShape(8.dp))
                     .padding(horizontal = 12.dp, vertical = 6.dp)
             )
         }
@@ -3603,12 +3847,13 @@ private fun ViewfinderSoundMeterOverlay(
     enabled: Boolean,
     frameProvider: () -> RemoteLiveFrame?,
     bottomInset: androidx.compose.ui.unit.Dp = 8.dp,
+    startInset: androidx.compose.ui.unit.Dp = 8.dp,
     modifier: Modifier = Modifier
 ) {
     BoxWithConstraints(modifier) {
         val levels = if (enabled) frameProvider()?.metadata?.soundLevels else null
-        // 短竖条高度封顶，避免横屏/全屏时向挖孔侧延伸。
-        // 横屏优先放在取景器外；空间不足时回落到画面内，并在直方图上方显示。
+        // 短竖条高度封顶，避免横屏时向挖孔侧延伸。
+        // 横屏由调用方限定在右侧曝光尺下方，竖屏沿用左下角位置。
         val availableHeight = (maxHeight - 16.dp).coerceAtLeast(0.dp)
         val targetMeterHeight = (maxHeight * 0.24f)
             .coerceIn(56.dp, 72.dp)
@@ -3625,7 +3870,7 @@ private fun ViewfinderSoundMeterOverlay(
             exit = fadeOut(tween(140, easing = FastOutSlowInEasing)),
             modifier = Modifier
                 .align(Alignment.BottomStart)
-                .padding(start = 8.dp, bottom = bottomInset)
+                .padding(start = startInset, bottom = bottomInset)
         ) {
             StereoSoundMeter(
                 levels = levels ?: LiveViewSoundLevels(0, 0, 0, 0),
@@ -3663,22 +3908,23 @@ private fun StereoSoundMeter(
     val shape = RoundedCornerShape(7.dp)
     Row(
         modifier = modifier
-            .background(Color.Black.copy(alpha = 0.56f), shape)
+            .width(MonitorMeterWidth)
+            .background(MonitorOverlayBackground, shape)
             .border(0.5.dp, Color.White.copy(alpha = 0.14f), shape)
-            .padding(horizontal = 4.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp)
+            .padding(horizontal = 3.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(3.dp)
     ) {
         SoundMeterChannel(
             label = "L",
-            level = leftLevel,
-            peak = leftPeak,
-            modifier = Modifier.fillMaxHeight()
+            level = { leftLevel },
+            peak = { leftPeak },
+            modifier = Modifier.weight(1f).fillMaxHeight()
         )
         SoundMeterChannel(
             label = "R",
-            level = rightLevel,
-            peak = rightPeak,
-            modifier = Modifier.fillMaxHeight()
+            level = { rightLevel },
+            peak = { rightPeak },
+            modifier = Modifier.weight(1f).fillMaxHeight()
         )
     }
 }
@@ -3686,26 +3932,29 @@ private fun StereoSoundMeter(
 @Composable
 private fun SoundMeterChannel(
     label: String,
-    level: Float,
-    peak: Float,
+    level: () -> Float,
+    peak: () -> Float,
     modifier: Modifier = Modifier
 ) {
     Column(
         modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Canvas(Modifier.width(9.dp).weight(1f)) {
+        Canvas(Modifier.fillMaxWidth().weight(1f)) {
+            // Read animation state only while drawing, avoiding per-tick layout recomposition.
+            val currentLevel = level()
+            val currentPeak = peak()
             val segmentCount = 15
             val gap = 1.dp.toPx()
             val segmentHeight =
                 ((size.height - gap * (segmentCount - 1)) / segmentCount).coerceAtLeast(0f)
             val activeCount = (
-                level.coerceIn(0f, LiveViewSoundLevels.MAX_SEGMENT.toFloat()) /
+                currentLevel.coerceIn(0f, LiveViewSoundLevels.MAX_SEGMENT.toFloat()) /
                     LiveViewSoundLevels.MAX_SEGMENT * segmentCount
                 ).roundToInt().coerceIn(0, segmentCount)
-            val peakIndex = if (peak > 0f) {
+            val peakIndex = if (currentPeak > 0f) {
                 (
-                    peak.coerceIn(0f, LiveViewSoundLevels.MAX_SEGMENT.toFloat()) /
+                    currentPeak.coerceIn(0f, LiveViewSoundLevels.MAX_SEGMENT.toFloat()) /
                         LiveViewSoundLevels.MAX_SEGMENT * (segmentCount - 1)
                     ).roundToInt().coerceIn(0, segmentCount - 1)
             } else {
@@ -3754,9 +4003,10 @@ private fun SoundMeterChannel(
  */
 @Composable
 private fun ViewfinderImage(
+    lutState: LutMonitorState,
     frameProvider: () -> RemoteLiveFrame?,
     grid: ViewfinderGrid,
-    showHistogram: Boolean,
+    histogramMode: HistogramMode,
     tapFocusFeedback: TapFocusFeedback,
     tapFocusPoint: Offset,
     tapFocusNonce: Int,
@@ -3767,8 +4017,14 @@ private fun ViewfinderImage(
     subjectTrackingActive: Boolean,
     onTapFocus: (ViewfinderTap) -> Unit,
     showZebra: Boolean,
+    showFalseColor: Boolean,
+    showWaveform: Boolean,
+    scopeStartInset: androidx.compose.ui.unit.Dp = 8.dp,
+    scopeBottomInset: Dp = 26.dp,
+    informationBottomInset: Dp = 0.dp,
     desqueezeMultiplier: Float = 1f
 ) {
+    val viewport = remember { ViewfinderViewport() }
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         val liveFrame = frameProvider()
         if (liveFrame != null) {
@@ -3786,18 +4042,22 @@ private fun ViewfinderImage(
             val focusCoordinateHeight =
                 liveFrame.metadata?.focusCoordinateHeight ?: imageHeight
             val currentTapHandler by rememberUpdatedState(onTapFocus)
+            ZoomableViewfinder(viewport, displayAspectRatio, Modifier.matchParentSize()) {
             Box(
                 Modifier
                     .matchParentSize()
                     .pointerInput(
                         imageWidth,
                         imageHeight,
+                        displayAspectRatio,
                         trackingCoordinateWidth,
                         trackingCoordinateHeight,
                         focusCoordinateWidth,
                         focusCoordinateHeight
                     ) {
-                        detectTapGestures { tap ->
+                        detectTapGestures(
+                            onDoubleTap = { viewport.reset() },
+                            onTap = { tap ->
                             val imageRect = fitCenterRect(
                                 size.width.toFloat(),
                                 size.height.toFloat(),
@@ -3832,15 +4092,16 @@ private fun ViewfinderImage(
                                     )
                                 )
                             }
-                        }
-                    }
+                        })
+                    },
+                contentAlignment = Alignment.Center
             ) {
-                Image(
-                    bitmap = liveFrame.image,
-                    contentDescription = null,
-                    contentScale = ContentScale.Fit,
+                RemoteLutImage(
+                    image = liveFrame.image,
+                    state = lutState,
                     modifier = Modifier
-                        .fillMaxWidth()
+                        // 与参考线共用 Fit 居中规则。尺寸动画期间也允许按高度适配，
+                        // 不强制占满宽度，避免宽幅反挤压画面溢出或与网格错位。
                         .aspectRatio(displayAspectRatio)
                         .graphicsLayer {
                             // An anamorphic frame is encoded horizontally compressed. Fit it
@@ -3866,6 +4127,9 @@ private fun ViewfinderImage(
                         onDrawBehind { drawRect(brush) }
                     }
             )
+            if (showFalseColor) liveFrame.analysis?.falseColor?.let {
+                FalseColorOverlay(it, displayAspectRatio, Modifier.matchParentSize())
+            }
             FramingGridOverlay(
                 grid = grid,
                 imageAspectRatio = displayAspectRatio,
@@ -3924,19 +4188,30 @@ private fun ViewfinderImage(
                     modifier = Modifier.matchParentSize()
                 )
             }
-            if (showHistogram) {
-                liveFrame.histogram?.let {
-                    HistogramOverlay(
-                        histogram = it,
-                        modifier = Modifier.align(Alignment.BottomStart).padding(8.dp)
-                    )
-                }
-            }
+            } // Only image-space layers zoom; scopes remain anchored to the panel.
+            // Stable composition keeps the outgoing scope alive for its exit animation and
+            // lets a surviving waveform slide to the same left anchor used by a lone histogram.
+            MonitorAnalysisOverlays(
+                histogram = liveFrame.histogram.takeIf { histogramMode != HistogramMode.OFF },
+                waveform = liveFrame.analysis?.waveform.takeIf { showWaveform },
+                falseColor = showFalseColor, modifier = Modifier.matchParentSize().padding(bottom = informationBottomInset),
+                histogramMode = histogramMode,
+                waveformMode = liveFrame.analysis?.waveformMode ?: WaveformMode.LUMA,
+                startInset = scopeStartInset,
+                bottomInset = scopeBottomInset,
+            )
+
         } else {
             Icon(
                 Icons.Default.Videocam, contentDescription = null,
                 tint = Color.White.copy(alpha = 0.18f),
                 modifier = Modifier.size(44.dp)
+            )
+            // 首帧到达前也可预览参考线，比例与外层占位取景器及反挤压保持一致。
+            FramingGridOverlay(
+                grid = grid,
+                imageAspectRatio = DEFAULT_VIEWFINDER_ASPECT * desqueezeMultiplier,
+                modifier = Modifier.matchParentSize()
             )
         }
     }
@@ -4016,8 +4291,10 @@ private fun ParamTile(
     onAutoIsoToggle: ((Boolean) -> Unit)?,
     modifier: Modifier = Modifier,
     onStep: (Int) -> Unit,
-    onOpenList: () -> Unit
+    onOpenList: () -> Unit,
+    tileHeight: androidx.compose.ui.unit.Dp = 54.dp,
 ) {
+    val compact = tileHeight < 44.dp
     val colors = AppTheme.colors
     val density = LocalDensity.current
     val hasAutoIsoControl = autoIsoEnabled != null && onAutoIsoToggle != null
@@ -4060,7 +4337,7 @@ private fun ParamTile(
     val tileShape = RoundedCornerShape(14.dp)
     BoxWithConstraints(
         modifier = modifier
-            .height(54.dp)
+            .height(tileHeight)
             .clip(tileShape)
             .background(colors.glassSurface)
             .background(
@@ -4161,7 +4438,7 @@ private fun ParamTile(
                 color = colors.onSurfaceVariant.copy(
                     alpha = if (valueWritable || hasAutoIsoControl) 0.85f else 0.4f
                 ),
-                modifier = Modifier.align(Alignment.TopStart).padding(start = 10.dp, top = 6.dp)
+                modifier = Modifier.align(Alignment.TopStart).padding(start = 10.dp, top = if (compact) 2.dp else 6.dp)
             )
         }
         if (hasAutoIsoControl) {
@@ -4209,19 +4486,14 @@ private fun ParamTile(
             Icon(
                 Icons.Default.Lock, contentDescription = null,
                 tint = colors.onSurfaceVariant.copy(alpha = 0.55f),
-                modifier = Modifier.align(Alignment.TopEnd).padding(end = 8.dp, top = 6.dp).size(11.dp)
+                modifier = Modifier.align(Alignment.TopEnd).padding(end = 8.dp, top = if (compact) 2.dp else 6.dp).size(11.dp)
             )
         }
-        // 每个参数项右下角固定保留小型上下调节提示；不可调或 AUTO 接管时压暗。
-        if (param != null) {
-            Text(
-                "↕",
-                color = colors.onSurfaceVariant.copy(alpha = if (writable) 0.35f else 0.16f),
-                fontSize = 10.sp,
-                lineHeight = 10.sp,
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(end = 8.dp, bottom = 5.dp)
+        // 仅在可调且超过三档时提示拖动；锁定和 AUTO 接管时不显示。
+        if (writable && wheelDragEnabled(values.size)) {
+            WheelDragHint(
+                color = colors.onSurfaceVariant.copy(alpha = 0.42f),
+                modifier = Modifier.align(Alignment.CenterEnd).padding(end = 8.dp),
             )
         }
         if (autoIsoOn) {
@@ -4229,7 +4501,8 @@ private fun ParamTile(
                 autoIsoValue?.let { rcFormat(Lab.PROP_ISO, it) } ?: "—",
                 color = colors.onBackground,
                 fontFamily = FontFamily.Monospace,
-                fontSize = 16.sp,
+                fontSize = if (compact) 14.sp else 16.sp,
+                lineHeight = if (compact) 16.sp else 20.sp,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
                 modifier = Modifier.align(Alignment.Center)
@@ -4254,7 +4527,8 @@ private fun ParamTile(
                         rcFormat(propCode, shownValue),
                         color = colors.onBackground,
                         fontFamily = FontFamily.Monospace,
-                        fontSize = 16.sp,
+                        fontSize = if (compact) 14.sp else 16.sp,
+                lineHeight = if (compact) 16.sp else 20.sp,
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
                         modifier = Modifier.align(Alignment.Center).graphicsLayer {
@@ -4287,7 +4561,8 @@ private fun ParamTile(
                 color = if (param == null) colors.onSurfaceVariant.copy(alpha = loadingAlpha)
                         else colors.onSurfaceVariant.copy(alpha = 0.5f),
                 fontFamily = FontFamily.Monospace,
-                fontSize = 16.sp,
+                fontSize = if (compact) 14.sp else 16.sp,
+                lineHeight = if (compact) 16.sp else 20.sp,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
                 modifier = Modifier.align(Alignment.Center)
@@ -4313,10 +4588,15 @@ private fun ShutterButton(
     recording: Boolean,
     onFocusStart: () -> Unit,
     onRelease: (fire: Boolean) -> Unit,
-    onQuickTap: () -> Unit
+    onQuickTap: () -> Unit,
+    diameter: androidx.compose.ui.unit.Dp = 76.dp,
 ) {
+    val longPressFeedback = com.ztransfer.ui.util.rememberLongPressFeedback(durationMs = 300L)
     val colors = AppTheme.colors
     var heldDown by remember { mutableStateOf(false) }
+    val currentFocusStart by rememberUpdatedState(onFocusStart)
+    val currentRelease by rememberUpdatedState(onRelease)
+    val currentQuickTap by rememberUpdatedState(onQuickTap)
     val coroutineScope = rememberCoroutineScope()
     val innerScale by animateFloatAsState(
         targetValue = if (focusing) 0.8f else 1f,
@@ -4339,16 +4619,16 @@ private fun ShutterButton(
     // 语义），尺寸与圆角同步动画做圆→方块的连续变形。
     val innerColor = if (movie) colors.statusError else Color.White
     val innerSize by animateDpAsState(
-        targetValue = if (recording) 28.dp else 60.dp,
+        targetValue = if (recording) diameter * (28f / 76f) else diameter * (60f / 76f),
         animationSpec = tween(160), label = "recInnerSize"
     )
     val innerCorner by animateDpAsState(
-        targetValue = if (recording) 7.dp else 30.dp,
+        targetValue = if (recording) diameter * (7f / 76f) else diameter * (30f / 76f),
         animationSpec = tween(160), label = "recInnerCorner"
     )
     Box(
         modifier = Modifier
-            .size(76.dp)
+            .size(diameter)
             .graphicsLayer {
                 scaleX = pressScale
                 scaleY = pressScale
@@ -4357,32 +4637,37 @@ private fun ShutterButton(
             .then(
                 // 照片拍摄确认中禁手势；录制中保持可用——停止靠的就是再按一下。
                 if (enabled && !capturing)
-                    Modifier.pointerInput(Unit) {
+                    Modifier.pointerInput(longPressFeedback) {
                         awaitEachGesture {
                             awaitFirstDown()
                             heldDown = true
+                            longPressFeedback.start()
                             var timerFired = false
                             // 300ms 计时器：超时后触发半按对焦；抬起在计时结束前=快拍。
                             val timerJob = coroutineScope.launch {
                                 delay(300)
                                 timerFired = true
-                                onFocusStart()
+                                longPressFeedback.trigger { currentFocusStart() }
                             }
-                            val up = waitForUpOrCancellation()
-                            heldDown = false
-                            timerJob.cancel()
+                            val up = try {
+                                waitForUpOrCancellation()
+                            } finally {
+                                heldDown = false
+                                timerJob.cancel()
+                                longPressFeedback.cancel()
+                            }
                             if (timerFired) {
                                 // 长按：对焦已触发，抬手落点判定拍摄/取消
                                 val fire = up != null &&
                                     up.position.x in 0f..size.width.toFloat() &&
                                     up.position.y in 0f..size.height.toFloat()
-                                onRelease(fire)
+                                currentRelease(fire)
                             } else {
                                 // 快拍：无对焦，抬手在键内直接拍摄
                                 val fire = up != null &&
                                     up.position.x in 0f..size.width.toFloat() &&
                                     up.position.y in 0f..size.height.toFloat()
-                                if (fire) onQuickTap()
+                                if (fire) currentQuickTap()
                             }
                         }
                     }
@@ -4392,7 +4677,7 @@ private fun ShutterButton(
     ) {
         if (capturing) {
             CircularProgressIndicator(
-                modifier = Modifier.size(52.dp),
+                modifier = Modifier.size(diameter * (52f / 76f)),
                 color = colors.onBackground,
                 strokeWidth = 3.dp
             )
@@ -4545,203 +4830,203 @@ private fun ConfirmedFocusReticleOverlay(
     }
 }
 
-/**
- * 监看工具栏：所有按钮按真实固有尺寸从左向右排列，按钮间距始终一致。
- * 空间不足时整颗按钮移到下一行，行数不设上限；任何一项都不会被 weight 或父级约束压窄。
- */
+/** Shared column tracks distribute spare width evenly and align all toolbar rows. */
 @Composable
-private fun AdaptiveRemoteToolBar(
+internal fun AdaptiveRemoteToolBar(
     modifier: Modifier = Modifier,
     horizontalGap: androidx.compose.ui.unit.Dp = 6.dp,
     verticalGap: androidx.compose.ui.unit.Dp = 4.dp,
     pinnedEndCount: Int = 0,
+    secondRowFirstId: String? = null,
     content: @Composable () -> Unit
 ) {
     Layout(modifier = modifier, content = content) { measurables, constraints ->
         val gapPx = horizontalGap.roundToPx()
         val rowGapPx = verticalGap.roundToPx()
         val maxWidth = constraints.maxWidth
-        // 无最小/最大宽度测量得到按钮真实固有宽度；TopIconToggle 只设最小尺寸，
-        // HD/FPS 在字体放大后会自然变宽，然后由这里决定是否整颗换行。
         val placeables = measurables.map { it.measure(Constraints()) }
-        val pinnedCount = pinnedEndCount.coerceIn(0, placeables.size)
-        val regularEnd = placeables.size - pinnedCount
-        // AnimatedVisibility 完全收起后会留下 0×0 measurable。它不能占按钮间距，
-        // 否则照片模式仍会被视频专属音频按钮暗中撑开 1 个 gap。
-        val regularIndices = (0 until regularEnd).filter {
-            placeables[it].width > 0 && placeables[it].height > 0
+        val regularEnd = placeables.size - pinnedEndCount.coerceIn(0, placeables.size)
+        val visibleIndices = placeables.indices.filter { placeables[it].width > 0 && placeables[it].height > 0 }
+        val regular = visibleIndices.filter { it < regularEnd }.toMutableList()
+        val pinned = visibleIndices.filter { it >= regularEnd }
+        // Wide recording capsules and enlarged text occupy whole columns, without shrinking.
+        // Text tools can be a little wider than icon tools (font scale / fractional density).
+        // Using the narrowest button made HD/FPS occupy two tracks and left alternating holes.
+        // Only the recording capsule is intentionally multi-column.
+        val cellWidth = maxOf(
+            36.dp.roundToPx(),
+            visibleIndices.filter { measurables[it].layoutId != RemoteTool.RECORD.id }
+                .maxOfOrNull { placeables[it].width } ?: 0,
+        )
+        val capacity = ((maxWidth + gapPx) / (cellWidth + gapPx)).coerceAtLeast(1)
+        fun span(index: Int) = ((placeables[index].width + gapPx + cellWidth + gapPx - 1) /
+            (cellWidth + gapPx)).coerceIn(1, capacity)
+        // Keep the full set of column tracks even when most tools are hidden.
+        // Otherwise three remaining buttons spread across the row and put full screen
+        // in its center instead of beside rotation at the trailing edge.
+        val columns = capacity
+        val pitch = if (columns > 1) ((maxWidth - cellWidth).toFloat() / (columns - 1)) else 0f
+        val pinnedSpans = pinned.sumOf(::span)
+        val firstCapacity = (columns - pinnedSpans).coerceAtLeast(0)
+        val defaultLock = regular.firstOrNull { secondRowFirstId != null && measurables[it].layoutId == secondRowFirstId }
+        // If visible tools fit on the first row, leave the lock in their normal sequence;
+        // never put hidden tools ahead of it just to force the default second-row position.
+        val rowTwoLock = defaultLock?.takeIf { regular.takeWhile { index -> index != it }.sumOf(::span) >= firstCapacity }
+        if (rowTwoLock != null) regular.remove(rowTwoLock)
+        val rows = mutableListOf<MutableList<Pair<Int, Int>>>(mutableListOf())
+        var next = 0
+        var used = 0
+        while (next < regular.size && used + span(regular[next]) <= firstCapacity) {
+            val index = regular[next++]
+            rows[0] += index to used
+            used += span(index)
         }
-        val pinnedIndices = (regularEnd until placeables.size).filter {
-            placeables[it].width > 0 && placeables[it].height > 0
-        }
-        val pinnedWidth = pinnedIndices.sumOf { placeables[it].width } +
-            gapPx * (pinnedIndices.size - 1).coerceAtLeast(0)
-
-        // 第一行先为尾部固定项预留真实宽度，因此全屏和旋转永远处在第一行按钮组的
-        // 最右端。这里是“紧跟普通工具后的行内尾部”，不是用空白把按钮撑到屏幕右缘。
-        // 普通工具只使用剩余空间，放不下就整颗移到后续行。
-        val firstRowCapacity = if (pinnedIndices.isEmpty()) {
-            maxWidth
-        } else {
-            (maxWidth - pinnedWidth - gapPx).coerceAtLeast(0)
-        }
-        val firstRow = mutableListOf<Int>()
-        var nextTool = 0
-        var firstRowWidth = 0
-        while (nextTool < regularIndices.size) {
-            val index = regularIndices[nextTool]
-            val placeable = placeables[index]
-            val candidateWidth =
-                firstRowWidth + (if (firstRow.isEmpty()) 0 else gapPx) + placeable.width
-            if (candidateWidth > firstRowCapacity) break
-            firstRow += index
-            firstRowWidth = candidateWidth
-            nextTool++
-        }
-
-        val rows = mutableListOf<MutableList<Int>>(firstRow)
-        while (nextTool < regularIndices.size) {
-            val row = mutableListOf<Int>()
-            var rowWidth = 0
-            while (nextTool < regularIndices.size) {
-                val index = regularIndices[nextTool]
-                val placeable = placeables[index]
-                val candidateWidth =
-                    rowWidth + (if (row.isEmpty()) 0 else gapPx) + placeable.width
-                if (row.isNotEmpty() && candidateWidth > maxWidth) break
-                row += index
-                rowWidth = candidateWidth
-                nextTool++
-                // 单颗按钮理论上比整个窗口还宽时仍保持固有宽度，只独占一行。
-                if (rowWidth > maxWidth) break
+        var pinnedColumn = (columns - pinnedSpans).coerceAtLeast(0)
+        pinned.forEach { index -> rows[0] += index to pinnedColumn; pinnedColumn += span(index) }
+        val remaining = (if (rowTwoLock != null) listOf(rowTwoLock) else emptyList()) + regular.drop(next)
+        var row: MutableList<Pair<Int, Int>>? = null
+        used = columns
+        for (index in remaining) {
+            val size = span(index)
+            if (row == null || used + size > columns) {
+                row = mutableListOf()
+                rows += row
+                used = 0
             }
-            rows += row
+            row += index to used
+            used += size
         }
-
-        val rowHeights = rows.mapIndexed { rowIndex, row ->
-            val indices = if (rowIndex == 0) row + pinnedIndices else row
-            indices.maxOfOrNull { placeables[it].height } ?: 0
-        }
+        val rowHeights = rows.map { r -> r.maxOfOrNull { placeables[it.first].height } ?: 0 }
         val naturalHeight = rowHeights.sum() + rowGapPx * (rows.size - 1).coerceAtLeast(0)
-        val layoutHeight = naturalHeight.coerceIn(constraints.minHeight, constraints.maxHeight)
-
-        layout(maxWidth, layoutHeight) {
+        layout(maxWidth, naturalHeight.coerceIn(constraints.minHeight, constraints.maxHeight)) {
             var y = 0
-            rows.forEachIndexed { rowIndex, row ->
-                val rowHeight = rowHeights[rowIndex]
-                var x = 0
-                row.forEach { index ->
-                    val placeable = placeables[index]
-                    placeable.placeRelative(x, y + (rowHeight - placeable.height) / 2)
-                    x += placeable.width + gapPx
+            rows.forEachIndexed { rowIndex, items ->
+                items.forEach { (index, column) ->
+                    val item = placeables[index]
+                    val slotWidth = cellWidth + (span(index) - 1) * pitch
+                    val x = (column * pitch + (slotWidth - item.width) / 2).roundToInt().coerceAtLeast(0)
+                    item.placeRelative(x, y + (rowHeights[rowIndex] - item.height) / 2)
                 }
-                if (rowIndex == 0 && pinnedIndices.isNotEmpty()) {
-                    var pinnedX = if (row.isEmpty()) 0 else x
-                    pinnedIndices.forEach { index ->
-                        val placeable = placeables[index]
-                        placeable.placeRelative(
-                            pinnedX,
-                            y + (rowHeight - placeable.height) / 2
-                        )
-                        pinnedX += placeable.width + gapPx
-                    }
-                }
-                y += rowHeight + rowGapPx
+                y += rowHeights[rowIndex] + rowGapPx
             }
         }
     }
 }
 
-/** 视频模式专属的音频电平显示开关；横向展开让其后的工具自然平滑让位。 */
+/** 棋子式圆润工具按钮：沿用主题材质，以低矮弧面表达微凸。 */
+/** Shared portrait/landscape navigation style. */
 @Composable
-private fun DesqueezeToolButton(multiplier: Float, onSelect: (Float) -> Unit) {
-    val currentIndex = REMOTE_DESQUEEZE_OPTIONS.indices.minByOrNull { index ->
-        kotlin.math.abs(REMOTE_DESQUEEZE_OPTIONS[index] - multiplier)
-    } ?: 0
-    val nextMultiplier = REMOTE_DESQUEEZE_OPTIONS[(currentIndex + 1) % REMOTE_DESQUEEZE_OPTIONS.size]
-    TopIconToggle(
-        active = multiplier > 1.001f,
-        contentDescription = "反挤压倍率 ${desqueezeDisplayValue(multiplier)}，点击切换",
-        onClick = { onSelect(nextMultiplier) },
-        modifier = Modifier.size(36.dp),
-    ) {
-        if (multiplier > 1.001f) {
-            Text(desqueezeDisplayValue(multiplier), fontSize = 12.sp, fontWeight = FontWeight.Bold)
-        } else {
-            Icon(
-                imageVector = Icons.Outlined.AspectRatio,
-                contentDescription = null,
-                modifier = Modifier.size(18.dp),
-            )
+private fun MonitorHeaderButton(onClick: () -> Unit, modifier: Modifier = Modifier,
+    active: Boolean = false, content: @Composable () -> Unit) {
+    val colors = AppTheme.colors
+    GlassButton(onClick = onClick, active = active, shape = RoundedCornerShape(22.dp),
+        showSheen = false, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+        modifier = modifier.size(width = 42.dp, height = 36.dp)) {
+        CompositionLocalProvider(LocalContentColor provides if (active) colors.accentBlue else colors.onBackground) {
+            content()
         }
     }
 }
 
-/** 视频模式专属的音频电平显示开关；横向展开让其后的工具自然平滑让位。 */
-@Composable
-private fun AudioLevelsToolButton(
-    visible: Boolean,
-    active: Boolean,
-    onClick: () -> Unit
-) {
-    AnimatedVisibility(
-        visible = visible,
-        enter = fadeIn(tween(150, easing = FastOutSlowInEasing)) +
-            expandHorizontally(
-                animationSpec = tween(220, easing = FastOutSlowInEasing),
-                expandFrom = Alignment.Start
-            ),
-        exit = fadeOut(tween(130, easing = FastOutSlowInEasing)) +
-            shrinkHorizontally(
-                animationSpec = tween(200, easing = FastOutSlowInEasing),
-                shrinkTowards = Alignment.Start
-            )
-    ) {
-        TopIconToggle(
-            active = active,
-            contentDescription = stringResource(R.string.cd_remote_audio_levels),
-            onClick = onClick
-        ) {
-            // 灰/蓝只表示“隐藏/显示电平”，始终使用有声图标，避免误解为关闭相机录音。
-            Icon(
-                Icons.Default.VolumeUp,
-                contentDescription = null,
-                modifier = Modifier.size(18.dp)
-            )
-        }
-    }
-}
-
-/** 顶栏紧凑切换按钮：保持最小点击尺寸，文字类标记可按固有宽度自然扩展。 */
 @Composable
 internal fun TopIconToggle(
     active: Boolean,
     contentDescription: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
     content: @Composable () -> Unit
 ) {
     val colors = AppTheme.colors
+    val skin = LocalButtonTexturePalette.current?.skin ?: SkinPreset.FROSTED_GLASS
+    val dark = colors.background.luminance() < 0.5f
+    // Solid materials redraw the icon; pass the same tint to both drawing layers.
+    val inactiveColor = when (skin) {
+        SkinPreset.TITANIUM -> if (dark) Color(0xFFE4ECEF) else Color(0xFF344149)
+        SkinPreset.WOOD -> if (dark) Color(0xFFF1D6A7) else Color(0xFF472A18)
+        SkinPreset.CAMERA_CONTROLS -> Color(0xFFD5D8DA)
+        SkinPreset.FROSTED_GLASS -> colors.onSurfaceVariant
+    }
+    val activeColor = when (skin) {
+        SkinPreset.TITANIUM, SkinPreset.WOOD ->
+            if (dark) Color(0xFF80D8FF) else Color(0xFF005B83)
+        SkinPreset.CAMERA_CONTROLS -> Color(0xFF80D8FF)
+        SkinPreset.FROSTED_GLASS -> colors.accentBlue
+    }
+    val markColor by animateColorAsState(
+        if (active) activeColor else inactiveColor,
+        animationSpec = tween(180), label = "monitorToolTint"
+    )
     GlassButton(
         onClick = onClick,
+        enabled = enabled,
         active = active,
+        activeOutline = true,
+        materialContentColor = markColor,
         shape = CircleShape,
-        showSheen = false,
-        shadowElevation = 0.dp,
+        raised = true,
+        showSheen = true,
+        enforceMinimumTouchTarget = false,
         contentPadding = PaddingValues(8.dp),
         modifier = modifier
             .defaultMinSize(minWidth = 36.dp, minHeight = 36.dp)
             .semantics { this.contentDescription = contentDescription }
     ) {
         CompositionLocalProvider(
-            LocalContentColor provides if (active) colors.accentBlue else colors.onSurfaceVariant
+            LocalContentColor provides markColor
         ) {
             Box(
                 modifier = Modifier.defaultMinSize(minWidth = 20.dp, minHeight = 20.dp),
                 contentAlignment = Alignment.Center
-            ) {
-                content()
-            }
+            ) { content() }
         }
+    }
+}
+
+
+/** Four rounded tiles distinguish the landscape tool drawer from portrait editing. */
+@Composable
+private fun DockToolMark() {
+    val color = LocalContentColor.current
+    Canvas(Modifier.size(19.dp)) {
+        val stroke = 1.6.dp.toPx()
+        val inset = stroke / 2f
+        val gap = 3.dp.toPx()
+        val tile = (size.width - stroke - gap) / 2f
+        for (row in 0..1) for (column in 0..1) {
+            drawRoundRect(
+                color = color,
+                topLeft = Offset(inset + column * (tile + gap), inset + row * (tile + gap)),
+                size = androidx.compose.ui.geometry.Size(tile, tile),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(1.5.dp.toPx()),
+                style = androidx.compose.ui.graphics.drawscope.Stroke(stroke),
+            )
+        }
+    }
+}
+
+/** Shared by the actual toolbar and its manager; there is no second icon set. */
+@Composable
+internal fun RemoteToolMark(tool: RemoteTool, preferences: RemoteToolPreferences) {
+    val mark = Modifier.size(19.dp)
+    when (tool) {
+        RemoteTool.LUT -> Text("LUT", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        RemoteTool.HD -> HdMark()
+        RemoteTool.FPS -> FpsMark()
+        RemoteTool.AUDIO -> Icon(Icons.Default.VolumeUp, null, mark)
+        RemoteTool.HISTOGRAM -> HistogramMark(mark, rgb = preferences.histogram.value == HistogramMode.RGB)
+        RemoteTool.GRID -> GridMark(preferences.grid.value.takeUnless { it == ViewfinderGrid.OFF } ?: ViewfinderGrid.THIRDS, mark)
+        RemoteTool.EXPOSURE -> if (preferences.exposure.value == ExposureAssist.FALSE_COLOR) FalseColorMark(mark) else ZebraMark(mark)
+        RemoteTool.DESQUEEZE -> if (preferences.desqueeze.value > 1.001f) {
+            Text(desqueezeDisplayValue(preferences.desqueeze.value), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        } else Icon(Icons.Outlined.AspectRatio, null, mark)
+        RemoteTool.METER -> Text("±EV", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        RemoteTool.LEVEL -> LevelMark(mark)
+        RemoteTool.RECORD -> Icon(Icons.Default.Videocam, null, mark)
+        RemoteTool.ROTATE -> RotateMark(mark)
+        RemoteTool.LOCK -> Icon(if (preferences.locked.value) Icons.Default.Lock else Icons.Default.LockOpen, null, mark)
+        RemoteTool.WHITE_BALANCE -> Text("WB", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        RemoteTool.FOCUS_AREA -> Icon(Icons.Default.CenterFocusStrong, null, mark)
+        RemoteTool.WAVEFORM -> WaveformMark(mark, rgb = preferences.waveform.value == WaveformMode.RGB)
     }
 }

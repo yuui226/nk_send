@@ -31,6 +31,7 @@ internal fun Modifier.geniePopupLayer(
     panel: () -> Rect?,
     layerRecorded: () -> Boolean,
     setLayerRecorded: (Boolean) -> Unit,
+    allowAboveAnchor: Boolean = false,
 ): Modifier = this
     .drawWithCache {
         val tile = Path()
@@ -43,22 +44,30 @@ internal fun Modifier.geniePopupLayer(
                 drawContent()
                 return@onDrawWithContent
             }
-            val panelAlpha = geniePanelAlpha(p)
-            if (panelAlpha <= 0f || size.width <= 0f || size.height <= 0f) return@onDrawWithContent
-            val bounds = panel() ?: Rect(0f, 0f, size.width, size.height)
-            val origin = anchor()
+            if (size.width <= 0f || size.height <= 0f) return@onDrawWithContent
             layer.compositingStrategy = CompositingStrategy.Offscreen
             layer.blendMode = BlendMode.SrcOver
             layer.alpha = 1f
+            // Prepare the content on the invisible first draw. Waiting until alpha > 0 puts
+            // the full settings recording and the first mesh frame on the same deadline.
+            if (!layerRecorded() || layer.size.width != size.width.toInt() || layer.size.height != size.height.toInt()) {
+                android.os.Trace.beginSection("ZTransfer.Genie.record")
+                try {
+                    layer.record { this@onDrawWithContent.drawContent() }
+                    setLayerRecorded(true)
+                } finally { android.os.Trace.endSection() }
+            }
+            val panelAlpha = geniePanelAlpha(p)
+            if (panelAlpha <= 0f) return@onDrawWithContent
+            val bounds = panel() ?: Rect(0f, 0f, size.width, size.height)
+            val origin = anchor()
+            val above = allowAboveAnchor && origin != null && bounds.bottom <= origin.top
+            fun mirrorY(rect: Rect) = Rect(rect.left,-rect.bottom,rect.right,-rect.top)
+            val geometryBounds=if(above) mirrorY(bounds) else bounds
+            val geometryOrigin=if(above) origin?.let(::mirrorY) else origin
             // Fade the assembled panel, not each triangle (or individual nested shadows).
             composite.alpha = panelAlpha
-            // Settings content is static while the popup is opening or closing. Re-recording
-            // the complete tree for every frame was the dominant source of iOS jank.
-            if (!layerRecorded()) {
-                layer.record { this@onDrawWithContent.drawContent() }
-                setLayerRecorded(true)
-            }
-            if (!validGenieAnchor(origin, bounds)) {
+            if (!validGenieAnchor(geometryOrigin, geometryBounds)) {
                 layer.alpha = p
                 drawLayer(layer)
                 return@onDrawWithContent
@@ -68,15 +77,18 @@ internal fun Modifier.geniePopupLayer(
             // Six bands are sufficient once the funnel is nearly open; p==1 above still settles
             // to the normal live draw.
             val renderBands = if (p > 0.82f) 6 else GENIE_RENDER_BANDS
-            val source = requireNotNull(origin)
+            val source = requireNotNull(geometryOrigin)
             val mouthWidth = GENIE_Z_MARK_WIDTH_DP.dp.toPx()
             val rows = Array(renderBands + 1) {
-                genieRow(p, it.toFloat() / renderBands, source, bounds, mouthWidth)
+                val fraction=it.toFloat()/renderBands
+                val row=genieRow(p,if(above) 1f-fraction else fraction,source,geometryBounds,mouthWidth)
+                if(above) GenieRow(row.left,row.right,size.height-row.y,-row.tilt) else row
             }
             // Include the mouth above the panel's layout bounds; never clip it to y=0.
             val outputBounds = Rect(rows.minOf { it.left }, rows.minOf { minOf(it.leftY, it.rightY) },
                 rows.maxOf { it.right }, rows.maxOf { maxOf(it.leftY, it.rightY) }).inflate(1f)
             val canvas = drawContext.canvas
+            android.os.Trace.beginSection("ZTransfer.Genie.mesh")
             canvas.saveLayer(outputBounds, composite)
             try {
                 layer.blendMode = BlendMode.Plus
@@ -109,6 +121,7 @@ internal fun Modifier.geniePopupLayer(
                 }
             } finally {
                 canvas.restore()
+                android.os.Trace.endSection()
             }
         }
     }

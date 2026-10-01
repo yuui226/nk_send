@@ -14,10 +14,15 @@ import java.util.concurrent.RecursiveAction
 object PhotoFilterRenderer {
     private const val PARALLEL_PIXEL_THRESHOLD = 512 * 512
     private const val PIXELS_PER_TASK = 64 * 1024
-    /** Four-megapixel stripes amortize worker dispatch while remaining bounded for large photos. */
+    /** Four-megapixel stripes amortize bitmap access while remaining bounded for large photos. */
     private const val IN_PLACE_PIXELS_PER_STRIPE = 4 * 1024 * 1024
+
+    /** A short image/region only needs its actual pixels, not an entire four-megapixel stripe. */
+    internal fun scratchPixelCount(width: Int, height: Int): Int {
+        require(width > 0 && height > 0)
+        return width * min((IN_PLACE_PIXELS_PER_STRIPE / width).coerceAtLeast(1), height)
+    }
     private const val CANCELLATION_CHECK_INTERVAL = 4 * 1024
-    private const val EXACT_RGB_LUT_SIZE = 1 shl 24
     private const val NCP_MAX_MANUAL_STEP = 3f
     // Nikon does not publish its post-RAW sRGB transform. Manual hue controls are mapped linearly,
     // while the source tone curves and Flexible Color mixer values remain exact.
@@ -31,40 +36,43 @@ object PhotoFilterRenderer {
      */
     internal const val NEUTRAL_PROTECTION_CHROMA_START = 4f / 255f
     internal const val NEUTRAL_PROTECTION_CHROMA_END = 16f / 255f
-    // 滤镜是成片生成的主要瓶颈；共享池最多使用六个线程，并始终给界面保留一个处理器。
-    // 多张图并发时仍共用这一个池，不会按图片倍增线程数。
+    // 此池仅供预览使用；原图导出与其准备工作在调用方后台线程顺序计算。
+    // 预览最多两个计算线程，保持交互响应，同时避免和下载、导出一起占满 CPU。
     private val filterParallelism =
-        (Runtime.getRuntime().availableProcessors() - 1).coerceIn(1, 6)
+        (Runtime.getRuntime().availableProcessors() - 1).coerceIn(1, 2)
     private val filterPool by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         ForkJoinPool(filterParallelism)
     }
-    private val exactLutLock = Any()
-    @Volatile private var cachedExactLut: ExactRgbLut? = null
-    @Volatile private var exactLutDisabledAfterOom = false
+    private val exactMemoLock = Any()
+    @Volatile private var cachedExactMemo: ExactRgbMemoCache? = null
+    @Volatile private var exactMemoDisabledAfterOom = false
 
-    private data class ExactRgbLutKey(
+    private data class ExactRgbMemoKey(
         val preset: PhotoFilterPreset,
         val intensityPercent: Int,
     )
 
-    private data class ExactRgbLut(
-        val key: ExactRgbLutKey,
-        val colors: IntArray,
+    private data class ExactRgbMemoCache(
+        val key: ExactRgbMemoKey,
+        val colors: ExactRgbMemo,
     )
 
     internal class PreparedOriginalFilter internal constructor(
         internal val selection: PhotoFilterSelection,
-        internal val exactRgbLut: IntArray?,
+        internal val exactRgbMemo: ExactRgbMemo?,
         internal val mode: PreparationMode,
+        internal val cubeMapper: PhotoCubeMapper? = null,
+        internal val cubeExecution: PhotoLutExecution = PhotoLutExecution.KOTLIN,
     )
 
-    internal enum class PreparationMode { EXACT_CACHE, EXACT_BUILT, DIRECT_FALLBACK }
+    internal enum class PreparationMode { EXACT_CACHE, EXACT_ALLOCATED, DIRECT_FALLBACK }
 
     /** Constants derived from one selected preset; built once instead of once per pixel. */
     private data class CompiledFilter(
         val preset: PhotoFilterPreset,
         val strength: Float,
         val preserveAlpha: Boolean,
+        val cubeMapper: PhotoCubeMapper? = null,
         val ncpHueShiftDegrees: Float = 0f,
         val ncpSaturationAdjustment: Float = 0f,
         val np3SaturationAdjustment: Float = 0f,
@@ -93,6 +101,7 @@ object PhotoFilterRenderer {
         val preset = selection.preset
         val strength = selection.normalizedIntensityPercent / 100f
         return when (val parameters = preset.parameters) {
+            is CubePhotoFilterParameters -> CompiledFilter(preset, strength, preserveAlpha, cubeMapper = parameters.mapper)
             is NcpPhotoFilterParameters -> CompiledFilter(
                 preset = preset,
                 strength = strength,
@@ -178,7 +187,7 @@ object PhotoFilterRenderer {
     /**
      * Applies a filter to a mutable export bitmap without allocating another full-resolution
      * bitmap and full-image [IntArray]. Only one bounded stripe is resident at a time; pixel work
-     * inside that stripe still uses the filter pool. This is the original-resolution export path.
+     * inside that stripe stays on the caller's background export worker. This is the original-resolution export path.
      */
     fun renderInPlace(
         source: Bitmap,
@@ -197,35 +206,43 @@ object PhotoFilterRenderer {
         isCancelled: () -> Boolean = { false },
     ): PreparedOriginalFilter {
         if (isCancelled()) throw CancellationException("Photo filter render superseded")
-        if (exactLutDisabledAfterOom) {
+        // A cube already is a compact lookup; it does not need the exact-color memo.
+        if (selection.preset.parameters is CubePhotoFilterParameters) {
+            synchronized(exactMemoLock) { cachedExactMemo = null }
+            // Pin only for this render: later regions must not reload an evicted/oversized LUT.
+            val mapper = selection.preset.parameters.mapper
+            val execution = mapper.prepareBulk()
+            return PreparedOriginalFilter(selection, null, PreparationMode.DIRECT_FALLBACK,
+                cubeMapper = mapper, cubeExecution = execution)
+        }
+        if (exactMemoDisabledAfterOom) {
             return PreparedOriginalFilter(
                 selection,
-                exactRgbLut = null,
+                exactRgbMemo = null,
                 mode = PreparationMode.DIRECT_FALLBACK,
             )
         }
-        val key = ExactRgbLutKey(
+        val key = ExactRgbMemoKey(
             preset = selection.preset,
             intensityPercent = selection.normalizedIntensityPercent,
         )
-        cachedExactLut?.takeIf { it.key == key }?.let {
+        cachedExactMemo?.takeIf { it.key == key }?.let {
             return PreparedOriginalFilter(selection, it.colors, PreparationMode.EXACT_CACHE)
         }
         var mode = PreparationMode.EXACT_CACHE
         val lookup = try {
-            synchronized(exactLutLock) {
-                if (exactLutDisabledAfterOom) {
+            synchronized(exactMemoLock) {
+                if (exactMemoDisabledAfterOom) {
                     mode = PreparationMode.DIRECT_FALLBACK
                     null
                 } else {
-                    cachedExactLut?.takeIf { it.key == key }?.colors ?: run {
-                        mode = PreparationMode.EXACT_BUILT
+                    cachedExactMemo?.takeIf { it.key == key }?.colors ?: run {
+                        mode = PreparationMode.EXACT_ALLOCATED
                         // Drop the previous cache before allocating the replacement. Active
                         // renders keep their own reference; an idle old table can be reclaimed.
-                        cachedExactLut = null
-                        val compiled = compileFilter(selection, preserveAlpha = false)
-                        val colors = buildExactRgbLut(compiled, isCancelled)
-                        cachedExactLut = ExactRgbLut(key, colors)
+                        cachedExactMemo = null
+                        val colors = ExactRgbMemo()
+                        cachedExactMemo = ExactRgbMemoCache(key, colors)
                         colors
                     }
                 }
@@ -234,7 +251,7 @@ object PhotoFilterRenderer {
             // Exact lookup is an optimization. Low-memory devices retain the established direct
             // renderer instead of failing the user's export.
             mode = PreparationMode.DIRECT_FALLBACK
-            exactLutDisabledAfterOom = true
+            exactMemoDisabledAfterOom = true
             null
         }
         return PreparedOriginalFilter(selection, lookup, mode)
@@ -252,35 +269,40 @@ object PhotoFilterRenderer {
         val height = source.height
         val preserveAlpha = source.hasAlpha()
         val rowsPerStripe = (IN_PLACE_PIXELS_PER_STRIPE / width).coerceAtLeast(1)
-        val requiredPixels = width * min(rowsPerStripe, height)
+        val requiredPixels = scratchPixelCount(width, height)
         val pixels = scratchPixels?.also {
             require(it.size >= requiredPixels) { "Filter scratch buffer is too small" }
         } ?: IntArray(requiredPixels)
-        val compiled = if (prepared.exactRgbLut == null) {
-            compileFilter(prepared.selection, preserveAlpha = preserveAlpha)
-        } else {
-            null
-        }
+        val compiled = prepared.cubeMapper?.let { mapper ->
+            CompiledFilter(prepared.selection.preset,
+                prepared.selection.normalizedIntensityPercent / 100f, preserveAlpha, cubeMapper = mapper)
+        } ?: compileFilter(prepared.selection,
+            preserveAlpha = if (prepared.exactRgbMemo == null) preserveAlpha else false)
         var top = 0
         while (top < height) {
             if (isCancelled()) throw CancellationException("Photo filter render superseded")
             val rows = min(rowsPerStripe, height - top)
             val count = width * rows
             source.getPixels(pixels, 0, width, 0, top, width, rows)
-            prepared.exactRgbLut?.let { lookup ->
-                applyExactRgbLut(
+            prepared.exactRgbMemo?.let { lookup ->
+                applyExactRgbMemoRange(
                     pixels = pixels,
-                    count = count,
+                    start = 0,
+                    end = count,
                     lookup = lookup,
+                    compiled = compiled,
                     preserveAlpha = preserveAlpha,
                     isCancelled = isCancelled,
                 )
-            } ?: filterPixels(
-                pixels = pixels,
-                count = count,
-                compiled = checkNotNull(compiled),
-                isCancelled = isCancelled,
-            )
+            } ?: run {
+                if (compiled.cubeMapper != null && prepared.cubeExecution != PhotoLutExecution.KOTLIN) {
+                    compiled.cubeMapper.mapRange(pixels, 0, count, compiled.strength,
+                        preserveAlpha, prepared.cubeExecution, isCancelled)
+                } else {
+                    // Keep the actual original loop for the baseline and native-unavailable fallback.
+                    filterPixelRange(pixels, 0, count, compiled, isCancelled)
+                }
+            }
             if (isCancelled()) throw CancellationException("Photo filter render superseded")
             source.setPixels(pixels, 0, width, 0, top, width, rows)
             top += rows
@@ -288,133 +310,12 @@ object PhotoFilterRenderer {
         return source
     }
 
-    private fun buildExactRgbLut(
-        compiled: CompiledFilter,
-        isCancelled: () -> Boolean,
-    ): IntArray {
-        val colors = IntArray(EXACT_RGB_LUT_SIZE)
-        if (filterParallelism > 1) {
-            filterPool.invoke(
-                BuildExactRgbLutAction(
-                    output = colors,
-                    start = 0,
-                    end = colors.size,
-                    compiled = compiled,
-                    isCancelled = isCancelled,
-                ),
-            )
-        } else {
-            buildExactRgbLutRange(colors, 0, colors.size, compiled, isCancelled)
-        }
-        return colors
-    }
-
-    private class BuildExactRgbLutAction(
-        private val output: IntArray,
-        private val start: Int,
-        private val end: Int,
-        private val compiled: CompiledFilter,
-        private val isCancelled: () -> Boolean,
-    ) : RecursiveAction() {
-        override fun compute() {
-            if (end - start <= PIXELS_PER_TASK) {
-                buildExactRgbLutRange(output, start, end, compiled, isCancelled)
-                return
-            }
-            val middle = start + (end - start) / 2
-            invokeAll(
-                BuildExactRgbLutAction(output, start, middle, compiled, isCancelled),
-                BuildExactRgbLutAction(output, middle, end, compiled, isCancelled),
-            )
-        }
-    }
-
-    private fun buildExactRgbLutRange(
-        output: IntArray,
-        start: Int,
-        end: Int,
-        compiled: CompiledFilter,
-        isCancelled: () -> Boolean,
-    ) {
-        var rgb = start
-        var nextCancellationCheck = start
-        while (rgb < end) {
-            if (rgb == nextCancellationCheck) {
-                if (isCancelled()) throw CancellationException("Photo filter render superseded")
-                nextCancellationCheck += CANCELLATION_CHECK_INTERVAL
-            }
-            output[rgb] = filterPixel(0xff000000.toInt() or rgb, compiled) and 0x00ffffff
-            rgb++
-        }
-    }
-
-    private fun applyExactRgbLut(
-        pixels: IntArray,
-        count: Int,
-        lookup: IntArray,
-        preserveAlpha: Boolean,
-        isCancelled: () -> Boolean,
-    ) {
-        if (filterParallelism > 1 && count >= PARALLEL_PIXEL_THRESHOLD) {
-            filterPool.invoke(
-                ApplyExactRgbLutAction(
-                    pixels,
-                    0,
-                    count,
-                    lookup,
-                    preserveAlpha,
-                    isCancelled,
-                ),
-            )
-        } else {
-            applyExactRgbLutRange(
-                pixels,
-                0,
-                count,
-                lookup,
-                preserveAlpha,
-                isCancelled,
-            )
-        }
-    }
-
-    private class ApplyExactRgbLutAction(
-        private val pixels: IntArray,
-        private val start: Int,
-        private val end: Int,
-        private val lookup: IntArray,
-        private val preserveAlpha: Boolean,
-        private val isCancelled: () -> Boolean,
-    ) : RecursiveAction() {
-        override fun compute() {
-            if (end - start <= PIXELS_PER_TASK) {
-                applyExactRgbLutRange(
-                    pixels,
-                    start,
-                    end,
-                    lookup,
-                    preserveAlpha,
-                    isCancelled,
-                )
-                return
-            }
-            val middle = start + (end - start) / 2
-            invokeAll(
-                ApplyExactRgbLutAction(
-                    pixels, start, middle, lookup, preserveAlpha, isCancelled,
-                ),
-                ApplyExactRgbLutAction(
-                    pixels, middle, end, lookup, preserveAlpha, isCancelled,
-                ),
-            )
-        }
-    }
-
-    private fun applyExactRgbLutRange(
+    private fun applyExactRgbMemoRange(
         pixels: IntArray,
         start: Int,
         end: Int,
-        lookup: IntArray,
+        lookup: ExactRgbMemo,
+        compiled: CompiledFilter,
         preserveAlpha: Boolean,
         isCancelled: () -> Boolean,
     ) {
@@ -426,9 +327,15 @@ object PhotoFilterRenderer {
                 nextCancellationCheck += CANCELLATION_CHECK_INTERVAL
             }
             val color = pixels[index]
+            val rgb = color and 0x00ffffff
+            var mapped = lookup.get(rgb)
+            if (mapped < 0) {
+                mapped = filterPixel(0xff000000.toInt() or rgb, compiled) and 0x00ffffff
+                lookup.put(rgb, mapped)
+            }
             pixels[index] = exactLookupOutputColor(
                 originalColor = color,
-                mappedRgb = lookup[color and 0x00ffffff],
+                mappedRgb = mapped,
                 preserveAlpha = preserveAlpha,
             )
             index++
@@ -446,33 +353,6 @@ object PhotoFilterRenderer {
             originalColor
         } else {
             alpha shl 24 or (mappedRgb and 0x00ffffff)
-        }
-    }
-
-    private fun filterPixels(
-        pixels: IntArray,
-        count: Int,
-        compiled: CompiledFilter,
-        isCancelled: () -> Boolean,
-    ) {
-        if (filterParallelism > 1 && count >= PARALLEL_PIXEL_THRESHOLD) {
-            filterPool.invoke(
-                FilterPixelsAction(
-                    pixels = pixels,
-                    start = 0,
-                    end = count,
-                    compiled = compiled,
-                    isCancelled = isCancelled,
-                ),
-            )
-        } else {
-            filterPixelRange(
-                pixels = pixels,
-                start = 0,
-                end = count,
-                compiled = compiled,
-                isCancelled = isCancelled,
-            )
         }
     }
 
@@ -518,6 +398,9 @@ object PhotoFilterRenderer {
     }
 
     private fun filterPixel(color: Int, compiled: CompiledFilter): Int {
+        compiled.cubeMapper?.let {
+            return it.map(color, compiled.strength, compiled.preserveAlpha)
+        }
         val alpha = if (compiled.preserveAlpha) color ushr 24 and 0xff else 0xff
         if (alpha == 0) return color
         val originalR = color ushr 16 and 0xff
@@ -551,6 +434,7 @@ object PhotoFilterRenderer {
         var hue = originalHue
 
         when (val parameters = compiled.preset.parameters) {
+            is CubePhotoFilterParameters -> error("Cube handled before HSL conversion")
             is NcpPhotoFilterParameters -> {
                 if (compiled.ncpHueShiftDegrees != 0f) {
                     hue = normalizeHue(

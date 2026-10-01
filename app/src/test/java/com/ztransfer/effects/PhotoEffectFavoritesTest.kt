@@ -12,6 +12,28 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class PhotoEffectFavoritesTest {
+    @Test fun compactWidthFavoritesRoundTrip() {
+        for (percent in listOf(60, 70, 80, 90)) {
+            val favorite = FavoriteFrameWatermarkEffect.capture(PhotoFramePreset.PARAMETER_POSTER, PhotoFrameWatermark(), percent)
+            assertEquals(favorite, decodeFavoriteFrameEffects(encodeFavoriteFrameEffects(listOf(favorite))).single())
+        }
+    }
+
+    @Test fun backdropFavoritesRoundTrip() {
+        val favorite = FavoriteFrameWatermarkEffect.capture(PhotoFramePreset.MIST, PhotoFrameWatermark(), 140, 0, 180)
+        assertEquals(favorite, decodeFavoriteFrameEffects(encodeFavoriteFrameEffects(listOf(favorite))).single())
+    }
+
+    @Test
+    fun frameFavoritesPersistWidthAndOldFavoritesDefaultToOriginalWidth() {
+        val favorite = FavoriteFrameWatermarkEffect.capture(
+            PhotoFramePreset.MIST, PhotoFrameWatermark(), 170,
+        )
+        assertEquals(favorite, decodeFavoriteFrameEffects(encodeFavoriteFrameEffects(listOf(favorite))).single())
+        val old = encodeFavoriteFrameEffects(listOf(favorite)).substringBeforeLast(",")
+        assertEquals(100, decodeFavoriteFrameEffects(old).single().frameWidthPercent)
+    }
+
     @Test
     fun filterCodecPreservesOrderMigratesLegacyValuesAndDropsInvalidEntries() {
         val decoded = decodeFavoritePhotoFilters(

@@ -13,6 +13,23 @@ import org.junit.Test
 class ThumbnailDiskCacheTest {
     private val temporaryRoots = mutableListOf<File>()
 
+    @Test
+    fun `enhanced STA JPG ignores old low resolution caches but reuses its own result`() {
+        val root = newRoot()
+        val camera = ThumbnailDiskCache(root).openCamera("nikon")
+        val oldKey = staThumbnailCacheFileName(42, 123L)
+        val newKey = staJpegThumbnailCacheFileName(42, 123L)
+        val legacy = legacyThumbnailCacheFileName("DSC_0042.JPG", 123L, null)
+        assertNotEquals(oldKey, newKey)
+        assertTrue(camera.write(oldKey, jpegBytes(1)))
+        File(root, legacy).writeBytes(jpegBytes(2))
+
+        assertNull(camera.findCachedFile(newKey, null))
+        assertTrue(camera.write(newKey, jpegBytes(3)))
+        assertEquals(camera.targetFile(newKey), camera.findCachedFile(newKey, null))
+        assertEquals(camera.targetFile(oldKey), camera.findCachedFile(oldKey, legacy))
+    }
+
     @After
     fun cleanUp() {
         temporaryRoots.forEach(File::deleteRecursively)

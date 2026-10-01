@@ -19,6 +19,13 @@ val keystoreProps = Properties().apply {
 android {
     namespace = "com.ztransfer"
     compileSdk = 35
+    ndkVersion = "27.2.12479018"
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
 
     signingConfigs {
         if (hasReleaseKeystore) {
@@ -35,8 +42,11 @@ android {
         applicationId = "com.ztransfer"
         minSdk = 26
         targetSdk = 35
-        versionCode = 55
-        versionName = "1.82"
+        versionCode = 64
+        versionName = "1.91"
+        // Keep the default explicit: AGP otherwise rewrites the first manifest entry when several
+        // standalone instrumentation suites are registered.
+        testInstrumentationRunner = "com.ztransfer.frame.FramePlaceLayoutInstrumentation"
 
         // The app exposes exactly English, Simplified Chinese and Traditional
         // Chinese. Do not package translations contributed by AndroidX for
@@ -81,6 +91,10 @@ android {
         kotlinCompilerExtensionVersion = "1.5.5"
     }
     packaging {
+        jniLibs {
+            // Compress native libraries in the APK; Android extracts them at install time.
+            useLegacyPackaging = true
+        }
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
@@ -137,7 +151,7 @@ val copyTimestampedDebugApk = tasks.register("copyTimestampedDebugApk") {
         val version = android.defaultConfig.versionName ?: "unknown"
         val destinationDirectory = rootProject.file("dist-debug").apply { mkdirs() }
         val destination = destinationDirectory.resolve(
-            "ZTransfer-debug-$version-$stamp.apk"
+            "Zdebug-$version-$stamp.apk"
         )
         source.copyTo(destination, overwrite = false)
         println("Timestamped debug APK: ${destination.absolutePath}")

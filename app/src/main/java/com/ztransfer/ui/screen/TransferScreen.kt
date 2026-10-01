@@ -1,5 +1,7 @@
 package com.ztransfer.ui.screen
 
+import com.ztransfer.viewmodel.canRetry
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
@@ -34,9 +36,13 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -52,6 +58,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -60,12 +67,20 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.ztransfer.R
@@ -79,6 +94,8 @@ import com.ztransfer.ui.theme.*
 import com.ztransfer.ui.util.formatDuration
 import com.ztransfer.ui.util.formatFileSize
 import com.ztransfer.ui.util.formatSpeed
+import com.ztransfer.viewmodel.presentationConnectionType
+import com.ztransfer.viewmodel.presentationIsSta
 import com.ztransfer.viewmodel.CameraViewModel
 import com.ztransfer.viewmodel.CameraState
 import com.ztransfer.viewmodel.TransferStatus
@@ -98,7 +115,7 @@ private val TRANSFER_CARD_WAVE_AMPLITUDE = 3.dp
 
 private enum class TransferCardPillTone { SIZE, SPEED, EFFECT, TRANSFER_DURATION, GENERATION_DURATION }
 
-private enum class TransferCardVisualState { WAITING, TRANSFERRING, GENERATING, COMPLETED, FAILED, CANCELLED }
+internal enum class TransferCardVisualState { WAITING, TRANSFERRING, GENERATING, COMPLETED, FAILED, CANCELLED }
 
 internal data class TransferQueueActionVisibility(
     val hasRetryable: Boolean,
@@ -113,7 +130,7 @@ internal fun transferQueueActionVisibility(
 ): TransferQueueActionVisibility = TransferQueueActionVisibility(
     hasRetryable = !suppressAll && !isTransferring && tasks.any { task ->
         task.taskId !in removingTaskIds &&
-            (task.status == TransferStatus.FAILED || task.status == TransferStatus.CANCELLED)
+            task.canRetry
     },
     hasClearable = !suppressAll && tasks.any { task ->
         task.taskId !in removingTaskIds &&
@@ -131,8 +148,8 @@ private data class TransferCameraUiState(
 
 private fun CameraState.toTransferCameraUiState(): TransferCameraUiState = TransferCameraUiState(
     isConnectedToCamera = isConnectedToCamera,
-    connectionType = connectionType,
-    isStaConnection = isStaConnection,
+    connectionType = presentationConnectionType,
+    isStaConnection = presentationIsSta,
     wifiRssi = wifiRssi,
 )
 
@@ -156,19 +173,7 @@ fun TransferTopControls(
             .padding(horizontal = 12.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        GlassButton(
-            onClick = onNavigateBack,
-            contentPadding = PaddingValues(horizontal = 9.dp, vertical = 7.dp),
-            enforceMinimumTouchTarget = false,
-            modifier = Modifier.height(36.dp),
-        ) {
-            Icon(
-                Icons.Default.ArrowBack,
-                contentDescription = stringResource(R.string.cd_back),
-                tint = colors.onBackground,
-                modifier = Modifier.size(22.dp),
-            )
-        }
+        GlassBackButton(onClick = onNavigateBack)
 
         Spacer(modifier = Modifier.width(8.dp))
         SignalPill(
@@ -233,8 +238,8 @@ fun TransferScreen(
     val hasRetryable = actionVisibility.hasRetryable
     val retryNeedsCamera = transferState.tasks.any {
         it.taskId !in removingTaskIds &&
-            (it.status == TransferStatus.FAILED || it.status == TransferStatus.CANCELLED) &&
-            !isTransferredOriginal(
+            it.canRetry &&
+            it.savedOriginalOutput == null && !isTransferredOriginal(
                 it.file,
                 transferState.existingExportIndex,
                 it.destinationFolderName,
@@ -243,6 +248,16 @@ fun TransferScreen(
     // 清空队列只作用于"不在传输中"的任务（正在传的文件会传完，中途打断会让相机关 Wi-Fi）：
     // 有可清的卡片才显示扫帚 FAB；确认后卡片集体收合退场、FAB 随之消失。
     val hasClearable = actionVisibility.hasClearable
+    val retryConfirmVisibility=rememberGenieVisibility(hasRetryable && showRetryConfirm)
+    val clearConfirmVisibility=rememberGenieVisibility(hasClearable && showClearConfirm)
+    LaunchedEffect(hasRetryable,hasClearable) {
+        if(!hasRetryable) showRetryConfirm=false
+        if(!hasClearable) showClearConfirm=false
+    }
+    BackHandler(enabled=retryConfirmVisibility.mounted.value || clearConfirmVisibility.mounted.value) {
+        showRetryConfirm=false
+        showClearConfirm=false
+    }
     // 共用顶部控制按钮仍沿用本页原行为：操作时收起已展开的清空/重试确认卡。
     LaunchedEffect(queueControlActionNonce) {
         if (queueControlActionNonce > 0L) {
@@ -273,6 +288,9 @@ fun TransferScreen(
     Box(modifier = Modifier.fillMaxSize().background(rememberAppBackgroundBrush())) {
         // ---------- 内容（铺满，延伸到系统栏后面）----------
         if (transferState.tasks.isEmpty()) {
+            // Enter only when the queue becomes empty; ordinary recomposition never restarts it.
+            val emptyReveal = remember { Animatable(0f) }
+            LaunchedEffect(Unit) { emptyReveal.animateTo(1f, Motion.overlayExpand) }
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     // 空状态只保留品牌双 Z 的低对比度剪影。透明度与尺寸做极轻的慢呼吸，
@@ -300,7 +318,7 @@ fun TransferScreen(
                         modifier = Modifier
                             .height(58.dp)
                             .graphicsLayer {
-                                alpha = breatheAlpha
+                                alpha = breatheAlpha * emptyReveal.value
                                 scaleX = breatheScale
                                 scaleY = breatheScale
                         },
@@ -346,7 +364,7 @@ fun TransferScreen(
                     }
                     val displayedFrameGenerationElapsedMs = if (task.isGeneratingFrame) {
                         task.frameGenerationStartedAtElapsedMs?.let { startedAt ->
-                            (generationClockMs - startedAt).coerceAtLeast(0L)
+                            task.frameGenerationAccumulatedMs + (generationClockMs - startedAt).coerceAtLeast(0L)
                         }
                     } else {
                         task.frameGenerationElapsedMs
@@ -373,34 +391,49 @@ fun TransferScreen(
                     DisposableEffect(taskId) {
                         onDispose { removingTaskIds.remove(taskId) }
                     }
-                    val cardContainerColor by animateColorAsState(
-                        targetValue = lerp(
-                            colors.surface,
-                            transferCardStateColor(task, colors),
-                            0.055f,
-                        ),
-                        animationSpec = tween(240, easing = FastOutSlowInEasing),
-                        label = "transferCardStateColor",
+                    // 一条颜色动画驱动底色、描边和色标，切换时保持同一节奏。
+                    val cardAccent by animateColorAsState(
+                        targetValue = transferCardStateColor(task, colors),
+                        animationSpec = tween(300, easing = FastOutSlowInEasing),
+                        label = "transferCardStateAccent",
                     )
-                    val cardBorderColor by animateColorAsState(
-                        targetValue = lerp(
+                    val cardContainerColor = lerp(colors.surface, cardAccent, 0.09f)
+                    // Light from above: a quiet bright rim, neutral sides, soft lower edge.
+                    val cardBorder = remember(colors) {
+                        Brush.verticalGradient(listOf(
+                            colors.glassSheen.copy(alpha = 0.32f),
                             colors.cardHairline,
-                            transferCardStateColor(task, colors),
-                            0.15f,
-                        ),
-                        animationSpec = tween(240, easing = FastOutSlowInEasing),
-                        label = "transferCardStateBorderColor",
-                    )
+                            Color.Black.copy(alpha = 0.08f),
+                        ))
+                    }
+                    val removeLabel = stringResource(R.string.cd_remove_from_queue)
                     Box(
                         modifier = Modifier
                             // 上方卡片增删/长矮时，本卡平滑让位而不是硬跳。
                             .animateItemPlacement(Motion.itemPlacement)
-                            .collapseHeight { removeProgress.value }
+                            .collapseHeight(clip = false) { removeProgress.value }
                             .padding(bottom = 8.dp)
                     ) {
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .queueCardSwipe(
+                                enabled = cardActionsVisible && task.status != TransferStatus.TRANSFERING &&
+                                    !task.isGeneratingFrame,
+                                removing = removing,
+                                removeLabel = removeLabel,
+                                onRemove = {
+                                    transferViewModel.withdrawTask(taskId)
+                                    removingTaskIds[taskId] = Unit
+                                },
+                            )
+                            .shadow(
+                                elevation = 6.dp,
+                                shape = RoundedCornerShape(16.dp),
+                                clip = false,
+                                ambientColor = Color.Black.copy(alpha = 0.08f),
+                                spotColor = Color.Black.copy(alpha = 0.12f),
+                            )
                             .then(
                                 if (task.status == TransferStatus.TRANSFERING) {
                                     Modifier.semantics {
@@ -413,10 +446,10 @@ fun TransferScreen(
                                     Modifier
                                 },
                             ),
-                        // 14dp 与列表页卡片/监看页 tile 的中型控件圆角一致（原 12dp 家族外）。
-                        shape = RoundedCornerShape(14.dp),
-                        // 浅色下白卡浮在浅灰背景上需要发丝线定界；深色 token 为透明，视觉不变。
-                        border = BorderStroke(1.dp, cardBorderColor),
+                        shape = RoundedCornerShape(16.dp),
+                        // Use the faint, wider shadow above; avoid stacking a second Material shadow.
+                        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                        border = BorderStroke(1.dp, cardBorder),
                         colors = CardDefaults.cardColors(
                             containerColor = cardContainerColor,
                         )
@@ -458,13 +491,22 @@ fun TransferScreen(
                                 )
                             }
 
-                        // 信息胶囊出现可能改变高度，继续柔和过渡；顶部 sheen 位于进度层之上，
-                        // 让液态填充仍属于卡片材质，而不是覆盖内容的色块。
+                        // 状态色标不参与测量；正常状态切换保持高度，错误说明仍可自然展开。
                         Column(
                             modifier = Modifier
                                 .background(cardSheen)
+                                .drawBehind {
+                                    val width = 2.5.dp.toPx()
+                                    val markerHeight = 32.dp.toPx()
+                                    drawRoundRect(
+                                        color = cardAccent.copy(alpha = 0.65f),
+                                        topLeft = Offset(5.dp.toPx(), (size.height - markerHeight) / 2f),
+                                        size = Size(width, markerHeight),
+                                        cornerRadius = CornerRadius(width, width),
+                                    )
+                                }
                                 .animateContentSize(tween(250, easing = FastOutSlowInEasing))
-                                .padding(12.dp)
+                                .padding(horizontal = 12.dp, vertical = 10.dp)
                         ) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -472,7 +514,7 @@ fun TransferScreen(
                             ) {
                                 // 缩略图：屏幕内的卡片始终允许取图（传输中请求排到
                                 // 文件间隙执行），isTransferring 仅作传输结束后的补载重试键。
-                                Box(modifier = Modifier.size(56.dp)) {
+                                Box(modifier = Modifier.size(72.dp)) {
                                     QueueThumbnail(
                                         file = task.file,
                                         retryNudge = transferState.isTransferring,
@@ -488,63 +530,30 @@ fun TransferScreen(
 
                                 Spacer(modifier = Modifier.width(12.dp))
 
-                                Box(modifier = Modifier.weight(1f)) {
-                                    TransferTaskCardContent(
-                                        task = task,
-                                        displayedSpeed = displayedSpeed,
-                                        displayedFrameGenerationElapsedMs = displayedFrameGenerationElapsedMs,
-                                        modifier = Modifier.fillMaxWidth(),
-                                    )
-                                    TransferRetryButton(
-                                        visible = cardActionsVisible &&
-                                            task.status == TransferStatus.FAILED,
-                                        enabled = cardActionsVisible &&
-                                            (connected || isTransferredOriginal(
-                                                task.file,
-                                                transferState.existingExportIndex,
-                                                task.destinationFolderName,
-                                            )),
-                                        onClick = {
-                                            transferViewModel.retrySingleTask(
-                                                taskId,
-                                                cameraViewModel::getCamera,
-                                            )
-                                        },
-                                        modifier = Modifier.align(Alignment.TopEnd),
-                                    )
-                                }
-
-                                // 最尾：毛玻璃移除按钮——把本卡从队列移除。正在传输的
-                                // 不可移除（中途打断会让相机关 Wi-Fi），传完变可移除时淡入。
-                                AnimatedVisibility(
+                                TransferTaskCardContent(
+                                    task = task,
+                                    displayedSpeed = displayedSpeed,
+                                    displayedFrameGenerationElapsedMs = displayedFrameGenerationElapsedMs,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                TransferRetryButton(
                                     visible = cardActionsVisible &&
-                                        task.status != TransferStatus.TRANSFERING &&
-                                        !task.isGeneratingFrame,
-                                    // 水平展开/收起：出现消失时行内其它内容平滑让位，不硬跳。
-                                    enter = fadeIn() + expandHorizontally(expandFrom = Alignment.Start),
-                                    exit = fadeOut() + shrinkHorizontally(shrinkTowards = Alignment.Start)
-                                ) {
-                                    Row {
-                                        Spacer(modifier = Modifier.width(10.dp))
-                                        GlassButton(
-                                            onClick = {
-                                                // 等待中的先撤下（置 CANCELLED），动画期间队列不会开始传它。
-                                                transferViewModel.withdrawTask(taskId)
-                                                removingTaskIds[taskId] = Unit
-                                            },
-                                            enabled = cardActionsVisible,
-                                            shape = CircleShape,
-                                            contentPadding = PaddingValues(6.dp)
-                                        ) {
-                                            // 与右下角"清空队列"同款自绘扫帚——同一动作同一符号。
-                                            BroomMark(
-                                                modifier = Modifier.size(16.dp),
-                                                color = colors.onSurfaceVariant,
-                                                contentDescription = stringResource(R.string.cd_remove_from_queue)
-                                            )
-                                        }
-                                    }
-                                }
+                                        task.canRetry && task.status != TransferStatus.CANCELLED,
+                                    enabled = cardActionsVisible &&
+                                        (task.savedOriginalOutput != null || connected || isTransferredOriginal(
+                                            task.file,
+                                            transferState.existingExportIndex,
+                                            task.destinationFolderName,
+                                        )),
+                                    onClick = {
+                                        transferViewModel.retrySingleTask(
+                                            taskId,
+                                            cameraViewModel::getCamera,
+                                        )
+                                    },
+                                )
+
+
                             }
 
                         }
@@ -572,18 +581,14 @@ fun TransferScreen(
         }
 
         // ---------- 右下角悬浮控件：只保留清空与重试，并继续沿用二次确认 ----------
-        val confirmOpen = (hasClearable && showClearConfirm) ||
-                (hasRetryable && showRetryConfirm)
-        // 全屏遮罩：确认卡展开时接管"点击外部任意处关闭"，淡入淡出，位于卡片之下、内容之上。
-        AnimatedVisibility(
-            visible = confirmOpen,
-            enter = fadeIn(),
-            exit = fadeOut()
-        ) {
+        // Keep input interception alive for exactly the same interval as the outgoing cards.
+        if (retryConfirmVisibility.mounted.value || clearConfirmVisibility.mounted.value) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(colors.scrim)
+                    .drawBehind {
+                        drawRect(colors.scrim,alpha=maxOf(retryConfirmVisibility.progress.value,clearConfirmVisibility.progress.value))
+                    }
                     .pointerInput(Unit) {
                         detectTapGestures {
                             showClearConfirm = false
@@ -604,12 +609,12 @@ fun TransferScreen(
         ) {
             // 断开时重试置灰禁用而非消失（配合顶栏红色断连图标，用户能看懂"等重连"）。
             AnimatedVisibility(
-                visible = hasRetryable,
+                visible = hasRetryable || retryConfirmVisibility.mounted.value,
                 enter = fadeIn() + scaleIn(initialScale = 0.6f),
                 exit = fadeOut() + scaleOut(targetScale = 0.6f)
             ) {
                 ConfirmFab(
-                    expanded = showRetryConfirm,
+                    visibility = retryConfirmVisibility,
                     icon = {
                         Icon(
                             Icons.Default.Refresh,
@@ -637,12 +642,12 @@ fun TransferScreen(
                 )
             }
             AnimatedVisibility(
-                visible = hasClearable,
+                visible = hasClearable || clearConfirmVisibility.mounted.value,
                 enter = fadeIn() + scaleIn(initialScale = 0.6f),
                 exit = fadeOut() + scaleOut(targetScale = 0.6f)
             ) {
                 ConfirmFab(
-                    expanded = showClearConfirm,
+                    visibility = clearConfirmVisibility,
                     icon = {
                         // 自绘斜握扫帚（CleaningServices 官方图标像叉子，弃用）。
                         BroomMark(
@@ -695,12 +700,12 @@ fun TransferScreen(
     }
 }
 
-private fun transferCardVisualState(task: TransferTask): TransferCardVisualState = when {
+internal fun transferCardVisualState(task: TransferTask): TransferCardVisualState = when {
     task.isGeneratingFrame -> TransferCardVisualState.GENERATING
     task.status == TransferStatus.WAITING -> TransferCardVisualState.WAITING
     task.status == TransferStatus.TRANSFERING -> TransferCardVisualState.TRANSFERRING
+    task.status == TransferStatus.FAILED || task.frameGenerationError != null -> TransferCardVisualState.FAILED
     task.status == TransferStatus.COMPLETED -> TransferCardVisualState.COMPLETED
-    task.status == TransferStatus.FAILED -> TransferCardVisualState.FAILED
     else -> TransferCardVisualState.CANCELLED
 }
 
@@ -713,19 +718,14 @@ private fun TransferRetryButton(
 ) {
     AnimatedVisibility(
         visible = visible,
-        enter = fadeIn() + scaleIn(
-            initialScale = 0.75f,
-            transformOrigin = TransformOrigin(1f, 0f),
-        ),
-        exit = fadeOut() + scaleOut(
-            targetScale = 0.75f,
-            transformOrigin = TransformOrigin(1f, 0f),
-        ),
+        enter = fadeIn() + expandHorizontally(expandFrom = Alignment.Start),
+        exit = fadeOut() + shrinkHorizontally(shrinkTowards = Alignment.Start),
         modifier = modifier,
     ) {
         GlassButton(
             onClick = onClick,
             enabled = enabled,
+            modifier = Modifier.padding(start = 10.dp),
             shape = CircleShape,
             contentPadding = PaddingValues(6.dp),
         ) {
@@ -812,7 +812,7 @@ private fun TransferTaskCardContent(
     modifier: Modifier = Modifier,
 ) {
     val colors = AppTheme.colors
-    val isFailed = task.status == TransferStatus.FAILED
+    val isFailed = task.status == TransferStatus.FAILED || task.frameGenerationError != null
     val transferred = task.status == TransferStatus.COMPLETED
     val speedText = when {
         task.status == TransferStatus.TRANSFERING && displayedSpeed > 0L -> formatSpeed(displayedSpeed)
@@ -820,27 +820,29 @@ private fun TransferTaskCardContent(
         else -> null
     }
     val transferDuration = task.elapsedMs?.let(::formatDuration)
-    val generationDuration = displayedFrameGenerationElapsedMs?.let(::formatDuration)
+    val generationWaiting = task.isGeneratingFrame && task.frameGenerationStartedAtElapsedMs == null &&
+        !task.frameGenerationSkipped
+    val generationDuration = displayedFrameGenerationElapsedMs
+        ?.takeUnless { task.frameGenerationSkipped }?.let(::formatDuration)
     val effectText = transferTaskEffectText(task)
     val animateTransferPills = task.status == TransferStatus.TRANSFERING
-    val animateGenerationPills = task.isGeneratingFrame
+    val animateGenerationPills = task.isGeneratingFrame && !task.frameGenerationSkipped
 
+    val rowGap = 5.dp
     Column(modifier = modifier) {
-        Text(
-            text = task.file.fileName,
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.Medium,
-            color = if (task.status == TransferStatus.CANCELLED) {
-                colors.onSurfaceVariant
-            } else {
-                colors.onBackground
-            },
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = if (isFailed) Modifier.padding(end = 42.dp) else Modifier,
-        )
+        Row(verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (task.cropRecipe != null) Icon(Icons.Default.ContentCut,
+                contentDescription = stringResource(R.string.crop_task),
+                tint = colors.accentBlue, modifier = Modifier.size(14.dp))
+            TransferFileTitle(
+                name = task.file.fileName,
+                cancelled = task.status == TransferStatus.CANCELLED,
+                modifier = Modifier.weight(1f),
+            )
+        }
 
-        Spacer(modifier = Modifier.height(6.dp))
+        Spacer(modifier = Modifier.height(rowGap))
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(5.dp),
@@ -853,6 +855,7 @@ private fun TransferTaskCardContent(
             TransferPillVisibility(
                 visible = speedText != null,
                 delayMillis = 60,
+                modifier = Modifier.weight(1f, fill = false),
             ) {
                 speedText?.let {
                     TransferInfoPill(
@@ -873,36 +876,82 @@ private fun TransferTaskCardContent(
         }
 
         if (isFailed) {
-            Spacer(modifier = Modifier.height(7.dp))
+            Spacer(modifier = Modifier.height(rowGap))
             Text(
-                text = task.error ?: stringResource(R.string.transfer_failed),
+                text = task.frameGenerationError?.let {
+                    stringResource(R.string.local_photo_batch_failed) + ": " + it
+                } ?: task.error ?: stringResource(R.string.transfer_failed),
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.statusError,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
         } else if (effectText != null) {
-            Spacer(modifier = Modifier.height(7.dp))
+            Spacer(modifier = Modifier.height(rowGap))
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(5.dp),
             ) {
                 TransferInfoPill(
-                    text = effectText,
+                    text = if (task.frameGenerationSkipped) stringResource(R.string.status_skipped) else effectText,
                     tone = TransferCardPillTone.EFFECT,
                     respond = animateGenerationPills && generationDuration != null,
                     modifier = Modifier.weight(1f, fill = false),
                 )
                 TransferPillVisibility(
-                    visible = generationDuration != null,
+                    visible = generationWaiting || generationDuration != null,
                     delayMillis = 80,
                 ) {
-                    generationDuration?.let {
-                        TransferInfoPill(text = it, tone = TransferCardPillTone.GENERATION_DURATION)
-                    }
+                    TransferInfoPill(
+                        text = generationDuration.orEmpty(),
+                        tone = TransferCardPillTone.GENERATION_DURATION,
+                        waiting = generationWaiting,
+                    )
                 }
             }
         }
+    }
+}
+
+/** Title remains one line; preserve both the file number and extension when space is tight. */
+@Composable
+private fun TransferFileTitle(name: String, cancelled: Boolean, modifier: Modifier = Modifier) {
+    val colors = AppTheme.colors
+    val style = MaterialTheme.typography.bodyMedium
+    val measurer = rememberTextMeasurer()
+    BoxWithConstraints(modifier) {
+        val widthPx = with(LocalDensity.current) { maxWidth.roundToPx() }
+        val title = remember(name, widthPx, style, colors, cancelled, measurer) {
+            val dot = name.lastIndexOf('.').takeIf { it > 0 } ?: name.length
+            val stem = name.substring(0, dot)
+            val extension = name.substring(dot)
+            fun label(value: String) = buildAnnotatedString {
+                withStyle(SpanStyle(
+                    color = if (cancelled) colors.onSurfaceVariant else colors.onBackground,
+                    fontWeight = FontWeight.SemiBold,
+                )) { append(value) }
+                withStyle(SpanStyle(color = colors.onSurfaceVariant, fontWeight = FontWeight.Normal)) {
+                    append(extension)
+                }
+            }
+            val full = label(stem)
+            if (measurer.measure(full, style, maxLines = 1, softWrap = false).size.width <= widthPx) full
+            else {
+                var low = 0
+                var high = (stem.length - 1).coerceAtLeast(0)
+                var fitted = label("…")
+                while (low <= high) {
+                    val kept = (low + high) / 2
+                    val candidate = label(stem.take((kept + 1) / 2) + "…" + stem.takeLast(kept / 2))
+                    if (measurer.measure(candidate, style, maxLines = 1, softWrap = false).size.width <= widthPx) {
+                        fitted = candidate
+                        low = kept + 1
+                    } else high = kept - 1
+                }
+                fitted
+            }
+        }
+        Text(title, style = style, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -910,6 +959,7 @@ private fun TransferTaskCardContent(
 private fun TransferPillVisibility(
     visible: Boolean,
     delayMillis: Int,
+    modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
     // 初次组合时直接采用真实状态；只有当前卡片留在组合内发生 false → true，才播放
@@ -922,8 +972,9 @@ private fun TransferPillVisibility(
     }
     AnimatedVisibility(
         visibleState = visibilityState,
+        modifier = modifier,
         enter = transferCardPillEnter(delayMillis),
-        exit = fadeOut(tween(100)) + shrinkHorizontally(shrinkTowards = Alignment.Start),
+        exit = fadeOut(tween(100)) + shrinkHorizontally(shrinkTowards = Alignment.Start, clip = false),
     ) { content() }
 }
 
@@ -931,6 +982,7 @@ private fun transferCardPillEnter(delayMillis: Int) =
     fadeIn(tween(200, delayMillis = delayMillis)) +
         expandHorizontally(
             expandFrom = Alignment.Start,
+            clip = false,
             animationSpec = Motion.bouncy(),
         ) +
         slideInHorizontally(
@@ -952,14 +1004,33 @@ private fun TransferInfoPill(
     tone: TransferCardPillTone,
     modifier: Modifier = Modifier,
     respond: Boolean = false,
+    waiting: Boolean = false,
 ) {
     val colors = AppTheme.colors
+    val pillHeight = with(LocalDensity.current) {
+        MaterialTheme.typography.labelSmall.lineHeight.toDp().coerceAtLeast(16.dp) + 4.dp
+    }
     val accent = when (tone) {
         TransferCardPillTone.SIZE -> colors.onSurfaceVariant
         TransferCardPillTone.SPEED -> colors.statusConnected
         TransferCardPillTone.EFFECT -> colors.accentPurple
         TransferCardPillTone.TRANSFER_DURATION -> colors.accentBlue
         TransferCardPillTone.GENERATION_DURATION -> colors.accentYellow
+    }
+    val pillShape = remember { RoundedCornerShape(6.dp) }
+    val pillFill = remember(accent, colors.glassSheen) {
+        Brush.verticalGradient(listOf(
+            lerp(accent.copy(alpha = 0.10f), colors.glassSheen.copy(alpha = 0.15f), 0.30f),
+            accent.copy(alpha = 0.09f),
+            accent.copy(alpha = 0.12f),
+        ))
+    }
+    val pillEdge = remember(accent, colors.glassSheen) {
+        Brush.verticalGradient(listOf(
+            lerp(accent.copy(alpha = 0.22f), colors.glassSheen.copy(alpha = 0.32f), 0.45f),
+            accent.copy(alpha = 0.16f),
+            accent.copy(alpha = 0.25f),
+        ))
     }
     val sourceScale = remember { Animatable(1f) }
     var previouslyResponding by remember { mutableStateOf(respond) }
@@ -974,17 +1045,24 @@ private fun TransferInfoPill(
     }
     Box(
         modifier = modifier
+            .height(pillHeight)
             // 左侧为分裂锚点；仅改变 X 缩放，左边界始终固定，回弹发生在右缘。
             .graphicsLayer {
                 transformOrigin = TransformOrigin(0f, 0.5f)
                 scaleX = sourceScale.value
             }
-            .clip(RoundedCornerShape(999.dp))
-            .background(accent.copy(alpha = 0.10f))
-            .border(1.dp, accent.copy(alpha = 0.22f), RoundedCornerShape(999.dp))
-            .padding(horizontal = 7.dp, vertical = 3.dp),
+            .clip(pillShape)
+            .background(pillFill)
+            .border(1.dp, pillEdge, pillShape)
+            // Draw the shell around the animated size, not inside a shrinking clip layer.
+            .animateContentSize(tween(140, easing = FastOutSlowInEasing))
+            .padding(horizontal = 7.dp),
+        contentAlignment = Alignment.Center,
     ) {
-        Text(
+        if (waiting) {
+            Icon(Icons.Default.Schedule, contentDescription = stringResource(R.string.status_waiting),
+                tint = accent, modifier = Modifier.size(16.dp))
+        } else Text(
             text = text,
             style = MaterialTheme.typography.labelSmall,
             color = accent,
@@ -997,12 +1075,16 @@ private fun TransferInfoPill(
 @Composable
 private fun transferTaskEffectText(task: TransferTask): String? {
     val frameName = task.framePreset
-        ?.takeIf { task.frameBorderRequested }
-        ?.let { photoFramePresetLabel(it) }
+        ?.let {
+            if (task.frameBorderRequested) photoFramePresetLabel(it)
+            else stringResource(R.string.photo_frame_watermark_short)
+        }
     val filterName = task.photoFilterRequested?.let {
         "${photoFilterDisplayName(it.preset)} ${it.normalizedIntensityPercent}%"
     }
-    val parts = listOfNotNull(frameName, filterName)
+    val cropName = if (task.cropRecipe != null) stringResource(R.string.crop_title) else null
+    val parts = if (task.cropEffectsSkipped) listOfNotNull(cropName, stringResource(R.string.crop_effects_skipped))
+        else listOfNotNull(cropName, frameName, filterName)
     return parts.takeIf { it.isNotEmpty() }?.joinToString(" · ")
 }
 
@@ -1028,6 +1110,7 @@ private fun photoFramePresetLabel(preset: PhotoFramePreset): String = stringReso
         PhotoFramePreset.COLOR_ARCHIVE -> R.string.photo_frame_color_archive
         PhotoFramePreset.FILM_GALLERY -> R.string.photo_frame_film_gallery
         PhotoFramePreset.FILM_EDGE -> R.string.photo_frame_film_edge
+        PhotoFramePreset.PARAMETER_POSTER -> R.string.photo_frame_parameter_poster
     }
 )
 
@@ -1037,12 +1120,12 @@ private fun photoFilterDisplayName(filter: PhotoFilterPreset): String =
 
 /**
  * 右下角悬浮的"图标 FAB + 二次确认"控件（清空/重试全部共用）：毛玻璃圆形按钮，
- * 点击后在其左上方弹出确认卡片（缩放动画以 FAB 所在的右下角为原点，向左上放大），
+ * 点击后确认卡片沿统一 Genie 动画从 FAB 向左上展开，关闭后收回原按钮，
  * 确认后才真正执行。外边距由调用方的叠放容器统一提供（可能同时叠两颗）。
  */
 @Composable
 private fun ConfirmFab(
-    expanded: Boolean,
+    visibility: GenieVisibilityState,
     icon: @Composable () -> Unit,
     title: String,
     confirmText: String,
@@ -1054,13 +1137,9 @@ private fun ConfirmFab(
     enabled: Boolean = true,
     modifier: Modifier = Modifier
 ) {
+    var triggerBounds by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
     Column(horizontalAlignment = Alignment.End, modifier = modifier) {
-        AnimatedVisibility(
-            visible = expanded,
-            // 以右下角为原点缩放弹出，视觉上从 FAB 位置向左上方展开。
-            enter = scaleIn(transformOrigin = TransformOrigin(1f, 1f)) + fadeIn(),
-            exit = scaleOut(transformOrigin = TransformOrigin(1f, 1f)) + fadeOut()
-        ) {
+        GenieInlinePanel(visibility,anchor={triggerBounds}) {
             ConfirmCard(
                 title = title,
                 subtitle = subtitle,
@@ -1078,7 +1157,7 @@ private fun ConfirmFab(
             enabled = enabled,
             shape = CircleShape,
             contentPadding = PaddingValues(16.dp),
-            modifier = Modifier.align(Alignment.End)
+            modifier = Modifier.align(Alignment.End).onGloballyPositioned { triggerBounds=it.boundsInRoot() }
         ) {
             icon()
         }
@@ -1161,8 +1240,8 @@ private fun QueueThumbnail(
     }
     Box(
         modifier = modifier
-            .size(52.dp)
-            .clip(RoundedCornerShape(8.dp))
+            .size(68.dp)
+            .clip(RoundedCornerShape(10.dp))
             .background(AppTheme.colors.thumbPlaceholder),
         contentAlignment = Alignment.Center
     ) {
@@ -1185,4 +1264,3 @@ private fun QueueThumbnail(
         }
     }
 }
-

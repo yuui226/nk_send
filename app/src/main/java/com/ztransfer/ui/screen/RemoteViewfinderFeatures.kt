@@ -6,7 +6,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Text
 import androidx.compose.ui.Alignment
@@ -27,6 +30,7 @@ import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.ztransfer.R
 import com.ztransfer.ui.theme.AppTheme
 import kotlin.math.abs
 import kotlin.math.ceil
@@ -36,14 +40,66 @@ import kotlin.math.sqrt
 
 private val ToolMarkStrokeWidth = 1.5.dp
 
-internal enum class ViewfinderGrid(val divisions: Int) {
-    OFF(0), THIRDS(3), FOURTHS(4);
+internal enum class ViewfinderGrid(val fractions: List<Float>, val labelRes: Int, val diagonals: Boolean = false, val frameAspect: Float? = null) {
+    OFF(emptyList(), R.string.remote_grid_off),
+    THIRDS(listOf(1f / 3f, 2f / 3f), R.string.remote_grid_thirds),
+    FOURTHS(listOf(0.25f, 0.5f, 0.75f), R.string.remote_grid_fourths),
+    CENTER(listOf(0.5f), R.string.remote_grid_center),
+    GOLDEN(listOf(0.38196602f, 0.618034f), R.string.remote_grid_golden),
+    THIRDS_DIAGONALS(listOf(1f / 3f, 2f / 3f), R.string.remote_grid_thirds_diagonals, true),
+    FOURTHS_DIAGONALS(listOf(0.25f, 0.5f, 0.75f), R.string.remote_grid_fourths_diagonals, true),
+    WIDE_235(emptyList(), R.string.remote_grid_235, frameAspect = 2.35f),
+    WIDE_169(emptyList(), R.string.remote_grid_169, frameAspect = 16f/9f),
+    FRAME_43(emptyList(), R.string.remote_grid_43, frameAspect = 4f/3f);
 
     fun next(): ViewfinderGrid = when (this) {
         OFF -> THIRDS
-        THIRDS -> FOURTHS
-        FOURTHS -> OFF
+        THIRDS -> THIRDS_DIAGONALS
+        THIRDS_DIAGONALS -> FOURTHS
+        FOURTHS -> FOURTHS_DIAGONALS
+        FOURTHS_DIAGONALS -> CENTER
+        CENTER -> GOLDEN
+        GOLDEN -> WIDE_235
+        WIDE_235 -> WIDE_169
+        WIDE_169 -> FRAME_43
+        FRAME_43 -> OFF
     }
+}
+
+internal data class FramingGridLine(val start: Offset, val end: Offset)
+
+/** Fractions are measured in the displayed image, after de-squeeze, excluding letterboxing. */
+internal fun framingGridLines(
+    grid: ViewfinderGrid,
+    containerWidth: Float,
+    containerHeight: Float,
+    imageAspectRatio: Float
+): List<FramingGridLine> {
+    if (grid == ViewfinderGrid.OFF) return emptyList()
+    val rect = fitCenterRect(containerWidth, containerHeight, imageAspectRatio)
+    if (rect.width <= 0f || rect.height <= 0f) return emptyList()
+    grid.frameAspect?.let { aspect ->
+        val fitted=fitCenterRect(rect.width,rect.height,aspect)
+        val frame=Rect(fitted.left+rect.left,fitted.top+rect.top,fitted.right+rect.left,fitted.bottom+rect.top)
+        return listOf(
+            FramingGridLine(frame.topLeft,Offset(frame.right,frame.top)),
+            FramingGridLine(Offset(frame.right,frame.top),frame.bottomRight),
+            FramingGridLine(frame.bottomRight,Offset(frame.left,frame.bottom)),
+            FramingGridLine(Offset(frame.left,frame.bottom),frame.topLeft),
+        )
+    }
+    val lines = grid.fractions.flatMap { fraction ->
+        val x = rect.left + rect.width * fraction
+        val y = rect.top + rect.height * fraction
+        listOf(
+            FramingGridLine(Offset(x, rect.top), Offset(x, rect.bottom)),
+            FramingGridLine(Offset(rect.left, y), Offset(rect.right, y))
+        )
+    }
+    return if (grid.diagonals) lines + listOf(
+        FramingGridLine(rect.topLeft, rect.bottomRight),
+        FramingGridLine(Offset(rect.right, rect.top), Offset(rect.left, rect.bottom)),
+    ) else lines
 }
 
 /** ContentScale.Fit 在容器中的真实图像区域；网格、点击坐标与 AF 框共用。 */
@@ -109,18 +165,23 @@ internal fun DrawScope.drawFocusCornerReticle(
     drawLine(color, Offset(x1 - cornerLength, y1), Offset(x1, y1), strokeWidth, StrokeCap.Round)
 }
 
-/** 抽样 RGB 直方图。每通道已归一化并用 log1p 压缩尖峰，绘制层不再做统计。 */
-internal data class LuminanceHistogram(val bins: FloatArray)
+/** 线性归一化的亮度统计，以及按需附带的 RGB 三通道统计；绘制层不再读取源图。 */
+internal data class LuminanceHistogram(val bins: FloatArray, val rgb: List<FloatArray>? = null)
 
 /**
  * 从已经解码的 Live View Bitmap 抽样统计，不再解一遍 JPEG。目标约 24k 像素，
  * VGA/XGA 都有稳定上限；按行复用一个 IntArray，避免每帧分配整图像素数组。
  */
-internal fun calculateLuminanceHistogram(bitmap: Bitmap): LuminanceHistogram {
+internal fun calculateLuminanceHistogram(bitmap: Bitmap, includeRgb: Boolean = false, sampleLimit: Int = 24_000): LuminanceHistogram {
     val width = bitmap.width.coerceAtLeast(1)
     val height = bitmap.height.coerceAtLeast(1)
-    val step = ceil(sqrt(width.toDouble() * height / 24_000.0)).toInt().coerceAtLeast(1)
+    val step = ceil(sqrt(width.toDouble() * height / sampleLimit.coerceAtLeast(1).toDouble())).toInt().coerceAtLeast(1)
     val counts = IntArray(256)
+    // RGB_565 expands 5/6-bit channels into sparse 8-bit values. Group all channels
+    // at the shared 5-bit precision instead of drawing empty bins as a comb.
+    val rgbBinCount = if (bitmap.config == Bitmap.Config.RGB_565) 32 else 256
+    val rgbBinWidth = 256 / rgbBinCount
+    val channels = if (includeRgb) List(3) { IntArray(rgbBinCount) } else null
     val row = IntArray(width)
     var y = 0
     while (y < height) {
@@ -133,13 +194,44 @@ internal fun calculateLuminanceHistogram(bitmap: Bitmap): LuminanceHistogram {
             val blue = px and 0xFF
             // Rec.709 亮度权重的整数近似（54 + 183 + 19 = 256）。
             counts[(54 * red + 183 * green + 19 * blue) ushr 8]++
+            channels?.let { it[0][red / rgbBinWidth]++; it[1][green / rgbBinWidth]++; it[2][blue / rgbBinWidth]++ }
             x += step
         }
         y += step
     }
     // 线性归一化保留“纵轴 = 像素数量”的直方图语义；0/255 两端尖峰不会被对数压平。
     val peak = counts.maxOrNull()?.coerceAtLeast(1) ?: 1
-    return LuminanceHistogram(FloatArray(256) { i -> counts[i].toFloat() / peak })
+    // One shared RGB scale preserves relative channel counts; never normalize each separately.
+    val rgbPeak = channels?.maxOf { it.maxOrNull() ?: 0 }?.coerceAtLeast(1) ?: 1
+    return LuminanceHistogram(FloatArray(256) { i -> counts[i].toFloat() / peak },
+        channels?.map { channel -> FloatArray(channel.size) { channel[it].toFloat() / rgbPeak } })
+}
+
+/** Decode only a small 8-bit RGB analysis image; display still uses RGB_565. */
+internal fun previewHistogramFromJpeg(bytes: ByteArray): LuminanceHistogram? {
+    return try {
+        val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        var sample = 1
+        while ((maxOf(bounds.outWidth, bounds.outHeight).toLong() + sample - 1) / sample > 512) sample *= 2
+        val bitmap = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size,
+            android.graphics.BitmapFactory.Options().apply {
+                inSampleSize = sample
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+                inPreferredColorSpace = android.graphics.ColorSpace.get(android.graphics.ColorSpace.Named.SRGB)
+            }) ?: return null
+        try {
+            // Scan every pixel of this bounded image: tiny highlights should not fall between samples.
+            calculateLuminanceHistogram(bitmap, includeRgb = true, sampleLimit = Int.MAX_VALUE)
+        } finally {
+            bitmap.recycle()
+        }
+    } catch (_: OutOfMemoryError) {
+        null // An optional scope must not prevent the photograph from being displayed.
+    } catch (_: Exception) {
+        null
+    }
 }
 
 /** 过曝斑马掩码：cols×rows 粗网格按行优先排列，true = 该格抽样亮度达到过曝阈值。 */
@@ -162,15 +254,18 @@ internal fun calculateZebraMask(bitmap: Bitmap): ZebraMask {
     val cols = (width + cellW - 1) / cellW
     val rows = (height + cellH - 1) / cellH
     val cells = BooleanArray(cols * rows)
-    val row = IntArray(width)
+    val sampled = Bitmap.createScaledBitmap(bitmap, cols, rows, false)
+    val pixels = IntArray(cols * rows)
+    try {
+        sampled.getPixels(pixels, 0, cols, 0, 0, cols, rows)
+    } finally {
+        if (sampled !== bitmap) sampled.recycle()
+    }
     var r = 0
     while (r < rows) {
-        val y = (r * cellH + cellH / 2).coerceAtMost(height - 1)
-        bitmap.getPixels(row, 0, width, 0, y, width, 1)
         var c = 0
         while (c < cols) {
-            val x = (c * cellW + cellW / 2).coerceAtMost(width - 1)
-            val px = row[x]
+            val px = pixels[r * cols + c]
             val red = (px ushr 16) and 0xFF
             val green = (px ushr 8) and 0xFF
             val blue = px and 0xFF
@@ -231,33 +326,21 @@ internal fun FramingGridOverlay(
     modifier: Modifier = Modifier
 ) {
     if (grid == ViewfinderGrid.OFF) return
-    Canvas(modifier) {
+    Box(modifier.drawWithCache {
+        val lines = framingGridLines(grid, size.width, size.height, imageAspectRatio)
         val color = Color.White.copy(alpha = 0.42f)
         val stroke = 0.75.dp.toPx()
-        val rect = fitCenterRect(size.width, size.height, imageAspectRatio)
-        for (i in 1 until grid.divisions) {
-            val fraction = i.toFloat() / grid.divisions
-            drawLine(
-                color,
-                Offset(rect.left + rect.width * fraction, rect.top),
-                Offset(rect.left + rect.width * fraction, rect.bottom),
-                stroke
-            )
-            drawLine(
-                color,
-                Offset(rect.left, rect.top + rect.height * fraction),
-                Offset(rect.right, rect.top + rect.height * fraction),
-                stroke
-            )
+        onDrawBehind {
+            lines.forEach { drawLine(color, it.start, it.end, stroke) }
         }
-    }
+    })
 }
 
 // ── 所有工具按钮图标：统一线宽 = ToolMarkStrokeWidth(1.5dp)，风格克制简洁 ──
 
 /** 直方图——5 根竖条，中间高两端低，经典”色阶分布”形状。 */
 @Composable
-internal fun HistogramMark(modifier: Modifier = Modifier) {
+internal fun HistogramMark(modifier: Modifier = Modifier, rgb: Boolean = false) {
     val c = LocalContentColor.current
     Canvas(modifier) {
         val sw = ToolMarkStrokeWidth.toPx()
@@ -268,23 +351,32 @@ internal fun HistogramMark(modifier: Modifier = Modifier) {
         for (i in 0..4) {
             val x = 2.5.dp.toPx() + i * barW + i * gap
             val barH = baseY * heights[i]
-            drawLine(c, Offset(x, baseY), Offset(x, baseY - barH), sw, StrokeCap.Round)
+            val color = if (rgb) ScopeRgbColors[minOf(i * 3 / 5, 2)] else c
+            drawLine(color, Offset(x, baseY), Offset(x, baseY - barH), sw, StrokeCap.Round)
         }
     }
 }
 
-/** 构图参考线——标准九宫格（”井”字），固定不随实际网格档位变形。 */
+/** 按当前档位绘制参考线图标；关闭时保留九宫格入口，以按钮的非激活色区分。 */
 @Composable
-internal fun GridMark(modifier: Modifier = Modifier) {
+internal fun GridMark(grid: ViewfinderGrid, modifier: Modifier = Modifier) {
     val c = LocalContentColor.current
     Canvas(modifier) {
         val sw = ToolMarkStrokeWidth.toPx()
         val inset = 2.dp.toPx()
-        for (f in floatArrayOf(0.30f, 0.70f)) {
+        grid.frameAspect?.let { aspect ->
+            val frame=fitCenterRect(size.width-inset*2,size.height-inset*2,aspect)
+            drawRect(c,frame.topLeft+Offset(inset,inset),frame.size,style=Stroke(sw))
+        }
+        for (f in (if (grid == ViewfinderGrid.OFF) ViewfinderGrid.THIRDS else grid).fractions) {
             val x = inset + (size.width - inset * 2f) * f
             val y = inset + (size.height - inset * 2f) * f
             drawLine(c, Offset(x, inset), Offset(x, size.height - inset), sw, StrokeCap.Round)
             drawLine(c, Offset(inset, y), Offset(size.width - inset, y), sw, StrokeCap.Round)
+        }
+        if (grid.diagonals) {
+            drawLine(c, Offset(inset, inset), Offset(size.width - inset, size.height - inset), sw, StrokeCap.Round)
+            drawLine(c, Offset(size.width - inset, inset), Offset(inset, size.height - inset), sw, StrokeCap.Round)
         }
     }
 }
@@ -320,28 +412,6 @@ internal fun FpsMark(modifier: Modifier = Modifier) {
             maxLines = 1,
             softWrap = false
         )
-    }
-}
-
-/** 全屏——四角括号（通用「放大到全屏」符号）。 */
-@Composable
-internal fun FullscreenEnterMark(modifier: Modifier = Modifier) {
-    val c = LocalContentColor.current
-    Canvas(modifier) {
-        val sw = ToolMarkStrokeWidth.toPx()
-        val pad = 2.dp.toPx()
-        val arm = 5.dp.toPx()
-        val w = size.width
-        val h = size.height
-        // 每个角一个 L 形括号，开口朝外
-        fun bracket(cornerX: Float, cornerY: Float, dx: Float, dy: Float) {
-            drawLine(c, Offset(cornerX, cornerY), Offset(cornerX + dx * arm, cornerY), sw, StrokeCap.Round)
-            drawLine(c, Offset(cornerX, cornerY), Offset(cornerX, cornerY + dy * arm), sw, StrokeCap.Round)
-        }
-        bracket(pad, pad, 1f, 1f)                    // 左上 ┌
-        bracket(w - pad, pad, -1f, 1f)               // 右上 ┐
-        bracket(pad, h - pad, 1f, -1f)               // 左下 └
-        bracket(w - pad, h - pad, -1f, -1f)          // 右下 ┘
     }
 }
 
@@ -545,76 +615,90 @@ internal fun ViewfinderZebraOverlay(
     )
 }
 
-/** ±1° 内算水平：够严格才有意义，又不至于因手抖级别的读数抖动反复变色。 */
-private const val LevelToleranceDegrees = 1.0f
+/** Separate enter/exit limits stop a nearly level camera from flickering between colors. */
+internal fun horizonAligned(roll: Float, wasAligned: Boolean): Boolean {
+    if (!roll.isFinite()) return false
+    // Align to the nearest horizontal or vertical axis, including inverted orientations.
+    val remainder = abs(roll % 90f)
+    val deviation = minOf(remainder, 90f - remainder)
+    return deviation <= if (wasAligned) 1.2f else 0.7f
+}
 
-/**
- * 电子水平仪叠加层——相机式虚拟水平线。
- *
- * [rollDegrees] 是【相机机身】的滚转角（Nikon AngleLevel 0xD067），不是手机传感器：
- * 相机在三脚架上、手机在手里，只有相机自身的姿态对构图有意义。
- * 地平线按滚转角的反向旋转，因此它在画面里始终代表真水平；中央与两端的固定参考
- * 标记不随之旋转，两者的夹角就是偏差。水平时转绿，否则用琥珀色。
- *
- * [rollDegrees] 为 null（还没读到角度或机身不支持该属性）时什么都不画——
- * 宁可没有水平仪，也不画一条假的水平线。
- */
+/** Preserve physical orientation and unwrap across ±180° for the shortest animation path. */
+internal fun horizonDisplayRoll(roll: Float, previous: Float = roll): Float =
+    previous + ((roll - previous + 180f) % 360f + 360f) % 360f - 180f
+
+/** Rotating diameter and parallel pitch chord; each axis indicates alignment independently. */
 @Composable
 internal fun ViewfinderLevelOverlay(
     rollDegrees: Float?,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    pitchDegrees: Float? = null,
 ) {
-    val roll = rollDegrees ?: return
-    val colors = AppTheme.colors
-    val horizonColor = (
-        if (abs(roll) <= LevelToleranceDegrees) colors.statusConnected else colors.accentOrange
-        ).copy(alpha = 0.82f)
+    val roll = rollDegrees?.takeIf { it.isFinite() } ?: return
+    val pitch = pitchDegrees?.takeIf { it.isFinite() && kotlin.math.abs(it) <= 90f }
+    var rollAligned by remember { mutableStateOf(horizonAligned(roll, false)) }
+    var pitchAligned by remember { mutableStateOf(false) }
+    LaunchedEffect(roll, pitch) {
+        rollAligned = horizonAligned(roll, rollAligned)
+        pitchAligned = pitch != null && kotlin.math.abs(pitch) <= if (pitchAligned) 1.2f else 0.7f
+    }
+    val aligned = rollAligned && (pitch == null || pitchAligned)
+    val pitchOffset by animateFloatAsState((pitch ?: 0f).coerceIn(-30f, 30f) / 30f, tween(100), label = "horizonPitch")
+    var rollTarget by remember { mutableFloatStateOf(roll) }
+    LaunchedEffect(roll) { rollTarget = horizonDisplayRoll(roll, rollTarget) }
+    val angle by animateFloatAsState(rollTarget, tween(100), label = "horizonRoll")
+    val tint by animateColorAsState(
+        if (rollAligned) Color(0xFF52F58B) else Color(0xFFFFC857),
+        tween(160), label = "horizonColor",
+    )
+    val stroke by animateFloatAsState(if (rollAligned) 1.6f else 1.2f, tween(160), label = "horizonStroke")
+    val pitchTint by animateColorAsState(
+        if (pitchAligned) Color(0xFF52F58B) else Color.White.copy(alpha = 0.65f),
+        tween(160), label = "horizonPitchColor",
+    )
+    val reference by animateColorAsState(
+        if (aligned) Color(0xFF52F58B).copy(alpha = 0.38f) else Color.White.copy(alpha = 0.26f),
+        tween(160), label = "horizonReference",
+    )
     Canvas(modifier) {
-        // 线宽与网格/直方图同一量级，半透明，不跟画面抢注意力。
-        val horizonStroke = 1.2.dp.toPx()
-        val refStroke = 1.5.dp.toPx()
-        val innerGap = 16.dp.toPx()          // 中央留空，不压住主体
-        val arm = (size.width * 0.27f).coerceAtMost(size.height * 0.42f)
-        if (arm <= innerGap) return@Canvas
-        val refColor = Color.White.copy(alpha = 0.45f)
-
-        // 相机顺时针歪 3°，线就逆时针转 3°——画面里这条线才是真水平。
-        rotate(degrees = -roll) {
-            drawLine(
-                horizonColor,
-                Offset(center.x - arm, center.y),
-                Offset(center.x - innerGap, center.y),
-                horizonStroke,
-                StrokeCap.Round
-            )
-            drawLine(
-                horizonColor,
-                Offset(center.x + innerGap, center.y),
-                Offset(center.x + arm, center.y),
-                horizonStroke,
-                StrokeCap.Round
-            )
+        val radius = minOf(size.width * 0.19f, size.height * 0.28f)
+        if (radius < 18.dp.toPx()) return@Canvas
+        val outline = Color.Black.copy(alpha = 0.24f)
+        drawCircle(Color.Black.copy(alpha = 0.12f), radius, style = Stroke(1.5.dp.toPx()))
+        drawCircle(reference, radius, style = Stroke(0.75.dp.toPx()))
+        // Only short fixed ticks: there is no competing fixed diameter.
+        for (side in listOf(-1, 1)) {
+            drawLine(reference, center + Offset(side * (radius - 4.dp.toPx()), 0f),
+                center + Offset(side * radius, 0f), 1.dp.toPx(), StrokeCap.Round)
+            drawLine(reference, center + Offset(0f, side * (radius - 4.dp.toPx())),
+                center + Offset(0f, side * radius), 1.dp.toPx(), StrokeCap.Round)
         }
-
-        // 固定中央参考短线（不旋转）
-        val refHalf = 10.dp.toPx()
-        drawLine(
-            refColor,
-            Offset(center.x - refHalf, center.y),
-            Offset(center.x + refHalf, center.y),
-            refStroke,
-            StrokeCap.Round
-        )
-        // 固定两端刻度：水平时旋转的地平线正好压在这两个刻度上
-        val tick = 4.dp.toPx()
-        for (dx in floatArrayOf(-arm, arm)) {
-            drawLine(
-                refColor,
-                Offset(center.x + dx, center.y - tick),
-                Offset(center.x + dx, center.y + tick),
-                refStroke,
-                StrokeCap.Round
-            )
+        // Match the camera display: the reported roll already has the required sign.
+        rotate(angle) {
+            // Leave room for rounded caps and the outline, keeping every stroke inside the ring.
+            val innerRadius = (radius - 2.dp.toPx()).coerceAtLeast(0f)
+            val start = center - Offset(innerRadius, 0f)
+            val end = center + Offset(innerRadius, 0f)
+            if (pitch != null) {
+                // Both lines use the same rotation. Pitch translates perpendicular to the
+                // diameter, and sqrt(r²-y²) keeps its endpoints on the inner circle.
+                val y = pitchOffset * innerRadius * 0.75f
+                val halfWidth = sqrt((innerRadius * innerRadius - y * y).coerceAtLeast(0f))
+                val pitchCenter = center + Offset(0f, y)
+                val pitchStart = pitchCenter - Offset(halfWidth, 0f)
+                val pitchEnd = pitchCenter + Offset(halfWidth, 0f)
+                drawLine(outline, pitchStart, pitchEnd, 2.dp.toPx(), StrokeCap.Round)
+                drawLine(pitchTint, pitchStart, pitchEnd, 1.dp.toPx(), StrokeCap.Round)
+            }
+            // Draw roll last so a level-pitch chord cannot obscure a tilted roll warning.
+            drawLine(outline, start, end, (stroke + 1f).dp.toPx(), StrokeCap.Round)
+            drawLine(tint, start, end, stroke.dp.toPx(), StrokeCap.Round)
         }
+        drawCircle(outline, 3.dp.toPx())
+        // The centre marker reports pitch separately; single-axis cameras retain roll feedback.
+        drawCircle(if (pitch != null) {
+            if (pitchAligned) Color(0xFF52F58B) else Color(0xFFFFC857)
+        } else tint, if (aligned) 2.2.dp.toPx() else 1.5.dp.toPx())
     }
 }

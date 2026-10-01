@@ -6,7 +6,9 @@ import android.view.View
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import android.provider.Settings
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalView
 
@@ -28,12 +30,12 @@ class Haptics(private val view: View, private val enabled: Boolean) {
 
     /** 轻点入队（单张 / 整组各一次）：最细的 tick，短促细腻。 */
     fun tick() {
-        if (enabled) view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+        if (enabled && confirmationDepth == 0) view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
     }
 
     /** 长按弹出预览：系统标准长按震感。 */
     fun longPress() {
-        if (enabled) view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+        if (enabled && confirmationDepth == 0) view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
     }
 
     /** 成功确认：用于连接建立、有效传输完成等明确完成事件。 */
@@ -50,13 +52,14 @@ class Haptics(private val view: View, private val enabled: Boolean) {
      * 长按蓄力使用单条渐强波形，避免高频 performHapticFeedback 被系统合并或限频。
      * 波形末尾刻意留白；只有真正按满后 [completeProgressiveHold] 才补上独立确认脉冲。
      */
-    fun startProgressiveHold() {
-        if (!enabled) return
+    fun startProgressiveHold(durationMs: Long = PROGRESSIVE_HOLD_HAPTIC_DURATION_MS.toLong()) {
+        if (!progressiveFeedbackEnabled()) return
         val device = vibrator?.takeIf { it.hasVibrator() } ?: return
         device.cancel()
+        progressiveOwner = this
         device.vibrate(
             VibrationEffect.createWaveform(
-                PROGRESSIVE_HOLD_TIMINGS_MS,
+                progressiveHoldTimings(durationMs),
                 PROGRESSIVE_HOLD_AMPLITUDES,
                 -1,
             )
@@ -65,13 +68,18 @@ class Haptics(private val view: View, private val enabled: Boolean) {
 
     /** 手指提前松开时立即停止尚未完成的蓄力反馈。 */
     fun cancelProgressiveHold() {
-        if (enabled) vibrator?.cancel()
+        if (progressiveOwner === this) {
+            progressiveOwner = null
+            vibrator?.cancel()
+        }
     }
 
     /** 按满后使用设备调校过的重点击；旧系统退化为短促脉冲，不使用闷重的长振动。 */
     fun completeProgressiveHold() {
-        if (!enabled) return
+        cancelProgressiveHold()
+        if (!progressiveFeedbackEnabled()) return
         val device = vibrator?.takeIf { it.hasVibrator() } ?: return
+        progressiveOwner = null
         device.cancel()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             device.vibrate(
@@ -85,6 +93,22 @@ class Haptics(private val view: View, private val enabled: Boolean) {
                 )
             )
         }
+    }
+
+    /** Shared actions may already contain a tap/preview pulse; emit only the hold confirmation. */
+    internal fun completeLongPress(action: () -> Unit) {
+        completeProgressiveHold()
+        confirmationDepth++
+        try { action() } finally { confirmationDepth-- }
+    }
+
+    private fun progressiveFeedbackEnabled(): Boolean = enabled && view.isHapticFeedbackEnabled &&
+        Settings.System.getInt(view.context.contentResolver, Settings.System.HAPTIC_FEEDBACK_ENABLED, 1) != 0
+
+    private companion object {
+        // All gesture callbacks run on the main thread. Suppression lasts only for this callback.
+        var confirmationDepth = 0
+        var progressiveOwner: Haptics? = null
     }
 
     /** 操作失败：新系统使用拒绝触感，旧系统以两次轻 tick 与成功确认明确区分。 */
@@ -106,7 +130,9 @@ class Haptics(private val view: View, private val enabled: Boolean) {
 @Composable
 fun rememberHaptics(enabled: Boolean): Haptics {
     val view = LocalView.current
-    return remember(view, enabled) { Haptics(view, enabled) }
+    val haptics = remember(view, enabled) { Haptics(view, enabled) }
+    DisposableEffect(haptics) { onDispose { haptics.cancelProgressiveHold() } }
+    return haptics
 }
 
 private const val FAILURE_SECOND_TICK_DELAY_MS = 65L
@@ -143,3 +169,16 @@ private val PROGRESSIVE_HOLD_AMPLITUDES = intArrayOf(
     118, 0,
     142, 0,
 )
+
+/** Scale interval boundaries, keeping total duration exact and preserving the final quiet gap. */
+internal fun progressiveHoldTimings(durationMs: Long): LongArray {
+    val duration = durationMs.coerceAtLeast(1L)
+    var elapsed = 0L
+    var previous = 0L
+    return LongArray(PROGRESSIVE_HOLD_TIMINGS_MS.size) { index ->
+        elapsed += PROGRESSIVE_HOLD_TIMINGS_MS[index]
+        val boundary = duration / PROGRESSIVE_HOLD_HAPTIC_DURATION_MS * elapsed +
+            duration % PROGRESSIVE_HOLD_HAPTIC_DURATION_MS * elapsed / PROGRESSIVE_HOLD_HAPTIC_DURATION_MS
+        (boundary - previous).also { previous = boundary }
+    }
+}

@@ -2,50 +2,31 @@ package com.ztransfer.util
 
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.roundToLong
 
-/**
- * Human-readable decimal-degree coordinates. Hemispheres replace signed values so the result is
- * immediately recognizable outside the app while remaining compact enough for photo borders.
- */
-internal fun formatDecimalDegreeCoordinates(
-    latitude: Double,
-    longitude: Double,
-    fractionDigits: Int,
-): String {
-    return "${formatDecimalDegreeLatitude(latitude, fractionDigits)}, " +
-        formatDecimalDegreeLongitude(longitude, fractionDigits)
-}
+/** Camera-style degrees and decimal minutes, with three decimal places in the minutes. */
+internal fun formatDegreesMinutesCoordinates(latitude: Double, longitude: Double): String =
+    "${formatDegreesMinutesLatitude(latitude)}, ${formatDegreesMinutesLongitude(longitude)}"
 
-internal fun formatDecimalDegreeLatitude(latitude: Double, fractionDigits: Int): String =
-    formatDecimalDegreeValue(
-        value = latitude,
-        maximum = 90.0,
-        positiveHemisphere = "N",
-        negativeHemisphere = "S",
-        fractionDigits = fractionDigits,
-        errorLabel = "latitude",
-    )
+internal fun formatDegreesMinutesLatitude(latitude: Double): String =
+    formatDegreesMinutesValue(latitude, 90.0, "N", "S", "latitude")
 
-internal fun formatDecimalDegreeLongitude(longitude: Double, fractionDigits: Int): String =
-    formatDecimalDegreeValue(
-        value = longitude,
-        maximum = 180.0,
-        positiveHemisphere = "E",
-        negativeHemisphere = "W",
-        fractionDigits = fractionDigits,
-        errorLabel = "longitude",
-    )
+internal fun formatDegreesMinutesLongitude(longitude: Double): String =
+    formatDegreesMinutesValue(longitude, 180.0, "E", "W", "longitude")
 
-private fun formatDecimalDegreeValue(
+private fun formatDegreesMinutesValue(
     value: Double,
     maximum: Double,
     positiveHemisphere: String,
     negativeHemisphere: String,
-    fractionDigits: Int,
     errorLabel: String,
 ): String {
     require(value.isFinite() && value in -maximum..maximum) { "$errorLabel out of range" }
-    require(fractionDigits in 0..8) { "fractionDigits out of range" }
     val hemisphere = if (value < 0.0) negativeHemisphere else positiveHemisphere
-    return String.format(Locale.US, "%.${fractionDigits}f°%s", abs(value), hemisphere)
+    // Round the total first: 59.9995 minutes must carry into the next degree, never show 60.000.
+    val thousandthsOfMinutes = (abs(value) * 60_000).roundToLong()
+    val degrees = thousandthsOfMinutes / 60_000
+    val minutes = (thousandthsOfMinutes % 60_000) / 1_000
+    val fraction = thousandthsOfMinutes % 1_000
+    return String.format(Locale.US, "%s %d°%02d.%03d'", hemisphere, degrees, minutes, fraction)
 }

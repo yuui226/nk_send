@@ -1,5 +1,14 @@
 package com.ztransfer.ui.screen
 
+import com.ztransfer.effects.effectivePhotoEffectModules
+import com.ztransfer.effects.PhotoEffectModule
+import com.ztransfer.effects.showsPhotoEffect
+
+
+import com.ztransfer.frame.supportsBackdropControls
+
+import com.ztransfer.viewmodel.AutoTransferMode
+
 import android.Manifest
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
@@ -46,6 +55,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -102,12 +112,13 @@ import androidx.core.content.ContextCompat
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
@@ -130,6 +141,11 @@ import com.ztransfer.effects.FavoritePhotoFilter
 import com.ztransfer.effects.orderWithFavorites
 import com.ztransfer.frame.PhotoFrameExporter
 import com.ztransfer.frame.PhotoFrameMetadata
+import com.ztransfer.frame.PhotoFrameBrandStyle
+import com.ztransfer.frame.nextBrandStyle
+import com.ztransfer.frame.MIN_PHOTO_FRAME_WIDTH_PERCENT
+import com.ztransfer.frame.MAX_PHOTO_FRAME_WIDTH_PERCENT
+import com.ztransfer.frame.PHOTO_FRAME_WIDTH_STEP
 import com.ztransfer.frame.PhotoFrameMetadataSettings
 import com.ztransfer.frame.PhotoFramePreset
 import com.ztransfer.frame.PhotoFrameWatermark
@@ -166,9 +182,9 @@ import com.ztransfer.update.AppUpdateManager
 import com.ztransfer.ui.theme.*
 import com.ztransfer.ui.util.PROGRESSIVE_HOLD_HAPTIC_DURATION_MS
 import com.ztransfer.ui.util.rememberHaptics
-import com.ztransfer.util.formatDecimalDegreeCoordinates
-import com.ztransfer.util.formatDecimalDegreeLatitude
-import com.ztransfer.util.formatDecimalDegreeLongitude
+import com.ztransfer.util.formatDegreesMinutesCoordinates
+import com.ztransfer.util.formatDegreesMinutesLatitude
+import com.ztransfer.util.formatDegreesMinutesLongitude
 import com.ztransfer.viewmodel.TransferViewModel
 import com.ztransfer.gps.GpsState
 import com.ztransfer.gps.GpsStatus
@@ -322,6 +338,9 @@ fun SettingsOverlay(
     var mainSettingsInfoAnchorBounds by remember { mutableStateOf<Rect?>(null) }
     var showPhotoEffectsInfo by remember { mutableStateOf(false) }
     var photoEffectsInfoAnchorBounds by remember { mutableStateOf<Rect?>(null) }
+    val visibleModules = effectivePhotoEffectModules(state.transferPhotoEffectModules, isPro)
+    var showModuleMenu by remember { mutableStateOf(false) }
+    var moduleMenuAnchor by remember { mutableStateOf<Rect?>(null) }
     var expandedEffectsPreview by remember {
         mutableStateOf<ExpandedEffectsPreview?>(null)
     }
@@ -335,6 +354,21 @@ fun SettingsOverlay(
     var filterDraftIntensity by remember {
         mutableIntStateOf(state.photoFilterIntensityPercent)
     }
+    val photoLutDraft = rememberPhotoLutDraft("transfer", state.photoLut) { filterDraftEnabled = false }
+    fun applyModuleVisibility(mask: Int) {
+        if (!mask.showsPhotoEffect(PhotoEffectModule.FILTER)) filterDraftEnabled = false
+        if (!mask.showsPhotoEffect(PhotoEffectModule.LUT)) photoLutDraft.off()
+        if (!mask.showsPhotoEffect(PhotoEffectModule.FRAME)) frameDraftBorderEnabled = false
+        if (!mask.showsPhotoEffect(PhotoEffectModule.WATERMARK)) watermarkDraft = watermarkDraft.copy(enabled = false)
+        frameDraftDecorationEnabled = frameDraftDecorationEnabled && (frameDraftBorderEnabled || (isPro && watermarkDraft.enabled))
+    }
+    LaunchedEffect(visibleModules, state.transferPhotoEffectModules) {
+        applyModuleVisibility(visibleModules)
+        if (state.transferPhotoEffectModules != visibleModules) {
+            viewModel.setTransferPhotoEffectModules(visibleModules)
+        }
+    }
+
     // 真实相机图始终直接复用，不能在主设置页主动清空，否则进入效果页的第一帧会无谓闪空。
     // 兜底图延迟生成：给内存缩略图和按需 FHD 足够时间，绝大多数已连接场景不会看见假图。
     var generatedEffectPreviewFallback by remember { mutableStateOf<Bitmap?>(null) }
@@ -404,6 +438,8 @@ fun SettingsOverlay(
             selectedId = filterDraftId,
             intensityPercent = filterDraftIntensity,
             enabled = filterDraftEnabled && filterDraftId != null,
+            lut = photoLutDraft.selection,
+            lutUri = photoLutDraft.selectedUri?.toString(),
         )
     }
     fun commitPhotoEffectsDraft() {
@@ -480,13 +516,23 @@ fun SettingsOverlay(
             .padding(start = 12.dp, end = 12.dp, top = panelTop)
             .navigationBarsPadding()   // 小屏时面板底部不顶进导航栏
             .fillMaxWidth(),
-        animateScale = false,
-        genieFromAnchor = true,
         overlayContent = {
             if (showMainSettingsInfo) {
                 MainSettingsInfoBubble(
                     anchorBounds = mainSettingsInfoAnchorBounds,
                     onDismiss = { showMainSettingsInfo = false },
+                )
+            }
+            if (showModuleMenu) {
+                PhotoEffectModuleMenu(visibleModules, moduleMenuAnchor,
+                    isPro = isPro,
+                    onChange = { mask ->
+                        applyModuleVisibility(mask)
+                        viewModel.setTransferPhotoEffectModules(mask)
+                        commitPhotoEffectsDraft()
+                    },
+                    onDismiss = { showModuleMenu = false },
+                    hapticsEnabled = state.hapticsEnabled,
                 )
             }
             if (showPhotoEffectsInfo) {
@@ -583,28 +629,20 @@ fun SettingsOverlay(
             // ---------- 标题栏：二级页复用全局 GlassButton 返回；主设置保留原关闭入口 ----------
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (page != SettingsPage.MAIN) {
-                    GlassButton(
+                    GlassBackButton(
                         onClick = {
                             focusManager.clearFocus()
                             if (page == SettingsPage.EFFECTS) commitPhotoEffectsDraft()
                             settingsPage = SettingsPage.MAIN
                         },
-                        modifier = Modifier.height(36.dp),
-                    ) {
-                        Icon(
-                            Icons.Default.ArrowBack,
-                            contentDescription = stringResource(R.string.cd_back),
-                            tint = colors.onBackground,
-                            modifier = Modifier.size(20.dp),
-                        )
-                    }
+                    )
                     Spacer(Modifier.width(10.dp))
                 }
                 Text(
                     stringResource(
                         when (page) {
                             SettingsPage.MAIN -> R.string.settings
-                            SettingsPage.EFFECTS -> R.string.photo_effects
+                            SettingsPage.EFFECTS -> R.string.photo_effects_editor_title
                         }
                     ),
                     style = MaterialTheme.typography.titleLarge,
@@ -666,6 +704,11 @@ fun SettingsOverlay(
                         Icon(Icons.Default.Close, contentDescription = stringResource(R.string.cd_close), tint = colors.onSurfaceVariant)
                     }
                 } else {
+                    PhotoEffectModuleButton(
+                        onClick = { showModuleMenu = true },
+                        modifier = Modifier.size(28.dp).onGloballyPositioned { moduleMenuAnchor = it.boundsInRoot() },
+                    )
+                    Spacer(Modifier.width(8.dp))
                     TipLightbulbButton(
                         onClick = {
                             viewModel.markPhotoEffectsHelpViewed()
@@ -684,7 +727,7 @@ fun SettingsOverlay(
 
             if (page == SettingsPage.EFFECTS) {
                 Spacer(Modifier.height(14.dp))
-                val previewFilter = state.photoFilters
+                val previewFilter = photoLutDraft.selection ?: state.photoFilters
                     .firstOrNull { it.id == filterDraftId }
                     ?.takeIf { filterDraftEnabled }
                     ?.let { PhotoFilterSelection(it, filterDraftIntensity) }
@@ -694,13 +737,14 @@ fun SettingsOverlay(
                     state.transferPhotoFilterIntensities,
                     filterDraftId,
                     filterDraftEnabled,
+                    photoLutDraft.selection,
                 ) {
                     nextPhotoFilterSelections(
                         filters = state.photoFilters,
                         favoriteCatalogKeys = state.favoritePhotoFilters.map { it.catalogKey },
                         rememberedIntensities = state.transferPhotoFilterIntensities,
                         selectedId = filterDraftId,
-                        enabled = filterDraftEnabled,
+                        enabled = filterDraftEnabled && photoLutDraft.selection == null,
                     )
                 }
                 val editorWatermark = when {
@@ -763,8 +807,7 @@ fun SettingsOverlay(
                                 requestedPortrait = previewSource.bitmap.height >
                                     previewSource.bitmap.width,
                                 onRotate = rotateEffectPreview,
-                                borderEnabled =
-                                    frameDraftDecorationEnabled && frameDraftBorderEnabled,
+                                borderEnabled = frameDraftDecorationEnabled && frameDraftBorderEnabled,
                                 preset = frameDraftPreset,
                                 metadataSettings = resolvedPhotoFrameMetadataSettings(
                                     state.photoFrameMetadataSettings,
@@ -773,11 +816,11 @@ fun SettingsOverlay(
                                 watermark = renderWatermark,
                                 filter = previewFilter,
                                 prefetchFilters = previewFilterPrefetch,
-                                onOpen = { bitmap, anchorRect ->
+                                onOpen = { bitmap, anchorRect, comparison ->
                                     focusManager.clearFocus()
                                     keyboardController?.hide()
                                     expandedEffectsPreview =
-                                        ExpandedEffectsPreview(bitmap, anchorRect)
+                                        ExpandedEffectsPreview(bitmap, anchorRect, comparison)
                                 },
                             )
                         } else {
@@ -788,27 +831,36 @@ fun SettingsOverlay(
                     }
                 }
                 Spacer(Modifier.height(10.dp))
-                PhotoFilterEditor(
-                    filters = state.photoFilters,
-                    favoriteFilters = state.favoritePhotoFilters,
-                    rememberedIntensities = state.transferPhotoFilterIntensities,
-                    selectedId = filterDraftId,
-                    enabled = filterDraftEnabled,
-                    intensityPercent = filterDraftIntensity,
-                    onDisabled = { filterDraftEnabled = false },
-                    onSelected = {
-                        filterDraftId = it
-                        filterDraftEnabled = true
-                    },
-                    onIntensityChanged = { filterId, intensity ->
-                        filterDraftIntensity = intensity
-                        viewModel.rememberTransferPhotoFilterIntensity(filterId, intensity)
-                    },
-                    onFavoriteToggled = viewModel::toggleFavoritePhotoFilter,
-                    hapticsEnabled = state.hapticsEnabled,
-                )
-                Spacer(Modifier.height(10.dp))
+                PhotoColorEffectGroup(visible = visibleModules.showsPhotoEffect(PhotoEffectModule.FILTER) && photoLutDraft.selection == null) {
+                    PhotoFilterEditor(
+                        filters = state.photoFilters,
+                        favoriteFilters = state.favoritePhotoFilters,
+                        rememberedIntensities = state.transferPhotoFilterIntensities,
+                        selectedId = filterDraftId,
+                        enabled = filterDraftEnabled && photoLutDraft.selection == null,
+                        intensityPercent = filterDraftIntensity,
+                        onDisabled = { filterDraftEnabled = false },
+                        onSelected = {
+                            photoLutDraft.off()
+                            filterDraftId = it
+                            filterDraftEnabled = true
+                        },
+                        onIntensityChanged = { filterId, intensity ->
+                            filterDraftIntensity = intensity
+                            viewModel.rememberTransferPhotoFilterIntensity(filterId, intensity)
+                        },
+                        onFavoriteToggled = viewModel::toggleFavoritePhotoFilter,
+                        hapticsEnabled = state.hapticsEnabled,
+                    )
+                }
+                PhotoColorEffectGroup(
+                    visible = visibleModules.showsPhotoEffect(PhotoEffectModule.LUT) && (!(filterDraftEnabled && state.photoFilters.any { it.id == filterDraftId }) || photoLutDraft.selection != null),
+                ) {
+                    PhotoLutEditor(photoLutDraft, state.hapticsEnabled)
+                }
                 PhotoFrameWatermarkEditor(
+                    showFrame = visibleModules.showsPhotoEffect(PhotoEffectModule.FRAME),
+                    showWatermark = visibleModules.showsPhotoEffect(PhotoEffectModule.WATERMARK),
                     favoriteEffects = state.favoriteFrameEffects,
                     borderEnabled = frameDraftDecorationEnabled && frameDraftBorderEnabled,
                     preset = frameDraftPreset,
@@ -827,7 +879,14 @@ fun SettingsOverlay(
                         frameDraftBorderEnabled = enabled
                         frameDraftDecorationEnabled = enabled || (isPro && watermarkDraft.enabled)
                     },
-                    onPresetChanged = { frameDraftPreset = it },
+                    onPresetChanged = { selected ->
+                        frameDraftPreset = selected
+                        state.favoriteFrameEffects.firstOrNull { it.framePreset == selected }?.let { favorite ->
+                            viewModel.setPhotoFrameMetadataSettings(selected,
+                                resolvedPhotoFrameMetadataSettings(state.photoFrameMetadataSettings, selected)
+                                    .copy(widthPercent = favorite.frameWidthPercent, backgroundBlurPercent = favorite.backgroundBlurPercent, backgroundMaskPercent = favorite.backgroundMaskPercent))
+                        }
+                    },
                     onMetadataSettingsChanged = { updated ->
                         viewModel.setPhotoFrameMetadataSettings(frameDraftPreset, updated)
                     },
@@ -842,9 +901,9 @@ fun SettingsOverlay(
                     },
                     onFavoriteWatermarkApplied = { favoriteWatermark ->
                         if (isPro) {
-                            watermarkDraft = favoriteWatermark
+                            watermarkDraft = favoriteWatermark.copy(enabled = favoriteWatermark.enabled && visibleModules.showsPhotoEffect(PhotoEffectModule.WATERMARK))
                             frameDraftDecorationEnabled =
-                                frameDraftBorderEnabled || favoriteWatermark.enabled
+                                frameDraftBorderEnabled || watermarkDraft.enabled
                         }
                     },
                     onWatermarkPositionChanged = { position ->
@@ -983,10 +1042,9 @@ fun SettingsOverlay(
                         enabled = state.transferDirUri != null,
                         modifier = Modifier.weight(1f),
                     )
-                    BooleanSettingsWheel(
-                        label = stringResource(R.string.auto_transfer_new_media),
-                        checked = state.autoTransferNewMedia,
-                        onCheckedChange = viewModel::setAutoTransferNewMedia,
+                    AutoTransferSettingsWheel(
+                        mode = state.autoTransferMode,
+                        onModeChanged = viewModel::setAutoTransferMode,
                         hapticsEnabled = state.hapticsEnabled,
                         enabled = state.transferDirUri != null,
                         modifier = Modifier.weight(1f),
@@ -1082,6 +1140,8 @@ fun SettingsOverlay(
                     stringResource(R.string.photo_frame_film_gallery),
                 PhotoFramePreset.FILM_EDGE to
                     stringResource(R.string.photo_frame_film_edge),
+                PhotoFramePreset.PARAMETER_POSTER to
+                    stringResource(R.string.photo_frame_parameter_poster),
             )
             val selectedFrameChoice = frameChoices.first { it.first == state.photoFramePreset }
             val visibleWatermark = if (state.photoFrameEnabled) {
@@ -1102,7 +1162,9 @@ fun SettingsOverlay(
             } else {
                 stringResource(R.string.photo_frame_no_watermark)
             }
-            val filterSummaryLines = selectedPhotoFilter
+            val filterSummaryLines = state.photoLut?.let {
+                listOf(it.preset.name, stringResource(R.string.photo_filter_intensity_summary, it.normalizedIntensityPercent))
+            } ?: selectedPhotoFilter
                 ?.takeIf { state.photoFilterEnabled }
                 ?.let {
                     listOf(
@@ -1128,9 +1190,9 @@ fun SettingsOverlay(
                     ?: state.photoFilters.firstOrNull()?.id
                 filterDraftIntensity = state.photoFilterIntensityPercent
                 filterDraftEnabled = state.photoFilterEnabled
+                photoLutDraft.reset(state.photoLut, photoLutDraft.store.uri("transfer"))
                 frameDraftDecorationEnabled = state.photoFrameEnabled
-                // 总开关关闭时 ViewModel 会保留上次的子配置。编辑草稿必须从当前实际
-                // 输出状态开始，避免用户只打开水印时把隐藏的旧边框一起恢复。
+                // 编辑草稿使用各子项的配置，不受照片效果总开关影响。
                 frameDraftBorderEnabled = state.photoFrameEnabled && state.photoFrameBorderEnabled
                 frameDraftPreset = state.photoFramePreset
                 watermarkDraft = state.photoFrameWatermark.copy(
@@ -1142,7 +1204,7 @@ fun SettingsOverlay(
             }
             SettingsCard(
                 borderColor = colors.accentOrange.copy(
-                    alpha = if (state.photoFilterEnabled || state.photoFrameEnabled) 0.56f
+                    alpha = if (state.photoEffectsEnabled && (state.photoFilterEnabled || state.photoLut != null || state.photoFrameEnabled)) 0.56f
                     else 0.30f
                 ),
                 pressAccentColor = colors.accentOrange,
@@ -1154,6 +1216,14 @@ fun SettingsOverlay(
                         color = colors.accentOrange,
                         modifier = Modifier.weight(1f),
                     )
+                    PhotoEffectsMasterSwitch(
+                        checked = state.photoEffectsEnabled,
+                        onCheckedChange = { enabled ->
+                            haptics.tick()
+                            viewModel.setPhotoEffectsEnabled(enabled)
+                        },
+                    )
+                    Spacer(Modifier.width(8.dp))
                     Icon(
                         Icons.Default.ChevronRight,
                         contentDescription = stringResource(R.string.photo_effects_open_editor),
@@ -1169,9 +1239,11 @@ fun SettingsOverlay(
                         .height(IntrinsicSize.Min),
                 ) {
                     PhotoEffectSummaryItem(
-                        label = stringResource(R.string.photo_filter),
+                        label = if (state.photoLut != null) "LUT" else stringResource(R.string.photo_filter),
                         valueLines = filterSummaryLines,
-                        accentColor = colors.accentOrange,
+                        accentColor = if (state.photoLut != null)
+                            androidx.compose.ui.graphics.lerp(colors.statusConnected, colors.accentBlue, .35f)
+                        else colors.accentBlue,
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxHeight(),
@@ -1390,6 +1462,7 @@ fun SettingsOverlay(
         val previewImage = remember(preview.bitmap) { preview.bitmap.asImageBitmap() }
         SinglePhotoPreviewOverlay(
             bitmap = previewImage,
+            comparisonBitmap = preview.comparison()?.let { remember(it) { it.asImageBitmap() } },
             title = stringResource(R.string.photo_effects),
             anchorRect = preview.anchorRect,
             onDismiss = { expandedEffectsPreview = null },
@@ -1397,9 +1470,10 @@ fun SettingsOverlay(
     }
 }
 
-private data class ExpandedEffectsPreview(
+internal data class ExpandedEffectsPreview(
     val bitmap: Bitmap,
     val anchorRect: Rect,
+    val comparison: () -> Bitmap?,
 )
 
 @Composable
@@ -1415,21 +1489,17 @@ internal fun PhotoEffectsInfoBubble(
     val panelTop = anchorBounds?.let {
         with(density) { it.bottom.toDp() } - parentTopInset + 8.dp
     } ?: 64.dp
-    val guidance = listOf(gestureHint, stringResource(R.string.photo_effects_wheel_hint))
+    val wheelHint = stringResource(R.string.photo_effects_wheel_hint)
+    val lutHint = stringResource(R.string.photo_lut_help)
+    val items = listOf(description) + extraHints + listOf(gestureHint, wheelHint, lutHint)
+    val visibleItems = items
         .filter { it.isNotBlank() }
-        .joinToString("\n")
-    val items = buildList {
-        if (description.isNotBlank()) add(TipBubbleItem(text = description))
-        extraHints.filter { it.isNotBlank() }.forEach { add(TipBubbleItem(text = it)) }
-        if (guidance.isNotBlank()) {
-            add(TipBubbleItem(text = guidance, emphasized = true))
-        }
-    }
+        .map { TipBubbleItem(text = it) }
     AnchorPopup(
         anchorBounds = anchorBounds,
         onDismiss = onDismiss,
         panelModifier = Modifier
-            .padding(start = 18.dp, end = 18.dp, top = panelTop)
+            .padding(start = 18.dp, end = 18.dp, top = panelTop, bottom = 18.dp)
             .widthIn(min = 260.dp, max = 420.dp),
         panelAlignment = Alignment.TopEnd,
         shape = RoundedCornerShape(18.dp),
@@ -1437,7 +1507,9 @@ internal fun PhotoEffectsInfoBubble(
     ) { _ ->
         TipBubbleContent(
             title = stringResource(R.string.photo_effects_info_title),
-            items = items,
+            items = visibleItems,
+            bulleted = true,
+            modifier = Modifier.verticalScroll(rememberScrollState()),
         )
     }
 }
@@ -1518,6 +1590,7 @@ private fun PhotoEffectSummaryItem(
                 style = MaterialTheme.typography.bodySmall,
                 color = colors.onSurfaceVariant,
                 maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }
@@ -1596,7 +1669,7 @@ internal fun PhotoFilterEditor(
                 label = stringResource(R.string.photo_filter),
                 wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
                 accentColor = filterAccent,
-                modifier = Modifier.weight(PHOTO_EFFECTS_PRIMARY_WHEEL_WEIGHT),
+                modifier = Modifier.weight(PHOTO_COLOR_NAME_WEIGHT),
                 onLongClick = { showFullChooser = true },
             )
             ReleaseCommitWheel(
@@ -1613,7 +1686,7 @@ internal fun PhotoFilterEditor(
                 enabled = enabled && selected != null,
                 wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
                 accentColor = filterAccent,
-                modifier = Modifier.weight(PHOTO_EFFECTS_SECONDARY_WHEEL_WEIGHT),
+                modifier = Modifier.weight(PHOTO_COLOR_INTENSITY_WEIGHT),
             )
             FavoriteToggleButton(
                 favorite = selected?.let { preset ->
@@ -1637,101 +1710,74 @@ internal fun PhotoFilterEditor(
         val chooserFilters = filters.orderForCategory(category, favoriteKeys) {
             BuiltInPhotoFilters.catalogKey(it.id) ?: it.id
         }
-        val dialogMaxHeight = (LocalConfiguration.current.screenHeightDp - 160)
-            .coerceIn(360, 440)
-            .dp
-        Dialog(
-            onDismissRequest = { showFullChooser = false },
-            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
-        ) {
+        val dialogMaxHeight = (LocalConfiguration.current.screenHeightDp - 120).coerceIn(120, 440).dp
+        Dialog(onDismissRequest = { showFullChooser = false },
+            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
             Surface(
-                modifier = Modifier.padding(horizontal = 24.dp).width(280.dp),
+                modifier = Modifier.padding(horizontal = 24.dp).width(320.dp),
                 shape = RoundedCornerShape(18.dp),
-                color = colors.glassSurface.copy(alpha = 0.92f),
+                color = colors.glassSurface.copy(alpha = .92f),
                 border = BorderStroke(1.dp, colors.glassPanelBorder),
                 shadowElevation = 6.dp,
             ) {
-                CompositionLocalProvider(LocalMinimumInteractiveComponentEnforcement provides false) {
-                    Row(
-                        Modifier.padding(10.dp).heightIn(max = dialogMaxHeight).fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Column(
-                            modifier = Modifier.width(84.dp).verticalScroll(rememberScrollState()),
-                            verticalArrangement = Arrangement.spacedBy(2.dp),
-                        ) {
-                            PhotoFilterCategory.entries.forEach { item ->
-                                val selectedCategory = item == category
-                                Surface(
-                                    onClick = { chooserCategory = item.name },
+                Column(Modifier.padding(10.dp).heightIn(max = dialogMaxHeight)) {
+                    LutChooserHeader(off = !enabled,
+                        offLabel = stringResource(R.string.photo_filter_turn_off),
+                        onOff = { haptics.tick(); onDisabled(); showFullChooser = false })
+                    Row(Modifier.weight(1f, fill = false).fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        androidx.compose.foundation.lazy.LazyColumn(Modifier.weight(.36f),
+                            verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            items(PhotoFilterCategory.entries.size) { index ->
+                                val item = PhotoFilterCategory.entries[index]
+                                Surface(onClick = { chooserCategory = item.name },
                                     shape = RoundedCornerShape(8.dp),
-                                    color = if (selectedCategory) filterAccent.copy(alpha = 0.18f)
-                                    else Color.Transparent,
-                                    modifier = Modifier.fillMaxWidth().heightIn(min = 40.dp),
-                                ) {
-                                    Box(contentAlignment = Alignment.CenterStart) {
-                                        Text(
-                                            text = item.title,
-                                            color = if (selectedCategory) filterAccent
-                                            else colors.onSurfaceVariant,
-                                            fontWeight = if (selectedCategory) FontWeight.SemiBold
-                                            else FontWeight.Normal,
-                                            style = MaterialTheme.typography.labelLarge,
-                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                                        )
-                                    }
+                                    color = if (item == category) filterAccent.copy(alpha = .14f) else Color.Transparent,
+                                    modifier = Modifier.fillMaxWidth()) {
+                                    Text(item.title, style = MaterialTheme.typography.labelLarge,
+                                        color = if (item == category) filterAccent else colors.onSurfaceVariant,
+                                        maxLines = 2, overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 10.dp))
                                 }
                             }
                         }
-                        Column(
-                            modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            chooserFilters.forEach { preset ->
-                                val isSelected = enabled && preset.id == selectedId
-                                val isFavorite = favoriteKeys.contains(
-                                    BuiltInPhotoFilters.catalogKey(preset.id)
-                                )
-                                Surface(
-                                    onClick = {
+                        key(category) {
+                            val scroll = androidx.compose.foundation.lazy.rememberLazyListState(
+                                initialFirstVisibleItemIndex = chooserFilters.indexOfFirst {
+                                    enabled && it.id == selectedId
+                                }.coerceAtLeast(0))
+                            androidx.compose.foundation.lazy.LazyColumn(Modifier.weight(.64f), state = scroll,
+                                verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                items(chooserFilters.size, key = { chooserFilters[it].id }) { index ->
+                                    val preset = chooserFilters[index]
+                                    val isSelected = enabled && preset.id == selectedId
+                                    val isFavorite = BuiltInPhotoFilters.catalogKey(preset.id) in favoriteKeys
+                                    Surface(onClick = {
+                                        haptics.tick()
                                         onSelected(preset.id)
                                         onIntensityChanged(preset.id, rememberedIntensity(preset.id))
                                         showFullChooser = false
-                                    },
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = if (isSelected) filterAccent.copy(alpha = 0.14f)
-                                    else Color.Transparent,
-                                    modifier = Modifier.fillMaxWidth().heightIn(min = 40.dp),
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        if (isFavorite) {
-                                            Icon(
-                                                Icons.Rounded.Star,
-                                                contentDescription = null,
-                                                tint = colors.accentYellow,
-                                                modifier = Modifier.size(18.dp),
-                                            )
-                                            Spacer(Modifier.width(8.dp))
-                                        }
-                                        Text(
-                                            text = photoFilterDisplayName(preset),
-                                            color = colors.onBackground,
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            modifier = Modifier.weight(1f),
-                                        )
+                                    }, shape = RoundedCornerShape(8.dp),
+                                        color = if (isSelected) filterAccent.copy(alpha = .18f) else Color.Transparent,
+                                        modifier = Modifier.fillMaxWidth()) {
+                                        Text(photoFilterDisplayName(preset),
+                                            color = when {
+                                                isFavorite -> colors.accentYellow
+                                                isSelected -> filterAccent
+                                                else -> colors.onBackground
+                                            }, style = MaterialTheme.typography.labelLarge,
+                                            maxLines = 2, overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp))
                                     }
                                 }
                             }
                         }
                     }
                 }
-                }
             }
         }
     }
+}
 
 internal fun nextPhotoFilterSelections(
     filters: List<PhotoFilterPreset>,
@@ -1801,7 +1847,7 @@ internal fun photoEffectFavoriteButtonPalette(
 }
 
 @Composable
-private fun FavoriteToggleButton(
+internal fun FavoriteToggleButton(
     favorite: Boolean,
     enabled: Boolean,
     onClick: () -> Unit,
@@ -1911,6 +1957,8 @@ private fun photoFilterDisplayName(filter: PhotoFilterPreset): String =
 
 @Composable
 internal fun PhotoFrameWatermarkEditor(
+    showFrame: Boolean = true,
+    showWatermark: Boolean = true,
     favoriteEffects: List<FavoriteFrameWatermarkEffect>,
     borderEnabled: Boolean,
     preset: PhotoFramePreset,
@@ -1933,6 +1981,8 @@ internal fun PhotoFrameWatermarkEditor(
     onFavoriteImageMissing: () -> Unit,
     onProRequired: () -> Unit,
     onImageRequested: () -> Unit,
+    debugBrandLabel: String? = null,
+    onCycleDebugBrand: (() -> Unit)? = null,
 ) {
     val colors = AppTheme.colors
     val frameAccent = colors.accentOrange
@@ -1958,6 +2008,7 @@ internal fun PhotoFrameWatermarkEditor(
         PhotoFramePreset.COLOR_ARCHIVE to stringResource(R.string.photo_frame_color_archive),
         PhotoFramePreset.FILM_GALLERY to stringResource(R.string.photo_frame_film_gallery),
         PhotoFramePreset.FILM_EDGE to stringResource(R.string.photo_frame_film_edge),
+        PhotoFramePreset.PARAMETER_POSTER to stringResource(R.string.photo_frame_parameter_poster),
     )
     val frameLabels = frameChoicesInCatalogOrder.toMap()
     val favoriteByPreset = favoriteEffects.associateBy { it.framePreset }
@@ -2051,424 +2102,458 @@ internal fun PhotoFrameWatermarkEditor(
         }
     }
 
-    SettingsCard(
-        borderColor = frameAccent.copy(alpha = 0.24f),
-        tintColor = frameAccent,
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+    PhotoColorEffectGroup(showFrame || showWatermark, spacing = 0.dp) {
+        SettingsCard(
+            borderColor = frameAccent.copy(alpha = 0.24f),
+            tintColor = frameAccent,
         ) {
-            ReleaseCommitWheel(
-                options = frameOptionPresets,
-                selected = preset.takeIf { borderEnabled },
-                optionLabel = { framePreset ->
-                    if (framePreset == null) {
-                        frameOffLabel
-                    } else {
-                        checkNotNull(frameLabels[framePreset])
-                    }
-                },
-                favoriteOption = { framePreset ->
-                    framePreset != null && framePreset in favoriteByPreset
-                },
-                favoriteIconColor = favoritePalette.activeIcon,
-                onValueCommitted = { selectedPreset ->
-                    focusManager.clearFocus()
-                    if (selectedPreset == null) {
-                        onBorderEnabledChanged(false)
-                    } else {
-                        val favorite = favoriteByPreset[selectedPreset]
-                        val favoriteWatermark = favorite?.applyTo(
-                            current = watermark,
-                            contentSource = watermarkContentSource,
-                        )
-                        if (favorite != null && favoriteWatermark == null) {
-                            onFavoriteImageMissing()
-                            return@ReleaseCommitWheel
-                        }
-                        onPresetChanged(selectedPreset)
-                        favoriteWatermark?.let(onFavoriteWatermarkApplied)
-                        onBorderEnabledChanged(true)
-                    }
-                },
-                onDetent = haptics::tick,
-                label = stringResource(R.string.photo_frame_style_short),
-                wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
-                accentColor = frameAccent,
-                modifier = Modifier.weight(PHOTO_EFFECTS_PRIMARY_WHEEL_WEIGHT),
-            )
-            // Metadata controls describe the frame configuration, not the fields currently
-            // present in one EXIF payload. They therefore stay available while EXIF is loading.
-            val metadataLabel = stringResource(R.string.photo_frame_metadata_button)
-            ReleaseCommitWheel(
-                options = listOf(Unit),
-                selected = Unit,
-                optionLabel = { metadataLabel },
-                onValueCommitted = {},
-                onActivated = {
-                    haptics.tick()
-                    metadataSettingsExpanded = !metadataSettingsExpanded
-                },
-                enabled = borderEnabled,
-                wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
-                showDragHint = false,
-                accentColor = frameAccent,
-                emphasized = metadataSettingsExpanded,
-                modifier = Modifier.weight(PHOTO_EFFECTS_SECONDARY_WHEEL_WEIGHT),
-            )
-            FavoriteToggleButton(
-                favorite = borderEnabled && preset in favoriteByPreset,
-                enabled = borderEnabled,
-                onClick = {
-                    haptics.tick()
-                    onFavoriteToggled(preset, watermark)
-                },
-            )
-        }
-
-        AnimatedVisibility(
-            visible = borderEnabled && metadataSettingsExpanded,
-            enter = fadeIn() + expandVertically(),
-            exit = fadeOut() + shrinkVertically(),
-        ) {
-            PhotoFrameMetadataInlineSettings(
-                settings = metadataSettings,
-                showLocationFields = showLocationFields,
-                onSettingsChanged = onMetadataSettingsChanged,
-                onDetent = haptics::tick,
-                modifier = Modifier.padding(top = 8.dp),
-            )
-        }
-
-        Spacer(Modifier.height(8.dp))
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .background(watermarkAccent.copy(alpha = 0.055f))
-                .border(
-                    1.dp,
-                    watermarkAccent.copy(alpha = 0.18f),
-                    RoundedCornerShape(12.dp),
-                )
-                .padding(8.dp),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Box(modifier = Modifier.weight(1f)) {
+            PhotoColorEffectGroup(showFrame, spacing = 0.dp) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     ReleaseCommitWheel(
-                        options = watermarkEnabledChoices,
-                        selected = watermarkEnabledChoices.first { it.first == watermark.enabled },
-                        optionLabel = { it.second },
-                        onValueCommitted = {
+                        options = frameOptionPresets,
+                        selected = preset.takeIf { borderEnabled },
+                        optionLabel = { framePreset ->
+                            if (framePreset == null) {
+                                frameOffLabel
+                            } else {
+                                checkNotNull(frameLabels[framePreset])
+                            }
+                        },
+                        favoriteOption = { framePreset ->
+                            framePreset != null && framePreset in favoriteByPreset
+                        },
+                        favoriteIconColor = favoritePalette.activeIcon,
+                        onValueCommitted = { selectedPreset ->
                             focusManager.clearFocus()
-                            commitWatermarkChange(watermark.copy(enabled = it.first))
+                            if (selectedPreset == null) {
+                                onBorderEnabledChanged(false)
+                            } else {
+                                val favorite = favoriteByPreset[selectedPreset]
+                                val favoriteWatermark = favorite?.takeIf { showWatermark }?.applyTo(
+                                    current = watermark,
+                                    contentSource = watermarkContentSource,
+                                )
+                                if (showWatermark && favorite != null && favoriteWatermark == null) {
+                                    onFavoriteImageMissing()
+                                    return@ReleaseCommitWheel
+                                }
+                                onPresetChanged(selectedPreset)
+                                favoriteWatermark?.let(onFavoriteWatermarkApplied)
+                                onBorderEnabledChanged(true)
+                            }
                         },
                         onDetent = haptics::tick,
-                        label = stringResource(R.string.photo_frame_watermark_short),
-                        enabled = isPro,
+                        label = stringResource(R.string.photo_frame_style_short),
                         wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
-                        accentColor = watermarkAccent,
-                        modifier = Modifier.fillMaxWidth(),
+                        accentColor = frameAccent,
+                        modifier = Modifier.weight(PHOTO_EFFECTS_PRIMARY_WHEEL_WEIGHT),
                     )
-                    if (!isPro) {
-                        Box(
+                    // Metadata controls describe the frame configuration, not the fields currently
+                    // present in one EXIF payload. They therefore stay available while EXIF is loading.
+                    val metadataLabel = stringResource(R.string.photo_frame_metadata_button)
+                    ReleaseCommitWheel(
+                        options = listOf(Unit),
+                        selected = Unit,
+                        optionLabel = { metadataLabel },
+                        onValueCommitted = {},
+                        onActivated = {
+                            haptics.tick()
+                            metadataSettingsExpanded = !metadataSettingsExpanded
+                        },
+                        enabled = borderEnabled,
+                        wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
+                        showDragHint = false,
+                        accentColor = frameAccent,
+                        emphasized = metadataSettingsExpanded,
+                        modifier = Modifier.weight(PHOTO_EFFECTS_SECONDARY_WHEEL_WEIGHT),
+                    )
+                    FavoriteToggleButton(
+                        favorite = borderEnabled && preset in favoriteByPreset,
+                        enabled = borderEnabled,
+                        onClick = {
+                            haptics.tick()
+                            onFavoriteToggled(preset, watermark)
+                        },
+                    )
+                }
+
+                PhotoColorEffectGroup(
+                    visible = borderEnabled && metadataSettingsExpanded,
+                    spacing = 0.dp,
+                ) {
+                    PhotoFrameMetadataInlineSettings(
+                        preset = preset,
+                        settings = metadataSettings,
+                        showLocationFields = showLocationFields,
+                        onSettingsChanged = onMetadataSettingsChanged,
+                        onDetent = haptics::tick,
+                        debugBrandLabel = debugBrandLabel,
+                        onCycleDebugBrand = onCycleDebugBrand,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
+
+            }
+            PhotoColorEffectGroup(showWatermark, spacing = 0.dp) {
+                PhotoColorEffectGroup(showFrame, spacing = 0.dp) {
+                    Spacer(Modifier.height(8.dp))
+                }
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(watermarkAccent.copy(alpha = 0.055f))
+                        .border(
+                            1.dp,
+                            watermarkAccent.copy(alpha = 0.18f),
+                            RoundedCornerShape(12.dp),
+                        )
+                        .padding(8.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Box(modifier = Modifier.weight(1f)) {
+                            ReleaseCommitWheel(
+                                options = watermarkEnabledChoices,
+                                selected = watermarkEnabledChoices.first { it.first == watermark.enabled },
+                                optionLabel = { it.second },
+                                onValueCommitted = {
+                                    focusManager.clearFocus()
+                                    commitWatermarkChange(watermark.copy(enabled = it.first))
+                                },
+                                onDetent = haptics::tick,
+                                label = stringResource(R.string.photo_frame_watermark_short),
+                                enabled = isPro,
+                                wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
+                                accentColor = watermarkAccent,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            if (!isPro) {
+                                Box(
+                                    modifier = Modifier
+                                        .matchParentSize()
+                                        .clip(RoundedCornerShape(13.dp))
+                                        .clickable(
+                                            interactionSource = proLockInteractionSource,
+                                            indication = null,
+                                            onClick = onProRequired,
+                                        ),
+                                )
+                            }
+                        }
+                        val watermarkSettingsLabel =
+                            stringResource(R.string.photo_frame_watermark_settings_button)
+                        ReleaseCommitWheel(
+                            options = listOf(Unit),
+                            selected = Unit,
+                            optionLabel = { watermarkSettingsLabel },
+                            onValueCommitted = {},
+                            onActivated = {
+                                haptics.tick()
+                                watermarkSettingsExpanded = !watermarkSettingsExpanded
+                            },
+                            enabled = watermark.enabled,
+                            wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
+                            showDragHint = false,
+                            accentColor = watermarkAccent,
+                            emphasized = watermarkSettingsExpanded,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+
+                    PhotoColorEffectGroup(
+                        visible = watermark.enabled && watermarkSettingsExpanded,
+                        spacing = 0.dp,
+                    ) {
+                        Column(
                             modifier = Modifier
-                                .matchParentSize()
-                                .clip(RoundedCornerShape(13.dp))
                                 .clickable(
+                                    enabled = !isPro,
                                     interactionSource = proLockInteractionSource,
                                     indication = null,
                                     onClick = onProRequired,
-                                ),
-                        )
-                    }
-                }
-                val watermarkSettingsLabel =
-                    stringResource(R.string.photo_frame_watermark_settings_button)
-                ReleaseCommitWheel(
-                    options = listOf(Unit),
-                    selected = Unit,
-                    optionLabel = { watermarkSettingsLabel },
-                    onValueCommitted = {},
-                    onActivated = {
-                        haptics.tick()
-                        watermarkSettingsExpanded = !watermarkSettingsExpanded
-                    },
-                    enabled = watermark.enabled,
-                    wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
-                    showDragHint = false,
-                    accentColor = watermarkAccent,
-                    emphasized = watermarkSettingsExpanded,
-                    modifier = Modifier.weight(1f),
-                )
-            }
-
-            AnimatedVisibility(
-                visible = watermark.enabled && watermarkSettingsExpanded,
-                enter = fadeIn() + expandVertically(),
-                exit = fadeOut() + shrinkVertically(),
-            ) {
-                Column(
-                    modifier = Modifier
-                        .clickable(
-                            enabled = !isPro,
-                            interactionSource = proLockInteractionSource,
-                            indication = null,
-                            onClick = onProRequired,
-                        )
-                        .padding(top = 10.dp),
-                ) {
-                BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-                    val contentWheelWidth = (maxWidth - 8.dp) / 3f
-                    val editorWidth = maxWidth - contentWheelWidth - 8.dp
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.Bottom,
-                    ) {
-                        ReleaseCommitWheel(
-                            options = contentChoices,
-                            selected = contentChoices.first { it.first == watermark.content },
-                            optionLabel = { it.second },
-                            onValueCommitted = { choice ->
-                                focusManager.clearFocus()
-                                when (choice.first) {
-                                    PhotoFrameWatermarkContent.TEXT -> commitWatermarkChange(
-                                        watermark.copy(content = PhotoFrameWatermarkContent.TEXT)
-                                    )
-                                    PhotoFrameWatermarkContent.IMAGE -> {
-                                        if (watermark.imageHash == null) {
-                                            onImageRequested()
-                                        } else {
-                                            commitWatermarkChange(
-                                                watermark.copy(
-                                                    content = PhotoFrameWatermarkContent.IMAGE,
+                                )
+                                .padding(top = 10.dp),
+                        ) {
+                            BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                                val contentWheelWidth = (maxWidth - 8.dp) / 3f
+                                val editorWidth = maxWidth - contentWheelWidth - 8.dp
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    ReleaseCommitWheel(
+                                        options = contentChoices,
+                                        selected = contentChoices.first { it.first == watermark.content },
+                                        optionLabel = { it.second },
+                                        onValueCommitted = { choice ->
+                                            focusManager.clearFocus()
+                                            when (choice.first) {
+                                                PhotoFrameWatermarkContent.TEXT -> commitWatermarkChange(
+                                                    watermark.copy(content = PhotoFrameWatermarkContent.TEXT)
                                                 )
+                                                PhotoFrameWatermarkContent.IMAGE -> {
+                                                    if (watermark.imageHash == null) {
+                                                        onImageRequested()
+                                                    } else {
+                                                        commitWatermarkChange(
+                                                            watermark.copy(
+                                                                content = PhotoFrameWatermarkContent.IMAGE,
+                                                            )
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        onDetent = haptics::tick,
+                                        label = stringResource(R.string.photo_frame_watermark_content),
+                                        enabled = isPro && !imageImporting,
+                                        wheelHeight = 34.dp,
+                                        cornerRadius = 10.dp,
+                                        optionFontSize = 12.sp,
+                                        optionFontWeight = FontWeight.Medium,
+                                        accentColor = watermarkAccent,
+                                        modifier = Modifier.width(contentWheelWidth),
+                                    )
+                                    if (watermark.content == PhotoFrameWatermarkContent.TEXT) {
+                                        WatermarkTextField(
+                                            value = watermark.text,
+                                            enabled = isPro,
+                                            onValueChange = { value ->
+                                                onWatermarkChanged(
+                                                    watermark.copy(
+                                                        text = limitPhotoFrameWatermarkText(value)
+                                                    )
+                                                )
+                                            },
+                                            onEditingFinished = onWatermarkTextCommitted,
+                                            modifier = Modifier.width(editorWidth),
+                                        )
+                                    } else {
+                                        val replaceLabel = stringResource(R.string.photo_frame_replace_image)
+                                        ReleaseCommitWheel(
+                                            options = listOf(replaceLabel),
+                                            selected = replaceLabel,
+                                            optionLabel = { it },
+                                            onValueCommitted = {},
+                                            onActivated = onImageRequested,
+                                            enabled = isPro && !imageImporting,
+                                            wheelHeight = 34.dp,
+                                            cornerRadius = 10.dp,
+                                            optionFontSize = 12.sp,
+                                            optionFontWeight = FontWeight.Medium,
+                                            showDragHint = false,
+                                            accentColor = watermarkAccent,
+                                            centerIcon = if (imageImporting) {
+                                                { tint -> CircularProgressIndicator(
+                                                        color = tint, strokeWidth = 1.5.dp,
+                                                        modifier = Modifier.size(12.dp),
+                                                    ) }
+                                            } else null,
+                                            modifier = Modifier.width(editorWidth),
+                                        )
+                                    }
+                                }
+                            }
+                            Spacer(Modifier.height(10.dp))
+                            BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                                val availableWidth = maxWidth - 16.dp
+                                val nameWheelWidth = availableWidth * 0.42f
+                                val valueWheelWidth = availableWidth * 0.29f
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    if (watermark.content == PhotoFrameWatermarkContent.TEXT) {
+                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            ReleaseCommitWheel(
+                                                options = fontChoices,
+                                                selected = fontChoices.first { it.first == watermark.font },
+                                                optionLabel = { it.second },
+                                                onValueCommitted = {
+                                                    focusManager.clearFocus()
+                                                    commitWatermarkChange(watermark.copy(font = it.first))
+                                                },
+                                                onDetent = haptics::tick,
+                                                label = stringResource(R.string.photo_frame_watermark_font),
+                                                enabled = isPro,
+                                                wheelHeight = 34.dp,
+                                                cornerRadius = 10.dp,
+                                                optionFontSize = 12.sp,
+                                                optionFontWeight = FontWeight.Medium,
+                                                accentColor = watermarkAccent,
+                                                modifier = Modifier.width(nameWheelWidth),
+                                            )
+                                            ReleaseCommitWheel(
+                                                options = sizeChoices,
+                                                selected = sizeChoices.first { it.first == watermark.sizePercent },
+                                                optionLabel = { it.second },
+                                                onValueCommitted = {
+                                                    focusManager.clearFocus()
+                                                    commitWatermarkChange(watermark.copy(sizePercent = it.first))
+                                                },
+                                                onDetent = haptics::tick,
+                                                label = stringResource(R.string.photo_frame_watermark_size),
+                                                enabled = isPro,
+                                                wheelHeight = 34.dp,
+                                                cornerRadius = 10.dp,
+                                                optionFontSize = 12.sp,
+                                                optionFontWeight = FontWeight.Medium,
+                                                accentColor = watermarkAccent,
+                                                modifier = Modifier.width(valueWheelWidth),
+                                            )
+                                            ReleaseCommitWheel(
+                                                options = opacityChoices,
+                                                selected = opacityChoices.first {
+                                                    it.first == watermark.opacityPercent
+                                                },
+                                                optionLabel = { it.second },
+                                                onValueCommitted = {
+                                                    focusManager.clearFocus()
+                                                    commitWatermarkChange(
+                                                        watermark.copy(opacityPercent = it.first)
+                                                    )
+                                                },
+                                                onDetent = haptics::tick,
+                                                label = stringResource(R.string.photo_frame_watermark_opacity),
+                                                enabled = isPro,
+                                                wheelHeight = 34.dp,
+                                                cornerRadius = 10.dp,
+                                                optionFontSize = 12.sp,
+                                                optionFontWeight = FontWeight.Medium,
+                                                accentColor = watermarkAccent,
+                                                modifier = Modifier.width(valueWheelWidth),
+                                            )
+                                        }
+                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            ReleaseCommitWheel(
+                                                options = textPositionChoices,
+                                                selected = textPositionChoices.firstOrNull {
+                                                    it.first == watermark.position
+                                                } ?: photoPositionChoices.last(),
+                                                optionLabel = { it.second },
+                                                onValueCommitted = {
+                                                    focusManager.clearFocus()
+                                                    commitWatermarkPosition(it.first)
+                                                },
+                                                onDetent = haptics::tick,
+                                                label = stringResource(R.string.photo_frame_watermark_position),
+                                                enabled = isPro,
+                                                wheelHeight = 34.dp,
+                                                cornerRadius = 10.dp,
+                                                optionFontSize = 12.sp,
+                                                optionFontWeight = FontWeight.Medium,
+                                                accentColor = watermarkAccent,
+                                                modifier = Modifier.width(nameWheelWidth),
+                                            )
+                                            ReleaseCommitWheel(
+                                                options = colorChoices,
+                                                selected = colorChoices.first { it.first == watermark.color },
+                                                optionLabel = { it.second },
+                                                onValueCommitted = {
+                                                    focusManager.clearFocus()
+                                                    commitWatermarkChange(watermark.copy(color = it.first))
+                                                },
+                                                onDetent = haptics::tick,
+                                                label = stringResource(R.string.photo_frame_watermark_color),
+                                                enabled = isPro,
+                                                wheelHeight = 34.dp,
+                                                cornerRadius = 10.dp,
+                                                optionFontSize = 12.sp,
+                                                optionFontWeight = FontWeight.Medium,
+                                                accentColor = watermarkAccent,
+                                                modifier = Modifier.width(valueWheelWidth),
+                                            )
+                                            ReleaseCommitWheel(
+                                                options = effectChoices,
+                                                selected = effectChoices.first { it.first == watermark.effect },
+                                                optionLabel = { it.second },
+                                                onValueCommitted = {
+                                                    focusManager.clearFocus()
+                                                    commitWatermarkChange(watermark.copy(effect = it.first))
+                                                },
+                                                onDetent = haptics::tick,
+                                                label = stringResource(R.string.photo_frame_watermark_effect),
+                                                enabled = isPro,
+                                                wheelHeight = 34.dp,
+                                                cornerRadius = 10.dp,
+                                                optionFontSize = 12.sp,
+                                                optionFontWeight = FontWeight.Medium,
+                                                accentColor = watermarkAccent,
+                                                modifier = Modifier.width(valueWheelWidth),
+                                            )
+                                        }
+                                    } else {
+                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            ReleaseCommitWheel(
+                                                options = sizeChoices,
+                                                selected = sizeChoices.first {
+                                                    it.first == watermark.sizePercent
+                                                },
+                                                optionLabel = { it.second },
+                                                onValueCommitted = {
+                                                    commitWatermarkChange(
+                                                        watermark.copy(sizePercent = it.first)
+                                                    )
+                                                },
+                                                onDetent = haptics::tick,
+                                                label = stringResource(R.string.photo_frame_watermark_size),
+                                                enabled = isPro,
+                                                wheelHeight = 34.dp,
+                                                cornerRadius = 10.dp,
+                                                optionFontSize = 12.sp,
+                                                optionFontWeight = FontWeight.Medium,
+                                                accentColor = watermarkAccent,
+                                                modifier = Modifier.width(valueWheelWidth),
+                                            )
+                                            ReleaseCommitWheel(
+                                                options = opacityChoices,
+                                                selected = opacityChoices.first {
+                                                    it.first == watermark.opacityPercent
+                                                },
+                                                optionLabel = { it.second },
+                                                onValueCommitted = {
+                                                    commitWatermarkChange(
+                                                        watermark.copy(opacityPercent = it.first)
+                                                    )
+                                                },
+                                                onDetent = haptics::tick,
+                                                label = stringResource(R.string.photo_frame_watermark_opacity),
+                                                enabled = isPro,
+                                                wheelHeight = 34.dp,
+                                                cornerRadius = 10.dp,
+                                                optionFontSize = 12.sp,
+                                                optionFontWeight = FontWeight.Medium,
+                                                accentColor = watermarkAccent,
+                                                modifier = Modifier.width(valueWheelWidth),
+                                            )
+                                            ReleaseCommitWheel(
+                                                options = photoPositionChoices,
+                                                selected = photoPositionChoices.first {
+                                                    it.first == watermark.position
+                                                },
+                                                optionLabel = { it.second },
+                                                onValueCommitted = {
+                                                    commitWatermarkPosition(it.first)
+                                                },
+                                                onDetent = haptics::tick,
+                                                label = stringResource(R.string.photo_frame_watermark_position),
+                                                enabled = isPro,
+                                                wheelHeight = 34.dp,
+                                                cornerRadius = 10.dp,
+                                                optionFontSize = 12.sp,
+                                                optionFontWeight = FontWeight.Medium,
+                                                accentColor = watermarkAccent,
+                                                modifier = Modifier.width(nameWheelWidth),
                                             )
                                         }
                                     }
                                 }
-                            },
-                            onDetent = haptics::tick,
-                            label = stringResource(R.string.photo_frame_watermark_content),
-                            enabled = isPro && !imageImporting,
-                            wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
-                            accentColor = watermarkAccent,
-                            modifier = Modifier.width(contentWheelWidth),
-                        )
-                        if (watermark.content == PhotoFrameWatermarkContent.TEXT) {
-                            WatermarkTextField(
-                                value = watermark.text,
-                                enabled = isPro,
-                                onValueChange = { value ->
-                                    onWatermarkChanged(
-                                        watermark.copy(
-                                            text = limitPhotoFrameWatermarkText(value)
-                                        )
-                                    )
-                                },
-                                onEditingFinished = onWatermarkTextCommitted,
-                                modifier = Modifier.width(editorWidth),
-                            )
-                        } else {
-                            GlassButton(
-                                onClick = onImageRequested,
-                                enabled = isPro && !imageImporting,
-                                shape = RoundedCornerShape(13.dp),
-                                modifier = Modifier
-                                    .width(editorWidth)
-                                    .height(PHOTO_EFFECTS_CONTROL_HEIGHT),
-                            ) {
-                                if (imageImporting) {
-                                    CircularProgressIndicator(
-                                        color = watermarkAccent,
-                                        strokeWidth = 2.dp,
-                                        modifier = Modifier.size(18.dp),
-                                    )
-                                } else {
-                                    Icon(
-                                        Icons.Default.Image,
-                                        contentDescription = null,
-                                        tint = watermarkAccent,
-                                        modifier = Modifier.size(18.dp),
-                                    )
-                                    Spacer(Modifier.width(6.dp))
-                                    Text(
-                                        stringResource(R.string.photo_frame_replace_image),
-                                        style = MaterialTheme.typography.labelMedium,
-                                        color = colors.onBackground,
-                                    )
-                                }
                             }
                         }
                     }
-                }
-                Spacer(Modifier.height(10.dp))
-                BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-                    val wheelWidth = (maxWidth - 16.dp) / 3f
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        if (watermark.content == PhotoFrameWatermarkContent.TEXT) {
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            ReleaseCommitWheel(
-                                options = fontChoices,
-                                selected = fontChoices.first { it.first == watermark.font },
-                                optionLabel = { it.second },
-                                onValueCommitted = {
-                                    focusManager.clearFocus()
-                                    commitWatermarkChange(watermark.copy(font = it.first))
-                                },
-                                onDetent = haptics::tick,
-                                label = stringResource(R.string.photo_frame_watermark_font),
-                                enabled = isPro,
-                                wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
-                                accentColor = watermarkAccent,
-                                modifier = Modifier.width(wheelWidth),
-                            )
-                            ReleaseCommitWheel(
-                                options = sizeChoices,
-                                selected = sizeChoices.first { it.first == watermark.sizePercent },
-                                optionLabel = { it.second },
-                                onValueCommitted = {
-                                    focusManager.clearFocus()
-                                    commitWatermarkChange(watermark.copy(sizePercent = it.first))
-                                },
-                                onDetent = haptics::tick,
-                                label = stringResource(R.string.photo_frame_watermark_size),
-                                enabled = isPro,
-                                wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
-                                accentColor = watermarkAccent,
-                                modifier = Modifier.width(wheelWidth),
-                            )
-                            ReleaseCommitWheel(
-                                options = opacityChoices,
-                                selected = opacityChoices.first {
-                                    it.first == watermark.opacityPercent
-                                },
-                                optionLabel = { it.second },
-                                onValueCommitted = {
-                                    focusManager.clearFocus()
-                                    commitWatermarkChange(
-                                        watermark.copy(opacityPercent = it.first)
-                                    )
-                                },
-                                onDetent = haptics::tick,
-                                label = stringResource(R.string.photo_frame_watermark_opacity),
-                                enabled = isPro,
-                                wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
-                                accentColor = watermarkAccent,
-                                modifier = Modifier.width(wheelWidth),
-                            )
-                            }
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            ReleaseCommitWheel(
-                                options = textPositionChoices,
-                                selected = textPositionChoices.firstOrNull {
-                                    it.first == watermark.position
-                                } ?: photoPositionChoices.last(),
-                                optionLabel = { it.second },
-                                onValueCommitted = {
-                                    focusManager.clearFocus()
-                                    commitWatermarkPosition(it.first)
-                                },
-                                onDetent = haptics::tick,
-                                label = stringResource(R.string.photo_frame_watermark_position),
-                                enabled = isPro,
-                                wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
-                                accentColor = watermarkAccent,
-                                modifier = Modifier.width(wheelWidth),
-                            )
-                            ReleaseCommitWheel(
-                                options = colorChoices,
-                                selected = colorChoices.first { it.first == watermark.color },
-                                optionLabel = { it.second },
-                                onValueCommitted = {
-                                    focusManager.clearFocus()
-                                    commitWatermarkChange(watermark.copy(color = it.first))
-                                },
-                                onDetent = haptics::tick,
-                                label = stringResource(R.string.photo_frame_watermark_color),
-                                enabled = isPro,
-                                wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
-                                accentColor = watermarkAccent,
-                                modifier = Modifier.width(wheelWidth),
-                            )
-                            ReleaseCommitWheel(
-                                options = effectChoices,
-                                selected = effectChoices.first { it.first == watermark.effect },
-                                optionLabel = { it.second },
-                                onValueCommitted = {
-                                    focusManager.clearFocus()
-                                    commitWatermarkChange(watermark.copy(effect = it.first))
-                                },
-                                onDetent = haptics::tick,
-                                label = stringResource(R.string.photo_frame_watermark_effect),
-                                enabled = isPro,
-                                wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
-                                accentColor = watermarkAccent,
-                                modifier = Modifier.width(wheelWidth),
-                            )
-                            }
-                        } else {
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                ReleaseCommitWheel(
-                                    options = sizeChoices,
-                                    selected = sizeChoices.first {
-                                        it.first == watermark.sizePercent
-                                    },
-                                    optionLabel = { it.second },
-                                    onValueCommitted = {
-                                        commitWatermarkChange(
-                                            watermark.copy(sizePercent = it.first)
-                                        )
-                                    },
-                                    onDetent = haptics::tick,
-                                    label = stringResource(R.string.photo_frame_watermark_size),
-                                    enabled = isPro,
-                                    wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
-                                    accentColor = watermarkAccent,
-                                    modifier = Modifier.width(wheelWidth),
-                                )
-                                ReleaseCommitWheel(
-                                    options = opacityChoices,
-                                    selected = opacityChoices.first {
-                                        it.first == watermark.opacityPercent
-                                    },
-                                    optionLabel = { it.second },
-                                    onValueCommitted = {
-                                        commitWatermarkChange(
-                                            watermark.copy(opacityPercent = it.first)
-                                        )
-                                    },
-                                    onDetent = haptics::tick,
-                                    label = stringResource(R.string.photo_frame_watermark_opacity),
-                                    enabled = isPro,
-                                    wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
-                                    accentColor = watermarkAccent,
-                                    modifier = Modifier.width(wheelWidth),
-                                )
-                                ReleaseCommitWheel(
-                                    options = photoPositionChoices,
-                                    selected = photoPositionChoices.first {
-                                        it.first == watermark.position
-                                    },
-                                    optionLabel = { it.second },
-                                    onValueCommitted = {
-                                        commitWatermarkPosition(it.first)
-                                    },
-                                    onDetent = haptics::tick,
-                                    label = stringResource(R.string.photo_frame_watermark_position),
-                                    enabled = isPro,
-                                    wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
-                                    accentColor = watermarkAccent,
-                                    modifier = Modifier.width(wheelWidth),
-                                )
-                            }
-                        }
-                    }
-                }
                 }
             }
         }
@@ -2478,11 +2563,14 @@ internal fun PhotoFrameWatermarkEditor(
 @Composable
 @OptIn(ExperimentalFoundationApi::class)
 private fun PhotoFrameMetadataInlineSettings(
+    preset: PhotoFramePreset,
     settings: PhotoFrameMetadataSettings,
     showLocationFields: Boolean,
     onSettingsChanged: (PhotoFrameMetadataSettings) -> Unit,
     onDetent: () -> Unit,
     modifier: Modifier = Modifier,
+    debugBrandLabel: String? = null,
+    onCycleDebugBrand: (() -> Unit)? = null,
 ) {
     val colors = AppTheme.colors
     val datePatterns = PHOTO_FRAME_DATE_PATTERNS
@@ -2504,29 +2592,92 @@ private fun PhotoFrameMetadataInlineSettings(
             .padding(8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        PhotoColorEffectGroup(
+            visible = preset != PhotoFramePreset.IMMERSIVE,
+            spacing = 0.dp,
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                ReleaseCommitWheel(
+                    options = remember { (MIN_PHOTO_FRAME_WIDTH_PERCENT..MAX_PHOTO_FRAME_WIDTH_PERCENT step PHOTO_FRAME_WIDTH_STEP).toList() },
+                    selected = settings.widthPercent,
+                    optionLabel = { "$it%" },
+                    onValueCommitted = { onSettingsChanged(settings.copy(widthPercent = it)) },
+                    onDetent = onDetent,
+                    enabled = preset != PhotoFramePreset.IMMERSIVE,
+                    label = stringResource(R.string.photo_frame_width),
+                    wheelHeight = 34.dp,
+                    cornerRadius = 10.dp,
+                    optionFontSize = 12.sp,
+                    optionFontWeight = FontWeight.Medium,
+                    accentColor = colors.accentOrange,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                PhotoColorEffectGroup(
+                    visible = preset.supportsBackdropControls(),
+                    spacing = 0.dp,
+                ) {
+                    // Switching presets discards any unfinished gesture belonging to the old settings.
+                    key(preset) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            val levels = remember { (0..200 step 10).toList() }
+                            ReleaseCommitWheel(options = levels, selected = settings.backgroundBlurPercent,
+                                optionLabel = { "$it%" }, label = stringResource(R.string.photo_frame_background_blur),
+                                onValueCommitted = { onSettingsChanged(settings.copy(backgroundBlurPercent = it)) },
+                                onDetent = onDetent, enabled = preset.supportsBackdropControls(),
+                                wheelHeight = 34.dp, cornerRadius = 10.dp,
+                                optionFontSize = 12.sp, optionFontWeight = FontWeight.Medium,
+                                accentColor = colors.accentOrange, modifier = Modifier.weight(1f))
+                            ReleaseCommitWheel(options = levels, selected = settings.backgroundMaskPercent,
+                                optionLabel = { "$it%" }, label = stringResource(R.string.photo_frame_background_mask),
+                                onValueCommitted = { onSettingsChanged(settings.copy(backgroundMaskPercent = it)) },
+                                onDetent = onDetent, enabled = preset.supportsBackdropControls(),
+                                wheelHeight = 34.dp, cornerRadius = 10.dp,
+                                optionFontSize = 12.sp, optionFontWeight = FontWeight.Medium,
+                                accentColor = colors.accentOrange, modifier = Modifier.weight(1f))
+                        }
+                    }
+                }
+                Box(
+                    Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp)
+                        .height(1.dp).background(colors.glassPanelBorder)
+                )
+            }
+        }
+        if (com.ztransfer.BuildConfig.DEBUG && debugBrandLabel != null && onCycleDebugBrand != null) {
+            FilterChip(
+                label = debugBrandLabel,
+                selected = true,
+                onClick = { onDetent(); onCycleDebugBrand() },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
         val choices = listOfNotNull(
+            Triple(R.string.photo_frame_metadata_brand, settings.showBrand) {
+                settings.nextBrandStyle()
+            },
+            Triple(R.string.photo_frame_metadata_model, settings.showModel) {
+                settings.copy(showModel = !settings.showModel)
+            },
+            Triple(R.string.photo_frame_metadata_lens_model, settings.showLensModel) {
+                settings.copy(showLensModel = !settings.showLensModel)
+            },
             Triple(R.string.photo_frame_metadata_focal_length, settings.showFocalLength) {
                 settings.copy(showFocalLength = !settings.showFocalLength)
             },
             Triple(R.string.photo_frame_metadata_exposure, settings.showExposure) {
                 settings.copy(showExposure = !settings.showExposure)
             },
-            Triple(R.string.photo_frame_metadata_lens_model, settings.showLensModel) {
-                settings.copy(showLensModel = !settings.showLensModel)
-            },
-            Triple(R.string.photo_frame_metadata_brand, settings.showBrand) {
-                settings.copy(showBrand = !settings.showBrand)
-            },
-            Triple(R.string.photo_frame_metadata_model, settings.showModel) {
-                settings.copy(showModel = !settings.showModel)
-            },
-            // Address reverse-geocoding is reserved for a future offline/online policy.  It is
-            // intentionally not exposed in the border editor so AP and STA exports stay equal.
             Triple(R.string.photo_frame_metadata_coordinates, settings.showCoordinates) {
                 settings.copy(showCoordinates = !settings.showCoordinates)
             }.takeIf { showLocationFields },
             Triple(R.string.photo_frame_metadata_altitude, settings.showAltitude) {
                 settings.copy(showAltitude = !settings.showAltitude)
+            }.takeIf { showLocationFields },
+            Triple(R.string.photo_frame_metadata_city, settings.showCity) {
+                settings.copy(showCity = !settings.showCity)
+            }.takeIf { showLocationFields },
+            Triple(R.string.photo_frame_metadata_region, settings.showRegion) {
+                settings.copy(showRegion = !settings.showRegion)
             }.takeIf { showLocationFields },
         )
         choices.chunked(3).forEach { rowChoices ->
@@ -2535,16 +2686,18 @@ private fun PhotoFrameMetadataInlineSettings(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 rowChoices.forEach { (label, selected, update) ->
+                    val title = if (label == R.string.photo_frame_metadata_brand && selected) {
+                        stringResource(if (settings.brandStyle == PhotoFrameBrandStyle.LOGO) R.string.photo_frame_metadata_brand_logo else R.string.photo_frame_metadata_brand_text)
+                    } else stringResource(label)
                     FilterChip(
-                        label = stringResource(label),
+                        label = title,
                         selected = selected,
-                        onClick = {
-                            onDetent()
-                            onSettingsChanged(update())
-                        },
+                        onClick = { onDetent(); onSettingsChanged(update()) },
+                        accentColor = colors.accentOrange,
                         modifier = Modifier.weight(1f),
                     )
                 }
+                repeat(3 - rowChoices.size) { Spacer(Modifier.weight(1f)) }
             }
         }
 
@@ -2614,7 +2767,10 @@ private fun MetadataFormatWheel(
         },
         onDetent = onDetent,
         label = title,
-        wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
+        wheelHeight = 34.dp,
+        cornerRadius = 10.dp,
+        optionFontSize = 12.sp,
+        optionFontWeight = FontWeight.Medium,
         accentColor = accent,
         modifier = modifier,
     )
@@ -2675,11 +2831,14 @@ private fun WatermarkTextField(
     }
     val textStyle = MaterialTheme.typography.bodyMedium.copy(
         color = colors.onBackground.copy(alpha = contentAlpha),
+        fontSize = 12.sp,
+        lineHeight = 16.sp,
+        fontWeight = FontWeight.Medium,
         textAlign = TextAlign.Center,
     )
     val shape = RoundedCornerShape(10.dp)
     Box(
-        modifier = modifier.height(PHOTO_EFFECTS_CONTROL_HEIGHT),
+        modifier = modifier.height(34.dp),
         contentAlignment = Alignment.CenterStart,
     ) {
         BasicTextField(
@@ -2701,7 +2860,9 @@ private fun WatermarkTextField(
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
             keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
             interactionSource = interactionSource,
-            decorationBox = { innerField -> innerField() },
+            decorationBox = { innerField ->
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { innerField() }
+            },
             modifier = Modifier
                 .bringIntoViewRequester(bringIntoViewRequester)
                 .onFocusChanged { state ->
@@ -2722,7 +2883,7 @@ private fun WatermarkTextField(
                         onEditingFinished(committed)
                     }
                 }
-                .fillMaxWidth()
+                .fillMaxSize()
                 .clip(shape)
                 .background(colors.glassSurface.copy(alpha = colors.glassSurface.alpha * contentAlpha))
                 .border(
@@ -2731,7 +2892,7 @@ private fun WatermarkTextField(
                         else colors.glassPanelBorder.copy(alpha = contentAlpha),
                     shape = shape,
                 )
-                .padding(horizontal = 14.dp, vertical = 10.dp),
+                .padding(horizontal = 10.dp),
         )
     }
 }
@@ -2781,10 +2942,15 @@ internal fun PhotoEffectsRenderedPreview(
     watermark: PhotoFrameWatermark,
     filter: PhotoFilterSelection? = null,
     prefetchFilters: List<PhotoFilterSelection> = emptyList(),
-    onOpen: ((Bitmap, Rect) -> Unit)?,
+    onOpen: ((Bitmap, Rect, () -> Bitmap?) -> Unit)?,
 ) {
+    val longPressFeedback = com.ztransfer.ui.util.rememberLongPressFeedback()
     val colors = AppTheme.colors
     val context = LocalContext.current
+    val placeLookupAllowed by remember(context) {
+        com.ztransfer.frame.PhotoFrameLocationResolver.availability(context)
+    }.collectAsState(initial = false)
+
     // 相机缩略图升级为 FHD 时保留旧效果帧；本地工作台换照片则按源重置，避免串图。
     // 两种入口在首张效果帧完成前都不直接绘制原图。
     val sourceRenderIdentity: Any = if (resetOnSourceChange) source else Unit
@@ -2807,6 +2973,7 @@ internal fun PhotoEffectsRenderedPreview(
         borderEnabled,
         preset,
         metadataSettings,
+        placeLookupAllowed.takeIf { metadataSettings.showCity || metadataSettings.showRegion },
         previewPlaceholders,
         watermark,
     ) {
@@ -2833,6 +3000,7 @@ internal fun PhotoEffectsRenderedPreview(
         borderEnabled,
         preset,
         metadataSettings,
+        placeLookupAllowed.takeIf { metadataSettings.showCity || metadataSettings.showRegion },
         previewPlaceholders,
         watermark,
     ) { PhotoEffectsPreviewCache() }
@@ -2885,7 +3053,9 @@ internal fun PhotoEffectsRenderedPreview(
                 output = PhotoFrameExporter.renderPreview(
                     context = context,
                     source = input,
-                    metadata = metadata,
+                    metadata = if (borderEnabled) com.ztransfer.frame.PhotoFrameLocationResolver.resolve(
+                        context, metadata, metadataSettings,
+                    ) else metadata,
                     preset = preset,
                     watermark = watermark,
                     borderEnabled = borderEnabled,
@@ -3100,23 +3270,27 @@ internal fun PhotoEffectsRenderedPreview(
                 // 横图和竖图各用稳定视口；边框成片在内部 Fit，完整呈现对应方向的留白与铭牌。
                 .aspectRatio(viewportAspectRatio)
                 .onGloballyPositioned { previewBounds = it.boundsInRoot() }
-                .pointerInput(previewForGesture, boundsForGesture) {
+                .pointerInput(previewForGesture, boundsForGesture, longPressFeedback, onRotate != null) {
                     if (previewForGesture == null || boundsForGesture == null) return@pointerInput
                     detectTapGestures(
                         onPress = {
                             try {
-                                tryAwaitRelease()
+                                if (previewForGesture.unfilteredBitmap != null) longPressFeedback.trackPress(this)
+                                else tryAwaitRelease()
                             } finally {
                                 showUnfiltered = false
                             }
                         },
                         onTap = {
-                            latestOnOpen?.invoke(previewForGesture.bitmap, boundsForGesture)
+                            latestOnOpen?.invoke(previewForGesture.bitmap, boundsForGesture) {
+                                rendered.value?.takeIf { it.bitmap === previewForGesture.bitmap }
+                                    ?.unfilteredBitmap ?: previewForGesture.unfilteredBitmap
+                            }
                         },
-                        onDoubleTap = { latestOnRotate?.invoke() },
+                        onDoubleTap = if (onRotate != null) ({ latestOnRotate?.invoke() }) else null,
                         onLongPress = {
                             if (previewForGesture.unfilteredBitmap != null) {
-                                showUnfiltered = true
+                                longPressFeedback.trigger { showUnfiltered = true }
                             }
                         },
                     )
@@ -3205,8 +3379,10 @@ private fun PhotoEffectsPreviewLayer(
 
 private const val PHOTO_EFFECTS_PREVIEW_LANDSCAPE_ASPECT_RATIO = 4f / 3f
 private const val PHOTO_EFFECTS_PREVIEW_PORTRAIT_ASPECT_RATIO = 3f / 4f
-private val PHOTO_EFFECTS_CONTROL_HEIGHT = 50.dp
+internal val PHOTO_EFFECTS_CONTROL_HEIGHT = 50.dp
 // 顶部两行共用 4:3 栅格：名称类波轮更舒展，数值/开关波轮更紧凑，收藏方钮保持对齐。
+internal const val PHOTO_COLOR_NAME_WEIGHT = 3f
+internal const val PHOTO_COLOR_INTENSITY_WEIGHT = 2f
 private const val PHOTO_EFFECTS_PRIMARY_WHEEL_WEIGHT = 4f
 private const val PHOTO_EFFECTS_SECONDARY_WHEEL_WEIGHT = 3f
 // 与相机 FHD 预览源保持一致，避免高密度屏幕或放大查看时出现二次缩放模糊。
@@ -3445,6 +3621,28 @@ private fun BooleanSettingsWheel(
         modifier = modifier,
         enabled = enabled,
     )
+}
+
+@Composable
+private fun AutoTransferSettingsWheel(
+    mode: AutoTransferMode,
+    onModeChanged: (AutoTransferMode) -> Unit,
+    hapticsEnabled: Boolean,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val colors = AppTheme.colors
+    val haptics = rememberHaptics(hapticsEnabled)
+    val labels = mapOf(AutoTransferMode.OFF to stringResource(R.string.setting_off),
+        AutoTransferMode.ALL to stringResource(R.string.filter_all),
+        AutoTransferMode.JPG to "JPG", AutoTransferMode.RAW to "RAW",
+        AutoTransferMode.VIDEO to stringResource(R.string.auto_transfer_video))
+    ReleaseCommitWheel(options = AutoTransferMode.entries.toList(), selected = mode,
+        optionLabel = { labels.getValue(it) }, onValueCommitted = onModeChanged,
+        onDetent = haptics::tick, label = stringResource(R.string.auto_transfer_new_media),
+        accentColor = if (mode == AutoTransferMode.OFF) colors.statusWaiting else colors.accentBlue,
+        emphasized = mode != AutoTransferMode.OFF, wheelHeight = BOOLEAN_SETTINGS_WHEEL_HEIGHT,
+        optionRowHeight = 18.dp, optionFontSize = 14.sp, modifier = modifier, enabled = enabled)
 }
 
 private val BOOLEAN_SETTINGS_OPTIONS = listOf(false, true)
@@ -3775,12 +3973,9 @@ internal fun GpsConnectionControl(
     var placeBubbleCoordinates by remember { mutableStateOf<Pair<Double, Double>?>(null) }
     var placeBubbleRequestId by remember { mutableIntStateOf(0) }
     var expanded by rememberSaveable { mutableStateOf(false) }
-    val detailVisibility = remember { MutableTransitionState(false) }
-    detailVisibility.targetState = expanded
-    val detailLayoutActive = gpsAnimatedLayerActive(
-        currentState = detailVisibility.currentState,
-        targetState = detailVisibility.targetState,
-    )
+    val detailVisibility = rememberGenieVisibility(expanded)
+    val detailLayoutActive = detailVisibility.mounted.value
+    var detailAnchor by remember { mutableStateOf<Rect?>(null) }
     var hintText by remember { mutableStateOf<String?>(null) }
     val permissionHint = stringResource(R.string.gps_permission_required)
     val logCopiedHint = stringResource(R.string.code_copied)
@@ -3913,10 +4108,9 @@ internal fun GpsConnectionControl(
         val requestId = placeBubbleRequestId
         when (lookup.status) {
             GpsPlaceLookupStatus.SUCCESS -> {
-                val coordinateText = formatDecimalDegreeCoordinates(
+                val coordinateText = formatDegreesMinutesCoordinates(
                     requestedCoordinates.first,
                     requestedCoordinates.second,
-                    fractionDigits = 5,
                 )
                 clipboard.setText(
                     AnnotatedString(
@@ -3985,53 +4179,18 @@ internal fun GpsConnectionControl(
             showEmphasisBorder = false,
             ambientEffectColor = gpsEntryAccent,
             ambientEffectAlpha = gpsEntryAmbientAlpha,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().onGloballyPositioned { detailAnchor=it.boundsInRoot() },
             onLongClick = {
                 clipboard.setText(AnnotatedString(GpsDiagnostics.snapshot()))
                 showHint(logCopiedHint)
             },
         )
         GpsDetailOverflowLayer(modifier = Modifier.fillMaxWidth()) {
-            AnimatedVisibility(
-                visibleState = detailVisibility,
-                modifier = if (detailLayoutActive) {
-                    Modifier.requiredWidth(GPS_DETAIL_PANEL_WIDTH)
-                } else {
-                    Modifier.width(0.dp)
-                },
-                enter = fadeIn(
-                    animationSpec = tween(
-                        durationMillis = 190,
-                        delayMillis = 25,
-                        easing = FastOutSlowInEasing,
-                    ),
-                ) + scaleIn(
-                    initialScale = 0.965f,
-                    transformOrigin = TransformOrigin(0f, 0f),
-                    animationSpec = tween(260, easing = FastOutSlowInEasing),
-                ) + slideInVertically(
-                    initialOffsetY = { height -> -height / 22 },
-                    animationSpec = tween(260, easing = FastOutSlowInEasing),
-                ),
-                exit = fadeOut(
-                    animationSpec = tween(
-                        durationMillis = 155,
-                        delayMillis = 20,
-                        easing = FastOutSlowInEasing,
-                    ),
-                ) + scaleOut(
-                    targetScale = 0.975f,
-                    transformOrigin = TransformOrigin(0f, 0f),
-                    animationSpec = tween(220, easing = FastOutSlowInEasing),
-                ) + slideOutVertically(
-                    targetOffsetY = { height -> -height / 28 },
-                    animationSpec = tween(220, easing = FastOutSlowInEasing),
-                ),
-        ) {
+            GenieInlinePanel(detailVisibility,anchor={detailAnchor},
+                modifier=Modifier.requiredWidth(GPS_DETAIL_PANEL_WIDTH).padding(top=6.dp)) {
             Surface(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 6.dp),
+                    .fillMaxWidth(),
                 shape = GPS_PANEL_SHAPE,
                 color = colors.glassSurface,
                 border = BorderStroke(1.dp, colors.glassPanelBorder),
@@ -4086,18 +4245,15 @@ internal fun GpsConnectionControl(
                             val displayLatitude = presentation.latitude
                             val displayLongitude = presentation.longitude
                             if (displayLatitude != null && displayLongitude != null) {
-                                val coordinates = formatDecimalDegreeCoordinates(
+                                val coordinates = formatDegreesMinutesCoordinates(
                                     displayLatitude,
                                     displayLongitude,
-                                    fractionDigits = 5,
                                 )
-                                val latitudeText = formatDecimalDegreeLatitude(
+                                val latitudeText = formatDegreesMinutesLatitude(
                                     displayLatitude,
-                                    fractionDigits = 5,
                                 )
-                                val longitudeText = formatDecimalDegreeLongitude(
+                                val longitudeText = formatDegreesMinutesLongitude(
                                     displayLongitude,
-                                    fractionDigits = 5,
                                 )
                                 Column(
                                     modifier = Modifier
@@ -4291,33 +4447,22 @@ private fun GpsPlaceLookupBubble(
     // Keep the last real address through the exit animation. Clearing the lookup owner must not
     // replace it with an idle/default frame while the bubble is visibly folding away.
     val displayedState = if (expanded) state else retainedState
-    val bubbleVisibility = remember { MutableTransitionState(false) }
-    bubbleVisibility.targetState = expanded
-    val bubbleMounted = gpsAnimatedLayerActive(
-        currentState = bubbleVisibility.currentState,
-        targetState = bubbleVisibility.targetState,
-    )
-    val density = LocalDensity.current
-    // Bottom-aligning the popup to the coordinate control puts it above that control. Offset it by
-    // one control height plus a fixed gap so every navigation mode gets the same visual spacing.
-    val bubbleOffset = with(density) {
-        (COMPACT_SETTINGS_WHEEL_HEIGHT + 8.dp).roundToPx()
-    }
-
-    if (bubbleMounted) {
+    val bubbleVisibility = rememberGenieVisibility(expanded)
+    val density=LocalDensity.current
+    var bubbleHostBounds by remember { mutableStateOf<Rect?>(null) }
+    if (bubbleVisibility.mounted.value) {
         Popup(
             alignment = Alignment.BottomCenter,
-            offset = IntOffset(0, -bubbleOffset),
             onDismissRequest = onDismiss,
             properties = PopupProperties(focusable = false),
         ) {
-            // Match the app's existing bottom hint bubble: a short upward drift and fade, never a
-            // dropdown expansion from the coordinate control.
-            AnimatedVisibility(
-                visibleState = bubbleVisibility,
-                enter = fadeIn(tween(160)) + slideInVertically(tween(180)) { it / 2 },
-                exit = fadeOut(tween(140)) + slideOutVertically(tween(160)) { it / 2 },
-            ) {
+            Column(Modifier.onGloballyPositioned { bubbleHostBounds=it.boundsInRoot() }) {
+            GenieInlinePanel(bubbleVisibility,anchor={
+                bubbleHostBounds?.let { bounds ->
+                    val h=with(density) { COMPACT_SETTINGS_WHEEL_HEIGHT.toPx() }
+                    Rect(bounds.center.x-h/2,bounds.bottom-h,bounds.center.x+h/2,bounds.bottom)
+                }
+            }) {
                 Box(
                     modifier = Modifier
                         .widthIn(max = 270.dp)
@@ -4389,6 +4534,10 @@ private fun GpsPlaceLookupBubble(
                         }
                     }
                 }
+            }
+            Spacer(Modifier.align(Alignment.CenterHorizontally).width(COMPACT_SETTINGS_WHEEL_HEIGHT).height(COMPACT_SETTINGS_WHEEL_HEIGHT+8.dp)
+                .clickable(interactionSource=remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                    indication=null,onClick=onDismiss))
             }
         }
     }
@@ -4585,24 +4734,41 @@ private fun GpsCoordinateValueSurface(
     modifier: Modifier = Modifier,
 ) {
     val colors = AppTheme.colors
+    val density = LocalDensity.current
+    val textMeasurer = rememberTextMeasurer()
+    val coordinateStyle = LocalTextStyle.current.copy(
+        fontSize = GPS_VALUE_FONT_SIZE,
+        lineHeight = GPS_VALUE_LINE_HEIGHT,
+        fontWeight = FontWeight.SemiBold,
+    )
     GpsDetailItemSurface(
         modifier = modifier,
         onClick = onClick,
         horizontalPadding = 8.dp,
         tintColor = tintColor,
     ) {
-        Box(
+        BoxWithConstraints(
             modifier = Modifier.fillMaxWidth(),
             contentAlignment = Alignment.Center,
         ) {
+            val textWidth = textMeasurer.measure(
+                text = value,
+                style = coordinateStyle,
+                softWrap = false,
+                maxLines = 1,
+            ).size.width
+            val availableWidth = with(density) { maxWidth.toPx() }
+            val fontScale = if (textWidth > 0) (availableWidth / textWidth).coerceAtMost(1f) else 1f
             Text(
                 text = value,
-                fontSize = GPS_VALUE_FONT_SIZE,
+                style = coordinateStyle,
+                fontSize = GPS_VALUE_FONT_SIZE * fontScale,
                 lineHeight = GPS_VALUE_LINE_HEIGHT,
                 fontWeight = FontWeight.SemiBold,
                 color = colors.onBackground,
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+                softWrap = false,
+                overflow = TextOverflow.Clip,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -4948,7 +5114,7 @@ private fun GpsStatusButton(
  * 把相关设置聚成一个视觉区域。[borderColor] 可覆盖描边（如目录未设时橙色强调）。
  */
 @Composable
-private fun SettingsCard(
+internal fun SettingsCard(
     modifier: Modifier = Modifier,
     borderColor: Color = AppTheme.colors.glassPanelBorder,
     tintColor: Color? = null,
@@ -5183,6 +5349,61 @@ internal fun ProBadgeButton(
                     maxLines = if (big) 2 else 1,
                 )
             }
+        }
+    }
+}
+
+/** Compact title-row switch; its hit area is wider than the drawn track. */
+@Composable
+private fun PhotoEffectsMasterSwitch(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    val colors = AppTheme.colors
+    val label = stringResource(R.string.photo_effects)
+    val position by animateFloatAsState(
+        targetValue = if (checked) 1f else 0f,
+        animationSpec = tween(180),
+        label = "photoEffectsSwitchPosition",
+    )
+    val trackColor by animateColorAsState(
+        targetValue = if (checked) colors.accentOrange else colors.onBackground.copy(alpha = 0.16f),
+        animationSpec = tween(180),
+        label = "photoEffectsSwitchTrack",
+    )
+    val thumbColor by animateColorAsState(
+        targetValue = if (checked) Color.White else colors.onSurfaceVariant,
+        animationSpec = tween(180),
+        label = "photoEffectsSwitchThumb",
+    )
+    Box(
+        modifier = Modifier
+            .size(width = 48.dp, height = 32.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .toggleable(
+                value = checked,
+                role = Role.Switch,
+                onValueChange = onCheckedChange,
+            )
+            .semantics { contentDescription = label },
+        contentAlignment = Alignment.Center,
+    ) {
+        androidx.compose.foundation.Canvas(Modifier.size(width = 36.dp, height = 20.dp)) {
+            drawRoundRect(
+                color = trackColor,
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.height / 2f),
+            )
+            val progress = if (layoutDirection == androidx.compose.ui.unit.LayoutDirection.Rtl) {
+                1f - position
+            } else position
+            drawCircle(
+                color = thumbColor,
+                radius = 7.dp.toPx(),
+                center = androidx.compose.ui.geometry.Offset(
+                    x = size.height / 2f + (size.width - size.height) * progress,
+                    y = size.height / 2f,
+                ),
+            )
         }
     }
 }
