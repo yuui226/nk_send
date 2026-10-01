@@ -2632,3 +2632,22 @@ suspend fun NikonCamera.runLabProbe(
     log("event polling:  ${if (Lab.NK_GET_EVENT in ops || Lab.NK_GET_EVENT_EX in ops) "advertised" else "MISSING"}")
     log("=== probe done in ${System.currentTimeMillis() - t0}ms ===")
 }
+
+/** Manual read-only probe. Property selection follows libgphoto2 Nikon moviequality/moviequality2. */
+internal suspend fun NikonCamera.probeMovieFormat(): String = buildString {
+    appendLine("Movie format v1; read only; D0A0=MovScreenSize, D0A7=MovQuality")
+    for ((prop, name) in listOf(0xD0A0 to "size/rate", 0xD0A7 to "quality")) {
+        val (rc, data) = labCommand(Lab.GET_DEVICE_PROP_DESC, prop)
+        appendLine("$name prop=${hex4(prop)} desc=${hex4(rc)} bytes=${data?.size ?: 0}")
+        if (rc == Lab.OK && data != null) {
+            val desc = runCatching { parseProbePropDescData(prop, data) }.getOrNull()
+            if (desc != null) {
+                appendLine("type=${hex4(desc.dataType)} current=${desc.current} writable=${desc.writable} form=${desc.formFlag} values=${desc.enumValues.take(64)}")
+            }
+            appendLine("descHex=${probeHex(data)}")
+        }
+        val (valueRc, value) = labCommand(Lab.GET_DEVICE_PROP_VALUE, prop)
+        appendLine("value=${hex4(valueRc)} hex=${value?.let { probeHex(it) } ?: "none"}")
+    }
+    append("Compare with camera frame size/frame rate; numeric mappings vary by model.")
+}

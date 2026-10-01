@@ -681,6 +681,6 @@
     <string name="remote_focus_diagnostic_hint">Passive focus sampling for 60 seconds. Move the camera focus point, switch photo/video or AF area, and mark each step. Copy the report afterwards.</string>
     <string name="remote_tool_focus_mode">Focus mode</string>
     <string name="remote_focus_manual_fixed">MF (fixed)</string>
-    <string name="monitor_disp_remaining_video">Time left %1$s</string>
     <string name="probe_video_remaining">Probe recording time left</string>
+    <string name="probe_movie_format">Probe video resolution / frame rate</string>
 </resources>

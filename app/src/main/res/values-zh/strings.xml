@@ -679,6 +679,6 @@
     <string name="remote_focus_diagnostic_hint">被动采样60秒。移动机内对焦点、切换照片/录像或对焦区域，每步点一次标记，结束后复制日志。</string>
     <string name="remote_tool_focus_mode">对焦模式</string>
     <string name="remote_focus_manual_fixed">MF（固定）</string>
-    <string name="monitor_disp_remaining_video">可录 %1$s</string>
     <string name="probe_video_remaining">探测录像剩余时长</string>
+    <string name="probe_movie_format">探测录像分辨率／帧率</string>
 </resources>
