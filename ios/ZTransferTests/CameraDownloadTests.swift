@@ -331,7 +331,7 @@ final class CameraDownloadTests: XCTestCase {
         let repository = CameraRepository(session: PTPSession(transport: wire), isUSBConnection: true)
         let session = CameraSession(repository: repository)
         let metadata = DownloadValueBox<PhotoFrameMetadata?>(nil)
-        let queue = TransferQueue(renderFrame: { source, _, _, snapshot in
+        let queue = TransferQueue(premiumAccess: PremiumAccess(.lifetime), renderFrame: { source, _, _, snapshot in
             metadata.value = snapshot
             return source
         })
@@ -351,7 +351,7 @@ final class CameraDownloadTests: XCTestCase {
         let cameraFile = file(size: UInt64(jpeg.count))
         try jpeg.write(to: target.appendingPathComponent(cameraFile.fileName))
         let rendered = DownloadValueBox(false)
-        let queue = TransferQueue(renderFrame: { source, _, _, _ in rendered.value = true; return source })
+        let queue = TransferQueue(premiumAccess: PremiumAccess(.lifetime), renderFrame: { source, _, _, _ in rendered.value = true; return source })
         var effects = PhotoEffectsSettings(); effects.photoFrameEnabled = true
         await queue.enqueue(cameraFile, effects: effects)
         await queue.start(session: nil, directory: target)

@@ -45,6 +45,23 @@ final class LocalPhotoBatchViewModel: ObservableObject {
     private var generationTask: Task<Void, Never>?
     private var previousIdleTimerDisabled: Bool?
     private var idleTimerGeneration: UInt64?
+    private let premiumAccess: PremiumAccess
+    private let requestAuthorization: @Sendable () async -> PHAuthorizationStatus
+    private let generatePhoto: @Sendable (PhotosPickerItem, PhotoEffectsSettings) async throws -> Void
+
+    // Keep the system authorization/output boundaries replaceable so tests can
+    // hold the permission prompt while exercising the real batch lifecycle.
+    init(premiumAccess: PremiumAccess = .shared,
+         requestAuthorization: @escaping @Sendable () async -> PHAuthorizationStatus = {
+             await PHPhotoLibrary.requestAuthorization(for: .addOnly)
+         },
+         generatePhoto: @escaping @Sendable (PhotosPickerItem, PhotoEffectsSettings) async throws -> Void = {
+             try await LocalPhotoOutput.generate(item: $0, settings: $1)
+         }) {
+        self.premiumAccess = premiumAccess
+        self.requestAuthorization = requestAuthorization
+        self.generatePhoto = generatePhoto
+    }
 
     func select(_ items: [PhotosPickerItem]) {
         // Android launches an image/* picker and lets each selected image reach
@@ -60,6 +77,9 @@ final class LocalPhotoBatchViewModel: ObservableObject {
     }
 
     func generate(settings: PhotoEffectsSettings) {
+        // Snapshot before Photos authorization suspends this task. Upgrades,
+        // refunds and edits only affect batches created after this one.
+        let settings = effectivePhotoEffectsSettings(settings, isPro: premiumAccess.isPro)
         guard settings.hasEffect, let generation = state.begin() else { return }
         let selected = state.photos
         previousIdleTimerDisabled = UIApplication.shared.isIdleTimerDisabled
@@ -69,14 +89,14 @@ final class LocalPhotoBatchViewModel: ObservableObject {
             guard let self else { return }
             do {
                 // Authorization is requested once for the immutable selection.
-                let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
+                let status = await requestAuthorization()
                 try Task.checkCancellation()
                 let canSave = status == .authorized || status == .limited
                 let result = try await PhotoEffectsBatchRunner.generate(photos: selected, onProgress: { [weak self] progress in
                     await self?.record(progress, generation: generation)
                 }, generate: { item in
                     guard canSave else { return false }
-                    try await LocalPhotoOutput.generate(item: item, settings: settings)
+                    try await self.generatePhoto(item, settings)
                     return true
                 })
                 try Task.checkCancellation()
@@ -130,6 +150,20 @@ enum LocalPhotoOutput {
     static func generate(item: PhotosPickerItem, settings: PhotoEffectsSettings) async throws {
         let sourceURL = try await stagedSource(item: item)
         defer { try? FileManager.default.removeItem(at: sourceURL) }
+        let output = try await render(sourceURL: sourceURL, settings: settings)
+        try Task.checkCancellation()
+        try await PHPhotoLibrary.shared().performChanges {
+            let request = PHAssetCreationRequest.forAsset()
+            request.addResource(with: .photo, data: output, options: nil)
+        }
+        // Photos writes already accepted by the system cannot be rolled back by
+        // task cancellation. The runner suppresses any late UI progress.
+        try Task.checkCancellation()
+    }
+
+    /// Shared file-to-JPEG path; the caller owns the staged source and decides
+    /// where to save the result. No entitlement reads occur during rendering.
+    static func render(sourceURL: URL, settings: PhotoEffectsSettings) async throws -> Data {
         try Task.checkCancellation()
         let renderer = Task.detached(priority: .userInitiated) {
             try Task.checkCancellation()
@@ -152,17 +186,9 @@ enum LocalPhotoOutput {
                 return encoded
             }
         }
-        let output = try await withTaskCancellationHandler {
+        return try await withTaskCancellationHandler {
             try await renderer.value
         } onCancel: { renderer.cancel() }
-        try Task.checkCancellation()
-        try await PHPhotoLibrary.shared().performChanges {
-            let request = PHAssetCreationRequest.forAsset()
-            request.addResource(with: .photo, data: output, options: nil)
-        }
-        // Photos writes already accepted by the system cannot be rolled back by
-        // task cancellation. The runner suppresses any late UI progress.
-        try Task.checkCancellation()
     }
 
     private static func stagedSource(item: PhotosPickerItem) async throws -> URL {

@@ -25,6 +25,8 @@ extension View {
 /// shared by transfer settings and LocalPhotoEffectsPage. The caller owns the
 /// draft, persistence scope, keyboard focus, and image picker lifecycle.
 struct PhotoEffectsControls: View {
+    @ObservedObject private var entitlements = PremiumEntitlementStore.shared
+    @State private var premiumHint: PhotoEffectsHint?
     @Binding var draft: PhotoEffectsSettings
     @Binding var showingWatermarkPicker: Bool
     @FocusState.Binding var textFieldFocused: Bool
@@ -43,7 +45,11 @@ struct PhotoEffectsControls: View {
     private func isFavoriteID(_ id: String) -> Bool { draft.favoriteFilterIDs.contains(filterKey(id)) }
     private var selectedFilterID: String? { draft.photoFilterEnabled ? draft.selectedFilter?.preset.id : nil }
     private var frameEnabled: Bool { draft.photoFrameEnabled && draft.photoFrameBorderEnabled }
-    private var watermarkEnabled: Bool { draft.photoFrameEnabled && draft.watermark.enabled }
+    private var isPro: Bool { entitlements.access.isPro }
+    private var shownWatermark: PhotoFrameWatermark {
+        effectivePhotoEffectsSettings(draft, isPro: isPro).watermark
+    }
+    private var watermarkEnabled: Bool { draft.photoFrameEnabled && shownWatermark.enabled }
     private var activeMetadata: PhotoFrameMetadataSettings {
         draft.metadataByPreset[draft.photoFramePreset.rawValue] ?? PhotoFrameMetadataSettings.defaults(for: draft.photoFramePreset)
     }
@@ -66,6 +72,7 @@ struct PhotoEffectsControls: View {
         draft = value
     }
     private func updateWatermark(_ update: (inout PhotoFrameWatermark) -> Void) {
+        guard isPro else { return }
         var value = draft
         update(&value.watermark)
         if frameEnabled, let index = value.favoriteFrameEffects.firstIndex(where: { $0.preset == value.photoFramePreset }) {
@@ -79,8 +86,12 @@ struct PhotoEffectsControls: View {
             filterCard
             frameCard
         }
+        .photoEffectsHint($premiumHint, duration: 2)
+        .onChange(of: entitlements.entitlement) { _ in
+            if !isPro { textFieldFocused = false; showingWatermarkPicker = false }
+        }
         .onChange(of: textFieldFocused) { focused in
-            guard !focused else { return }
+            guard !focused, isPro else { return }
             let text = draft.watermark.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 ? PhotoFrameWatermark.defaultText : draft.watermark.text
             if text != draft.watermark.text { updateWatermark { $0.text = text } }
@@ -144,11 +155,11 @@ struct PhotoEffectsControls: View {
                                     var updated = draft
                                     guard let value else {
                                         updated.photoFrameBorderEnabled = false
-                                        updated.photoFrameEnabled = updated.watermark.enabled
+                                        updated.photoFrameEnabled = isPro && updated.watermark.enabled
                                         draft = updated
                                         return
                                     }
-                                    if let favorite = updated.favoriteFrameEffects.first(where: { $0.preset == value }) {
+                                    if isPro, let favorite = updated.favoriteFrameEffects.first(where: { $0.preset == value }) {
                                         guard let watermark = favorite.applying(to: updated.watermark) else {
                                             onFavoriteImageMissing()
                                             return
@@ -222,6 +233,7 @@ struct PhotoEffectsControls: View {
                 HStack(spacing: 8) {
                     DetentWheel(label: AppLocalized.resource("photo_frame_watermark_short"), options: [false, true], selected: watermarkEnabled,
                                 optionLabel: { $0 ? AppLocalized.resource("photo_frame_on") : AppLocalized.resource("photo_frame_off") }, onCommit: { value in
+                                    guard isPro else { return }
                                     textFieldFocused = false
                                     let borderWasEnabled = frameEnabled
                                     var updated = draft
@@ -236,7 +248,12 @@ struct PhotoEffectsControls: View {
                                         updated.favoriteFrameEffects[index].watermark = updated.watermark
                                     }
                                     draft = updated
-                                }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, enabled: true, accentColor: ZTransferColors.accentPurple)
+                                }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, enabled: isPro, accentColor: ZTransferColors.accentPurple)
+                    .overlay {
+                        if !isPro {
+                            Color.clear.contentShape(Rectangle()).onTapGesture { showPremiumHint() }
+                        }
+                    }
                     DetentWheel(label: "", options: [false], selected: false,
                                 optionLabel: { _ in AppLocalized.resource("photo_frame_watermark_settings_button") }, onCommit: { _ in }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height,
                                 enabled: watermarkEnabled, accentColor: ZTransferColors.accentPurple,
@@ -257,10 +274,10 @@ struct PhotoEffectsControls: View {
                             let typeWidth = (proxy.size.width - 8) / 3
                             HStack(spacing: 8) {
                                 DetentWheel(label: AppLocalized.resource("photo_frame_watermark_content"), options: PhotoFrameWatermarkContent.allCases,
-                                            selected: draft.watermark.content,
+                                            selected: shownWatermark.content,
                                             optionLabel: { $0 == .text ? AppLocalized.resource("photo_frame_content_text") : AppLocalized.resource("photo_frame_content_image") },
                                             onCommit: { value in
-                                                if value == .image && draft.watermark.imageHash == nil {
+                                                if value == .image && shownWatermark.imageHash == nil {
                                                     showingWatermarkPicker = true
                                                 } else {
                                                     updateWatermark { $0.content = value }
@@ -269,9 +286,9 @@ struct PhotoEffectsControls: View {
                                             enabled: !imageImporting,
                                             accentColor: ZTransferColors.accentPurple)
                                 .frame(width: typeWidth)
-                                if draft.watermark.content == .text {
+                                if shownWatermark.content == .text {
                                     TextField("", text: Binding(
-                                        get: { draft.watermark.text },
+                                        get: { shownWatermark.text },
                                         set: { value in
                                             updateWatermark {
                                                 $0.text = PhotoFrameWatermark.limitText(value)
@@ -310,23 +327,30 @@ struct PhotoEffectsControls: View {
                             }
                         }
                         .frame(height: PhotoEffectControlMetrics.height)
-                        if draft.watermark.content == .text {
+                        if shownWatermark.content == .text {
                             HStack(spacing: 8) {
-                                DetentWheel(label: AppLocalized.resource("photo_frame_watermark_font"), options: PhotoFrameWatermarkFont.allCases, selected: draft.watermark.font, optionLabel: fontName, onCommit: { value in updateWatermark { $0.font = value } }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentPurple)
-                                DetentWheel(label: AppLocalized.resource("photo_frame_watermark_size"), options: Array(PhotoFrameWatermark.sizeRange.reversed()), selected: draft.watermark.sizePercent, optionLabel: { "\($0)%" }, onCommit: { value in updateWatermark { $0.sizePercent = value } }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentPurple)
-                                DetentWheel(label: AppLocalized.resource("photo_frame_watermark_opacity"), options: Array(PhotoFrameWatermark.opacityRange.reversed()), selected: draft.watermark.opacityPercent, optionLabel: { "\($0)%" }, onCommit: { value in updateWatermark { $0.opacityPercent = value } }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentPurple)
+                                DetentWheel(label: AppLocalized.resource("photo_frame_watermark_font"), options: PhotoFrameWatermarkFont.allCases, selected: shownWatermark.font, optionLabel: fontName, onCommit: { value in updateWatermark { $0.font = value } }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentPurple)
+                                DetentWheel(label: AppLocalized.resource("photo_frame_watermark_size"), options: Array(PhotoFrameWatermark.sizeRange.reversed()), selected: shownWatermark.sizePercent, optionLabel: { "\($0)%" }, onCommit: { value in updateWatermark { $0.sizePercent = value } }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentPurple)
+                                DetentWheel(label: AppLocalized.resource("photo_frame_watermark_opacity"), options: Array(PhotoFrameWatermark.opacityRange.reversed()), selected: shownWatermark.opacityPercent, optionLabel: { "\($0)%" }, onCommit: { value in updateWatermark { $0.opacityPercent = value } }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentPurple)
                             }
                             HStack(spacing: 8) {
-                                DetentWheel(label: AppLocalized.resource("photo_frame_watermark_position"), options: textWatermarkPositions, selected: textWatermarkPositions.contains(draft.watermark.position) ? draft.watermark.position : .photoBottomCenter, optionLabel: positionName, onCommit: { value in updateWatermark { $0.position = value } }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentPurple)
-                                DetentWheel(label: AppLocalized.resource("photo_frame_watermark_color"), options: PhotoFrameWatermarkColor.allCases, selected: draft.watermark.color, optionLabel: colorName, onCommit: { value in updateWatermark { $0.color = value } }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentPurple)
-                                DetentWheel(label: AppLocalized.resource("photo_frame_watermark_effect"), options: PhotoFrameWatermarkEffect.allCases, selected: draft.watermark.effect, optionLabel: effectName, onCommit: { value in updateWatermark { $0.effect = value } }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentPurple)
+                                DetentWheel(label: AppLocalized.resource("photo_frame_watermark_position"), options: textWatermarkPositions, selected: textWatermarkPositions.contains(shownWatermark.position) ? shownWatermark.position : .photoBottomCenter, optionLabel: positionName, onCommit: { value in updateWatermark { $0.position = value } }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentPurple)
+                                DetentWheel(label: AppLocalized.resource("photo_frame_watermark_color"), options: PhotoFrameWatermarkColor.allCases, selected: shownWatermark.color, optionLabel: colorName, onCommit: { value in updateWatermark { $0.color = value } }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentPurple)
+                                DetentWheel(label: AppLocalized.resource("photo_frame_watermark_effect"), options: PhotoFrameWatermarkEffect.allCases, selected: shownWatermark.effect, optionLabel: effectName, onCommit: { value in updateWatermark { $0.effect = value } }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentPurple)
                             }
                         } else {
                             HStack(spacing: 8) {
-                                DetentWheel(label: AppLocalized.resource("photo_frame_watermark_size"), options: Array(PhotoFrameWatermark.sizeRange.reversed()), selected: draft.watermark.sizePercent, optionLabel: { "\($0)%" }, onCommit: { value in updateWatermark { $0.sizePercent = value } }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentPurple)
-                                DetentWheel(label: AppLocalized.resource("photo_frame_watermark_opacity"), options: Array(PhotoFrameWatermark.opacityRange.reversed()), selected: draft.watermark.opacityPercent, optionLabel: { "\($0)%" }, onCommit: { value in updateWatermark { $0.opacityPercent = value } }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentPurple)
-                                DetentWheel(label: AppLocalized.resource("photo_frame_watermark_position"), options: photoWatermarkPositions, selected: photoWatermarkPositions.contains(draft.watermark.position) ? draft.watermark.position : .photoBottomCenter, optionLabel: positionName, onCommit: { value in updateWatermark { $0.position = value } }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentPurple)
+                                DetentWheel(label: AppLocalized.resource("photo_frame_watermark_size"), options: Array(PhotoFrameWatermark.sizeRange.reversed()), selected: shownWatermark.sizePercent, optionLabel: { "\($0)%" }, onCommit: { value in updateWatermark { $0.sizePercent = value } }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentPurple)
+                                DetentWheel(label: AppLocalized.resource("photo_frame_watermark_opacity"), options: Array(PhotoFrameWatermark.opacityRange.reversed()), selected: shownWatermark.opacityPercent, optionLabel: { "\($0)%" }, onCommit: { value in updateWatermark { $0.opacityPercent = value } }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentPurple)
+                                DetentWheel(label: AppLocalized.resource("photo_frame_watermark_position"), options: photoWatermarkPositions, selected: photoWatermarkPositions.contains(shownWatermark.position) ? shownWatermark.position : .photoBottomCenter, optionLabel: positionName, onCommit: { value in updateWatermark { $0.position = value } }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentPurple)
                             }
+                        }
+                    }
+                    .disabled(!isPro)
+                    .opacity(isPro ? 1 : 0.45)
+                    .overlay {
+                        if !isPro {
+                            Color.clear.contentShape(Rectangle()).onTapGesture { showPremiumHint() }
                         }
                     }
                     .padding(.top, 10)
@@ -338,6 +362,10 @@ struct PhotoEffectsControls: View {
                 .overlay(RoundedRectangle(cornerRadius: 12).stroke(ZTransferColors.accentPurple.opacity(0.18)))
                 .padding(.top, 8)
             }
+    }
+
+    private func showPremiumHint() {
+        premiumHint = .init(resource: "photo_frame_watermark_pro_only")
     }
 
     private func metadataButton(_ title: String, _ selected: Bool, action: @escaping () -> Void) -> some View {

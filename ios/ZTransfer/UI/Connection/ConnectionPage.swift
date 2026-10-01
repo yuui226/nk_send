@@ -42,7 +42,8 @@ struct ConnectionPage: View {
                             attentionActive: model.cameraSession == nil && !gpsCoordinator.state.enabled,
                             attentionOrigin: attentionOrigin,
                             selected: model.cameraSession?.isUSB == true,
-                            celebrationStart: celebrationStart)
+                            celebrationStart: celebrationStart,
+                            previewPremiumCelebration: model.previewsPremiumConnectionAnimation)
                             .modifier(GPSBlockedConnectionCard(
                                 blocked: gpsCoordinator.state.enabled,
                                 onBlockedTap: showGPSConnectionBlockedHint
@@ -66,6 +67,7 @@ struct ConnectionPage: View {
                         attentionOrigin: attentionOrigin,
                         selected: model.cameraSession != nil && model.cameraSession?.isUSB == false,
                         celebrationStart: celebrationStart,
+                        previewPremiumCelebration: model.previewsPremiumConnectionAnimation,
                         onWirelessModeChanged: model.select(wirelessMode:),
                         onConnect: { Task { await model.connectSelectedWiFi() } },
                         onResetSTAPairing: { Task { await model.refreshSTAProfiles(); showSTAReset = true } },
@@ -123,6 +125,15 @@ struct ConnectionPage: View {
                                     .frame(width: 40, height: 36)
                             }
                             .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
+                            // Android combinedClickable uses the platform's
+                            // 500 ms long press. A release tap cannot replace
+                            // the already-created session or its preview mode.
+                            .simultaneousGesture(LongPressGesture(minimumDuration: 0.5)
+                                .onEnded { _ in model.connectDebugSimulator(previewPremiumAnimation: true) })
+                            .accessibilityLabel("打开模拟照片")
+                            .accessibilityAction(named: Text("播放高级版连接成功动画")) {
+                                model.connectDebugSimulator(previewPremiumAnimation: true)
+                            }
                             .accessibilityIdentifier("debug-photo-library")
                             #endif
                         }

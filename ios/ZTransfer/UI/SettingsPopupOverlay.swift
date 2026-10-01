@@ -33,6 +33,8 @@ struct SettingsPopupOverlay: View {
     @State private var effectsHint: PhotoEffectsHint?
     @State private var contentHeight: CGFloat?
     @State private var presentationID = 0
+    @State private var showingPremium = false
+    @StateObject private var fireworks = PremiumFireworks()
 
     var body: some View {
         GeometryReader { proxy in
@@ -40,7 +42,11 @@ struct SettingsPopupOverlay: View {
             let panelLeft: CGFloat = 12
             let panelWidth = max(1, proxy.size.width - panelLeft * 2)
             let panelTop = localAnchor.maxY + 8
-            let availableHeight = max(1, proxy.size.height - panelTop - max(12, proxy.safeAreaInsets.bottom))
+            // The geometry already excludes the bottom safe area (including
+            // the keyboard). Add a gap only when no system inset provides one;
+            // subtracting that inset again would collapse the editor twice.
+            let bottomGap: CGFloat = proxy.safeAreaInsets.bottom > 0 ? 0 : 12
+            let availableHeight = max(1, proxy.size.height - panelTop - bottomGap)
             let sourceAnchor = GeniePopupMotion.attachmentAnchor(
                 for: localAnchor, cornerRadius: 22
             ).offsetBy(dx: -panelLeft, dy: -panelTop)
@@ -62,7 +68,7 @@ struct SettingsPopupOverlay: View {
                         filterChooser: $filterChooser,
                         effectsHint: $effectsHint,
                         dismissalRequested: !isPresented,
-                        popupMotionPaused: !isPresented,
+                        popupMotionPaused: !isPresented || showingPremium,
                         requestTransferDirectoryAttention: requestTransferDirectoryAttention,
                         effectPreviewSource: effectPreviewSource,
                         effectPreviewExif: effectPreviewExif,
@@ -70,6 +76,8 @@ struct SettingsPopupOverlay: View {
                         onContentHeightChange: { height in
                             contentHeight = height
                         },
+                        onShowPremium: { showingPremium = true },
+                        onPlayFireworks: { fireworks.launch() },
                         onClose: { close() }
                     )
                     .id(presentationID),
@@ -87,9 +95,15 @@ struct SettingsPopupOverlay: View {
                 .frame(height: min(contentHeight ?? availableHeight, availableHeight), alignment: .top)
                 .padding(.horizontal, panelLeft)
                 .padding(.top, panelTop)
+                .allowsHitTesting(!showingPremium)
                 if filterChooser.isPresented {
                     PhotoFilterChooserOverlay(draft: $effectsDraft, state: $filterChooser)
                 }
+                if showingPremium {
+                    PremiumPurchaseView(onClose: { showingPremium = false },
+                                        onCelebrate: { fireworks.launch() })
+                }
+                PremiumFireworksOverlay(state: fireworks)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .allowsHitTesting(isPresented)
@@ -100,17 +114,20 @@ struct SettingsPopupOverlay: View {
                     effectsHint = nil
                     presentationID &+= 1
                 } else {
+                    showingPremium = false
                     filterChooser = PhotoFilterChooserState()
                     effectsHint = nil
                 }
             }
         }
-        .ignoresSafeArea()
+        // Android WatermarkTextField brings the focused editor into view.
+        // Keep the popup anchored below the toolbar, but let its scroll view
+        // shrink above the keyboard so the text stays visible while editing.
+        .ignoresSafeArea(.container, edges: [.top, .leading, .trailing])
         .zIndex(100)
         .photoEffectsHint($effectsHint, duration: 1.8)
         .onChange(of: effectsDraft) { value in
-            let persisted = effectsStore.settings.persistingEditorPreferences(from: value)
-            if persisted != effectsStore.settings { effectsStore.update(persisted) }
+            effectsStore.persistEditorPreferences(from: value)
         }
     }
 

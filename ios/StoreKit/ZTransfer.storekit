@@ -1,0 +1,70 @@
+{
+  "identifier": "7E25D3C0-2366-40C8-A15B-331716BE8A42",
+  "nonRenewingSubscriptions": [],
+  "products": [
+    {
+      "displayPrice": "99.99",
+      "familyShareable": false,
+      "internalID": "1000002",
+      "localizations": [
+        {
+          "displayName": "永久高级版",
+          "description": "一次购买，永久使用高级功能",
+          "locale": "zh_CN"
+        },
+        {
+          "displayName": "Lifetime Pro",
+          "description": "Unlock ZTransfer Pro features",
+          "locale": "en_US"
+        }
+      ],
+      "productID": "com.ztransfer.ios.pro.lifetime",
+      "referenceName": "Lifetime Pro",
+      "type": "NonConsumable"
+    }
+  ],
+  "settings": {
+    "_failTransactionsEnabled": false,
+    "_locale": "zh_CN",
+    "_storefront": "CHN"
+  },
+  "subscriptionGroups": [
+    {
+      "id": "1000000",
+      "localizations": [],
+      "name": "ZTransfer Pro",
+      "subscriptions": [
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "39.99",
+          "familyShareable": false,
+          "groupNumber": 1,
+          "internalID": "1000001",
+          "introductoryOffer": null,
+          "localizations": [
+            {
+              "displayName": "一年高级版",
+              "description": "一年高级版，自动续订，可随时取消续订",
+              "locale": "zh_CN"
+            },
+            {
+              "displayName": "Annual Pro",
+              "description": "Unlock ZTransfer Pro features",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.ztransfer.ios.pro.annual",
+          "recurringSubscriptionPeriod": "P1Y",
+          "referenceName": "Annual Pro",
+          "subscriptionGroupID": "1000000",
+          "type": "RecurringSubscription"
+        }
+      ]
+    }
+  ],
+  "version": {
+    "major": 3,
+    "minor": 0
+  }
+}

@@ -1102,7 +1102,7 @@ final class DomainModelTests: XCTestCase {
         let suite = "effects-watermark-import-\(UUID())"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
-        let store = PhotoEffectsStore(defaults: defaults)
+        let store = PhotoEffectsStore(defaults: defaults, premiumAccess: PremiumAccess(.lifetime))
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: 2_300, height: 12))
         let image = renderer.image { context in
             UIColor.systemOrange.setFill()
@@ -2210,9 +2210,9 @@ final class TransferQueueScenarioTests: XCTestCase {
             try? FileManager.default.removeItem(at: directory)
         }
         if let renderer {
-            return (TransferQueue(defaults: UserDefaults(suiteName: suite)!, renderFrame: renderer), directory)
+            return (TransferQueue(defaults: UserDefaults(suiteName: suite)!, premiumAccess: PremiumAccess(.lifetime), renderFrame: renderer), directory)
         }
-        return (TransferQueue(defaults: UserDefaults(suiteName: suite)!), directory)
+        return (TransferQueue(defaults: UserDefaults(suiteName: suite)!, premiumAccess: PremiumAccess(.lifetime)), directory)
     }
 
     private func snapshot(_ queue: TransferQueue) async -> TransferQueueSnapshot {
@@ -2457,11 +2457,11 @@ final class TransferQueueScenarioTests: XCTestCase {
         let replacement = await queue.retry(id: id)
         XCTAssertNotEqual(replacement, id)
         let final = try await wait(queue) { !$0.isTransferring && $0.items[0].status == .completed && !$0.items[0].isGeneratingFrame }
-        XCTAssertEqual(final.items[0].effects, effects)
+        XCTAssertEqual(final.items[0].effects, effectivePhotoEffectsSettings(effects, isPro: true))
         XCTAssertNotNil(final.items[0].frameURL)
         XCTAssertNil(final.items[0].error)
         let selections = await renderer.selections
-        XCTAssertEqual(selections, [effects, effects])
+        XCTAssertEqual(selections, Array(repeating: effectivePhotoEffectsSettings(effects, isPro: true), count: 2))
     }
 
     func testNewDownloadRemainsCompletedWhenOnlyItsFrameFails() async throws {

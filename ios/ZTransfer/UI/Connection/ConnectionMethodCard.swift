@@ -16,6 +16,7 @@ struct ConnectionMethodCard: View {
     /// the surrounding page remain static while only the hero layers redraw.
     let selected: Bool
     let celebrationStart: Date?
+    var previewPremiumCelebration = false
     var onWirelessModeChanged: ((WirelessMode) -> Void)?
     var onConnect: (() -> Void)?
     var onResetSTAPairing: (() -> Void)?
@@ -164,7 +165,8 @@ struct ConnectionMethodCard: View {
                 let success = values.success > 0 && selected
 
                 if success {
-                    ConnectionSuccessOverlay(progress: values.success)
+                    ConnectionSuccessOverlay(progress: values.success,
+                                             previewPremium: previewPremiumCelebration)
                         .frame(width: 220, height: 220)
                         .position(x: start.x, y: start.y)
                         .offset(translation)
@@ -470,12 +472,23 @@ func connectionCelebrationEase(_ value: CGFloat) -> CGFloat {
 /// the Android radii, stagger, fade-in and stroke widths in points.
 private struct ConnectionSuccessOverlay: View {
     let progress: CGFloat
+    // Capture once per mounted success effect; a refund must not restart it.
+    @State private var goldBurst: Bool
+
+    init(progress: CGFloat, previewPremium: Bool) {
+        self.progress = progress
+        _goldBurst = State(initialValue: previewPremium || PremiumAccess.shared.isPro)
+    }
 
     var body: some View {
         Canvas { context, size in
             let p = min(1, max(0, progress))
             guard p > 0 else { return }
             let center = CGPoint(x: size.width / 2, y: size.height / 2)
+            if goldBurst {
+                drawPremium(context: &context, size: size, progress: p)
+                return
+            }
             let startRadius: CGFloat = 42
             let endRadius: CGFloat = 102
 
@@ -516,6 +529,68 @@ private struct ConnectionSuccessOverlay: View {
                 )
             }
         }
+        .zIndex(goldBurst ? 1 : -1)
+    }
+
+    /// HomeScreen.kt drawPremiumSuccessEffect + the original confirmation
+    /// rings, particles and core. Preserves the confirmed iOS 620 + 760 ms
+    /// clock (docs/技术调研/iOS-连接成功动画性能优化.md).
+    private func drawPremium(context: inout GraphicsContext, size: CGSize, progress p: CGFloat) {
+        let center = CGPoint(x: size.width / 2, y: size.height / 2)
+        let dimension = min(size.width, size.height)
+        let gold = Color(red: 1, green: 214 / 255.0, blue: 107 / 255.0)
+        let warm = Color(red: 240 / 255.0, green: 169 / 255.0, blue: 59 / 255.0)
+        let green = ZTransferColors.statusConnected
+        let visibility = min(1, p / 0.16) * min(1, (1 - p) / 0.30)
+        let halo = max(0, sin(min(p, 0.72) / 0.72 * .pi))
+        func circle(_ at: CGPoint, _ radius: CGFloat) -> Path {
+            Path(ellipseIn: CGRect(x: at.x - radius, y: at.y - radius, width: radius * 2, height: radius * 2))
+        }
+        context.fill(circle(center, dimension * (0.16 + p * 0.16)), with: .color(gold.opacity(0.12 * halo)))
+        context.fill(circle(center, dimension * (0.24 + p * 0.12)), with: .color(warm.opacity(0.07 * halo)))
+        let orbit = dimension * (0.22 + p * 0.10)
+        for index in 0..<3 {
+            let angle = CGFloat(index * 120 + 8) - 32 + p * 118
+            var arc = Path()
+            arc.addArc(center: center, radius: orbit, startAngle: .degrees(angle),
+                       endAngle: .degrees(angle + 54), clockwise: false)
+            context.stroke(arc, with: .color((index == 1 ? gold : warm).opacity((index == 1 ? 0.92 : 0.72) * visibility)),
+                           style: StrokeStyle(lineWidth: 1.6, lineCap: .round))
+        }
+        for index in 0..<6 {
+            let phase = min(1, max(0, (p - CGFloat(index) * 0.025) / 0.78))
+            let angle = CGFloat(index) * .pi / 3 + phase * 0.28
+            let distance = dimension * (0.19 + phase * 0.25)
+            let point = CGPoint(x: center.x + cos(angle) * distance, y: center.y + sin(angle) * distance)
+            let fade = min(1, phase * 5) * (1 - phase)
+            let long = CGFloat(index.isMultiple(of: 2) ? 7 : 5) * (0.7 + fade * 0.6)
+            var star = Path()
+            star.move(to: CGPoint(x: point.x, y: point.y - long))
+            star.addLine(to: CGPoint(x: point.x, y: point.y + long))
+            star.move(to: CGPoint(x: point.x - long * 0.42, y: point.y))
+            star.addLine(to: CGPoint(x: point.x + long * 0.42, y: point.y))
+            context.stroke(star, with: .color((index.isMultiple(of: 2) ? gold : .white).opacity(fade * 0.95)),
+                           style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
+        }
+        let reveal = min(1, p * 5)
+        for index in 0..<2 {
+            let phase = min(1, max(0, (p - CGFloat(index) * 0.14) / 0.72))
+            let scale = 0.72 + phase * 1.72
+            context.stroke(circle(center, (41 - 0.75) * scale),
+                           with: .color(green.opacity((1 - phase) * 0.62 * reveal)), lineWidth: 1.5 * scale)
+        }
+        for index in 0..<10 {
+            let angle = CGFloat(index * 36 + (index.isMultiple(of: 2) ? 7 : -5)) * .pi / 180
+            let distance = CGFloat(48 + (index % 3) * 11) * p
+            let point = CGPoint(x: center.x + cos(angle) * distance, y: center.y + sin(angle) * distance)
+            let color = index.isMultiple(of: 2) ? Color(red: 1, green: 224 / 255.0, blue: 130 / 255.0) : warm
+            context.fill(circle(point, index.isMultiple(of: 3) ? 3 : 2), with: .color(color.opacity(reveal * (1 - p))))
+        }
+        let coreScale = 0.82 + sin(p * .pi) * 0.22
+        let coreAlpha = max(0.16, 1 - p)
+        context.fill(circle(center, 39 * coreScale), with: .color(green.opacity(0.08 * coreAlpha * reveal)))
+        context.stroke(circle(center, (39 - 0.75) * coreScale),
+                       with: .color(green.opacity(0.70 * coreAlpha * reveal)), lineWidth: 1.5 * coreScale)
     }
 }
 

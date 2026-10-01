@@ -2,6 +2,31 @@ import XCTest
 @testable import ZTransfer
 
 final class ConnectionStateTests: XCTestCase {
+    #if DEBUG
+    @MainActor
+    func testDebugPremiumPreviewIsSessionScopedAndDoesNotGrantAccess() {
+        let accessBefore = PremiumAccess.shared.entitlement
+        let now = Date()
+        let usageBefore = FreeUsageStore.shared.snapshot(at: now)
+        let model = ConnectionViewModel()
+        XCTAssertFalse(model.previewsPremiumConnectionAnimation)
+        model.connectDebugSimulator(previewPremiumAnimation: true)
+        let session = model.cameraSession
+        XCTAssertNotNil(session)
+        XCTAssertTrue(model.previewsPremiumConnectionAnimation)
+        // A release click following the recognized long press is a no-op.
+        model.connectDebugSimulator()
+        XCTAssertTrue(model.cameraSession === session)
+        XCTAssertTrue(model.previewsPremiumConnectionAnimation)
+
+        let nextWorkspace = ConnectionViewModel()
+        nextWorkspace.connectDebugSimulator()
+        XCTAssertFalse(nextWorkspace.previewsPremiumConnectionAnimation)
+        XCTAssertEqual(PremiumAccess.shared.entitlement, accessBefore)
+        XCTAssertEqual(FreeUsageStore.shared.snapshot(at: now), usageBefore)
+    }
+    #endif
+
     func testUSBIsTheInitialConnectionMode() {
         let state = ConnectionState()
         XCTAssertEqual(state.selectedMode, .usb)

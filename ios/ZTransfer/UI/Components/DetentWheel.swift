@@ -261,7 +261,9 @@ struct DetentWheel<Option: Hashable>: View {
         let target = (selectedIndex + 1) % options.count
         guard target != selectedIndex else { return }
         emitDetent()
-        withAnimation(ZTransferMotion.standard) { position = CGFloat(target) }
+        // Android's click path only requests a change. A picker or a missing
+        // favorite asset may defer/reject it; keep displaying the accepted
+        // selection until onChange(selected) animates the committed value.
         onCommit(options[target])
     }
 

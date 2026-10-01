@@ -139,7 +139,7 @@ struct RootView: View {
         }
         .preferredColorScheme(themeMode == "DARK" ? .dark : themeMode == "LIGHT" ? .light : nil)
         .environment(\.locale, locale)
-        .fullScreenCover(isPresented: $monitorPresented) {
+        .fullScreenCover(isPresented: $monitorPresented, onDismiss: RemoteTrialNotice.returnedToList) {
             if let session = connectionModel.cameraSession ?? establishedSession {
                 let listModel = PhotoListViewModel.cached(session: session)
                 RemoteView(session: session,
@@ -245,6 +245,7 @@ struct RootView: View {
             connectionModel.setUSBForegroundActive(phase == .active)
             if phase == .active {
                 connectionModel.refreshUSBAuthorization()
+                StoreKitPurchaseStore.shared.refresh()
             }
         }
         .task(id: connectionModel.cameraSession != nil) {

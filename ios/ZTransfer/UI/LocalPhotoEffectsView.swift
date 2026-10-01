@@ -4,6 +4,7 @@ import SwiftUI
 /// Android LocalPhotoEffectsPage: fixed 4:3 pager, batch action, inline editors.
 /// The picked list is the batch selection; there is no second selection grid.
 struct LocalPhotoEffectsView: View {
+    @ObservedObject private var entitlements = PremiumEntitlementStore.shared
     let onNavigateUp: () -> Void
     @StateObject private var effectsStore = PhotoEffectsStore(scope: .localPhotos)
     @StateObject private var batch = LocalPhotoBatchViewModel()
@@ -99,10 +100,9 @@ struct LocalPhotoEffectsView: View {
                   let generation = effectsStore.beginWatermarkImageImport() else { return }
             Task { @MainActor in
                 let hash = await importPhotoPickerWatermarkImage(item)
-                guard effectsStore.finishWatermarkImageImport(
-                    generation: generation, hash: hash
-                ) else { return }
+                let accepted = effectsStore.finishWatermarkImageImport(generation: generation, hash: hash)
                 watermarkPickerItems = []
+                guard accepted else { return }
                 if hash == nil || effectsStore.settings.watermark.imageHash != hash {
                     effectsHint = .init(resource: "photo_frame_image_import_failed")
                 }
@@ -128,13 +128,13 @@ struct LocalPhotoEffectsView: View {
     }
 
     private var effectsBinding: Binding<PhotoEffectsSettings> {
-        Binding(get: { effectsStore.settings }, set: { effectsStore.update($0) })
+        Binding(get: { effectsStore.settings }, set: { effectsStore.updateFromEditor($0) })
     }
 
     private var previewSettings: PhotoEffectsSettings {
         var value = effectsStore.settings
         value.metadata = value.metadataByPreset[value.photoFramePreset.rawValue] ?? value.metadata
-        return value
+        return effectivePhotoEffectsSettings(value, isPro: entitlements.access.isPro)
     }
 
     private var toolbar: some View {

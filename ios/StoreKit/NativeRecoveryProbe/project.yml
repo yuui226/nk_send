@@ -1,0 +1,41 @@
+name: NativeStoreKitProbe
+settings:
+  base:
+    IPHONEOS_DEPLOYMENT_TARGET: '16.0'
+    SWIFT_VERSION: '6.0'
+    GENERATE_INFOPLIST_FILE: YES
+targets:
+  NativeStoreKitProbe:
+    type: application
+    platform: iOS
+    sources: [App]
+    entitlements:
+      path: App/Debug.entitlements
+      properties:
+        get-task-allow: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.ztransfer.storekit.nativeprobe
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+  NativeStoreKitProbeTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Tests
+      - path: ../ZTransfer.storekit
+        buildPhase: resources
+    dependencies:
+      - target: NativeStoreKitProbe
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.ztransfer.storekit.nativeprobe.tests
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/NativeStoreKitProbe.app/NativeStoreKitProbe
+        BUNDLE_LOADER: $(TEST_HOST)
+schemes:
+  NativeStoreKitProbe:
+    build:
+      targets:
+        NativeStoreKitProbe: all
+    test:
+      targets: [NativeStoreKitProbeTests]

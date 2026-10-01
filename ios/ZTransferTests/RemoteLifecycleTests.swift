@@ -1,9 +1,105 @@
 import XCTest
 import UIKit
+@preconcurrency import AVFoundation
 @testable import ZTransfer
 
 @MainActor
 final class RemoteLifecycleTests: XCTestCase {
+    func testConcurrentTrialAndPageExitShareOneCleanup() async throws {
+        let camera = RemoteLifecycleCamera()
+        let model = RemoteViewModel(camera: camera)
+        model.start()
+        try await waitFor { await camera.log.contains("frame") }
+        async let trial: Void = model.stopAndWait()
+        async let page: Void = model.stopAndWait()
+        _ = await (trial, page)
+        await model.stopAndWait()
+        let calls = await camera.log
+        XCTAssertEqual(calls.filter { $0 == "gate:false" }.count, 1)
+    }
+
+    func testFreeLocalRecordingIsBlockedBeforeMicrophoneOrRecorder() {
+        let camera = RemoteLifecycleCamera()
+        let entitlements = PremiumEntitlementStore(access: PremiumAccess(.free))
+        let model = RemoteViewModel(camera: camera, entitlements: entitlements)
+        model.startLocalRecording()
+        XCTAssertEqual(model.localRecordingPhase, .idle)
+        XCTAssertEqual(model.localRecordingHint, AppLocalized.resource("remote_rec_pro_only"))
+    }
+
+    func testExpiryFinalizesPlayableRecordingBeforeExhaustedMonitorExits() async throws {
+        try await verifyRecordingLoss(expiry: true)
+    }
+
+    func testPausedRecordingFinalizesOnRevocationAndConcurrentPageExit() async throws {
+        try await verifyRecordingLoss(expiry: false)
+    }
+
+    // Uses the real frame decoder, recorder, permission result and page cleanup.
+    // Only camera packets and verified entitlement inputs are controlled; this
+    // does not stand in for a real StoreKit refund or a physical camera test.
+    private func verifyRecordingLoss(expiry: Bool) async throws {
+        guard AVAudioSession.sharedInstance().recordPermission == .denied else {
+            throw XCTSkip("Set the test simulator's com.ztransfer.ios microphone permission to denied with simctl privacy before running; no microphone capture is needed.")
+        }
+        let name = "RemoteRecordingLoss.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+        let usage = FreeUsageStore(defaults: defaults)
+        if expiry { usage.consumeMonitoring(FreeUsageStore.monitoringLimit, isPro: false) }
+        let entitlements = PremiumEntitlementStore(access: PremiumAccess(.lifetime))
+        let camera = RemoteLifecycleCamera(frameSize: CGSize(width: 64, height: 48))
+        let model = RemoteViewModel(camera: camera, recordingDirectory: directory,
+                                   entitlements: entitlements, freeUsage: usage)
+        addTeardownBlock {
+            await model.stopAndWait()
+            UserDefaults(suiteName: name)?.removePersistentDomain(forName: name)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        model.start()
+        try await waitFor { model.state.session == .ready && model.frameImage != nil }
+        model.startLocalRecording()
+        try await waitFor { model.localRecordingPhase == .recording }
+        // Allow several real camera packets to pass through decode and encoding.
+        try await Task.sleep(for: .milliseconds(400))
+        if expiry {
+            let until = Date().addingTimeInterval(0.15)
+            entitlements.publish(.annual(until: until, gracePeriod: false))
+            try await waitFor { model.trialEnded }
+            XCTAssertEqual(entitlements.entitlement, .annual(until: until, gracePeriod: false),
+                           "Known expiry must work without a second StoreKit publication")
+        } else {
+            model.toggleLocalRecordingPause()
+            XCTAssertEqual(model.localRecordingPhase, .paused)
+            entitlements.publish(.free)
+            XCTAssertEqual(model.localRecordingPhase, .finalizing,
+                           "Revocation must initiate saving before page exit")
+            async let first: Void = model.stopAndWait()
+            async let second: Void = model.stopAndWait()
+            _ = await (first, second)
+            XCTAssertFalse(model.trialEnded)
+        }
+        XCTAssertEqual(model.localRecordingPhase, .saved)
+        XCTAssertFalse(model.usageMeter.isPro)
+        let calls = await camera.log
+        XCTAssertEqual(calls.filter { $0 == "gate:false" }.count, 1)
+        let files = try FileManager.default.contentsOfDirectory(at: directory,
+                                                                includingPropertiesForKeys: nil)
+        XCTAssertEqual(files.count, 1)
+        let recording = try XCTUnwrap(files.first)
+        XCTAssertEqual(recording.pathExtension, "mp4")
+        try await assertDecodableSilentRecording(recording)
+        let attachment = XCTAttachment(data: try Data(contentsOf: recording),
+                                       uniformTypeIdentifier: "public.mpeg-4")
+        attachment.name = expiry ? "expired-recording.mp4" : "revoked-paused-recording.mp4"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        model.startLocalRecording()
+        XCTAssertEqual(model.localRecordingHint, AppLocalized.resource("remote_rec_pro_only"))
+        XCTAssertNotEqual(model.localRecordingPhase, .recording)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path).count, 1)
+    }
+
     func testEntryGatesBeforeParametersAndSelectsMovieExposureBeforeLiveView() async throws {
         let camera = RemoteLifecycleCamera(movie: true)
         let model = RemoteViewModel(camera: camera)
@@ -612,8 +708,44 @@ final class RemoteViewfinderRecorderTests: XCTestCase {
         XCTAssertEqual(result, output)
         let values = try output.resourceValues(forKeys: [.fileSizeKey])
         XCTAssertGreaterThan(values.fileSize ?? 0, 0)
+        try await assertDecodableSilentRecording(output)
         try? FileManager.default.removeItem(at: directory)
     }
+}
+
+/// Decode every frame: a nonempty MP4 alone does not prove its muxer was closed.
+private func assertDecodableSilentRecording(_ url: URL,
+                                           file: StaticString = #filePath, line: UInt = #line) async throws {
+    let asset = AVURLAsset(url: url)
+    let playable = try await asset.load(.isPlayable)
+    let duration = try await asset.load(.duration)
+    XCTAssertTrue(playable, file: file, line: line)
+    XCTAssertGreaterThan(duration.seconds, 0, file: file, line: line)
+    let videoTracks = try await asset.loadTracks(withMediaType: .video)
+    let audioTracks = try await asset.loadTracks(withMediaType: .audio)
+    XCTAssertEqual(videoTracks.count, 1, file: file, line: line)
+    XCTAssertTrue(audioTracks.isEmpty, file: file, line: line)
+    let track = try XCTUnwrap(videoTracks.first, file: file, line: line)
+    let reader = try AVAssetReader(asset: asset)
+    let output = AVAssetReaderTrackOutput(track: track, outputSettings: [
+        kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
+    ])
+    reader.add(output)
+    XCTAssertTrue(reader.startReading(), file: file, line: line)
+    var frames = 0
+    var previous = CMTime.invalid
+    while let sample = output.copyNextSampleBuffer() {
+        let pixels = try XCTUnwrap(CMSampleBufferGetImageBuffer(sample), file: file, line: line)
+        XCTAssertEqual(CVPixelBufferGetWidth(pixels), 64, file: file, line: line)
+        XCTAssertEqual(CVPixelBufferGetHeight(pixels), 48, file: file, line: line)
+        let time = CMSampleBufferGetPresentationTimeStamp(sample)
+        if previous.isValid { XCTAssertGreaterThan(time.seconds, previous.seconds, file: file, line: line) }
+        previous = time
+        frames += 1
+    }
+    XCTAssertNil(reader.error, file: file, line: line)
+    XCTAssertEqual(reader.status, .completed, file: file, line: line)
+    XCTAssertGreaterThan(frames, 1, file: file, line: line)
 }
 
 private actor RemoteLifecycleCamera: RemoteCameraControlling {
@@ -639,13 +771,15 @@ private actor RemoteLifecycleCamera: RemoteCameraControlling {
     private var applicationMode = false
     private let frame: Data
     init(movie: Bool = false, failingFrames: Int = 0, isUSB: Bool = false,
-         transportFailure: Bool = false) {
+         transportFailure: Bool = false, frameSize: CGSize = CGSize(width: 8, height: 8)) {
         self.movie = movie
         self.failingFrames = failingFrames
         self.isUSB = isUSB
         self.transportFailure = transportFailure
-        self.frame = UIGraphicsImageRenderer(size: CGSize(width: 8, height: 8)).image { context in
-            UIColor.white.setFill(); context.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        self.frame = UIGraphicsImageRenderer(size: frameSize, format: format).image { context in
+            UIColor.white.setFill(); context.fill(CGRect(origin: .zero, size: frameSize))
         }.jpegData(compressionQuality: 0.5)!
     }
     func setRemoteActive(_ active: Bool) { log.append("gate:\(active)") }

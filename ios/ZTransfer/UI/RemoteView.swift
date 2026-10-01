@@ -35,6 +35,8 @@ private extension EnvironmentValues {
 /// that are already present in Android's RemoteScreen.
 struct RemoteView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
+    @ObservedObject private var entitlements = PremiumEntitlementStore.shared
     private let onStopped: ((Bool) async -> Void)?
     private let onPreparing: (() async -> Void)?
     private let onTransportLost: (() -> Void)?
@@ -144,6 +146,20 @@ struct RemoteView: View {
                         removal: .opacity.animation(.easeOut(duration: 0.30))
                     ))
             }
+        }
+        .overlay(alignment: .bottomTrailing) {
+            RemoteTrialBadge(meter: model.usageMeter)
+                .padding(.trailing, 12)
+                .padding(.bottom, 8)
+                .allowsHitTesting(false)
+        }
+        .onChange(of: model.trialEnded) { ended in
+            guard ended else { return }
+            RemoteTrialNotice.pending = true
+            dismiss()
+        }
+        .onChange(of: scenePhase) { phase in
+            model.usageMeter.setActive(phase == .active)
         }
         .animation(.easeInOut(duration: 0.20), value: model.interactionHint)
         .animation(.easeInOut(duration: 0.20), value: model.recordingHint)
@@ -579,6 +595,7 @@ struct RemoteView: View {
                 activeColor: ZTransferColors.statusConnected
             ))
             .disabled(phase == .finalizing || saved)
+            .opacity(!expanded && !saved && !entitlements.access.isPro ? 0.45 : 1)
             .padding(.leading, 4)
 
             if expanded {
@@ -1618,5 +1635,23 @@ private struct ExposureValueList: View {
             .navigationBarTitleDisplayMode(.inline)
         }
         .presentationDetents([.medium, .large])
+    }
+}
+
+/// The one-second countdown only invalidates this badge, not the video layout.
+private struct RemoteTrialBadge: View {
+    @ObservedObject var meter: RemoteUsageMeter
+    var body: some View {
+        if !meter.isPro {
+            Text(AppLocalized.formattedResource("remote_trial_left", [
+                "%1$s": String(format: "%d:%02d", meter.secondsLeft / 60, meter.secondsLeft % 60)
+            ]))
+            .font(.system(size: 12, weight: .medium, design: .monospaced))
+            .foregroundStyle(ZTransferColors.secondaryText)
+            .lineLimit(1)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background { ZTransferGlassSurface(cornerRadius: 9, kind: .panel) }
+        }
     }
 }

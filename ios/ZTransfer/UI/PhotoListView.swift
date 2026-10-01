@@ -725,6 +725,14 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
         .onChange(of: queueModel.snapshot.items) { items in
             model.recordTransferredOriginals(items)
         }
+        .onReceive(NotificationCenter.default.publisher(for: FreeUsageStore.changed)) { notification in
+            guard let left = notification.userInfo?["threshold"] as? Int else { return }
+            showUsageHint(AppLocalized.formattedResource("quota_left_hint", ["%1$d": String(left), "%2$d": "25"]))
+        }
+        .onReceive(NotificationCenter.default.publisher(for: RemoteTrialNotice.returned)) { _ in
+            consumeRemoteTrialNotice()
+        }
+        .onAppear { consumeRemoteTrialNotice() }
         .onChange(of: queueModel.snapshot.invalidatedDirectory) { invalidated in
             // Handle the actual invalidation once. A historical failed card
             // must never clear a different directory the user just selected.
@@ -752,7 +760,7 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
                 }
             }
         }
-        .fullScreenCover(isPresented: $internalShowingRemote) {
+        .fullScreenCover(isPresented: $internalShowingRemote, onDismiss: RemoteTrialNotice.returnedToList) {
             RemoteView(session: session,
                        recordingDirectory: directoryStore.directoryURL,
                        isSessionConnected: isSessionConnected,
@@ -1332,7 +1340,28 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
             }
             return
         }
+        guard PremiumAccess.shared.isPro || FreeUsageStore.shared.snapshot().monitoringLeft > 0 else {
+            showUsageHint(AppLocalized.resource("remote_trial_ended"))
+            return
+        }
         withAnimation(ZTransferMotion.standard) { showingRemote = true }
+    }
+
+    private func showUsageHint(_ text: String) {
+        let id = UUID()
+        remoteEntryHintID = id
+        withAnimation(ZTransferMotion.standard) { remoteEntryHint = text }
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(1800))
+            guard !Task.isCancelled, remoteEntryHintID == id else { return }
+            withAnimation(ZTransferMotion.standard) { remoteEntryHint = nil }
+        }
+    }
+
+    private func consumeRemoteTrialNotice() {
+        guard !showingRemote, RemoteTrialNotice.pending else { return }
+        RemoteTrialNotice.pending = false
+        showUsageHint(AppLocalized.resource("remote_trial_ended"))
     }
 
     private func toggleBurst(_ id: String) {

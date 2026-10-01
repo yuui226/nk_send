@@ -9,6 +9,31 @@ settings:
   base:
     SWIFT_VERSION: 6.0
     DEVELOPMENT_TEAM: ""
+fileGroups:
+  - StoreKit
+schemes:
+  ZTransfer-StoreKit:
+    build:
+      targets:
+        ZTransfer: all
+    run:
+      config: Debug
+      storeKitConfiguration: StoreKit/ZTransfer.storekit
+    test:
+      config: Debug
+      targets:
+        - ZTransferStoreKitTests
+  ZTransfer-StoreKitUI:
+    build:
+      targets:
+        ZTransfer: all
+    run:
+      config: Debug
+      storeKitConfiguration: StoreKit/ZTransfer.storekit
+    test:
+      config: Debug
+      targets:
+        - ZTransferStoreKitUITests
 targets:
   ZTransfer:
     type: application
@@ -23,8 +48,12 @@ targets:
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         CFBundleDisplayName: Z传
+        CADisableMinimumFrameDurationOnPhone: true
         LSApplicationCategoryType: public.app-category.photography
         NSLocationWhenInUseUsageDescription: 用于向相机写入拍摄位置
+        NSLocationAlwaysAndWhenInUseUsageDescription: 用于在后台持续向相机写入拍摄位置
+        UIBackgroundModes:
+          - location
         NSBluetoothAlwaysUsageDescription: 用于连接 Nikon GPS 设备
         NSCameraUsageDescription: 用于通过 USB 连接相机、浏览和传输照片并控制拍摄
         NSPhotoLibraryUsageDescription: 用于读取工作台照片
@@ -71,6 +100,9 @@ targets:
         SWIFT_EMIT_LOC_STRINGS: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGN_ENTITLEMENTS: ZTransfer/ZTransfer.entitlements
+      configs:
+        Debug:
+          "CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]": StoreKit/SimulatorDebug.entitlements
     scheme:
       testTargets:
         - ZTransferTests
@@ -90,4 +122,33 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.ztransfer.ios.tests
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/ZTransfer.app/ZTransfer"
         BUNDLE_LOADER: "$(TEST_HOST)"
+        GENERATE_INFOPLIST_FILE: YES
+  ZTransferStoreKitTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: StoreKitTests
+      - path: StoreKit/ZTransfer.storekit
+        buildPhase: resources
+    dependencies:
+      - target: ZTransfer
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.ztransfer.ios.storekittests
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/ZTransfer.app/ZTransfer"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+        GENERATE_INFOPLIST_FILE: YES
+  ZTransferStoreKitUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: StoreKitUITests
+      - path: StoreKit/ZTransfer.storekit
+        buildPhase: resources
+    dependencies:
+      - target: ZTransfer
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.ztransfer.ios.storekituitests
+        TEST_TARGET_NAME: ZTransfer
         GENERATE_INFOPLIST_FILE: YES

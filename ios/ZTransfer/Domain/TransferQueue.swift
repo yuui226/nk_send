@@ -298,8 +298,14 @@ actor TransferQueue {
     private var progressContinuations: [UUID: AsyncStream<TransferActiveProgress?>.Continuation] = [:]
     private var activeProgress: TransferActiveProgress?
     private var lastValidTransferSpeed: Int64 = 0
-    init(defaults: UserDefaults = .standard, renderFrame: @escaping FrameRenderer = TransferQueue.renderFrameFile) {
+    private let premiumAccess: PremiumAccess
+    private let freeUsage: FreeUsageStore
+    init(defaults: UserDefaults = .standard, premiumAccess: PremiumAccess = .shared,
+         freeUsage: FreeUsageStore = .shared,
+         renderFrame: @escaping FrameRenderer = TransferQueue.renderFrameFile) {
         self.renderFrame = renderFrame
+        self.premiumAccess = premiumAccess
+        self.freeUsage = freeUsage
         // Android TransferState.tasks is in-memory only. Discard the earlier
         // iOS-only snapshot once; settings and on-disk partials have their own
         // existing stores and are unaffected by this queue lifecycle.
@@ -342,6 +348,7 @@ actor TransferQueue {
     @discardableResult
     func enqueue(_ file: CameraFile, organizeByDate: Bool = false,
                  effects: PhotoEffectsSettings? = nil) -> UUID? {
+        let effects = effects.map { effectivePhotoEffectsSettings($0, isPro: premiumAccess.isPro) }
         let item = TransferQueueItem(
             id: UUID(), file: file,
             destinationFolderName: organizeByDate ? transferDateFolderName(file.captureDate) : nil,
@@ -353,6 +360,9 @@ actor TransferQueue {
     @discardableResult
     func enqueue(_ files: [CameraFile], organizeByDate: Bool = false,
                  effects: PhotoEffectsSettings? = nil) -> [UUID] {
+        // User-confirmed P05: all files in this enqueue share the effective
+        // watermark captured now. Derived jobs and retries use this value.
+        let effects = effects.map { effectivePhotoEffectsSettings($0, isPro: premiumAccess.isPro) }
         var seen: Set<UInt32> = []
         let queuedAt = Date()
         let additions = files.filter { seen.insert($0.id).inserted }.map { file in
@@ -694,6 +704,18 @@ actor TransferQueue {
                         directoryIndexes[destinationDirectory]?.removePartial(partial)
                     }
                 }
+                // LicenseManager / TransferViewModel: check only at the file
+                // boundary, after local shortcuts; never interrupt a download.
+                if !premiumAccess.isPro {
+                    if freeUsage.snapshot().transfersLeft == 0 {
+                        fail(itemID, message: AppLocalized.resource("transfer_limit_reached"))
+                        continue
+                    }
+                    if task.file.size > FreeUsageStore.maximumFileBytes {
+                        fail(itemID, message: AppLocalized.formattedResource("transfer_size_limit", ["%1$d": "400"]))
+                        continue
+                    }
+                }
                 // No TRANSFERING state for a local hit or disconnected task.
                 // Resolve the current session only after local-file preflight.
                 guard let session else {
@@ -713,6 +735,9 @@ actor TransferQueue {
                     Task { await self?.updateProgress(id: itemID, progress: progress) }
                 }
                 let output = result.url
+                // The original is committed. Derived rendering failure must
+                // not undo this count or count its offline retry a second time.
+                freeUsage.recordTransfer(id: itemID, isPro: premiumAccess.isPro)
                 if let index = items.firstIndex(where: { $0.id == itemID }) {
                     items[index].status = .completed
                     items[index].progress = 1

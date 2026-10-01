@@ -36,6 +36,9 @@ final class RemoteViewModel: ObservableObject {
     @Published private var recordingOperations = RemoteRecordingOperationGate()
     @Published private(set) var levelRoll: Double?
     @Published private(set) var batteryPercent: Int?
+    @Published private(set) var trialEnded = false
+    let usageMeter: RemoteUsageMeter
+    private let premiumAccess: PremiumAccess
 
     var recordingBusy: Bool { recordingOperations.isBusy }
     var recordingHint: String? { state.recordingHint?.message }
@@ -87,6 +90,8 @@ final class RemoteViewModel: ObservableObject {
     // Teardown is cooperative. Cancelling an in-flight PTP request can
     // invalidate the camera session before the photo list resumes.
     private var stopRequested = false
+    private var cleanupTask: Task<Void, Never>?
+    private var cleanupComplete = false
     private var lastFrameAt: ContinuousClock.Instant?
     private var frameDecodeGeneration: UInt64 = 0
     private var histogramEnabled = false
@@ -97,11 +102,23 @@ final class RemoteViewModel: ObservableObject {
 
     init(camera: RemoteCameraControlling, recordingDirectory: URL? = nil,
          onTransportLost: (() -> Void)? = nil,
-         haptics: ZTransferHaptics = .shared) {
+         haptics: ZTransferHaptics = .shared,
+         entitlements: PremiumEntitlementStore = .shared, freeUsage: FreeUsageStore = .shared) {
         self.camera = camera
         self.recordingDirectory = recordingDirectory
         self.onTransportLost = onTransportLost
         self.haptics = haptics
+        premiumAccess = entitlements.access
+        usageMeter = RemoteUsageMeter(entitlements: entitlements, usage: freeUsage)
+        usageMeter.onLostPremium = { [weak self] in self?.stopLocalRecording() }
+        usageMeter.onExhausted = { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                // Finish writing the recording before closing monitoring.
+                await stopAndWait()
+                trialEnded = true
+            }
+        }
     }
 
     func start() {
@@ -373,12 +390,16 @@ final class RemoteViewModel: ObservableObject {
         frameHistogram = decoded.histogram
         frameZebraMask = decoded.zebraMask
         state = state.applying(.frameReceived(fps: decoded.fps))
+        if initialLoaded { usageMeter.markReady() }
         if localRecordingPhase == .recording {
             localRecorder?.append(image: decoded.image, receivedAtUptime: decoded.receivedAtUptime)
         }
     }
 
     func startLocalRecording() {
+        guard premiumAccess.isPro else {
+            showLocalRecordingHint(AppLocalized.resource("remote_rec_pro_only")); return
+        }
         guard localRecordingPhase == .idle || localRecordingPhase == .saved,
               localRecorder == nil, let image = frameImage else {
             if frameImage == nil { showLocalRecordingHint(AppLocalized.resource("remote_rec_start_failed")) }
@@ -389,6 +410,11 @@ final class RemoteViewModel: ObservableObject {
             guard let self else { return }
             let permission = await microphonePermission()
             guard !Task.isCancelled, !stopRequested else { return }
+            guard premiumAccess.isPro else {
+                showLocalRecordingHint(AppLocalized.resource("remote_rec_pro_only"))
+                localRecordingTask = nil
+                return
+            }
             if !permission {
                 showLocalRecordingHint(AppLocalized.resource("remote_rec_no_audio"))
             }
@@ -403,6 +429,7 @@ final class RemoteViewModel: ObservableObject {
             localRecorder?.pause()
             localRecordingPhase = .paused
         case .paused:
+            guard premiumAccess.isPro else { stopLocalRecording(); return }
             localRecorder?.resume()
             localRecordingPhase = .recording
         default: break
@@ -730,6 +757,7 @@ final class RemoteViewModel: ObservableObject {
     }
 
     func stop() {
+        usageMeter.stop()
         disposed = true
         stopRequested = true
         // A USB start response can arrive after the page has begun leaving but
@@ -770,6 +798,16 @@ final class RemoteViewModel: ObservableObject {
     /// Waits for any active PTP operations to finish their normal protocol
     /// teardown before the photo list starts catalog work again.
     func stopAndWait() async {
+        guard !cleanupComplete else { return }
+        if let cleanupTask { await cleanupTask.value; return }
+        let task = Task { [self] in await performStopAndWait() }
+        cleanupTask = task
+        await task.value
+        cleanupComplete = true
+        cleanupTask = nil
+    }
+
+    private func performStopAndWait() async {
         if localRecordingPhase == .recording || localRecordingPhase == .paused { stopLocalRecording() }
         stop()
         let frame = frameTask
@@ -1211,6 +1249,7 @@ final class RemoteViewModel: ObservableObject {
 
     private func notifyTransportLost() {
         guard !transportLossNotified else { return }
+        usageMeter.stop()
         transportLossNotified = true
         stopRequested = true
         modeTask?.cancel()

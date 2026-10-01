@@ -11,6 +11,18 @@ final class ConnectionViewModel: ObservableObject {
     private let wifiDiscovery = PTPIPDiscoveryService()
     @Published private(set) var cameraRepository: CameraRepository?
     @Published private(set) var cameraSession: CameraSession?
+    #if DEBUG
+    private weak var premiumAnimationPreviewSession: CameraSession?
+    #endif
+    /// HomeScreen's long press overrides only its simulated connection effect.
+    /// Session identity prevents a later physical connection inheriting it.
+    var previewsPremiumConnectionAnimation: Bool {
+        #if DEBUG
+        return cameraSession != nil && cameraSession === premiumAnimationPreviewSession
+        #else
+        return false
+        #endif
+    }
     private var usbEventsTask: Task<Void, Never>?
     private var usbConnectTask: Task<Void, Never>?
     private var usbCleanupTask: Task<Void, Never>?
@@ -201,11 +213,13 @@ final class ConnectionViewModel: ObservableObject {
 
     #if DEBUG
     /// Starts the in-process catalog without requiring a camera or Wi-Fi.
-    func connectDebugSimulator() {
+    func connectDebugSimulator(previewPremiumAnimation: Bool = false) {
         guard cameraSession == nil else { return }
         let repository = CameraRepository(debugData: .shared)
+        let session = CameraSession(repository: repository, wirelessMode: .ap)
+        premiumAnimationPreviewSession = previewPremiumAnimation ? session : nil
         cameraRepository = repository
-        cameraSession = CameraSession(repository: repository, wirelessMode: .ap)
+        cameraSession = session
         state.wirelessMode = .ap
         state.wifiPhase = .connected
     }

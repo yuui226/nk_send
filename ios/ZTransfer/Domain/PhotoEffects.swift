@@ -400,6 +400,37 @@ func androidPhotoFrameOutputName(sourceName: String, settings: PhotoEffectsSetti
     return "\(stem)_\(style)\(watermarkSuffix)\(filterSuffix).jpg"
 }
 
+/// TransferViewModel.kt effectivePhotoFrameWatermark. The caller captures this
+/// value at enqueue, and previews use the same policy without writing it back
+/// to the user's saved preferences. Renderers never read the live entitlement.
+func effectivePhotoFrameWatermark(isPro: Bool, preference: PhotoFrameWatermark,
+                                 borderEnabled: Bool = true) -> PhotoFrameWatermark {
+    var value = isPro ? preference : PhotoFrameWatermark(opacityPercent: 80)
+    let hash = value.imageHash?.lowercased()
+    let validHash = hash.flatMap { candidate -> String? in
+        candidate.count == 64 && candidate.utf8.allSatisfy {
+            (48...57).contains($0) || (97...102).contains($0)
+        } ? candidate : nil
+    }
+    value.imageHash = validHash
+    if value.content == .image, validHash == nil { value.content = .text }
+    value.text = value.displayText
+    value.sizePercent = min(max(value.sizePercent, PhotoFrameWatermark.sizeRange.lowerBound),
+                            PhotoFrameWatermark.sizeRange.upperBound)
+    value.opacityPercent = min(max(value.opacityPercent, PhotoFrameWatermark.opacityRange.lowerBound),
+                               PhotoFrameWatermark.opacityRange.upperBound)
+    return androidWatermarkForBorderMode(value, borderEnabled: borderEnabled)
+}
+
+func effectivePhotoEffectsSettings(_ preference: PhotoEffectsSettings, isPro: Bool) -> PhotoEffectsSettings {
+    var value = preference
+    value.watermark = preference.photoFrameEnabled
+        ? effectivePhotoFrameWatermark(isPro: isPro, preference: preference.watermark,
+                                       borderEnabled: preference.photoFrameBorderEnabled)
+        : PhotoFrameWatermark(enabled: false)
+    return value
+}
+
 private func androidWatermarkForBorderMode(_ watermark: PhotoFrameWatermark, borderEnabled: Bool) -> PhotoFrameWatermark {
     guard (!borderEnabled || watermark.content == .image),
           !androidPhotoPlacement(watermark.position) else { return watermark }
@@ -564,10 +595,12 @@ final class PhotoEffectsStore: ObservableObject {
     private let defaults: UserDefaults
     private let key: String
     private let scope: Scope
+    private let premiumAccess: PremiumAccess
     private var watermarkImportGeneration: UInt64 = 0
 
     init(defaults: UserDefaults = .standard, scope: Scope = .cameraTransfer,
-         legacyDefaults: UserDefaults? = nil) {
+         legacyDefaults: UserDefaults? = nil, premiumAccess: PremiumAccess = .shared) {
+        self.premiumAccess = premiumAccess
         // Android isolates phone-photo effects in the `local_photo_effects`
         // preference file.  UserDefaults suites provide the same isolation;
         // injected defaults are still honored for camera-transfer tests.
@@ -626,10 +659,43 @@ final class PhotoEffectsStore: ObservableObject {
         self.defaults.set(data, forKey: key)
     }
 
+    /// Editor writes preserve paid preferences when access has changed during
+    /// an open draft; rendering applies the separate effective-watermark policy.
+    func updateFromEditor(_ value: PhotoEffectsSettings) {
+        var accepted = value
+        if !premiumAccess.isPro {
+            accepted.watermark = settings.watermark
+            for index in accepted.favoriteFrameEffects.indices {
+                if let saved = settings.favoriteFrameEffects.first(where: {
+                    $0.preset == accepted.favoriteFrameEffects[index].preset
+                }) {
+                    accepted.favoriteFrameEffects[index].watermark = saved.watermark
+                } else {
+                    // Android's free editor displays/captures its default
+                    // watermark when adding a frame favorite. A stale paid
+                    // draft must not introduce new custom parameters here.
+                    accepted.favoriteFrameEffects[index].watermark = effectivePhotoFrameWatermark(
+                        isPro: false, preference: settings.watermark,
+                        borderEnabled: accepted.photoFrameBorderEnabled
+                    )
+                }
+            }
+        }
+        update(accepted)
+    }
+
+    /// Transfer settings persist favorites/metadata immediately, independently
+    /// of applying the active effects draft. Use the same permission boundary
+    /// as an explicit save, including a refund while the popup is open.
+    func persistEditorPreferences(from draft: PhotoEffectsSettings) {
+        let value = settings.persistingEditorPreferences(from: draft)
+        if value != settings { updateFromEditor(value) }
+    }
+
     func beginDraft() -> PhotoEffectsSettings { settings }
 
     func beginWatermarkImageImport() -> UInt64? {
-        guard !watermarkImageImporting else { return nil }
+        guard premiumAccess.isPro, !watermarkImageImporting else { return nil }
         watermarkImportGeneration &+= 1
         watermarkImageImporting = true
         lastImportedWatermarkHash = nil
@@ -642,6 +708,7 @@ final class PhotoEffectsStore: ObservableObject {
     func finishWatermarkImageImport(generation: UInt64, hash: String?) -> Bool {
         guard watermarkImportGeneration == generation else { return false }
         watermarkImageImporting = false
+        guard premiumAccess.isPro else { return false }
         guard let hash else { return true }
         var updated = settings
         updated.watermark.content = .image

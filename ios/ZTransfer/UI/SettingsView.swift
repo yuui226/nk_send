@@ -21,6 +21,7 @@ private extension View {
 }
 
 struct SettingsView: View {
+    @ObservedObject private var entitlements = PremiumEntitlementStore.shared
     @ObservedObject private var directory: DirectoryAccessStore
     @ObservedObject private var effectsStore: PhotoEffectsStore
     @State private var showingPicker = false
@@ -59,6 +60,8 @@ struct SettingsView: View {
     let effectPreviewExif: PhotoExif?
     let onEffectPreviewRequested: () -> Void
     let onContentHeightChange: (CGFloat) -> Void
+    let onShowPremium: () -> Void
+    let onPlayFireworks: () -> Void
 
     private enum SettingsPage {
         case main
@@ -83,7 +86,9 @@ struct SettingsView: View {
          requestTransferDirectoryAttention: Bool = false,
          effectPreviewSource: UIImage? = nil, effectPreviewExif: PhotoExif? = nil,
          onEffectPreviewRequested: @escaping () -> Void = {},
-         onContentHeightChange: @escaping (CGFloat) -> Void = { _ in }, onClose: (() -> Void)? = nil) {
+         onContentHeightChange: @escaping (CGFloat) -> Void = { _ in },
+         onShowPremium: @escaping () -> Void = {}, onPlayFireworks: @escaping () -> Void = {},
+         onClose: (() -> Void)? = nil) {
         self.showPhotoEffectsEntry = showPhotoEffectsEntry
         self.onClose = onClose
         _effectsStore = ObservedObject(wrappedValue: effectsStore)
@@ -98,6 +103,8 @@ struct SettingsView: View {
         self.effectPreviewExif = effectPreviewExif
         self.onEffectPreviewRequested = onEffectPreviewRequested
         self.onContentHeightChange = onContentHeightChange
+        self.onShowPremium = onShowPremium
+        self.onPlayFireworks = onPlayFireworks
     }
 
     var body: some View {
@@ -123,7 +130,7 @@ struct SettingsView: View {
                             VStack(spacing: 0) {
                                 PhotoEffectsSettingsPreview(source: effectPreviewSource,
                                     metadata: effectPreviewExif.map(PhotoFrameMetadata.init),
-                                    settings: effectsDraft,
+                                    settings: effectivePhotoEffectsSettings(effectsDraft, isPro: entitlements.access.isPro),
                                     onRequest: onEffectPreviewRequested)
                                     .padding(.horizontal, 16).padding(.top, 10)
                                 PhotoEffectsControls(draft: $effectsDraft,
@@ -194,10 +201,9 @@ struct SettingsView: View {
             guard let generation = effectsStore.beginWatermarkImageImport() else { return }
             Task { @MainActor in
                 let hash = await importPhotoPickerWatermarkImage(item)
-                guard effectsStore.finishWatermarkImageImport(
-                    generation: generation, hash: hash
-                ) else { return }
+                let accepted = effectsStore.finishWatermarkImageImport(generation: generation, hash: hash)
                 watermarkPickerItems = []
+                guard accepted else { return }
                 if hash == nil || effectsStore.settings.watermark.imageHash != hash {
                     effectsHint = .init(resource: "photo_frame_image_import_failed")
                 }
@@ -321,12 +327,12 @@ struct SettingsView: View {
         persisted.photoFramePreset = effectsDraft.photoFramePreset
         persisted.metadata = effectsDraft.metadata
         persisted.watermark = effectsDraft.watermark
-        effectsStore.update(persisted)
+        effectsStore.updateFromEditor(persisted)
     }
 
     private func commitEffectsDraft() {
         watermarkTextFocused = false
-        effectsStore.update(effectsDraft)
+        effectsStore.updateFromEditor(effectsDraft)
     }
 
     private var header: some View {
@@ -349,6 +355,8 @@ struct SettingsView: View {
             }
             .tipPopupAnchor(.settings)
             Spacer()
+            PremiumSettingsActions(motionPaused: popupMotionPaused,
+                                   onShowPremium: onShowPremium, onPlayFireworks: onPlayFireworks)
             Button { onClose?() } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 18, weight: .medium))
@@ -451,7 +459,7 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var photoEffectsCard: some View {
-        let settings = effectsStore.settings
+        let settings = effectivePhotoEffectsSettings(effectsStore.settings, isPro: entitlements.access.isPro)
         let filterName: String = {
             guard settings.photoFilterEnabled, let selection = settings.selectedFilter else {
                 return AppLocalized.resource("photo_filter_off_option")
