@@ -667,4 +667,10 @@
     <string name="photo_effect_module_lut">LUT</string>
     <string name="photo_effect_module_frame">邊框</string>
     <string name="photo_effect_module_watermark">浮水印</string>
+
+    <string name="remote_tool_focus_frame">對焦框</string>
+    <string name="remote_focus_diagnostic_start">開始採樣</string>
+    <string name="remote_focus_diagnostic_stop">停止</string>
+    <string name="remote_focus_diagnostic_mark">標記步驟</string>
+    <string name="remote_focus_diagnostic_hint">被動採樣60秒。移動機內對焦點、切換照片/錄影或對焦區域，每步點一次標記，結束後複製日誌。</string>
 </resources>

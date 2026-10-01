@@ -17,6 +17,7 @@ internal enum class RemoteTool(val id: String, val title: Int, val fixed: Boolea
     DESQUEEZE("desqueeze", R.string.remote_tool_desqueeze), LEVEL("level", R.string.remote_tool_level),
     RECORD("record", R.string.remote_tool_record), WHITE_BALANCE("white_balance", R.string.remote_tool_wb),
     FOCUS_AREA("focus_area", R.string.remote_tool_focus_area), WAVEFORM("waveform", R.string.remote_tool_waveform),
+    FOCUS_FRAME("focus_frame", R.string.remote_tool_focus_frame),
     LUT("lut", R.string.remote_tool_lut),
     METER("meter", R.string.remote_tool_meter),
     LOCK("lock", R.string.remote_tool_lock),
@@ -51,6 +52,20 @@ private class SavedToolState<T>(initial: T, private val save: (T) -> Unit) : Mut
 
 @Stable
 internal class RemoteToolPreferences(private val prefs: SharedPreferences) {
+    init {
+        // One-time introduction: also reset preferences saved by pre-release test builds.
+        // Later launches respect the user's own switch and visibility choices.
+        if (!prefs.getBoolean("remote_focus_frame_introduced_v1", false)) {
+            val edit = prefs.edit().putBoolean("remote_focus_frame", true)
+                .putBoolean("remote_focus_frame_introduced_v1", true)
+            for (mode in listOf("photo", "movie")) {
+                val key = "remote_hidden_tools_$mode"
+                edit.putStringSet(key, prefs.getStringSet(key, emptySet()).orEmpty() - RemoteTool.FOCUS_FRAME.id)
+            }
+            edit.apply()
+        }
+    }
+
     private fun bool(key: String, default: Boolean = false): MutableState<Boolean> = SavedToolState(prefs.getBoolean(key, default)) {
         prefs.edit().putBoolean(key, it).apply()
     }
@@ -65,6 +80,7 @@ internal class RemoteToolPreferences(private val prefs: SharedPreferences) {
     val grid = enum("remote_grid", ViewfinderGrid.OFF)
     val exposure = enum("remote_exposure_assist", ExposureAssist.OFF)
     val level = bool("remote_level")
+    val focusFrame = bool("remote_focus_frame", true)
     val meter = bool("remote_exposure_meter")
     val audio = bool("remote_audio_levels_visible", true)
     val desqueeze: MutableState<Float> = SavedToolState(
@@ -89,6 +105,7 @@ internal class RemoteToolPreferences(private val prefs: SharedPreferences) {
             RemoteTool.EXPOSURE -> exposure.value = ExposureAssist.OFF
             RemoteTool.DESQUEEZE -> desqueeze.value = 1f
             RemoteTool.LEVEL -> level.value = false
+            RemoteTool.FOCUS_FRAME -> focusFrame.value = false
             RemoteTool.METER -> meter.value = false
             RemoteTool.WAVEFORM -> waveform.value = WaveformMode.OFF
             RemoteTool.LOCK -> locked.value = false

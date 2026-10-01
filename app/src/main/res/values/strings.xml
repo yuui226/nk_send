@@ -673,4 +673,10 @@
     <string name="photo_effect_module_lut">LUT</string>
     <string name="photo_effect_module_frame">Frame</string>
     <string name="photo_effect_module_watermark">Watermark</string>
+
+    <string name="remote_tool_focus_frame">Focus frame</string>
+    <string name="remote_focus_diagnostic_start">Start</string>
+    <string name="remote_focus_diagnostic_stop">Stop</string>
+    <string name="remote_focus_diagnostic_mark">Mark step</string>
+    <string name="remote_focus_diagnostic_hint">Passive focus sampling for 60 seconds. Move the camera focus point, switch photo/video or AF area, and mark each step. Copy the report afterwards.</string>
 </resources>

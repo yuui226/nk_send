@@ -7,11 +7,12 @@ package com.ztransfer.protocol
 enum class LiveViewFocusJudgement {
     NONE,
     NOT_FOCUSED,
-    FOCUSED
+    FOCUSED,
+    UNKNOWN
 }
 
 /**
- * 已换算到 Live View 完整画面的归一化 AF 框。
+ * 已换算到当前 Live View 可见画面的归一化 AF 框。
  *
  * [centerX]/[centerY] 与 [width]/[height] 均在 0..1 坐标系中，UI 不需要知道
  * 不同机型使用的是传感器尺寸、显示区域尺寸还是 JPEG 尺寸。
@@ -22,6 +23,23 @@ data class LiveViewFocusFrame(
     val width: Float,
     val height: Float
 )
+
+/** Visible image rectangle in the camera's full coordinate space. */
+data class LiveViewDisplayArea(val left: Float, val top: Float, val width: Float, val height: Float)
+
+/** Clip to the visible image without shifting the camera-selected region. */
+internal fun mapLiveViewFocusFrame(
+    frame: LiveViewFocusFrame,
+    area: LiveViewDisplayArea
+): LiveViewFocusFrame? {
+    if (area.width <= 0f || area.height <= 0f) return null
+    val left = ((frame.centerX - frame.width / 2 - area.left) / area.width).coerceAtLeast(0f)
+    val top = ((frame.centerY - frame.height / 2 - area.top) / area.height).coerceAtLeast(0f)
+    val right = ((frame.centerX + frame.width / 2 - area.left) / area.width).coerceAtMost(1f)
+    val bottom = ((frame.centerY + frame.height / 2 - area.top) / area.height).coerceAtMost(1f)
+    if (right <= left || bottom <= top) return null
+    return LiveViewFocusFrame((left + right) / 2, (top + bottom) / 2, right - left, bottom - top)
+}
 
 /**
  * 相机在 LiveViewObject 帧头中给出的双声道音频电平。
@@ -53,7 +71,10 @@ data class LiveViewMetadata(
     val focusCoordinateHeight: Int?,
     /** 视频 Live View 的机内 L/R 电平；头型不支持或字段校验失败时为 null。 */
     val soundLevels: LiveViewSoundLevels?,
-    val attitude: LiveViewAttitude? = null
+    val attitude: LiveViewAttitude? = null,
+    val focusFrameStatus: String = "legacy",
+    val focusDisplayArea: LiveViewDisplayArea? = null,
+    val focusFrames: List<LiveViewFocusFrame> = listOfNotNull(selectedFocusFrame)
 )
 
 /** 一帧完整 Live View 载荷；JPEG 直接从 [jpegOffset] 解码，避免热路径复制。 */
@@ -92,9 +113,9 @@ private const val EXTENDED_SOUND_LEVELS_OFFSET = 824
  * - 512-byte 帧头的 +388、1024-byte 扩展帧头的 +824 起，依次为 L/R 峰值
  *   和 L/R 当前电平。两种布局都是各自的绝对偏移，不能按距帧尾推断。
  *
- * 512-byte v1 帧头当前未解析（跳过的）字节范围：
+ * 其他字段：
  * - +4 ~ +7（4 字节）：未知；
- * - +20 ~ +27（8 字节）：未知；
+ * - +20 ~ +27：显示区域宽高与中心，按大端解析并检查完整画面边界；
  * - +32 ~ +41（10 字节）：未知；
  * - +46 ~ +47（2 字节）：在 selectedIndex 与 AF 框数据之间，未解析。
  * 512-byte v1 帧头 +404/+408 为滚转/俯仰角：Z30 V1.20 四组姿态实测确认，
@@ -142,22 +163,23 @@ internal fun parseLiveViewMetadata(
         0 -> LiveViewFocusJudgement.NONE
         1 -> LiveViewFocusJudgement.NOT_FOCUSED
         2 -> LiveViewFocusJudgement.FOCUSED
-        else -> return null
+        else -> LiveViewFocusJudgement.UNKNOWN
     }
 
     val frameCount = payload[44].toInt() and 0xFF
     val selectedIndex = payload[45].toInt() and 0xFF
     val focusFrameOffset = 48
     val focusFrameStride = 8
-    val maxFrameCount = (jpegOffset - focusFrameOffset) / focusFrameStride
-    // 主体追踪时机身可能同时保留多个候选框；此前只接受单框，导致相机选中的
-    // 追踪框被丢弃，UI 一直停在最初点击点。先校验整个记录区，再只解析选中项。
+    // Do not allow AF records into the recording-time/audio fields. This is a
+    // conservative boundary, not a claim about the number of subjects supported.
+    val frameTableEnd = if (jpegOffset == 512) 380 else 816
+    val maxFrameCount = (frameTableEnd - focusFrameOffset) / focusFrameStride
+    // Z30 实机确认数量对应机内多个框；逐条校验，坏记录不影响其他有效框。
     val completeFrameTable =
         frameCount in 1..maxFrameCount &&
-            selectedIndex < frameCount &&
-            focusFrameOffset + frameCount * focusFrameStride <= jpegOffset
-    val selectedFrame = if (completeFrameTable) {
-        val offset = focusFrameOffset + selectedIndex * focusFrameStride
+            focusFrameOffset + frameCount * focusFrameStride <= frameTableEnd
+    fun readFrame(index: Int): LiveViewFocusFrame? {
+        val offset = focusFrameOffset + index * focusFrameStride
         val width = payload.be16(offset)
         val height = payload.be16(offset + 2)
         val centerX = payload.be16(offset + 4)
@@ -173,7 +195,7 @@ internal fun parseLiveViewMetadata(
                 (coordinateWidth - centerX) * 2 >= width &&
                 (coordinateHeight - centerY) * 2 >= height
 
-        if (valid) {
+        return if (valid) {
             LiveViewFocusFrame(
                 centerX = centerX.toFloat() / coordinateWidth,
                 centerY = centerY.toFloat() / coordinateHeight,
@@ -183,21 +205,58 @@ internal fun parseLiveViewMetadata(
         } else {
             null
         }
-    } else {
-        null
+    }
+
+    val areaWidth = payload.be16(20)
+    val areaHeight = payload.be16(22)
+    val areaCenterX = payload.be16(24)
+    val areaCenterY = payload.be16(26)
+    val areaValid = areaWidth in 1..coordinateWidth && areaHeight in 1..coordinateHeight &&
+        areaCenterX * 2 >= areaWidth && areaCenterY * 2 >= areaHeight &&
+        (coordinateWidth - areaCenterX) * 2 >= areaWidth &&
+        (coordinateHeight - areaCenterY) * 2 >= areaHeight
+    val displayArea = if (areaValid) LiveViewDisplayArea(
+        (areaCenterX - areaWidth / 2f) / coordinateWidth,
+        (areaCenterY - areaHeight / 2f) / coordinateHeight,
+        areaWidth.toFloat() / coordinateWidth, areaHeight.toFloat() / coordinateHeight
+    ) else null
+    // Zero-filled fields are used by older captures; retain their full-frame mapping.
+    // Non-zero malformed geometry must never silently be treated as a full image.
+    val areaAbsent = areaWidth == 0 && areaHeight == 0 && areaCenterX == 0 && areaCenterY == 0
+    val mappedRecords = if (completeFrameTable) List(frameCount) { index ->
+        val frame = readFrame(index)
+        when {
+            frame == null -> null
+            displayArea != null -> mapLiveViewFocusFrame(frame, displayArea)
+            areaAbsent -> frame
+            else -> null
+        }
+    } else emptyList()
+    val mappedFrame = mappedRecords.getOrNull(selectedIndex)
+    val visibleFrames = mappedRecords.filterNotNull().distinct()
+    val frameStatus = when {
+        frameCount == 0 -> "none"
+        !completeFrameTable -> "invalid-table"
+        !areaValid && !areaAbsent -> "invalid-area"
+        visibleFrames.isEmpty() -> "no-valid-visible-frame"
+        areaAbsent -> "full-frame"
+        else -> "display-area"
     }
 
     val soundLevels = parseLiveViewSoundLevels(payload, jpegOffset)
 
     return LiveViewMetadata(
         focusJudgement = judgement,
-        selectedFocusFrame = selectedFrame,
+        selectedFocusFrame = mappedFrame,
         trackingCoordinateWidth = coordinateWidth,
         trackingCoordinateHeight = coordinateHeight,
         focusCoordinateWidth = focusCoordinateWidth.takeIf { validFocusCoordinateGrid },
         focusCoordinateHeight = focusCoordinateHeight.takeIf { validFocusCoordinateGrid },
         soundLevels = soundLevels,
-        attitude = parseCompactLiveViewAttitude(payload, jpegOffset)
+        attitude = parseCompactLiveViewAttitude(payload, jpegOffset),
+        focusFrameStatus = frameStatus,
+        focusDisplayArea = displayArea,
+        focusFrames = visibleFrames
     )
 }
 
