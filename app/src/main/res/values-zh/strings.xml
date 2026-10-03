@@ -694,4 +694,6 @@
     <string name="photo_lut_settings">LUT设置</string>
     <string name="filter_rating_stars">%1$d 星</string>
     <string name="filter_rating_enabled">星级筛选</string>
+    <string name="filter_rating_help_title">评级筛选</string>
+    <string name="filter_rating_help_description">读取最近三个拍摄日的星级。关闭后不会读取评级数据。</string>
 </resources>

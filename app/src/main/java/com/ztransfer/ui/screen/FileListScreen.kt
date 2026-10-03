@@ -4424,6 +4424,8 @@ private fun FilterOverlay(
 ) {
     val colors = AppTheme.colors
     val density = LocalDensity.current
+    var showRatingTip by remember { mutableStateOf(false) }
+    var ratingTipAnchor by remember { mutableStateOf<Rect?>(null) }
     var editingDate by remember { mutableStateOf(false) }
     val screenWidth = LocalConfiguration.current.screenWidthDp.dp
     val panelWidth = minOf(
@@ -4595,9 +4597,11 @@ private fun FilterOverlay(
                             exit = fadeOut() + shrinkHorizontally(shrinkTowards = Alignment.End),
                         ) {
                             TipLightbulbButton(
-                                onClick = { },
-                                contentDescription = stringResource(R.string.filter_rating_enabled),
-                                modifier = Modifier.size(34.dp),
+                                onClick = { showRatingTip = true },
+                                contentDescription = stringResource(R.string.filter_rating_help_title),
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .onGloballyPositioned { ratingTipAnchor = it.boundsInRoot() },
                             )
                         }
                         AnimatedVisibility(
@@ -4713,6 +4717,24 @@ private fun FilterOverlay(
                     }
                 }
             }
+        }
+    }
+    if (showRatingTip) {
+        AnchorPopup(
+            anchorBounds = ratingTipAnchor,
+            onDismiss = { showRatingTip = false },
+            panelModifier = Modifier
+                .padding(horizontal = 18.dp, vertical = 8.dp)
+                .widthIn(min = 240.dp, max = 320.dp),
+            panelAlignment = Alignment.TopEnd,
+            shape = RoundedCornerShape(16.dp),
+            dim = false,
+        ) { _ ->
+            TipBubbleContent(
+                title = stringResource(R.string.filter_rating_help_title),
+                items = listOf(TipBubbleItem(stringResource(R.string.filter_rating_help_description))),
+                bulleted = true,
+            )
         }
     }
 }
