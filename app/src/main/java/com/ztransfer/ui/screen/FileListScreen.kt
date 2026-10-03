@@ -833,7 +833,8 @@ fun FileListScreen(
         cameraViewModel.getCamera().takeIf { state.isConnectedToCamera },
         filterRatingEnabled, presentedCameraFiles, paused = transferState.isTransferring || state.isLoadingFiles || previewIndex != null,
         useObjectRating = state.connectionType == CameraConnectionType.USB || !state.isStaConnection,
-        staConnection = state.isStaConnection)
+        staConnection = state.isStaConnection,
+        thumbnailReady = { file -> cameraViewModel.prefetchThumbnail(file) })
     val filterProtected = transferState.filterProtectedOnly
     val filterBurst = transferState.filterBurstOnly
     val filterUntransferred = transferState.filterUntransferredOnly

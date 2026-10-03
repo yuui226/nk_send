@@ -14,7 +14,8 @@ internal data class PhotoRatingScan(val values: Map<Int, Int?> = emptyMap(), val
 @Composable
 internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
     files: List<NikonCamera.FileInfo>, paused: Boolean, useObjectRating: Boolean,
-    staConnection: Boolean): PhotoRatingScan {
+    staConnection: Boolean,
+    thumbnailReady: suspend (NikonCamera.FileInfo) -> Boolean): PhotoRatingScan {
     val generation = camera?.photoRatingGeneration?.collectAsState()?.value ?: 0
     var result by remember(camera, enabled, generation, useObjectRating) { mutableStateOf(PhotoRatingScan(loading = enabled && camera != null)) }
     val latestFiles by rememberUpdatedState(files)
@@ -67,6 +68,15 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
             )
             publish(pending.isNotEmpty())
             if (pause) return@collectLatest
+            if (staConnection && datesForRating(eligiblePhotos).size >= 3) {
+                // Recent thumbnails have priority. Cache hits return immediately; misses
+                // share the existing thumbnail request and only then yield to rating reads.
+                for (file in eligiblePhotos) {
+                    currentCoroutineContext().ensureActive()
+                    if (latestPaused) return@collectLatest
+                    thumbnailReady(file)
+                }
+            }
             var confirmed = 0
             var unknown = 0
             try {
@@ -109,3 +119,6 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
     }
     return result
 }
+
+private fun datesForRating(files: List<NikonCamera.FileInfo>): List<String> =
+    files.asSequence().mapNotNull { it.captureDate?.take(8) }.distinct().take(3).toList()
