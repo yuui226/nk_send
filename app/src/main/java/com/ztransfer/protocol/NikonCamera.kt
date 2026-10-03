@@ -1409,13 +1409,16 @@ class NikonCamera(private val context: Context) {
 
     /** At most 256KiB total; extend the prefix rather than download its first half twice. */
     internal suspend fun readPhotoRatingHeader(file: FileInfo): Int? {
+        // Nikon Z bodies expose the rating field within the first 64 KiB. Keep this
+        // probe small; only extend once when a model does not expose it in that prefix.
+        val ratingChunkBytes = 64 * 1024
         val generation = photoRatingGeneration.value
         suspend fun chunk(offset: Int): ByteArray? = ioGate.withTransferSlice {
             withContext(Dispatchers.IO) {
                 if (!sessionOpen || generation != photoRatingGeneration.value) return@withContext null
                 try {
                     if (!ratingNikonHeaderUnsupported) {
-                        sendCmd(PtpConstants.NK_GET_PARTIAL_OBJECT_EX, file.handle, offset, 0, 131072, 0)
+                        sendCmd(PtpConstants.NK_GET_PARTIAL_OBJECT_EX, file.handle, offset, 0, ratingChunkBytes, 0)
                         val (response, bytes) = recvRespWithPayload()
                         if (response == PtpConstants.RESPONSE_OK) return@withContext bytes
                         if (response == 0x2019) throw RatingReadDeferred()
@@ -1423,7 +1426,7 @@ class NikonCamera(private val context: Context) {
                         ratingNikonHeaderUnsupported = true
                     }
                     if (ratingStandardHeaderUnsupported) return@withContext null
-                    sendCmd(0x101B, file.handle, offset, 131072)
+                    sendCmd(0x101B, file.handle, offset, ratingChunkBytes)
                     val (response, bytes) = recvRespWithPayload()
                     if (response == 0x2019) throw RatingReadDeferred()
                     if (response == 0x2005) ratingStandardHeaderUnsupported = true
@@ -1437,9 +1440,9 @@ class NikonCamera(private val context: Context) {
             }
         }
         val first = chunk(0) ?: return null
-        if (first.size > 131072) return null
+        if (first.size > ratingChunkBytes) return null
         var rating = withContext(Dispatchers.Default) { parsePhotoRating(first) }
-        if (rating == null && first.size == 131072) {
+        if (rating == null && first.size == ratingChunkBytes) {
             val tail = chunk(first.size)
             if (tail != null && tail.size <= 131072) {
                 rating = withContext(Dispatchers.Default) { parsePhotoRating(first + tail) }
