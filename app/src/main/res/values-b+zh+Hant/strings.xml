@@ -692,4 +692,6 @@
     <string name="filter_rating_enabled">星級篩選</string>
     <string name="filter_rating_help_title">評級篩選</string>
     <string name="filter_rating_help_description">讀取最近三個拍攝日的星級。關閉後不會讀取評級資料。</string>
+    <string name="filter_rating_off">關閉</string>
+    <string name="filter_rating_on">開啟</string>
 </resources>

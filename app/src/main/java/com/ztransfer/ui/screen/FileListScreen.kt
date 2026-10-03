@@ -4569,14 +4569,10 @@ private fun FilterOverlay(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
                         FilterChip(
-                            label = buildString {
-                                append(stringResource(R.string.filter_rating_enabled))
-                                if (working.ratingEnabled && ratingProgress.total > 0) {
-                                    append(" ")
-                                    append(ratingProgress.completed.coerceAtMost(ratingProgress.total))
-                                    append("/")
-                                    append(ratingProgress.total)
-                                }
+                            label = when {
+                                !working.ratingEnabled -> stringResource(R.string.filter_rating_off)
+                                ratingProgress.loading && ratingProgress.total > 0 -> "${ratingProgress.completed.coerceAtMost(ratingProgress.total)}/${ratingProgress.total}"
+                                else -> stringResource(R.string.filter_rating_on)
                             },
                             selected = working.ratingEnabled,
                             onClick = {
@@ -4590,7 +4586,8 @@ private fun FilterOverlay(
                                 .graphicsLayer {
                                     alpha = if (working.ratingEnabled && ratingProgress.loading) ratingAlpha else 1f
                                 },
-                            icon = if (working.ratingEnabled && ratingProgress.complete) Icons.Default.Check else Icons.Default.Star,
+                            icon = Icons.Default.Star,
+                            cornerLabel = stringResource(R.string.filter_rating_enabled),
                         )
                         AnimatedVisibility(
                             visible = !working.ratingEnabled,
@@ -4971,6 +4968,7 @@ internal fun FilterChip(
     icon: ImageVector? = null,
     leading: (@Composable (Color) -> Unit)? = null,
     accentColor: Color? = null,
+    cornerLabel: String? = null,
 ) {
     val colors = AppTheme.colors
     val activeColor = accentColor ?: colors.accentBlue
@@ -4986,6 +4984,7 @@ internal fun FilterChip(
         onValueCommitted = {},
         onActivated = onClick,
         wheelHeight = 34.dp,
+        label = cornerLabel,
         cornerRadius = 10.dp,
         optionFontSize = 12.sp,
         optionFontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,

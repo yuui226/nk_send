@@ -698,4 +698,6 @@
     <string name="filter_rating_enabled">Star rating filter</string>
     <string name="filter_rating_help_title">Star rating</string>
     <string name="filter_rating_help_description">Reads ratings for the three most recent shooting dates. Turn it off to skip rating reads.</string>
+    <string name="filter_rating_off">Off</string>
+    <string name="filter_rating_on">On</string>
 </resources>
