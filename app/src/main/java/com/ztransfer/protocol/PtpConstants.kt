@@ -57,6 +57,8 @@ object PtpConstants {
     const val NK_PAIRING_RESULT = 0x935A
 
     const val EVENT_DEVICE_INFO_CHANGED = 0x4008
+    const val EVENT_OBJECT_INFO_CHANGED = 0x4007
+    const val EVENT_MTP_OBJECT_PROP_CHANGED = 0xC801
 
     // 响应码
     const val RESPONSE_OK = 0x2001

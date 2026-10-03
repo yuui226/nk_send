@@ -2643,6 +2643,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         when (event.first) {
             Lab.EVT_OBJECT_ADDED -> enqueueNewCameraObject(cam, event.second.toInt())
             Lab.EVT_OBJECT_REMOVED -> requestHandleCatalogSync(cam, event.second.toInt())
+            PtpConstants.EVENT_OBJECT_INFO_CHANGED,
+            PtpConstants.EVENT_MTP_OBJECT_PROP_CHANGED -> {
+                // Rating changes may keep name, size and handle unchanged. Invalidate only the
+                // affected object; the scanner will re-read it when the camera is idle.
+                cam.invalidatePhotoRating(event.second.toInt())
+            }
         }
     }
 
@@ -2976,6 +2982,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         detectNewHandles: Boolean = false,
     ) {
         val cam = camera ?: return
+        if (!preserveExisting && resumeSnapshot == null) cam.invalidatePhotoRatings()
         val diskCacheForScan = activeThumbnailDiskCache
         if (cam.staDirectObjectReadValidated && !preserveExisting) {
             staScanThumbnailDiskHits = 0

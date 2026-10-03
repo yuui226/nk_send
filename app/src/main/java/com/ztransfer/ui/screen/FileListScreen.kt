@@ -1,5 +1,8 @@
 package com.ztransfer.ui.screen
 
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
+
 import com.ztransfer.util.HistogramMode
 
 import android.app.Activity
@@ -235,6 +238,7 @@ internal data class FileListTransferUiState(
     val storageMode: TransferStorageMode,
     val filterExtensions: Set<String>?,
     val filterProtectedOnly: Boolean,
+    val filterRating: Int? = null,
     val filterBurstOnly: Boolean,
     val filterUntransferredOnly: Boolean,
     val filterStorageSlot: Int?,
@@ -258,6 +262,7 @@ internal fun TransferState.toFileListTransferUiState(): FileListTransferUiState 
         storageMode = storageMode,
         filterExtensions = filterExtensions,
         filterProtectedOnly = filterProtectedOnly,
+        filterRating = filterRating,
         filterBurstOnly = filterBurstOnly,
         filterUntransferredOnly = filterUntransferredOnly,
         filterStorageSlot = filterStorageSlot,
@@ -813,12 +818,18 @@ fun FileListScreen(
         bottom = bottomInset + 12.dp
     )
 
-    // 筛选（类型/保护/连拍/未传输/卡槽/日期）：纯前端过滤——原始 state.files 不动、不触发重新读取；
+    // 筛选不修改原始 state.files；星级按需补读文件头，其余条件均为本地过滤。
     // 预览翻页/分组/网格全部基于过滤后的数据，自然一致。
     //（曾有"横竖构图"筛选,已摘除:ObjectInfo 的宽高是传感器原生方向,竖拍的方向
     // 只在 EXIF Orientation 里且依赖机内"自动旋转图像"设置——ObjectInfo 这条路
     // 判不出构图。将来若做,走 EXIF 头懒采集 + 磁盘缓存,可顺带修显示旋转。）
     val filterExts = transferState.filterExtensions
+    var previewIndex by remember { mutableStateOf<Int?>(null) }
+    val filterRating = transferState.filterRating
+    val ratingScan = rememberPhotoRatings(
+        cameraViewModel.getCamera().takeIf { state.isConnectedToCamera },
+        filterRating != null, presentedCameraFiles, paused = transferState.isTransferring || state.isLoadingFiles || previewIndex != null,
+        useObjectRating = state.connectionType == CameraConnectionType.USB || !state.isStaConnection)
     val filterProtected = transferState.filterProtectedOnly
     val filterBurst = transferState.filterBurstOnly
     val filterUntransferred = transferState.filterUntransferredOnly
@@ -831,6 +842,7 @@ fun FileListScreen(
     val selectedStorageIds = filterStorageSlot?.let(storageIdBySlot::get)
     val filterCriteria = remember(
         filterExts,
+        filterRating,
         filterProtected,
         filterBurst,
         filterUntransferred,
@@ -840,13 +852,14 @@ fun FileListScreen(
         PhotoFilterCriteria(
             extensions = filterExts,
             protectedOnly = filterProtected,
+            rating = filterRating,
             burstOnly = filterBurst,
             untransferredOnly = filterUntransferred,
             storageSlot = filterStorageSlot,
             dateRange = filterDateRange,
         )
     }
-    val filterActive = filterExts != null || filterProtected || filterBurst ||
+    val filterActive = filterRating != null || filterExts != null || filterProtected || filterBurst ||
         filterUntransferred || filterStorageSlot != null || filterDateRange != null
 
     // 设备上实际存在的类型（从未过滤的原始列表提取，供下拉选项自动生成）。
@@ -982,11 +995,13 @@ fun FileListScreen(
     // 分组 / 扁平列表（供长按预览翻页）/ 传输忙碌（缩略图让路）——提到顶层，供内容区与预览层共用。
     val groups = remember(
         presentedCameraFiles, filterExts, filterProtected, filterBurst, filterUntransferred,
+        filterRating, ratingScan.values,
         filterStorageSlot, selectedStorageIds, filterDateRange,
         burstHandles, filteredExportHandles
     ) {
         val files = presentedCameraFiles.asSequence()
             .filter { filterExts == null || it.extension in filterExts }
+            .filter { filterRating == null || ratingScan.values[it.handle] == filterRating }
             .filter { !filterProtected || it.isProtected }
             .filter { !filterBurst || it.handle in burstHandles }
             .filter { !filterUntransferred || it.handle !in filteredExportHandles }
@@ -1061,7 +1076,6 @@ fun FileListScreen(
     val haptics = rememberHaptics(transferState.hapticsEnabled)
 
     // 长按预览：全屏翻页 + 从被长按格子的位置放大展开。
-    var previewIndex by remember { mutableStateOf<Int?>(null) }
     // Every explicit open owns a new pager/cache/gesture lifetime, including close→open races.
     var previewSessionId by remember { mutableStateOf(0L) }
     val latestPreviewVisibilityChanged by rememberUpdatedState(onPreviewVisibilityChanged)
@@ -1548,7 +1562,11 @@ fun FileListScreen(
                             color = colors.onSurfaceVariant.copy(alpha = breatheAlpha)
                         )
                         Spacer(modifier = Modifier.height(12.dp))
-                        Text(stringResource(R.string.no_photos_match_filter), color = colors.onSurfaceVariant)
+                        if (!(filterRating != null && ratingScan.loading)) {
+                            Text(stringResource(R.string.no_photos_match_filter),
+                                color = colors.onSurfaceVariant, modifier = Modifier.padding(horizontal = 24.dp),
+                                textAlign = TextAlign.Center)
+                        }
                         Spacer(modifier = Modifier.height(18.dp))
                         GlassButton(
                             onClick = {
@@ -4455,7 +4473,10 @@ private fun FilterOverlay(
                 )
             } else {
                 Column(
-                    modifier = Modifier.padding(14.dp),
+                    modifier = Modifier
+                        .heightIn(max = (LocalConfiguration.current.screenHeightDp.dp - panelTop - 20.dp).coerceAtLeast(100.dp))
+                        .verticalScroll(rememberScrollState())
+                        .padding(14.dp),
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -4510,6 +4531,22 @@ private fun FilterOverlay(
                     FilterSectionLabel(
                         label = stringResource(R.string.filter_section_status),
                     )
+                    Spacer(Modifier.height(8.dp))
+
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                        val feedback = com.ztransfer.ui.util.rememberHaptics(hapticsEnabled)
+                        for (star in 1..5) {
+                            FavoriteToggleButton(
+                                favorite = star <= (working.rating ?: 0),
+                                enabled = true,
+                                description = stringResource(R.string.filter_rating_stars, star),
+                                onClick = {
+                                    feedback.tick()
+                                    commit(working.copy(rating = if (working.rating == star) null else star))
+                                },
+                            )
+                        }
+                    }
                     Spacer(Modifier.height(8.dp))
 
                     // ---- 标记：保护 / 连拍 / 未传输（独立开关，与日期和类型叠加）----

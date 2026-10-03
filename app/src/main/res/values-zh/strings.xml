@@ -692,4 +692,5 @@
     <string name="photo_lut_shadows">阴影</string>
     <string name="photo_lut_concentration">浓度</string>
     <string name="photo_lut_settings">LUT设置</string>
+    <string name="filter_rating_stars">%1$d 星</string>
 </resources>

@@ -1851,6 +1851,7 @@ internal fun FavoriteToggleButton(
     favorite: Boolean,
     enabled: Boolean,
     onClick: () -> Unit,
+    description: String? = null,
 ) {
     val palette = rememberPhotoEffectFavoriteButtonPalette()
     val markColor by animateColorAsState(
@@ -1881,7 +1882,7 @@ internal fun FavoriteToggleButton(
         ) { selected ->
             Icon(
                 imageVector = if (selected) Icons.Rounded.Star else Icons.Rounded.StarBorder,
-                contentDescription = stringResource(
+                contentDescription = description ?: stringResource(
                     if (selected) R.string.photo_effect_favorite_remove
                     else R.string.photo_effect_favorite_add,
                 ),

@@ -694,4 +694,5 @@
     <string name="photo_lut_shadows">Shadows</string>
     <string name="photo_lut_concentration">Concentration</string>
     <string name="photo_lut_settings">LUT settings</string>
+    <string name="filter_rating_stars">%1$d stars</string>
 </resources>
