@@ -1,6 +1,7 @@
 package com.ztransfer.ui.screen
 
 import androidx.compose.runtime.*
+import android.os.SystemClock
 import com.ztransfer.diagnostics.PhotoGenerationProbe
 import com.ztransfer.protocol.photoRatingSources
 import com.ztransfer.protocol.NikonCamera
@@ -106,6 +107,8 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
             // two pipelines arbitrate through the existing camera request scheduler.
             var confirmed = 0
             var unknown = 0
+            val readStartedAt = SystemClock.elapsedRealtime()
+            var cancelled = false
             try {
                 pending.forEachIndexed { index, file ->
                     currentCoroutineContext().ensureActive()
@@ -120,10 +123,16 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
                     }
                     ratings[file.handle] = resolvedRating
                     if (resolvedRating != null) confirmed++ else unknown++
-                    if (index % 12 == 11) publish(true)
+                    if (index % 12 == 11) {
+                        publish(true)
+                        ratingDiagnostic(
+                            "progress=${ratings.size}/${uniqueSources.size} " +
+                                "elapsed=${SystemClock.elapsedRealtime() - readStartedAt}ms",
+                        )
+                    }
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
-                ratingDiagnostic("scan cancelled generation=$generation confirmed=$confirmed unknown=$unknown")
+                cancelled = true
                 throw e
             } catch (e: Exception) {
                 // A broken transport must not crash Compose or trigger a whole-card retry loop.
@@ -131,9 +140,12 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
                         "error=${e.javaClass.simpleName}",
                 )
             } finally {
-                ratingDiagnostic("scan complete generation=$generation confirmed=$confirmed unknown=$unknown " +
-                        "known=${ratings.size}",
-                )
+                if (!cancelled) {
+                    ratingDiagnostic("complete=${ratings.size}/${uniqueSources.size} " +
+                            "confirmed=$confirmed unknown=$unknown " +
+                            "elapsed=${SystemClock.elapsedRealtime() - readStartedAt}ms",
+                    )
+                }
                 publish(false, complete = ratings.size >= uniqueSources.size && uniqueSources.isNotEmpty())
             }
         }
