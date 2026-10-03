@@ -21,11 +21,13 @@ internal data class PhotoRatingScan(
 internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
     files: List<NikonCamera.FileInfo>, paused: Boolean, useObjectRating: Boolean,
     staConnection: Boolean,
+    listLoading: Boolean,
     thumbnailReady: suspend (NikonCamera.FileInfo) -> Boolean): PhotoRatingScan {
     val generation = camera?.photoRatingGeneration?.collectAsState()?.value ?: 0
     var result by remember(camera, enabled, generation, useObjectRating, staConnection) { mutableStateOf(PhotoRatingScan(loading = enabled && camera != null)) }
     val latestFiles by rememberUpdatedState(files)
     val latestPaused by rememberUpdatedState(paused)
+    val latestListLoading by rememberUpdatedState(listLoading)
     LaunchedEffect(camera, enabled, generation, useObjectRating, staConnection) {
         if (!enabled || camera == null) return@LaunchedEffect
         val ratings = HashMap<Int, Int?>()
@@ -33,14 +35,19 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
         // complete list are intentionally left for the next connection.
         val sessionHandles = HashSet<Int>()
         var sessionInitialized = false
-        snapshotFlow { latestFiles to latestPaused }.collectLatest { (current, pause) ->
+        snapshotFlow { Triple(latestFiles, latestPaused, latestListLoading) }.collectLatest { (current, pause, _) ->
             if (current.isEmpty()) {
                 sessionHandles.clear()
                 sessionInitialized = false
                 ratings.clear()
             } else if (!sessionInitialized && !pause) {
                 sessionHandles += current.map { it.handle }
-                sessionInitialized = true
+                val dates = current.asSequence().mapNotNull { it.captureDate?.take(8) }
+                    .distinct().take(3).count()
+                // Keep collecting handles while the catalog is still arriving. Once three
+                // dates are known, lock the connection snapshot immediately; if this camera
+                // has fewer than three dates, lock when the authoritative list ends.
+                sessionInitialized = dates >= 3 || !latestListLoading
             }
             val allPhotos = current.filter { it.extension in setOf(".jpg", ".jpeg", ".nef", ".nrw", ".mov", ".mp4") }
             val photos = allPhotos.filter { !sessionInitialized || it.handle in sessionHandles }

@@ -831,9 +831,10 @@ fun FileListScreen(
     val filterRatingEnabled = transferState.filterRatingEnabled
     val ratingScan = rememberPhotoRatings(
         cameraViewModel.getCamera().takeIf { state.isConnectedToCamera },
-        filterRatingEnabled, presentedCameraFiles, paused = transferState.isTransferring || state.isLoadingFiles || previewIndex != null,
+        filterRatingEnabled, presentedCameraFiles, paused = transferState.isTransferring || previewIndex != null,
         useObjectRating = state.connectionType == CameraConnectionType.USB || !state.isStaConnection,
         staConnection = state.isStaConnection,
+        listLoading = state.isLoadingFiles,
         thumbnailReady = { file -> cameraViewModel.prefetchThumbnail(file) })
     val filterProtected = transferState.filterProtectedOnly
     val filterBurst = transferState.filterBurstOnly
