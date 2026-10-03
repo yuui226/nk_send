@@ -3417,6 +3417,10 @@ private data class PhotoEffectsPreviewFrameLayout(
 private data class PhotoEffectsPreviewCacheKey(
     val filterId: String?,
     val intensityPercent: Int,
+    val contrast: Int,
+    val saturation: Int,
+    val highlights: Int,
+    val shadows: Int,
 ) {
     companion object {
         fun from(selection: PhotoFilterSelection?): PhotoEffectsPreviewCacheKey =
@@ -3424,8 +3428,12 @@ private data class PhotoEffectsPreviewCacheKey(
                 PhotoEffectsPreviewCacheKey(
                     filterId = it.preset.id,
                     intensityPercent = it.normalizedIntensityPercent,
+                    contrast = it.lutAdjustments.contrast,
+                    saturation = it.lutAdjustments.saturation,
+                    highlights = it.lutAdjustments.highlights,
+                    shadows = it.lutAdjustments.shadows,
                 )
-            } ?: PhotoEffectsPreviewCacheKey(null, 0)
+            } ?: PhotoEffectsPreviewCacheKey(null, 0, 0, 0, 0, 0)
     }
 }
 

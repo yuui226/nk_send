@@ -5643,7 +5643,7 @@ private const val EDITORIAL_FRAME_RENDER_VERSION = 2
 // Film-gallery typography evolves independently. Transfer-side deduplication uses this token,
 // while the editor preview always redraws and therefore cannot reveal a stale-output hit.
 private const val FILM_GALLERY_RENDER_VERSION = 1
-private const val PHOTO_FILTER_RENDER_VERSION = 2
+private const val PHOTO_FILTER_RENDER_VERSION = 3
 
 internal fun isPhotoFrameOutputName(name: String): Boolean =
     PHOTO_FRAME_OUTPUT_PATTERN.containsMatchIn(name)
@@ -5686,7 +5686,15 @@ internal fun photoFrameOutputName(
 /** Changes whenever filter pixels change, so an older derived image cannot mask a new render. */
 internal fun photoFilterRenderFingerprint(filter: PhotoFilterSelection): String =
     MessageDigest.getInstance("SHA-256")
-        .digest("v=$PHOTO_FILTER_RENDER_VERSION\u0000${filter.preset.id}".toByteArray(Charsets.UTF_8))
+        .digest(
+            ("v=$PHOTO_FILTER_RENDER_VERSION\u0000${filter.preset.id}" +
+                "\u0000i=${filter.normalizedIntensityPercent}" +
+                "\u0000c=${filter.lutAdjustments.contrast}" +
+                "\u0000s=${filter.lutAdjustments.saturation}" +
+                "\u0000h=${filter.lutAdjustments.highlights}" +
+                "\u0000sh=${filter.lutAdjustments.shadows}")
+                .toByteArray(Charsets.UTF_8),
+        )
         .take(4)
         .joinToString("") { byte -> "%02x".format(Locale.ROOT, byte.toInt() and 0xff) }
 

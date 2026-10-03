@@ -57,6 +57,7 @@ internal fun rememberPhotoLutDraft(role: String, initial: PhotoFilterSelection?,
 internal fun PhotoLutEditor(state: PhotoLutEditorState, hapticsEnabled: Boolean) {
     val context = LocalContext.current
     var showChooser by remember { mutableStateOf(false) }
+    var lutSettingsExpanded by remember { mutableStateOf(false) }
     val colors = AppTheme.colors
     val lutAccent = lerp(colors.statusConnected, colors.accentBlue, .35f)
     val haptics = rememberHaptics(hapticsEnabled)
@@ -99,6 +100,7 @@ internal fun PhotoLutEditor(state: PhotoLutEditorState, hapticsEnabled: Boolean)
     }
     val empty = options.size == 1
     val active = state.selection != null && !state.loading
+    val lutSettingsLabel = stringResource(R.string.photo_lut_settings)
     SettingsCard(tintColor = lutAccent, borderColor = lutAccent.copy(alpha = .24f)) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             ReleaseCommitWheel(options, (state.pendingUri ?: current).takeIf { it in options },
@@ -112,12 +114,73 @@ internal fun PhotoLutEditor(state: PhotoLutEditorState, hapticsEnabled: Boolean)
                 onLongClick = { showChooser = true; state.refresh() },
                 readOnly = state.loading,
                 accentColor = lutAccent, ambientEffectColor = lutAccent, ambientEffectAlpha = loadingAlpha)
-            ReleaseCommitWheel(remember { (100 downTo 2 step 2).toList() }, state.selection?.normalizedIntensityPercent ?: 80,
-                optionLabel = { "$it%" }, onValueCommitted = state::strength,
-                modifier = Modifier.weight(PHOTO_COLOR_INTENSITY_WEIGHT), label = stringResource(R.string.photo_filter_intensity),
-                wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT, accentColor = lutAccent, enabled = active, onDetent = haptics::tick)
+            ReleaseCommitWheel(
+                options = listOf(Unit),
+                selected = Unit,
+                optionLabel = { lutSettingsLabel },
+                onValueCommitted = {},
+                onActivated = { haptics.tick(); lutSettingsExpanded = !lutSettingsExpanded },
+                modifier = Modifier.weight(PHOTO_COLOR_INTENSITY_WEIGHT),
+                wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
+                accentColor = lutAccent, enabled = active,
+                emphasized = lutSettingsExpanded, showDragHint = false)
             FavoriteToggleButton(current?.toString() in state.favorites, active,
                 { haptics.tick(); state.favorite() })
+        }
+        PhotoColorEffectGroup(visible = lutSettingsExpanded && state.selection != null, spacing = 0.dp) {
+            val adjustments = state.selection?.lutAdjustments ?: com.ztransfer.filter.LutAdjustments()
+            val values = remember { (-100..100 step 5).toList() }
+            key(state.selection?.preset?.id, state.selection?.normalizedIntensityPercent, adjustments) {
+                Column(
+                    Modifier.fillMaxWidth().padding(top = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    ReleaseCommitWheel(
+                        remember { (100 downTo 2 step 2).toList() },
+                        state.selection?.normalizedIntensityPercent ?: 80,
+                        optionLabel = { "$it%" }, onValueCommitted = state::strength,
+                        modifier = Modifier.fillMaxWidth(), label = stringResource(R.string.photo_lut_concentration),
+                        wheelHeight = 34.dp, cornerRadius = 10.dp, optionRowHeight = 16.dp,
+                        optionFontSize = 13.sp, accentColor = lutAccent, enabled = active, onDetent = haptics::tick,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        ReleaseCommitWheel(
+                            values, adjustments.contrast,
+                            optionLabel = { it.toString() }, onValueCommitted = {
+                                state.adjustments(adjustments.copy(contrast = it))
+                            }, modifier = Modifier.weight(1f), label = stringResource(R.string.photo_lut_contrast),
+                            wheelHeight = 34.dp, cornerRadius = 10.dp, optionRowHeight = 16.dp,
+                            optionFontSize = 13.sp, accentColor = lutAccent, enabled = active, onDetent = haptics::tick,
+                        )
+                        ReleaseCommitWheel(
+                            values, adjustments.saturation,
+                            optionLabel = { it.toString() }, onValueCommitted = {
+                                state.adjustments(adjustments.copy(saturation = it))
+                            }, modifier = Modifier.weight(1f), label = stringResource(R.string.photo_lut_saturation),
+                            wheelHeight = 34.dp, cornerRadius = 10.dp, optionRowHeight = 16.dp,
+                            optionFontSize = 13.sp, accentColor = lutAccent, enabled = active, onDetent = haptics::tick,
+                        )
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        ReleaseCommitWheel(
+                            values, adjustments.highlights,
+                            optionLabel = { it.toString() }, onValueCommitted = {
+                                state.adjustments(adjustments.copy(highlights = it))
+                            }, modifier = Modifier.weight(1f), label = stringResource(R.string.photo_lut_highlights),
+                            wheelHeight = 34.dp, cornerRadius = 10.dp, optionRowHeight = 16.dp,
+                            optionFontSize = 13.sp, accentColor = lutAccent, enabled = active, onDetent = haptics::tick,
+                        )
+                        ReleaseCommitWheel(
+                            values, adjustments.shadows,
+                            optionLabel = { it.toString() }, onValueCommitted = {
+                                state.adjustments(adjustments.copy(shadows = it))
+                            }, modifier = Modifier.weight(1f), label = stringResource(R.string.photo_lut_shadows),
+                            wheelHeight = 34.dp, cornerRadius = 10.dp, optionRowHeight = 16.dp,
+                            optionFontSize = 13.sp, accentColor = lutAccent, enabled = active, onDetent = haptics::tick,
+                        )
+                    }
+                }
+            }
         }
     }
     if (showChooser) {

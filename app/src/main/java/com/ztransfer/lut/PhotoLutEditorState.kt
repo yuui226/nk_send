@@ -4,6 +4,7 @@ import android.net.Uri
 import androidx.compose.runtime.*
 import com.ztransfer.R
 import com.ztransfer.filter.PhotoFilterSelection
+import com.ztransfer.filter.LutAdjustments
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -41,7 +42,16 @@ internal class PhotoLutEditorState(
     fun off() { cancel(); selection = null; selectedUri = null }
     fun strength(value: Int) {
         selection = selection?.copy(intensityPercent = value)
-        selectedUri?.let { store.rememberIntensity(it.toString(), value) }
+        selection?.preset?.id?.removePrefix("cube:")?.takeIf { it.matches(Regex("[a-f0-9]{64}")) }
+            ?.let { digest -> store.rememberIntensity(digest, selectedUri?.toString(), value) }
+            ?: selectedUri?.let { store.rememberIntensity(it.toString(), value) }
+    }
+    fun adjustments(value: LutAdjustments) {
+        val current = selection ?: return
+        val normalized = value.normalized()
+        selection = current.copy(lutAdjustments = normalized)
+        current.preset.id.removePrefix("cube:").takeIf { it.matches(Regex("[a-f0-9]{64}")) }
+            ?.let { store.rememberAdjustments(it, normalized) }
     }
     fun favorite() {
         selectedUri?.let { store.toggleFavorite(it.toString()); favorites = store.favorites() }

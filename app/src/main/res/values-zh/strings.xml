@@ -686,4 +686,10 @@
     <string name="remote_focus_manual_fixed">MF（固定）</string>
     <string name="probe_video_remaining">探测录像剩余时长</string>
     <string name="probe_movie_format">探测录像分辨率／帧率</string>
+    <string name="photo_lut_contrast">对比度</string>
+    <string name="photo_lut_saturation">饱和度</string>
+    <string name="photo_lut_highlights">高光</string>
+    <string name="photo_lut_shadows">阴影</string>
+    <string name="photo_lut_concentration">浓度</string>
+    <string name="photo_lut_settings">LUT设置</string>
 </resources>

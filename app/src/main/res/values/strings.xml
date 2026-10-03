@@ -688,4 +688,10 @@
     <string name="remote_focus_manual_fixed">MF (fixed)</string>
     <string name="probe_video_remaining">Probe recording time left</string>
     <string name="probe_movie_format">Probe video resolution / frame rate</string>
+    <string name="photo_lut_contrast">Contrast</string>
+    <string name="photo_lut_saturation">Saturation</string>
+    <string name="photo_lut_highlights">Highlights</string>
+    <string name="photo_lut_shadows">Shadows</string>
+    <string name="photo_lut_concentration">Concentration</string>
+    <string name="photo_lut_settings">LUT settings</string>
 </resources>

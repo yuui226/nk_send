@@ -72,6 +72,7 @@ object PhotoFilterRenderer {
         val preset: PhotoFilterPreset,
         val strength: Float,
         val preserveAlpha: Boolean,
+        val lutAdjustments: LutAdjustments = LutAdjustments(),
         val cubeMapper: PhotoCubeMapper? = null,
         val ncpHueShiftDegrees: Float = 0f,
         val ncpSaturationAdjustment: Float = 0f,
@@ -101,7 +102,11 @@ object PhotoFilterRenderer {
         val preset = selection.preset
         val strength = selection.normalizedIntensityPercent / 100f
         return when (val parameters = preset.parameters) {
-            is CubePhotoFilterParameters -> CompiledFilter(preset, strength, preserveAlpha, cubeMapper = parameters.mapper)
+            is CubePhotoFilterParameters -> CompiledFilter(
+                preset, strength, preserveAlpha,
+                lutAdjustments = selection.lutAdjustments.normalized(),
+                cubeMapper = parameters.mapper,
+            )
             is NcpPhotoFilterParameters -> CompiledFilter(
                 preset = preset,
                 strength = strength,
@@ -275,7 +280,8 @@ object PhotoFilterRenderer {
         } ?: IntArray(requiredPixels)
         val compiled = prepared.cubeMapper?.let { mapper ->
             CompiledFilter(prepared.selection.preset,
-                prepared.selection.normalizedIntensityPercent / 100f, preserveAlpha, cubeMapper = mapper)
+                prepared.selection.normalizedIntensityPercent / 100f, preserveAlpha,
+                lutAdjustments = prepared.selection.lutAdjustments.normalized(), cubeMapper = mapper)
         } ?: compileFilter(prepared.selection,
             preserveAlpha = if (prepared.exactRgbMemo == null) preserveAlpha else false)
         var top = 0
@@ -298,6 +304,7 @@ object PhotoFilterRenderer {
                 if (compiled.cubeMapper != null && prepared.cubeExecution != PhotoLutExecution.KOTLIN) {
                     compiled.cubeMapper.mapRange(pixels, 0, count, compiled.strength,
                         preserveAlpha, prepared.cubeExecution, isCancelled)
+                    applyLutAdjustmentsRange(pixels, 0, count, compiled, isCancelled)
                 } else {
                     // Keep the actual original loop for the baseline and native-unavailable fallback.
                     filterPixelRange(pixels, 0, count, compiled, isCancelled)
@@ -399,7 +406,11 @@ object PhotoFilterRenderer {
 
     private fun filterPixel(color: Int, compiled: CompiledFilter): Int {
         compiled.cubeMapper?.let {
-            return it.map(color, compiled.strength, compiled.preserveAlpha)
+            return LutColorPipeline.apply(
+                it.map(color, compiled.strength, compiled.preserveAlpha),
+                compiled.lutAdjustments,
+                compiled.preserveAlpha,
+            )
         }
         val alpha = if (compiled.preserveAlpha) color ushr 24 and 0xff else 0xff
         if (alpha == 0) return color
@@ -503,6 +514,27 @@ object PhotoFilterRenderer {
             (mixChannel(originalR, filtered ushr 16 and 0xff, compiled.strength) shl 16) or
             (mixChannel(originalG, filtered ushr 8 and 0xff, compiled.strength) shl 8) or
             mixChannel(originalB, filtered and 0xff, compiled.strength)
+    }
+
+    private fun applyLutAdjustmentsRange(
+        pixels: IntArray,
+        start: Int,
+        end: Int,
+        compiled: CompiledFilter,
+        isCancelled: () -> Boolean,
+    ) {
+        if (compiled.lutAdjustments.isNeutral) return
+        var index = start
+        var nextCancellationCheck = start
+        while (index < end) {
+            if (index == nextCancellationCheck) {
+                if (isCancelled()) throw CancellationException("Photo filter render superseded")
+                nextCancellationCheck += CANCELLATION_CHECK_INTERVAL
+            }
+            pixels[index] = LutColorPipeline.apply(
+                pixels[index], compiled.lutAdjustments, compiled.preserveAlpha)
+            index++
+        }
     }
 
     private fun applyNp3TonalControls(
