@@ -144,6 +144,11 @@
     <string name="defer_transfer_start">Transfer after selecting</string>
     <string name="defer_transfer_start_summary">Items added to the transfer queue do not start transferring immediately, so you can keep previewing and selecting photos.</string>
     <string name="organize_transfers_by_date">Save by day</string>
+    <string name="storage_mode">Storage mode</string>
+    <string name="storage_mode_unified">Unified</string>
+    <string name="storage_mode_by_day">By day</string>
+    <string name="storage_mode_by_type">By type</string>
+    <string name="storage_mode_summary">Choose unified, by day, or by file type. Photo effects stay in their separate folder.</string>
     <string name="organize_transfers_by_date_summary">Save files in folders by capture date. When off, save them directly in the transfer folder.</string>
     <string name="cd_start_transfers">Start transfers</string>
     <string name="cd_pause_after_current">Pause after the current item</string>

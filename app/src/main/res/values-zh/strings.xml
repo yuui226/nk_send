@@ -144,6 +144,11 @@
     <string name="defer_transfer_start">选完再传</string>
     <string name="defer_transfer_start_summary">加入传输队列后不会立即开始传输，方便继续预览挑选照片。</string>
     <string name="organize_transfers_by_date">按天保存</string>
+    <string name="storage_mode">存放方式</string>
+    <string name="storage_mode_unified">统一存放</string>
+    <string name="storage_mode_by_day">按天存放</string>
+    <string name="storage_mode_by_type">按类存放</string>
+    <string name="storage_mode_summary">可选择统一存放、按天存放或按类存放；照片效果图仍保存在独立文件夹中。</string>
     <string name="organize_transfers_by_date_summary">按拍摄日期分文件夹保存；关闭后直接保存到传输目录。</string>
     <string name="cd_start_transfers">开始传输</string>
     <string name="cd_pause_after_current">传完当前任务后暂停</string>

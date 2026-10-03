@@ -75,10 +75,7 @@ data class LiveViewMetadata(
     val focusFrameStatus: String = "legacy",
     val focusDisplayArea: LiveViewDisplayArea? = null,
     val focusFrames: List<LiveViewFocusFrame> = listOfNotNull(selectedFocusFrame),
-    val remainingVideoTimeMs: Long? = null,
-    val videoHeaderSize: Int = 0,
-    val videoRemainingRaw: Long? = null,
-    val videoRecordingRaw: Int? = null
+    val remainingVideoTimeMs: Long? = null
 )
 
 /** 一帧完整 Live View 载荷；JPEG 直接从 [jpegOffset] 解码，避免热路径复制。 */
@@ -134,7 +131,6 @@ internal fun parseLiveViewMetadata(
     jpegOffset: Int,
     operation: Int
 ): LiveViewMetadata? {
-    LiveViewVideoDiagnostic.capture(payload, jpegOffset, operation)
     if (
         operation != Lab.NK_GET_LIVE_VIEW_IMG_EX ||
         (jpegOffset != 512 && jpegOffset != 1024) ||
@@ -262,10 +258,7 @@ internal fun parseLiveViewMetadata(
         focusFrameStatus = frameStatus,
         focusDisplayArea = displayArea,
         focusFrames = visibleFrames,
-        remainingVideoTimeMs = parseLiveViewRemainingVideoTime(payload, jpegOffset),
-        videoHeaderSize = jpegOffset,
-        videoRemainingRaw = payload.be32(if (jpegOffset == 512) 384 else 816),
-        videoRecordingRaw = payload[frameTableEnd + 12].toInt() and 0xFF
+        remainingVideoTimeMs = parseLiveViewRemainingVideoTime(payload, jpegOffset)
     )
 }
 

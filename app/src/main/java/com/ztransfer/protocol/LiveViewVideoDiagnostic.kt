@@ -1,42 +1,5 @@
 package com.ztransfer.protocol
 
-/** Passive, bounded diagnostics. No camera I/O; no payload retained outside this call. */
-internal object LiveViewVideoDiagnostic {
-    @Volatile private var enabled = false
-    @Volatile var latest: String = "awaiting fresh frame"
-        private set
-    private var lastSampleNs = 0L
-
-    @Synchronized fun start() {
-        latest = "awaiting fresh frame"
-        lastSampleNs = 0L
-        enabled = true
-    }
-    @Synchronized fun stop() { enabled = false }
-
-    fun capture(payload: ByteArray, headerSize: Int, operation: Int) {
-        if (!enabled) return
-        synchronized(this) {
-            if (!enabled) return
-            val now = System.nanoTime()
-            if (lastSampleNs != 0L && now - lastSampleNs < 1_000_000_000L) return
-            lastSampleNs = now
-            val end = minOf(headerSize, payload.size, 1024).coerceAtLeast(0)
-            fun hex(from: Int, limit: Int): String = buildString {
-                for (i in from until limit.coerceAtMost(end)) {
-                    val b = payload[i].toInt() and 255
-                    append("0123456789ABCDEF"[b ushr 4])
-                    append("0123456789ABCDEF"[b and 15])
-                }
-            }
-            val tail = when (headerSize) { 512 -> 352; 1024 -> 800; else -> 0 }
-            latest = "frame op=${operation.toString(16)} header=$headerSize sampleNs=$now\n" +
-                "head[0..47]=${hex(0, 48)}\n" +
-                "tail[$tail..${end - 1}]=${hex(tail, end)}"
-        }
-    }
-}
-
 /** One read only: does not switch the normal live-view operation or camera mode. */
 internal suspend fun NikonCamera.probeLegacyVideoTime(): String {
     val (response, data) = labCommand(Lab.NK_GET_LIVE_VIEW_IMG)

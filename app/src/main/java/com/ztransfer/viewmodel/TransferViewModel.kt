@@ -460,6 +460,8 @@ internal fun retryableTransferTaskIds(
 private fun NikonCamera.FileInfo.autoTransferIdentity(): String =
     "$fileName|$size|$captureDate"
 
+enum class TransferStorageMode { UNIFIED, BY_DAY, BY_TYPE }
+
 data class TransferState(
     val tasks: List<TransferTask> = emptyList(),
     /** 仅在任务增删或替换时递增；纯状态变化不会让照片页重建 handle -> 列表下标索引。 */
@@ -494,7 +496,7 @@ data class TransferState(
     // 待传模式：空闲时入队只保留 WAITING，由传输页的开始按钮显式放行；默认关闭。
     val deferTransferStart: Boolean = false,
     // 原图按拍摄日写入 ZTyyyy-MM-dd 子目录，派生效果图位于该目录的 ZTFrames 中；默认开启。
-    val organizeTransfersByDate: Boolean = false,
+    val storageMode: TransferStorageMode = TransferStorageMode.UNIFIED,
     // 主题模式：默认跟随系统深浅色，可在设置里固定深色/浅色。
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     // UI 皮肤预设（毛玻璃/经典等），全局配色与纹理风格。
@@ -632,6 +634,10 @@ internal fun restoredPhotoFrameWatermarkOpacityPercent(persisted: Any?): Int {
     return normalizePhotoFrameWatermarkOpacityPercent(rawPercent)
 }
 
+/** Compatibility view for existing callers; new code uses [storageMode]. */
+val TransferState.organizeTransfersByDate: Boolean
+    get() = storageMode == TransferStorageMode.BY_DAY
+
 internal val TransferState.photoFrameWatermark: PhotoFrameWatermark
     get() = PhotoFrameWatermark(
         enabled = photoFrameWatermarkEnabled,
@@ -727,24 +733,33 @@ internal fun transferDateFolderName(
 
 internal fun transferDestinationFolderName(
     captureDate: String?,
-    organizeTransfersByDate: Boolean,
+    storageMode: TransferStorageMode,
     fallbackDate: LocalDate = LocalDate.now(),
 ): String? {
-    if (!organizeTransfersByDate) return null
-    return transferDateFolderName(captureDate, fallbackDate)
+    return when (storageMode) {
+        TransferStorageMode.UNIFIED -> null
+        TransferStorageMode.BY_DAY -> transferDateFolderName(captureDate, fallbackDate)
+        TransferStorageMode.BY_TYPE -> null // resolved from file extension by the task creator
+    }
 }
+
+
+internal fun storageTypeFolderName(fileName: String, mode: TransferStorageMode): String? =
+    if (mode == TransferStorageMode.BY_TYPE) {
+        fileName.substringAfterLast('.', "UNKNOWN").trim().uppercase(Locale.ROOT).ifBlank { "UNKNOWN" }
+    } else null
 
 /** 相机文件是否已在当前保存目录中落盘；列表对号、筛选和任务模式必须共用该判定。 */
 internal fun isTransferredOriginal(
     file: NikonCamera.FileInfo,
     existingExportIndex: ExportedOriginalIndex,
-    organizeTransfersByDate: Boolean,
+    storageMode: TransferStorageMode,
 ): Boolean = existingExportIndex.contains(
     file = file,
     destinationFolderName = transferDestinationFolderName(
         captureDate = file.captureDate,
-        organizeTransfersByDate = organizeTransfersByDate,
-    ),
+        storageMode = storageMode,
+    ) ?: storageTypeFolderName(file.fileName, storageMode),
 )
 
 /** 已入队任务使用入队时锁定的目标目录，不受之后的“按天保存”开关变化影响。 */
@@ -753,6 +768,15 @@ internal fun isTransferredOriginal(
     existingExportIndex: ExportedOriginalIndex,
     destinationFolderName: String?,
 ): Boolean = existingExportIndex.contains(file, destinationFolderName)
+
+internal fun isTransferredOriginal(
+    file: NikonCamera.FileInfo,
+    existingExportIndex: ExportedOriginalIndex,
+    organizeTransfersByDate: Boolean,
+): Boolean = isTransferredOriginal(
+    file, existingExportIndex,
+    if (organizeTransfersByDate) TransferStorageMode.BY_DAY else TransferStorageMode.UNIFIED,
+)
 
 internal fun createQueueTasks(
     files: List<NikonCamera.FileInfo>,
@@ -763,7 +787,25 @@ internal fun createQueueTasks(
     photoFrameMetadataSettings: PhotoFrameMetadataSettings =
         defaultPhotoFrameMetadataSettings(photoFramePreset),
     photoFilter: PhotoFilterSelection? = null,
-    organizeTransfersByDate: Boolean = false,
+    organizeTransfersByDate: Boolean,
+    queuedDate: LocalDate = LocalDate.now(),
+): List<TransferTask> = createQueueTasks(
+    files, photoFrameEnabled, photoFrameBorderEnabled, photoFramePreset,
+    photoFrameWatermark, photoFrameMetadataSettings, photoFilter,
+    if (organizeTransfersByDate) TransferStorageMode.BY_DAY else TransferStorageMode.UNIFIED,
+    queuedDate,
+)
+
+internal fun createQueueTasks(
+    files: List<NikonCamera.FileInfo>,
+    photoFrameEnabled: Boolean,
+    photoFrameBorderEnabled: Boolean = true,
+    photoFramePreset: PhotoFramePreset,
+    photoFrameWatermark: PhotoFrameWatermark,
+    photoFrameMetadataSettings: PhotoFrameMetadataSettings =
+        defaultPhotoFrameMetadataSettings(photoFramePreset),
+    photoFilter: PhotoFilterSelection? = null,
+    storageMode: TransferStorageMode = TransferStorageMode.UNIFIED,
     queuedDate: LocalDate = LocalDate.now(),
 ): List<TransferTask> = files.asSequence()
     // 同一次批量点击按相机文件去重；不同点击始终创建独立任务。
@@ -782,9 +824,9 @@ internal fun createQueueTasks(
             },
             destinationFolderName = transferDestinationFolderName(
                 captureDate = file.captureDate,
-                organizeTransfersByDate = organizeTransfersByDate,
+                storageMode = storageMode,
                 fallbackDate = queuedDate,
-            ),
+            ) ?: storageTypeFolderName(file.fileName, storageMode),
         )
     }
     .toList()
@@ -1196,7 +1238,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 ),
                 autoTransferMode = AutoTransferMode.restored(prefs.getString("auto_transfer_mode", null), prefs.getBoolean("auto_transfer_new_media", false)),
                 deferTransferStart = prefs.getBoolean("defer_transfer_start", false),
-                organizeTransfersByDate = prefs.getBoolean("organize_transfers_by_date", false),
+                storageMode = runCatching { TransferStorageMode.valueOf(prefs.getString("storage_storage_mode", null) ?: if (prefs.getBoolean("organize_transfers_by_date", false)) "BY_DAY" else "UNIFIED") }.getOrDefault(TransferStorageMode.UNIFIED),
                 themeMode = prefs.getString("theme_mode", null)
                     ?.let { m -> ThemeMode.entries.firstOrNull { e -> e.name == m } }
                     ?: ThemeMode.SYSTEM,
@@ -1382,9 +1424,14 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         _state.update { it.copy(deferTransferStart = enabled) }
     }
 
-    fun setOrganizeTransfersByDate(enabled: Boolean) {
-        prefs.edit().putBoolean("organize_transfers_by_date", enabled).apply()
-        _state.update { it.copy(organizeTransfersByDate = enabled) }
+    fun setStorageMode(mode: TransferStorageMode) {
+        prefs.edit().putString("storage_storage_mode", mode.name)
+            .putBoolean("organize_transfers_by_date", mode == TransferStorageMode.BY_DAY).apply()
+        _state.update { it.copy(storageMode = mode, existingExportRevision = it.existingExportRevision + 1L) }
+        // 只扫描新档位自己的目录；不会把其它存放方式纳入已传判定。
+        _state.value.transferDirUri?.let { uri ->
+            viewModelScope.launch(Dispatchers.IO) { refreshExistingExportFiles(Uri.parse(uri), deleteParts = false) }
+        }
     }
 
     /** 保存预览大图的全局旋转方向；任何照片和下次启动都复用。 */
@@ -1918,7 +1965,11 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 add(null to getDirectoryIndex(uri, deleteParts))
                 childDirectories(uri, rootDirectoryUri)
                     .asSequence()
-                    .filter { DATED_TRANSFER_FOLDER_REGEX.matches(it.first) }
+                    .filter { child ->
+                        val mode = _state.value.storageMode
+                        mode == TransferStorageMode.BY_DAY && DATED_TRANSFER_FOLDER_REGEX.matches(child.first) ||
+                            mode == TransferStorageMode.BY_TYPE && !child.first.equals(PHOTO_FRAME_OUTPUT_DIRECTORY, ignoreCase = true)
+                    }
                     .forEach { (folderName, directoryUri) ->
                         add(folderName to getDirectoryIndex(uri, directoryUri, deleteParts))
                     }
@@ -2003,7 +2054,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 snapshot.photoFramePreset,
             ),
             photoFilter = snapshot.photoFilterSelection,
-            organizeTransfersByDate = snapshot.organizeTransfersByDate,
+            storageMode = snapshot.storageMode,
         )
         val admittedTasks = if (cropRecipe == null) newTasks else newTasks.map { it.copy(cropRecipe = cropRecipe) }
         if (admittedTasks.isEmpty()) return

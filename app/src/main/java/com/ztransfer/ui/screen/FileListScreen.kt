@@ -139,6 +139,7 @@ import com.ztransfer.viewmodel.PhotoDateRange
 import com.ztransfer.viewmodel.TransferState
 import com.ztransfer.viewmodel.TransferStatus
 import com.ztransfer.viewmodel.TransferTask
+import com.ztransfer.viewmodel.TransferStorageMode
 import com.ztransfer.viewmodel.TransferViewModel
 import com.ztransfer.viewmodel.compactDateRangeLabel
 import com.ztransfer.viewmodel.isTransferredOriginal
@@ -231,7 +232,7 @@ internal data class FileListTransferUiState(
     val collapseBurstPhotos: Boolean,
     val tapToPreview: Boolean,
     val hapticsEnabled: Boolean,
-    val organizeTransfersByDate: Boolean,
+    val storageMode: TransferStorageMode,
     val filterExtensions: Set<String>?,
     val filterProtectedOnly: Boolean,
     val filterBurstOnly: Boolean,
@@ -254,7 +255,7 @@ internal fun TransferState.toFileListTransferUiState(): FileListTransferUiState 
         collapseBurstPhotos = collapseBurstPhotos,
         tapToPreview = tapToPreview,
         hapticsEnabled = hapticsEnabled,
-        organizeTransfersByDate = organizeTransfersByDate,
+        storageMode = storageMode,
         filterExtensions = filterExtensions,
         filterProtectedOnly = filterProtectedOnly,
         filterBurstOnly = filterBurstOnly,
@@ -320,10 +321,21 @@ internal fun exportedHandlesForUntransferredFilter(
     index: ExportedOriginalIndex,
     organizeTransfersByDate: Boolean,
     enabled: Boolean,
+): Set<Int> = exportedHandlesForUntransferredFilter(
+    files, index,
+    if (organizeTransfersByDate) TransferStorageMode.BY_DAY else TransferStorageMode.UNIFIED,
+    enabled,
+)
+
+internal fun exportedHandlesForUntransferredFilter(
+    files: List<NikonCamera.FileInfo>,
+    index: ExportedOriginalIndex,
+    storageMode: TransferStorageMode,
+    enabled: Boolean,
 ): Set<Int> = if (enabled) {
     files.asSequence()
         .filter { file ->
-            isTransferredOriginal(file, index, organizeTransfersByDate)
+            isTransferredOriginal(file, index, storageMode)
         }
         .mapTo(HashSet()) { it.handle }
 } else {
@@ -895,13 +907,13 @@ fun FileListScreen(
     val exportedHandlesForFilter: Set<Int> = remember(
         presentedCameraFiles,
         transferState.existingExportRevision,
-        transferState.organizeTransfersByDate,
+        transferState.storageMode,
         filterUntransferred,
     ) {
         exportedHandlesForUntransferredFilter(
             files = presentedCameraFiles,
             index = transferState.existingExportIndex,
-            organizeTransfersByDate = transferState.organizeTransfersByDate,
+            storageMode = transferState.storageMode,
             enabled = filterUntransferred,
         )
     }
@@ -1198,7 +1210,7 @@ fun FileListScreen(
         isTransferredOriginal(
             file,
             transferState.existingExportIndex,
-            transferState.organizeTransfersByDate,
+            transferState.storageMode,
         )
     }
     // 单文件入队共用同一套前置检查与任务创建；只有动画按操作来源分流：列表继续
@@ -1564,7 +1576,7 @@ fun FileListScreen(
                 queuedIndexByHandle = queuedIndexByHandle,
                 existingExportIndex = transferState.existingExportIndex,
                 existingExportRevision = transferState.existingExportRevision,
-                organizeTransfersByDate = transferState.organizeTransfersByDate,
+                storageMode = transferState.storageMode,
                 activeProgressFlow = transferViewModel.activeTransferProgress,
                 columns = transferState.thumbnailColumns,
                 isLoading = state.isLoadingFiles,
@@ -3257,7 +3269,7 @@ private fun ThumbnailGrid(
     queuedIndexByHandle: Map<Int, Int>,
     existingExportIndex: ExportedOriginalIndex,
     existingExportRevision: Long,
-    organizeTransfersByDate: Boolean,
+    storageMode: TransferStorageMode,
     activeProgressFlow: StateFlow<ActiveTransferProgress?>,
     columns: Int,
     isLoading: Boolean,
@@ -3586,12 +3598,12 @@ private fun ThumbnailGrid(
                                     file,
                                     existingExportIndex,
                                     existingExportRevision,
-                                    organizeTransfersByDate,
+                                    storageMode,
                                 ) {
                                     isTransferredOriginal(
                                         file,
                                         existingExportIndex,
-                                        organizeTransfersByDate,
+                                        storageMode,
                                     )
                                 }
                                 ThumbnailCell(

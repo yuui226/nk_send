@@ -2,7 +2,6 @@ package com.ztransfer.ui.screen
 
 import com.ztransfer.protocol.probeMovieFormat
 import com.ztransfer.protocol.probeLegacyVideoTime
-import com.ztransfer.protocol.LiveViewVideoDiagnostic
 import com.ztransfer.util.HistogramMode
 import com.ztransfer.lut.LutFolderRepository
 import com.ztransfer.lut.LutMonitorState
@@ -926,25 +925,6 @@ private fun RemoteContent(
     var legacyVideoReport by remember { mutableStateOf("") }
     var legacyVideoBusy by remember { mutableStateOf(false) }
     val videoProbeScope = rememberCoroutineScope()
-    var videoTimeReport by remember { mutableStateOf("") }
-    val videoDiagnosticState by rememberUpdatedState(newValue = {
-        val current = frame
-        val meta = current?.metadata
-        "Video remaining v2: movie=$movieMode recording=$recording disp=${tools.disp.value} landscape=$landscapeLayout\n" +
-            "ageMs=${current?.let { SystemClock.elapsedRealtime() - it.receivedAtElapsedMs }} metadata=${meta != null} rawMs=${meta?.videoRemainingRaw} recFlag=${meta?.videoRecordingRaw} acceptedMs=${meta?.remainingVideoTimeMs}\n" +
-            LiveViewVideoDiagnostic.latest
-    })
-    LaunchedEffect(devPanel) {
-        if (!devPanel) return@LaunchedEffect
-        LiveViewVideoDiagnostic.start()
-        try {
-            while (true) {
-                videoTimeReport = videoDiagnosticState()
-                delay(1_000)
-            }
-        } finally { LiveViewVideoDiagnostic.stop() }
-    }
-
     var recBusy by remember { mutableStateOf(false) }
     var lastStopCmdAt by remember { mutableLongStateOf(0L) }
     // Nikon Z 系远程开录前需要进入应用模式。USB 优先走已验证的 0x9435，
@@ -1765,6 +1745,7 @@ private fun RemoteContent(
     fun startFocus() {
         if (cameraToolWriting || afHeld || tapFocusBusy || focusModeManual || afJob?.isActive == true) return
         tapFocusHideJob?.cancel()
+        tapFocusNonce++ // A fresh half-press must not inherit the previous tap's result colour/handoff.
         tapFocusFeedback = TapFocusFeedback.IDLE
         confirmedFocusMarker = null
         subjectTrackingActive = false
@@ -1845,6 +1826,23 @@ private fun RemoteContent(
     // 后一条重新计满时长，不会被前一条的旧计时器提前掐掉。
     var hintText by remember { mutableStateOf("") }
     var hintVisible by remember { mutableStateOf(false) }
+    var hintAnchor by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
+    val hintDensity = LocalDensity.current
+    var hintHostActive by remember { mutableStateOf(true) }
+    DisposableEffect(Unit) {
+        hintHostActive = true
+        onDispose { hintHostActive = false }
+    }
+    var recordingErrorReport by remember { mutableStateOf("") }
+    fun recordHintDiagnostic(text: String) {
+        recordingErrorReport = (recordingErrorReport + "\n" + text).lines().takeLast(24).joinToString("\n")
+    }
+    fun updateHintAnchor(coordinates: androidx.compose.ui.layout.LayoutCoordinates) {
+        val root = toolOverlayCoordinates ?: return
+        if (root.isAttached && coordinates.isAttached) {
+            hintAnchor = root.localBoundingBoxOf(coordinates, clipBounds = false)
+        }
+    }
     var hintNonce by remember { mutableIntStateOf(0) }
     var hintDurationMs by remember { mutableLongStateOf(2500L) }
     fun showHint(text: String, durationMs: Long = 2500L) {
@@ -2359,11 +2357,8 @@ private fun RemoteContent(
                             result?.diagnosticSummary(),
                             movieUsbSessionDiagnostic
                         ).joinToString("\n").ifEmpty { null }
-                        showHint(
-                            if (diagnostic == null) recFailHint
-                            else "$recFailHint\n$diagnostic",
-                            durationMs = 12_000L
-                        )
+                        recordHintDiagnostic("$recFailHint\n${diagnostic.orEmpty()}")
+                        showHint(recFailHint, durationMs = 12_000L)
                     }
                 } else {
                     lastStopCmdAt = System.currentTimeMillis()   // 之后 2s 内的"已开始"事件按迟到回声忽略
@@ -2412,10 +2407,8 @@ private fun RemoteContent(
                         devLog("!! movie end resp=0x%04X".format(rc and 0xFFFF))
                         // 命令失败时不能假装已经停止，也不能清应用模式；相机若其实已
                         // 自行停止，随后到达的完成/中断事件会纠正 recording 并清理。
-                        showHint(
-                            "$recStopFailHint\nstop=0x%04X".format(rc and 0xFFFF),
-                            durationMs = 6000L
-                        )
+                        recordHintDiagnostic("$recStopFailHint\nstop=0x%04X".format(rc and 0xFFFF))
+                        showHint(recStopFailHint, durationMs = 6000L)
                     }
                 }
             } finally {
@@ -2482,11 +2475,10 @@ private fun RemoteContent(
             } else {
                 recSaveFeedbackJob?.cancel()
                 recSaveSuccess = false
-                android.widget.Toast.makeText(
-                    services.context,
-                    services.context.getString(R.string.cd_remote_rec_toast_failed),
-                    android.widget.Toast.LENGTH_SHORT
-                ).show()
+                val message = services.context.getString(R.string.cd_remote_rec_toast_failed)
+                if (hintHostActive) showHint(message, durationMs = 3000L)
+                else Toast.makeText(services.context, message, Toast.LENGTH_SHORT).show()
+                // 保存可能在退出监看后完成；此时仍需把失败告知用户。
             }
         }
     }
@@ -2837,7 +2829,8 @@ private fun RemoteContent(
                     )
                     BatteryPill(percent = rcBatteryPercentage(batteryParam))
                 }
-                Spacer(Modifier.weight(1f))
+                Box(Modifier.weight(1f).height(40.dp).padding(horizontal = 6.dp)
+                    .onGloballyPositioned { updateHintAnchor(it) })
                 GlassBackButton(
                     onClick = onNavigateBack,
                     forward = true,
@@ -3013,6 +3006,12 @@ private fun RemoteContent(
                 )
 
 
+                Box(
+                    Modifier.offset(x = imageX, y = imageY + imageHeight * .20f)
+                        .width(imageWidth).height(40.dp).padding(horizontal = 12.dp)
+                        .onGloballyPositioned { updateHintAnchor(it) },
+                )
+
                 val cameraDisp = dispMode == MonitorDispMode.CAMERA
                 val detailValues = rememberMonitorDetails(
                     cameraViewModel.getCamera(), movieMode,
@@ -3115,32 +3114,6 @@ private fun RemoteContent(
             )
         }
 
-        // 顶部提示条：视觉与照片列表页的底部玻璃提示条同款（22dp 玻璃 Surface + 投影 +
-        // labelLarge）；位置留在顶部——本页底部是快门键，提示不能压它。
-        AnimatedVisibility(
-            visible = hintVisible,
-            enter = fadeIn(tween(200)) + slideInVertically(tween(200)) { -it / 2 },
-            exit = fadeOut(tween(300)),
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .statusBarsPadding()
-                .padding(top = 60.dp)
-        ) {
-            Surface(
-                shape = RoundedCornerShape(22.dp),
-                color = colors.glassSurfaceHeavy,
-                shadowElevation = 6.dp,
-                border = BorderStroke(1.dp, colors.glassPanelBorder)
-            ) {
-                Text(
-                    hintText,
-                    style = MaterialTheme.typography.labelLarge,
-                    color = colors.onBackground,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
-                )
-            }
-        }
-
         listProp?.let { prop ->
             val listParam = params[prop]
             val localAnchor = toolOverlayCoordinates?.takeIf { it.isAttached }?.let { root ->
@@ -3206,8 +3179,8 @@ private fun RemoteContent(
                         Spacer(Modifier.weight(1f))
                         GlassButton(
                             onClick = {
-                                services.clipboard.setText(AnnotatedString(movieFormatReport + "\n\n" + videoTimeReport + "\n\n" + legacyVideoReport + "\n\n" + focusModeReport))
-                                Toast.makeText(services.context, R.string.code_copied, Toast.LENGTH_SHORT).show()
+                                services.clipboard.setText(AnnotatedString(recordingErrorReport + "\n\n" + movieFormatReport + "\n\n" + legacyVideoReport + "\n\n" + focusModeReport))
+                                showHint(services.context.getString(R.string.code_copied))
                             },
                             contentPadding = PaddingValues(8.dp)
                         ) {
@@ -3274,7 +3247,7 @@ private fun RemoteContent(
                     }
                     Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
                         Spacer(Modifier.height(8.dp))
-                        val logLines = (movieFormatReport + "\n\n" + videoTimeReport + "\n\n" + legacyVideoReport + "\n\n" + focusModeReport).lines()
+                        val logLines = (recordingErrorReport + "\n\n" + movieFormatReport + "\n\n" + legacyVideoReport + "\n\n" + focusModeReport).lines()
                         // 日志跟尾：面板刚打开（尚无布局信息）直接跳到底；此后新行到来时，
                         // 停在底部附近才跟到底，用户上翻查看时不打扰。
                         val logState = rememberLazyListState()
@@ -3381,6 +3354,18 @@ private fun RemoteContent(
                 }
             }, log = { if (selectedTool == RemoteCameraTool.FOCUS_MODE) focusModeLog(it); devLog(it) }, onDismiss = { cameraToolPanel = null; cameraToolCloseRequested = false }) }
     }
+        // 独立于所有菜单开关：点按对焦失败等提示在菜单关闭时也必须显示。
+        // 单一提示层位于页内菜单和日志之上；锚点只在布局变化时更新，不参与取帧。
+        hintAnchor?.let { anchor ->
+            Box(
+                Modifier.offset { androidx.compose.ui.unit.IntOffset(anchor.left.roundToInt(), anchor.top.roundToInt()) }
+                    .width(with(hintDensity) { anchor.width.toDp() })
+                    .height(with(hintDensity) { anchor.height.toDp() }),
+                contentAlignment = Alignment.Center,
+            ) {
+                MonitorHintBubble(hintVisible, hintText, compact = rotation == 0)
+            }
+        }
     BackHandler(enabled = editingTools) { onEditingTools(false) }
         }
     }
@@ -4056,40 +4041,31 @@ private fun ViewfinderImage(
                 else -> null
             }
             val cameraFocus = liveFrame.metadata?.focusFrames.takeIf { focusBlock == null }
-            if (cameraFocus != null) {
-                CameraFocusReticleOverlay(cameraFocus,
-                    liveFrame.metadata?.focusJudgement == LiveViewFocusJudgement.FOCUSED,
-                    displayAspectRatio, viewport.scale, Modifier.matchParentSize(), onFocusDisplay)
-            } else if (tapFocusFeedback != TapFocusFeedback.IDLE) {
-                TapFocusReticleOverlay(
-                    feedback = tapFocusFeedback,
-                    point = tapFocusPoint,
-                    nonce = tapFocusNonce,
-                    imageAspectRatio = displayAspectRatio,
-                    modifier = Modifier.matchParentSize()
-                )
-            } else if (afHeld) {
-                TapFocusReticleOverlay(
-                    feedback = if (afLocked) {
-                        TapFocusFeedback.LOCKED
-                    } else {
-                        TapFocusFeedback.FOCUSING
-                    },
-                    point = afFocusPoint,
-                    nonce = tapFocusNonce,
-                    imageAspectRatio = displayAspectRatio,
-                    modifier = Modifier.matchParentSize()
-                )
+            val marker = confirmedFocusMarker
+            val fallback = marker?.takeIf {
+                !it.subjectTracking && SystemClock.elapsedRealtime() - it.confirmedAtElapsedMs < TAP_FOCUS_MARKER_VISIBLE_MS
             }
+            val feedback = when {
+                tapFocusFeedback != TapFocusFeedback.IDLE -> tapFocusFeedback
+                afHeld -> if (afLocked) TapFocusFeedback.LOCKED else TapFocusFeedback.FOCUSING
+                fallback != null -> TapFocusFeedback.LOCKED
+                else -> TapFocusFeedback.IDLE
+            }
+            FocusReticleOverlay(
+                cameraFrames = cameraFocus,
+                cameraFocused = liveFrame.metadata?.focusJudgement == LiveViewFocusJudgement.FOCUSED,
+                allowHandoff = marker != null && liveFrame.receivedAtElapsedMs >= marker.confirmedAtElapsedMs,
+                feedback = feedback,
+                point = if (tapFocusFeedback != TapFocusFeedback.IDLE) tapFocusPoint
+                    else if (afHeld) afFocusPoint else fallback?.fallbackPoint ?: tapFocusPoint,
+                nonce = tapFocusNonce,
+                imageAspectRatio = displayAspectRatio,
+                zoom = viewport.scale,
+                modifier = Modifier.matchParentSize(),
+            )
             androidx.compose.runtime.SideEffect {
                 if (focusBlock != null) onFocusDisplay?.invoke("blocked=$focusBlock age=${SystemClock.elapsedRealtime() - liveFrame.receivedAtElapsedMs}ms")
-            }
-            val marker = confirmedFocusMarker
-            if (cameraFocus == null && tapFocusFeedback == TapFocusFeedback.IDLE && !afHeld &&
-                marker != null && !marker.subjectTracking &&
-                SystemClock.elapsedRealtime() - marker.confirmedAtElapsedMs < TAP_FOCUS_MARKER_VISIBLE_MS) {
-                TapFocusReticleOverlay(TapFocusFeedback.LOCKED, marker.fallbackPoint,
-                    tapFocusNonce, displayAspectRatio, Modifier.matchParentSize())
+                else onFocusDisplay?.invoke("drawn boxes=${cameraFocus?.size ?: 0}")
             }
             } // Only image-space layers zoom; scopes remain anchored to the panel.
             // Stable composition keeps the outgoing scope alive for its exit animation and
@@ -4601,92 +4577,103 @@ private fun ShutterButton(
     }
 }
 
+/** Focus hints stay outside the portrait image and use a translucent plate over landscape video. */
 @Composable
-private fun TapFocusReticleOverlay(
+private fun MonitorHintBubble(visible: Boolean, text: String, compact: Boolean) {
+    val colors = AppTheme.colors
+    AnimatedVisibility(visible, enter = fadeIn(tween(160)), exit = fadeOut(tween(200))) {
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = if (compact) colors.glassSurfaceHeavy.copy(alpha = .60f) else Color.Black.copy(alpha = .42f),
+            border = BorderStroke(.5.dp, if (compact) colors.glassPanelBorder else Color.White.copy(alpha = .15f)),
+            modifier = Modifier.widthIn(max = 280.dp),
+        ) {
+            Text(text,
+                color = if (compact) colors.onBackground else Color.White.copy(alpha = .95f),
+                style = MaterialTheme.typography.labelMedium,
+                fontSize = if (compact) 11.sp else 12.sp,
+                lineHeight = if (compact) 13.sp else 16.sp,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                maxLines = 2,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                modifier = Modifier.padding(horizontal = if (compact) 8.dp else 12.dp, vertical = 5.dp),
+            )
+        }
+    }
+}
+
+/** Stable layers: packet gaps never recreate the tap animation or turn failure back into focusing. */
+@Composable
+private fun FocusReticleOverlay(
+    cameraFrames: List<LiveViewFocusFrame>?,
+    cameraFocused: Boolean,
+    allowHandoff: Boolean,
     feedback: TapFocusFeedback,
     point: Offset,
     nonce: Int,
     imageAspectRatio: Float,
-    modifier: Modifier = Modifier
-) {
-    val colors = AppTheme.colors
-    val appearScale = remember { Animatable(1.45f) }
-    LaunchedEffect(nonce) {
-        appearScale.snapTo(1.45f)
-        appearScale.animateTo(1f, tween(180))
-    }
-    val resultScale by animateFloatAsState(
-        targetValue = if (feedback == TapFocusFeedback.FOCUSING) 1f else 0.9f,
-        animationSpec = Motion.bouncy(),
-        label = "tapAfResult"
-    )
-    val reticleColor = when (feedback) {
-        TapFocusFeedback.LOCKED -> colors.statusConnected
-        TapFocusFeedback.FAILED -> colors.statusError
-        else -> colors.accentBlue
-    }.copy(alpha = 0.95f)
-
-    Canvas(modifier) {
-        val imageRect = fitCenterRect(size.width, size.height, imageAspectRatio)
-        val scale = appearScale.value * resultScale
-        val half = 32.dp.toPx() * scale
-        val len = 12.dp.toPx() * scale
-        val stroke = 2.dp.toPx()
-        val requestedCenter = Offset(
-            imageRect.left + imageRect.width * point.x.coerceIn(0f, 1f),
-            imageRect.top + imageRect.height * point.y.coerceIn(0f, 1f)
-        )
-        // 只约束反馈框的绘制位置，发给相机的坐标仍是用户真实点位。
-        // 这样点画面边缘时框不会被圆角取景器裁掉一半。
-        val center = Offset(
-            if (imageRect.width >= half * 2f) {
-                requestedCenter.x.coerceIn(imageRect.left + half, imageRect.right - half)
-            } else imageRect.center.x,
-            if (imageRect.height >= half * 2f) {
-                requestedCenter.y.coerceIn(imageRect.top + half, imageRect.bottom - half)
-            } else imageRect.center.y
-        )
-        drawFocusCornerReticle(
-            center = center,
-            halfSize = half,
-            cornerLength = len,
-            color = reticleColor,
-            strokeWidth = stroke
-        )
-    }
-}
-
-/** Camera geometry is drawn without a minimum-size expansion or position animation. */
-@Composable
-private fun CameraFocusReticleOverlay(
-    frames: List<LiveViewFocusFrame>,
-    focused: Boolean,
-    imageAspectRatio: Float,
     zoom: Float,
     modifier: Modifier,
-    onFocusDisplay: ((String) -> Unit)?
 ) {
-    // Z30 reports its multiple AF areas in yellow; a global focus flag cannot prove every area is focused.
-    val color = if (frames.size > 1) Color(0xFFFFDEA0).copy(alpha = 0.94f)
-        else if (focused) Color(0xFF67E58B) else Color.White
-    // Reuse a single path for all areas; two draw passes, no per-frame Path allocation.
+    var handedOff by remember(nonce, feedback == TapFocusFeedback.FOCUSING) { mutableStateOf(false) }
+    val handoff = feedback == TapFocusFeedback.LOCKED && allowHandoff && !cameraFrames.isNullOrEmpty()
+    LaunchedEffect(handoff, nonce) {
+        if (handoff) {
+            delay(120) // Let the success colour settle before yielding to fresh camera geometry.
+            handedOff = true
+        }
+    }
+    val suppressCamera = feedback == TapFocusFeedback.FOCUSING || feedback == TapFocusFeedback.FAILED ||
+        (feedback == TapFocusFeedback.LOCKED && !handedOff)
+    val cameraVisible = !suppressCamera && !cameraFrames.isNullOrEmpty()
+    val tapVisible = feedback != TapFocusFeedback.IDLE && !handedOff
+    var lastFrames by remember { mutableStateOf(emptyList<LiveViewFocusFrame>()) }
+    var lastFocused by remember { mutableStateOf(false) }
+    SideEffect {
+        if (!cameraFrames.isNullOrEmpty()) {
+            lastFrames = cameraFrames
+            lastFocused = cameraFocused
+        }
+    }
+    val cameraAlpha = animateFloatAsState(if (cameraVisible) 1f else 0f, tween(160), label = "cameraAfAlpha")
+    val tapAlpha = animateFloatAsState(if (tapVisible) 1f else 0f, tween(160), label = "tapAfAlpha")
+    val appearScale = remember { Animatable(1f) }
+    LaunchedEffect(nonce, feedback == TapFocusFeedback.FOCUSING) {
+        if (feedback == TapFocusFeedback.FOCUSING) {
+            appearScale.snapTo(1.12f)
+        }
+        appearScale.animateTo(1f, tween(180, easing = FastOutSlowInEasing))
+    }
+    // Keep the outgoing result's colour while fading; IDLE must not flash white.
+    var lastFeedback by remember { mutableStateOf(TapFocusFeedback.FOCUSING) }
+    var lastPoint by remember { mutableStateOf(point) }
+    SideEffect {
+        if (feedback != TapFocusFeedback.IDLE) {
+            lastFeedback = feedback
+            lastPoint = point
+        }
+    }
+    val displayPoint = if (feedback == TapFocusFeedback.IDLE) lastPoint else point
+    val effectiveFeedback = if (feedback == TapFocusFeedback.IDLE) lastFeedback else feedback
+    val tapColor = key(nonce) {
+        // New requests start neutral rather than briefly inheriting the previous red/green.
+        animateColorAsState(when (effectiveFeedback) {
+            TapFocusFeedback.LOCKED -> Color(0xFF67E58B)
+            TapFocusFeedback.FAILED -> Color(0xFFFF7777)
+            else -> Color.White
+        }, tween(150), label = "tapAfColor")
+    }
+    val cameraColor = animateColorAsState(
+        if (lastFrames.size > 1) Color(0xFFFFDEA0) else if (lastFocused) Color(0xFF67E58B) else Color.White,
+        tween(150), label = "cameraAfColor")
     val outline = remember { androidx.compose.ui.graphics.Path() }
     Canvas(modifier) {
         val image = fitCenterRect(size.width, size.height, imageAspectRatio)
-        if (image.width <= 0f || image.height <= 0f) {
-            onFocusDisplay?.invoke("blocked=empty-canvas")
-            return@Canvas
-        }
-        outline.reset()
+        if (image.width <= 0f || image.height <= 0f) return@Canvas
         val scale = zoom.coerceAtLeast(1f)
-        for (frame in frames) {
-            val halfWidth = image.width * frame.width / 2f
-            val halfHeight = image.height * frame.height / 2f
-            if (halfWidth <= 0f || halfHeight <= 0f) continue
-            val center = Offset(image.left + image.width * frame.centerX, image.top + image.height * frame.centerY)
-            val arm = minOf(4.5.dp.toPx() / scale, halfWidth * 0.65f, halfHeight * 0.65f)
-            val radius = minOf(1.4.dp.toPx() / scale, arm * 0.45f)
-            // Each corner is one continuous curve: no overlapping strokes at the elbow.
+        fun corners(center: Offset, halfWidth: Float, halfHeight: Float) {
+            val arm = minOf(5.dp.toPx() / scale, halfWidth * .65f, halfHeight * .65f)
+            val radius = minOf(1.4.dp.toPx() / scale, arm * .45f)
             for (xSign in -1..1 step 2) for (ySign in -1..1 step 2) {
                 val x = center.x + xSign * halfWidth
                 val y = center.y + ySign * halfHeight
@@ -4696,15 +4683,33 @@ private fun CameraFocusReticleOverlay(
                 outline.lineTo(x, y - ySign * arm)
             }
         }
-        drawPath(outline, Color.Black.copy(alpha = 0.24f),
-            style = androidx.compose.ui.graphics.drawscope.Stroke(2.1.dp.toPx() / scale, cap = StrokeCap.Round))
-        drawPath(outline, color,
-            style = androidx.compose.ui.graphics.drawscope.Stroke(1.15.dp.toPx() / scale, cap = StrokeCap.Round))
-        onFocusDisplay?.invoke("drawn boxes=${frames.size}")
+        fun paint(color: Color, alpha: Float) {
+            drawPath(outline, Color.Black.copy(alpha = .24f * alpha),
+                style = androidx.compose.ui.graphics.drawscope.Stroke(2.1.dp.toPx() / scale, cap = StrokeCap.Round))
+            drawPath(outline, color.copy(alpha = .94f * alpha),
+                style = androidx.compose.ui.graphics.drawscope.Stroke(1.15.dp.toPx() / scale, cap = StrokeCap.Round))
+        }
+        if (cameraAlpha.value > 0f) {
+            outline.reset()
+            for (frame in cameraFrames ?: lastFrames) {
+                corners(Offset(image.left + image.width * frame.centerX, image.top + image.height * frame.centerY),
+                    image.width * frame.width / 2f, image.height * frame.height / 2f)
+            }
+            paint(cameraColor.value, cameraAlpha.value)
+        }
+        if (tapAlpha.value > 0f) {
+            outline.reset()
+            val half = minOf(22.dp.toPx() / scale * appearScale.value, image.width / 2f, image.height / 2f)
+            // Reserve the largest entrance footprint: shrinking must not slide edge taps sideways.
+            val inset = minOf(22.dp.toPx() / scale * 1.12f, image.width / 2f, image.height / 2f)
+            val center = Offset(
+                (image.left + image.width * displayPoint.x).coerceIn(image.left + inset, image.right - inset),
+                (image.top + image.height * displayPoint.y).coerceIn(image.top + inset, image.bottom - inset))
+            corners(center, half, half)
+            paint(tapColor.value, tapAlpha.value)
+        }
     }
 }
-
-
 
 /** Shared column tracks distribute spare width evenly and align all toolbar rows. */
 @Composable

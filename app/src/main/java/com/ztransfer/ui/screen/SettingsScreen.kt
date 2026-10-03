@@ -8,6 +8,7 @@ import com.ztransfer.effects.showsPhotoEffect
 import com.ztransfer.frame.supportsBackdropControls
 
 import com.ztransfer.viewmodel.AutoTransferMode
+import com.ztransfer.viewmodel.TransferStorageMode
 
 import android.Manifest
 import android.bluetooth.BluetoothAdapter
@@ -1034,10 +1035,9 @@ fun SettingsOverlay(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    BooleanSettingsWheel(
-                        label = stringResource(R.string.organize_transfers_by_date),
-                        checked = state.organizeTransfersByDate,
-                        onCheckedChange = viewModel::setOrganizeTransfersByDate,
+                    StorageModeWheel(
+                        mode = state.storageMode,
+                        onModeChanged = viewModel::setStorageMode,
                         hapticsEnabled = state.hapticsEnabled,
                         enabled = state.transferDirUri != null,
                         modifier = Modifier.weight(1f),
@@ -1525,8 +1525,8 @@ private fun MainSettingsInfoBubble(
     } ?: 64.dp
     val items = listOf(
         TipBubbleItem(
-            label = stringResource(R.string.organize_transfers_by_date),
-            text = stringResource(R.string.organize_transfers_by_date_summary),
+            label = stringResource(R.string.storage_mode),
+            text = stringResource(R.string.storage_mode_summary),
         ),
         TipBubbleItem(
             label = stringResource(R.string.auto_transfer_new_media),
@@ -3620,6 +3620,32 @@ private fun BooleanSettingsWheel(
         optionFontSize = if (compact) COMPACT_SETTINGS_WHEEL_FONT_SIZE else 14.sp,
         modifier = modifier,
         enabled = enabled,
+    )
+}
+
+@Composable
+private fun StorageModeWheel(
+    mode: TransferStorageMode,
+    onModeChanged: (TransferStorageMode) -> Unit,
+    hapticsEnabled: Boolean,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val colors = AppTheme.colors
+    val haptics = rememberHaptics(hapticsEnabled)
+    val labels = mapOf(
+        TransferStorageMode.UNIFIED to stringResource(R.string.storage_mode_unified),
+        TransferStorageMode.BY_DAY to stringResource(R.string.storage_mode_by_day),
+        TransferStorageMode.BY_TYPE to stringResource(R.string.storage_mode_by_type),
+    )
+    ReleaseCommitWheel(
+        options = TransferStorageMode.entries.toList(), selected = mode,
+        optionLabel = { labels.getValue(it) }, onValueCommitted = onModeChanged,
+        onDetent = haptics::tick, label = stringResource(R.string.storage_mode),
+        accentColor = if (mode == TransferStorageMode.UNIFIED) colors.statusWaiting else colors.accentBlue,
+        emphasized = mode != TransferStorageMode.UNIFIED,
+        wheelHeight = BOOLEAN_SETTINGS_WHEEL_HEIGHT, optionRowHeight = 18.dp,
+        optionFontSize = 14.sp, modifier = modifier, enabled = enabled,
     )
 }
 

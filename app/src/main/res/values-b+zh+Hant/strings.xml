@@ -144,6 +144,11 @@
     <string name="defer_transfer_start">選完再傳</string>
     <string name="defer_transfer_start_summary">加入傳輸佇列後不會立即開始傳輸，方便繼續預覽挑選照片。</string>
     <string name="organize_transfers_by_date">按天儲存</string>
+    <string name="storage_mode">儲存方式</string>
+    <string name="storage_mode_unified">統一儲存</string>
+    <string name="storage_mode_by_day">按天儲存</string>
+    <string name="storage_mode_by_type">按類儲存</string>
+    <string name="storage_mode_summary">可選擇統一儲存、按天儲存或按類儲存；照片效果圖仍保存在獨立資料夾中。</string>
     <string name="organize_transfers_by_date_summary">依拍攝日期分資料夾儲存；關閉後直接儲存到傳輸目錄。</string>
     <string name="cd_start_transfers">開始傳輸</string>
     <string name="cd_pause_after_current">傳完目前任務後暫停</string>
