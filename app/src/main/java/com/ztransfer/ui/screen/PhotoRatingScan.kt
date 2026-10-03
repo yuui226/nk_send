@@ -21,8 +21,7 @@ internal data class PhotoRatingScan(
 internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
     files: List<NikonCamera.FileInfo>, paused: Boolean, useObjectRating: Boolean,
     staConnection: Boolean,
-    listLoading: Boolean,
-    thumbnailReady: suspend (NikonCamera.FileInfo) -> Boolean): PhotoRatingScan {
+    listLoading: Boolean): PhotoRatingScan {
     val generation = camera?.photoRatingGeneration?.collectAsState()?.value ?: 0
     var result by remember(camera, enabled, generation, useObjectRating, staConnection) { mutableStateOf(PhotoRatingScan(loading = enabled && camera != null)) }
     val latestFiles by rememberUpdatedState(files)
@@ -82,23 +81,17 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
                 )
             }
             val pending = uniqueSources.filterNot { ratings.containsKey(it.handle) }
-            PhotoGenerationProbe.note(
-                "RATING",
-                "scan start generation=$generation files=${eligiblePhotos.size} sources=${uniqueSources.size} " +
+            ratingDiagnostic("scan start generation=$generation files=${eligiblePhotos.size} sources=${uniqueSources.size} " +
                     "cached=${uniqueSources.size - pending.size} pending=${pending.size} " +
                     "source=${if (useObjectRating) "object+header" else "header"} paused=$pause",
             )
             publish(pending.isNotEmpty())
             if (pause) return@collectLatest
-            if (staConnection && datesForRating(eligiblePhotos).size >= 3) {
-                // Recent thumbnails have priority. Cache hits return immediately; misses
-                // share the existing thumbnail request and only then yield to rating reads.
-                for (file in eligiblePhotos) {
-                    currentCoroutineContext().ensureActive()
-                    if (latestPaused) return@collectLatest
-                    thumbnailReady(file)
-                }
-            }
+            // The thumbnail pipeline owns camera thumbnail requests and already prioritizes
+            // the newest three dates. Do not prefetch them serially here: doing so made the
+            // rating scan wait for every thumbnail (including invisible/background items).
+            // Once the three-date boundary is known, rating reads start immediately and the
+            // two pipelines arbitrate through the existing camera request scheduler.
             var confirmed = 0
             var unknown = 0
             try {
@@ -118,19 +111,15 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
                     if (index % 12 == 11) publish(true)
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
-                PhotoGenerationProbe.note("RATING", "scan cancelled generation=$generation confirmed=$confirmed unknown=$unknown")
+                ratingDiagnostic("scan cancelled generation=$generation confirmed=$confirmed unknown=$unknown")
                 throw e
             } catch (e: Exception) {
                 // A broken transport must not crash Compose or trigger a whole-card retry loop.
-                PhotoGenerationProbe.note(
-                    "RATING",
-                    "scan stopped generation=$generation confirmed=$confirmed unknown=$unknown " +
+                ratingDiagnostic("scan stopped generation=$generation confirmed=$confirmed unknown=$unknown " +
                         "error=${e.javaClass.simpleName}",
                 )
             } finally {
-                PhotoGenerationProbe.note(
-                    "RATING",
-                    "scan complete generation=$generation confirmed=$confirmed unknown=$unknown " +
+                ratingDiagnostic("scan complete generation=$generation confirmed=$confirmed unknown=$unknown " +
                         "known=${ratings.size}",
                 )
                 publish(false, complete = ratings.size >= uniqueSources.size && uniqueSources.isNotEmpty())
@@ -138,6 +127,11 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
         }
     }
     return result
+}
+
+internal fun ratingDiagnostic(message: String) {
+    PhotoGenerationProbe.note("RATING", message)
+    RatingDiagnostics.note(message)
 }
 
 private fun datesForRating(files: List<NikonCamera.FileInfo>): List<String> =

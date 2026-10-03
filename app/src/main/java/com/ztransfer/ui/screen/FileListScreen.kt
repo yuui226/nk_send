@@ -109,12 +109,14 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
@@ -834,8 +836,7 @@ fun FileListScreen(
         filterRatingEnabled, presentedCameraFiles, paused = transferState.isTransferring || previewIndex != null,
         useObjectRating = state.connectionType == CameraConnectionType.USB || !state.isStaConnection,
         staConnection = state.isStaConnection,
-        listLoading = state.isLoadingFiles,
-        thumbnailReady = { file -> cameraViewModel.prefetchThumbnail(file) })
+        listLoading = state.isLoadingFiles)
     val filterProtected = transferState.filterProtectedOnly
     val filterBurst = transferState.filterBurstOnly
     val filterUntransferred = transferState.filterUntransferredOnly
@@ -4424,6 +4425,7 @@ private fun FilterOverlay(
     onDismiss: () -> Unit
 ) {
     val colors = AppTheme.colors
+    val clipboard = LocalClipboardManager.current
     val density = LocalDensity.current
     var showRatingTip by remember { mutableStateOf(false) }
     var ratingTipAnchor by remember { mutableStateOf<Rect?>(null) }
@@ -4586,8 +4588,10 @@ private fun FilterOverlay(
                                 .graphicsLayer {
                                     alpha = if (working.ratingEnabled && ratingProgress.loading) ratingAlpha else 1f
                                 },
-                            icon = Icons.Default.Star,
                             cornerLabel = stringResource(R.string.filter_rating_enabled),
+                            onLongClick = if (working.ratingEnabled) {
+                                { clipboard.setText(AnnotatedString(RatingDiagnostics.snapshot())) }
+                            } else null,
                         )
                         AnimatedVisibility(
                             visible = !working.ratingEnabled,
@@ -4969,6 +4973,7 @@ internal fun FilterChip(
     leading: (@Composable (Color) -> Unit)? = null,
     accentColor: Color? = null,
     cornerLabel: String? = null,
+    onLongClick: (() -> Unit)? = null,
 ) {
     val colors = AppTheme.colors
     val activeColor = accentColor ?: colors.accentBlue
@@ -4983,6 +4988,7 @@ internal fun FilterChip(
         optionLabel = { it },
         onValueCommitted = {},
         onActivated = onClick,
+        onLongClick = onLongClick,
         wheelHeight = 34.dp,
         label = cornerLabel,
         cornerRadius = 10.dp,
