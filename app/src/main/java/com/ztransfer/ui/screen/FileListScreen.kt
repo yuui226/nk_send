@@ -238,6 +238,7 @@ internal data class FileListTransferUiState(
     val storageMode: TransferStorageMode,
     val filterExtensions: Set<String>?,
     val filterProtectedOnly: Boolean,
+    val filterRatingEnabled: Boolean = false,
     val filterRating: Int? = null,
     val filterBurstOnly: Boolean,
     val filterUntransferredOnly: Boolean,
@@ -262,6 +263,7 @@ internal fun TransferState.toFileListTransferUiState(): FileListTransferUiState 
         storageMode = storageMode,
         filterExtensions = filterExtensions,
         filterProtectedOnly = filterProtectedOnly,
+        filterRatingEnabled = filterRatingEnabled,
         filterRating = filterRating,
         filterBurstOnly = filterBurstOnly,
         filterUntransferredOnly = filterUntransferredOnly,
@@ -826,10 +828,12 @@ fun FileListScreen(
     val filterExts = transferState.filterExtensions
     var previewIndex by remember { mutableStateOf<Int?>(null) }
     val filterRating = transferState.filterRating
+    val filterRatingEnabled = transferState.filterRatingEnabled
     val ratingScan = rememberPhotoRatings(
         cameraViewModel.getCamera().takeIf { state.isConnectedToCamera },
-        filterRating != null, presentedCameraFiles, paused = transferState.isTransferring || state.isLoadingFiles || previewIndex != null,
-        useObjectRating = state.connectionType == CameraConnectionType.USB || !state.isStaConnection)
+        filterRatingEnabled, presentedCameraFiles, paused = transferState.isTransferring || state.isLoadingFiles || previewIndex != null,
+        useObjectRating = state.connectionType == CameraConnectionType.USB || !state.isStaConnection,
+        staConnection = state.isStaConnection)
     val filterProtected = transferState.filterProtectedOnly
     val filterBurst = transferState.filterBurstOnly
     val filterUntransferred = transferState.filterUntransferredOnly
@@ -843,6 +847,7 @@ fun FileListScreen(
     val filterCriteria = remember(
         filterExts,
         filterRating,
+        filterRatingEnabled,
         filterProtected,
         filterBurst,
         filterUntransferred,
@@ -852,6 +857,7 @@ fun FileListScreen(
         PhotoFilterCriteria(
             extensions = filterExts,
             protectedOnly = filterProtected,
+            ratingEnabled = filterRatingEnabled,
             rating = filterRating,
             burstOnly = filterBurst,
             untransferredOnly = filterUntransferred,
@@ -859,7 +865,7 @@ fun FileListScreen(
             dateRange = filterDateRange,
         )
     }
-    val filterActive = filterRating != null || filterExts != null || filterProtected || filterBurst ||
+    val filterActive = filterRatingEnabled || filterExts != null || filterProtected || filterBurst ||
         filterUntransferred || filterStorageSlot != null || filterDateRange != null
 
     // 设备上实际存在的类型（从未过滤的原始列表提取，供下拉选项自动生成）。
@@ -995,13 +1001,13 @@ fun FileListScreen(
     // 分组 / 扁平列表（供长按预览翻页）/ 传输忙碌（缩略图让路）——提到顶层，供内容区与预览层共用。
     val groups = remember(
         presentedCameraFiles, filterExts, filterProtected, filterBurst, filterUntransferred,
-        filterRating, ratingScan.values,
+        filterRating, filterRatingEnabled, ratingScan.values,
         filterStorageSlot, selectedStorageIds, filterDateRange,
         burstHandles, filteredExportHandles
     ) {
         val files = presentedCameraFiles.asSequence()
             .filter { filterExts == null || it.extension in filterExts }
-            .filter { filterRating == null || ratingScan.values[it.handle] == filterRating }
+            .filter { !filterRatingEnabled || filterRating == null || ratingScan.values[it.handle] == filterRating }
             .filter { !filterProtected || it.isProtected }
             .filter { !filterBurst || it.handle in burstHandles }
             .filter { !filterUntransferred || it.handle !in filteredExportHandles }
@@ -1562,7 +1568,7 @@ fun FileListScreen(
                             color = colors.onSurfaceVariant.copy(alpha = breatheAlpha)
                         )
                         Spacer(modifier = Modifier.height(12.dp))
-                        if (!(filterRating != null && ratingScan.loading)) {
+                        if (!(filterRatingEnabled && filterRating != null && ratingScan.loading)) {
                             Text(stringResource(R.string.no_photos_match_filter),
                                 color = colors.onSurfaceVariant, modifier = Modifier.padding(horizontal = 24.dp),
                                 textAlign = TextAlign.Center)
@@ -4533,16 +4539,36 @@ private fun FilterOverlay(
                     )
                     Spacer(Modifier.height(8.dp))
 
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                    FilterChip(
+                        label = stringResource(R.string.filter_rating_enabled),
+                        selected = working.ratingEnabled,
+                        onClick = {
+                            commit(working.copy(
+                                ratingEnabled = !working.ratingEnabled,
+                                rating = if (working.ratingEnabled) null else working.rating,
+                            ))
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        icon = Icons.Default.Star,
+                    )
+                    Spacer(Modifier.height(8.dp))
+
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                    ) {
                         val feedback = com.ztransfer.ui.util.rememberHaptics(hapticsEnabled)
                         for (star in 1..5) {
                             FavoriteToggleButton(
                                 favorite = star <= (working.rating ?: 0),
-                                enabled = true,
+                                enabled = working.ratingEnabled,
                                 description = stringResource(R.string.filter_rating_stars, star),
                                 onClick = {
                                     feedback.tick()
-                                    commit(working.copy(rating = if (working.rating == star) null else star))
+                                    commit(working.copy(
+                                        ratingEnabled = true,
+                                        rating = if (working.rating == star) null else star,
+                                    ))
                                 },
                             )
                         }

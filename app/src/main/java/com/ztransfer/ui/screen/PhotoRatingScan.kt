@@ -13,7 +13,8 @@ internal data class PhotoRatingScan(val values: Map<Int, Int?> = emptyMap(), val
 /** Reuse ratings captured during listing; only supplement missing photo headers while filtering. */
 @Composable
 internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
-    files: List<NikonCamera.FileInfo>, paused: Boolean, useObjectRating: Boolean): PhotoRatingScan {
+    files: List<NikonCamera.FileInfo>, paused: Boolean, useObjectRating: Boolean,
+    staConnection: Boolean): PhotoRatingScan {
     val generation = camera?.photoRatingGeneration?.collectAsState()?.value ?: 0
     var result by remember(camera, enabled, generation, useObjectRating) { mutableStateOf(PhotoRatingScan(loading = enabled && camera != null)) }
     val latestFiles by rememberUpdatedState(files)
@@ -21,13 +22,35 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
     LaunchedEffect(camera, enabled, generation, useObjectRating) {
         if (!enabled || camera == null) return@LaunchedEffect
         val ratings = HashMap<Int, Int?>()
+        // A rating snapshot belongs to one connection. Files appearing after the first
+        // complete list are intentionally left for the next connection.
+        val sessionHandles = HashSet<Int>()
+        var sessionInitialized = false
         snapshotFlow { latestFiles to latestPaused }.collectLatest { (current, pause) ->
-            val photos = current.filter { it.extension in setOf(".jpg", ".jpeg", ".nef", ".nrw", ".mov", ".mp4") }
-            val handles = photos.mapTo(HashSet()) { it.handle }
+            if (current.isEmpty()) {
+                sessionHandles.clear()
+                sessionInitialized = false
+                ratings.clear()
+            } else if (!sessionInitialized && !pause) {
+                sessionHandles += current.map { it.handle }
+                sessionInitialized = true
+            }
+            val allPhotos = current.filter { it.extension in setOf(".jpg", ".jpeg", ".nef", ".nrw", ".mov", ".mp4") }
+            val photos = allPhotos.filter { !sessionInitialized || it.handle in sessionHandles }
+            // STA reads only the newest three actual shooting dates. The list is already
+            // newest-first; once the third reliable date is present, older files are skipped.
+            val eligiblePhotos = if (staConnection) {
+                val dates = photos.asSequence().mapNotNull { it.captureDate?.take(8) }
+                    .distinct().take(3).toList()
+                val cutoff = dates.lastOrNull()
+                if (cutoff == null) emptyList() else photos.filter {
+                    it.captureDate?.take(8)?.let { date -> date >= cutoff } == true
+                }
+            } else photos
+            val handles = eligiblePhotos.mapTo(HashSet()) { it.handle }
             ratings.keys.retainAll(handles)
-            val sources = photoRatingSources(photos)
+            val sources = photoRatingSources(eligiblePhotos)
             val uniqueSources = sources.values.distinctBy { it.handle }
-            uniqueSources.forEach { file -> camera.cachedPhotoRating(file.handle)?.let { ratings[file.handle] = it } }
             fun publish(loading: Boolean) {
                 val visible = HashMap<Int, Int?>()
                 sources.forEach { (handle, source) ->
@@ -38,8 +61,8 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
             val pending = uniqueSources.filterNot { ratings.containsKey(it.handle) }
             PhotoGenerationProbe.note(
                 "RATING",
-                "scan start generation=$generation files=${photos.size} sources=${uniqueSources.size} " +
-                    "cached=${uniqueSources.size - pending.size} pending=${pending.size} " +
+                "scan start generation=$generation files=${eligiblePhotos.size} sources=${uniqueSources.size} " +
+                    "cached=0 pending=${pending.size} " +
                     "source=${if (useObjectRating) "object+header" else "header"} paused=$pause",
             )
             publish(pending.isNotEmpty())
