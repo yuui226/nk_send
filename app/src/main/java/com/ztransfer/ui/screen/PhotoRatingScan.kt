@@ -7,6 +7,7 @@ import com.ztransfer.protocol.NikonCamera
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 internal data class PhotoRatingScan(
     val values: Map<Int, Int?> = emptyMap(),
@@ -34,7 +35,18 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
         // complete list are intentionally left for the next connection.
         val sessionHandles = HashSet<Int>()
         var sessionInitialized = false
-        snapshotFlow { Triple(latestFiles, latestPaused, latestListLoading) }.collectLatest { (current, pause, _) ->
+        // Once the three-date snapshot is locked, thumbnail/cache updates must not restart
+        // the rating pass. Only a pause/list-enumeration transition may restart it.
+        snapshotFlow {
+            val current = latestFiles
+            Triple(
+                if (sessionInitialized) 0 else current.asSequence().map { it.handle }.toList().hashCode(),
+                latestPaused,
+                if (sessionInitialized) false else latestListLoading,
+            )
+        }.distinctUntilChanged().collectLatest {
+            val current = latestFiles
+            val pause = latestPaused
             if (current.isEmpty()) {
                 sessionHandles.clear()
                 sessionInitialized = false
