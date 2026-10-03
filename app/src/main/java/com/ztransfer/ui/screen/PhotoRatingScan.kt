@@ -73,6 +73,14 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
                     it.captureDate?.take(8)?.let { date -> date >= cutoff } == true
                 }
             } else photos
+            // During STA enumeration, do not start a partial rating pass. The list grows in
+            // several batches; starting at one or two dates only causes cancellation and
+            // makes passive header values look like completed progress. Wait for the third
+            // date (or the authoritative end of a shorter catalog) first.
+            if (staConnection && datesForRating(photos).size < 3 && latestListLoading) {
+                result = PhotoRatingScan(loading = false)
+                return@collectLatest
+            }
             val handles = eligiblePhotos.mapTo(HashSet()) { it.handle }
             ratings.keys.retainAll(handles)
             val sources = photoRatingSources(eligiblePhotos)
