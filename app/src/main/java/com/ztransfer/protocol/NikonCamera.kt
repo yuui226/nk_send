@@ -1327,13 +1327,16 @@ class NikonCamera(private val context: Context) {
     private val staDirectCaptureDates = HashMap<Int, String>()
     // Only small decoded ratings are retained; encoded photo prefixes have their separate budget.
     private val photoRatings = java.util.Collections.synchronizedMap(LinkedHashMap<Int, Int>())
+    private val photoRatingOrigins = java.util.Collections.synchronizedMap(LinkedHashMap<Int, String>())
     internal val photoRatingGeneration = MutableStateFlow(0)
 
     internal fun cachedPhotoRating(handle: Int): Int? = photoRatings[handle]
+    internal fun cachedPhotoRatingOrigin(handle: Int): String? = photoRatingOrigins[handle]
 
     internal fun invalidatePhotoRatings() {
         synchronized(photoRatings) {
             photoRatings.clear()
+            photoRatingOrigins.clear()
             photoRatingGeneration.value += 1
         }
     }
@@ -1343,25 +1346,27 @@ class NikonCamera(private val context: Context) {
         if (handle == 0 || handle == -1) return
         synchronized(photoRatings) {
             photoRatings.remove(handle)
+            photoRatingOrigins.remove(handle)
             // Bump the scan generation even when this handle was not cached yet: an in-flight
             // read or a local scan snapshot may otherwise publish the pre-change value later.
             photoRatingGeneration.value += 1
         }
     }
 
-    private fun capturePhotoRating(handle: Int, bytes: ByteArray, validLength: Int = bytes.size) {
+    private fun capturePhotoRating(handle: Int, bytes: ByteArray, validLength: Int = bytes.size, origin: String = "header") {
         val generation = photoRatingGeneration.value
         val length = minOf(validLength, bytes.size, 262144)
         if (length < 8) return
         val prefix = if (length == bytes.size) bytes else bytes.copyOf(length)
         val rating = parsePhotoRating(prefix) ?: parseNikonVideoRating(prefix) ?: return
-        rememberPhotoRating(handle, rating, generation)
+        rememberPhotoRating(handle, rating, generation, origin)
     }
 
-    private fun rememberPhotoRating(handle: Int, rating: Int, generation: Int) {
+    private fun rememberPhotoRating(handle: Int, rating: Int, generation: Int, origin: String = "header") {
         synchronized(photoRatings) {
             if (generation != photoRatingGeneration.value) return
             photoRatings[handle] = rating
+            photoRatingOrigins[handle] = origin
             while (photoRatings.size > 8192) photoRatings.remove(photoRatings.keys.first())
         }
     }
@@ -1382,7 +1387,7 @@ class NikonCamera(private val context: Context) {
                 val (response, bytes) = recvRespWithPayload()
                 if (generation != photoRatingGeneration.value) return@withContext null
                 when (response) {
-                    0x2001 -> bytes?.let(::parseNikonObjectRating)?.also { rememberPhotoRating(file.handle, it, generation) }
+                    0x2001 -> bytes?.let(::parseNikonObjectRating)?.also { rememberPhotoRating(file.handle, it, generation, "object-read") }
                     0x2005 -> { ratingOperationUnsupported = true; null }
                     0xA80A, 0xA801 -> { ratingUnsupportedExtensions += file.extension; null }
                     0x2019 -> throw RatingReadDeferred()
@@ -1441,7 +1446,7 @@ class NikonCamera(private val context: Context) {
             }
         }
         if (generation != photoRatingGeneration.value) return null
-        rating?.let { rememberPhotoRating(file.handle, it, generation) }
+        rating?.let { rememberPhotoRating(file.handle, it, generation, "rating-header") }
         return rating
     }
 
@@ -1477,7 +1482,7 @@ class NikonCamera(private val context: Context) {
             }
         }
         if (generation != photoRatingGeneration.value) return@withContext null
-        rating?.let { rememberPhotoRating(file.handle,it,generation) }
+        rating?.let { rememberPhotoRating(file.handle, it, generation, "rating-video") }
         rating
     }
 
@@ -2581,7 +2586,7 @@ class NikonCamera(private val context: Context) {
                         sendCmd(PtpConstants.NK_GET_PARTIAL_OBJECT_EX, handle, 0, 0, maxSize, 0)
                         val (respCode, data) = recvRespWithPayload()
                         if (respCode == PtpConstants.RESPONSE_OK && data != null && data.isNotEmpty()) {
-                            capturePhotoRating(handle, data)
+                            capturePhotoRating(handle, data, origin = "metadata-header")
                             result = data
                             break
                         }
@@ -2958,7 +2963,7 @@ class NikonCamera(private val context: Context) {
 
     /** Retains only the useful beginning of a recent STA object; larger prefixes never grow the cap. */
     private fun rememberStaDirectPrefix(handle: Int, bytes: ByteArray, validLength: Int = bytes.size) {
-        if (cachedPhotoRating(handle) == null) capturePhotoRating(handle, bytes, validLength)
+        if (cachedPhotoRating(handle) == null) capturePhotoRating(handle, bytes, validLength, "sta-prefix")
         val retainedLength = minOf(validLength, bytes.size, STA_DIRECT_RECENT_PREFIX_BYTES)
         if (retainedLength <= 0) return
         val existing = staDirectRecentHeaders[handle]

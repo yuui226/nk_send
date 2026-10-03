@@ -87,7 +87,14 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
             val uniqueSources = sources.values.distinctBy { it.handle }
             // Headers already captured by the current connection can provide a free
             // passive result. loadFiles() invalidates this map when a new connection scan starts.
-            uniqueSources.forEach { file -> camera.cachedPhotoRating(file.handle)?.let { ratings[file.handle] = it } }
+            val cachedOrigins = linkedMapOf<String, Int>()
+            uniqueSources.forEach { file ->
+                camera.cachedPhotoRating(file.handle)?.let {
+                    ratings[file.handle] = it
+                    val origin = camera.cachedPhotoRatingOrigin(file.handle) ?: "unknown"
+                    cachedOrigins[origin] = (cachedOrigins[origin] ?: 0) + 1
+                }
+            }
             fun publish(loading: Boolean, complete: Boolean = false) {
                 val visible = HashMap<Int, Int?>()
                 sources.forEach { (handle, source) ->
@@ -104,6 +111,7 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
             val pending = uniqueSources.filterNot { ratings.containsKey(it.handle) }
             ratingDiagnostic("scan start generation=$generation files=${eligiblePhotos.size} sources=${uniqueSources.size} " +
                     "cached=${uniqueSources.size - pending.size} pending=${pending.size} " +
+                    "cachedOrigins=${cachedOrigins.entries.joinToString(",") { "${it.key}:${it.value}" }} " +
                     "source=${if (useObjectRating) "object+header" else "header"} paused=$pause",
             )
             publish(pending.isNotEmpty())
