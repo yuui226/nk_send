@@ -866,7 +866,9 @@ fun FileListScreen(
             dateRange = filterDateRange,
         )
     }
-    val filterActive = filterRatingEnabled || filterExts != null || filterProtected || filterBurst ||
+    // Turning on the rating loader alone must not filter or re-layout the photo grid.
+    // Only a concrete star value is a visible list filter.
+    val filterActive = filterRating != null || filterExts != null || filterProtected || filterBurst ||
         filterUntransferred || filterStorageSlot != null || filterDateRange != null
 
     // 设备上实际存在的类型（从未过滤的原始列表提取，供下拉选项自动生成）。
@@ -1002,13 +1004,13 @@ fun FileListScreen(
     // 分组 / 扁平列表（供长按预览翻页）/ 传输忙碌（缩略图让路）——提到顶层，供内容区与预览层共用。
     val groups = remember(
         presentedCameraFiles, filterExts, filterProtected, filterBurst, filterUntransferred,
-        filterRating, filterRatingEnabled, ratingScan.values,
+        filterRating, ratingScan.values,
         filterStorageSlot, selectedStorageIds, filterDateRange,
         burstHandles, filteredExportHandles
     ) {
         val files = presentedCameraFiles.asSequence()
             .filter { filterExts == null || it.extension in filterExts }
-            .filter { !filterRatingEnabled || filterRating == null || ratingScan.values[it.handle] == filterRating }
+            .filter { filterRating == null || ratingScan.values[it.handle] == filterRating }
             .filter { !filterProtected || it.isProtected }
             .filter { !filterBurst || it.handle in burstHandles }
             .filter { !filterUntransferred || it.handle !in filteredExportHandles }
@@ -4552,50 +4554,68 @@ private fun FilterOverlay(
                         ).value
                     } else 1f
 
-                    FilterChip(
-                        label = buildString {
-                            append(stringResource(R.string.filter_rating_enabled))
-                            if (working.ratingEnabled && ratingProgress.total > 0) {
-                                append(" ")
-                                append(ratingProgress.completed.coerceAtMost(ratingProgress.total))
-                                append("/")
-                                append(ratingProgress.total)
-                            }
-                        },
-                        selected = working.ratingEnabled,
-                        onClick = {
-                            commit(working.copy(
-                                ratingEnabled = !working.ratingEnabled,
-                                rating = if (working.ratingEnabled) null else working.rating,
-                            ))
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .graphicsLayer {
-                                alpha = if (working.ratingEnabled && ratingProgress.loading) ratingAlpha else 1f
-                            },
-                        icon = if (working.ratingEnabled && ratingProgress.complete) Icons.Default.Check else Icons.Default.Star,
-                    )
-                    Spacer(Modifier.height(8.dp))
-
                     Row(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
-                        val feedback = com.ztransfer.ui.util.rememberHaptics(hapticsEnabled)
-                        for (star in 1..5) {
-                            FavoriteToggleButton(
-                                favorite = star <= (working.rating ?: 0),
-                                enabled = working.ratingEnabled,
-                                description = stringResource(R.string.filter_rating_stars, star),
-                                onClick = {
-                                    feedback.tick()
-                                    commit(working.copy(
-                                        ratingEnabled = true,
-                                        rating = if (working.rating == star) null else star,
-                                    ))
+                        FilterChip(
+                            label = buildString {
+                                append(stringResource(R.string.filter_rating_enabled))
+                                if (working.ratingEnabled && ratingProgress.total > 0) {
+                                    append(" ")
+                                    append(ratingProgress.completed.coerceAtMost(ratingProgress.total))
+                                    append("/")
+                                    append(ratingProgress.total)
+                                }
+                            },
+                            selected = working.ratingEnabled,
+                            onClick = {
+                                commit(working.copy(
+                                    ratingEnabled = !working.ratingEnabled,
+                                    rating = if (working.ratingEnabled) null else working.rating,
+                                ))
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .graphicsLayer {
+                                    alpha = if (working.ratingEnabled && ratingProgress.loading) ratingAlpha else 1f
                                 },
+                            icon = if (working.ratingEnabled && ratingProgress.complete) Icons.Default.Check else Icons.Default.Star,
+                        )
+                        AnimatedVisibility(
+                            visible = !working.ratingEnabled,
+                            enter = fadeIn() + expandHorizontally(expandFrom = Alignment.End),
+                            exit = fadeOut() + shrinkHorizontally(shrinkTowards = Alignment.End),
+                        ) {
+                            TipLightbulbButton(
+                                onClick = { },
+                                contentDescription = stringResource(R.string.filter_rating_enabled),
+                                modifier = Modifier.size(34.dp),
                             )
+                        }
+                        AnimatedVisibility(
+                            visible = working.ratingEnabled,
+                            enter = fadeIn() + expandHorizontally(expandFrom = Alignment.End),
+                            exit = fadeOut() + shrinkHorizontally(shrinkTowards = Alignment.End),
+                        ) {
+                            val feedback = com.ztransfer.ui.util.rememberHaptics(hapticsEnabled)
+                            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                                for (star in 1..5) {
+                                    FavoriteToggleButton(
+                                        favorite = star <= (working.rating ?: 0),
+                                        enabled = true,
+                                        description = stringResource(R.string.filter_rating_stars, star),
+                                        onClick = {
+                                            feedback.tick()
+                                            commit(working.copy(
+                                                ratingEnabled = true,
+                                                rating = if (working.rating == star) null else star,
+                                            ))
+                                        },
+                                    )
+                                }
+                            }
                         }
                     }
                     Spacer(Modifier.height(8.dp))
