@@ -1,6 +1,7 @@
 package com.ztransfer.ui.screen
 
 import androidx.compose.runtime.*
+import com.ztransfer.diagnostics.PhotoGenerationProbe
 import com.ztransfer.protocol.photoRatingSources
 import com.ztransfer.protocol.NikonCamera
 import kotlinx.coroutines.currentCoroutineContext
@@ -35,28 +36,50 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
                 result = PhotoRatingScan(visible, loading)
             }
             val pending = uniqueSources.filterNot { ratings.containsKey(it.handle) }
+            PhotoGenerationProbe.note(
+                "RATING",
+                "scan start generation=$generation files=${photos.size} sources=${uniqueSources.size} " +
+                    "cached=${uniqueSources.size - pending.size} pending=${pending.size} " +
+                    "source=${if (useObjectRating) "object+header" else "header"} paused=$pause",
+            )
             publish(pending.isNotEmpty())
             if (pause) return@collectLatest
+            var confirmed = 0
+            var unknown = 0
             try {
                 pending.forEachIndexed { index, file ->
                     currentCoroutineContext().ensureActive()
                     val cached = camera.cachedPhotoRating(file.handle)
-                    if (cached != null) {
+                    val resolvedRating = if (cached != null) {
                         ratings[file.handle] = cached
+                        cached
                     } else {
                         var rating = if (useObjectRating) camera.readObjectRating(file) else null
                         val isPhoto = file.extension in setOf(".jpg", ".jpeg", ".nef", ".nrw")
                         // Videos use the verified Nikon container tag, not photo EXIF parsing.
                         if (rating == null) rating = if (isPhoto) camera.readPhotoRatingHeader(file) else camera.readVideoRating(file)
                         ratings[file.handle] = rating
+                        rating
                     }
+                    if (resolvedRating != null) confirmed++ else unknown++
                     if (index % 12 == 11) publish(true)
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
+                PhotoGenerationProbe.note("RATING", "scan cancelled generation=$generation confirmed=$confirmed unknown=$unknown")
                 throw e
-            } catch (_: Exception) {
+            } catch (e: Exception) {
                 // A broken transport must not crash Compose or trigger a whole-card retry loop.
+                PhotoGenerationProbe.note(
+                    "RATING",
+                    "scan stopped generation=$generation confirmed=$confirmed unknown=$unknown " +
+                        "error=${e.javaClass.simpleName}",
+                )
             } finally {
+                PhotoGenerationProbe.note(
+                    "RATING",
+                    "scan complete generation=$generation confirmed=$confirmed unknown=$unknown " +
+                        "known=${ratings.size}",
+                )
                 publish(false)
             }
         }

@@ -2648,6 +2648,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 // Rating changes may keep name, size and handle unchanged. Invalidate only the
                 // affected object; the scanner will re-read it when the camera is idle.
                 cam.invalidatePhotoRating(event.second.toInt())
+                if (PhotoGenerationProbe.enabled) {
+                    PhotoGenerationProbe.note(
+                        "RATING",
+                        "event invalidate code=0x%04X handle=0x%08X".format(
+                            event.first, event.second.toInt(),
+                        ),
+                    )
+                }
             }
         }
     }
