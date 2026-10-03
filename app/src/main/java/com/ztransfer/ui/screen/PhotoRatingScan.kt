@@ -8,7 +8,13 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.collectLatest
 
-internal data class PhotoRatingScan(val values: Map<Int, Int?> = emptyMap(), val loading: Boolean = false)
+internal data class PhotoRatingScan(
+    val values: Map<Int, Int?> = emptyMap(),
+    val loading: Boolean = false,
+    val completed: Int = 0,
+    val total: Int = 0,
+    val complete: Boolean = false,
+)
 
 /** Reuse ratings captured during listing; only supplement missing photo headers while filtering. */
 @Composable
@@ -17,10 +23,10 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
     staConnection: Boolean,
     thumbnailReady: suspend (NikonCamera.FileInfo) -> Boolean): PhotoRatingScan {
     val generation = camera?.photoRatingGeneration?.collectAsState()?.value ?: 0
-    var result by remember(camera, enabled, generation, useObjectRating) { mutableStateOf(PhotoRatingScan(loading = enabled && camera != null)) }
+    var result by remember(camera, enabled, generation, useObjectRating, staConnection) { mutableStateOf(PhotoRatingScan(loading = enabled && camera != null)) }
     val latestFiles by rememberUpdatedState(files)
     val latestPaused by rememberUpdatedState(paused)
-    LaunchedEffect(camera, enabled, generation, useObjectRating) {
+    LaunchedEffect(camera, enabled, generation, useObjectRating, staConnection) {
         if (!enabled || camera == null) return@LaunchedEffect
         val ratings = HashMap<Int, Int?>()
         // A rating snapshot belongs to one connection. Files appearing after the first
@@ -52,18 +58,27 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
             ratings.keys.retainAll(handles)
             val sources = photoRatingSources(eligiblePhotos)
             val uniqueSources = sources.values.distinctBy { it.handle }
-            fun publish(loading: Boolean) {
+            // Headers already captured by the current connection can provide a free
+            // passive result. loadFiles() invalidates this map when a new connection scan starts.
+            uniqueSources.forEach { file -> camera.cachedPhotoRating(file.handle)?.let { ratings[file.handle] = it } }
+            fun publish(loading: Boolean, complete: Boolean = false) {
                 val visible = HashMap<Int, Int?>()
                 sources.forEach { (handle, source) ->
                     if (ratings.containsKey(source.handle)) visible[handle] = ratings[source.handle]
                 }
-                result = PhotoRatingScan(visible, loading)
+                result = PhotoRatingScan(
+                    values = visible,
+                    loading = loading,
+                    completed = ratings.size,
+                    total = uniqueSources.size,
+                    complete = complete,
+                )
             }
             val pending = uniqueSources.filterNot { ratings.containsKey(it.handle) }
             PhotoGenerationProbe.note(
                 "RATING",
                 "scan start generation=$generation files=${eligiblePhotos.size} sources=${uniqueSources.size} " +
-                    "cached=0 pending=${pending.size} " +
+                    "cached=${uniqueSources.size - pending.size} pending=${pending.size} " +
                     "source=${if (useObjectRating) "object+header" else "header"} paused=$pause",
             )
             publish(pending.isNotEmpty())
@@ -82,18 +97,16 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
             try {
                 pending.forEachIndexed { index, file ->
                     currentCoroutineContext().ensureActive()
-                    val cached = camera.cachedPhotoRating(file.handle)
-                    val resolvedRating = if (cached != null) {
-                        ratings[file.handle] = cached
-                        cached
-                    } else {
-                        var rating = if (useObjectRating) camera.readObjectRating(file) else null
-                        val isPhoto = file.extension in setOf(".jpg", ".jpeg", ".nef", ".nrw")
-                        // Videos use the verified Nikon container tag, not photo EXIF parsing.
-                        if (rating == null) rating = if (isPhoto) camera.readPhotoRatingHeader(file) else camera.readVideoRating(file)
-                        ratings[file.handle] = rating
-                        rating
+                    // Never reuse the camera's cross-flow rating map here: this scan is a
+                    // fresh snapshot for the current connection. The local map above is the
+                    // only source of already-completed values for this scan.
+                    var resolvedRating = if (useObjectRating) camera.readObjectRating(file) else null
+                    val isPhoto = file.extension in setOf(".jpg", ".jpeg", ".nef", ".nrw")
+                    // Videos use the verified Nikon container tag, not photo EXIF parsing.
+                    if (resolvedRating == null) {
+                        resolvedRating = if (isPhoto) camera.readPhotoRatingHeader(file) else camera.readVideoRating(file)
                     }
+                    ratings[file.handle] = resolvedRating
                     if (resolvedRating != null) confirmed++ else unknown++
                     if (index % 12 == 11) publish(true)
                 }
@@ -113,7 +126,7 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
                     "scan complete generation=$generation confirmed=$confirmed unknown=$unknown " +
                         "known=${ratings.size}",
                 )
-                publish(false)
+                publish(false, complete = ratings.size >= uniqueSources.size && uniqueSources.isNotEmpty())
             }
         }
     }

@@ -2051,6 +2051,7 @@ fun FileListScreen(
                 anchorBounds = frozenAnchor,
                 availableExts = availableExts,
                 current = filterCriteria,
+                ratingProgress = ratingScan,
                 storageSlots = visibleStorageSlots,
                 suggestedDate = latestKnownDate,
                 hapticsEnabled = transferState.hapticsEnabled,
@@ -4409,6 +4410,7 @@ private fun FilterOverlay(
     anchorBounds: Rect,
     availableExts: List<String>,
     current: PhotoFilterCriteria,
+    ratingProgress: PhotoRatingScan,
     storageSlots: List<Int>,
     suggestedDate: LocalDate?,
     hapticsEnabled: Boolean,
@@ -4540,8 +4542,26 @@ private fun FilterOverlay(
                     )
                     Spacer(Modifier.height(8.dp))
 
+                    val ratingAlpha = if (working.ratingEnabled && ratingProgress.loading) {
+                        val ratingPulse = rememberInfiniteTransition(label = "ratingFilterPulse")
+                        ratingPulse.animateFloat(
+                            initialValue = 0.72f,
+                            targetValue = 1f,
+                            animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
+                            label = "ratingFilterAlpha",
+                        ).value
+                    } else 1f
+
                     FilterChip(
-                        label = stringResource(R.string.filter_rating_enabled),
+                        label = buildString {
+                            append(stringResource(R.string.filter_rating_enabled))
+                            if (working.ratingEnabled && ratingProgress.total > 0) {
+                                append(" ")
+                                append(ratingProgress.completed.coerceAtMost(ratingProgress.total))
+                                append("/")
+                                append(ratingProgress.total)
+                            }
+                        },
                         selected = working.ratingEnabled,
                         onClick = {
                             commit(working.copy(
@@ -4549,8 +4569,12 @@ private fun FilterOverlay(
                                 rating = if (working.ratingEnabled) null else working.rating,
                             ))
                         },
-                        modifier = Modifier.fillMaxWidth(),
-                        icon = Icons.Default.Star,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .graphicsLayer {
+                                alpha = if (working.ratingEnabled && ratingProgress.loading) ratingAlpha else 1f
+                            },
+                        icon = if (working.ratingEnabled && ratingProgress.complete) Icons.Default.Check else Icons.Default.Star,
                     )
                     Spacer(Modifier.height(8.dp))
 
