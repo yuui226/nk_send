@@ -1852,6 +1852,7 @@ internal fun FavoriteToggleButton(
     enabled: Boolean,
     onClick: () -> Unit,
     description: String? = null,
+    compact: Boolean = false,
 ) {
     val palette = rememberPhotoEffectFavoriteButtonPalette()
     val markColor by animateColorAsState(
@@ -1870,7 +1871,7 @@ internal fun FavoriteToggleButton(
         materialContentColor = markColor,
         shape = RoundedCornerShape(13.dp),
         contentPadding = PaddingValues(0.dp),
-        modifier = Modifier.size(PHOTO_EFFECTS_CONTROL_HEIGHT),
+        modifier = Modifier.size(if (compact) 28.dp else PHOTO_EFFECTS_CONTROL_HEIGHT),
     ) {
         AnimatedContent(
             targetState = favorite,
@@ -1887,7 +1888,7 @@ internal fun FavoriteToggleButton(
                     else R.string.photo_effect_favorite_add,
                 ),
                 tint = markColor,
-                modifier = Modifier.size(22.dp),
+                modifier = Modifier.size(if (compact) 18.dp else 22.dp),
             )
         }
     }

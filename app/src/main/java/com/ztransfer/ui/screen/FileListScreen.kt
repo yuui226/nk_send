@@ -1002,15 +1002,16 @@ fun FileListScreen(
         }
     }
     // 分组 / 扁平列表（供长按预览翻页）/ 传输忙碌（缩略图让路）——提到顶层，供内容区与预览层共用。
+    val activeRatingValues = if (filterRating != null) ratingScan.values else emptyMap()
     val groups = remember(
         presentedCameraFiles, filterExts, filterProtected, filterBurst, filterUntransferred,
-        filterRating, ratingScan.values,
+        filterRating, activeRatingValues,
         filterStorageSlot, selectedStorageIds, filterDateRange,
         burstHandles, filteredExportHandles
     ) {
         val files = presentedCameraFiles.asSequence()
             .filter { filterExts == null || it.extension in filterExts }
-            .filter { filterRating == null || ratingScan.values[it.handle] == filterRating }
+            .filter { filterRating == null || activeRatingValues[it.handle] == filterRating }
             .filter { !filterProtected || it.isProtected }
             .filter { !filterBurst || it.handle in burstHandles }
             .filter { !filterUntransferred || it.handle !in filteredExportHandles }
@@ -2057,12 +2058,14 @@ fun FileListScreen(
                 storageSlots = visibleStorageSlots,
                 suggestedDate = latestKnownDate,
                 hapticsEnabled = transferState.hapticsEnabled,
-                onChange = { criteria ->
+                onChange = { criteria, animateList ->
                     // FilterOverlay 只在工作状态确实变化时回调；这里每次都提交。
                     // 不能用父层上一帧的 filter* 闭包拦截：快速双击同一项时，第二次
                     // 取消可能在重组前到达，会被误判为“未变化”而无法持久化。
-                    filterRevealTick++
-                    filterRevealWindow = true
+                    if (animateList) {
+                        filterRevealTick++
+                        filterRevealWindow = true
+                    }
                     transferViewModel.setFilters(
                         criteria.copy(
                             storageSlot = normalizeStorageSlotFilter(
@@ -4416,7 +4419,7 @@ private fun FilterOverlay(
     storageSlots: List<Int>,
     suggestedDate: LocalDate?,
     hapticsEnabled: Boolean,
-    onChange: (PhotoFilterCriteria) -> Unit,
+    onChange: (PhotoFilterCriteria, Boolean) -> Unit,
     onDismiss: () -> Unit
 ) {
     val colors = AppTheme.colors
@@ -4441,8 +4444,11 @@ private fun FilterOverlay(
     fun extLabel(ext: String) = ext.removePrefix(".").uppercase().ifEmpty { otherLabel }
     fun commit(next: PhotoFilterCriteria) {
         if (next == working) return
+        // Compare against the current draft, including rapid taps before recomposition.
+        // Enabling data collection alone must never replay the grid's reveal animation.
+        val changesList = working.copy(ratingEnabled = next.ratingEnabled) != next
         working = next
-        onChange(next)
+        onChange(next, changesList)
     }
     fun toggle(ext: String) {
         val cur = working.extensions ?: availableExts.toSet()
@@ -4605,6 +4611,7 @@ private fun FilterOverlay(
                                     FavoriteToggleButton(
                                         favorite = star <= (working.rating ?: 0),
                                         enabled = true,
+                                        compact = true,
                                         description = stringResource(R.string.filter_rating_stars, star),
                                         onClick = {
                                             feedback.tick()
