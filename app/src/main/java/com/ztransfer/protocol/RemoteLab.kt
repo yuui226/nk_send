@@ -1277,20 +1277,29 @@ suspend fun NikonCamera.rcFocusAt(
 
 suspend fun NikonCamera.rcPollEvents(): List<Pair<Int, Long>> {
     // STA 初始化已经实际验证过 GetEventEx；只在该会话使用新格式。AP/USB 继续保持
-    // 原来的 GetEvent 路径，避免把一台相机的能力假设扩散到其它连接模式。
-    if (staAlbumAccessValidated) {
-        val (extendedResponse, extendedData) = labCommand(Lab.NK_GET_EVENT_EX)
-        if (extendedResponse == Lab.OK) {
-            return extendedData?.let { data ->
-                runCatching { parseNikonExtendedEvents(data) }.getOrDefault(emptyList())
-            }.orEmpty()
-        }
-        if (extendedResponse != PtpConstants.OPERATION_NOT_SUPPORTED) return emptyList()
-    }
+    // 原来的 GetEvent 路径，避免把一台相机的能力假设扩散到其它连接模式。事件轮询
+    // 平时保持旧的交互队列时序；评级阶段由调度器自动降到 IDLE，不能挡住评级。
+    return focusMutex.withLock {
+        withEventPoll {
+            withContext(Dispatchers.IO) {
+                if (staAlbumAccessValidated) {
+                    val (extendedResponse, extendedData) =
+                        sendCmd(Lab.NK_GET_EVENT_EX).let { recvRespWithPayload() }
+                    if (extendedResponse == Lab.OK) {
+                        return@withContext extendedData?.let { data ->
+                            runCatching { parseNikonExtendedEvents(data) }.getOrDefault(emptyList())
+                        }.orEmpty()
+                    }
+                    if (extendedResponse != PtpConstants.OPERATION_NOT_SUPPORTED) return@withContext emptyList()
+                }
 
-    val (response, data) = labCommand(Lab.NK_GET_EVENT)
-    if (response != Lab.OK || data == null) return emptyList()
-    return runCatching { parseNikonEvents(data) }.getOrDefault(emptyList())
+                sendCmd(Lab.NK_GET_EVENT)
+                val (response, data) = recvRespWithPayload()
+                if (response != Lab.OK || data == null) return@withContext emptyList()
+                runCatching { parseNikonEvents(data) }.getOrDefault(emptyList())
+            }
+        }
+    }
 }
 
 /** 发单条命令，DEVICE_BUSY 时退避重试（200ms × 5）。拍摄/录像触发类命令共用。 */

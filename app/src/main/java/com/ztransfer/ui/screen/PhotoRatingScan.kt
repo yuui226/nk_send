@@ -44,11 +44,14 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
         var sessionInitialized = false
         var scanStarted = false
         // Once the three-date snapshot is locked, thumbnail/cache updates must not restart
-        // the rating pass. Only a pause/list-enumeration transition may restart it.
+        // the rating pass. A new camera generation or an explicit enable/disable transition
+        // creates a new effect and therefore a new snapshot.
         snapshotFlow {
             val current = latestFiles
             Triple(
-                if (sessionInitialized) 0 else current.asSequence().map { it.handle }.toList().hashCode(),
+                if (sessionInitialized) 0 else current.asSequence()
+                    .map { it.handle to it.captureDate?.take(8) }
+                    .toList().hashCode(),
                 latestPaused,
                 Pair(
                     if (sessionInitialized) false else latestListLoading,
@@ -56,6 +59,9 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
                 ),
             )
         }.distinctUntilChanged().collect {
+            // The connection snapshot is immutable after the first pass starts. Later thumbnail
+            // or catalog emissions must not re-enter the setup path (or print another start line).
+            if (scanStarted) return@collect
             val current = latestFiles
             val pause = latestPaused
             if (staConnection && !latestRecentThumbnailReady) {
@@ -128,11 +134,17 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
                     "cachedOrigins=${cachedOrigins.entries.joinToString(",") { "${it.key}:${it.value}" }} " +
                     "source=${if (useObjectRating) "object+header" else "header"} paused=$pause",
             )
+            if (pending.isEmpty()) {
+                scanStarted = true
+                publish(loading = false, complete = uniqueSources.isNotEmpty())
+                ratingDiagnostic(
+                    "complete=${uniqueSources.size}/${uniqueSources.size} " +
+                        "confirmed=${uniqueSources.size} unknown=0 elapsed=0ms source=cache",
+                )
+                return@collect
+            }
             publish(pending.isNotEmpty())
             if (pause) return@collect
-            // Once a connection scan has begun, later catalog/thumbnail emissions must not
-            // cancel and restart it. The snapshot is already fixed to the newest three dates.
-            if (scanStarted) return@collect
             // The thumbnail pipeline owns camera thumbnail requests and already prioritizes
             // the newest three dates. Do not prefetch them serially here: doing so made the
             // rating scan wait for every thumbnail (including invisible/background items).
@@ -144,7 +156,13 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
             scanStarted = true
             val readStartedAt = SystemClock.elapsedRealtime()
             var cancelled = false
+            var ratingPhaseStarted = false
             try {
+                // Keep the old transfer/thumbnail FIFO outside the scan. While this scan is
+                // active, only remote thumbnail requests move behind its short RATING tickets;
+                // transfers and interactive work retain their existing priority.
+                camera.beginRatingPhase()
+                ratingPhaseStarted = true
                 // Each reader submits one RATING transaction. Do not reserve the channel for the
                 // whole scan: interactive work and transfer chunk boundaries must be able to run
                 // between files, while the scheduler still gives each rating read its priority.
@@ -183,6 +201,7 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
                         "error=${e.javaClass.simpleName}",
                 )
             } finally {
+                if (ratingPhaseStarted) camera.endRatingPhase()
                 if (!cancelled) {
                     ratingDiagnostic("complete=${ratings.size}/${uniqueSources.size} " +
                             "confirmed=$confirmed unknown=$unknown " +

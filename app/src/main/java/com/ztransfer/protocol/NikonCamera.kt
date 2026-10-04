@@ -201,6 +201,8 @@ internal enum class CameraRequestKind(val priority: Int) {
     VISIBLE_THUMBNAIL(4),
     BACKGROUND_THUMBNAIL(5),
     IDLE(6),
+    /** Fallback GetEvent polling; legacy interactive ordering outside a rating phase. */
+    EVENT_POLL(0),
 }
 
 internal data class CameraSchedulerSnapshot(
@@ -239,6 +241,11 @@ internal class CameraIoGate(
     private var activeTicket: Ticket? = null
     private var interactiveReservations = 0
     private var activeDownloadCount = 0
+    /** Once shutdown starts, no new business request may enter this camera session. */
+    private var shuttingDown = false
+    private var shutdownReason = "camera session closed"
+    /** Compatibility mode: before a rating scan, transfer and thumbnail work shared one FIFO. */
+    private var ratingPhaseActive = false
     @Volatile private var activeOwner: String = "none"
     @Volatile private var activeKind: CameraRequestKind? = null
 
@@ -260,9 +267,11 @@ internal class CameraIoGate(
      * queued background work run after its sockets are closed; the currently active transaction
      * is deliberately left alone so its operation-specific cleanup can finish first.
      */
-    suspend fun cancelQueuedTransactions(reason: String = "camera session closed") =
+    suspend fun beginShutdown(reason: String = "camera session closed") =
         withContext(NonCancellable) {
             state.withLock {
+                shuttingDown = true
+                shutdownReason = reason
                 val queued = pending.toList()
                 pending.clear()
                 queued.forEach { ticket ->
@@ -272,16 +281,47 @@ internal class CameraIoGate(
             }
         }
 
+    /** Compatibility name for tests/older callers; shutdown is now also a submission barrier. */
+    suspend fun cancelQueuedTransactions(reason: String = "camera session closed") =
+        beginShutdown(reason)
+
+    /** Prefer rating over remote thumbnail work without reserving or holding the channel. */
+    suspend fun beginRatingPhase() {
+        state.withLock {
+            ratingPhaseActive = true
+            if (activeTicket == null) pumpLocked()
+        }
+    }
+
+    suspend fun endRatingPhase() = withContext(NonCancellable) {
+        state.withLock {
+            ratingPhaseActive = false
+            if (activeTicket == null) pumpLocked()
+        }
+    }
+
     /** Execute exactly one non-preemptible camera transaction. */
     suspend fun <T> withCameraTransaction(
         kind: CameraRequestKind,
         owner: String = kind.name,
         block: suspend () -> T,
+    ): T = withCameraTransaction(kind, owner, false, block)
+
+    suspend fun <T> withCameraTransaction(
+        kind: CameraRequestKind,
+        owner: String,
+        allowDuringShutdown: Boolean,
+        block: suspend () -> T,
     ): T {
         check(coroutineContext[TransactionMarker]?.scheduler !== this) {
             "Nested camera transaction is not allowed: $owner"
         }
-        val ticket = state.withLock { Ticket(sequence++, kind, owner) }
+        val ticket = state.withLock {
+            if (shuttingDown && !allowDuringShutdown) {
+                throw CancellationException(shutdownReason)
+            }
+            Ticket(sequence++, kind, owner)
+        }
         var acquired = false
         return try {
             acquire(ticket)
@@ -360,13 +400,38 @@ internal class CameraIoGate(
         if (interactiveReservations > 0 && ticket.kind.priority > CameraRequestKind.PREVIEW.priority) {
             return false
         }
+        // During a rating pass, do not let a low-priority request start in the tiny gap between
+        // two rating files. Priority sorting only orders tickets that are already queued; this
+        // admission rule keeps directory/thumbnail/event work from taking that gap while still
+        // allowing interactive, preview, and transfer transactions to proceed.
+        if (ratingPhaseActive && (
+                ticket.kind == CameraRequestKind.VISIBLE_THUMBNAIL ||
+                    ticket.kind == CameraRequestKind.BACKGROUND_THUMBNAIL ||
+                    ticket.kind == CameraRequestKind.IDLE ||
+                    ticket.kind == CameraRequestKind.EVENT_POLL
+            )
+        ) {
+            return false
+        }
         return true
+    }
+
+    private fun effectivePriority(ticket: Ticket): Int = when {
+        ratingPhaseActive && ticket.kind == CameraRequestKind.EVENT_POLL ->
+            CameraRequestKind.IDLE.priority
+        !ratingPhaseActive && ticket.kind == CameraRequestKind.EVENT_POLL ->
+            CameraRequestKind.TRANSFER.priority
+        !ratingPhaseActive && ticket.kind == CameraRequestKind.VISIBLE_THUMBNAIL ->
+            CameraRequestKind.TRANSFER.priority
+        !ratingPhaseActive && ticket.kind == CameraRequestKind.BACKGROUND_THUMBNAIL ->
+            CameraRequestKind.TRANSFER.priority
+        else -> ticket.kind.priority
     }
 
     private fun nextTicketLocked(): Ticket? = pending
         .asSequence()
         .filter(::eligibleLocked)
-        .minWithOrNull(compareBy<Ticket> { it.kind.priority }.thenBy { it.sequence })
+        .minWithOrNull(compareBy<Ticket> { effectivePriority(it) }.thenBy { it.sequence })
 
     /** state mutex must be held. Marks the selected ticket active before resuming it. */
     private fun pumpLocked() {
@@ -1520,18 +1585,6 @@ class NikonCamera(private val context: Context) {
         }
     }
 
-    /** Invalidate one file after an object/property change event without discarding other values. */
-    internal fun invalidatePhotoRating(handle: Int) {
-        if (handle == 0 || handle == -1) return
-        synchronized(photoRatings) {
-            photoRatings.remove(handle)
-            photoRatingOrigins.remove(handle)
-            // Bump the scan generation even when this handle was not cached yet: an in-flight
-            // read or a local scan snapshot may otherwise publish the pre-change value later.
-            photoRatingGeneration.value += 1
-        }
-    }
-
     private fun capturePhotoRating(handle: Int, bytes: ByteArray, validLength: Int = bytes.size, origin: String = "header") {
         val generation = photoRatingGeneration.value
         val length = minOf(validLength, bytes.size, 262144)
@@ -1729,6 +1782,20 @@ class NikonCamera(private val context: Context) {
         owner: String = kind.name,
         block: suspend () -> T,
     ): T = ioGate.withCameraTransaction(kind, owner, block)
+
+    internal suspend fun <T> withCameraTransaction(
+        kind: CameraRequestKind,
+        owner: String,
+        allowDuringShutdown: Boolean,
+        block: suspend () -> T,
+    ): T = ioGate.withCameraTransaction(kind, owner, allowDuringShutdown, block)
+
+    internal suspend fun beginRatingPhase() = ioGate.beginRatingPhase()
+    internal suspend fun endRatingPhase() = ioGate.endRatingPhase()
+
+    /** Event polling keeps legacy ordering except while a rating phase is active. */
+    internal suspend fun <T> withEventPoll(block: suspend () -> T): T =
+        ioGate.withCameraTransaction(CameraRequestKind.EVENT_POLL, "EVENT_POLL", block)
 
     /** Lightweight diagnostic snapshot; does not enqueue or touch the camera socket. */
     internal suspend fun cameraSchedulerSnapshot(): CameraSchedulerSnapshot = ioGate.snapshot()
@@ -2883,19 +2950,17 @@ class NikonCamera(private val context: Context) {
             val batch = handles.subList(cursor, end)
             cursor = end
             val probeStartedAtMs = if (FileOrderProbe.enabled) SystemClock.elapsedRealtime() else 0L
-            // 每条 ObjectInfo 单独提交事务，批内也释放相机通道：评级、监看和缩略图
-            // 不会被余下 19 条目录命令绑在同一个低优先级事务里。
+            // 保持旧版边界：每批 ObjectInfo 共用一个低优先级事务，批间释放相机通道。
+            // 评级、监看和缩略图仍可在批间让路，不改变原有列表发布和顺序。
             // IO 异常（掉线/读超时）直接向上抛给调用方终止扫描：逐个 handle 硬试会让
             // 每个都等满 60s 读超时、扫描假死数十分钟；单文件 PTP 级失败在
             // getObjectInfoInternal 内已按 null 跳过，不会走到这里。
-            val files = buildList {
-                batch.forEach { handle ->
+            val files = ioGate.withBackgroundThumbnail {
+                batch.mapNotNull { handle ->
                     loadContext.ensureActive()
-                    val result = ioGate.withBackgroundThumbnail {
-                        getObjectInfoInternal(handle)
-                    }
+                    val result = getObjectInfoInternal(handle)
                     if (!result.successful) allObjectInfoSucceeded = false
-                    result.file?.let(::add)
+                    result.file
                 }
             }
             if (FileOrderProbe.enabled) {
@@ -2932,11 +2997,7 @@ class NikonCamera(private val context: Context) {
         var allSucceeded = true
         ioGate.withBackgroundThumbnail {
             loadStaDirectOriginalFileNamesInternal()
-        }
-        ioGate.withBackgroundThumbnail {
             loadStaDirectObjectsMetadataInternal(storageIds)
-        }
-        ioGate.withBackgroundThumbnail {
             ensureStaDirectFileNumberAnchorsInternal(
                 listOf((storageIds.singleOrNull() ?: -1) to handles),
             )
@@ -2953,18 +3014,16 @@ class NikonCamera(private val context: Context) {
             }
             val batchEnd = minOf(nextHandleIndex + currentBatchSize, total)
             val batch = handles.subList(nextHandleIndex, batchEnd)
-            val files = buildList {
-                batch.forEach { handle ->
+            val files = ioGate.withBackgroundThumbnail {
+                batch.mapNotNull { handle ->
                     loadContext.ensureActive()
-                    val result = ioGate.withBackgroundThumbnail {
-                        readStaDirectIndexedObjectInternal(
-                            handle = handle,
-                            storageId = storageIds.singleOrNull(),
-                        )
-                    }
+                    val result = readStaDirectIndexedObjectInternal(
+                        handle = handle,
+                        storageId = storageIds.singleOrNull(),
+                    )
                     if (!result.successful) allSucceeded = false
                     cacheStaDirectObjectHeader(handle, result)
-                    result.file?.let(::add)
+                    result.file
                 }
             }
             processed += batch.size
@@ -2995,12 +3054,8 @@ class NikonCamera(private val context: Context) {
         val loadContext = coroutineContext
         ioGate.withBackgroundThumbnail {
             loadStaDirectOriginalFileNamesInternal()
-        }
-        ioGate.withBackgroundThumbnail {
             loadStaDirectObjectsMetadataInternal(storageIds)
-        }
-        groups.forEach { group ->
-            ioGate.withBackgroundThumbnail {
+            groups.forEach { group ->
                 ensureStaDirectFileNumberAnchorsInternal(listOf(group))
             }
         }
@@ -3020,7 +3075,7 @@ class NikonCamera(private val context: Context) {
             var requestedHandles = 0
             val completedBeforeBatch = completed
             val requestBudget = maxOf(groups.size, currentBatchSize + groups.size - 1)
-            val output = buildList {
+            val output = ioGate.withBackgroundThumbnail { buildList {
                     while (size < currentBatchSize && completed < total) {
                         groups.indices.forEach { groupIndex ->
                             if (heads[groupIndex] != null) return@forEach
@@ -3030,9 +3085,7 @@ class NikonCamera(private val context: Context) {
                                 loadContext.ensureActive()
                                 val handle = handles[cursors[groupIndex]++]
                                 requestedHandles++
-                                val result = ioGate.withBackgroundThumbnail {
-                                    readStaDirectIndexedObjectInternal(handle, storageId)
-                                }
+                                val result = readStaDirectIndexedObjectInternal(handle, storageId)
                                 cacheStaDirectObjectHeader(handle, result)
                                 if (!result.successful) allSucceeded = false
                                 val file = result.file
@@ -3056,7 +3109,7 @@ class NikonCamera(private val context: Context) {
                         heads[selected] = null
                         completed++
                     }
-            }
+            } }
             if (output.isNotEmpty()) {
                 onBatch(output, completed, total)
             } else if (completed == completedBeforeBatch && requestedHandles == 0) {
@@ -4163,8 +4216,8 @@ class NikonCamera(private val context: Context) {
     /**
      * 双卡 ObjectInfo 流式归并。每组 handle 已按各自卡内的新到旧排列；这里只为每张卡
      * 保留一个已读取的 head，用其真实 captureDate 选择全机下一条。因此不会先扫完一张卡，
-     * 也不需要把全部 ObjectInfo 读完才显示。每个 handle 仍只请求一次，每条 ObjectInfo
-     * 都单独释放相机通道，与单卡枚举的通道占用粒度一致。
+     * 也不需要把全部 ObjectInfo 读完才显示。每个 handle 仍只请求一次，批次之间释放相机
+     * 通道，保持原有列表发布和让路边界。
      */
     suspend fun streamMergedFileInfo(
         newestFirstHandlesByStorage: List<List<Int>>,
@@ -4196,7 +4249,7 @@ class NikonCamera(private val context: Context) {
             val completedBeforeBatch = completed
 
             var objectInfoRequests = 0
-            val output = buildList {
+            val output = ioGate.withBackgroundThumbnail { buildList {
                 while (size < currentBatchSize && completed < total) {
                     groups.indices.forEach { groupIndex ->
                         if (heads[groupIndex] != null) return@forEach
@@ -4207,9 +4260,7 @@ class NikonCamera(private val context: Context) {
                             val handle = handles[cursors[groupIndex]++]
                             objectInfoRequests++
                             requestedHandles += handle
-                            val result = ioGate.withBackgroundThumbnail {
-                                getObjectInfoInternal(handle)
-                            }
+                            val result = getObjectInfoInternal(handle)
                             val file = result.file
                             if (!result.successful) allObjectInfoSucceeded = false
                             if (file == null) {
@@ -4235,7 +4286,7 @@ class NikonCamera(private val context: Context) {
                     heads[selected] = null
                     completed++
                 }
-            }
+            } }
 
             if (FileOrderProbe.enabled && requestedHandles.isNotEmpty()) {
                 FileOrderProbe.recordObjectInfoBatch(
@@ -4659,11 +4710,15 @@ class NikonCamera(private val context: Context) {
      * - 用 NonCancellable 保证即使调用方作用域已取消也能完成清理。
      */
     suspend fun close() = withContext(NonCancellable + Dispatchers.IO) {
-        // Cancel old waiters before enqueueing the close command. An admitted transaction remains
-        // the only operation allowed to finish; its own transfer/command cleanup keeps the PTP
-        // stream aligned before this close transaction takes the next slot.
-        ioGate.cancelQueuedTransactions()
-        withCameraTransaction(CameraRequestKind.INTERACTIVE, "CLOSE_SESSION") {
+        // Close the submission gate before enqueueing the close command. An admitted transaction
+        // remains the only business operation allowed to finish; its own transfer/command cleanup
+        // keeps the PTP stream aligned before this close transaction takes the next slot.
+        ioGate.beginShutdown()
+        withCameraTransaction(
+            CameraRequestKind.INTERACTIVE,
+            "CLOSE_SESSION",
+            true,
+        ) {
             // 仅在会话确实打开时才发送 CloseSession，否则握手中途失败时会空等响应。
             if (sessionOpen) {
                 try {

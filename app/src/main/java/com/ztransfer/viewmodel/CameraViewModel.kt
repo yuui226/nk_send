@@ -883,6 +883,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 eventPollJob?.cancel()
                 val previous = camera
                 camera = null
+                fileLoadJob?.cancel()
                 previous?.close()
                 releaseSessionWifiLock()
                 CameraSessionService.stop(getApplication())
@@ -1070,6 +1071,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         CameraSessionService.stop(getApplication())
         keepaliveJob?.cancel()
         eventPollJob?.cancel()
+        fileLoadJob?.cancel()
         val cam = camera
         camera = null
         _state.update {
@@ -1629,6 +1631,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         keepaliveJob?.cancel()
         eventPollJob?.cancel()
         releaseSessionWifiLock()
+        fileLoadJob?.cancel()
         val cam = camera
         camera = null
         _state.update {
@@ -2647,17 +2650,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             Lab.EVT_OBJECT_REMOVED -> requestHandleCatalogSync(cam, event.second.toInt())
             PtpConstants.EVENT_OBJECT_INFO_CHANGED,
             PtpConstants.EVENT_MTP_OBJECT_PROP_CHANGED -> {
-                // Rating changes may keep name, size and handle unchanged. Invalidate only the
-                // affected object; the scanner will re-read it when the camera is idle.
-                cam.invalidatePhotoRating(event.second.toInt())
-                if (PhotoGenerationProbe.enabled) {
-                    PhotoGenerationProbe.note(
-                        "RATING",
-                        "event invalidate code=0x%04X handle=0x%08X".format(
-                            event.first, event.second.toInt(),
-                        ),
-                    )
-                }
+                // Keep the rating snapshot stable for this connection. Nikon emits the same
+                // object/property events for unrelated metadata changes, and the event payload
+                // does not contain a reliable rating value. A new connection starts a fresh
+                // snapshot through loadFiles(); do not cancel and restart the active scan here.
             }
         }
     }
@@ -3575,6 +3571,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         if (_recentThumbnailReady.value || published.isEmpty()) return
         val dates = published.asSequence().mapNotNull { it.captureDate?.take(8) }
             .distinct().take(4).toList()
+        // A card may contain fewer than three shooting days. Once the authoritative list and
+        // its final thumbnail batch are complete, that shorter range is already definitive.
+        if (loaded >= total && dates.isNotEmpty()) {
+            _recentThumbnailReady.value = true
+            return
+        }
         if (dates.size < 3) return
         val cutoff = dates[2]
         val crossedBoundary = completedBatch.any { it.captureDate?.take(8)?.let { d -> d < cutoff } == true }
@@ -3589,6 +3591,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      */
     fun onCameraTransportLost(failedCamera: NikonCamera) {
         if (camera !== failedCamera) return
+        fileLoadJob?.cancel()
         camera = null
         keepaliveJob?.cancel()
         eventPollJob?.cancel()

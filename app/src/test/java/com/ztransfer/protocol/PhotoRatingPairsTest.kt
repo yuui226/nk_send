@@ -15,6 +15,12 @@ class PhotoRatingPairsTest {
         assertEquals(jpg, sources[2])
     }
 
+    @Test fun uniquePairAlsoProjectsJpegRatingToNrw() {
+        val raw = file(1, "Z30_9049.NRW")
+        val jpg = file(2, "Z30_9049.JPG")
+        assertEquals(jpg, photoRatingSources(listOf(raw, jpg))[1])
+    }
+
     @Test fun unmatchedDifferentCardDateOrAmbiguousRawStaysIndependent() {
         val raw = file(1, "Z30_9049.NEF")
         for (others in listOf(emptyList(), listOf(file(2, "Z30_9049.JPG", card = 2)),
