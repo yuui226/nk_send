@@ -1417,7 +1417,6 @@ class NikonCamera(private val context: Context) {
         suspend fun chunk(offset: Int): ByteArray? {
             val requestedAt = SystemClock.elapsedRealtime()
             return ioGate.withTransferSlice {
-            val commandStartedAt = SystemClock.elapsedRealtime()
             var commandStarted = 0L
             withContext(Dispatchers.IO) {
                 if (!sessionOpen || generation != photoRatingGeneration.value) return@withContext null
