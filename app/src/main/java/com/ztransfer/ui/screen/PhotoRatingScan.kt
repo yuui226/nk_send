@@ -145,8 +145,10 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
             val readStartedAt = SystemClock.elapsedRealtime()
             var cancelled = false
             try {
-                camera.withPhotoRatingPriority {
-                    pending.forEachIndexed { index, file ->
+                // Each reader submits one RATING transaction. Do not reserve the channel for the
+                // whole scan: interactive work and transfer chunk boundaries must be able to run
+                // between files, while the scheduler still gives each rating read its priority.
+                pending.forEachIndexed { index, file ->
                     currentCoroutineContext().ensureActive()
                     activeFile = file.fileName
                     // Never reuse the camera's cross-flow rating map here: this scan is a
@@ -169,7 +171,6 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
                                 "active=$activeFile " +
                                 "elapsed=${SystemClock.elapsedRealtime() - readStartedAt}ms",
                         )
-                    }
                     }
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {

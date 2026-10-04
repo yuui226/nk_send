@@ -638,7 +638,7 @@ private fun RemoteContent(
     var autoIsoBusy by remember { mutableStateOf(false) }
     var autoIsoProbeLogKey by remember { mutableStateOf<String?>(null) }
     // 初始参数是否已加载完：用于把事件轮询推迟到之后开始，避免进页时 GetEvent 与
-    // 曝光参数与模式读取抢 ioMutex、拖慢参数首次显示。
+    // 曝光参数与模式读取抢 相机事务调度器、拖慢参数首次显示。
     var initialLoaded by remember { mutableStateOf(false) }
     // 只控制后台相机命令何时放行；取帧本身不设任何 FPS 上限。
     var liveViewStable by remember { mutableStateOf(false) }
@@ -1301,7 +1301,7 @@ private fun RemoteContent(
         }
     }
 
-    // 在页期间暂停后台缩略图填充：把 ioMutex 完全让给取帧与参数加载，
+    // 在页期间暂停后台缩略图填充：把相机通道完全让给取帧与参数加载，
     // 否则每条启动命令都排在 GetThumb 后面，进页要等好几秒。退出自动恢复。
     DisposableEffect(Unit) {
         cameraViewModel.setRemoteActive(true)
@@ -1388,7 +1388,7 @@ private fun RemoteContent(
 
     // 部分机身不发 BatteryLevel 变更事件：每 120s 兜底刷新。首读失败时
     // 也会重新拉取属性描述，避免进页瞬间相机忙导致整次会话一直显示未知。
-    // 拍摄/录像命令期间等忙状态结束再读，不抢占实时取景的共用 ioMutex。
+    // 拍摄/录像命令期间等忙状态结束再读，不抢占实时取景的共用相机事务调度器。
     LaunchedEffect(connected, initialLoaded) {
         if (!connected || !initialLoaded) return@LaunchedEffect
         while (isActive) {
@@ -1439,7 +1439,7 @@ private fun RemoteContent(
     // ---------- 电子水平仪（AngleLevel 0xD067）----------
     // 角度取自【相机机身】而非手机传感器：相机在架子上、手机在手里，只有相机自身姿态
     // 对构图有意义。只在水平仪打开时轮询，关掉就一条命令都不发——本页所有相机 I/O
-    // 共用 ioMutex，多一个常驻轮询就是白占取帧通道。250ms 对水平指示足够跟手。
+    // 共用相机事务调度器，多一个常驻轮询就是白占取帧通道。250ms 对水平指示足够跟手。
     // 机身不支持时停止轮询、不显示假角度，保留用户偏好供下次连接使用。
     LaunchedEffect(showLevel, connected) {
         levelRoll = null
@@ -1627,7 +1627,7 @@ private fun RemoteContent(
 
     // ---------- 调参 ----------
     // 步进采用"乐观更新 + 尾值合并"：本地值立即跟手（长按连调不卡），停手 160ms 后
-    // 只把最终值发给相机——逐档发送会在 ioMutex 上排队，连调十几档要追几秒。
+    // 只把最终值发给相机——逐档发送会在相机事务调度器上排队，连调十几档要追几秒。
     fun sendValue(prop: Int, value: Long, immediate: Boolean) {
         val p = params[prop] ?: return
         params[prop] = p.copy(current = value)

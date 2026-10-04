@@ -14,7 +14,7 @@ import kotlinx.coroutines.withContext
  * 无线遥控协议层：Live View、曝光参数读写、触摸对焦、遥控拍摄、事件轮询，
  * 外加开发者面板用的完整能力探测（runLabProbe）。语义与 libgphoto2 ptp.h/library.c 对照，
  * 已在 Z 30 (fw1.20) 真机全项验证。
- * 所有命令经 [NikonCamera.ioMutex] 串行，与传输/缩略图/心跳互斥，不碰下载热路径。
+ * 所有命令经 NikonCamera 的统一事务调度器串行，与传输/缩略图/心跳互斥，不碰下载热路径。
  *
  * 探测/诊断日志固定英文 + 十六进制（用于与 libgphoto2 语义比对），不做 i18n。
  */
@@ -238,7 +238,7 @@ private suspend fun logProbeCodes(
 /** 单条无 data-out 事务：发命令、收响应码+数据载荷。与正式操作共用互斥锁。 */
 suspend fun NikonCamera.labCommand(code: Int, vararg params: Int): Pair<Int, ByteArray?> =
     focusMutex.withLock {
-        ioMutex.withLock {
+        withCameraTransaction(CameraRequestKind.INTERACTIVE, "LAB_COMMAND") {
             withContext(Dispatchers.IO) {
                 sendCmd(code, *params)
                 recvRespWithPayload()
@@ -249,7 +249,7 @@ suspend fun NikonCamera.labCommand(code: Int, vararg params: Int): Pair<Int, Byt
 /** SetDevicePropValue：把 [raw]（属性的原始小端编码）写给相机，返回响应码。 */
 suspend fun NikonCamera.labSetProp(prop: Int, raw: ByteArray): Int =
     focusMutex.withLock {
-        ioMutex.withLock {
+        withCameraTransaction(CameraRequestKind.INTERACTIVE, "LAB_SET_PROP") {
             withContext(Dispatchers.IO) {
                 sendCmdWithData(Lab.SET_DEVICE_PROP_VALUE, raw, prop)
                 recvRespWithPayload().first
@@ -978,12 +978,12 @@ private suspend fun NikonCamera.focusCommand(
     deadlineMs: Long,
     vararg params: Int
 ): Pair<Int, ByteArray?>? = withContext(Dispatchers.IO) {
-    ioMutex.withLock {
+    withCameraTransaction(CameraRequestKind.INTERACTIVE, "FOCUS_COMMAND") {
         focusCommandLocked(code, deadlineMs, *params)
     }
 }
 
-/** 调用方必须在 I/O 调度器持有 [NikonCamera.ioMutex]，用于组成严格时序的 AF 原子段。 */
+/** 调用方必须在 I/O 调度器事务内调用，用于组成严格时序的 AF 原子段。 */
 private fun NikonCamera.focusCommandLocked(
     code: Int,
     deadlineMs: Long,
@@ -1050,7 +1050,7 @@ internal suspend fun runTapFocusStart(
     )
 }
 
-/** 调用方必须持有 focusMutex -> ioMutex；没有活动追踪时不发送冗余命令。 */
+/** 调用方必须持有 focusMutex -> 相机事务；没有活动追踪时不发送冗余命令。 */
 private fun NikonCamera.endSubjectTrackingLocked(deadlineMs: Long): Int? {
     if (!subjectTrackingActive) return null
     sendCmd(Lab.NK_END_TRACKING)
@@ -1140,7 +1140,7 @@ private suspend fun NikonCamera.afDriveAndWait(
  * 2. 轮询 DeviceReady(0x90C8)；
  * 3. 0x2019 继续等待，0x2001 为合焦成功，0xA002 为未合焦。
  *
- * [NikonCamera.focusMutex] 防止两套 AF 流程互相穿插；[NikonCamera.ioMutex] 只保护
+ * [NikonCamera.focusMutex] 防止两套 AF 流程互相穿插；统一事务调度器只保护
  * 每条完整 PTP 事务，使 Live View 能在 DeviceReady 的轮询间隔内继续取帧。
  */
 suspend fun NikonCamera.rcAfDriveAndWait(timeoutMs: Long = 6_000L): RcAfResult =
@@ -1148,7 +1148,9 @@ suspend fun NikonCamera.rcAfDriveAndWait(timeoutMs: Long = 6_000L): RcAfResult =
         val startedAt = SystemClock.elapsedRealtime()
         val deadlineMs = startedAt + timeoutMs
         val endRc = withContext(Dispatchers.IO) {
-            ioMutex.withLock { endSubjectTrackingLocked(deadlineMs) }
+            withCameraTransaction(CameraRequestKind.INTERACTIVE, "FOCUS_END_TRACKING") {
+                endSubjectTrackingLocked(deadlineMs)
+            }
         }
         if (endRc != null && subjectTrackingActive) {
             RcAfResult(endRc, 0, SystemClock.elapsedRealtime() - startedAt, false)
@@ -1162,7 +1164,9 @@ suspend fun NikonCamera.rcEndSubjectTracking(timeoutMs: Long = 6_000L): Int? =
     focusMutex.withLock {
         val deadlineMs = SystemClock.elapsedRealtime() + timeoutMs
         withContext(Dispatchers.IO) {
-            ioMutex.withLock { endSubjectTrackingLocked(deadlineMs) }
+            withCameraTransaction(CameraRequestKind.INTERACTIVE, "FOCUS_END_TRACKING") {
+                endSubjectTrackingLocked(deadlineMs)
+            }
         }
     }
 
@@ -1180,7 +1184,7 @@ suspend fun NikonCamera.rcFocusAt(
     val startedAt = SystemClock.elapsedRealtime()
     val deadlineMs = startedAt + timeoutMs
     val (endTrackingRc, start) = withContext(Dispatchers.IO) {
-        ioMutex.withLock {
+        withCameraTransaction(CameraRequestKind.INTERACTIVE, "FOCUS_START") {
             val endRc = endSubjectTrackingLocked(deadlineMs)
             val startResult = if (subjectTrackingActive) {
                 null
@@ -1406,7 +1410,7 @@ internal suspend fun NikonCamera.rcStartMovieDetailed(
     return RcMovieStartResult(rc, prohibitCondition)
 }
 
-/** 执行 USB 开录序列；调用方必须已持有 ioMutex 并处于 I/O 调度器。 */
+/** 执行 USB 开录序列；调用方必须处于相机事务 并处于 I/O 调度器。 */
 private fun NikonCamera.prepareAndStartMovieLocked(): RcMovieStartResult {
     fun command(code: Int, vararg params: Int): Pair<Int, ByteArray?> {
         sendCmd(code, *params)
@@ -1488,14 +1492,14 @@ private fun NikonCamera.prepareAndStartMovieLocked(): RcMovieStartResult {
 
 /**
  * USB 远控会话内的开录原子序列。禁止条件读取、应用模式和 0x920A 共用一次
- * [NikonCamera.ioMutex]，事件轮询与取帧不能插入中途看到半切换状态或把应用模式清回去。
+ * 统一事务调度器，事件轮询与取帧不能插入中途看到半切换状态或把应用模式清回去。
  * Live View 与 PTP 会话始终保持，不在这里发送 EndLiveView。
  */
 internal suspend fun NikonCamera.rcPrepareAndStartMovieDetailed(
     log: (String) -> Unit = {}
 ): RcMovieStartResult {
     val result = focusMutex.withLock {
-        ioMutex.withLock {
+        withCameraTransaction(CameraRequestKind.INTERACTIVE, "MOVIE_START") {
             withContext(Dispatchers.IO) { prepareAndStartMovieLocked() }
         }
     }
@@ -1605,7 +1609,7 @@ suspend fun NikonCamera.labStartLiveView(log: suspend (String) -> Unit): Boolean
 
 suspend fun NikonCamera.labEndLiveView(): Int {
     val rc = focusMutex.withLock {
-        ioMutex.withLock {
+        withCameraTransaction(CameraRequestKind.INTERACTIVE, "LIVE_VIEW_END") {
             withContext(Dispatchers.IO) {
                 // EndLiveView 会隐式终止画面，但不能依赖它替我们闭合追踪会话；否则下次
                 // 开 LV 时机身仍可能保留旧目标。错误响应不阻止继续关 LV；但若一次事务
@@ -1636,7 +1640,7 @@ suspend fun NikonCamera.labEndLiveView(): Int {
  * 相机忙返回 null（调用方稍后重试）；其它失败抛响应码异常。
  */
 suspend fun NikonCamera.labGrabFrame(): LiveViewPacket? =
-    ioMutex.withLock {
+    withCameraTransaction(CameraRequestKind.INTERACTIVE, "LIVE_VIEW_FRAME") {
         withContext(Dispatchers.IO) {
             if (liveViewImageOperation == null) {
                 // 正常路径已在 labStartLiveView 前解析；仅为直接调用 labGrabFrame 的

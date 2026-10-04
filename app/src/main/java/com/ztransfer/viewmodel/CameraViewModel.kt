@@ -516,7 +516,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private var lastHandleCatalogCheckAtMs = 0L
     private var fileLoadJob: Job? = null
     // 首次连接的整卡 ObjectInfo 枚举可能跨越数秒。进入监看时取消并记住尚未完成，
-    // 退出后从已发布的文件继续，避免 GetObjectInfo 与 Live View 取帧争抢 ioMutex。
+    // 退出后从已发布的文件继续，避免 GetObjectInfo 与 Live View 取帧争抢相机事务调度器。
     private var fileLoadPending = false
     // ObjectInfo 开始前已经取得的 StorageID + handles 快照。大图预览短暂停顿后，同一
     // NikonCamera 实例可直接继续剩余 handles，不重复向相机请求整卡 handle 列表。
@@ -569,7 +569,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     // 后台落盘先于可见格发起时也要共享请求；否则二者会在 remoteThumbGate 两侧各取一次。
     // value 只负责把字节落盘，不解码入内存，完成后由主线程清理。
     private val inflightPrefetches = HashMap<Int, CompletableDeferred<Boolean>>()
-    // PTP 命令通道本身严格串行；若整屏可见格子都提前排进 NikonCamera.ioMutex，
+    // PTP 命令通道本身严格串行；若整屏可见格子都提前排进统一事务调度器，
     // 后来的交互型 FHD 会被十几个 GetThumb 挡住。这里只允许一个远程缩略图进入
     // PTP 等待队列，其余在外层等待；不降低相机吞吐，却给 FHD 留出插队机会。
     private val remoteThumbGate = Semaphore(1)
@@ -1124,7 +1124,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     // 遥控页活跃期间同样完全停止填充：监看取帧是连续流量，填充的 GetThumb 会与
-    // 参数加载/取帧争抢 ioMutex（表现为进页要等半天、帧率骤降）。与"传输中停止"
+    // 参数加载/取帧争抢相机事务调度器（表现为进页要等半天、帧率骤降）。与"传输中停止"
     // 同一哲学——前台交互独占通道；退出遥控页自动恢复。
     private val remoteActiveFlow = MutableStateFlow(false)
 
@@ -1149,7 +1149,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     // FHD 长按预览活跃期间暂停后台缩略图填充：FHD 取图比缩略图慢得多（1-3s vs 100ms），
-    // 持续填充的 GetThumb 排队会把 FHD 请求憋在 ioMutex 队列后面、用户感知加载慢。
+    // 持续填充的 GetThumb 排队会把 FHD 请求憋在 相机事务调度器 队列后面、用户感知加载慢。
     // 与 remoteActive 同机制——前台交互独占通道；退出预览自动恢复。
     private val fhdActiveFlow = MutableStateFlow(false)
 
@@ -3031,7 +3031,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 effectPreviewExif = if (preserveExisting) it.effectPreviewExif else null,
             )
         }
-        // 监看和交互式大图都先于列表枚举：保留待加载标记，不向 ioMutex 排队。
+        // 监看和交互式大图都先于列表枚举：保留待加载标记，不向相机事务调度器排队。
         if (isFileScanPaused()) return
 
         if (FileOrderProbe.enabled) {
@@ -3784,7 +3784,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             if (FileOrderProbe.enabled) {
                 getRemoteThumbnailProbed(expectedCamera, handle, "background")
             } else {
-                expectedCamera.getThumbnail(handle)
+                expectedCamera.getThumbnail(handle, visible = false)
             }
         }   // 瞬时失败会抛出，由扫描循环按单张失败处理
         if (camera !== expectedCamera ||
@@ -3822,7 +3822,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             -1
         }
         return try {
-            val bytes = cam.getThumbnail(handle)
+            val bytes = cam.getThumbnail(handle, visible = lane == "visible")
             if (FileOrderProbe.enabled) {
                 FileOrderProbe.finishThumbnail(
                     sequence = sequence,
@@ -3988,7 +3988,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 if (FileOrderProbe.enabled) {
                     getRemoteThumbnailProbed(expectedCamera, handle, "visible")
                 } else {
-                    expectedCamera.getThumbnail(handle)
+                    expectedCamera.getThumbnail(handle, visible = true)
                 }
             }
             if (camera !== expectedCamera ||
