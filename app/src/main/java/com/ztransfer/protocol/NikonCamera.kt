@@ -1425,9 +1425,9 @@ class NikonCamera(private val context: Context) {
         ioGate.withInteractiveTagged("RATING") { readPhotoRatingHeaderInternal(file) }
 
     private suspend fun readPhotoRatingHeaderInternal(file: FileInfo): Int? {
-        // Nikon Z bodies expose the rating field within the first 64 KiB. Keep this
-        // probe small; only extend once when a model does not expose it in that prefix.
-        val ratingChunkBytes = 64 * 1024
+        // Z30 diagnostics place the rating field at the 64 KiB boundary. Read a small
+        // margin beyond it so the common case completes in one PTP request.
+        val ratingChunkBytes = 80 * 1024
         val generation = photoRatingGeneration.value
         suspend fun chunk(offset: Int): ByteArray? {
             val requestedAt = SystemClock.elapsedRealtime()
@@ -1470,6 +1470,7 @@ class NikonCamera(private val context: Context) {
         val first = chunk(0) ?: return null
         if (first.size > ratingChunkBytes) return null
         var rating = withContext(Dispatchers.Default) { parsePhotoRating(first) }
+        RatingDiagnostics.note("parse file=${file.fileName} prefix=${first.size} result=${rating ?: "unknown"}")
         if (rating == null && first.size == ratingChunkBytes) {
             val tail = chunk(first.size)
             if (tail != null && tail.size <= 131072) {
