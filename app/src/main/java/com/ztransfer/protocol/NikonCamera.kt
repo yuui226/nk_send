@@ -1416,7 +1416,10 @@ class NikonCamera(private val context: Context) {
         val generation = photoRatingGeneration.value
         suspend fun chunk(offset: Int): ByteArray? {
             val requestedAt = SystemClock.elapsedRealtime()
-            return ioGate.withTransferSlice {
+            // Once the recent-three-day boundary is reached, rating reads are the active
+            // user request. Old background thumbnails must yield at the gate; the PTP
+            // transaction itself remains serialized by the same mutex.
+            return ioGate.withInteractive {
             var commandStarted = 0L
             withContext(Dispatchers.IO) {
                 if (!sessionOpen || generation != photoRatingGeneration.value) return@withContext null
