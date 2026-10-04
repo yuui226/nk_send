@@ -195,6 +195,8 @@ internal fun updateFhdSupport(
 internal class CameraIoGate(
     val mutex: Mutex = Mutex(),
 ) {
+    /** Serializes admission so transfers cannot queue ahead after an interactive request registers. */
+    private val admission = Mutex()
     private val interactiveWaiters = MutableStateFlow(0)
     private val activeDownloads = MutableStateFlow(0)
     @Volatile private var activeOwner: String = "none"
@@ -214,17 +216,28 @@ internal class CameraIoGate(
         withInteractiveTagged("INTERACTIVE", block)
 
     suspend fun <T> withInteractiveTagged(owner: String, block: suspend () -> T): T =
-        withInteractivePriority { mutex.withLock {
-            val previous = activeOwner
-            activeOwner = owner
-            try { block() } finally { activeOwner = previous }
-        } }
+        withInteractivePriority {
+            admission.withLock { mutex.lock() }
+            try {
+                val previous = activeOwner
+                activeOwner = owner
+                try { return@withInteractivePriority block() } finally { activeOwner = previous }
+            } finally {
+                mutex.unlock()
+            }
+        }
 
     suspend fun <T> withTransferSlice(block: suspend () -> T): T {
         while (true) {
             interactiveWaiters.first { it == 0 }
-            mutex.lock()
-            if (interactiveWaiters.value == 0) {
+            var admitted = false
+            admission.withLock {
+                if (interactiveWaiters.value == 0) {
+                    mutex.lock()
+                    admitted = true
+                }
+            }
+            if (admitted) {
                 try {
                     val previous = activeOwner
                     activeOwner = "TRANSFER"
@@ -233,7 +246,6 @@ internal class CameraIoGate(
                     mutex.unlock()
                 }
             }
-            mutex.unlock()
         }
     }
 
@@ -1389,7 +1401,7 @@ class NikonCamera(private val context: Context) {
     private val ratingUnsupportedExtensions = HashSet<String>()
     private var ratingOperationUnsupported = false
 
-    internal suspend fun readObjectRating(file: FileInfo): Int? = ioGate.withTransferSlice {
+    internal suspend fun readObjectRating(file: FileInfo): Int? = ioGate.withInteractiveTagged("RATING") {
         withContext(Dispatchers.IO) {
             if (ratingOperationUnsupported || file.extension in ratingUnsupportedExtensions) return@withContext null
             if (!sessionOpen) throw RatingReadDeferred()
@@ -1421,30 +1433,35 @@ class NikonCamera(private val context: Context) {
     private var ratingStandardHeaderUnsupported = false
 
     /** At most 256KiB total; extend the prefix rather than download its first half twice. */
-    internal suspend fun readPhotoRatingHeader(file: FileInfo): Int? =
-        ioGate.withInteractiveTagged("RATING") { readPhotoRatingHeaderInternal(file) }
+    internal suspend fun readPhotoRatingHeader(file: FileInfo): Int? {
+        val requestedAt = SystemClock.elapsedRealtime()
+        return ioGate.withInteractiveTagged("RATING") {
+            readPhotoRatingHeaderInternal(file, SystemClock.elapsedRealtime() - requestedAt)
+        }
+    }
 
-    private suspend fun readPhotoRatingHeaderInternal(file: FileInfo): Int? {
-        // Z30 diagnostics place the rating field at the 64 KiB boundary. Read a small
-        // margin beyond it so the common case completes in one PTP request.
-        val ratingChunkBytes = 80 * 1024
+    private suspend fun readPhotoRatingHeaderInternal(file: FileInfo, gateWaitMs: Long): Int? {
+        val probeStartedAt = SystemClock.elapsedRealtime()
+        // The tested Z30 JPEGs parse successfully with a 100 KiB prefix.
+        // This is a measured prefix size, not a fixed rating-field offset.
+        val ratingChunkBytes = 100 * 1024
+        val ratingExtensionBytes = 8 * 1024
         val generation = photoRatingGeneration.value
-        suspend fun chunk(offset: Int): ByteArray? {
-            val requestedAt = SystemClock.elapsedRealtime()
-            // The caller holds the interactive gate for the complete two-chunk probe. Do not
-            // release it between chunks, otherwise an old thumbnail request can be inserted
-            // between offset 0 and offset 64 KiB.
+        var readCommandMs = 0L
+        var readChunks = 0
+        suspend fun chunk(offset: Int, count: Int): ByteArray? {
+            // The caller holds the gate across this bounded prefix probe.
             return withContext(Dispatchers.IO) {
-            var commandStarted = 0L
+                var commandStarted: Long
                 if (!sessionOpen || generation != photoRatingGeneration.value) return@withContext null
                 try {
                     commandStarted = SystemClock.elapsedRealtime()
-                    val gateWaitMs = commandStarted - requestedAt
                     if (!ratingNikonHeaderUnsupported) {
-                        sendCmd(PtpConstants.NK_GET_PARTIAL_OBJECT_EX, file.handle, offset, 0, ratingChunkBytes, 0)
+                        sendCmd(PtpConstants.NK_GET_PARTIAL_OBJECT_EX, file.handle, offset, 0, count, 0)
                         val (response, bytes) = recvRespWithPayload()
                         if (response == PtpConstants.RESPONSE_OK) {
-                            RatingDiagnostics.note("read file=${file.fileName} offset=$offset bytes=${bytes?.size ?: 0} gate=${gateWaitMs}ms blockedBy=${if (gateWaitMs > 20) "other" else "none"} command=${SystemClock.elapsedRealtime() - commandStarted}ms")
+                            readCommandMs += SystemClock.elapsedRealtime() - commandStarted
+                            readChunks++
                             return@withContext bytes
                         }
                         if (response == 0x2019) throw RatingReadDeferred()
@@ -1452,12 +1469,13 @@ class NikonCamera(private val context: Context) {
                         ratingNikonHeaderUnsupported = true
                     }
                     if (ratingStandardHeaderUnsupported) return@withContext null
-                    sendCmd(0x101B, file.handle, offset, ratingChunkBytes)
+                    sendCmd(0x101B, file.handle, offset, count)
                     val (response, bytes) = recvRespWithPayload()
                     if (response == 0x2019) throw RatingReadDeferred()
                     if (response == 0x2005) ratingStandardHeaderUnsupported = true
                     bytes?.takeIf { response == PtpConstants.RESPONSE_OK }?.also {
-                        RatingDiagnostics.note("read file=${file.fileName} offset=$offset bytes=${it.size} gate=${gateWaitMs}ms blockedBy=${if (gateWaitMs > 20) "other" else "none"} command=${SystemClock.elapsedRealtime() - commandStarted}ms")
+                        readCommandMs += SystemClock.elapsedRealtime() - commandStarted
+                        readChunks++
                     }
                 } catch (e: CancellationException) {
                     throw e
@@ -1466,17 +1484,31 @@ class NikonCamera(private val context: Context) {
                     throw e
                 }
             }
-            }
-        val first = chunk(0) ?: return null
-        if (first.size > ratingChunkBytes) return null
-        var rating = withContext(Dispatchers.Default) { parsePhotoRating(first) }
-        RatingDiagnostics.note("parse file=${file.fileName} prefix=${first.size} result=${rating ?: "unknown"}")
-        if (rating == null && first.size == ratingChunkBytes) {
-            val tail = chunk(first.size)
-            if (tail != null && tail.size <= 131072) {
-                rating = withContext(Dispatchers.Default) { parsePhotoRating(first + tail) }
-            }
         }
+        val first = chunk(0, ratingChunkBytes) ?: return null
+        if (first.size > ratingChunkBytes) return null
+        var parseMs = 0L
+        suspend fun parse(bytes: ByteArray): Int? = withContext(Dispatchers.Default) {
+            val startedAt = SystemClock.elapsedRealtime()
+            try { parsePhotoRating(bytes) }
+            finally { parseMs += SystemClock.elapsedRealtime() - startedAt }
+        }
+        var rating = parse(first)
+        var parsedBytes = first
+        while (rating == null && parsedBytes.size < 262144) {
+            val count = minOf(ratingExtensionBytes, 262144 - parsedBytes.size)
+            val tail = chunk(parsedBytes.size, count) ?: break
+            if (tail.isEmpty() || tail.size > count) break
+            parsedBytes += tail
+            rating = parse(parsedBytes)
+        }
+        RatingDiagnostics.note(
+                "read file=${file.fileName} bytes=${parsedBytes.size} chunks=$readChunks " +
+                "gate=${gateWaitMs}ms command=${readCommandMs}ms " +
+                "parse=${parseMs}ms " +
+                "other=${(SystemClock.elapsedRealtime() - probeStartedAt - readCommandMs - parseMs).coerceAtLeast(0)}ms " +
+                "result=${rating ?: "unknown"}",
+        )
         if (generation != photoRatingGeneration.value) return null
         rating?.let { rememberPhotoRating(file.handle, it, generation, "rating-header") }
         return rating
@@ -1484,9 +1516,11 @@ class NikonCamera(private val context: Context) {
 
     internal suspend fun readVideoRating(file: FileInfo): Int? = withContext(Dispatchers.Default) {
         val generation = photoRatingGeneration.value
-        // Parsed session values are reused above; old unversioned prefixes may predate a rating edit.
+        val startedAt = SystemClock.elapsedRealtime()
+        // Use the verified structural locator. It reads only the required MP4 regions
+        // (normally the moov/NCTG field), never the video payload.
         val rating = readNikonVideoRating(file.size) { offset, count ->
-            ioGate.withTransferSlice {
+            ioGate.withInteractiveTagged("RATING") {
                 withContext(Dispatchers.IO) {
                     if (!sessionOpen) throw RatingReadDeferred()
                     if (generation != photoRatingGeneration.value) return@withContext null
@@ -1514,6 +1548,10 @@ class NikonCamera(private val context: Context) {
             }
         }
         if (generation != photoRatingGeneration.value) return@withContext null
+        RatingDiagnostics.note(
+            "read video=${file.fileName} elapsed=${SystemClock.elapsedRealtime() - startedAt}ms " +
+                "result=${rating ?: "unknown"}",
+        )
         rating?.let { rememberPhotoRating(file.handle, it, generation, "rating-video") }
         rating
     }
@@ -2345,7 +2383,7 @@ class NikonCamera(private val context: Context) {
      * 其它非 OK 响应（如设备忙）与 IO 失败一律抛出——那是瞬时状态，负缓存会把
      * 恰好赶上相机忙碌时段的整批缩略图永久打成"无图"。与其它命令共用 ioMutex。
      */
-    suspend fun getThumbnail(handle: Int): ByteArray? = ioMutex.withLock {
+    suspend fun getThumbnail(handle: Int): ByteArray? = ioGate.withTransferSlice {
         withContext(Dispatchers.IO) {
             if (staDirectObjectReadValidated) {
                 if ((staDirectFiles[handle]?.extension ?: staDirectExtensionFromHandle(handle)) == ".jpg") {
@@ -2648,6 +2686,10 @@ class NikonCamera(private val context: Context) {
     internal suspend fun <T> withInteractivePreviewPriority(block: suspend () -> T): T =
         ioGate.withInteractivePriority(block)
 
+    /** Keep the camera lane reserved for the active rating pass between individual reads. */
+    internal suspend fun <T> withPhotoRatingPriority(block: suspend () -> T): T =
+        ioGate.withInteractivePriority(block)
+
     suspend fun streamFileInfo(
         handles: List<Int>,
         batchSize: Int = 20,
@@ -2674,7 +2716,7 @@ class NikonCamera(private val context: Context) {
             // IO 异常（掉线/读超时）直接向上抛给调用方终止扫描：逐个 handle 硬试会让
             // 每个都等满 60s 读超时、扫描假死数十分钟；单文件 PTP 级失败在
             // getObjectInfoInternal 内已按 null 跳过，不会走到这里。
-            val files = ioMutex.withLock {
+            val files = ioGate.withTransferSlice {
                 batch.mapNotNull { handle ->
                     loadContext.ensureActive()
                     val result = getObjectInfoInternal(handle)
@@ -2733,7 +2775,7 @@ class NikonCamera(private val context: Context) {
             }
             val batchEnd = minOf(nextHandleIndex + currentBatchSize, total)
             val batch = handles.subList(nextHandleIndex, batchEnd)
-            val files = ioMutex.withLock {
+            val files = ioGate.withTransferSlice {
                 batch.mapNotNull { handle ->
                     loadContext.ensureActive()
                     val result = readStaDirectIndexedObjectInternal(
@@ -2792,8 +2834,7 @@ class NikonCamera(private val context: Context) {
             var requestedHandles = 0
             val completedBeforeBatch = completed
             val requestBudget = maxOf(groups.size, currentBatchSize + groups.size - 1)
-            val output = ioMutex.withLock {
-                buildList {
+            val output = ioGate.withTransferSlice { buildList {
                     while (size < currentBatchSize && completed < total) {
                         groups.indices.forEach { groupIndex ->
                             if (heads[groupIndex] != null) return@forEach
@@ -2827,8 +2868,7 @@ class NikonCamera(private val context: Context) {
                         heads[selected] = null
                         completed++
                     }
-                }
-            }
+            } }
             if (output.isNotEmpty()) {
                 onBatch(output, completed, total)
             } else if (completed == completedBeforeBatch && requestedHandles == 0) {

@@ -487,6 +487,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         ),
     )
     val state: StateFlow<CameraState> = _state.asStateFlow()
+    private val _recentThumbnailReady = MutableStateFlow(false)
+    val recentThumbnailReady: StateFlow<Boolean> = _recentThumbnailReady.asStateFlow()
     private val _newMediaFiles = MutableSharedFlow<NewCameraMedia>(
         extraBufferCapacity = 32,
     )
@@ -2990,6 +2992,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         detectNewHandles: Boolean = false,
     ) {
         val cam = camera ?: return
+        _recentThumbnailReady.value = false
         if (!preserveExisting && resumeSnapshot == null) cam.invalidatePhotoRatings()
         val diskCacheForScan = activeThumbnailDiskCache
         if (cam.staDirectObjectReadValidated && !preserveExisting) {
@@ -3311,6 +3314,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     it.newestFirstHandles.size
                 }
                 if (remainingHandleCount == 0) {
+                    if (_state.value.files.asSequence().mapNotNull { it.captureDate?.take(8) }
+                            .distinct().take(3).count() >= 3) {
+                        _recentThumbnailReady.value = true
+                    }
                     if (fileScanHandleSnapshot === activeSnapshot) fileScanHandleSnapshot = null
                     fileLoadPending = false
                     _state.update { it.copy(isLoadingFiles = false, hasCompletedFileScan = true) }
@@ -3435,6 +3442,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                             expectedCamera = cam,
                             expectedGeneration = generation,
                         )
+                        updateRecentThumbnailReady(snapshot, batch, loaded, total)
                         scanBatchPolicy.complete(additions.size, allCached)
                     } else {
                         scanBatchPolicy.complete(0, false)
@@ -3551,6 +3559,26 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
         fileLoadJob = job
         job.start()
+    }
+
+    /**
+     * The rating pass starts only after the completed thumbnail batch crosses the third
+     * shooting-date boundary. Local cache hits still run through this same fast path; they
+     * never enter the camera gate.
+     */
+    private fun updateRecentThumbnailReady(
+        published: List<NikonCamera.FileInfo>,
+        completedBatch: List<NikonCamera.FileInfo>,
+        loaded: Int,
+        total: Int,
+    ) {
+        if (_recentThumbnailReady.value || published.isEmpty()) return
+        val dates = published.asSequence().mapNotNull { it.captureDate?.take(8) }
+            .distinct().take(4).toList()
+        if (dates.size < 3) return
+        val cutoff = dates[2]
+        val crossedBoundary = completedBatch.any { it.captureDate?.take(8)?.let { d -> d < cutoff } == true }
+        if (crossedBoundary || loaded >= total) _recentThumbnailReady.value = true
     }
 
     fun getCamera(): NikonCamera? = camera

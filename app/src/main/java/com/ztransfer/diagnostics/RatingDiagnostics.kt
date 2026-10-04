@@ -4,11 +4,12 @@ package com.ztransfer.diagnostics
 object RatingDiagnostics {
     private const val MAX_ENTRIES = 120
     private const val MAX_CHARS = 16_000
+    private val whitespace = Regex("\\s+")
     private val lock = Any()
     private val entries = ArrayDeque<String>()
 
     fun note(message: String) = synchronized(lock) {
-        entries.addLast(message.replace(Regex("\\s+"), " ").take(260))
+        entries.addLast(message.replace(whitespace, " ").take(260))
         while (entries.size > MAX_ENTRIES || entries.sumOf { it.length + 1 } > MAX_CHARS) {
             entries.removeFirstOrNull() ?: break
         }

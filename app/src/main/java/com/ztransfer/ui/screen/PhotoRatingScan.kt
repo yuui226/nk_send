@@ -8,7 +8,7 @@ import com.ztransfer.protocol.photoRatingSources
 import com.ztransfer.protocol.NikonCamera
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.distinctUntilChanged
 
 internal data class PhotoRatingScan(
@@ -19,17 +19,22 @@ internal data class PhotoRatingScan(
     val complete: Boolean = false,
 )
 
+private val ratingPhotoExtensions = setOf(".jpg", ".jpeg", ".nef", ".nrw", ".mov", ".mp4")
+private val ratingStillExtensions = setOf(".jpg", ".jpeg", ".nef", ".nrw")
+
 /** Reuse ratings captured during listing; only supplement missing photo headers while filtering. */
 @Composable
 internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
     files: List<NikonCamera.FileInfo>, paused: Boolean, useObjectRating: Boolean,
     staConnection: Boolean,
-    listLoading: Boolean): PhotoRatingScan {
+    listLoading: Boolean,
+    recentThumbnailReady: Boolean): PhotoRatingScan {
     val generation = camera?.photoRatingGeneration?.collectAsState()?.value ?: 0
     var result by remember(camera, enabled, generation, useObjectRating, staConnection) { mutableStateOf(PhotoRatingScan(loading = enabled && camera != null)) }
     val latestFiles by rememberUpdatedState(files)
     val latestPaused by rememberUpdatedState(paused)
     val latestListLoading by rememberUpdatedState(listLoading)
+    val latestRecentThumbnailReady by rememberUpdatedState(recentThumbnailReady)
     LaunchedEffect(camera, enabled, generation, useObjectRating, staConnection) {
         if (!enabled || camera == null) return@LaunchedEffect
         val ratings = HashMap<Int, Int?>()
@@ -37,6 +42,7 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
         // complete list are intentionally left for the next connection.
         val sessionHandles = HashSet<Int>()
         var sessionInitialized = false
+        var scanStarted = false
         // Once the three-date snapshot is locked, thumbnail/cache updates must not restart
         // the rating pass. Only a pause/list-enumeration transition may restart it.
         snapshotFlow {
@@ -44,11 +50,18 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
             Triple(
                 if (sessionInitialized) 0 else current.asSequence().map { it.handle }.toList().hashCode(),
                 latestPaused,
-                if (sessionInitialized) false else latestListLoading,
+                Pair(
+                    if (sessionInitialized) false else latestListLoading,
+                    latestRecentThumbnailReady,
+                ),
             )
-        }.distinctUntilChanged().collectLatest {
+        }.distinctUntilChanged().collect {
             val current = latestFiles
             val pause = latestPaused
+            if (staConnection && !latestRecentThumbnailReady) {
+                result = PhotoRatingScan(loading = false)
+                return@collect
+            }
             if (current.isEmpty()) {
                 sessionHandles.clear()
                 sessionInitialized = false
@@ -62,7 +75,7 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
                 // has fewer than three dates, lock when the authoritative list ends.
                 sessionInitialized = dates >= 3 || !latestListLoading
             }
-            val allPhotos = current.filter { it.extension in setOf(".jpg", ".jpeg", ".nef", ".nrw", ".mov", ".mp4") }
+            val allPhotos = current.filter { it.extension in ratingPhotoExtensions }
             val photos = allPhotos.filter { !sessionInitialized || it.handle in sessionHandles }
             // STA reads only the newest three actual shooting dates. The list is already
             // newest-first; once the third reliable date is present, older files are skipped.
@@ -80,7 +93,7 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
             // date (or the authoritative end of a shorter catalog) first.
             if (staConnection && datesForRating(photos).size < 3 && latestListLoading) {
                 result = PhotoRatingScan(loading = false)
-                return@collectLatest
+                return@collect
             }
             val handles = eligiblePhotos.mapTo(HashSet()) { it.handle }
             ratings.keys.retainAll(handles)
@@ -116,7 +129,10 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
                     "source=${if (useObjectRating) "object+header" else "header"} paused=$pause",
             )
             publish(pending.isNotEmpty())
-            if (pause) return@collectLatest
+            if (pause) return@collect
+            // Once a connection scan has begun, later catalog/thumbnail emissions must not
+            // cancel and restart it. The snapshot is already fixed to the newest three dates.
+            if (scanStarted) return@collect
             // The thumbnail pipeline owns camera thumbnail requests and already prioritizes
             // the newest three dates. Do not prefetch them serially here: doing so made the
             // rating scan wait for every thumbnail (including invisible/background items).
@@ -124,32 +140,41 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
             // two pipelines arbitrate through the existing camera request scheduler.
             var confirmed = 0
             var unknown = 0
+            var activeFile = ""
+            scanStarted = true
             val readStartedAt = SystemClock.elapsedRealtime()
             var cancelled = false
             try {
-                pending.forEachIndexed { index, file ->
+                camera.withPhotoRatingPriority {
+                    pending.forEachIndexed { index, file ->
                     currentCoroutineContext().ensureActive()
+                    activeFile = file.fileName
                     // Never reuse the camera's cross-flow rating map here: this scan is a
                     // fresh snapshot for the current connection. The local map above is the
                     // only source of already-completed values for this scan.
                     var resolvedRating = if (useObjectRating) camera.readObjectRating(file) else null
-                    val isPhoto = file.extension in setOf(".jpg", ".jpeg", ".nef", ".nrw")
+                    val isPhoto = file.extension in ratingStillExtensions
                     // Videos use the verified Nikon container tag, not photo EXIF parsing.
                     if (resolvedRating == null) {
                         resolvedRating = if (isPhoto) camera.readPhotoRatingHeader(file) else camera.readVideoRating(file)
                     }
                     ratings[file.handle] = resolvedRating
                     if (resolvedRating != null) confirmed++ else unknown++
+                    // The progress control must advance after every file. Batching this
+                    // publication made the UI appear frozen at 1/52 while reads continued.
+                    publish(true)
                     if (index % 12 == 11) {
-                        publish(true)
                         ratingDiagnostic(
                             "progress=${ratings.size}/${uniqueSources.size} " +
+                                "active=$activeFile " +
                                 "elapsed=${SystemClock.elapsedRealtime() - readStartedAt}ms",
                         )
+                    }
                     }
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 cancelled = true
+                ratingDiagnostic("scan cancelled generation=$generation progress=${ratings.size}/${uniqueSources.size} active=$activeFile")
                 throw e
             } catch (e: Exception) {
                 // A broken transport must not crash Compose or trigger a whole-card retry loop.

@@ -1,14 +1,31 @@
 package com.ztransfer.protocol
 
+private data class XmpRatingPatterns(val attribute: Regex, val element: Regex)
+
+private val xmpNamespacePattern = Regex(
+    "xmlns:([A-Za-z_][\\w.-]*)\\s*=\\s*[\\\"']http://ns.adobe.com/xap/1.0/[\\\"']",
+)
+private val xmpRatingPatternCache = HashMap<String, XmpRatingPatterns>()
+private val xmpRatingPatternLock = Any()
+
+private fun xmpRatingPatterns(prefix: String): XmpRatingPatterns = synchronized(xmpRatingPatternLock) {
+    xmpRatingPatternCache.getOrPut(prefix) {
+        val name = Regex.escape("$prefix:Rating")
+        XmpRatingPatterns(
+            attribute = Regex("\\b$name\\s*=\\s*[\\\"']\\s*(-?\\d+)\\s*[\\\"']"),
+            element = Regex("<$name\\s*>\\s*(-?\\d+)\\s*</$name\\s*>"),
+        )
+    }
+}
+
 /** A missing/truncated/unsupported field is unknown, never zero stars. */
 internal fun parsePhotoRating(bytes: ByteArray): Int? {
     fun xmp(start: Int, end: Int): Int? {
         val text = bytes.copyOfRange(start, end).toString(Charsets.UTF_8)
-        val namespace = Regex("xmlns:([A-Za-z_][\\w.-]*)\\s*=\\s*[\"']http://ns.adobe.com/xap/1.0/[\"']")
-        for (match in namespace.findAll(text)) {
-            val name = Regex.escape(match.groupValues[1] + ":Rating")
-            val value = Regex("\\b$name\\s*=\\s*[\"']\\s*(-?\\d+)\\s*[\"']").find(text)?.groupValues?.get(1)
-                ?: Regex("<$name\\s*>\\s*(-?\\d+)\\s*</$name\\s*>").find(text)?.groupValues?.get(1)
+        for (match in xmpNamespacePattern.findAll(text)) {
+            val patterns = xmpRatingPatterns(match.groupValues[1])
+            val value = patterns.attribute.find(text)?.groupValues?.get(1)
+                ?: patterns.element.find(text)?.groupValues?.get(1)
             value?.toIntOrNull()?.takeIf { it in -1..5 }?.let { return it }
         }
         return null

@@ -582,6 +582,7 @@ fun FileListScreen(
     }.collectAsStateWithLifecycle(
         initialValue = transferViewModel.state.value.toFileListTransferUiState(),
     )
+    val recentThumbnailReady by cameraViewModel.recentThumbnailReady.collectAsStateWithLifecycle()
     val gpsContext = LocalContext.current
     val gpsBlockedByAp = state.isConnectedToCamera &&
         state.connectionType == CameraConnectionType.WIFI &&
@@ -837,7 +838,8 @@ fun FileListScreen(
         filterRatingEnabled, presentedCameraFiles, paused = transferState.isTransferring || previewIndex != null,
         useObjectRating = state.connectionType == CameraConnectionType.USB || !state.isStaConnection,
         staConnection = state.isStaConnection,
-        listLoading = state.isLoadingFiles)
+        listLoading = state.isLoadingFiles,
+        recentThumbnailReady = recentThumbnailReady)
     val filterProtected = transferState.filterProtectedOnly
     val filterBurst = transferState.filterBurstOnly
     val filterUntransferred = transferState.filterUntransferredOnly
