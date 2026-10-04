@@ -1409,17 +1409,20 @@ class NikonCamera(private val context: Context) {
     private var ratingStandardHeaderUnsupported = false
 
     /** At most 256KiB total; extend the prefix rather than download its first half twice. */
-    internal suspend fun readPhotoRatingHeader(file: FileInfo): Int? {
+    internal suspend fun readPhotoRatingHeader(file: FileInfo): Int? =
+        ioGate.withInteractive { readPhotoRatingHeaderInternal(file) }
+
+    private suspend fun readPhotoRatingHeaderInternal(file: FileInfo): Int? {
         // Nikon Z bodies expose the rating field within the first 64 KiB. Keep this
         // probe small; only extend once when a model does not expose it in that prefix.
         val ratingChunkBytes = 64 * 1024
         val generation = photoRatingGeneration.value
         suspend fun chunk(offset: Int): ByteArray? {
             val requestedAt = SystemClock.elapsedRealtime()
-            // Once the recent-three-day boundary is reached, rating reads are the active
-            // user request. Old background thumbnails must yield at the gate; the PTP
-            // transaction itself remains serialized by the same mutex.
-            return ioGate.withInteractive {
+            // The caller holds the interactive gate for the complete two-chunk probe. Do not
+            // release it between chunks, otherwise an old thumbnail request can be inserted
+            // between offset 0 and offset 64 KiB.
+            return withContext(Dispatchers.IO) {
             var commandStarted = 0L
             withContext(Dispatchers.IO) {
                 if (!sessionOpen || generation != photoRatingGeneration.value) return@withContext null
