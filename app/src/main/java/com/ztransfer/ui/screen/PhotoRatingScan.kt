@@ -3,6 +3,7 @@ package com.ztransfer.ui.screen
 import androidx.compose.runtime.*
 import android.os.SystemClock
 import com.ztransfer.diagnostics.PhotoGenerationProbe
+import com.ztransfer.diagnostics.RatingDiagnostics
 import com.ztransfer.protocol.photoRatingSources
 import com.ztransfer.protocol.NikonCamera
 import kotlinx.coroutines.currentCoroutineContext

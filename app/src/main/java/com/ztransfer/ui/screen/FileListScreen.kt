@@ -125,6 +125,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ztransfer.R
 import com.ztransfer.gps.NikonGpsService
+import com.ztransfer.diagnostics.RatingDiagnostics
 import com.ztransfer.license.LicenseManager
 import com.ztransfer.protocol.CameraConnectionType
 import com.ztransfer.protocol.NikonCamera

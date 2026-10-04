@@ -13,6 +13,7 @@ import com.ztransfer.BuildConfig
 import com.ztransfer.R
 import com.ztransfer.diagnostics.FileOrderProbe
 import com.ztransfer.diagnostics.PhotoGenerationProbe
+import com.ztransfer.diagnostics.RatingDiagnostics
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -1413,14 +1414,22 @@ class NikonCamera(private val context: Context) {
         // probe small; only extend once when a model does not expose it in that prefix.
         val ratingChunkBytes = 64 * 1024
         val generation = photoRatingGeneration.value
-        suspend fun chunk(offset: Int): ByteArray? = ioGate.withTransferSlice {
+        suspend fun chunk(offset: Int): ByteArray? {
+            val requestedAt = SystemClock.elapsedRealtime()
+            return ioGate.withTransferSlice {
+            val commandStartedAt = SystemClock.elapsedRealtime()
+            var commandStarted = 0L
             withContext(Dispatchers.IO) {
                 if (!sessionOpen || generation != photoRatingGeneration.value) return@withContext null
                 try {
+                    commandStarted = SystemClock.elapsedRealtime()
                     if (!ratingNikonHeaderUnsupported) {
                         sendCmd(PtpConstants.NK_GET_PARTIAL_OBJECT_EX, file.handle, offset, 0, ratingChunkBytes, 0)
                         val (response, bytes) = recvRespWithPayload()
-                        if (response == PtpConstants.RESPONSE_OK) return@withContext bytes
+                        if (response == PtpConstants.RESPONSE_OK) {
+                            RatingDiagnostics.note("read file=${file.fileName} offset=$offset bytes=${bytes?.size ?: 0} gate=${commandStarted - requestedAt}ms command=${SystemClock.elapsedRealtime() - commandStarted}ms")
+                            return@withContext bytes
+                        }
                         if (response == 0x2019) throw RatingReadDeferred()
                         if (response != 0x2005) return@withContext null
                         ratingNikonHeaderUnsupported = true
@@ -1430,13 +1439,16 @@ class NikonCamera(private val context: Context) {
                     val (response, bytes) = recvRespWithPayload()
                     if (response == 0x2019) throw RatingReadDeferred()
                     if (response == 0x2005) ratingStandardHeaderUnsupported = true
-                    bytes?.takeIf { response == PtpConstants.RESPONSE_OK }
+                    bytes?.takeIf { response == PtpConstants.RESPONSE_OK }?.also {
+                        RatingDiagnostics.note("read file=${file.fileName} offset=$offset bytes=${it.size} gate=${commandStarted - requestedAt}ms command=${SystemClock.elapsedRealtime() - commandStarted}ms")
+                    }
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
                     if (e !is RatingReadDeferred) closeQuietly()
                     throw e
                 }
+            }
             }
         }
         val first = chunk(0) ?: return null
