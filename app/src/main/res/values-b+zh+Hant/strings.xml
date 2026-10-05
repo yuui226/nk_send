@@ -689,7 +689,7 @@
     <string name="photo_lut_concentration">濃度</string>
     <string name="photo_lut_settings">LUT設定</string>
     <string name="filter_rating_stars">%1$d 顆星</string>
-    <string name="filter_rating_enabled">星級篩選</string>
+    <string name="filter_rating_enabled">評級篩選</string>
     <string name="filter_rating_help_title">評級篩選</string>
     <string name="filter_rating_range_all">全部</string>
     <string name="filter_rating_range_days">%1$d日</string>

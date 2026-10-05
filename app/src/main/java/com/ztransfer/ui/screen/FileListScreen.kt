@@ -4555,7 +4555,16 @@ private fun FilterOverlay(
                         typeChips.chunked(typeColumnCount).forEach { rowChips ->
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 rowChips.forEach { (label, selected, onClick) ->
-                                    FilterChip(label, selected, onClick, Modifier.weight(1f))
+                                    key(label) {
+                                        AnimatedVisibility(
+                                            visible = true,
+                                            enter = fadeIn(tween(180)) + expandHorizontally(expandFrom = Alignment.Start),
+                                            exit = fadeOut(tween(120)) + shrinkHorizontally(shrinkTowards = Alignment.Start),
+                                            modifier = Modifier.weight(1f),
+                                        ) {
+                                            FilterChip(label, selected, onClick, Modifier.fillMaxWidth())
+                                        }
+                                    }
                                 }
                                 repeat(typeColumnCount - rowChips.size) {
                                     Spacer(Modifier.weight(1f))
@@ -4580,6 +4589,12 @@ private fun FilterOverlay(
                             label = "ratingFilterAlpha",
                         ).value
                     } else 1f
+                    val ratingAccent = when {
+                        !working.ratingEnabled -> colors.accentBlue
+                        ratingProgress.waitingForRange -> colors.accentYellow
+                        ratingProgress.loading -> colors.accentBlue
+                        else -> colors.statusConnected
+                    }
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -4589,8 +4604,7 @@ private fun FilterOverlay(
                         FilterChip(
                             label = when {
                                 !working.ratingEnabled -> stringResource(R.string.filter_rating_off)
-                                ratingProgress.waitingForRange -> stringResource(R.string.filter_rating_waiting)
-                                ratingProgress.loading && ratingProgress.total > 0 -> "${ratingProgress.completed.coerceAtMost(ratingProgress.total)}/${ratingProgress.total}"
+                                ratingProgress.loading -> "0/${ratingProgress.total}"
                                 else -> stringResource(R.string.filter_rating_on)
                             },
                             selected = working.ratingEnabled,
@@ -4601,10 +4615,11 @@ private fun FilterOverlay(
                                 ))
                             },
                             modifier = Modifier
-                                .weight(1f)
+                                .width(132.dp)
                                 .graphicsLayer {
                                     alpha = if (working.ratingEnabled && ratingProgress.loading) ratingAlpha else 1f
                                 },
+                            accentColor = ratingAccent,
                             cornerLabel = stringResource(R.string.filter_rating_enabled),
                             onLongClick = if (working.ratingEnabled) {
                                 { clipboard.setText(AnnotatedString(RatingDiagnostics.snapshot())) }

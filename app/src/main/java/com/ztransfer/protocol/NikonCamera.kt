@@ -2898,7 +2898,6 @@ class NikonCamera(private val context: Context) {
                         sendCmd(PtpConstants.NK_GET_PARTIAL_OBJECT_EX, handle, 0, 0, maxSize, 0)
                         val (respCode, data) = recvRespWithPayload()
                         if (respCode == PtpConstants.RESPONSE_OK && data != null && data.isNotEmpty()) {
-                            capturePhotoRating(handle, data, origin = "metadata-header")
                             result = data
                             break
                         }
@@ -3278,7 +3277,6 @@ class NikonCamera(private val context: Context) {
 
     /** Retains only the useful beginning of a recent STA object; larger prefixes never grow the cap. */
     private fun rememberStaDirectPrefix(handle: Int, bytes: ByteArray, validLength: Int = bytes.size) {
-        if (cachedPhotoRating(handle) == null) capturePhotoRating(handle, bytes, validLength, "sta-prefix")
         val retainedLength = minOf(validLength, bytes.size, STA_DIRECT_RECENT_PREFIX_BYTES)
         if (retainedLength <= 0) return
         val existing = staDirectRecentHeaders[handle]
