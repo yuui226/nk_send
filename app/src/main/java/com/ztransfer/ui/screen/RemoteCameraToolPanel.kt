@@ -59,6 +59,17 @@ internal fun cameraToolLabelResource(tool: RemoteCameraTool, prop: Int, value: L
 // Nikon_LiveViewAF). Do not reuse DSLR point counts for an unknown body.
 private fun focusAreaLabelResource(prop: Int, value: Long, model: String?, dataType: Int?): Int? {
     val body = model.orEmpty().trim().uppercase(java.util.Locale.ROOT).removePrefix("NIKON").trim()
+    val isZ30 = body.replace(" ", "") == "Z30"
+    // Z 系照片属性有时会回报短值 2，而不是扩展值 0x8013；两者分别是
+    // 动态区域 AF（S/M/L）的同一组选项。这个映射必须先于旧式 D05D
+    // 的 0/1/2/3/4 枚举，否则 Z30 会把 2 显示为“相机选项 2”。
+    if (prop in listOf(0x501C, 0xD05D, 0xD1F8) && isZ30) {
+        when (value) {
+            2L -> return R.string.remote_af_dynamic_s
+            0x8013L -> return R.string.remote_af_dynamic_m
+            0x8014L -> return R.string.remote_af_dynamic_l
+        }
+    }
     if (prop == 0xD05D && dataType in listOf(0x0001, 0x0002)) {
         return when (value) {
             0L -> R.string.remote_af_face_priority
@@ -78,16 +89,6 @@ private fun focusAreaLabelResource(prop: Int, value: Long, model: String?, dataT
             else -> null
         }
         if (specific != null) return specific
-    }
-    // Z 系照片和录像使用不同属性，但枚举值相同：2/0x8013/0x8014
-    // 分别对应动态区域 AF(S/M/L)。录像属性漏掉这里时会回退成“相机选项”。
-    if (prop in listOf(0x501C, 0xD1F8) && body.startsWith("Z")) {
-        return when (value) {
-            2L -> R.string.remote_af_dynamic_s
-            0x8013L -> R.string.remote_af_dynamic_m
-            0x8014L -> R.string.remote_af_dynamic_l
-            else -> null
-        }
     }
     return if (prop in listOf(0x501C, 0xD05D, 0xD1F8)) when (value) {
         2L -> if (prop == 0x501C && body.startsWith("Z")) R.string.remote_af_dynamic else null

@@ -231,6 +231,12 @@ class RemoteFocusTest {
         assertEquals(RcTapFocusPath.MOVE_AREA, rcTapFocusPath(param(0xD1F8, 0x8014), "Z 30"))
         assertEquals(RcTapFocusPath.MOVE_AREA, rcTapFocusPath(param(0xD05D, 0x8010), "Z 30"))
         assertEquals(RcTapFocusPath.MOVE_AREA, rcTapFocusPath(param(0xD05D, 0x8018), "Z 30"))
+        assertEquals(RcTapFocusPath.MOVE_AREA, rcTapFocusPath(param(0xD05D, 0x801A), "Z 30"))
+        assertEquals(RcTapFocusPath.MOVE_AREA, rcTapFocusPath(param(0xD05D, 0x801B), "Z 30"))
+        assertEquals(RcTapFocusPath.MOVE_AREA, rcTapFocusPath(param(0xD1F8, 0x801A), "Z 30"))
+        assertEquals(RcTapFocusPath.MOVE_AREA, rcTapFocusPath(param(0xD1F8, 0x801B), "Z 30"))
+        assertEquals(RcTapFocusPath.TRACKING, rcTapFocusPath(param(0xD05D, 0x8020), "Z 30"))
+        assertEquals(RcTapFocusPath.TRACKING, rcTapFocusPath(param(0xD05D, 0x8021), "Z 30"))
     }
 
     @Test
