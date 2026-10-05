@@ -4436,6 +4436,7 @@ private fun FilterOverlay(
     val colors = AppTheme.colors
     val clipboard = LocalClipboardManager.current
     val density = LocalDensity.current
+    val haptics = rememberHaptics(hapticsEnabled)
     var showRatingTip by remember { mutableStateOf(false) }
     var ratingTipAnchor by remember { mutableStateOf<Rect?>(null) }
     var editingDate by remember { mutableStateOf(false) }
@@ -4628,6 +4629,7 @@ private fun FilterOverlay(
                                 onValueCommitted = { days ->
                                     commit(working.copy(ratingDays = days))
                                 },
+                                onDetent = haptics::tick,
                                 label = stringResource(R.string.filter_rating_range_label),
                                 wheelHeight = 34.dp,
                                 optionFontSize = 12.sp,
