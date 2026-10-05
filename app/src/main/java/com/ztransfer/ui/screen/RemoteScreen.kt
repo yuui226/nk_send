@@ -198,6 +198,8 @@ import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -620,6 +622,8 @@ private fun RemoteContent(
     var capturing by remember { mutableStateOf(false) }
     var modeText by remember { mutableStateOf<String?>(null) }
     var movieMode by remember { mutableStateOf(false) }
+    var computerControlBusy by remember { mutableStateOf(false) }
+    var computerControlEnabled by remember { mutableStateOf(false) }
     var focusModeText by remember { mutableStateOf<String?>(null) }
     var focusModeProp by remember { mutableStateOf<Int?>(null) }
     var focusModeManual by remember { mutableStateOf(false) }
@@ -673,6 +677,13 @@ private fun RemoteContent(
     }
     DisposableEffect(Unit) {
         onDispose { diagnosticPreferences.edit().putString("focus_mode_report_v1", focusModeReport).apply() }
+    }
+
+    LaunchedEffect(connected) {
+        if (!connected) {
+            computerControlEnabled = false
+            computerControlBusy = false
+        }
     }
     // 开发者入口默认隐藏：1.5s 内连按 4 次 FPS 键才现身（FPS 连按 4 次开关状态
     // 恰好复原，不留副作用）。仅本次进页有效，退页复位——这是诊断后门不是常驻功能。
@@ -1192,6 +1203,44 @@ private fun RemoteContent(
         }
     }
 
+    fun setComputerControl(enabled: Boolean) {
+        val cam = cameraViewModel.getCamera() ?: return
+        if (computerControlBusy || !connected) return
+        computerControlBusy = true
+        services.scope.launch {
+            val oldLvJob = lvJob
+            try {
+                // SetControlMode is not safe while the normal Live View command
+                // stream is active. Serialize the transition and restart LV after
+                // the camera has accepted the new mode.
+                oldLvJob?.cancelAndJoin()
+                if (lvJob === oldLvJob) lvJob = null
+                runCatching { cam.labEndLiveView() }
+                val rc = cam.rcSetControlMode(enabled)
+                if (rc == Lab.OK) {
+                    cam.remoteDiagnosticControlModeSet = enabled
+                    computerControlEnabled = enabled
+                    devLog("ComputerControl ${if (enabled) "enabled" else "disabled"}")
+                } else {
+                    devLog("!! ComputerControl ${if (enabled) "enable" else "disable"} resp=0x%04X".format(rc and 0xFFFF))
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                devLog("!! ComputerControl ${if (enabled) "enable" else "disable"} failed=${e.javaClass.simpleName}: ${e.message}")
+            } finally {
+                if (currentCoroutineContext().isActive &&
+                    cameraViewModel.state.value.isConnectedToCamera &&
+                    cameraViewModel.getCamera() === cam
+                ) {
+                    startSession(hdLiveView, preserveFrameUntilNext = true)
+                }
+                computerControlBusy = false
+            }
+        }
+    }
+
+
     suspend fun prepareUsbMovieSession(cam: NikonCamera): NikonCamera? {
         val oldLvJob = lvJob
         oldLvJob?.cancelAndJoin()
@@ -1325,6 +1374,8 @@ private fun RemoteContent(
             return@LaunchedEffect
         }
         val sessionCamera = cameraViewModel.getCamera() ?: return@LaunchedEffect
+        computerControlEnabled = sessionCamera.remoteControlModeSet &&
+            sessionCamera.remoteDiagnosticControlModeSet
         try {
             // 新连接不继承上一条连接的拨杆状态。首次读取失败时按照片模式处理，优先
             // 保证机身画面与快门不被错误锁进电脑控制模式。
@@ -2660,6 +2711,7 @@ private fun RemoteContent(
                     startSession(false)
                 }
                 RemoteTool.LOCK -> onLockRotation(false)
+                RemoteTool.COMPUTER_CONTROL -> if (computerControlEnabled) setComputerControl(false)
                 RemoteTool.LUT -> { lutState.off(); lutState.dismissMenu() }
                 RemoteTool.GRID -> gridPanelOpen = false
                 RemoteTool.WHITE_BALANCE -> if (cameraToolPanel == RemoteCameraTool.WHITE_BALANCE) cameraToolPanel = null
@@ -2694,10 +2746,13 @@ private fun RemoteContent(
                 RemoteTool.LEVEL -> showLevel
                 RemoteTool.WAVEFORM -> showWaveform
                 RemoteTool.LOCK -> tools.locked.value
+                RemoteTool.COMPUTER_CONTROL -> computerControlEnabled
                 else -> false
             }
             val disabled = (tool?.fixed == true && editingTools) ||
-                (tool == RemoteTool.ROTATE && tools.locked.value)
+                (tool == RemoteTool.ROTATE && tools.locked.value) ||
+                (tool == RemoteTool.COMPUTER_CONTROL &&
+                    (computerControlBusy || capturing || recording || recBusy))
             val toolClick: () -> Unit = {
                 when (tool) {
                     RemoteTool.HD -> { hdLiveView = !hdLiveView; startSession(hdLiveView) }
@@ -2731,6 +2786,9 @@ private fun RemoteContent(
                         val locked = !tools.locked.value
                         onLockRotation(locked)
                         showHint(if (locked) rotationStoppedHint else rotationResumedHint)
+                    }
+                    RemoteTool.COMPUTER_CONTROL -> if (!disabled) {
+                        setComputerControl(!computerControlEnabled)
                     }
                     RemoteTool.ROTATE -> if (!disabled) onCycleRotation()
                     RemoteTool.WHITE_BALANCE -> { lutState.dismissMenu(); gridPanelOpen = false; listProp = null; devPanel = false; if (cameraToolPanel == RemoteCameraTool.WHITE_BALANCE) cameraToolCloseRequested = true else { cameraToolCloseRequested = false; cameraToolPanel = RemoteCameraTool.WHITE_BALANCE } }
@@ -4383,7 +4441,14 @@ private fun ParamTile(
         if (writable && wheelDragEnabled(values.size)) {
             WheelDragHint(
                 color = colors.onSurfaceVariant.copy(alpha = 0.42f),
-                modifier = Modifier.align(Alignment.CenterEnd).padding(end = 8.dp),
+                // ISO also owns the AUTO corner control. Keep its drag chevrons
+                // in the lower-right area so the upper chevron cannot overlap
+                // the AUTO badge; other parameter wheels retain the centered hint.
+                modifier = if (hasAutoIsoControl) {
+                    Modifier.align(Alignment.BottomEnd).padding(end = 8.dp, bottom = 5.dp)
+                } else {
+                    Modifier.align(Alignment.CenterEnd).padding(end = 8.dp)
+                },
             )
         }
         if (autoIsoOn) {
@@ -4917,6 +4982,7 @@ internal fun RemoteToolMark(tool: RemoteTool, preferences: RemoteToolPreferences
         RemoteTool.RECORD -> Icon(Icons.Default.Videocam, null, mark)
         RemoteTool.ROTATE -> RotateMark(mark)
         RemoteTool.LOCK -> Icon(if (preferences.locked.value) Icons.Default.Lock else Icons.Default.LockOpen, null, mark)
+        RemoteTool.COMPUTER_CONTROL -> Text("PC", fontSize = 9.sp, fontWeight = FontWeight.Bold)
         RemoteTool.WHITE_BALANCE -> Text("WB", fontSize = 11.sp, fontWeight = FontWeight.Bold)
         RemoteTool.FOCUS_MODE -> Text("MODE", fontSize = 9.sp, fontWeight = FontWeight.Bold)
         RemoteTool.FOCUS_FRAME -> FocusFrameMark()

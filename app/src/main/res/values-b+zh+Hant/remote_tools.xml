@@ -12,6 +12,7 @@
     <string name="remote_tool_focus_area">對焦區域</string>
     <string name="remote_tool_waveform">波形圖</string>
     <string name="remote_tool_lock">鎖定佈局</string>
+    <string name="remote_tool_computer_control">完全控制</string>
     <string name="remote_tool_rotate">旋轉佈局</string>
     <string name="remote_tool_manage">管理工具</string>
     <string name="remote_tool_fixed">位置固定</string>
