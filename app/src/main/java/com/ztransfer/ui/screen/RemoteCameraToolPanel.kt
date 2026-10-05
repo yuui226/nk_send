@@ -79,7 +79,9 @@ private fun focusAreaLabelResource(prop: Int, value: Long, model: String?, dataT
         }
         if (specific != null) return specific
     }
-    if (prop == 0x501C && body.startsWith("Z")) {
+    // Z 系照片和录像使用不同属性，但枚举值相同：2/0x8013/0x8014
+    // 分别对应动态区域 AF(S/M/L)。录像属性漏掉这里时会回退成“相机选项”。
+    if (prop in listOf(0x501C, 0xD1F8) && body.startsWith("Z")) {
         return when (value) {
             2L -> R.string.remote_af_dynamic_s
             0x8013L -> R.string.remote_af_dynamic_m
