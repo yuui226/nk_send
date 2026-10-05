@@ -31,6 +31,7 @@ internal fun rcTapFocusPath(param: RcParam?, model: String?): RcTapFocusPath {
         // 单点、精准点、动态区域、宽区域、群组区域走 ChangeAfArea。
         0x501C, 0xD1F8 -> when (param.current) {
             0x8011L, 0x8012L, 0x8020L, 0x8021L -> RcTapFocusPath.TRACKING
+            // Z30 的宽区域 AF（L · 人物/动物）不接受 StartTracking，仍需移动 AF 区域。
             0x8010L, 0x8015L, 0x8017L, 0x8018L, 0x8019L,
             0x801AL, 0x801BL,
             0x801EL, 0x801FL, 2L, 0x8013L, 0x8014L -> RcTapFocusPath.MOVE_AREA
@@ -43,6 +44,7 @@ internal fun rcTapFocusPath(param: RcParam?, model: String?): RcTapFocusPath {
             1L, 2L, 4L -> RcTapFocusPath.MOVE_AREA
             // Z30 照片模式实际从 D05D 返回扩展枚举，与 501C/D1F8 共用值域。
             0x8011L, 0x8012L, 0x8020L, 0x8021L -> RcTapFocusPath.TRACKING
+            // Z30 的宽区域 AF（L · 人物/动物）不接受 StartTracking，仍需移动 AF 区域。
             0x8010L, 0x8015L, 0x8017L, 0x8018L, 0x8019L,
             0x801AL, 0x801BL,
             0x801EL, 0x801FL, 0x8013L, 0x8014L -> RcTapFocusPath.MOVE_AREA
