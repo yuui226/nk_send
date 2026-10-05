@@ -177,7 +177,7 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
             ratingDiagnostic("scan start generation=$generation files=${eligiblePhotos.size} sources=${uniqueSources.size} " +
                     "cached=${uniqueSources.size - pending.size} pending=${pending.size} " +
                     "cachedOrigins=${cachedOrigins.entries.joinToString(",") { "${it.key}:${it.value}" }} " +
-                    "source=${if (useObjectRating) "object+header" else "header"} paused=$pause",
+                    "source=${if (useObjectRating) "object" else "header"} paused=$pause",
             )
             if (pending.isEmpty()) {
                 scanStarted = true
@@ -217,11 +217,13 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
                     // Never reuse the camera's cross-flow rating map here: this scan is a
                     // fresh snapshot for the current connection. The local map above is the
                     // only source of already-completed values for this scan.
-                    var resolvedRating = if (useObjectRating) camera.readObjectRating(file) else null
-                    val isPhoto = file.extension in ratingStillExtensions
-                    // Videos use the verified Nikon container tag, not photo EXIF parsing.
-                    if (resolvedRating == null) {
-                        resolvedRating = if (isPhoto) camera.readPhotoRatingHeader(file) else camera.readVideoRating(file)
+                    // AP/USB expose the rating as an object property; do not fall back to a
+                    // file-header read there. STA uses the verified JPEG/RAW header or MP4 tag.
+                    val resolvedRating = if (useObjectRating) {
+                        camera.readObjectRating(file)
+                    } else {
+                        val isPhoto = file.extension in ratingStillExtensions
+                        if (isPhoto) camera.readPhotoRatingHeader(file) else camera.readVideoRating(file)
                     }
                     ratings[file.handle] = resolvedRating
                     if (resolvedRating != null) confirmed++ else unknown++

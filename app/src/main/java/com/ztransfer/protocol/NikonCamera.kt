@@ -1614,6 +1614,13 @@ class NikonCamera(private val context: Context) {
     private val ratingUnsupportedExtensions = HashSet<String>()
     private var ratingOperationUnsupported = false
 
+    private fun resetRatingCapabilityState() {
+        ratingUnsupportedExtensions.clear()
+        ratingOperationUnsupported = false
+        ratingNikonHeaderUnsupported = false
+        ratingStandardHeaderUnsupported = false
+    }
+
     internal suspend fun readObjectRating(file: FileInfo): Int? = ioGate.withRatingTransaction("RATING") {
         withContext(Dispatchers.IO) {
             if (ratingOperationUnsupported || file.extension in ratingUnsupportedExtensions) return@withContext null
@@ -2044,6 +2051,7 @@ class NikonCamera(private val context: Context) {
                 return@withContext Result.failure(Exception(context.getString(R.string.error_open_session, PtpConstants.translateResponse(context, resp))))
             }
             sessionOpen = true
+            resetRatingCapabilityState()
 
             // Read the identity once while establishing the session so every camera-backed UI can
             // use the real body model without inserting a later command into thumbnail/transfer IO.
@@ -2207,6 +2215,7 @@ class NikonCamera(private val context: Context) {
                 )
             }
             sessionOpen = true
+            resetRatingCapabilityState()
             initializeStaBrowsingSession(
                 allowPairing = allowPairing,
                 exploreAlbumAccess = exploreAlbumAccess,
@@ -2258,6 +2267,7 @@ class NikonCamera(private val context: Context) {
                 )
             }
             sessionOpen = true
+            resetRatingCapabilityState()
 
             log { "USB_CONNECT device-info" }
             sendCmd(PtpConstants.GET_DEVICE_INFO)
@@ -2362,6 +2372,7 @@ class NikonCamera(private val context: Context) {
                             )
                         }
                         sessionOpen = true
+                        resetRatingCapabilityState()
 
                         sendCmd(0x941C) // Nikon GetEventEx: drain stale events after OpenSession.
                         val drainResponse = recvRespWithPayload().first
