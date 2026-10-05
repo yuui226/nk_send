@@ -489,6 +489,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     val state: StateFlow<CameraState> = _state.asStateFlow()
     private val _recentThumbnailReady = MutableStateFlow(false)
     val recentThumbnailReady: StateFlow<Boolean> = _recentThumbnailReady.asStateFlow()
+    // Number of newest actual shooting dates whose thumbnail boundary is complete.
+    private val _recentThumbnailReadyDays = MutableStateFlow(0)
+    val recentThumbnailReadyDays: StateFlow<Int> = _recentThumbnailReadyDays.asStateFlow()
     private val _newMediaFiles = MutableSharedFlow<NewCameraMedia>(
         extraBufferCapacity = 32,
     )
@@ -2989,6 +2992,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     ) {
         val cam = camera ?: return
         _recentThumbnailReady.value = false
+        _recentThumbnailReadyDays.value = 0
         if (!preserveExisting && resumeSnapshot == null) cam.invalidatePhotoRatings()
         val diskCacheForScan = activeThumbnailDiskCache
         if (cam.staDirectObjectReadValidated && !preserveExisting) {
@@ -3310,8 +3314,15 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     it.newestFirstHandles.size
                 }
                 if (remainingHandleCount == 0) {
-                    if (_state.value.files.asSequence().mapNotNull { it.captureDate?.take(8) }
-                            .any()) {
+                    val completedDates = _state.value.files.asSequence()
+                        .mapNotNull { it.captureDate?.take(8) }
+                        .distinct()
+                        .count()
+                    if (completedDates > 0) {
+                        _recentThumbnailReadyDays.value = maxOf(
+                            _recentThumbnailReadyDays.value,
+                            completedDates,
+                        )
                         _recentThumbnailReady.value = true
                     }
                     if (fileScanHandleSnapshot === activeSnapshot) fileScanHandleSnapshot = null
@@ -3558,9 +3569,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     /**
-     * The rating pass starts only after the completed thumbnail batch crosses the third
-     * shooting-date boundary. Local cache hits still run through this same fast path; they
-     * never enter the camera gate.
+     * Rating passes start after the completed thumbnail batch crosses the selected
+     * shooting-date boundary. Local cache hits still run through this same fast path;
+     * they never enter the camera gate.
      */
     private fun updateRecentThumbnailReady(
         published: List<NikonCamera.FileInfo>,
@@ -3568,19 +3579,24 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         loaded: Int,
         total: Int,
     ) {
-        if (_recentThumbnailReady.value || published.isEmpty()) return
+        if (published.isEmpty()) return
         val dates = published.asSequence().mapNotNull { it.captureDate?.take(8) }
-            .distinct().take(4).toList()
+            .distinct().toList()
         // A card may contain fewer than three shooting days. Once the authoritative list and
         // its final thumbnail batch are complete, that shorter range is already definitive.
         if (loaded >= total && dates.isNotEmpty()) {
+            _recentThumbnailReadyDays.value = maxOf(_recentThumbnailReadyDays.value, dates.size)
             _recentThumbnailReady.value = true
             return
         }
-        if (dates.size < 3) return
-        val cutoff = dates[2]
-        val crossedBoundary = completedBatch.any { it.captureDate?.take(8)?.let { d -> d < cutoff } == true }
-        if (crossedBoundary || loaded >= total) _recentThumbnailReady.value = true
+        var readyDays = _recentThumbnailReadyDays.value
+        dates.forEachIndexed { index, date ->
+            if (completedBatch.any { it.captureDate?.take(8)?.let { d -> d < date } == true }) {
+                readyDays = maxOf(readyDays, index + 1)
+            }
+        }
+        _recentThumbnailReadyDays.value = readyDays
+        if (readyDays >= 3) _recentThumbnailReady.value = true
     }
 
     fun getCamera(): NikonCamera? = camera

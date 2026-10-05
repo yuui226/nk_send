@@ -508,6 +508,8 @@ data class TransferState(
     val filterProtectedOnly: Boolean = false,
     val filterRatingEnabled: Boolean = false,
     val filterRating: Int? = null,
+    // 评级读取范围：1/3/5 个实际拍摄日；0 = 全部。默认保持原来的三日范围。
+    val filterRatingDays: Int = 3,
     // 只看连拍照片（检测算法见 FileListScreen.computeBurstGroups）。持久化。
     val filterBurstOnly: Boolean = false,
     // 只看导出目录中尚未存在的照片。与缩略图已传对号共用同一份索引。持久化。
@@ -586,6 +588,7 @@ data class PhotoFilterCriteria(
     val protectedOnly: Boolean = false,
     val ratingEnabled: Boolean = false,
     val rating: Int? = null,
+    val ratingDays: Int = 3,
     val burstOnly: Boolean = false,
     val untransferredOnly: Boolean = false,
     val storageSlot: Int? = null,
@@ -1252,6 +1255,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 filterProtectedOnly = prefs.getBoolean("filter_protected", false),
                 filterRatingEnabled = prefs.getBoolean("filter_rating_enabled", false),
                 filterRating = prefs.getInt("filter_rating", 0).takeIf { it in 1..5 },
+                filterRatingDays = prefs.getInt("filter_rating_days", 3).let { if (it == 0 || it in setOf(1, 3, 5)) it else 3 },
                 filterBurstOnly = prefs.getBoolean("filter_burst", false),
                 filterUntransferredOnly = prefs.getBoolean("filter_untransferred", false),
                 filterDateRange = PhotoDateRange.restore(
@@ -1736,6 +1740,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             else putStringSet("filter_exts", criteria.extensions)
             if (criteria.rating in 1..5) putInt("filter_rating", criteria.rating!!) else remove("filter_rating")
             if (criteria.ratingEnabled) putBoolean("filter_rating_enabled", true) else remove("filter_rating_enabled")
+            putInt("filter_rating_days", criteria.ratingDays.takeIf { it == 0 || it in setOf(1, 3, 5) } ?: 3)
             if (criteria.protectedOnly) putBoolean("filter_protected", true) else remove("filter_protected")
             if (criteria.burstOnly) putBoolean("filter_burst", true) else remove("filter_burst")
             if (criteria.untransferredOnly) putBoolean("filter_untransferred", true)
@@ -1756,6 +1761,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 filterProtectedOnly = criteria.protectedOnly,
                 filterRatingEnabled = criteria.ratingEnabled,
                 filterRating = criteria.rating?.takeIf { it in 1..5 },
+                filterRatingDays = criteria.ratingDays,
                 filterBurstOnly = criteria.burstOnly,
                 filterUntransferredOnly = criteria.untransferredOnly,
                 filterStorageSlot = criteria.storageSlot,

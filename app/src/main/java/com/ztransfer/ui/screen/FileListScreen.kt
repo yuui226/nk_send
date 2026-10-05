@@ -243,6 +243,7 @@ internal data class FileListTransferUiState(
     val filterProtectedOnly: Boolean,
     val filterRatingEnabled: Boolean = false,
     val filterRating: Int? = null,
+    val filterRatingDays: Int = 3,
     val filterBurstOnly: Boolean,
     val filterUntransferredOnly: Boolean,
     val filterStorageSlot: Int?,
@@ -268,6 +269,7 @@ internal fun TransferState.toFileListTransferUiState(): FileListTransferUiState 
         filterProtectedOnly = filterProtectedOnly,
         filterRatingEnabled = filterRatingEnabled,
         filterRating = filterRating,
+        filterRatingDays = filterRatingDays,
         filterBurstOnly = filterBurstOnly,
         filterUntransferredOnly = filterUntransferredOnly,
         filterStorageSlot = filterStorageSlot,
@@ -582,7 +584,7 @@ fun FileListScreen(
     }.collectAsStateWithLifecycle(
         initialValue = transferViewModel.state.value.toFileListTransferUiState(),
     )
-    val recentThumbnailReady by cameraViewModel.recentThumbnailReady.collectAsStateWithLifecycle()
+    val recentThumbnailReadyDays by cameraViewModel.recentThumbnailReadyDays.collectAsStateWithLifecycle()
     val gpsContext = LocalContext.current
     val gpsBlockedByAp = state.isConnectedToCamera &&
         state.connectionType == CameraConnectionType.WIFI &&
@@ -833,13 +835,15 @@ fun FileListScreen(
     var previewIndex by remember { mutableStateOf<Int?>(null) }
     val filterRating = transferState.filterRating
     val filterRatingEnabled = transferState.filterRatingEnabled
+    val filterRatingDays = transferState.filterRatingDays
     val ratingScan = rememberPhotoRatings(
         cameraViewModel.getCamera().takeIf { state.isConnectedToCamera },
         filterRatingEnabled, presentedCameraFiles, paused = transferState.isTransferring || previewIndex != null,
         useObjectRating = state.connectionType == CameraConnectionType.USB || !state.isStaConnection,
         staConnection = state.isStaConnection,
         listLoading = state.isLoadingFiles,
-        recentThumbnailReady = recentThumbnailReady)
+        recentThumbnailReadyDays = recentThumbnailReadyDays,
+        ratingDays = filterRatingDays)
     val filterProtected = transferState.filterProtectedOnly
     val filterBurst = transferState.filterBurstOnly
     val filterUntransferred = transferState.filterUntransferredOnly
@@ -854,6 +858,7 @@ fun FileListScreen(
         filterExts,
         filterRating,
         filterRatingEnabled,
+        filterRatingDays,
         filterProtected,
         filterBurst,
         filterUntransferred,
@@ -865,6 +870,7 @@ fun FileListScreen(
             protectedOnly = filterProtected,
             ratingEnabled = filterRatingEnabled,
             rating = filterRating,
+            ratingDays = filterRatingDays,
             burstOnly = filterBurst,
             untransferredOnly = filterUntransferred,
             storageSlot = filterStorageSlot,
@@ -4576,6 +4582,7 @@ private fun FilterOverlay(
                         FilterChip(
                             label = when {
                                 !working.ratingEnabled -> stringResource(R.string.filter_rating_off)
+                                ratingProgress.waitingForRange -> stringResource(R.string.filter_rating_waiting)
                                 ratingProgress.loading && ratingProgress.total > 0 -> "${ratingProgress.completed.coerceAtMost(ratingProgress.total)}/${ratingProgress.total}"
                                 else -> stringResource(R.string.filter_rating_on)
                             },
@@ -4607,6 +4614,33 @@ private fun FilterOverlay(
                                 modifier = Modifier
                                     .size(34.dp)
                                     .onGloballyPositioned { ratingTipAnchor = it.boundsInRoot() },
+                            )
+                        }
+                        AnimatedVisibility(
+                            visible = !working.ratingEnabled,
+                            enter = fadeIn() + expandHorizontally(expandFrom = Alignment.End),
+                            exit = fadeOut() + shrinkHorizontally(shrinkTowards = Alignment.End),
+                        ) {
+                            val rangeOptions = listOf(1, 3, 5, 0)
+                            val rangeLabels = mapOf(
+                                0 to stringResource(R.string.filter_rating_range_all),
+                                1 to stringResource(R.string.filter_rating_range_days, 1),
+                                3 to stringResource(R.string.filter_rating_range_days, 3),
+                                5 to stringResource(R.string.filter_rating_range_days, 5),
+                            )
+                            ReleaseCommitWheel(
+                                options = rangeOptions,
+                                selected = working.ratingDays.takeIf { it in rangeOptions } ?: 3,
+                                optionLabel = { days -> rangeLabels[days] ?: rangeLabels.getValue(3) },
+                                onValueCommitted = { days ->
+                                    commit(working.copy(ratingDays = days))
+                                },
+                                label = stringResource(R.string.filter_rating_range_label),
+                                wheelHeight = 34.dp,
+                                optionFontSize = 12.sp,
+                                optionFontWeight = FontWeight.Medium,
+                                showDragHint = false,
+                                modifier = Modifier.width(76.dp),
                             )
                         }
                         AnimatedVisibility(
@@ -4737,7 +4771,11 @@ private fun FilterOverlay(
         ) { _ ->
             TipBubbleContent(
                 title = stringResource(R.string.filter_rating_help_title),
-                items = listOf(TipBubbleItem(stringResource(R.string.filter_rating_help_description))),
+                items = listOf(TipBubbleItem(stringResource(
+                    R.string.filter_rating_help_description,
+                    if (working.ratingDays == 0) stringResource(R.string.filter_rating_range_all)
+                    else stringResource(R.string.filter_rating_range_days, working.ratingDays),
+                ))),
                 bulleted = true,
             )
         }

@@ -17,6 +17,8 @@ internal data class PhotoRatingScan(
     val completed: Int = 0,
     val total: Int = 0,
     val complete: Boolean = false,
+    /** The user enabled the filter, but the recent-date boundary is not ready yet. */
+    val waitingForRange: Boolean = false,
 )
 
 private val ratingPhotoExtensions = setOf(".jpg", ".jpeg", ".nef", ".nrw", ".mov", ".mp4")
@@ -28,22 +30,42 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
     files: List<NikonCamera.FileInfo>, paused: Boolean, useObjectRating: Boolean,
     staConnection: Boolean,
     listLoading: Boolean,
-    recentThumbnailReady: Boolean): PhotoRatingScan {
+    recentThumbnailReadyDays: Int,
+    ratingDays: Int): PhotoRatingScan {
     val generation = camera?.photoRatingGeneration?.collectAsState()?.value ?: 0
-    var result by remember(camera, enabled, generation, useObjectRating, staConnection) { mutableStateOf(PhotoRatingScan(loading = enabled && camera != null)) }
+    var clearedGeneration by remember(camera) { mutableStateOf<Int?>(null) }
+    var result by remember(camera, enabled, generation, useObjectRating, staConnection) {
+        mutableStateOf(PhotoRatingScan(
+            loading = enabled && camera != null,
+            waitingForRange = enabled && camera != null && staConnection,
+        ))
+    }
     val latestFiles by rememberUpdatedState(files)
     val latestPaused by rememberUpdatedState(paused)
     val latestListLoading by rememberUpdatedState(listLoading)
-    val latestRecentThumbnailReady by rememberUpdatedState(recentThumbnailReady)
-    LaunchedEffect(camera, enabled, generation, useObjectRating, staConnection) {
-        if (!enabled || camera == null) return@LaunchedEffect
+    val latestRecentThumbnailReadyDays by rememberUpdatedState(recentThumbnailReadyDays)
+    LaunchedEffect(camera, enabled, generation, useObjectRating, staConnection, ratingDays) {
+        if (!enabled) {
+            // Toggling the filter is an explicit fresh-snapshot boundary. Do not retain
+            // ratings read before the user turned it off; reopening must observe the camera
+            // again so changes made on-camera can be picked up.
+            if (camera != null && clearedGeneration != generation) {
+                // invalidatePhotoRatings increments generation; remember the value it will
+                // produce so the dependency restart below cannot clear repeatedly.
+                clearedGeneration = generation + 1
+                camera.invalidatePhotoRatings()
+            }
+            result = PhotoRatingScan()
+            return@LaunchedEffect
+        }
+        if (camera == null) return@LaunchedEffect
         val ratings = HashMap<Int, Int?>()
         // A rating snapshot belongs to one connection. Files appearing after the first
         // complete list are intentionally left for the next connection.
         val sessionHandles = HashSet<Int>()
         var sessionInitialized = false
         var scanStarted = false
-        // Once the three-date snapshot is locked, thumbnail/cache updates must not restart
+        // Once the selected date snapshot is locked, thumbnail/cache updates must not restart
         // the rating pass. A new camera generation or an explicit enable/disable transition
         // creates a new effect and therefore a new snapshot.
         snapshotFlow {
@@ -53,9 +75,9 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
                     .map { it.handle to it.captureDate?.take(8) }
                     .toList().hashCode(),
                 latestPaused,
-                Pair(
+                Triple(
                     if (sessionInitialized) false else latestListLoading,
-                    latestRecentThumbnailReady,
+                    latestRecentThumbnailReadyDays,
                 ),
             )
         }.distinctUntilChanged().collect {
@@ -64,8 +86,14 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
             if (scanStarted) return@collect
             val current = latestFiles
             val pause = latestPaused
-            if (staConnection && !latestRecentThumbnailReady) {
-                result = PhotoRatingScan(loading = false)
+            val thumbnailRangeReady = if (ratingDays == 0) {
+                val knownDates = datesForRating(current).size
+                !latestListLoading && (knownDates == 0 || latestRecentThumbnailReadyDays >= knownDates)
+            } else {
+                latestRecentThumbnailReadyDays >= ratingDays || (!latestListLoading && datesForRating(current).size < ratingDays)
+            }
+            if (staConnection && !thumbnailRangeReady) {
+                result = PhotoRatingScan(loading = true, waitingForRange = true)
                 return@collect
             }
             if (current.isEmpty()) {
@@ -75,30 +103,30 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
             } else if (!sessionInitialized && !pause) {
                 sessionHandles += current.map { it.handle }
                 val dates = current.asSequence().mapNotNull { it.captureDate?.take(8) }
-                    .distinct().take(3).count()
-                // Keep collecting handles while the catalog is still arriving. Once three
-                // dates are known, lock the connection snapshot immediately; if this camera
-                // has fewer than three dates, lock when the authoritative list ends.
-                sessionInitialized = dates >= 3 || !latestListLoading
+                    .distinct().count()
+                // Keep collecting handles while the catalog is still arriving. Lock at the
+                // selected range; a completed catalog may lock an actually shorter range.
+                sessionInitialized = ratingDays == 0 || dates >= ratingDays || !latestListLoading
             }
             val allPhotos = current.filter { it.extension in ratingPhotoExtensions }
             val photos = allPhotos.filter { !sessionInitialized || it.handle in sessionHandles }
-            // STA reads only the newest three actual shooting dates. The list is already
-            // newest-first; once the third reliable date is present, older files are skipped.
+            // STA reads only the newest selected actual shooting dates. The list is already
+            // newest-first; older files are skipped after the selected boundary.
             val eligiblePhotos = if (staConnection) {
                 val dates = photos.asSequence().mapNotNull { it.captureDate?.take(8) }
-                    .distinct().take(3).toList()
+                    .distinct().let { sequence ->
+                        if (ratingDays == 0) sequence.toList() else sequence.take(ratingDays).toList()
+                    }
                 val cutoff = dates.lastOrNull()
                 if (cutoff == null) emptyList() else photos.filter {
                     it.captureDate?.take(8)?.let { date -> date >= cutoff } == true
                 }
             } else photos
             // During STA enumeration, do not start a partial rating pass. The list grows in
-            // several batches; starting at one or two dates only causes cancellation and
-            // makes passive header values look like completed progress. Wait for the third
-            // date (or the authoritative end of a shorter catalog) first.
-            if (staConnection && datesForRating(photos).size < 3 && latestListLoading) {
-                result = PhotoRatingScan(loading = false)
+            // several batches; wait for the selected date count (or the authoritative end of
+            // a shorter catalog) first.
+            if (staConnection && ratingDays > 0 && datesForRating(photos).size < ratingDays && latestListLoading) {
+                result = PhotoRatingScan(loading = true, waitingForRange = true)
                 return@collect
             }
             val handles = eligiblePhotos.mapTo(HashSet()) { it.handle }
@@ -146,9 +174,9 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
             publish(pending.isNotEmpty())
             if (pause) return@collect
             // The thumbnail pipeline owns camera thumbnail requests and already prioritizes
-            // the newest three dates. Do not prefetch them serially here: doing so made the
+            // selected newest dates. Do not prefetch them serially here: doing so made the
             // rating scan wait for every thumbnail (including invisible/background items).
-            // Once the three-date boundary is known, rating reads start immediately and the
+            // Once the selected date boundary is known, rating reads start immediately and the
             // two pipelines arbitrate through the existing camera request scheduler.
             var confirmed = 0
             var unknown = 0
@@ -220,5 +248,6 @@ internal fun ratingDiagnostic(message: String) {
     RatingDiagnostics.note(message)
 }
 
-private fun datesForRating(files: List<NikonCamera.FileInfo>): List<String> =
-    files.asSequence().mapNotNull { it.captureDate?.take(8) }.distinct().take(3).toList()
+private fun datesForRating(files: List<NikonCamera.FileInfo>, limit: Int = 0): List<String> =
+    files.asSequence().mapNotNull { it.captureDate?.take(8) }.distinct()
+        .let { if (limit <= 0) it.toList() else it.take(limit).toList() }
