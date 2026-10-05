@@ -232,6 +232,7 @@ internal class CameraIoGate(
         val sequence: Long,
         val kind: CameraRequestKind,
         val owner: String,
+        val allowDuringShutdown: Boolean = false,
         val ready: CompletableDeferred<Unit> = CompletableDeferred(),
     )
 
@@ -245,7 +246,8 @@ internal class CameraIoGate(
     private var shuttingDown = false
     private var shutdownReason = "camera session closed"
     /** Compatibility mode: before a rating scan, transfer and thumbnail work shared one FIFO. */
-    private var ratingPhaseActive = false
+    private var ratingPhaseCount = 0
+    private val ratingPhaseActive: Boolean get() = ratingPhaseCount > 0
     @Volatile private var activeOwner: String = "none"
     @Volatile private var activeKind: CameraRequestKind? = null
 
@@ -288,14 +290,14 @@ internal class CameraIoGate(
     /** Prefer rating over remote thumbnail work without reserving or holding the channel. */
     suspend fun beginRatingPhase() {
         state.withLock {
-            ratingPhaseActive = true
+            ratingPhaseCount++
             if (activeTicket == null) pumpLocked()
         }
     }
 
     suspend fun endRatingPhase() = withContext(NonCancellable) {
         state.withLock {
-            ratingPhaseActive = false
+            ratingPhaseCount = (ratingPhaseCount - 1).coerceAtLeast(0)
             if (activeTicket == null) pumpLocked()
         }
     }
@@ -320,7 +322,7 @@ internal class CameraIoGate(
             if (shuttingDown && !allowDuringShutdown) {
                 throw CancellationException(shutdownReason)
             }
-            Ticket(sequence++, kind, owner)
+            Ticket(sequence++, kind, owner, allowDuringShutdown)
         }
         var acquired = false
         return try {
@@ -452,6 +454,10 @@ internal class CameraIoGate(
 
     private suspend fun acquire(ticket: Ticket) {
         state.withLock {
+            // Shutdown may start after ticket creation but before queue admission.
+            if (shuttingDown && !ticket.allowDuringShutdown) {
+                throw CancellationException(shutdownReason)
+            }
             pending += ticket
             pumpLocked()
         }
@@ -1792,10 +1798,6 @@ class NikonCamera(private val context: Context) {
 
     internal suspend fun beginRatingPhase() = ioGate.beginRatingPhase()
     internal suspend fun endRatingPhase() = ioGate.endRatingPhase()
-
-    /** Event polling keeps legacy ordering except while a rating phase is active. */
-    internal suspend fun <T> withEventPoll(block: suspend () -> T): T =
-        ioGate.withCameraTransaction(CameraRequestKind.EVENT_POLL, "EVENT_POLL", block)
 
     /** Lightweight diagnostic snapshot; does not enqueue or touch the camera socket. */
     internal suspend fun cameraSchedulerSnapshot(): CameraSchedulerSnapshot = ioGate.snapshot()

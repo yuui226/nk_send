@@ -499,6 +499,109 @@ class CameraIoGateTest {
         assertTrue(gate.withIdleCommand(skippedValue = false) { true })
     }
 
+    @Test(timeout = 5000)
+    fun ratingGapsBlockEveryBackgroundKindButAllowForegroundAndLocalWork() = runBlocking {
+        val gate = CameraIoGate()
+        val background = listOf(CameraRequestKind.VISIBLE_THUMBNAIL,
+            CameraRequestKind.BACKGROUND_THUMBNAIL, CameraRequestKind.IDLE,
+            CameraRequestKind.EVENT_POLL)
+        val order = mutableListOf<String>()
+        gate.beginRatingPhase()
+        val waiting = background.map { kind ->
+            launch { gate.withCameraTransaction(kind) { order += kind.name } }
+        }
+        yield()
+        assertEquals(4, gate.snapshot().queued)
+        repeat(2) {
+            // No rating ticket is queued during this local work, but the phase stays active.
+            val local = async { "cached thumbnail" }
+            assertEquals("cached thumbnail", local.await())
+            for (kind in listOf(CameraRequestKind.INTERACTIVE, CameraRequestKind.PREVIEW,
+                CameraRequestKind.TRANSFER, CameraRequestKind.RATING)) {
+                gate.withCameraTransaction(kind) { order += kind.name }
+            }
+            assertFalse(order.any { name -> background.any { it.name == name } })
+        }
+        gate.endRatingPhase()
+        waiting.joinAll()
+        assertEquals(0, gate.snapshot().queued)
+        assertEquals(background.toSet(), order.takeLast(4).map { CameraRequestKind.valueOf(it) }.toSet())
+    }
+
+    @Test(timeout = 5000)
+    fun cancelledRatingPassReleasesBlockedRequestsInFinally() = runBlocking {
+        val gate = CameraIoGate()
+        val started = CompletableDeferred<Unit>()
+        val scan = launch {
+            gate.beginRatingPhase()
+            try {
+                started.complete(Unit)
+                awaitCancellation()
+            } finally { gate.endRatingPhase() }
+        }
+        started.await()
+        var ran = false
+        val thumbnail = launch { gate.withBackgroundThumbnail { ran = true } }
+        yield()
+        assertFalse(ran)
+        scan.cancelAndJoin()
+        thumbnail.join()
+        assertTrue(ran)
+    }
+
+    @Test(timeout = 5000)
+    fun shutdownClearsPhaseBlockedRequestsAndAllowsClose() = runBlocking {
+        val gate = CameraIoGate()
+        gate.beginRatingPhase()
+        val queued = listOf(CameraRequestKind.EVENT_POLL, CameraRequestKind.IDLE,
+            CameraRequestKind.BACKGROUND_THUMBNAIL).map { kind ->
+            launch { gate.withCameraTransaction(kind) { fail("blocked request ran") } }
+        }
+        yield()
+        gate.beginShutdown()
+        queued.joinAll()
+        assertTrue(queued.all { it.isCancelled })
+        gate.withCameraTransaction(CameraRequestKind.INTERACTIVE, "close", true) { Unit }
+        gate.endRatingPhase()
+        assertEquals(0, gate.snapshot().queued)
+    }
+
+    @Test(timeout = 5000)
+    fun monitorEventsRemainAvailableWhileBackgroundEventsWaitForRating() = runBlocking {
+        val gate = CameraIoGate()
+        gate.beginRatingPhase()
+        var backgroundRan = false
+        val background = launch {
+            gate.withCameraTransaction(eventPollRequestKind(true)) { backgroundRan = true }
+        }
+        yield()
+        assertFalse(backgroundRan)
+        var monitorRan = false
+        gate.withCameraTransaction(eventPollRequestKind(false)) { monitorRan = true }
+        assertTrue(monitorRan)
+        assertFalse(backgroundRan)
+        gate.endRatingPhase()
+        background.join()
+        assertTrue(backgroundRan)
+    }
+
+    @Test(timeout = 5000)
+    fun overlappingRatingLifecyclesCannotReleaseAnotherPassBarrier() = runBlocking {
+        val gate = CameraIoGate()
+        gate.beginRatingPhase()
+        gate.beginRatingPhase()
+        var ran = false
+        val thumbnail = launch { gate.withBackgroundThumbnail { ran = true } }
+        yield()
+        gate.endRatingPhase()
+        yield()
+        assertFalse(ran)
+        gate.withRatingTransaction { Unit }
+        gate.endRatingPhase()
+        thumbnail.join()
+        assertTrue(ran)
+    }
+
     @Test
     fun wifiKnownSizesPreferPartialObjectPath() {
         assertEquals(4L * 1024 * 1024, NikonCamera.CHUNK_SIZE)

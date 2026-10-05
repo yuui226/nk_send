@@ -2635,7 +2635,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         }
                         if (camera !== cam || !_state.value.isConnectedToCamera) break
                     }
-                    val events = runCatching { cam.rcPollEvents() }.getOrDefault(emptyList())
+                    val events = runCatching { cam.rcPollEvents(background = true) }.getOrDefault(emptyList())
                     events.forEach { event -> handleCameraObjectEvent(cam, event) }
                 }
             } finally {
@@ -3311,7 +3311,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 }
                 if (remainingHandleCount == 0) {
                     if (_state.value.files.asSequence().mapNotNull { it.captureDate?.take(8) }
-                            .distinct().take(3).count() >= 3) {
+                            .any()) {
                         _recentThumbnailReady.value = true
                     }
                     if (fileScanHandleSnapshot === activeSnapshot) fileScanHandleSnapshot = null

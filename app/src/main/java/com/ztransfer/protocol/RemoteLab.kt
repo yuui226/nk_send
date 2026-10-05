@@ -1275,24 +1275,24 @@ suspend fun NikonCamera.rcFocusAt(
     }
 }
 
-suspend fun NikonCamera.rcPollEvents(): List<Pair<Int, Long>> {
-    // STA 初始化已经实际验证过 GetEventEx；只在该会话使用新格式。AP/USB 继续保持
-    // 原来的 GetEvent 路径，避免把一台相机的能力假设扩散到其它连接模式。事件轮询
-    // 平时保持旧的交互队列时序；评级阶段由调度器自动降到 IDLE，不能挡住评级。
-    return focusMutex.withLock {
-        withEventPoll {
+/** Only the photo-list fallback poll yields for the whole rating phase. */
+internal fun eventPollRequestKind(background: Boolean): CameraRequestKind =
+    if (background) CameraRequestKind.EVENT_POLL else CameraRequestKind.INTERACTIVE
+
+suspend fun NikonCamera.rcPollEvents(background: Boolean = false): List<Pair<Int, Long>> {
+    val read: suspend () -> List<Pair<Int, Long>> = {
+        withCameraTransaction(eventPollRequestKind(background), "EVENT_POLL") {
             withContext(Dispatchers.IO) {
                 if (staAlbumAccessValidated) {
-                    val (extendedResponse, extendedData) =
-                        sendCmd(Lab.NK_GET_EVENT_EX).let { recvRespWithPayload() }
-                    if (extendedResponse == Lab.OK) {
-                        return@withContext extendedData?.let { data ->
-                            runCatching { parseNikonExtendedEvents(data) }.getOrDefault(emptyList())
+                    sendCmd(Lab.NK_GET_EVENT_EX)
+                    val (response, data) = recvRespWithPayload()
+                    if (response == Lab.OK) {
+                        return@withContext data?.let {
+                            runCatching { parseNikonExtendedEvents(it) }.getOrDefault(emptyList())
                         }.orEmpty()
                     }
-                    if (extendedResponse != PtpConstants.OPERATION_NOT_SUPPORTED) return@withContext emptyList()
+                    if (response != PtpConstants.OPERATION_NOT_SUPPORTED) return@withContext emptyList()
                 }
-
                 sendCmd(Lab.NK_GET_EVENT)
                 val (response, data) = recvRespWithPayload()
                 if (response != Lab.OK || data == null) return@withContext emptyList()
@@ -1300,6 +1300,9 @@ suspend fun NikonCamera.rcPollEvents(): List<Pair<Int, Long>> {
             }
         }
     }
+    // Background polling must not hold the focus lock while awaiting rating completion.
+    // Monitor events retain their original coordination with focus and recording operations.
+    return if (background) read() else focusMutex.withLock { read() }
 }
 
 /** 发单条命令，DEVICE_BUSY 时退避重试（200ms × 5）。拍摄/录像触发类命令共用。 */
