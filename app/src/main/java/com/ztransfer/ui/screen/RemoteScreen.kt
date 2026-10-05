@@ -2802,10 +2802,9 @@ private fun RemoteContent(
     // ---------- 布局 ----------
     Box(modifier = Modifier.fillMaxSize().background(rememberAppBackgroundBrush())
         .onGloballyPositioned { toolOverlayCoordinates = it }) {
-        // Resolve the camera's photo/movie mode before exposing the mode-dependent layout.
-        // Otherwise entering from the file list briefly renders the photo controls, then
-        // switches to the movie controls when the first mode read completes.
-        val monitorContentReady = initialLoaded && frame != null
+        // The mode is resolved before initialLoaded is published. Keep the shell visible while
+        // the first frame is requested so entering from the file list never shows a blank page;
+        // mode-dependent controls are already gated by initialLoaded below.
         AnimatedContent(
             targetState = rotation,
             transitionSpec = {
@@ -2815,9 +2814,7 @@ private fun RemoteContent(
             },
             contentAlignment = Alignment.Center,
             label = "remoteLayoutOrientation",
-            modifier = Modifier
-                .fillMaxSize()
-                .graphicsLayer { alpha = if (monitorContentReady) 1f else 0f }
+            modifier = Modifier.fillMaxSize()
         ) { renderedRotation ->
         val landscape = renderedRotation != 0
         if (!landscape) {
