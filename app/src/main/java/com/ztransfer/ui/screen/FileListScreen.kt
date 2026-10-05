@@ -4460,7 +4460,13 @@ private fun FilterOverlay(
         if (next == working) return
         // Compare against the current draft, including rapid taps before recomposition.
         // Enabling data collection alone must never replay the grid's reveal animation.
-        val changesList = working.copy(ratingEnabled = next.ratingEnabled) != next
+        // Loading-range changes only affect the background rating scan. They must not be
+        // treated as a visible grid-filter change, otherwise the whole thumbnail grid plays
+        // its reveal/reflow animation while the user merely turns the range wheel.
+        val changesList = working.copy(
+            ratingEnabled = next.ratingEnabled,
+            ratingDays = next.ratingDays,
+        ) != next
         working = next
         onChange(next, changesList)
     }
@@ -4608,19 +4614,6 @@ private fun FilterOverlay(
                             enter = fadeIn() + expandHorizontally(expandFrom = Alignment.End),
                             exit = fadeOut() + shrinkHorizontally(shrinkTowards = Alignment.End),
                         ) {
-                            TipLightbulbButton(
-                                onClick = { showRatingTip = true },
-                                contentDescription = stringResource(R.string.filter_rating_help_title),
-                                modifier = Modifier
-                                    .size(34.dp)
-                                    .onGloballyPositioned { ratingTipAnchor = it.boundsInRoot() },
-                            )
-                        }
-                        AnimatedVisibility(
-                            visible = !working.ratingEnabled,
-                            enter = fadeIn() + expandHorizontally(expandFrom = Alignment.End),
-                            exit = fadeOut() + shrinkHorizontally(shrinkTowards = Alignment.End),
-                        ) {
                             val rangeOptions = listOf(1, 3, 5, 0)
                             val rangeLabels = mapOf(
                                 0 to stringResource(R.string.filter_rating_range_all),
@@ -4641,6 +4634,19 @@ private fun FilterOverlay(
                                 optionFontWeight = FontWeight.Medium,
                                 showDragHint = false,
                                 modifier = Modifier.width(76.dp),
+                            )
+                        }
+                        AnimatedVisibility(
+                            visible = !working.ratingEnabled,
+                            enter = fadeIn() + expandHorizontally(expandFrom = Alignment.End),
+                            exit = fadeOut() + shrinkHorizontally(shrinkTowards = Alignment.End),
+                        ) {
+                            TipLightbulbButton(
+                                onClick = { showRatingTip = true },
+                                contentDescription = stringResource(R.string.filter_rating_help_title),
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .onGloballyPositioned { ratingTipAnchor = it.boundsInRoot() },
                             )
                         }
                         AnimatedVisibility(
