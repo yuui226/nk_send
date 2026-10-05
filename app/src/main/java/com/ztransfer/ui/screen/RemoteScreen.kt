@@ -987,12 +987,16 @@ private fun RemoteContent(
     fun startSession(
         hd: Boolean,
         adoptActiveLiveView: NikonCamera? = null,
-        suppressStartupPropertyEvents: Boolean = false
+        suppressStartupPropertyEvents: Boolean = false,
+        preserveFrameUntilNext: Boolean = false,
     ) {
         val prev = lvJob
         lvJob = services.scope.launch {
             prev?.cancelAndJoin()
-            frame = null
+            // A recording compatibility restart should not blank the monitor while the
+            // camera establishes the replacement Live View session. Other session changes
+            // keep the old behavior and clear the stale frame immediately.
+            if (!preserveFrameUntilNext) frame = null
             focusValidAfter = SystemClock.elapsedRealtime()
             subjectTrackingActive = false
             liveViewStable = false
@@ -1326,20 +1330,21 @@ private fun RemoteContent(
             // 保证机身画面与快门不被错误锁进电脑控制模式。
             movieMode = false
             batteryParam = null
-            // 先确定照片/视频拨杆，再只读取对应的一组参数。旧流程先读照片组、随后切到
-            // 视频组，会表现为参数出现、清空、再加载一遍。
-            refreshMovieMode(refreshExposureOnChange = false)
             // USB 待机始终使用普通 PTP Live View，让机身拨杆保持可读；电脑远控只在
-            // 用户真正开始录像时临时进入，停止后立即退出。
+            // 用户真正开始录像时临时进入，停止后立即退出。先清理遗留会话，避免
+            // 先读取一次旧状态、清理后又重复读取一次。
             val hadStaleUsbMovieSession = shouldReturnUsbMovieSessionToStandby(
                     sessionCamera.connectionType,
                     sessionCamera.remoteControlModeSet
                 )
-            if (hadStaleUsbMovieSession && releaseUsbMovieSession(sessionCamera)) {
+            if (hadStaleUsbMovieSession) {
+                releaseUsbMovieSession(sessionCamera)
                 // 电脑控制中的 D1A6 可能仍是进入控制前的录像值；归还机身后立即重读，
-                // 避免重进页面时先按错误模式加载整套参数。
-                refreshMovieMode(refreshExposureOnChange = false)
+                // 再读取一次即可得到当前真实拨杆状态。
             }
+            // 先确定照片/视频拨杆，再只读取对应的一组参数。旧流程先读照片组、随后切到
+            // 视频组，会表现为参数出现、清空、再加载一遍。
+            refreshMovieMode(refreshExposureOnChange = false)
             val initialExposureProps =
                 if (movieMode) MOVIE_EXPOSURE_PROPS else EXPOSURE_PROPS
             initialExposureProps.forEach { refreshParam(it) }
@@ -2280,7 +2285,6 @@ private fun RemoteContent(
                     if (preparedUsbSession) {
                         // 录像待机保持普通会话以放行机身拨杆；只在用户真正按下录像时
                         // 临时进入已验证的 Nikon USB 电脑远控序列。
-                        initialLoaded = false
                         adoptedLiveView = prepareUsbMovieSession(cam)
                         restartedLiveView = true
                     }
@@ -2326,7 +2330,11 @@ private fun RemoteContent(
                     }
 
                     if (restartedLiveView) {
-                        startSession(hdLiveView, adoptedLiveView)
+                        startSession(
+                            hdLiveView,
+                            adoptedLiveView,
+                            preserveFrameUntilNext = true,
+                        )
                     }
                     if (preparedUsbSession) initialLoaded = true
 
@@ -2794,6 +2802,10 @@ private fun RemoteContent(
     // ---------- 布局 ----------
     Box(modifier = Modifier.fillMaxSize().background(rememberAppBackgroundBrush())
         .onGloballyPositioned { toolOverlayCoordinates = it }) {
+        // Resolve the camera's photo/movie mode before exposing the mode-dependent layout.
+        // Otherwise entering from the file list briefly renders the photo controls, then
+        // switches to the movie controls when the first mode read completes.
+        val monitorContentReady = initialLoaded && frame != null
         AnimatedContent(
             targetState = rotation,
             transitionSpec = {
@@ -2803,7 +2815,9 @@ private fun RemoteContent(
             },
             contentAlignment = Alignment.Center,
             label = "remoteLayoutOrientation",
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer { alpha = if (monitorContentReady) 1f else 0f }
         ) { renderedRotation ->
         val landscape = renderedRotation != 0
         if (!landscape) {

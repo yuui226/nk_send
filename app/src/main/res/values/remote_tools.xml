@@ -37,6 +37,9 @@
     <string name="remote_wb_off">Off</string>
     <string name="remote_wb_natural">Natural light auto</string>
     <string name="remote_af_dynamic">Dynamic-area AF</string>
+    <string name="remote_af_dynamic_s">Dynamic-area AF (S)</string>
+    <string name="remote_af_dynamic_m">Dynamic-area AF (M)</string>
+    <string name="remote_af_dynamic_l">Dynamic-area AF (L)</string>
     <string name="remote_af_single">Single-point AF</string>
     <string name="remote_af_auto">Auto-area AF</string>
     <string name="remote_af_tracking">3D-tracking</string>

@@ -79,6 +79,14 @@ private fun focusAreaLabelResource(prop: Int, value: Long, model: String?, dataT
         }
         if (specific != null) return specific
     }
+    if (prop == 0x501C && body.startsWith("Z")) {
+        return when (value) {
+            2L -> R.string.remote_af_dynamic_s
+            0x8013L -> R.string.remote_af_dynamic_m
+            0x8014L -> R.string.remote_af_dynamic_l
+            else -> null
+        }
+    }
     return if (prop in listOf(0x501C, 0xD05D, 0xD1F8)) when (value) {
         2L -> if (prop == 0x501C && body.startsWith("Z")) R.string.remote_af_dynamic else null
         0x8010L -> R.string.remote_af_single
@@ -103,7 +111,8 @@ private fun focusAreaLabelResource(prop: Int, value: Long, model: String?, dataT
 private val focusAreaNameOrder = listOf(
     R.string.remote_af_pinpoint, R.string.remote_af_spot,
     R.string.remote_af_single, R.string.remote_af_normal,
-    R.string.remote_af_dynamic, R.string.remote_af_dynamic_9,
+    R.string.remote_af_dynamic, R.string.remote_af_dynamic_s,
+    R.string.remote_af_dynamic_m, R.string.remote_af_dynamic_l, R.string.remote_af_dynamic_9,
     R.string.remote_af_dynamic_21, R.string.remote_af_dynamic_25,
     R.string.remote_af_dynamic_51, R.string.remote_af_dynamic_72, R.string.remote_af_dynamic_153,
     R.string.remote_af_wide, R.string.remote_af_wide_s, R.string.remote_af_wide_l,

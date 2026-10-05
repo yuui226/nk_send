@@ -37,6 +37,9 @@
     <string name="remote_wb_off">關閉</string>
     <string name="remote_wb_natural">自然光自動</string>
     <string name="remote_af_dynamic">動態區域 AF</string>
+    <string name="remote_af_dynamic_s">動態區域 AF（S）</string>
+    <string name="remote_af_dynamic_m">動態區域 AF（M）</string>
+    <string name="remote_af_dynamic_l">動態區域 AF（L）</string>
     <string name="remote_af_single">單點 AF</string>
     <string name="remote_af_auto">自動區域 AF</string>
     <string name="remote_af_tracking">3D 追蹤</string>
