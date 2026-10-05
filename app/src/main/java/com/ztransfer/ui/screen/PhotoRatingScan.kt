@@ -75,7 +75,7 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
                     .map { it.handle to it.captureDate?.take(8) }
                     .toList().hashCode(),
                 latestPaused,
-                Triple(
+                Pair(
                     if (sessionInitialized) false else latestListLoading,
                     latestRecentThumbnailReadyDays,
                 ),
