@@ -4604,7 +4604,8 @@ private fun FilterOverlay(
                         FilterChip(
                             label = when {
                                 !working.ratingEnabled -> stringResource(R.string.filter_rating_off)
-                                ratingProgress.loading -> "0/${ratingProgress.total}"
+                                ratingProgress.waitingForRange -> "0/${ratingProgress.total}"
+                                ratingProgress.loading -> "${ratingProgress.completed.coerceAtMost(ratingProgress.total)}/${ratingProgress.total}"
                                 else -> stringResource(R.string.filter_rating_on)
                             },
                             selected = working.ratingEnabled,
@@ -4627,8 +4628,9 @@ private fun FilterOverlay(
                         )
                         AnimatedVisibility(
                             visible = !working.ratingEnabled,
-                            enter = fadeIn() + expandHorizontally(expandFrom = Alignment.End),
-                            exit = fadeOut() + shrinkHorizontally(shrinkTowards = Alignment.End),
+                            // Keep the control anchored in place; only its opacity changes.
+                            enter = fadeIn(tween(180)),
+                            exit = fadeOut(tween(140)),
                         ) {
                             val rangeOptions = listOf(1, 3, 5, 0)
                             val rangeLabels = mapOf(
@@ -4655,8 +4657,9 @@ private fun FilterOverlay(
                         }
                         AnimatedVisibility(
                             visible = !working.ratingEnabled,
-                            enter = fadeIn() + expandHorizontally(expandFrom = Alignment.End),
-                            exit = fadeOut() + shrinkHorizontally(shrinkTowards = Alignment.End),
+                            // The help button fades at its slot instead of sliding the row.
+                            enter = fadeIn(tween(180)),
+                            exit = fadeOut(tween(140)),
                         ) {
                             TipLightbulbButton(
                                 onClick = { showRatingTip = true },
@@ -4668,8 +4671,9 @@ private fun FilterOverlay(
                         }
                         AnimatedVisibility(
                             visible = working.ratingEnabled,
-                            enter = fadeIn() + expandHorizontally(expandFrom = Alignment.End),
-                            exit = fadeOut() + shrinkHorizontally(shrinkTowards = Alignment.End),
+                            // Star choices use the same in-place fade as the range/help controls.
+                            enter = fadeIn(tween(180)),
+                            exit = fadeOut(tween(140)),
                         ) {
                             val feedback = com.ztransfer.ui.util.rememberHaptics(hapticsEnabled)
                             Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
