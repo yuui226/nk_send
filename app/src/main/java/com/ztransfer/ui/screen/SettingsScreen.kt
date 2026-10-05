@@ -1853,6 +1853,7 @@ internal fun FavoriteToggleButton(
     onClick: () -> Unit,
     description: String? = null,
     compact: Boolean = false,
+    compactSize: Dp = 28.dp,
 ) {
     val palette = rememberPhotoEffectFavoriteButtonPalette()
     val markColor by animateColorAsState(
@@ -1869,9 +1870,9 @@ internal fun FavoriteToggleButton(
         // 钛合金凹刻与相机键帽丝印会重绘内容；显式传入同一动画色，确保实体材质
         // 与毛玻璃、木纹主题拥有一致的收藏过渡，同时保持各自合适的对比度。
         materialContentColor = markColor,
-        shape = RoundedCornerShape(13.dp),
+        shape = RoundedCornerShape(if (compact) 10.dp else 13.dp),
         contentPadding = PaddingValues(0.dp),
-        modifier = Modifier.size(if (compact) 28.dp else PHOTO_EFFECTS_CONTROL_HEIGHT),
+        modifier = Modifier.size(if (compact) compactSize else PHOTO_EFFECTS_CONTROL_HEIGHT),
     ) {
         AnimatedContent(
             targetState = favorite,
@@ -1888,7 +1889,7 @@ internal fun FavoriteToggleButton(
                     else R.string.photo_effect_favorite_add,
                 ),
                 tint = markColor,
-                modifier = Modifier.size(if (compact) 18.dp else 22.dp),
+                modifier = Modifier.size(if (compact) (compactSize - 10.dp).coerceAtLeast(16.dp) else 22.dp),
             )
         }
     }
