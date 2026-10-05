@@ -57,6 +57,7 @@
     <string name="remote_af_auto_animals">自动区域 AF（动物）</string>
     <string name="remote_af_tap_badge">可点按对焦</string>
     <string name="remote_tap_focus_area_retry">请切换对焦区域后重试</string>
+    <string name="remote_tap_focus_area_unsupported">当前对焦区域不支持点按对焦，请切换为单点、动态区域或宽区域 AF</string>
     <string name="remote_tap_focus_retry">对焦失败，请重试</string>
     <string name="remote_rotation_stopped">自动旋转停止</string>
     <string name="remote_rotation_resumed">自动旋转恢复</string>

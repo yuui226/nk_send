@@ -1005,10 +1005,12 @@ internal suspend fun runTapFocusStart(
     focusX: Int,
     focusY: Int,
     tryTracking: Boolean,
+    tapPath: RcTapFocusPath? = null,
     command: suspend (code: Int, params: IntArray) -> Int?,
     pause: suspend (Long) -> Unit
 ): RcTapFocusStartResult {
-    if (tryTracking) {
+    val useTracking = tapPath?.let { it == RcTapFocusPath.TRACKING } ?: tryTracking
+    if (useTracking) {
         // Z 30 实机探测确认坐标属于 StartTracking 本身：无参调用返回 0x2006，
         // StartTracking(x,y) 返回 OK，并使增强帧开始携带选中 AF 框。
         val trackingRc = command(Lab.NK_START_TRACKING, intArrayOf(trackingX, trackingY))
@@ -1030,7 +1032,7 @@ internal suspend fun runTapFocusStart(
         // 状态错误直接上报，避免擅自改变用户预期。
     }
 
-    val trackingUnsupported = if (tryTracking) {
+    val trackingUnsupported = if (useTracking) {
         PtpConstants.OPERATION_NOT_SUPPORTED
     } else {
         null
@@ -1179,6 +1181,7 @@ suspend fun NikonCamera.rcFocusAt(
     trackingY: Int,
     focusX: Int,
     focusY: Int,
+    tapPath: RcTapFocusPath? = null,
     timeoutMs: Long = 6_000L
 ): RcTapFocusResult = focusMutex.withLock {
     val startedAt = SystemClock.elapsedRealtime()
@@ -1195,6 +1198,7 @@ suspend fun NikonCamera.rcFocusAt(
                     focusX = focusX,
                     focusY = focusY,
                     tryTracking = subjectTrackingSupported != false,
+                    tapPath = tapPath,
                     command = { code, params ->
                         focusCommandLocked(code, deadlineMs, *params)?.first
                     },
@@ -1785,8 +1789,9 @@ private suspend fun NikonCamera.logTrackingFocusProperties(
 
 /**
  * 完整探测中的主体追踪专检。这里故意尝试几种参数/顺序组合，但只使用机身自己
- * 广告的 StartTracking/EndTracking/ChangeAfArea/AfDrive。StartTracking 使用增强帧
- * +16/+18 的完整坐标系，ChangeAfArea 使用 +28/+30 的 AF 网格。仅在 StartTracking
+ * 广告的 StartTracking/EndTracking/ChangeAfArea/AfDrive。StartTracking 与 ChangeAfArea
+ * 都使用增强帧 +16/+18 的整幅 Live View 坐标系；+28/+30 只是 AF 框/显示网格，不能直接
+ * 作为 ChangeAfArea 的命令坐标范围。仅在 StartTracking
  * 明确成功后发送 EndTracking，避免无意义的状态命令；
  * finally 只清理已经开始的追踪状态。每条协议事务自行获取 focusMutex，外层不得重复持锁。
  *

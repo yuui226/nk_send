@@ -137,6 +137,7 @@ import com.ztransfer.protocol.LiveViewSoundLevels
 import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.protocol.PtpConstants
 import com.ztransfer.protocol.RcParam
+import com.ztransfer.protocol.RcTapFocusPath
 import com.ztransfer.protocol.RemoteCameraTool
 import com.ztransfer.protocol.labEndLiveView
 import com.ztransfer.protocol.labGrabFrame
@@ -152,6 +153,9 @@ import com.ztransfer.protocol.rcReadExposureMeter
 import com.ztransfer.protocol.rcBatteryPercentage
 import com.ztransfer.protocol.rcCapture
 import com.ztransfer.protocol.rcFocusAt
+import com.ztransfer.protocol.rcNormalizedToFocusCoordinate
+import com.ztransfer.protocol.rcGetCameraTool
+import com.ztransfer.protocol.rcTapFocusPath
 import com.ztransfer.protocol.rcChangeApplicationMode
 import com.ztransfer.protocol.rcCanonicalExposureProp
 import com.ztransfer.protocol.rcEndMovie
@@ -664,6 +668,9 @@ private fun RemoteContent(
     var focusModeReport by remember {
         mutableStateOf(diagnosticPreferences.getString("focus_mode_report_v1", "").orEmpty())
     }
+    var tapFocusReport by remember {
+        mutableStateOf(diagnosticPreferences.getString("tap_focus_report_v2", "").orEmpty())
+    }
     var devPanel by remember { mutableStateOf(false) }
     fun focusModeLog(line: String) {
         focusModeReport = (focusModeReport.lines() + line).takeLast(80).joinToString("\n")
@@ -675,8 +682,16 @@ private fun RemoteContent(
             "transport=${cam?.connectionType} mode=${if (cam?.connectionType == CameraConnectionType.USB) "USB" else if (camState.isStaConnection) "STA" else "AP"}\n" +
             "movie=$movieMode current=$focusModeText"
     }
+    fun tapFocusLog(line: String) {
+        tapFocusReport = (tapFocusReport.lines() + line).filter { it.isNotBlank() }.takeLast(80).joinToString("\n")
+    }
     DisposableEffect(Unit) {
-        onDispose { diagnosticPreferences.edit().putString("focus_mode_report_v1", focusModeReport).apply() }
+        onDispose {
+            diagnosticPreferences.edit()
+                .putString("focus_mode_report_v1", focusModeReport)
+                .putString("tap_focus_report_v2", tapFocusReport)
+                .apply()
+        }
     }
 
     LaunchedEffect(connected) {
@@ -2034,6 +2049,7 @@ private fun RemoteContent(
     val recStopFailHint = stringResource(R.string.remote_rec_stop_failed)
     val manualFocusHint = stringResource(R.string.remote_tap_focus_manual)
     val trackingAreaModeHint = stringResource(R.string.remote_tap_focus_area_retry)
+    val unsupportedFocusAreaHint = stringResource(R.string.remote_tap_focus_area_unsupported)
     val tapFocusFailedHint = stringResource(R.string.remote_tap_focus_retry)
     val rotationStoppedHint = stringResource(R.string.remote_rotation_stopped)
     val rotationResumedHint = stringResource(R.string.remote_rotation_resumed)
@@ -2096,16 +2112,48 @@ private fun RemoteContent(
         devLog(
             "tap tracking=(${tap.trackingX},${tap.trackingY})/" +
                 "${tap.trackingCoordinateWidth}x${tap.trackingCoordinateHeight} " +
-                "focus=(${tap.focusX},${tap.focusY})/" +
+                "focusCommand=(${tap.focusX},${tap.focusY})/" +
                 "${tap.focusCoordinateWidth}x${tap.focusCoordinateHeight}"
         )
         tapFocusJob = services.scope.launch {
             try {
+                // 机身上的 AF-area 可能在应用外被拨轮或触屏改变；每次点按只读一次
+                // 当前描述，避免用过期的 UI 值选择错误的 PTP 路径。
+                val area = runCatching {
+                    cam.rcGetCameraTool(RemoteCameraTool.FOCUS_AREA, movieMode)
+                }.getOrNull()
+                val path = rcTapFocusPath(area, cam.deviceModel)
+                tapFocusLog(
+                    "tap area prop=${area?.prop?.let { "0x%04X".format(it) } ?: "none"} " +
+                        "value=${area?.current ?: "none"} path=$path movie=$movieMode"
+                )
+                if (path == RcTapFocusPath.UNSUPPORTED) {
+                    tapFocusFeedback = TapFocusFeedback.FAILED
+                    confirmedFocusMarker = null
+                    tapFocusLog("tap result=unsupported-area")
+                    showHint(unsupportedFocusAreaHint)
+                    val completedNonce = tapFocusNonce
+                    tapFocusHideJob = services.scope.launch {
+                        delay(1_300L)
+                        if (tapFocusNonce == completedNonce) tapFocusFeedback = TapFocusFeedback.IDLE
+                    }
+                    return@launch
+                }
                 val result = cam.rcFocusAt(
                     trackingX = tap.trackingX,
                     trackingY = tap.trackingY,
                     focusX = tap.focusX,
-                    focusY = tap.focusY
+                    focusY = tap.focusY,
+                    tapPath = path.takeUnless { it == RcTapFocusPath.UNKNOWN }
+                )
+                tapFocusLog(
+                    "tap commands path=${path.name} " +
+                        "normalized=(%.3f,%.3f) ".format(tap.normalized.x, tap.normalized.y) +
+                        "trackingParams=(${tap.trackingX},${tap.trackingY}) " +
+                        "moveParams=(${tap.focusX},${tap.focusY}) " +
+                        "tracking=${result.trackingResponseCode?.let { "0x%04X".format(it and 0xFFFF) } ?: "none"} " +
+                        "move=${result.moveResponseCode?.let { "0x%04X".format(it and 0xFFFF) } ?: "none"} " +
+                        "af=${result.afResult?.responseCode?.let { "0x%04X".format(it and 0xFFFF) } ?: "none"}"
                 )
                 val af = result.afResult
                 if (result.trackingStarted || result.moveResponseCode == Lab.OK) {
@@ -3248,7 +3296,7 @@ private fun RemoteContent(
                         Spacer(Modifier.weight(1f))
                         GlassButton(
                             onClick = {
-                                services.clipboard.setText(AnnotatedString(recordingErrorReport + "\n\n" + movieFormatReport + "\n\n" + legacyVideoReport + "\n\n" + focusModeReport))
+                                services.clipboard.setText(AnnotatedString(recordingErrorReport + "\n\n" + movieFormatReport + "\n\n" + legacyVideoReport + "\n\n" + focusModeReport + "\n\n" + tapFocusReport))
                                 showHint(services.context.getString(R.string.code_copied))
                             },
                             contentPadding = PaddingValues(8.dp)
@@ -3316,7 +3364,7 @@ private fun RemoteContent(
                     }
                     Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
                         Spacer(Modifier.height(8.dp))
-                        val logLines = (recordingErrorReport + "\n\n" + movieFormatReport + "\n\n" + legacyVideoReport + "\n\n" + focusModeReport).lines()
+                        val logLines = (recordingErrorReport + "\n\n" + movieFormatReport + "\n\n" + legacyVideoReport + "\n\n" + focusModeReport + "\n\n" + tapFocusReport).lines()
                         // 日志跟尾：面板刚打开（尚无布局信息）直接跳到底；此后新行到来时，
                         // 停在底部附近才跟到底，用户上翻查看时不打扰。
                         val logState = rememberLazyListState()
@@ -3978,16 +4026,15 @@ private fun ViewfinderImage(
             val imageWidth = liveFrame.image.width
             val imageHeight = liveFrame.image.height
             val displayAspectRatio = imageWidth.toFloat() / imageHeight * desqueezeMultiplier
-            // StartTracking 使用增强帧头 +16/+18 的完整画面坐标；普通 ChangeAfArea
-            // 使用 +28/+30 的显示 AF 网格。两套坐标纵横比接近但量级完全不同，不能混用。
+            // StartTracking 与 ChangeAfArea 都使用整幅 Live View 的命令坐标。
+            // +28/+30 是帧头中的 AF 框/显示网格，不能作为 ChangeAfArea 的坐标范围；
+            // 用它会把所有点击压缩到画面左上角（例如 Z30 的 640x424）。
             val trackingCoordinateWidth =
                 liveFrame.metadata?.trackingCoordinateWidth ?: imageWidth
             val trackingCoordinateHeight =
                 liveFrame.metadata?.trackingCoordinateHeight ?: imageHeight
-            val focusCoordinateWidth =
-                liveFrame.metadata?.focusCoordinateWidth ?: imageWidth
-            val focusCoordinateHeight =
-                liveFrame.metadata?.focusCoordinateHeight ?: imageHeight
+            val focusCoordinateWidth = trackingCoordinateWidth
+            val focusCoordinateHeight = trackingCoordinateHeight
             val currentTapHandler by rememberUpdatedState(onTapFocus)
             ZoomableViewfinder(viewport, displayAspectRatio, Modifier.matchParentSize()) {
             Box(
@@ -4020,19 +4067,19 @@ private fun ViewfinderImage(
                                 currentTapHandler(
                                     ViewfinderTap(
                                         trackingX = (
-                                            normalizedX * (trackingCoordinateWidth - 1)
-                                            ).roundToInt(),
+                                            rcNormalizedToFocusCoordinate(normalizedX, trackingCoordinateWidth)
+                                        ),
                                         trackingY = (
-                                            normalizedY * (trackingCoordinateHeight - 1)
-                                            ).roundToInt(),
+                                            rcNormalizedToFocusCoordinate(normalizedY, trackingCoordinateHeight)
+                                        ),
                                         trackingCoordinateWidth = trackingCoordinateWidth,
                                         trackingCoordinateHeight = trackingCoordinateHeight,
                                         focusX = (
-                                            normalizedX * (focusCoordinateWidth - 1)
-                                            ).roundToInt(),
+                                            rcNormalizedToFocusCoordinate(normalizedX, focusCoordinateWidth)
+                                        ),
                                         focusY = (
-                                            normalizedY * (focusCoordinateHeight - 1)
-                                            ).roundToInt(),
+                                            rcNormalizedToFocusCoordinate(normalizedY, focusCoordinateHeight)
+                                        ),
                                         focusCoordinateWidth = focusCoordinateWidth,
                                         focusCoordinateHeight = focusCoordinateHeight,
                                         normalized = Offset(normalizedX, normalizedY)

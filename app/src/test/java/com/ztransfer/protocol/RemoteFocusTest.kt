@@ -9,6 +9,15 @@ import org.junit.Test
 
 class RemoteFocusTest {
     @Test
+    fun focusCommandCoordinatesUseFullLiveViewDomain() {
+        assertEquals(0, rcNormalizedToFocusCoordinate(0f, 5568))
+        assertEquals(2784, rcNormalizedToFocusCoordinate(0.5f, 5568))
+        assertEquals(5567, rcNormalizedToFocusCoordinate(1f, 5568))
+        assertEquals(1856, rcNormalizedToFocusCoordinate(0.5f, 3712))
+        assertEquals(0, rcNormalizedToFocusCoordinate(0.5f, 1))
+    }
+
+    @Test
     fun trackingProbeRequiresSeveralFramesAndMaterialCameraFrameMotion() {
         val still = listOf(
             LiveViewFocusFrame(0.500f, 0.500f, 0.1f, 0.1f),
@@ -181,6 +190,47 @@ class RemoteFocusTest {
         assertNull(result.trackingResponseCode)
         assertEquals(Lab.OK, result.afStartResponseCode)
         assertEquals(listOf(Lab.NK_CHANGE_AF_AREA, Lab.NK_AF_DRIVE), commands)
+    }
+
+    @Test
+    fun movableAreaPathSkipsSubjectTrackingProbe() = runBlocking {
+        val calls = mutableListOf<Pair<Int, List<Int>>>()
+        val result = runTapFocusStart(
+            trackingX = 2_175,
+            trackingY = 1_638,
+            focusX = 400,
+            focusY = 300,
+            tryTracking = true,
+            tapPath = RcTapFocusPath.MOVE_AREA,
+            command = { code, params ->
+                calls += code to params.toList()
+                Lab.OK
+            },
+            pause = {}
+        )
+
+        assertNull(result.trackingResponseCode)
+        assertEquals(Lab.OK, result.moveResponseCode)
+        assertEquals(Lab.OK, result.afStartResponseCode)
+        assertEquals(
+            listOf(
+                Lab.NK_CHANGE_AF_AREA to listOf(400, 300),
+                Lab.NK_AF_DRIVE to emptyList()
+            ),
+            calls
+        )
+    }
+
+    @Test
+    fun zSeriesFocusAreaValuesSelectExpectedTapPath() {
+        fun param(prop: Int, value: Long) = RcParam(prop, 0x0002, true, value, listOf(value))
+
+        assertEquals(RcTapFocusPath.TRACKING, rcTapFocusPath(param(0xD1F8, 0x8011), "Z 30"))
+        assertEquals(RcTapFocusPath.MOVE_AREA, rcTapFocusPath(param(0xD1F8, 2), "Z 30"))
+        assertEquals(RcTapFocusPath.MOVE_AREA, rcTapFocusPath(param(0xD1F8, 0x8013), "Z 30"))
+        assertEquals(RcTapFocusPath.MOVE_AREA, rcTapFocusPath(param(0xD1F8, 0x8014), "Z 30"))
+        assertEquals(RcTapFocusPath.MOVE_AREA, rcTapFocusPath(param(0xD05D, 0x8010), "Z 30"))
+        assertEquals(RcTapFocusPath.MOVE_AREA, rcTapFocusPath(param(0xD05D, 0x8018), "Z 30"))
     }
 
     @Test

@@ -66,7 +66,7 @@ data class LiveViewMetadata(
     /** `StartTracking(x, y)` 与 AF 框记录共同使用的完整画面坐标系。 */
     val trackingCoordinateWidth: Int,
     val trackingCoordinateHeight: Int,
-    /** `ChangeAfArea(x, y)` 使用的相机显示坐标网格；未知头型时由 UI 回退 JPEG 尺寸。 */
+    /** 帧头声明的 AF 框/显示网格；它不是 `ChangeAfArea(x, y)` 的命令坐标范围。 */
     val focusCoordinateWidth: Int?,
     val focusCoordinateHeight: Int?,
     /** 视频 Live View 的机内 L/R 电平；头型不支持或字段校验失败时为 null。 */
@@ -107,7 +107,7 @@ private const val EXTENDED_SOUND_LEVELS_OFFSET = 824
  * - 大端字段；
  * - +8 为头长，+12 为 JPEG 长度；
  * - +16/+18 为完整坐标系；
- * - +28/+30 为 `ChangeAfArea` 使用的显示坐标网格；
+ * - +28/+30 为 AF 框/显示数据使用的网格；不能直接作为 `ChangeAfArea` 的命令坐标范围；
  * - +42 为对焦判断（0 无信息、1 未合焦、2 合焦）；
  * - +44/+45 为 AF 框数量/选中索引；
  * - +48 起每框 8 字节：宽、高、中心 X、中心 Y。

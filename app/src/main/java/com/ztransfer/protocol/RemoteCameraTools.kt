@@ -1,7 +1,57 @@
 package com.ztransfer.protocol
 
+import kotlin.math.roundToInt
+
 /** Property identities from libgphoto2 camlibs/ptp2/ptp.h. No mode-changing commands here. */
 internal enum class RemoteCameraTool { WHITE_BALANCE, FOCUS_AREA, FOCUS_MODE }
+
+/**
+ * 点按对焦的两条机身路径：主体追踪和移动 AF 区域。
+ * UNKNOWN 保留旧的能力探测回退，避免未知机型因为标签不完整而失去原有能力。
+ */
+enum class RcTapFocusPath { TRACKING, MOVE_AREA, UNSUPPORTED, UNKNOWN }
+
+/**
+ * Map a viewfinder fraction to a Nikon AF command coordinate.
+ *
+ * The command domain is the full Live View coordinate domain (the enhanced
+ * frame's +16/+18 values), not the smaller AF-frame metadata grid at +28/+30.
+ */
+internal fun rcNormalizedToFocusCoordinate(normalized: Float, size: Int): Int {
+    if (size <= 1) return 0
+    return (normalized.coerceIn(0f, 1f) * (size - 1)).roundToInt()
+}
+
+internal fun rcTapFocusPath(param: RcParam?, model: String?): RcTapFocusPath {
+    if (param == null) return RcTapFocusPath.UNKNOWN
+    val body = model.orEmpty().trim().uppercase(java.util.Locale.ROOT).removePrefix("NIKON").trim()
+    val zFamily = body.startsWith("Z")
+    return when (param.prop) {
+        // Z 系照片/录像枚举：自动区域及主体检测走 StartTracking，
+        // 单点、精准点、动态区域、宽区域、群组区域走 ChangeAfArea。
+        0x501C, 0xD1F8 -> when (param.current) {
+            0x8011L, 0x8012L, 0x801AL, 0x801BL,
+            0x8020L, 0x8021L -> RcTapFocusPath.TRACKING
+            0x8010L, 0x8015L, 0x8017L, 0x8018L, 0x8019L,
+            0x801EL, 0x801FL, 2L, 0x8013L, 0x8014L -> RcTapFocusPath.MOVE_AREA
+            else -> if (zFamily) RcTapFocusPath.UNSUPPORTED else RcTapFocusPath.UNKNOWN
+        }
+        // 老属性的值域不是 Z 系扩展值，按 libgphoto2 的 Live View AF 映射处理。
+        0xD05D -> when (param.current) {
+            // 老机型的基础枚举：人脸优先 / 主体跟踪。
+            0L, 3L -> RcTapFocusPath.TRACKING
+            1L, 2L, 4L -> RcTapFocusPath.MOVE_AREA
+            // Z30 照片模式实际从 D05D 返回扩展枚举，与 501C/D1F8 共用值域。
+            0x8011L, 0x8012L, 0x801AL, 0x801BL,
+            0x8020L, 0x8021L -> RcTapFocusPath.TRACKING
+            0x8010L, 0x8015L, 0x8017L, 0x8018L, 0x8019L,
+            0x801EL, 0x801FL, 0x8013L, 0x8014L -> RcTapFocusPath.MOVE_AREA
+            else -> RcTapFocusPath.UNKNOWN
+        }
+        else -> RcTapFocusPath.UNKNOWN
+    }
+}
+
 internal fun remoteToolPropertyCandidates(tool: RemoteCameraTool, movie: Boolean): List<Int> = when (tool) {
     RemoteCameraTool.FOCUS_MODE -> focusModeProperties
     RemoteCameraTool.WHITE_BALANCE -> if (movie) listOf(0xD23A, 0xD1A7) else listOf(0x5005)

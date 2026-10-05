@@ -208,8 +208,9 @@ internal fun RemoteCameraToolPanel(
         MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp, lineHeight = 18.sp)
     else MaterialTheme.typography.bodyMedium
     fun hasTapMarker(p: RcParam, value: Long) =
-        tool == RemoteCameraTool.FOCUS_AREA && p.prop in listOf(0x501C, 0xD05D, 0xD1F8) &&
-            value in listOf(0x8011L, 0x8020L, 0x8021L)
+        tool == RemoteCameraTool.FOCUS_AREA &&
+            rcTapFocusPath(p.copy(current = value), camera?.deviceModel) in
+                listOf(RcTapFocusPath.TRACKING, RcTapFocusPath.MOVE_AREA)
     // Measure only the connected camera's rows; unsupported long labels must not widen this menu.
     val labelWidth = param?.let { p ->
         (p.values + p.current).distinct().maxOfOrNull { value ->

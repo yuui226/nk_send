@@ -57,6 +57,7 @@
     <string name="remote_af_auto_animals">Auto-area AF (animals)</string>
     <string name="remote_af_tap_badge">Tap to focus</string>
     <string name="remote_tap_focus_area_retry">Try changing the AF-area mode</string>
+    <string name="remote_tap_focus_area_unsupported">This AF-area mode does not support tap focus. Switch to single-point, dynamic-area, or wide-area AF.</string>
     <string name="remote_tap_focus_retry">Focus failed. Please try again</string>
     <string name="remote_rotation_stopped">Auto-rotation stopped</string>
     <string name="remote_rotation_resumed">Auto-rotation resumed</string>
