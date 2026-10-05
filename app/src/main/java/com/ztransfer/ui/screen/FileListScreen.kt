@@ -4552,130 +4552,6 @@ private fun FilterOverlay(
 
                     FilterSectionDivider()
 
-                    Spacer(Modifier.height(8.dp))
-
-                    val ratingAlpha = if (working.ratingEnabled && ratingProgress.loading) {
-                        val ratingPulse = rememberInfiniteTransition(label = "ratingFilterPulse")
-                        ratingPulse.animateFloat(
-                            initialValue = 0.72f,
-                            targetValue = 1f,
-                            animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
-                            label = "ratingFilterAlpha",
-                        ).value
-                    } else 1f
-                    val ratingAccent = when {
-                        !working.ratingEnabled -> colors.accentBlue
-                        ratingProgress.waitingForRange -> colors.accentYellow
-                        ratingProgress.loading -> colors.accentBlue
-                        else -> colors.statusConnected
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        FilterChip(
-                            label = when {
-                                !working.ratingEnabled -> stringResource(R.string.filter_rating_off)
-                                ratingProgress.waitingForRange -> "0/${ratingProgress.total}"
-                                ratingProgress.loading -> "${ratingProgress.completed.coerceAtMost(ratingProgress.total)}/${ratingProgress.total}"
-                                else -> stringResource(R.string.filter_rating_on)
-                            },
-                            selected = working.ratingEnabled,
-                            onClick = {
-                                commit(working.copy(
-                                    ratingEnabled = !working.ratingEnabled,
-                                    rating = if (working.ratingEnabled) null else working.rating,
-                                ))
-                            },
-                            modifier = Modifier
-                                .weight(1f)
-                                .graphicsLayer {
-                                    alpha = if (working.ratingEnabled && ratingProgress.loading) ratingAlpha else 1f
-                                },
-                            accentColor = ratingAccent,
-                            cornerLabel = stringResource(R.string.filter_rating_enabled),
-                            onLongClick = if (working.ratingEnabled) {
-                                { clipboard.setText(AnnotatedString(RatingDiagnostics.snapshot())) }
-                            } else null,
-                        )
-                        // Keep both states in one fixed slot. Crossfade overlays the old and
-                        // new controls instead of letting Row remeasure and push neighbors.
-                        Box(
-                            modifier = Modifier.weight(2f).height(34.dp),
-                            contentAlignment = Alignment.CenterStart,
-                        ) {
-                            Crossfade(
-                                targetState = working.ratingEnabled,
-                                animationSpec = tween(180),
-                                label = "ratingControlsFade",
-                            ) { enabled ->
-                                if (!enabled) {
-                                    Row(
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        val rangeOptions = listOf(1, 3, 5, 0)
-                                        val rangeLabels = mapOf(
-                                            0 to stringResource(R.string.filter_rating_range_all),
-                                            1 to stringResource(R.string.filter_rating_range_days, 1),
-                                            3 to stringResource(R.string.filter_rating_range_days, 3),
-                                            5 to stringResource(R.string.filter_rating_range_days, 5),
-                                        )
-                                        ReleaseCommitWheel(
-                                            options = rangeOptions,
-                                            selected = working.ratingDays.takeIf { it in rangeOptions } ?: 3,
-                                            optionLabel = { days -> rangeLabels[days] ?: rangeLabels.getValue(3) },
-                                            onValueCommitted = { days -> commit(working.copy(ratingDays = days)) },
-                                            onDetent = haptics::tick,
-                                            label = stringResource(R.string.filter_rating_range_label),
-                                            wheelHeight = 34.dp,
-                                            optionFontSize = 12.sp,
-                                            optionFontWeight = FontWeight.Medium,
-                                            cornerRadius = 10.dp,
-                                            showDragHint = false,
-                                            // Match the compact status-chip width; the remaining
-                                            // slot is reserved for the help button and star row.
-                                            modifier = Modifier.width(78.dp),
-                                        )
-                                        TipLightbulbButton(
-                                            onClick = { showRatingTip = true },
-                                            contentDescription = stringResource(R.string.filter_rating_help_title),
-                                            modifier = Modifier
-                                                .size(34.dp)
-                                                .onGloballyPositioned { ratingTipAnchor = it.boundsInRoot() },
-                                        )
-                                    }
-                                } else {
-                                    val feedback = com.ztransfer.ui.util.rememberHaptics(hapticsEnabled)
-                                    Row(
-                                        horizontalArrangement = Arrangement.spacedBy(2.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        for (star in 1..5) {
-                                            FavoriteToggleButton(
-                                                favorite = star <= (working.rating ?: 0),
-                                                enabled = true,
-                                                compact = true,
-                                                compactSize = 34.dp,
-                                                description = stringResource(R.string.filter_rating_stars, star),
-                                                onClick = {
-                                                    feedback.tick()
-                                                    commit(working.copy(
-                                                        ratingEnabled = true,
-                                                        rating = if (working.rating == star) null else star,
-                                                    ))
-                                                },
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    Spacer(Modifier.height(8.dp))
-
                     // ---- 标记：保护 / 连拍 / 未传输（独立开关，与日期和类型叠加）----
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         FilterChip(
@@ -4740,7 +4616,128 @@ private fun FilterOverlay(
 
                     FilterSectionDivider()
 
-                    Spacer(Modifier.height(8.dp))
+                    val ratingAlpha = if (working.ratingEnabled && ratingProgress.loading) {
+                        val ratingPulse = rememberInfiniteTransition(label = "ratingFilterPulse")
+                        ratingPulse.animateFloat(
+                            initialValue = 0.72f,
+                            targetValue = 1f,
+                            animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
+                            label = "ratingFilterAlpha",
+                        ).value
+                    } else 1f
+                    val ratingAccent = when {
+                        !working.ratingEnabled -> colors.accentBlue
+                        ratingProgress.waitingForRange -> colors.accentYellow
+                        ratingProgress.loading -> colors.accentBlue
+                        else -> colors.statusConnected
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        FilterChip(
+                            label = when {
+                                !working.ratingEnabled -> stringResource(R.string.filter_rating_off)
+                                ratingProgress.waitingForRange -> "0/${ratingProgress.total}"
+                                ratingProgress.loading -> "${ratingProgress.completed.coerceAtMost(ratingProgress.total)}/${ratingProgress.total}"
+                                else -> stringResource(R.string.filter_rating_on)
+                            },
+                            selected = working.ratingEnabled,
+                            onClick = {
+                                commit(working.copy(
+                                    ratingEnabled = !working.ratingEnabled,
+                                    rating = if (working.ratingEnabled) null else working.rating,
+                                ))
+                            },
+                            modifier = Modifier
+                                .width(81.dp)
+                                .graphicsLayer {
+                                    alpha = if (working.ratingEnabled && ratingProgress.loading) ratingAlpha else 1f
+                                },
+                            accentColor = ratingAccent,
+                            cornerLabel = stringResource(R.string.filter_rating_enabled),
+                            onLongClick = if (working.ratingEnabled) {
+                                { clipboard.setText(AnnotatedString(RatingDiagnostics.snapshot())) }
+                            } else null,
+                        )
+                        // Keep both states in one fixed slot. Crossfade overlays the old and
+                        // new controls instead of letting Row remeasure and push neighbors.
+                        Box(
+                            modifier = Modifier.weight(1f).height(34.dp),
+                            contentAlignment = Alignment.CenterStart,
+                        ) {
+                            Crossfade(
+                                targetState = working.ratingEnabled,
+                                animationSpec = tween(180),
+                                label = "ratingControlsFade",
+                            ) { enabled ->
+                                if (!enabled) {
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        val rangeOptions = listOf(1, 3, 5, 0)
+                                        val rangeLabels = mapOf(
+                                            0 to stringResource(R.string.filter_rating_range_all),
+                                            1 to stringResource(R.string.filter_rating_range_days, 1),
+                                            3 to stringResource(R.string.filter_rating_range_days, 3),
+                                            5 to stringResource(R.string.filter_rating_range_days, 5),
+                                        )
+                                        ReleaseCommitWheel(
+                                            options = rangeOptions,
+                                            selected = working.ratingDays.takeIf { it in rangeOptions } ?: 3,
+                                            optionLabel = { days -> rangeLabels[days] ?: rangeLabels.getValue(3) },
+                                            onValueCommitted = { days -> commit(working.copy(ratingDays = days)) },
+                                            onDetent = haptics::tick,
+                                            label = stringResource(R.string.filter_rating_range_label),
+                                            wheelHeight = 34.dp,
+                                            optionFontSize = 12.sp,
+                                            optionFontWeight = FontWeight.Medium,
+                                            cornerRadius = 10.dp,
+                                            showDragHint = false,
+                                            // Match the compact status-chip width; the remaining
+                                            // slot is reserved for the help button and star row.
+                                            modifier = Modifier.width(81.dp),
+                                        )
+                                        TipLightbulbButton(
+                                            onClick = { showRatingTip = true },
+                                            contentDescription = stringResource(R.string.filter_rating_help_title),
+                                            modifier = Modifier
+                                                .size(34.dp)
+                                                .onGloballyPositioned { ratingTipAnchor = it.boundsInRoot() },
+                                        )
+                                    }
+                                } else {
+                                    val feedback = com.ztransfer.ui.util.rememberHaptics(hapticsEnabled)
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        for (star in 1..5) {
+                                            FavoriteToggleButton(
+                                                favorite = star <= (working.rating ?: 0),
+                                                enabled = true,
+                                                compact = true,
+                                                compactSize = 34.dp,
+                                                description = stringResource(R.string.filter_rating_stars, star),
+                                                onClick = {
+                                                    feedback.tick()
+                                                    commit(working.copy(
+                                                        ratingEnabled = true,
+                                                        rating = if (working.rating == star) null else star,
+                                                    ))
+                                                },
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    FilterSectionDivider()
 
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         FilterChip(
@@ -4777,11 +4774,7 @@ private fun FilterOverlay(
         ) { _ ->
             TipBubbleContent(
                 title = stringResource(R.string.filter_rating_help_title),
-                items = listOf(TipBubbleItem(stringResource(
-                    R.string.filter_rating_help_description,
-                    if (working.ratingDays == 0) stringResource(R.string.filter_rating_range_all)
-                    else stringResource(R.string.filter_rating_range_days, working.ratingDays),
-                ))),
+                items = listOf(TipBubbleItem(stringResource(R.string.filter_rating_help_description))),
                 bulleted = true,
             )
         }
