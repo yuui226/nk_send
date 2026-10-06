@@ -75,7 +75,9 @@ private const val FILM_EDGE_SIDE_TO_PHOTO_WIDTH = 0.07f
 private const val FILM_EDGE_TOP_TO_PHOTO_WIDTH = 0.035f
 private const val FILM_EDGE_BOTTOM_TO_PHOTO_WIDTH = 0.085f
 private const val FILM_NEGATIVE_SIDE_TO_PHOTO_WIDTH = 0.026f
-private const val FILM_NEGATIVE_TOP_TO_PHOTO_WIDTH = 0.085f
+// The identity line now sits in the compact top strip. Keep the strip just tall enough
+// for the brand mark and frame label so the old, unused upper air is not preserved.
+private const val FILM_NEGATIVE_TOP_TO_PHOTO_WIDTH = 0.060f
 private const val FILM_NEGATIVE_BOTTOM_TO_PHOTO_WIDTH = 0.16f
 private const val COLOR_ARCHIVE_SIDE_TO_PHOTO_WIDTH = 0.04f
 private const val COLOR_ARCHIVE_TOP_TO_PHOTO_WIDTH = 0.04f
@@ -4096,7 +4098,10 @@ object PhotoFrameExporter {
             style = Paint.Style.STROKE
             strokeWidth = unit * 0.0012f
         }
-        canvas.drawLine(0f, photo.top - unit * 0.018f, layout.canvasWidth.toFloat(), photo.top - unit * 0.018f, linePaint)
+        // The top strip is user-adjustable. Keep its rule close to the photo so the identity
+        // line remains separated even at the narrowest supported frame width.
+        val topRuleY = photo.top - unit * 0.006f
+        canvas.drawLine(0f, topRuleY, layout.canvasWidth.toFloat(), topRuleY, linePaint)
         canvas.drawLine(0f, photo.bottom + unit * 0.018f, layout.canvasWidth.toFloat(), photo.bottom + unit * 0.018f, linePaint)
 
         val brand = normalizeCameraMake(metadata.make)
@@ -4113,7 +4118,16 @@ object PhotoFrameExporter {
         )
         if (identity.isNotBlank()) {
             labelPaint.textAlign = Paint.Align.LEFT
-            canvas.drawText(identity, unit * 0.028f, photo.top * 0.58f, labelPaint)
+            // Use the shared identity renderer so LOGO mode gets the same Nikon/vector mark
+            // as every other frame. The previous plain drawText path silently skipped logos.
+            canvas.drawFrameIdentity(
+                text = identity,
+                x = unit * 0.028f,
+                baseline = photo.top * 0.58f,
+                paint = labelPaint,
+                logo = metadata.useBrandLogo,
+                logoScale = PhotoFramePreset.FILM_NEGATIVE.brandLogoScale(),
+            )
         }
         val frameNumber = filmFrameNumber(metadata)
         val frameLabel = "FRAME %03d".format(Locale.ROOT, frameNumber)
@@ -5777,7 +5791,7 @@ private const val EDITORIAL_FRAME_RENDER_VERSION = 2
 // Film-gallery typography evolves independently. Transfer-side deduplication uses this token,
 // while the editor preview always redraws and therefore cannot reveal a stale-output hit.
 private const val FILM_GALLERY_RENDER_VERSION = 1
-private const val FILM_NEGATIVE_RENDER_VERSION = 1
+private const val FILM_NEGATIVE_RENDER_VERSION = 2
 private const val PHOTO_FILTER_RENDER_VERSION = 3
 
 internal fun isPhotoFrameOutputName(name: String): Boolean =

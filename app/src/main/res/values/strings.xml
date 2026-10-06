@@ -702,7 +702,7 @@
     <string name="filter_rating_range_days">%1$d days</string>
     <string name="filter_rating_range_label">Range</string>
     <string name="filter_rating_waiting">Waiting</string>
-    <string name="filter_rating_help_description">Enable to load ratings in the selected range and filter photos by rating.</string>
+    <string name="filter_rating_help_description">Enable to load ratings in the selected range and filter photos by rating. Turn it off and on again to reload the latest ratings.</string>
     <string name="filter_rating_off">Off</string>
     <string name="filter_rating_on">On</string>
 </resources>

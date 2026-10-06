@@ -696,7 +696,7 @@
     <string name="filter_rating_range_days">%1$d日</string>
     <string name="filter_rating_range_label">範圍</string>
     <string name="filter_rating_waiting">等待中</string>
-    <string name="filter_rating_help_description">開啟會載入範圍內的評級資料，實現按評級篩選功能。</string>
+    <string name="filter_rating_help_description">開啟會載入範圍內的評級資料，實現按評級篩選功能。重新開啟可重新載入最新評級資料。</string>
     <string name="filter_rating_off">關閉</string>
     <string name="filter_rating_on">開啟</string>
 </resources>

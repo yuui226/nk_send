@@ -4809,7 +4809,7 @@ private fun FilterOverlay(
             onDismiss = { showRatingTip = false },
             panelModifier = Modifier
                 .padding(start = 18.dp, end = 18.dp, top = ratingTipTop, bottom = 18.dp)
-                .widthIn(min = 240.dp, max = 320.dp),
+                .widthIn(min = 220.dp, max = 260.dp),
             panelAlignment = Alignment.TopEnd,
             shape = RoundedCornerShape(16.dp),
             dim = false,

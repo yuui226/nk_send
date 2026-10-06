@@ -700,7 +700,7 @@
     <string name="filter_rating_range_days">%1$d日</string>
     <string name="filter_rating_range_label">范围</string>
     <string name="filter_rating_waiting">等待中</string>
-    <string name="filter_rating_help_description">开启会加载范围内的评级数据，实现按评级筛选功能。</string>
+    <string name="filter_rating_help_description">开启会加载范围内的评级数据，实现按评级筛选功能。重新开启可重新加载最新评级数据。</string>
     <string name="filter_rating_off">关闭</string>
     <string name="filter_rating_on">开启</string>
 </resources>

@@ -147,7 +147,10 @@ private fun RemoteToolBarContent(
                         val up = stringResource(R.string.remote_tool_move_up)
                         val down = stringResource(R.string.remote_tool_move_down)
                         val iconOpacity = animateFloatAsState(if (visible) 1f else 0.38f, tween(180), label = "toolIconOpacity-$id")
-                        Box {
+                        // Keep the manager slot identical to the normal portrait slot. The eye
+                        // is an overlay only; it must never participate in measurement and push
+                        // the neighbouring tools into a new column or row.
+                        Box(Modifier.size(36.dp), contentAlignment = Alignment.Center) {
                             TopIconToggle(visible, title, { onVisible(tool, !layout.visible(tool)) },
                                 modifier = Modifier.semantics {
                                     stateDescription = stateLabel
