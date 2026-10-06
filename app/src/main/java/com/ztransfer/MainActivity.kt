@@ -333,12 +333,14 @@ private data class MainTransferUiState(
     val isTransferring: Boolean,
     val keepScreenOn: Boolean,
     val filterDateRange: PhotoDateRange?,
+    val photoLoadingRangeDays: Int,
 )
 
 private fun TransferState.toMainTransferUiState(): MainTransferUiState = MainTransferUiState(
     isTransferring = isTransferring,
     keepScreenOn = keepScreenOn,
     filterDateRange = filterDateRange,
+    photoLoadingRangeDays = photoLoadingRange.days,
 )
 
 internal fun shouldShowFirstLaunchNotificationHint(
@@ -747,6 +749,9 @@ fun MainScreen(transferViewModel: TransferViewModel) {
     // 日期筛选同时是后台缩略图的优先范围；放在共同宿主桥接，离开文件页后仍能继续填充。
     LaunchedEffect(transferState.filterDateRange) {
         cameraViewModel.setThumbnailPriorityRange(transferState.filterDateRange)
+    }
+    LaunchedEffect(transferState.photoLoadingRangeDays) {
+        cameraViewModel.setThumbnailLoadingDays(transferState.photoLoadingRangeDays)
     }
 
     // 相机新增事件由共同宿主承接，与当前停留页面无关；只有真正被自动入口接纳的文件

@@ -1,5 +1,6 @@
 package com.ztransfer.viewmodel
 
+import com.ztransfer.protocol.NikonCamera
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
@@ -39,6 +40,22 @@ data class PhotoDateRange private constructor(
 /** 只为最大值创建一个 LocalDate，避免渐进文件列表每次更新都为全部照片分配日期对象。 */
 internal fun latestCaptureLocalDate(captureDates: Sequence<String?>): LocalDate? =
     captureDates.mapNotNull(::captureDayKey).maxOrNull()?.toLocalDate()
+
+/** Returns the range covering the newest actual shooting days, skipping empty calendar days. */
+internal fun newestCaptureDaysRange(
+    files: Iterable<NikonCamera.FileInfo>,
+    days: Int,
+): PhotoDateRange? {
+    if (days <= 0) return null
+    val keys = files.asSequence()
+        .mapNotNull { it.captureDate?.takeIf { value -> value.length >= 8 }?.let(::captureDayKey) }
+        .distinct()
+        .sortedDescending()
+        .take(days)
+        .toList()
+    if (keys.isEmpty()) return null
+    return PhotoDateRange.between(keys.last().toLocalDate(), keys.first().toLocalDate())
+}
 
 /** 主筛选面板使用的两位年份短摘要，保证起止日期格式稳定且适合单行显示。 */
 internal fun compactDateRangeLabel(range: PhotoDateRange?): String? {

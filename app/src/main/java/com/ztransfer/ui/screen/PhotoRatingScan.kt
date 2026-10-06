@@ -31,7 +31,8 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
     staConnection: Boolean,
     listLoading: Boolean,
     recentThumbnailReadyDays: Int,
-    ratingDays: Int): PhotoRatingScan {
+    ratingDays: Int,
+    photoLoadingDays: Int): PhotoRatingScan {
     val generation = camera?.photoRatingGeneration?.collectAsState()?.value ?: 0
     var clearedGeneration by remember(camera) { mutableStateOf<Int?>(null) }
     var previousEnabled by remember(camera) { mutableStateOf<Boolean?>(null) }
@@ -45,7 +46,7 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
     val latestPaused by rememberUpdatedState(paused)
     val latestListLoading by rememberUpdatedState(listLoading)
     val latestRecentThumbnailReadyDays by rememberUpdatedState(recentThumbnailReadyDays)
-    LaunchedEffect(camera, enabled, generation, useObjectRating, staConnection, ratingDays) {
+    LaunchedEffect(camera, enabled, generation, useObjectRating, staConnection, ratingDays, photoLoadingDays) {
         val enteringEnabled = enabled && previousEnabled != true
         previousEnabled = enabled
         if (!enabled) {
@@ -62,6 +63,13 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
             return@LaunchedEffect
         }
         if (camera == null) return@LaunchedEffect
+        // The photo boundary is an upper bound for rating work: if photos are configured for
+        // one day and ratings for three, the first day is enough to start rating. Zero means all.
+        val effectiveDays = when {
+            ratingDays == 0 -> photoLoadingDays
+            photoLoadingDays == 0 -> ratingDays
+            else -> minOf(ratingDays, photoLoadingDays)
+        }
         // Thumbnail/header loading may have captured passive ratings while the filter was off.
         // Enabling the filter is an explicit fresh-snapshot request, so discard those values
         // before building the pending set. The generation restart is guarded by previousEnabled.
@@ -95,11 +103,11 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
             if (scanStarted) return@collect
             val current = latestFiles
             val pause = latestPaused
-            val thumbnailRangeReady = if (ratingDays == 0) {
+            val thumbnailRangeReady = if (effectiveDays == 0) {
                 val knownDates = datesForRating(current).size
                 !latestListLoading && (knownDates == 0 || latestRecentThumbnailReadyDays >= knownDates)
             } else {
-                latestRecentThumbnailReadyDays >= ratingDays || (!latestListLoading && datesForRating(current).size < ratingDays)
+                latestRecentThumbnailReadyDays >= effectiveDays || (!latestListLoading && datesForRating(current).size < effectiveDays)
             }
             if (staConnection && !thumbnailRangeReady) {
                 result = PhotoRatingScan(
@@ -119,7 +127,7 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
                     .distinct().count()
                 // Keep collecting handles while the catalog is still arriving. Lock at the
                 // selected range; a completed catalog may lock an actually shorter range.
-                sessionInitialized = ratingDays == 0 || dates >= ratingDays || !latestListLoading
+                sessionInitialized = effectiveDays == 0 || dates >= effectiveDays || !latestListLoading
             }
             val allPhotos = current.filter { it.extension in ratingPhotoExtensions }
             val photos = allPhotos.filter { !sessionInitialized || it.handle in sessionHandles }
@@ -128,7 +136,7 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
             val eligiblePhotos = if (staConnection) {
                 val dates = photos.asSequence().mapNotNull { it.captureDate?.take(8) }
                     .distinct().let { sequence ->
-                        if (ratingDays == 0) sequence.toList() else sequence.take(ratingDays).toList()
+                        if (effectiveDays == 0) sequence.toList() else sequence.take(effectiveDays).toList()
                     }
                 val cutoff = dates.lastOrNull()
                 if (cutoff == null) emptyList() else photos.filter {
@@ -138,7 +146,7 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
             // During STA enumeration, do not start a partial rating pass. The list grows in
             // several batches; wait for the selected date count (or the authoritative end of
             // a shorter catalog) first.
-            if (staConnection && ratingDays > 0 && datesForRating(photos).size < ratingDays && latestListLoading) {
+            if (staConnection && effectiveDays > 0 && datesForRating(photos).size < effectiveDays && latestListLoading) {
                 result = PhotoRatingScan(
                     loading = true,
                     total = ratingSourceCount(photos),

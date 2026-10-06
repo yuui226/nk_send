@@ -462,6 +462,9 @@ private fun NikonCamera.FileInfo.autoTransferIdentity(): String =
 
 enum class TransferStorageMode { UNIFIED, BY_DAY, BY_TYPE }
 
+/** 缩略图加载范围：按最新的实际拍摄日计数，0 表示全部。 */
+enum class PhotoLoadingRange(val days: Int) { ONE(1), THREE(3), FIVE(5), ALL(0) }
+
 data class TransferState(
     val tasks: List<TransferTask> = emptyList(),
     /** 仅在任务增删或替换时递增；纯状态变化不会让照片页重建 handle -> 列表下标索引。 */
@@ -510,6 +513,8 @@ data class TransferState(
     val filterRating: Int? = null,
     // 评级读取范围：1/3/5 个实际拍摄日；0 = 全部。默认保持原来的三日范围。
     val filterRatingDays: Int = 3,
+    /** 照片列表后台缩略图加载范围；默认全部，保持旧版本行为。 */
+    val photoLoadingRange: PhotoLoadingRange = PhotoLoadingRange.ALL,
     // 只看连拍照片（检测算法见 FileListScreen.computeBurstGroups）。持久化。
     val filterBurstOnly: Boolean = false,
     // 只看导出目录中尚未存在的照片。与缩略图已传对号共用同一份索引。持久化。
@@ -1253,9 +1258,14 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 // getStringSet 返回的实例不可直接持有（SharedPreferences 约定），拷贝一份。
                 filterExtensions = prefs.getStringSet("filter_exts", null)?.toSet()?.takeIf { it.isNotEmpty() },
                 filterProtectedOnly = prefs.getBoolean("filter_protected", false),
-                filterRatingEnabled = prefs.getBoolean("filter_rating_enabled", false),
-                filterRating = prefs.getInt("filter_rating", 0).takeIf { it in 1..5 },
+                // A selected rating is session-only. Requiring a fresh choice after reopening
+                // prevents stale camera ratings from silently filtering the next session.
+                filterRatingEnabled = false,
+                filterRating = null,
                 filterRatingDays = prefs.getInt("filter_rating_days", 3).let { if (it == 0 || it in setOf(1, 3, 5)) it else 3 },
+                photoLoadingRange = prefs.getInt("photo_loading_range_days", 0).let { stored ->
+                    PhotoLoadingRange.entries.firstOrNull { it.days == stored } ?: PhotoLoadingRange.ALL
+                },
                 filterBurstOnly = prefs.getBoolean("filter_burst", false),
                 filterUntransferredOnly = prefs.getBoolean("filter_untransferred", false),
                 filterDateRange = PhotoDateRange.restore(
@@ -1354,6 +1364,23 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         val c = normalizeThumbnailColumns(columns)
         prefs.edit().putInt("thumbnail_columns", c).apply()
         _state.update { it.copy(thumbnailColumns = c) }
+    }
+
+    /**
+     * Changing the photo loading boundary invalidates the current rating scan.  Rating selection
+     * is deliberately session-only, so the simplest and safest behavior is to close it and make
+     * the user explicitly enable it again after changing the boundary.
+     */
+    fun setPhotoLoadingRange(range: PhotoLoadingRange) {
+        if (_state.value.photoLoadingRange == range) return
+        prefs.edit().putInt("photo_loading_range_days", range.days).apply()
+        _state.update {
+            it.copy(
+                photoLoadingRange = range,
+                filterRatingEnabled = false,
+                filterRating = null,
+            )
+        }
     }
 
     fun setCollapseBurstPhotos(enabled: Boolean) {
@@ -1732,14 +1759,16 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         _state.update { it.copy(appLanguage = tag) }
     }
 
-    /** 应用筛选（类型/保护/连拍/未传输/卡槽/日期）；卡槽仅当前进程生效，其余持久化。 */
+    /** 应用筛选（类型/保护/评级/连拍/未传输/卡槽/日期）；评级选择仅当前会话生效。 */
     fun setFilters(requested: PhotoFilterCriteria) {
         val criteria = requested.copy(extensions = requested.extensions?.takeIf { it.isNotEmpty() })
         prefs.edit().apply {
             if (criteria.extensions == null) remove("filter_exts")
             else putStringSet("filter_exts", criteria.extensions)
-            if (criteria.rating in 1..5) putInt("filter_rating", criteria.rating!!) else remove("filter_rating")
-            if (criteria.ratingEnabled) putBoolean("filter_rating_enabled", true) else remove("filter_rating_enabled")
+            // Rating selection and its loader switch are deliberately not persisted. Clear keys
+            // written by older builds so an upgrade cannot restore a stale rating filter.
+            remove("filter_rating")
+            remove("filter_rating_enabled")
             putInt("filter_rating_days", criteria.ratingDays.takeIf { it == 0 || it in setOf(1, 3, 5) } ?: 3)
             if (criteria.protectedOnly) putBoolean("filter_protected", true) else remove("filter_protected")
             if (criteria.burstOnly) putBoolean("filter_burst", true) else remove("filter_burst")

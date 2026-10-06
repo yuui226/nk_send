@@ -1119,6 +1119,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     //（TransferViewModel 与本 VM 相互独立，经 MainScreen 桥接）。
     private val transfersBusyFlow = MutableStateFlow(false)
     private val thumbnailPriorityRangeFlow = MutableStateFlow<PhotoDateRange?>(null)
+    private val thumbnailLoadingDaysFlow = MutableStateFlow(0)
 
     fun setTransfersBusy(busy: Boolean) {
         transfersBusyFlow.value = busy
@@ -1126,6 +1127,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     fun setThumbnailPriorityRange(range: PhotoDateRange?) {
         thumbnailPriorityRangeFlow.value = range
+    }
+
+    /** Limits background thumbnail work to the newest actual shooting days. */
+    fun setThumbnailLoadingDays(days: Int) {
+        val normalized = days.takeIf { it == 1 || it == 3 || it == 5 } ?: 0
+        thumbnailLoadingDaysFlow.value = normalized
+        thumbnailFillQueue.updateLoadingRange(newestCaptureDaysRange(state.value.files, normalized))
+        thumbnailFillWake.trySend(Unit)
     }
 
     // 遥控页活跃期间同样完全停止填充：监看取帧是连续流量，填充的 GetThumb 会与
@@ -1280,7 +1289,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 if (blocked || !connected || !scanComplete) return@collectLatest
                 val expectedCacheGeneration = thumbnailCacheSessionGeneration
                 val expectedQueueRevision = thumbnailFillQueue.revision
-                thumbnailFillQueue.seed(state.value.files, thumbnailPriorityRangeFlow.value)
+                thumbnailFillQueue.seed(
+                    state.value.files,
+                    thumbnailPriorityRangeFlow.value,
+                    newestCaptureDaysRange(state.value.files, thumbnailLoadingDaysFlow.value),
+                )
                 thumbnailFillQueue.retryFailed()
                 log { "THUMB_FILL resume pending=${thumbnailFillQueue.pendingCount}" }
                 var loaded = 0
@@ -3596,7 +3609,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
         _recentThumbnailReadyDays.value = readyDays
-        if (readyDays >= 3) _recentThumbnailReady.value = true
+        val requiredDays = thumbnailLoadingDaysFlow.value.takeIf { it > 0 } ?: 3
+        if (readyDays >= requiredDays) _recentThumbnailReady.value = true
     }
 
     fun getCamera(): NikonCamera? = camera
@@ -3761,7 +3775,18 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         expectedGeneration: Long,
     ): Boolean = withContext(Dispatchers.Main.immediate) {
         var allCached = batch.isNotEmpty()
+        val allowedRange = newestCaptureDaysRange(
+            state.value.files.asSequence().plus(batch.asSequence()).asIterable(),
+            thumbnailLoadingDaysFlow.value,
+        )
         for (file in batch) {
+            // The scan still publishes the complete ObjectInfo catalog, but thumbnail requests
+            // outside the selected newest shooting-day boundary are deferred entirely.
+            if (allowedRange != null && file.captureDate != null &&
+                !allowedRange.containsCaptureDate(file.captureDate)
+            ) {
+                continue
+            }
             if (camera !== expectedCamera || fileLoadGeneration != expectedGeneration ||
                 !state.value.isConnectedToCamera
             ) {

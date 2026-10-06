@@ -9,6 +9,7 @@ import com.ztransfer.frame.supportsBackdropControls
 
 import com.ztransfer.viewmodel.AutoTransferMode
 import com.ztransfer.viewmodel.TransferStorageMode
+import com.ztransfer.viewmodel.PhotoLoadingRange
 
 import android.Manifest
 import android.bluetooth.BluetoothAdapter
@@ -1094,22 +1095,34 @@ fun SettingsOverlay(
 
                 CardDivider()
 
-                val selectedPhotoInteraction = photoInteractionChoices.first {
-                    it.first == state.tapToPreview
-                }
-                ReleaseCommitWheel(
-                    options = photoInteractionChoices,
-                    selected = selectedPhotoInteraction,
-                    optionLabel = { (_, label) -> label },
-                    onValueCommitted = { (tapToPreview, _) ->
-                        viewModel.setTapToPreview(tapToPreview)
-                    },
-                    onDetent = haptics::tick,
-                    label = stringResource(R.string.photo_interaction),
-                    optionRowHeight = 32.dp,
-                    optionMaxLines = 2,
+                val selectedPhotoInteraction = photoInteractionChoices.first { it.first == state.tapToPreview }
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth(),
-                )
+                ) {
+                    ReleaseCommitWheel(
+                        options = photoInteractionChoices,
+                        selected = selectedPhotoInteraction,
+                        optionLabel = { (_, label) -> label },
+                        onValueCommitted = { (tapToPreview, _) -> viewModel.setTapToPreview(tapToPreview) },
+                        onDetent = haptics::tick,
+                        label = stringResource(R.string.photo_interaction),
+                        optionRowHeight = 32.dp,
+                        optionMaxLines = 2,
+                        modifier = Modifier.weight(1.35f),
+                    )
+                    ReleaseCommitWheel(
+                        options = PhotoLoadingRange.entries,
+                        selected = state.photoLoadingRange,
+                        optionLabel = { range -> if (range == PhotoLoadingRange.ALL) "全部" else "${range.days}日" },
+                        onValueCommitted = viewModel::setPhotoLoadingRange,
+                        onDetent = haptics::tick,
+                        label = "照片加载范围",
+                        optionRowHeight = 32.dp,
+                        modifier = Modifier.weight(0.65f),
+                    )
+                }
             }
 
             Spacer(Modifier.height(8.dp))

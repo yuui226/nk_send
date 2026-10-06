@@ -244,6 +244,7 @@ internal data class FileListTransferUiState(
     val filterRatingEnabled: Boolean = false,
     val filterRating: Int? = null,
     val filterRatingDays: Int = 3,
+    val photoLoadingDays: Int = 0,
     val filterBurstOnly: Boolean,
     val filterUntransferredOnly: Boolean,
     val filterStorageSlot: Int?,
@@ -270,6 +271,7 @@ internal fun TransferState.toFileListTransferUiState(): FileListTransferUiState 
         filterRatingEnabled = filterRatingEnabled,
         filterRating = filterRating,
         filterRatingDays = filterRatingDays,
+        photoLoadingDays = photoLoadingRange.days,
         filterBurstOnly = filterBurstOnly,
         filterUntransferredOnly = filterUntransferredOnly,
         filterStorageSlot = filterStorageSlot,
@@ -838,6 +840,7 @@ fun FileListScreen(
     val filterRating = transferState.filterRating
     val filterRatingEnabled = transferState.filterRatingEnabled
     val filterRatingDays = transferState.filterRatingDays
+    val photoLoadingDays = transferState.photoLoadingDays
     val ratingScan = rememberPhotoRatings(
         cameraViewModel.getCamera().takeIf { state.isConnectedToCamera },
         filterRatingEnabled, presentedCameraFiles, paused = transferState.isTransferring || previewIndex != null,
@@ -845,7 +848,8 @@ fun FileListScreen(
         staConnection = state.isStaConnection,
         listLoading = state.isLoadingFiles,
         recentThumbnailReadyDays = recentThumbnailReadyDays,
-        ratingDays = filterRatingDays)
+        ratingDays = filterRatingDays,
+        photoLoadingDays = photoLoadingDays)
     val filterProtected = transferState.filterProtectedOnly
     val filterBurst = transferState.filterBurstOnly
     val filterUntransferred = transferState.filterUntransferredOnly
