@@ -503,6 +503,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     private var camera: NikonCamera? = null
     private var keepaliveJob: Job? = null
+    // STA 的短暂网络抖动不应立即拆掉已建立的会话。只有连续保活失败后，才进入
+    // 统一的断线重连路径；若确实重连，则尽量沿用当前列表，避免用户看到整页重载。
+    private var staReconnectPreserveExisting = false
     private var watcherJob: Job? = null
     private var eventPollJob: Job? = null
     private data class PendingNewCameraObject(
@@ -1739,6 +1742,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     fun selectApMode() {
         val current = _state.value
         if (current.isConnectedToCamera || current.connectionType == CameraConnectionType.USB) return
+        staReconnectPreserveExisting = false
         com.ztransfer.frame.PhotoFrameLocationResolver.apBlocked.value = true
         persistWirelessMode(WirelessMode.AP)
         if (current.wirelessMode == WirelessMode.AP) {
@@ -1767,6 +1771,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     fun selectStaMode() {
         val current = _state.value
         if (current.isConnectedToCamera || current.connectionType == CameraConnectionType.USB) return
+        staReconnectPreserveExisting = false
         persistWirelessMode(WirelessMode.STA)
         if (current.wirelessMode == WirelessMode.STA) return
 
@@ -2328,6 +2333,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         ) {
             "STA camera must validate album access and pairing before activation"
         }
+        val preserveExisting = staReconnectPreserveExisting
+        staReconnectPreserveExisting = false
         staConnectingCamera = null
         staReconnectAttempt = 0
         camera = candidateCamera
@@ -2351,11 +2358,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 // frame and send the user straight to the false "no photos" screen.
                 isLoadingFiles = true,
                 hasCompletedFileScan = false,
-                files = emptyList(),
-                storageIds = emptyList(),
-                effectPreviewBitmap = null,
-                effectPreviewFileKey = null,
-                effectPreviewExif = null,
+                files = if (preserveExisting) it.files else emptyList(),
+                storageIds = if (preserveExisting) it.storageIds else emptyList(),
+                effectPreviewBitmap = if (preserveExisting) it.effectPreviewBitmap else null,
+                effectPreviewFileKey = if (preserveExisting) it.effectPreviewFileKey else null,
+                effectPreviewExif = if (preserveExisting) it.effectPreviewExif else null,
             )
         }
         CameraSessionService.start(getApplication())
@@ -2369,7 +2376,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             log { "STA thumbnail cache unavailable: ${error.javaClass.simpleName}" }
         }
         if (camera !== candidateCamera || !_state.value.isConnectedToCamera) return
-        loadFiles()
+        loadFiles(
+            preserveExisting = preserveExisting,
+            detectNewHandles = preserveExisting,
+        )
         startEventPolling()
     }
 
@@ -2612,15 +2622,29 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private fun startKeepalive() {
         keepaliveJob?.cancel()
         keepaliveJob = viewModelScope.launch {
+            var consecutiveFailures = 0
             while (isActive) {
                 delay(KEEPALIVE_INTERVAL_MS)
                 val cam = camera ?: break
-                if (!cam.keepalive()) {
+                if (cam.keepalive()) {
+                    consecutiveFailures = 0
+                    continue
+                }
+                consecutiveFailures++
+                log {
+                    "KEEPALIVE failed count=$consecutiveFailures/$KEEPALIVE_FAILURE_LIMIT " +
+                        "sta=${_state.value.wirelessMode == WirelessMode.STA}"
+                }
+                if (consecutiveFailures >= KEEPALIVE_FAILURE_LIMIT) {
                     // Keep the current camera reference intact until the centralized handler claims
                     // it. Clearing it here first would trip that handler's stale-session guard.
                     onCameraTransportLost(cam)
                     break
                 }
+                // A single failed probe is commonly caused by the phone briefly dozing or by a
+                // route handoff while the app is backgrounded. Give the existing socket one more
+                // chance before tearing down the session and starting discovery again.
+                delay(KEEPALIVE_RETRY_DELAY_MS)
             }
         }
     }
@@ -3703,6 +3727,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      */
     fun onCameraTransportLost(failedCamera: NikonCamera) {
         if (camera !== failedCamera) return
+        if (failedCamera.connectionType == CameraConnectionType.WIFI &&
+            _state.value.wirelessMode == WirelessMode.STA &&
+            (_state.value.files.isNotEmpty() || _state.value.hasCompletedFileScan)
+        ) {
+            // The next STA session is a recovery of the same connected camera. Keep the visible
+            // catalog and let the new session re-enumerate handles with preserveExisting=true.
+            staReconnectPreserveExisting = true
+        }
         fileLoadJob?.cancel()
         camera = null
         keepaliveJob?.cancel()
@@ -4640,6 +4672,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         const val USB_PERMISSION_POLL_MS = 100L
         const val USB_CONNECT_MAX_ATTEMPTS = 3
         const val KEEPALIVE_INTERVAL_MS = 10_000L
+        private const val KEEPALIVE_FAILURE_LIMIT = 2
+        private const val KEEPALIVE_RETRY_DELAY_MS = 1_000L
         // STA 正常走事件通道；2 秒轮询只承担丢包、旧机型和 USB/AP 的原有兜底职责。
         private const val EVENT_POLL_INTERVAL_MS = 2_000L
         private const val HANDLE_CATALOG_SYNC_INTERVAL_MS = 10_000L
