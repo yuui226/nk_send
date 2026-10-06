@@ -1697,6 +1697,7 @@ object PhotoFrameExporter {
                     backdropSource,
                     layout,
                     preset,
+                    metadata,
                     watermark,
                     backdropSettings,
                 )
@@ -2366,8 +2367,7 @@ object PhotoFrameExporter {
             PhotoFramePreset.FILM_NEGATIVE -> {
                 firstWidth = 900f
                 firstOffset = 50f
-                first = identity(firstWidth, center, 25f) +
-                    descriptions(
+                first = descriptions(
                         listOfNotNull(
                             metadata.lensModel,
                             frameDetailLine(metadata).takeIf(String::isNotBlank),
@@ -3497,6 +3497,7 @@ object PhotoFrameExporter {
                     canvas = canvas,
                     layout = layout,
                     preset = preset,
+                    metadata = metadata,
                     watermark = watermark,
                 )
                 recordGenerationStage(
@@ -3878,6 +3879,7 @@ object PhotoFrameExporter {
         backdropSource: Bitmap,
         layout: PhotoFrameLayout,
         preset: PhotoFramePreset,
+        metadata: PhotoFrameMetadata,
         watermark: PhotoFrameWatermark,
         backdropSettings: PhotoFrameMetadataSettings,
     ) {
@@ -3906,7 +3908,7 @@ object PhotoFrameExporter {
         } else {
             canvas.drawBitmap(source, null, photo, photoPaint)
         }
-        drawEditorialFrameDecoration(context, canvas, layout, preset, watermark)
+        drawEditorialFrameDecoration(context, canvas, layout, preset, metadata, watermark)
     }
 
     /** Reference-inspired editorial frames share exact photo geometry in preview and export. */
@@ -3968,6 +3970,7 @@ object PhotoFrameExporter {
         canvas: Canvas,
         layout: PhotoFrameLayout,
         preset: PhotoFramePreset,
+        metadata: PhotoFrameMetadata,
         watermark: PhotoFrameWatermark,
     ) {
         require(preset.isEditorialFrame())
@@ -3975,8 +3978,8 @@ object PhotoFrameExporter {
         drawPhotoWatermark(context, canvas, photo, preset, watermark.forEditorialPhoto(preset), min(layout.designWidth, layout.designHeight))
         when (preset) {
             PhotoFramePreset.FILM_GALLERY -> drawFilmStripDecoration(canvas, layout)
-            PhotoFramePreset.FILM_EDGE -> drawFilmEdgeDecoration(canvas, layout)
-            PhotoFramePreset.FILM_NEGATIVE -> drawFilmNegativeDecoration(canvas, layout)
+            PhotoFramePreset.FILM_EDGE -> drawFilmEdgeDecoration(canvas, layout, metadata)
+            PhotoFramePreset.FILM_NEGATIVE -> drawFilmNegativeDecoration(canvas, layout, metadata)
             PhotoFramePreset.COLOR_ARCHIVE -> drawColorArchiveDecoration(canvas, layout)
             PhotoFramePreset.CLASSIC_SIGNATURE -> canvas.drawRect(photo, Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 style = Paint.Style.STROKE; strokeWidth = maxOf(1f, layout.designWidth * 0.0008f)
@@ -4049,6 +4052,7 @@ object PhotoFrameExporter {
     private fun drawFilmEdgeDecoration(
         canvas: Canvas,
         layout: PhotoFrameLayout,
+        metadata: PhotoFrameMetadata,
     ) {
         val photo = layout.photoRect()
         val sidePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
@@ -4068,7 +4072,12 @@ object PhotoFrameExporter {
         val rightY = photo.top + photo.height() * 0.22f
         canvas.save()
         canvas.rotate(90f, rightX, rightY)
-        canvas.drawText("▶  20", rightX, rightY + sideBaselineOffset, sidePaint)
+        canvas.drawText(
+            "▶  %03d".format(Locale.ROOT, filmFrameNumber(metadata)),
+            rightX,
+            rightY + sideBaselineOffset,
+            sidePaint,
+        )
         canvas.restore()
 
     }
@@ -4077,6 +4086,7 @@ object PhotoFrameExporter {
     private fun drawFilmNegativeDecoration(
         canvas: Canvas,
         layout: PhotoFrameLayout,
+        metadata: PhotoFrameMetadata,
     ) {
         val photo = layout.photoRect()
         val unit = photo.width()
@@ -4089,17 +4099,32 @@ object PhotoFrameExporter {
         canvas.drawLine(0f, photo.top - unit * 0.018f, layout.canvasWidth.toFloat(), photo.top - unit * 0.018f, linePaint)
         canvas.drawLine(0f, photo.bottom + unit * 0.018f, layout.canvasWidth.toFloat(), photo.bottom + unit * 0.018f, linePaint)
 
+        val brand = normalizeCameraMake(metadata.make)
+        val model = normalizeCameraModel(metadata.make, metadata.model)
+        val identity = listOf(brand, model)
+            .filter(String::isNotBlank)
+            .joinToString(" · ")
         val labelPaint = fittedEditorialPaint(
-            text = "KODAK 400TX   36",
+            text = identity,
             preferredSize = unit * 0.021f,
-            maxWidth = unit * 0.34f,
+            maxWidth = unit * 0.46f,
             color = ink,
             typeface = Typeface.create("monospace", Typeface.BOLD),
         )
-        labelPaint.textAlign = Paint.Align.LEFT
-        canvas.drawText("KODAK 400TX   36", unit * 0.028f, photo.top * 0.58f, labelPaint)
-        labelPaint.textAlign = Paint.Align.RIGHT
-        canvas.drawText("FRAME  01", layout.canvasWidth - unit * 0.028f, photo.top * 0.58f, labelPaint)
+        if (identity.isNotBlank()) {
+            labelPaint.textAlign = Paint.Align.LEFT
+            canvas.drawText(identity, unit * 0.028f, photo.top * 0.58f, labelPaint)
+        }
+        val frameNumber = filmFrameNumber(metadata)
+        val frameLabel = "FRAME %03d".format(Locale.ROOT, frameNumber)
+        val framePaint = fittedEditorialPaint(
+            text = frameLabel,
+            preferredSize = unit * 0.021f,
+            maxWidth = unit * 0.26f,
+            color = ink,
+            typeface = Typeface.create("monospace", Typeface.BOLD),
+        ).apply { textAlign = Paint.Align.RIGHT }
+        canvas.drawText(frameLabel, layout.canvasWidth - unit * 0.028f, photo.top * 0.58f, framePaint)
 
         val markPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(224, 145, 91) }
         val markWidth = unit * 0.018f
@@ -4111,23 +4136,20 @@ object PhotoFrameExporter {
         val start = (layout.canvasWidth - occupied) / 2f
         repeat(count) { index ->
             val left = start + index * (markWidth + markGap)
-            canvas.drawRoundRect(
+        canvas.drawRoundRect(
                 RectF(left, markTop, left + markWidth, markTop + markHeight),
                 markWidth * 0.28f,
                 markWidth * 0.28f,
                 markPaint,
             )
         }
-        val footerPaint = fittedEditorialPaint(
-            text = "ZTRANSFER  /  35MM",
-            preferredSize = unit * 0.018f,
-            maxWidth = unit * 0.42f,
-            color = Color.rgb(206, 145, 103),
-            typeface = Typeface.create("monospace", Typeface.NORMAL),
-        )
-        footerPaint.textAlign = Paint.Align.CENTER
-        canvas.drawText("ZTRANSFER  /  35MM", layout.canvasWidth / 2f, layout.canvasHeight - unit * 0.030f, footerPaint)
     }
+
+    /** Stable per-photo decorative number shared by all film-style borders. */
+    private fun filmFrameNumber(metadata: PhotoFrameMetadata): Int =
+        (((listOfNotNull(metadata.dateTime, metadata.make, metadata.model,
+            metadata.lensModel, metadata.focalLength, metadata.iso, metadata.shutter)
+            .joinToString("\u0000").hashCode() and Int.MAX_VALUE) % 999) + 1)
 
     private fun fittedEditorialPaint(
         text: String,
@@ -5348,9 +5370,9 @@ private fun PhotoFrameWatermark.forEditorialPhoto(
                 content == PhotoFrameWatermarkContent.IMAGE
         PhotoFramePreset.COLOR_ARCHIVE -> true
         PhotoFramePreset.GALLERY_MAT,
-        PhotoFramePreset.FILM_GALLERY -> content == PhotoFrameWatermarkContent.IMAGE
+        PhotoFramePreset.FILM_GALLERY,
+        PhotoFramePreset.FILM_NEGATIVE -> content == PhotoFrameWatermarkContent.IMAGE
         PhotoFramePreset.FILM_EDGE,
-        PhotoFramePreset.FILM_NEGATIVE,
         PhotoFramePreset.PARAMETER_POSTER -> true
         else -> false
     }
@@ -5366,9 +5388,9 @@ private fun PhotoFrameWatermark.bandWatermarkFor(
     val supported = when (preset) {
         PhotoFramePreset.CLASSIC_SIGNATURE -> position != PhotoFrameWatermarkPosition.AUTO
         PhotoFramePreset.GALLERY_MAT,
-        PhotoFramePreset.FILM_GALLERY -> true
-        PhotoFramePreset.FILM_EDGE,
-        PhotoFramePreset.FILM_NEGATIVE -> false
+        PhotoFramePreset.FILM_GALLERY,
+        PhotoFramePreset.FILM_NEGATIVE -> true
+        PhotoFramePreset.FILM_EDGE -> false
         else -> false
     }
     if (!supported) return null
@@ -5929,7 +5951,7 @@ private fun resolvedWatermarkPosition(
             PhotoFramePreset.CLASSIC_SIGNATURE,
             PhotoFramePreset.COLOR_ARCHIVE,
             PhotoFramePreset.FILM_EDGE,
-            PhotoFramePreset.FILM_NEGATIVE -> PhotoFrameWatermarkPosition.PHOTO_BOTTOM_RIGHT
+            PhotoFramePreset.FILM_NEGATIVE -> PhotoFrameWatermarkPosition.CENTER
             PhotoFramePreset.GALLERY_MAT,
             PhotoFramePreset.FILM_GALLERY -> PhotoFrameWatermarkPosition.CENTER
             else -> PhotoFrameWatermarkPosition.CENTER

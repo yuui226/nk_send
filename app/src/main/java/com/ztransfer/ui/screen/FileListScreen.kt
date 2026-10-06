@@ -4665,7 +4665,9 @@ private fun FilterOverlay(
                         // Keep both states in one fixed slot. Crossfade overlays the old and
                         // new controls instead of letting Row remeasure and push neighbors.
                         Box(
-                            modifier = Modifier.weight(1f).height(34.dp),
+                            // Keep the five stars at a fixed compact width. A weighted slot can
+                            // become narrower on small screens and clip the last star.
+                            modifier = Modifier.width(154.dp).height(34.dp),
                             contentAlignment = Alignment.CenterStart,
                         ) {
                             Crossfade(
@@ -4712,7 +4714,8 @@ private fun FilterOverlay(
                                 } else {
                                     val feedback = com.ztransfer.ui.util.rememberHaptics(hapticsEnabled)
                                     Row(
-                                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                                        modifier = Modifier.width(154.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(1.dp),
                                         verticalAlignment = Alignment.CenterVertically,
                                     ) {
                                         for (star in 1..5) {
@@ -4720,7 +4723,7 @@ private fun FilterOverlay(
                                                 favorite = star <= (working.rating ?: 0),
                                                 enabled = true,
                                                 compact = true,
-                                                compactSize = 34.dp,
+                                                compactSize = 30.dp,
                                                 description = stringResource(R.string.filter_rating_stars, star),
                                                 onClick = {
                                                     feedback.tick()
