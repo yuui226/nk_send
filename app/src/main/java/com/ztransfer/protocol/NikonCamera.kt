@@ -1759,7 +1759,7 @@ class NikonCamera(private val context: Context) {
             parsedBytes += tail
             rating = parse(parsedBytes)
         }
-        RatingDiagnostics.note(
+        RatingDiagnostics.detail(
                 "read file=${file.fileName} bytes=${parsedBytes.size} chunks=$readChunks " +
                 "gate=${gateWaitMs}ms command=${readCommandMs}ms " +
                 "parse=${parseMs}ms " +
@@ -1805,7 +1805,7 @@ class NikonCamera(private val context: Context) {
             }
         }
         if (generation != photoRatingGeneration.value) return@withContext null
-        RatingDiagnostics.note(
+        RatingDiagnostics.detail(
             "read video=${file.fileName} elapsed=${SystemClock.elapsedRealtime() - startedAt}ms " +
                 "result=${rating ?: "unknown"}",
         )

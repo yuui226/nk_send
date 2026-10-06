@@ -47,6 +47,9 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
     val latestListLoading by rememberUpdatedState(listLoading)
     val latestRecentThumbnailReadyDays by rememberUpdatedState(recentThumbnailReadyDays)
     LaunchedEffect(camera, enabled, generation, useObjectRating, staConnection, ratingDays, photoLoadingDays) {
+        // Keep diagnostics opt-in with the filter itself. When disabled, note() returns before
+        // locking or retaining any protocol text.
+        RatingDiagnostics.setEnabled(enabled)
         val enteringEnabled = enabled && previousEnabled != true
         previousEnabled = enabled
         if (!enabled) {

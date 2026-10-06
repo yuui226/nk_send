@@ -2253,10 +2253,14 @@ fun FileListScreen(
                         it.extension.equals(".NEF", true) || it.extension.equals(".NRW", true)
                     }
                     if (raw == null) null else {
-                        RatingDiagnostics.clear()
-                        runCatching { cameraViewModel.getCamera()?.probeRawRating(raw) }
-                            .onFailure { RatingDiagnostics.note("probe error=${it.javaClass.simpleName}") }
-                        RatingDiagnostics.snapshot()
+                        val previousCapture = RatingDiagnostics.beginProbe()
+                        try {
+                            runCatching { cameraViewModel.getCamera()?.probeRawRating(raw) }
+                                .onFailure { RatingDiagnostics.note("probe error=${it.javaClass.simpleName}") }
+                            RatingDiagnostics.snapshot()
+                        } finally {
+                            RatingDiagnostics.restore(previousCapture)
+                        }
                     }
                 }
             } else null,
