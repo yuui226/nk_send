@@ -470,9 +470,11 @@ private val TOP_BAR_COMPACT_BUTTON_MIN_WIDTH = 40.dp
 // 主筛选与日期编辑共用固定宽度，切页时不横向重排面板。
 // 筛选内容包含五列类型按钮和三列日期波轮：手机上尽量利用横向空间，宽屏则封顶，
 // 避免固定窄面板挤压标签，也避免平板上横向铺得过散。
-// Compact width leaves the rating stars a small trailing breathing room while keeping
-// three-column status chips at the same width as the rating control.
-private val FILTER_PANEL_MAX_WIDTH = 288.dp
+// Keep the panel just wide enough for the fixed rating row: 14dp content padding on both sides,
+// the 81dp switch, its 8dp gap, and five 30dp stars with 1dp gaps. This makes the last star's
+// trailing margin identical to the right margin of the full-width “未传” chip row, without
+// changing the panel width when the rating controls crossfade.
+private val FILTER_PANEL_MAX_WIDTH = 14.dp * 2 + 81.dp + 8.dp + (30.dp * 5) + (1.dp * 4)
 private val FILTER_PANEL_SCREEN_MARGIN = 12.dp
 private val DATE_FILTER_WHEEL_HEIGHT = 50.dp
 
@@ -4711,6 +4713,7 @@ private fun FilterOverlay(
                             ) { enabled ->
                                 if (!enabled) {
                                     Row(
+                                        modifier = Modifier.height(34.dp),
                                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                                         verticalAlignment = Alignment.CenterVertically,
                                     ) {
@@ -4748,7 +4751,9 @@ private fun FilterOverlay(
                                 } else {
                                     val feedback = com.ztransfer.ui.util.rememberHaptics(hapticsEnabled)
                                     Row(
-                                        modifier = Modifier.width(154.dp),
+                                        modifier = Modifier
+                                            .width(154.dp)
+                                            .height(34.dp),
                                         horizontalArrangement = Arrangement.spacedBy(1.dp),
                                         verticalAlignment = Alignment.CenterVertically,
                                     ) {
