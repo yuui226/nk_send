@@ -1120,6 +1120,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private val transfersBusyFlow = MutableStateFlow(false)
     private val thumbnailPriorityRangeFlow = MutableStateFlow<PhotoDateRange?>(null)
     private val thumbnailLoadingDaysFlow = MutableStateFlow(0)
+    /** Set when the initial catalog stopped at the selected newest-day boundary. */
+    private var photoRangeScanStopped = false
 
     fun setTransfersBusy(busy: Boolean) {
         transfersBusyFlow.value = busy
@@ -1131,10 +1133,23 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     /** Limits background thumbnail work to the newest actual shooting days. */
     fun setThumbnailLoadingDays(days: Int) {
+        val previous = thumbnailLoadingDaysFlow.value
         val normalized = days.takeIf { it == 1 || it == 3 || it == 5 } ?: 0
         thumbnailLoadingDaysFlow.value = normalized
         thumbnailFillQueue.updateLoadingRange(newestCaptureDaysRange(state.value.files, normalized))
         thumbnailFillWake.trySend(Unit)
+        // A previous bounded scan keeps its unprocessed handles in the session snapshot. When
+        // the user widens the range, resume that snapshot instead of enumerating the camera again.
+        val widened = previous != 0 && (normalized == 0 || normalized > previous)
+        if (normalized != previous && widened && photoRangeScanStopped &&
+            state.value.isConnectedToCamera && state.value.hasCompletedFileScan &&
+            fileScanHandleSnapshot != null
+        ) {
+            loadFiles(
+                preserveExisting = true,
+                resumeSnapshot = fileScanHandleSnapshot,
+            )
+        }
     }
 
     // 遥控页活跃期间同样完全停止填充：监看取帧是连续流量，填充的 GetThumb 会与
@@ -2933,9 +2948,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 )
             }
         } else {
-            cam.streamFileInfo(listOf(handle), batchSize = 1) { batch, _, _ ->
-                result = batch.firstOrNull()
-            }
+            cam.streamFileInfo(
+                handles = listOf(handle),
+                batchSize = 1,
+                onBatch = { batch, _, _ -> result = batch.firstOrNull() },
+            )
         }
         result
     } catch (cancelled: CancellationException) {
@@ -3008,6 +3025,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         _recentThumbnailReadyDays.value = 0
         if (!preserveExisting && resumeSnapshot == null) cam.invalidatePhotoRatings()
         val diskCacheForScan = activeThumbnailDiskCache
+        photoRangeScanStopped = false
         if (cam.staDirectObjectReadValidated && !preserveExisting) {
             staScanThumbnailDiskHits = 0
             staScanThumbnailDiskMisses = 0
@@ -3369,6 +3387,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     it.newestFirstHandles.isNotEmpty()
                 } > 1
                 val scanBatchPolicy = CachedThumbnailBatchPolicy()
+                var stopAtPhotoRange = false
                 val nextScanBatchSize: () -> Int = {
                     // Foreground work may start after the preceding batch has completed.
                     if (transfersBusyFlow.value || remoteActiveFlow.value || fhdActiveFlow.value ||
@@ -3391,9 +3410,27 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         rawBatch
                     }
                     val publishedSizeBeforeBatch = publishedFiles.size
-                    val additions = ArrayList<NikonCamera.FileInfo>(batch.size)
+                    val configuredDays = thumbnailLoadingDaysFlow.value
+                    val observedDates = (publishedFiles.asSequence() + batch.asSequence())
+                        .mapNotNull { it.captureDate?.take(8) }
+                        .distinct()
+                        .toList()
+                    val rangeBoundaryReached = configuredDays > 0 &&
+                        observedDates.size > configuredDays
+                    val currentRange = newestCaptureDaysRange(
+                        (publishedFiles.asSequence() + batch.asSequence()).asIterable(),
+                        configuredDays,
+                    )
+                    val acceptedBatch = if (rangeBoundaryReached && currentRange != null) {
+                        batch.filter { file ->
+                            file.captureDate == null || currentRange.containsCaptureDate(file.captureDate)
+                        }
+                    } else {
+                        batch
+                    }
+                    val additions = ArrayList<NikonCamera.FileInfo>(acceptedBatch.size)
                     val replacements = HashMap<Int, NikonCamera.FileInfo>()
-                    batch.forEach { file ->
+                    acceptedBatch.forEach { file ->
                         val identity = file.logicalIdentity()
                         val existingIndex = indexByIdentity[identity]
                         if (existingIndex == null) {
@@ -3429,8 +3466,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         } else {
                             // A cancelled batch is not resumable until its rows are actually
                             // published. Keep the snapshot marker in this same accepted section.
-                            activeSnapshot.markProcessed(batch.map { it.handle })
-                            batch.forEach { file -> indexedCameraFiles[file.handle] = file }
+                            activeSnapshot.markProcessed(acceptedBatch.map { it.handle })
+                            acceptedBatch.forEach { file -> indexedCameraFiles[file.handle] = file }
                             _state.update {
                                 it.copy(files = snapshot, isLoadingFiles = loaded < total)
                             }
@@ -3439,7 +3476,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     }
                     if (accepted) {
                         if (FileOrderProbe.enabled && dynamicDualCardSchedule) {
-                            FileOrderProbe.appendScheduledHandles(batch.map { it.handle })
+                            FileOrderProbe.appendScheduledHandles(acceptedBatch.map { it.handle })
                         }
                         if (PhotoGenerationProbe.enabled && cam.staDirectObjectReadValidated) {
                             cam.staDirectMetadataDiagnosticReports.forEach { diagnostic ->
@@ -3455,15 +3492,32 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                                 file.handle in newHandlesToReport && isAutoTransferMedia(file)
                             }
                         }
+                        // The photo loading range is a request boundary, not merely a UI filter.
+                        // Do not enqueue out-of-range additions during the initial catalog scan;
+                        // otherwise the grid hides them but the camera still streams every
+                        // thumbnail in the background.
+                        val thumbnailRange = newestCaptureDaysRange(
+                            snapshot,
+                            thumbnailLoadingDaysFlow.value,
+                        )
+                        val thumbnailBatch = additions.filter { file ->
+                            thumbnailRange == null ||
+                                file.captureDate == null ||
+                                thumbnailRange.containsCaptureDate(file.captureDate)
+                        }
                         val allCached = prefetchPublishedFileBatch(
                             // 双卡备份模式下，原始 batch 可能包含不会单独显示的重复副本；
                             // 只为本批真正加入列表的逻辑照片获取一次缩略图。
-                            batch = additions,
+                            batch = thumbnailBatch,
                             expectedCamera = cam,
                             expectedGeneration = generation,
                         )
+                        // Keep the first out-of-range date as the boundary evidence. Passing only
+                        // the filtered thumbnail batch would hide that evidence and leave rating
+                        // waiting even though the selected photo days are complete.
                         updateRecentThumbnailReady(snapshot, batch, loaded, total)
                         scanBatchPolicy.complete(additions.size, allCached)
+                        stopAtPhotoRange = rangeBoundaryReached
                     } else {
                         scanBatchPolicy.complete(0, false)
                     }
@@ -3485,6 +3539,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         batchSize = FILE_THUMBNAIL_PIPELINE_BATCH_SIZE,
                         nextBatchSize = nextScanBatchSize,
                         onBatch = publishBatch,
+                        stopAfterBatch = { stopAtPhotoRange },
                     )
                 } else if (nonEmptyRemainingOrders.size == 1) {
                     cam.streamFileInfo(
@@ -3493,6 +3548,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         fastFirstBatch = true,
                         nextBatchSize = nextScanBatchSize,
                         onBatch = publishBatch,
+                        stopAfterBatch = { stopAtPhotoRange },
                     )
                 } else {
                     cam.streamMergedFileInfo(
@@ -3503,6 +3559,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         fastFirstBatch = true,
                         nextBatchSize = nextScanBatchSize,
                         onBatch = publishBatch,
+                        stopAfterBatch = { stopAtPhotoRange },
                     )
                 }
 
@@ -3525,6 +3582,25 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 }
 
                 if (fileLoadGeneration != generation || camera !== cam) return@launch
+                if (stopAtPhotoRange) {
+                    // Keep the handle snapshot and its unprocessed tail for a later range
+                    // expansion. The currently selected days are a complete, usable list.
+                    photoRangeScanStopped = true
+                    val boundedDates = _state.value.files.asSequence()
+                        .mapNotNull { it.captureDate?.take(8) }
+                        .distinct()
+                        .count()
+                    _recentThumbnailReadyDays.value = maxOf(
+                        _recentThumbnailReadyDays.value,
+                        boundedDates,
+                    )
+                    _recentThumbnailReady.value = true
+                    fileLoadPending = false
+                    _state.update { it.copy(isLoadingFiles = false, hasCompletedFileScan = true) }
+                    log { "FILE_SCAN bounded at ${thumbnailLoadingDaysFlow.value} shooting days files=${allFiles.size}" }
+                    return@launch
+                }
+                photoRangeScanStopped = false
                 if (fileScanHandleSnapshot === activeSnapshot) fileScanHandleSnapshot = null
                 fileLoadPending = false
                 log { "FILE_SCAN done files=${allFiles.size}" }

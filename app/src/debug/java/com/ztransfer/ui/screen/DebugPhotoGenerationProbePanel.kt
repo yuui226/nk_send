@@ -38,6 +38,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -49,15 +50,22 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ztransfer.diagnostics.PhotoGenerationProbe
+import kotlinx.coroutines.launch
 import com.ztransfer.ui.theme.AppTheme
 
 /** Debug 照片页的生成耗时窗口；Release 有同名空实现。 */
 @Composable
-internal fun DebugPhotoGenerationProbePanel(modifier: Modifier = Modifier) {
+internal fun DebugPhotoGenerationProbePanel(
+    modifier: Modifier = Modifier,
+    onProbeRawRating: (suspend () -> String?)? = null,
+) {
     val colors = AppTheme.colors
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     var open by remember { mutableStateOf(false) }
+    var rawProbeRunning by remember { mutableStateOf(false) }
+    var rawProbeReport by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
 
     Box(modifier = modifier) {
         if (!open) {
@@ -147,6 +155,26 @@ internal fun DebugPhotoGenerationProbePanel(modifier: Modifier = Modifier) {
                                 modifier = Modifier.size(16.dp),
                             )
                         }
+                        if (onProbeRawRating != null) {
+                            GlassButton(
+                                enabled = !rawProbeRunning,
+                                onClick = {
+                                    rawProbeRunning = true
+                                    rawProbeReport = null
+                                    scope.launch {
+                                        rawProbeReport = onProbeRawRating()
+                                        rawProbeRunning = false
+                                    }
+                                },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                            ) {
+                                Text(
+                                    if (rawProbeRunning) "RAW 探测中…" else "探测 RAW 评级",
+                                    color = colors.accentBlue,
+                                    fontSize = 11.sp,
+                                )
+                            }
+                        }
                         GlassButton(
                             onClick = {
                                 PhotoGenerationProbe.clear()
@@ -173,6 +201,20 @@ internal fun DebugPhotoGenerationProbePanel(modifier: Modifier = Modifier) {
                         }
                     }
                     Spacer(Modifier.height(10.dp))
+                    rawProbeReport?.let { report ->
+                        Text(
+                            report,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color.Black.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
+                                .padding(8.dp),
+                            color = colors.onSurfaceVariant,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 10.sp,
+                            lineHeight = 13.sp,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                    }
                     LazyColumn(
                         modifier = Modifier
                             .weight(1f)

@@ -19,4 +19,6 @@ object RatingDiagnostics {
         if (entries.isEmpty()) "评级筛选：暂无诊断记录"
         else "ZTransfer 评级筛选诊断\n" + entries.joinToString("\n")
     }
+
+    fun clear() = synchronized(lock) { entries.clear() }
 }

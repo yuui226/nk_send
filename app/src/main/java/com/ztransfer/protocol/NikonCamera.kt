@@ -1660,6 +1660,23 @@ class NikonCamera(private val context: Context) {
         }
     }
 
+    /** One-shot diagnostic for AP/USB RAW rating support; deliberately probes one RAW only. */
+    internal suspend fun probeRawRating(file: FileInfo) {
+        RatingDiagnostics.note(
+            "raw probe mode=${if (connectionType == CameraConnectionType.USB) "USB" else "WIFI"} " +
+                "file=${file.fileName} handle=0x%08X".format(file.handle),
+        )
+        val objectValue = runCatching { readObjectRating(file) }
+            .onFailure { RatingDiagnostics.note("object error=${it.javaClass.simpleName}") }
+            .getOrNull()
+        RatingDiagnostics.note("object property=0xDC8A result=${objectValue ?: "unsupported-or-unknown"}")
+        val headerValue = runCatching { readPhotoRatingHeader(file) }
+            .onFailure { RatingDiagnostics.note("header error=${it.javaClass.simpleName}") }
+            .getOrNull()
+        RatingDiagnostics.note("header result=${headerValue ?: "unknown"}")
+        RatingDiagnostics.note("raw probe complete")
+    }
+
     private suspend fun readPhotoRatingHeaderInternal(file: FileInfo, gateWaitMs: Long): Int? {
         val probeStartedAt = SystemClock.elapsedRealtime()
         // The tested Z30 JPEGs parse successfully with a 100 KiB prefix.
@@ -2948,7 +2965,8 @@ class NikonCamera(private val context: Context) {
         batchSize: Int = 20,
         fastFirstBatch: Boolean = false,
         nextBatchSize: (() -> Int)? = null,
-        onBatch: suspend (List<FileInfo>, Int, Int) -> Unit
+        onBatch: suspend (List<FileInfo>, Int, Int) -> Unit,
+        stopAfterBatch: () -> Boolean = { false },
     ): Boolean = withContext(Dispatchers.IO) {
         val loadContext = coroutineContext
         val total = handles.size
@@ -2985,6 +3003,7 @@ class NikonCamera(private val context: Context) {
             loaded += files.size
             if (files.isNotEmpty()) {
                 onBatch(files, loaded, total)
+                if (stopAfterBatch()) break
             }
         }
         allObjectInfoSucceeded
@@ -3057,6 +3076,7 @@ class NikonCamera(private val context: Context) {
         batchSize: Int = 12,
         nextBatchSize: (() -> Int)? = null,
         onBatch: suspend (List<FileInfo>, Int, Int) -> Unit,
+        stopAfterBatch: () -> Boolean = { false },
     ): Boolean = withContext(Dispatchers.IO) {
         check(staDirectObjectReadValidated) { "STA direct object reads were not validated" }
         require(batchSize > 0) { "batchSize must be positive" }
@@ -3124,6 +3144,7 @@ class NikonCamera(private val context: Context) {
             } }
             if (output.isNotEmpty()) {
                 onBatch(output, completed, total)
+                if (stopAfterBatch()) break
             } else if (completed == completedBeforeBatch && requestedHandles == 0) {
                 error("Merged STA direct scan made no progress")
             }
@@ -4236,6 +4257,7 @@ class NikonCamera(private val context: Context) {
         fastFirstBatch: Boolean = false,
         nextBatchSize: (() -> Int)? = null,
         onBatch: suspend (List<FileInfo>, Int, Int) -> Unit,
+        stopAfterBatch: () -> Boolean = { false },
     ): Boolean = withContext(Dispatchers.IO) {
         require(batchSize > 0) { "batchSize must be positive" }
         val groups = newestFirstHandlesByStorage.filter { it.isNotEmpty() }
@@ -4308,6 +4330,7 @@ class NikonCamera(private val context: Context) {
             }
             if (output.isNotEmpty()) {
                 onBatch(output, completed, total)
+                if (stopAfterBatch()) break
             } else if (completed == completedBeforeBatch && requestedHandles.isEmpty()) {
                 error("Merged ObjectInfo scan made no progress")
             }

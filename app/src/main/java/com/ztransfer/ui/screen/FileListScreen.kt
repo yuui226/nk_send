@@ -142,6 +142,7 @@ import com.ztransfer.viewmodel.ExportedOriginalIndex
 import com.ztransfer.viewmodel.PhotoExif
 import com.ztransfer.viewmodel.PhotoFilterCriteria
 import com.ztransfer.viewmodel.PhotoDateRange
+import com.ztransfer.viewmodel.newestCaptureDaysRange
 import com.ztransfer.viewmodel.TransferState
 import com.ztransfer.viewmodel.TransferStatus
 import com.ztransfer.viewmodel.TransferTask
@@ -644,6 +645,16 @@ fun FileListScreen(
             }
         }
     }
+    // The catalog remains complete for transfer/rating bookkeeping, while the visible grid and
+    // its rating source snapshot honor the user's newest actual-shooting-day boundary.
+    val photoLoadingRange = remember(presentedCameraFiles, transferState.photoLoadingDays) {
+        newestCaptureDaysRange(presentedCameraFiles, transferState.photoLoadingDays)
+    }
+    val displayedCameraFiles = remember(presentedCameraFiles, photoLoadingRange) {
+        if (photoLoadingRange == null) presentedCameraFiles else presentedCameraFiles.filter { file ->
+            file.captureDate == null || photoLoadingRange.containsCaptureDate(file.captureDate)
+        }
+    }
     val colors = AppTheme.colors
     // 设置以轻量面板呈现（点击左上角 "Z传" 打开），不再跳转独立页面。
     var showSettings by remember { mutableStateOf(false) }
@@ -843,7 +854,7 @@ fun FileListScreen(
     val photoLoadingDays = transferState.photoLoadingDays
     val ratingScan = rememberPhotoRatings(
         cameraViewModel.getCamera().takeIf { state.isConnectedToCamera },
-        filterRatingEnabled, presentedCameraFiles, paused = transferState.isTransferring || previewIndex != null,
+        filterRatingEnabled, displayedCameraFiles, paused = transferState.isTransferring || previewIndex != null,
         useObjectRating = state.connectionType == CameraConnectionType.USB || !state.isStaConnection,
         staConnection = state.isStaConnection,
         listLoading = state.isLoadingFiles,
@@ -889,8 +900,8 @@ fun FileListScreen(
         filterUntransferred || filterStorageSlot != null || filterDateRange != null
 
     // 设备上实际存在的类型（从未过滤的原始列表提取，供下拉选项自动生成）。
-    val availableExts = remember(presentedCameraFiles) {
-        presentedCameraFiles.map { it.extension }.distinct().sorted()
+    val availableExts = remember(displayedCameraFiles) {
+        displayedCameraFiles.map { it.extension }.distinct().sorted()
     }
     // 扫描途中保留当前选择；完整扫描后只有确认存在双卡才允许卡槽筛选。
     // 单卡时筛选没有意义，归回“全部”也能保证入口按钮不会卡在激活状态。
@@ -923,13 +934,13 @@ fun FileListScreen(
             filterRevealWindow = false
         }
     }
-    val latestKnownDate = remember(presentedCameraFiles) {
-        latestCaptureLocalDate(presentedCameraFiles.asSequence().map { it.captureDate })
+    val latestKnownDate = remember(displayedCameraFiles) {
+        latestCaptureLocalDate(displayedCameraFiles.asSequence().map { it.captureDate })
     }
     // 连拍检测基于原始列表，只在文件列表变化时重算。角标、筛选和合集都共享这一份
     // 结果，避免三个功能对“哪些照片属于连拍”产生分歧。
-    val burstGroups = remember(presentedCameraFiles) {
-        computeBurstGroups(presentedCameraFiles)
+    val burstGroups = remember(displayedCameraFiles) {
+        computeBurstGroups(displayedCameraFiles)
     }
     val burstHandles = remember(burstGroups) {
         burstGroups.flatMapTo(HashSet()) { group -> group.files.map { it.handle } }
@@ -1021,12 +1032,12 @@ fun FileListScreen(
     // 分组 / 扁平列表（供长按预览翻页）/ 传输忙碌（缩略图让路）——提到顶层，供内容区与预览层共用。
     val activeRatingValues = if (filterRating != null) ratingScan.values else emptyMap()
     val groups = remember(
-        presentedCameraFiles, filterExts, filterProtected, filterBurst, filterUntransferred,
+        displayedCameraFiles, filterExts, filterProtected, filterBurst, filterUntransferred,
         filterRating, activeRatingValues,
         filterStorageSlot, selectedStorageIds, filterDateRange,
         burstHandles, filteredExportHandles
     ) {
-        val files = presentedCameraFiles.asSequence()
+        val files = displayedCameraFiles.asSequence()
             .filter { filterExts == null || it.extension in filterExts }
             .filter { filterRating == null || activeRatingValues[it.handle] == filterRating }
             .filter { !filterProtected || it.isProtected }
@@ -2234,7 +2245,22 @@ fun FileListScreen(
         )
 
         // Debug 构建显示效果图生成耗时入口；Release 为同名空实现，不产生节点。
-        DebugPhotoGenerationProbePanel(modifier = Modifier.fillMaxSize())
+        DebugPhotoGenerationProbePanel(
+            modifier = Modifier.fillMaxSize(),
+            onProbeRawRating = if (state.connectionType == CameraConnectionType.USB || !state.isStaConnection) {
+                {
+                    val raw = displayedCameraFiles.firstOrNull {
+                        it.extension.equals(".NEF", true) || it.extension.equals(".NRW", true)
+                    }
+                    if (raw == null) null else {
+                        RatingDiagnostics.clear()
+                        runCatching { cameraViewModel.getCamera()?.probeRawRating(raw) }
+                            .onFailure { RatingDiagnostics.note("probe error=${it.javaClass.simpleName}") }
+                        RatingDiagnostics.snapshot()
+                    }
+                }
+            } else null,
+        )
     }
 }
 

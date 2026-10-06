@@ -112,7 +112,7 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
             if (staConnection && !thumbnailRangeReady) {
                 result = PhotoRatingScan(
                     loading = true,
-                    total = ratingSourceCount(current),
+                    total = ratingFileCount(current),
                     waitingForRange = true,
                 )
                 return@collect
@@ -149,7 +149,7 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
             if (staConnection && effectiveDays > 0 && datesForRating(photos).size < effectiveDays && latestListLoading) {
                 result = PhotoRatingScan(
                     loading = true,
-                    total = ratingSourceCount(photos),
+                    total = ratingFileCount(photos),
                     waitingForRange = true,
                 )
                 return@collect
@@ -176,8 +176,11 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
                 result = PhotoRatingScan(
                     values = visible,
                     loading = loading,
-                    completed = ratings.size,
-                    total = uniqueSources.size,
+                    // One camera read can serve a JPEG/RAW pair, but the UI represents both
+                    // visible files. Count every file while retaining source de-duplication for
+                    // the actual reads.
+                    completed = sources.count { (_, source) -> ratings.containsKey(source.handle) },
+                    total = eligiblePhotos.count { it.extension in ratingPhotoExtensions },
                     complete = complete,
                 )
             }
@@ -279,6 +282,5 @@ private fun datesForRating(files: List<NikonCamera.FileInfo>, limit: Int = 0): L
     files.asSequence().mapNotNull { it.captureDate?.take(8) }.distinct()
         .let { if (limit <= 0) it.toList() else it.take(limit).toList() }
 
-private fun ratingSourceCount(files: List<NikonCamera.FileInfo>): Int =
-    photoRatingSources(files.filter { it.extension in ratingPhotoExtensions })
-        .values.distinctBy { it.handle }.size
+private fun ratingFileCount(files: List<NikonCamera.FileInfo>): Int =
+    files.count { it.extension in ratingPhotoExtensions }
