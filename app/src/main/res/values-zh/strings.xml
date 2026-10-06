@@ -202,6 +202,7 @@
     <string name="photo_frame_color_archive">色彩档案</string>
     <string name="photo_frame_film_gallery">胶片画廊</string>
     <string name="photo_frame_film_edge">胶片边框</string>
+    <string name="photo_frame_film_negative">底片胶片</string>
     <string name="photo_frame_metadata_button">边框设置</string>
     <string name="photo_frame_metadata_focal_length">焦距</string>
     <string name="photo_frame_metadata_exposure">曝光</string>

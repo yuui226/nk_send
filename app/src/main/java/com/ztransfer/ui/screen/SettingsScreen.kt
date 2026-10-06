@@ -1140,6 +1140,8 @@ fun SettingsOverlay(
                     stringResource(R.string.photo_frame_film_gallery),
                 PhotoFramePreset.FILM_EDGE to
                     stringResource(R.string.photo_frame_film_edge),
+                PhotoFramePreset.FILM_NEGATIVE to
+                    stringResource(R.string.photo_frame_film_negative),
                 PhotoFramePreset.PARAMETER_POSTER to
                     stringResource(R.string.photo_frame_parameter_poster),
             )
@@ -2011,6 +2013,7 @@ internal fun PhotoFrameWatermarkEditor(
         PhotoFramePreset.COLOR_ARCHIVE to stringResource(R.string.photo_frame_color_archive),
         PhotoFramePreset.FILM_GALLERY to stringResource(R.string.photo_frame_film_gallery),
         PhotoFramePreset.FILM_EDGE to stringResource(R.string.photo_frame_film_edge),
+        PhotoFramePreset.FILM_NEGATIVE to stringResource(R.string.photo_frame_film_negative),
         PhotoFramePreset.PARAMETER_POSTER to stringResource(R.string.photo_frame_parameter_poster),
     )
     val frameLabels = frameChoicesInCatalogOrder.toMap()

@@ -83,6 +83,7 @@ class PhotoFrameExporterTest {
         assertEquals(PhotoFramePreset.COLOR_ARCHIVE, PhotoFramePreset.valueOf("COLOR_ARCHIVE"))
         assertEquals(PhotoFramePreset.FILM_GALLERY, PhotoFramePreset.valueOf("FILM_GALLERY"))
         assertEquals(PhotoFramePreset.FILM_EDGE, PhotoFramePreset.valueOf("FILM_EDGE"))
+        assertEquals(PhotoFramePreset.FILM_NEGATIVE, PhotoFramePreset.valueOf("FILM_NEGATIVE"))
     }
 
     @Test
@@ -93,6 +94,7 @@ class PhotoFrameExporterTest {
             PhotoFramePreset.COLOR_ARCHIVE,
             PhotoFramePreset.FILM_GALLERY,
             PhotoFramePreset.FILM_EDGE,
+            PhotoFramePreset.FILM_NEGATIVE,
         ).forEach { preset ->
             val preview = calculateEditorialFrameLayout(6000, 4000, preset)
             val original = calculateOriginalQualityEditorialFrameLayout(6000, 4000, preset)

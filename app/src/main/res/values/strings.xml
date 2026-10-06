@@ -202,6 +202,7 @@
     <string name="photo_frame_color_archive">Color Archive</string>
     <string name="photo_frame_film_gallery">Film Gallery</string>
     <string name="photo_frame_film_edge">Film Edge</string>
+    <string name="photo_frame_film_negative">Film Negative</string>
     <string name="photo_frame_metadata_button">Frame settings</string>
     <string name="photo_frame_metadata_focal_length">Focal</string>
     <string name="photo_frame_metadata_exposure">Exposure</string>
