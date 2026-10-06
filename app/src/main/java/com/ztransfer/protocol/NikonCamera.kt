@@ -1649,6 +1649,26 @@ class NikonCamera(private val context: Context) {
         }
     }
 
+    /**
+     * AP/USB rating read used by the list scan. JPEG remains an object-property read. A RAW
+     * object-property miss is remembered for this connection after the first probe, because the
+     * camera has already demonstrated that 0xDC8A is not implemented for that extension; the
+     * current and subsequent NEF/NRW files then use their own header rating directly.
+     */
+    internal suspend fun readObjectOrRawHeaderRating(file: FileInfo): Int? {
+        val isRaw = file.extension.equals(".NEF", true) || file.extension.equals(".NRW", true)
+        if (!isRaw) return readObjectRating(file)
+        if (file.extension in ratingUnsupportedExtensions) {
+            return readPhotoRatingHeader(file)
+        }
+        val objectValue = readObjectRating(file)
+        if (objectValue != null) return objectValue
+        // A null RAW object read is enough to stop probing this extension repeatedly. The header
+        // path is the verified Nikon RAW fallback and also resolves the first file immediately.
+        ratingUnsupportedExtensions += file.extension
+        return readPhotoRatingHeader(file)
+    }
+
     private var ratingNikonHeaderUnsupported = false
     private var ratingStandardHeaderUnsupported = false
 

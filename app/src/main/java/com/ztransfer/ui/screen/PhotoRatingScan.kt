@@ -228,10 +228,11 @@ internal fun rememberPhotoRatings(camera: NikonCamera?, enabled: Boolean,
                     // Never reuse the camera's cross-flow rating map here: this scan is a
                     // fresh snapshot for the current connection. The local map above is the
                     // only source of already-completed values for this scan.
-                    // AP/USB expose the rating as an object property; do not fall back to a
-                    // file-header read there. STA uses the verified JPEG/RAW header or MP4 tag.
+                    // AP/USB use the object property for JPEG. A RAW-only source probes that
+                    // property once, then falls back to the verified NEF/NRW header path for the
+                    // current and subsequent RAW files in this connection.
                     val resolvedRating = if (useObjectRating) {
-                        camera.readObjectRating(file)
+                        camera.readObjectOrRawHeaderRating(file)
                     } else {
                         val isPhoto = file.extension in ratingStillExtensions
                         if (isPhoto) camera.readPhotoRatingHeader(file) else camera.readVideoRating(file)

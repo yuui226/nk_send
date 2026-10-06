@@ -1142,13 +1142,19 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         // the user widens the range, resume that snapshot instead of enumerating the camera again.
         val widened = previous != 0 && (normalized == 0 || normalized > previous)
         if (normalized != previous && widened && photoRangeScanStopped &&
-            state.value.isConnectedToCamera && state.value.hasCompletedFileScan &&
-            fileScanHandleSnapshot != null
+            state.value.isConnectedToCamera && state.value.hasCompletedFileScan
         ) {
-            loadFiles(
-                preserveExisting = true,
-                resumeSnapshot = fileScanHandleSnapshot,
-            )
+            val snapshot = fileScanHandleSnapshot
+            if (snapshot != null) {
+                loadFiles(
+                    preserveExisting = true,
+                    resumeSnapshot = snapshot,
+                )
+            } else {
+                // A deletion/catalog-sync can invalidate the partial snapshot. Re-enumerate
+                // handles while preserving the visible files instead of losing the old tail.
+                loadFiles(preserveExisting = true, detectNewHandles = true)
+            }
         }
     }
 
