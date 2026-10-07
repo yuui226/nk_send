@@ -88,6 +88,7 @@ actor CameraSession {
         preserveExisting: Bool,
         resumeSnapshot: PhotoScanSnapshot? = nil,
         detectNewHandles: Bool = false,
+        loadingRange: PhotoLoadingRange = .all,
         nextBatchSize: @escaping @Sendable () async -> Int = { 12 },
         onBatch: @escaping @Sendable ([CameraFile]) async throws -> Void
     ) async throws -> PhotoScanResult {
@@ -100,6 +101,7 @@ actor CameraSession {
         return try await repository.scanCatalog(preserveExisting: preserveExisting,
                                           resumeSnapshot: resumeSnapshot,
                                           detectNewHandles: detectNewHandles,
+                                          loadingRange: loadingRange,
                                           nextBatchSize: nextBatchSize,
                                           onBatch: onBatch)
     }
@@ -251,6 +253,18 @@ actor CameraSession {
 
     func beginRatingPhase() async { await repository.beginRatingPhase() }
     func endRatingPhase() async { await repository.endRatingPhase() }
+    func readObjectRating(file: CameraFile) async throws -> Int? {
+        try await repository.readObjectRating(file: file)
+    }
+    func readObjectOrRawHeaderRating(file: CameraFile) async throws -> Int? {
+        try await repository.readObjectOrRawHeaderRating(file: file)
+    }
+    func readPhotoRatingHeader(file: CameraFile) async throws -> Int? {
+        try await repository.readPhotoRatingHeader(file: file)
+    }
+    func readVideoRating(file: CameraFile) async throws -> Int? {
+        try await repository.readVideoRating(file: file)
+    }
 
     /// The active transport is probed only when the command channel is idle.
     /// Both USB and Wi-Fi use the same Nikon GetStorageIDs liveness rule.

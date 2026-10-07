@@ -42,6 +42,7 @@ struct SettingsView: View {
     @AppStorage("auto_transfer_mode") private var autoTransferModeRaw = ""
     @AppStorage("defer_transfer_start") private var deferStart = false
     @AppStorage("thumbnail_columns") private var columns = 3
+    @AppStorage("photo_loading_range_days") private var photoLoadingRangeDays = 0
     @AppStorage("collapse_burst_photos") private var collapseBurst = true
     @AppStorage("tap_to_preview") private var tapToPreview = false
     @AppStorage("haptics_enabled") private var haptics = true
@@ -63,6 +64,7 @@ struct SettingsView: View {
     let onContentHeightChange: (CGFloat) -> Void
     let onShowPremium: () -> Void
     let onPlayFireworks: () -> Void
+    let onPhotoLoadingRangeChanged: (PhotoLoadingRange) -> Void
 
     private enum SettingsPage {
         case main
@@ -87,6 +89,7 @@ struct SettingsView: View {
          requestTransferDirectoryAttention: Bool = false,
          effectPreviewSource: UIImage? = nil, effectPreviewExif: PhotoExif? = nil,
          onEffectPreviewRequested: @escaping () -> Void = {},
+         onPhotoLoadingRangeChanged: @escaping (PhotoLoadingRange) -> Void = { _ in },
          onContentHeightChange: @escaping (CGFloat) -> Void = { _ in },
          onShowPremium: @escaping () -> Void = {}, onPlayFireworks: @escaping () -> Void = {},
          onClose: (() -> Void)? = nil) {
@@ -103,6 +106,7 @@ struct SettingsView: View {
         self.effectPreviewSource = effectPreviewSource
         self.effectPreviewExif = effectPreviewExif
         self.onEffectPreviewRequested = onEffectPreviewRequested
+        self.onPhotoLoadingRangeChanged = onPhotoLoadingRangeChanged
         self.onContentHeightChange = onContentHeightChange
         self.onShowPremium = onShowPremium
         self.onPlayFireworks = onPlayFireworks
@@ -449,7 +453,19 @@ struct SettingsView: View {
                 ToggleWheel(label: AppLocalized.resource("collapse_burst_photos"), isOn: $collapseBurst).frame(maxWidth: .infinity)
             }
             SettingsDivider()
+            HStack(spacing: 8) {
                 DetentWheel(label: AppLocalized.resource("photo_interaction"), options: [false, true], selected: tapToPreview, optionLabel: { $0 ? AppLocalized.resource("tap_preview_hold_transfer") : AppLocalized.resource("tap_transfer_hold_preview") }, onCommit: { tapToPreview = $0 }, rowHeight: 32, wheelHeight: 56, optionMaxLines: 2, optionFontSize: 13)
+                    .frame(maxWidth: .infinity)
+                DetentWheel(label: "照片加载范围", options: PhotoLoadingRange.allCases,
+                            selected: PhotoLoadingRange(days: photoLoadingRangeDays),
+                            optionLabel: { $0 == .all ? "全部" : "\($0.days)日" },
+                            onCommit: { range in
+                                photoLoadingRangeDays = range.days
+                                onPhotoLoadingRangeChanged(range)
+                            }, rowHeight: 32, wheelHeight: 56,
+                            onDetent: { ZTransferHaptics.shared.tick() })
+                    .frame(maxWidth: .infinity)
+            }
         }
     }
 

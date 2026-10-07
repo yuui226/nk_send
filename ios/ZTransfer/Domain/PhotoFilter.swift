@@ -13,6 +13,39 @@ struct PhotoDateRange: Equatable, Sendable, Codable {
     }
 }
 
+/// Background photo loading scope. The value counts distinct actual shooting
+/// days, so a camera with no captures on a calendar day does not consume one
+/// of the selected slots. Zero keeps the complete catalog scope.
+enum PhotoLoadingRange: Int, CaseIterable, Codable, Sendable {
+    case one = 1
+    case three = 3
+    case five = 5
+    case all = 0
+
+    var days: Int { rawValue }
+
+    init(days: Int) {
+        switch days {
+        case 1: self = .one
+        case 3: self = .three
+        case 5: self = .five
+        default: self = .all
+        }
+    }
+}
+
+/// The newest actual shooting days represented by a catalog. Invalid or
+/// missing capture dates do not create a date boundary, matching Android's
+/// `newestCaptureDaysRange` implementation.
+func newestCaptureDaysRange(_ files: some Sequence<CameraFile>, days: Int) -> PhotoDateRange? {
+    guard days > 0 else { return nil }
+    let keys = Set(files.compactMap { validPhotoCaptureDay($0.captureDate) })
+        .sorted(by: >)
+        .prefix(days)
+    guard let newest = keys.first, let oldest = keys.last else { return nil }
+    return PhotoDateRange(start: oldest, end: newest)
+}
+
 func validPhotoCaptureDay(_ value: String?) -> String? {
     guard let value, value.count >= 8 else { return nil }
     let dayValue = String(value.prefix(8))
@@ -150,6 +183,16 @@ enum PhotoFilterPersistence {
     private static let untransferredKey = "filter_untransferred"
     private static let startKey = "filter_date_start"
     private static let endKey = "filter_date_end"
+    static let photoLoadingRangeKey = "photo_loading_range_days"
+
+    static func loadPhotoLoadingRange(from defaults: UserDefaults = .standard) -> PhotoLoadingRange {
+        PhotoLoadingRange(days: defaults.object(forKey: photoLoadingRangeKey) as? Int ?? 0)
+    }
+
+    static func savePhotoLoadingRange(_ range: PhotoLoadingRange,
+                                      to defaults: UserDefaults = .standard) {
+        defaults.set(range.days, forKey: photoLoadingRangeKey)
+    }
 
     static func load(from defaults: UserDefaults = .standard) -> PhotoFilterState {
         let extensions = defaults.stringArray(forKey: extensionsKey).map { Set($0.map { $0.lowercased() }) }

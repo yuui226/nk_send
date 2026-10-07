@@ -4,7 +4,7 @@
 
 2026-10-07 用户要求：拉取安卓新功能合入 ios，先形成变动文档，深入阅读通用调度器专门文档，再按原规则逐项完整复刻。已从 `origin/android` 拉取并将 `2b2bf0c2802cacc909e9373562d912bce2d21175` 合入 `ios`，合并提交 `5d583d60`。旧安卓基准 `617082c3`，合并前 iOS `27fba4bf`；增量 **62 个提交、79 个净变化文件**，安卓 versionName **1.93**、versionCode **66**。合并无冲突，`app/` 与远端基准一致，合并未改变 `ios/`。尚未推送此次合并。
 
-新轮进度 **2/15**（N01–N02 已完成开发侧复刻，待用户真机验收）。状态采用待调查→调查中→实现中→复刻完成，待用户真机验收；不能沿用上一轮 26/26 证明本轮完成。共享文件按差异块分别归属，任务之间允许先处理依赖，但不扩大单项边界或遗漏总范围。[来源索引](iOS-1.93-增量来源索引.json)保留全部提交、文件、差异块位置及初始路由；路由不代表已经调查或迁移。
+新轮进度 **3/15**（N01–N03 已完成开发侧复刻，待用户真机验收）。状态采用待调查→调查中→实现中→复刻完成，待用户真机验收；不能沿用上一轮 26/26 证明本轮完成。共享文件按差异块分别归属，任务之间允许先处理依赖，但不扩大单项边界或遗漏总范围。[来源索引](iOS-1.93-增量来源索引.json)保留全部提交、文件、差异块位置及初始路由；路由不代表已经调查或迁移。
 
 先读对应安卓提交、最终源码、上下游及测试，写明状态、文本、布局、动画、取消/错误/重试和保存范围，然后实施。迁移安卓测试，同时补足已识别但安卓未测的边界。每完成一大块才集中构建和必要自动化测试；真机测试与验收由用户负责。本轮功能实现不自动提交、推送或安装。
 
@@ -16,8 +16,8 @@
 |---|---|---|---|
 | N01 | 统一调度核心：8 类请求、有效优先级/FIFO、不可抢占、评级计数屏障、预约、下载活动、取消、shutdown、嵌套拒绝及快照；不包含全部业务调用迁移 | NikonCamera.CameraIoGate；CameraIoGateTest；权威逻辑文档 | 复刻完成，待用户验收 |
 | N02 | 调度生产接入：监看/AF/录像、FHD/EXIF、目录批次、缩略图、下载、事件/心跳/余量、关闭重连统一入口；PTP 排空/取消在释放前；整文件计时和照片/视频边界 | NikonCamera、RemoteLab、MonitorStorage、CameraViewModel、ThumbnailFillQueue；CameraIoGateTest、既有协议/下载测试 | 复刻完成，待用户验收 |
-| N03 | 照片加载 1/3/5/全部拍摄日范围：持久化、旧尾部快照、扩大续扫、缩小隐藏、删除后重枚举、新事件、批次就绪信号 | PhotoDateRange、CameraViewModel、NikonCamera、TransferViewModel；安卓暂无专项范围测试，iOS 需补 | 待调查 |
-| N04 | 评级协议：STA JPG/RAW 100 KiB+8 KiB≤256 KiB 连续探测、视频结构区、AP/USB 对象属性、能力短路、JPG/NEF 唯一配对及未知值 | PhotoRating、PhotoRatingPairs、VideoRating、NikonCamera；对应三个解析/配对测试 | 待调查 |
+| N03 | 照片加载 1/3/5/全部拍摄日范围：持久化、旧尾部快照、扩大续扫、缩小隐藏、删除后重枚举、新事件、批次就绪信号 | PhotoDateRange、CameraViewModel、NikonCamera、TransferViewModel；安卓暂无专项范围测试，iOS 需补 | 复刻完成，待用户验收 |
+| N04 | 评级协议：STA JPG/RAW 100 KiB+8 KiB≤256 KiB 连续探测、视频结构区、AP/USB 对象属性、能力短路、JPG/NEF 唯一配对及未知值 | PhotoRating、PhotoRatingPairs、VideoRating、NikonCamera；对应三个解析/配对测试 | 实现中 |
 | N05 | 评级扫描生命周期：开关刷新代次、范围交集/锚点、来源快照、逐文件/区域 P3、进度、取消屏障、8192 值缓存和来源、重连隔离 | PhotoRatingScan、RatingDiagnostics、CameraViewModel；调度/评级测试 | 待调查 |
 | N06 | 评级筛选 UI：开关、0–5 星条件、日期拨轮、等待/进度/完成、角标/帮助、触感、固定布局、独立 UI 状态避免重播网格 | FileListScreen、TransferViewModel、三语资源；相关方案仅用于解释最终代码 | 待调查 |
 | N07 | 实时多对焦框：帧头多框/坐标/颜色/显隐/有效期、照片录像差异、60 秒被动诊断/步骤标记及工具入口 | LiveViewMetadata、LiveViewFocusDiagnostic、RemoteScreen；帧头/诊断测试及专门方案 | 待调查 |
@@ -64,3 +64,18 @@
 - 新增 3 个调度器场景测试，连同旧 gate 回归共 **14/14** 通过：`/tmp/ztransfer-ios193-n02-gate-tests.log`（`** TEST SUCCEEDED **`）。生产工程构建通过：`/tmp/ztransfer-ios193-n02-wiring-build3.log`（`** BUILD SUCCEEDED **`）。
 - 当前 N02 已完成 repository 全部运行期命令接入：AF、参数、监看、拍照/录像、FHD/EXIF、目录、缩略图可见/后台、下载分块、事件轮询、心跳和关闭前 shutdown 均经过统一 gate；连接握手/底层 transport CloseSession 保留为会话边界例外。PTPSession 原有取消/排空路径继续在传输事务内执行，未由 gate 提前释放。
 - 既有 CameraDownloadTests 与 RemoteLifecycleTests 集中回归 **76/76** 通过，日志 `/tmp/ztransfer-ios193-n02-regression.log`（`** TEST SUCCEEDED **`）。N02 标记“复刻完成，待用户验收”。
+
+### 2026-10-07 N03 照片加载范围收尾
+
+- 安卓来源为 `eae2e836`（设置 1/3/5/全部范围、按实际拍摄日计数）和 `2bd59ede`（扫描越过边界后只接受最新范围、保留旧尾部快照）。调查确认范围不是简单日历过滤：无照片的日历日不计数；无效拍摄日期不形成边界；跨边界批次只发布范围内行，快照只标记已接受句柄，扩大范围继续原句柄快照；缩小范围立即隐藏行并停止范围外缩略图入队；范围扩大时旧快照失效则保留已显示目录并重枚举；新事件通过同一范围准入；全部范围保持原始批次/顺序。
+- iOS 已在 `PhotoLoadingRange`、`newestCaptureDaysRange`、`PhotoFilterPersistence`、`CameraRepository`/`CameraSession`、`PhotoListViewModel`、`PhotoThumbnailFillQueue`、`PhotoListView`、`SettingsView`/`SettingsPopupOverlay` 中接线。范围选择器逐字使用安卓界面文案“照片加载范围”“全部”“1日”“3日”“5日”；展示网格使用范围内目录，传输及事件索引仍保留完整会话目录。
+- 扩大范围沿用 repository 的 `PhotoScanSnapshot`，不重新请求已接受句柄；快照不存在时 `preserveExisting=true` 触发删除/新增可识别的重枚举。队列范围变化只清理未完成/失败项，保留已完成磁盘命中；范围外的新事件和缩略图不会进入工作队列。
+- 新增自动化覆盖实际拍摄日计数与非法日期、持久化未知值归一化、队列缩小/扩大再准入，以及跨批次越界后尾部快照和扩大续扫：`/tmp/ztransfer-ios193-n03-final-tests.log`，**4/4 通过**。N03 相关回归（DomainModel、ScanBatchPolicy、PhotoThumbnailStore、CameraDownload、RemoteLifecycle）共 **213 项，3 项既有麦克风权限跳过，0 失败**：`/tmp/ztransfer-ios193-n03-regression.log`。生产工程构建通过：`/tmp/ztransfer-ios193-n03-build.log`（`** BUILD SUCCEEDED **`）。
+- 当前 N03 标记“复刻完成，待用户验收”。评级开关/结果属于 N04–N06；范围变更对评级扫描的失效和重建将在评级生命周期任务中按安卓实现接入，不在 N03 提前添加空业务状态。
+
+### 2026-10-07 N04 阶段保存（未完成）
+
+- 用户要求提交推送一次，本次保存 N03 以及当前 N04 阶段代码，不增加完成任务数。此前合并和 N01/N02 已随 `ee537a95` 推送，文档开头“尚未推送此次合并”为合并时的历史状态。
+- 已对照安卓 `PhotoRating.kt`、`PhotoRatingPairs.kt`、`VideoRating.kt` 及对应测试，迁移 JPEG/Exif/XMP、TIFF/NEF、Nikon 对象属性值映射、JPG/RAW 唯一配对和视频 NCTG 结构定位。缺失或未知评级保留 nil，不转换为零星。
+- 已初步接入 `CameraRepository`/`CameraSession` 的对象属性、RAW 头部回退、100 KiB 首读与 8 KiB 续读、Nikon/标准操作能力状态和视频窗口读取，均经过评级调度入口；尚需协议回放覆盖、异常/取消及空响应对照审查。评级缓存/代次、扫描生命周期和界面仍属于后续 N05/N06，当前不能认为评级功能已经闭环。
+- 验证过程如实保留：首轮测试存在 Swift 6 并发/辅助函数编译问题；第二轮测试夹具将 65535 转成 Int16 导致溢出；协议接入曾出现 actor 隔离和抛错闭包编译错误，均已修复。最终 `/tmp/ztransfer-ios193-checkpoint-tests.log` 为 `** TEST SUCCEEDED **`，应用及测试目标编译通过，三个评级解析/配对测试类共 **14/14 通过**。尚未运行新增协议接入的命令回放测试或真机验收，N04 保持“实现中”。

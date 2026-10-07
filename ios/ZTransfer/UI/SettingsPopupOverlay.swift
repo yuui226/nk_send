@@ -12,6 +12,7 @@ struct SettingsPopupOverlay: View {
     let effectPreviewSource: UIImage?
     let effectPreviewExif: PhotoExif?
     let onEffectPreviewRequested: () -> Void
+    let onPhotoLoadingRangeChanged: (PhotoLoadingRange) -> Void
 
     init(isPresented: Binding<Bool>, showPhotoEffectsEntry: Bool, effectsStore: PhotoEffectsStore,
          directory: DirectoryAccessStore, anchor: Anchor<CGRect>,
@@ -26,6 +27,24 @@ struct SettingsPopupOverlay: View {
         self.effectPreviewSource = effectPreviewSource
         self.effectPreviewExif = effectPreviewExif
         self.onEffectPreviewRequested = onEffectPreviewRequested
+        self.onPhotoLoadingRangeChanged = { _ in }
+    }
+
+    init(isPresented: Binding<Bool>, showPhotoEffectsEntry: Bool, effectsStore: PhotoEffectsStore,
+         directory: DirectoryAccessStore, anchor: Anchor<CGRect>,
+         requestTransferDirectoryAttention: Bool = false, effectPreviewSource: UIImage? = nil,
+         effectPreviewExif: PhotoExif? = nil, onEffectPreviewRequested: @escaping () -> Void = {},
+         onPhotoLoadingRangeChanged: @escaping (PhotoLoadingRange) -> Void) {
+        _isPresented = isPresented
+        self.showPhotoEffectsEntry = showPhotoEffectsEntry
+        self.effectsStore = effectsStore
+        self.directory = directory
+        self.anchor = anchor
+        self.requestTransferDirectoryAttention = requestTransferDirectoryAttention
+        self.effectPreviewSource = effectPreviewSource
+        self.effectPreviewExif = effectPreviewExif
+        self.onEffectPreviewRequested = onEffectPreviewRequested
+        self.onPhotoLoadingRangeChanged = onPhotoLoadingRangeChanged
     }
 
     @State private var effectsDraft = PhotoEffectsSettings()
@@ -73,6 +92,7 @@ struct SettingsPopupOverlay: View {
                         effectPreviewSource: effectPreviewSource,
                         effectPreviewExif: effectPreviewExif,
                         onEffectPreviewRequested: onEffectPreviewRequested,
+                        onPhotoLoadingRangeChanged: onPhotoLoadingRangeChanged,
                         onContentHeightChange: { height in
                             contentHeight = height
                         },

@@ -415,9 +415,13 @@ enum PTPConstants {
     static let getObjectInfo: UInt16 = 0x1008
     static let getObject: UInt16 = 0x1009
     static let getThumb: UInt16 = 0x100A
+    // MTP/PTP object-property operations used by Nikon's rating path.
+    static let getObjectPropValue: UInt16 = 0x9803
+    static let objectPropRating: UInt32 = 0xDC8A
     static let getDevicePropDesc: UInt16 = 0x1014
     static let getDevicePropValue: UInt16 = 0x1015
     static let setDevicePropValue: UInt16 = 0x1016
+    static let getPartialObject: UInt16 = 0x101B
     static let getPartialObjectEx: UInt16 = 0x9431
     static let getObjectSize: UInt16 = 0x9421
     static let getObjectsMetadata: UInt16 = 0x9434

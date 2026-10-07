@@ -880,6 +880,58 @@ final class DomainModelTests: XCTestCase {
         XCTAssertEqual(second?.id, outOfRange.id)
     }
 
+    func testPhotoLoadingRangeCountsNewestActualShootingDays() {
+        let files = [
+            CameraFile(id: 1, storageID: 1, format: 0x3801, size: 1,
+                       fileName: "new.JPG", captureDate: "20261006T120000", isProtected: false),
+            CameraFile(id: 2, storageID: 1, format: 0x3801, size: 1,
+                       fileName: "gap.JPG", captureDate: "20261004T120000", isProtected: false),
+            CameraFile(id: 3, storageID: 1, format: 0x3801, size: 1,
+                       fileName: "old.JPG", captureDate: "20261001T120000", isProtected: false),
+            CameraFile(id: 4, storageID: 1, format: 0x3801, size: 1,
+                       fileName: "bad.JPG", captureDate: "20261340T120000", isProtected: false),
+        ]
+        let range = newestCaptureDaysRange(files, days: 2)
+        XCTAssertEqual(range, PhotoDateRange(start: "20261004", end: "20261006"))
+        XCTAssertTrue(range?.contains("20261006T000000") == true)
+        XCTAssertTrue(range?.contains("20261004T000000") == true)
+        XCTAssertFalse(range?.contains("20261001T000000") == true)
+        XCTAssertNil(newestCaptureDaysRange(files, days: 0))
+    }
+
+    func testPhotoLoadingRangePersistenceNormalizesUnknownValues() {
+        let suiteName = "com.ztransfer.photo-loading-range.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        PhotoFilterPersistence.savePhotoLoadingRange(.five, to: defaults)
+        XCTAssertEqual(PhotoFilterPersistence.loadPhotoLoadingRange(from: defaults), .five)
+        defaults.set(2, forKey: PhotoFilterPersistence.photoLoadingRangeKey)
+        XCTAssertEqual(PhotoFilterPersistence.loadPhotoLoadingRange(from: defaults), .all)
+    }
+
+    func testThumbnailLoadingRangeDropsOutOfScopeWorkAndReadmitsOnWiden() async {
+        let files = [
+            CameraFile(id: 1, storageID: 1, format: 0x3801, size: 1,
+                       fileName: "new.JPG", captureDate: "20261006T120000", isProtected: false),
+            CameraFile(id: 2, storageID: 1, format: 0x3801, size: 1,
+                       fileName: "old.JPG", captureDate: "20261001T120000", isProtected: false),
+        ]
+        let queue = PhotoThumbnailFillQueue(sequential: true)
+        await queue.beginScan()
+        await queue.seed(files, loadingRange: PhotoDateRange(start: "20261006", end: "20261006"))
+        let first = await queue.poll()
+        XCTAssertEqual(first?.id, 1)
+        if let first { await queue.markSettled(first.id) }
+        let outOfScope = await queue.poll()
+        XCTAssertNil(outOfScope)
+
+        await queue.updateLoadingRange(files, range: nil)
+        await queue.seed(files, loadingRange: nil)
+        let admitted = await queue.poll()
+        XCTAssertEqual(admitted?.id, 2)
+    }
+
     func testBurstGroupingMatchesConsecutiveNameAndOneSecondRule() {
         let files = (100...102).map { n in
             CameraFile(id: UInt32(n), storageID: 1, format: 0x3801, size: 1,

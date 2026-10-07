@@ -625,7 +625,7 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
             if showingRemote { showingQueue = false }
             if presentedSections.isEmpty {
                 presentedSections = model.sections
-                presentedCameraFiles = model.availableFiles
+                presentedCameraFiles = model.displayedFiles
             }
             await session?.setPreferHighThroughputTransfers(!showingRemote)
             queueModel.attach(session: transferSession, directory: directoryStore.directoryURL)
@@ -681,6 +681,9 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
             if !enabled { expandedBurstIDs.removeAll() }
         }
         .onChange(of: model.sections) { updatePresentedSections($0) }
+        .onChange(of: model.displayedFiles) { files in
+            presentedCameraFiles = files
+        }
         .onChange(of: model.availableDayKeys) { valid in
             // Filters can temporarily hide complete date groups. Only an
             // authoritative catalog change may retire a remembered choice.
@@ -787,7 +790,8 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
                     requestTransferDirectoryAttention: transferDirectoryAttention,
                     effectPreviewSource: effectPreviewSource,
                     effectPreviewExif: effectPreviewExif,
-                    onEffectPreviewRequested: requestEffectPreview
+                    onEffectPreviewRequested: requestEffectPreview,
+                    onPhotoLoadingRangeChanged: model.setPhotoLoadingRange
                 )
             }
             if let anchor = anchors[.filter] {
@@ -1375,7 +1379,7 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
     }
 
     private func updatePresentedSections(_ target: [PhotoDaySection]) {
-        let currentCameraFiles = model.availableFiles
+        let currentCameraFiles = model.displayedFiles
         let canAnimateRemoval = isSessionConnected && model.hasCompletedFileScan && !model.isLoadingFiles
         let removedDays = canAnimateRemoval
             ? publishedCameraRemovalDays(previous: presentedCameraFiles, current: currentCameraFiles)

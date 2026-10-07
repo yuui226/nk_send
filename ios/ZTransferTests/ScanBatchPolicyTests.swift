@@ -63,6 +63,49 @@ final class ScanBatchPolicyTests: XCTestCase {
         }
     }
 
+    func testBoundedPhotoScanRetainsTailAndWiderScopeResumesIt() async throws {
+        let handles: [UInt32] = [1, 2, 3, 4, 5]
+        var script: [STAExchange] = [
+            .init(PTPConstants.getStorageIDs, [], payload: staU32Array([1])),
+            .init(PTPConstants.getObjectHandles, [1, .max, 0], payload: staU32Array(handles)),
+        ]
+        let dates: [UInt32: String] = [
+            5: "20261005T120000", 4: "20261004T120000", 3: "20261003T120000",
+            2: "20261002T120000", 1: "20261001T120000",
+        ]
+        // The Android warm-up reads one object, then a three-object batch.
+        // The second batch crosses the three-day boundary after reading 2;
+        // handle 1 remains unread in the retained snapshot.
+        for id in [5, 4, 3, 2] as [UInt32] {
+            script.append(.init(PTPConstants.getObjectInfo, [id], payload: objectInfo(id, date: dates[id]!)))
+        }
+        // The bounded pass leaves the first out-of-range handle in the
+        // snapshot. The wider pass must request that tail again.
+        for id: UInt32 in [2, 1] {
+            script.append(.init(PTPConstants.getObjectInfo, [id], payload: objectInfo(id, date: dates[id]!)))
+        }
+        let wire = STAScriptTransport(script)
+        let repository = CameraRepository(session: PTPSession(transport: wire))
+        let bounded = try await repository.scanCatalog(loadingRange: .three,
+                                                        nextBatchSize: { 48 })
+        XCTAssertTrue(bounded.stoppedAtLoadingRange)
+        XCTAssertEqual(bounded.files.map(\.id), [5, 4, 3])
+        let snapshotValue = await repository.scanSnapshotForResume()
+        let snapshot = try XCTUnwrap(snapshotValue)
+        XCTAssertEqual(snapshot.remainingHandles.flatMap { $0.handles }, [2, 1])
+
+        let resumed = try await repository.scanCatalog(preserveExisting: true,
+                                                       resumeSnapshot: snapshot,
+                                                       loadingRange: .all,
+                                                       nextBatchSize: { 48 })
+        XCTAssertFalse(resumed.stoppedAtLoadingRange)
+        XCTAssertEqual(resumed.files.map(\.id), [5, 4, 3, 2, 1])
+        let finalSnapshot = await repository.scanSnapshotForResume()
+        XCTAssertNil(finalSnapshot)
+        let remaining = await wire.remaining
+        XCTAssertEqual(remaining, 0)
+    }
+
     @MainActor
     func testDualCardProductionScanPreservesOrderAndWarmGrowth() async throws {
         let handles = Array(UInt32(1)...88)

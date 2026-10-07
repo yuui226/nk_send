@@ -20,6 +20,7 @@ actor PhotoThumbnailFillQueue {
     // the final scan completion can both reach the fill pipeline.
     private var seededRevision = -1
     private var priorityRange: PhotoDateRange?
+    private var loadingRange: PhotoDateRange?
     private let wakeStream: AsyncStream<Void>
     private let wakeContinuation: AsyncStream<Void>.Continuation
 
@@ -57,10 +58,12 @@ actor PhotoThumbnailFillQueue {
         // arriving before seed() must still be classified by that range.
     }
 
-    func seed(_ files: [CameraFile], priorityRange: PhotoDateRange? = nil) {
+    func seed(_ files: [CameraFile], priorityRange: PhotoDateRange? = nil,
+              loadingRange: PhotoDateRange? = nil) {
         guard seededRevision != revision else { return }
         seededRevision = revision
         for file in files { filesByID[file.id] = file }
+        self.loadingRange = loadingRange
         self.priorityRange = sequential ? nil : priorityRange
         let ordered = sequential ? files : stableNewestFirst(files)
         for file in ordered where !settled.contains(file.id) && !pending.contains(file.id) && !failed.contains(file.id) {
@@ -70,7 +73,7 @@ actor PhotoThumbnailFillQueue {
 
     func enqueueNew(_ files: [CameraFile]) {
         for file in files { filesByID[file.id] = file }
-        for file in files where !settled.contains(file.id) {
+        for file in files where isInLoadingRange(file) && !settled.contains(file.id) {
             enqueue(file.id, priority: priorityRange?.contains(file.captureDate) == true, front: !sequential)
         }
     }
@@ -90,6 +93,10 @@ actor PhotoThumbnailFillQueue {
         guard !settled.contains(id), !failed.contains(id) else { return }
         priority.removeAll { $0 == id }; regular.removeAll { $0 == id }
         pending.insert(id)
+        guard isInLoadingRange(filesByID[id]) else {
+            pending.remove(id)
+            return
+        }
         if priorityRange?.contains(filesByID[id]?.captureDate) == true {
             priority.insert(id, at: 0)
         } else {
@@ -140,12 +147,32 @@ actor PhotoThumbnailFillQueue {
         pending = Set(unfinished.map(\.id))
     }
 
+    /// Changing the loading scope is a new work boundary. Finished cache
+    /// entries survive, while pending and failed entries outside the new
+    /// scope are discarded and entries newly brought into scope can be seeded
+    /// from the retained catalog/snapshot.
+    func updateLoadingRange(_ files: [CameraFile], range: PhotoDateRange?) {
+        guard loadingRange != range else { return }
+        for file in files { filesByID[file.id] = file }
+        loadingRange = range
+        let unfinishedIDs = priority + regular + failedOrder
+        let unfinished = unfinishedIDs.compactMap { filesByID[$0] }
+        priority.removeAll(); regular.removeAll(); pending.removeAll()
+        failed.removeAll(); failedOrder.removeAll()
+        revision &+= 1
+        seededRevision = -1
+        for file in unfinished where isInLoadingRange(file) {
+            enqueue(file.id, priority: priorityRange?.contains(file.captureDate) == true, front: false)
+        }
+    }
+
     func state() -> (revision: Int, pending: Set<UInt32>, failed: Set<UInt32>, settled: Set<UInt32>) {
         (revision, pending, failed, settled)
     }
 
     private func enqueue(_ id: UInt32, priority: Bool, front: Bool) {
         guard !pending.contains(id), !settled.contains(id) else { return }
+        guard isInLoadingRange(filesByID[id]) else { return }
         pending.insert(id)
         if priority {
             if front { self.priority.insert(id, at: 0) } else { self.priority.append(id) }
@@ -169,5 +196,10 @@ actor PhotoThumbnailFillQueue {
             if left != right { return left > right }
             return lhs.offset < rhs.offset
         }.map(\.element)
+    }
+
+    private func isInLoadingRange(_ file: CameraFile?) -> Bool {
+        guard let loadingRange, let file else { return loadingRange == nil }
+        return file.captureDate == nil || loadingRange.contains(file.captureDate)
     }
 }

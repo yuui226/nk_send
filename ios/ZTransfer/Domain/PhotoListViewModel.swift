@@ -31,11 +31,15 @@ final class PhotoListViewModel: ObservableObject {
     }
     @Published private(set) var loadState: PhotoListLoadState = .idle
     @Published private(set) var sections: [PhotoDaySection] = []
+    /// The complete session catalog is retained for transfer and event
+    /// bookkeeping; this is the range-scoped catalog presented in the grid.
+    @Published private(set) var displayedFiles: [CameraFile] = []
     @Published private(set) var availableDayKeys: Set<String> = []
     @Published private(set) var burstGroups: [BurstPhotoGroup] = []
     @Published private(set) var burstIDByFile: [UInt32: String] = [:]
     @Published private(set) var exitingTransferredFileIDs: Set<UInt32> = []
     @Published private(set) var filter = PhotoFilterState()
+    @Published private(set) var photoLoadingRange = PhotoFilterPersistence.loadPhotoLoadingRange()
     @Published private(set) var availableStorageSlots: [UInt32] = []
     /// Android derives these with `remember(presentedCameraFiles)`. Keep the
     /// same catalog-scoped cache here so opening Filter is a constant-time
@@ -79,6 +83,7 @@ final class PhotoListViewModel: ObservableObject {
     private var queueOriginals = ExportedOriginalIndex()
     /// A cancelled/old scan must never publish over a newer camera session.
     private var loadGeneration = 0
+    private var loadingRangeScanStopped = false
 
     /// Matches Android's latestEffectPreviewFile: videos are never used as an
     /// effect demo, and ties are resolved by the camera handle.
@@ -104,11 +109,13 @@ final class PhotoListViewModel: ObservableObject {
         self.onTransportLost = onTransportLost
         self.setRemoteGate = { await session.setRemoteActive($0) }
         self.scanCatalog = { preserve, snapshot, detect, nextBatchSize, handler in
-            try await session.scanCatalog(preserveExisting: preserve,
-                                          resumeSnapshot: snapshot,
-                                          detectNewHandles: detect,
-                                          nextBatchSize: nextBatchSize,
-                                          onBatch: handler)
+            let loadingRange = PhotoFilterPersistence.loadPhotoLoadingRange()
+            return try await session.scanCatalog(preserveExisting: preserve,
+                                                 resumeSnapshot: snapshot,
+                                                 detectNewHandles: detect,
+                                                 loadingRange: loadingRange,
+                                                 nextBatchSize: nextBatchSize,
+                                                 onBatch: handler)
         }
         self.resumeSnapshotProvider = { await session.scanSnapshotForResume() }
         self.prefetchBatch = { files in
@@ -240,6 +247,7 @@ final class PhotoListViewModel: ObservableObject {
         catalogUpdatesTask = nil
         newMediaHandler = nil
         isLoadingFiles = false
+        displayedFiles.removeAll()
     }
 
     func load() {
@@ -257,6 +265,7 @@ final class PhotoListViewModel: ObservableObject {
         loadGeneration &+= 1
         let generation = loadGeneration
         allFiles.removeAll(keepingCapacity: true)
+        displayedFiles.removeAll(keepingCapacity: true)
         sections.removeAll()
         hasCompletedFileScan = false
         isLoadingFiles = true
@@ -297,6 +306,7 @@ final class PhotoListViewModel: ObservableObject {
         fillResumeTask = nil
         fillWorkerActive = false
         await thumbnailFillQueue.beginScan()
+        loadingRangeScanStopped = false
         loadState = .loading
         isLoadingFiles = true
         hasCompletedFileScan = false
@@ -324,6 +334,7 @@ final class PhotoListViewModel: ObservableObject {
             // Repository returns the merged logical rows in stable display
             // order, including dual-card membership replacements.
             allFiles = result.files
+            loadingRangeScanStopped = result.stoppedAtLoadingRange
             if result.handleQueriesSucceeded {
                 storageIDsBySlot = photoStorageIDsBySlot(result.filterStorageIDs)
                 availableStorageSlots = storageIDsBySlot.keys.sorted()
@@ -333,7 +344,11 @@ final class PhotoListViewModel: ObservableObject {
                 if normalizedSlot != filter.storageSlot { filter.storageSlot = normalizedSlot }
             }
             if !result.removedHandles.isEmpty { await thumbnailFillQueue.remove(result.removedHandles) }
-            await thumbnailFillQueue.seed(allFiles, priorityRange: filter.dateRange)
+            await thumbnailFillQueue.seed(
+                allFiles,
+                priorityRange: filter.dateRange,
+                loadingRange: newestCaptureDaysRange(allFiles, days: photoLoadingRange.days)
+            )
             await reconcileCache(allFiles, result.handleQueriesSucceeded && result.metadataComplete)
             publishSections()
             loadState = .loaded
@@ -376,9 +391,17 @@ final class PhotoListViewModel: ObservableObject {
     private func publishSections() {
         // A refreshed catalog may reuse a handle for another file. Resolve
         // current file identity against the indexes, never a stale handle set.
+        let loadingRange = newestCaptureDaysRange(allFiles, days: photoLoadingRange.days)
+        let scopedFiles = loadingRange == nil
+            ? allFiles
+            : allFiles.filter { file in
+                file.captureDate == nil || loadingRange?.contains(file.captureDate) == true
+            }
+        displayedFiles = scopedFiles
+
         var extensions = Set<String>()
         var latestDay: String?
-        for file in allFiles {
+        for file in scopedFiles {
             extensions.insert(file.fileExtension.lowercased())
             if let day = validPhotoCaptureDay(file.captureDate) {
                 if let current = latestDay {
@@ -391,16 +414,16 @@ final class PhotoListViewModel: ObservableObject {
         availableFilterExtensions = extensions.sorted()
         latestKnownCaptureDay = latestDay
         transferredIDs = indexedTransferredIDs
-        availableDayKeys = Set(allFiles.map { file in
+        availableDayKeys = Set(scopedFiles.map { file in
             guard let value = file.captureDate, value.count >= 8 else { return PhotoCatalogGrouping.unknownDay }
             return String(value.prefix(8))
         })
-        burstGroups = PhotoCatalogGrouping.bursts(in: allFiles)
+        burstGroups = PhotoCatalogGrouping.bursts(in: scopedFiles)
         burstIDByFile = burstGroups.reduce(into: [:]) { result, group in
             for file in group.files { result[file.id] = group.id }
         }
         sections = PhotoCatalogGrouping.byCaptureDay(
-            PhotoFilter.apply(allFiles, state: filter,
+            PhotoFilter.apply(scopedFiles, state: filter,
                               transferredIDs: transferredIDs.subtracting(exitingTransferredFileIDs),
                               storageIDsBySlot: storageIDsBySlot),
         )
@@ -519,6 +542,38 @@ final class PhotoListViewModel: ObservableObject {
             await thumbnailFillQueue.updatePriorityRange(allFiles, range: filter.dateRange)
             await thumbnailFillQueue.retryFailed()
             startThumbnailFillWorker()
+        }
+    }
+
+    /// Persists the Android-compatible newest-shooting-day scope. Shrinking
+    /// only changes the presented set and queue admission. If an earlier
+    /// bounded scan retained a handle snapshot, widening resumes that same
+    /// snapshot instead of starting a second enumeration from the camera.
+    func setPhotoLoadingRange(_ range: PhotoLoadingRange) {
+        let previous = photoLoadingRange
+        guard previous != range else { return }
+        PhotoFilterPersistence.savePhotoLoadingRange(range)
+        photoLoadingRange = range
+        publishSections()
+        let allowed = newestCaptureDaysRange(allFiles, days: range.days)
+        Task { [weak self] in
+            guard let self else { return }
+            await thumbnailFillQueue.updateLoadingRange(allFiles, range: allowed)
+            await thumbnailFillQueue.wake()
+            let widened = previous.days > 0 && (range.days == 0 || range.days > previous.days)
+            guard widened, loadingRangeScanStopped, hasCompletedFileScan,
+                  self.scanCatalog != nil else { return }
+            loadTask?.cancel()
+            loadGeneration &+= 1
+            let generation = loadGeneration
+            let snapshot = await resumeSnapshotProvider()
+            guard !Task.isCancelled else { return }
+            loadState = .loading
+            isLoadingFiles = true
+            hasCompletedFileScan = false
+            loadTask = Task { [weak self] in
+                await self?.reload(generation: generation, resumeSnapshot: snapshot, preserve: true)
+            }
         }
     }
 

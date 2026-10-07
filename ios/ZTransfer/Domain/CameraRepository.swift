@@ -155,6 +155,9 @@ enum CameraRepositoryError: Error, Equatable, Sendable {
     /// Remote monitor owns the channel; the list must abandon its old handle
     /// snapshot and enumerate again after monitor dismissal.
     case foregroundPreempted
+    /// The camera returned DeviceBusy while the rating pass was between files.
+    /// The scan may yield and retry without treating this as a capability miss.
+    case ratingReadDeferred
 }
 
 /// Resumable handle enumeration state. Android keeps this snapshot when a
@@ -180,6 +183,9 @@ struct PhotoScanResult: Sendable {
     let handleQueriesSucceeded: Bool
     let metadataComplete: Bool
     var filterStorageIDs: [UInt32] = []
+    /// The handle snapshot is intentionally retained when a bounded photo
+    /// scan reaches an older shooting day. The next wider scope resumes it.
+    var stoppedAtLoadingRange: Bool = false
 }
 
 struct STADirectStorageLayout: Equatable, Sendable {
@@ -289,6 +295,13 @@ actor CameraRepository {
     /// Android learns this capability once and remembers an unsupported
     /// partial-object operation for the rest of the session.
     private var partialObjectSupported: Bool?
+    /// Rating capabilities are connection-scoped. A negative response for one
+    /// operation/extension must not be retried for every subsequent file, while
+    /// transient busy/denied/object errors remain retryable.
+    private var ratingUnsupportedExtensions = Set<String>()
+    private var ratingOperationUnsupported = false
+    private var ratingNikonHeaderUnsupported = false
+    private var ratingStandardHeaderUnsupported = false
     private var subjectTrackingActive = false
     private var subjectTrackingSupported: Bool?
     private let focusGate = CameraIOGate()
@@ -1183,6 +1196,144 @@ actor CameraRepository {
         }
     }
 
+    // MARK: - Nikon photo/video ratings
+
+    /// Reads Nikon's 0xDC8A object property. The operation is deliberately
+    /// kept separate from header parsing: AP/USB bodies expose this property
+    /// for JPEGs and some RAWs even when it is absent from DeviceInfo.
+    func readObjectRating(file: CameraFile) async throws -> Int? {
+        try await ioGate.withRatingTransaction(owner: "RATING") { [self] in
+            try await readObjectRatingCommand(file: file)
+        }
+    }
+
+    private func readObjectRatingCommand(file: CameraFile) async throws -> Int? {
+        if ratingOperationUnsupported || ratingUnsupportedExtensions.contains(file.fileExtension) {
+            return nil
+        }
+        let response = try await session.executeResponse(
+            operation: PTPConstants.getObjectPropValue,
+            parameters: [file.id, PTPConstants.objectPropRating]
+        )
+        switch response.code {
+        case PTPConstants.responseOK:
+            return parseNikonObjectRating(response.data)
+        case PTPConstants.operationNotSupported:
+            ratingOperationUnsupported = true
+            return nil
+        case 0xA80A, 0xA801:
+            ratingUnsupportedExtensions.insert(file.fileExtension)
+            return nil
+        case PTPConstants.deviceBusy:
+            throw CameraRepositoryError.ratingReadDeferred
+        default:
+            // Permission/object errors do not prove persistent lack of
+            // support; the next file may still expose the property.
+            return nil
+        }
+    }
+
+    /// AP/USB list path: JPEG uses the object property; a RAW property miss
+    /// latches that extension and immediately falls back to its verified
+    /// embedded header. Subsequent RAWs skip the doomed property probe.
+    func readObjectOrRawHeaderRating(file: CameraFile) async throws -> Int? {
+        let isRaw = file.fileExtension == ".nef" || file.fileExtension == ".nrw"
+        guard isRaw else { return try await readObjectRating(file: file) }
+        if ratingUnsupportedExtensions.contains(file.fileExtension) {
+            return try await readPhotoRatingHeader(file: file)
+        }
+        let objectValue = try await readObjectRating(file: file)
+        if objectValue != nil { return objectValue }
+        ratingUnsupportedExtensions.insert(file.fileExtension)
+        return try await readPhotoRatingHeader(file: file)
+    }
+
+    /// Reads at most 100 KiB first, then contiguous 8 KiB extensions up to
+    /// 256 KiB. Each extension is appended to the retained prefix so a rating
+    /// field split at a boundary is parsed without downloading the first block
+    /// a second time. Nikon's 0x9431 is preferred, with standard 0x101B as the
+    /// connection-scoped fallback when the camera explicitly rejects it.
+    func readPhotoRatingHeader(file: CameraFile) async throws -> Int? {
+        try await ioGate.withRatingTransaction(owner: "RATING") { [self] in
+            try await readPhotoRatingHeaderCommand(file: file)
+        }
+    }
+
+    private func readPhotoRatingHeaderCommand(file: CameraFile) async throws -> Int? {
+        let firstLimit = 100 * 1024
+        let extensionSize = 8 * 1024
+        let maximum = 256 * 1024
+        var bytes = try await readRatingChunk(file: file, offset: 0, count: firstLimit)
+        guard bytes.count <= firstLimit else { return nil }
+        var rating = parsePhotoRating(bytes)
+        while rating == nil && bytes.count < maximum {
+            let count = min(extensionSize, maximum - bytes.count)
+            let tail = try await readRatingChunk(file: file, offset: UInt64(bytes.count), count: count)
+            guard !tail.isEmpty, tail.count <= count else { break }
+            bytes.append(tail)
+            rating = parsePhotoRating(bytes)
+        }
+        return rating
+    }
+
+    /// The NCTG field may live in a small atom near the front or in a tail
+    /// `moov`; the structural reader requests only the missing 8 KiB windows
+    /// and caps the total remote windows at 32.
+    func readVideoRating(file: CameraFile) async throws -> Int? {
+        try await readNikonVideoRatingThrowing(fileSize: file.size) { [self] offset, count in
+            try await ioGate.withRatingTransaction(owner: "RATING") {
+                try await readRatingChunk(file: file, offset: offset, count: count)
+            }
+        }
+    }
+
+    /// Clears connection-scoped rating capability latches. Connections are
+    /// normally represented by a fresh repository, but reconnect paths may
+    /// explicitly reuse one while rebuilding its PTP session.
+    func resetRatingCapabilityState() {
+        ratingUnsupportedExtensions.removeAll()
+        ratingOperationUnsupported = false
+        ratingNikonHeaderUnsupported = false
+        ratingStandardHeaderUnsupported = false
+    }
+
+    /// Must be called while the rating gate is held. The response code is
+    /// preserved so capability state distinguishes unsupported from transient
+    /// busy/error responses exactly as the Android path does.
+    private func readRatingChunk(file: CameraFile, offset: UInt64, count: Int) async throws -> Data {
+        guard count > 0, count <= Int(UInt32.max), offset <= UInt64.max - UInt64(count) else { return Data() }
+        if !ratingNikonHeaderUnsupported {
+            let response = try await session.executeResponse(
+                operation: PTPConstants.getPartialObjectEx,
+                parameters: [file.id, UInt32(truncatingIfNeeded: offset),
+                              UInt32(truncatingIfNeeded: offset >> 32), UInt32(count), 0]
+            )
+            if response.code == PTPConstants.responseOK {
+                return response.data
+            }
+            if response.code == PTPConstants.deviceBusy {
+                throw CameraRepositoryError.ratingReadDeferred
+            }
+            if response.code != PTPConstants.operationNotSupported {
+                return Data()
+            }
+            ratingNikonHeaderUnsupported = true
+        }
+        guard !ratingStandardHeaderUnsupported, offset <= UInt64(UInt32.max) else { return Data() }
+        let response = try await session.executeResponse(
+            operation: PTPConstants.getPartialObject,
+            parameters: [file.id, UInt32(offset), UInt32(count)]
+        )
+        if response.code == PTPConstants.deviceBusy {
+            throw CameraRepositoryError.ratingReadDeferred
+        }
+        if response.code == PTPConstants.operationNotSupported {
+            ratingStandardHeaderUnsupported = true
+            return Data()
+        }
+        return response.code == PTPConstants.responseOK ? response.data : Data()
+    }
+
     func download(handle: UInt32, size: UInt64, fileName: String,
                   captureDate: String? = nil, to directory: URL,
                   progress: (@Sendable (Double) -> Void)? = nil,
@@ -1441,6 +1592,7 @@ actor CameraRepository {
         preserveExisting: Bool = false,
         resumeSnapshot: PhotoScanSnapshot? = nil,
         detectNewHandles: Bool = false,
+        loadingRange: PhotoLoadingRange = .all,
         nextBatchSize: @escaping @Sendable () async -> Int = { 12 },
         onBatch: (@Sendable ([CameraFile]) async throws -> Void)? = nil
     ) async throws -> PhotoScanResult {
@@ -1644,6 +1796,7 @@ actor CameraRepository {
         // accepted section; marking it when ObjectInfo returns would skip rows
         // if the UI callback is cancelled or the session generation changes.
         var pendingProcessedHandles: [UInt32] = []
+        var stoppedAtLoadingRange = false
         while mergeState.completed < totalCatalogHandles {
             try Task.checkCancellation()
             try await waitForForegroundPreview()
@@ -1681,8 +1834,20 @@ actor CameraRepository {
             pendingProcessedHandles += merged.processed
             let output = merged.files
             if output.isEmpty { continue }
-            for rawFile in output {
-                let file = replacingStorageIDs(rawFile, with: directStorageIDsByHandle[rawFile.id] ?? [])
+            let parsedOutput = output.map { rawFile in
+                replacingStorageIDs(rawFile, with: directStorageIDsByHandle[rawFile.id] ?? [])
+            }
+            let rangeInput = files + parsedOutput
+            let observedDays = Set(rangeInput.compactMap { validPhotoCaptureDay($0.captureDate) })
+            let boundaryReached = loadingRange.days > 0 && observedDays.count > loadingRange.days
+            let allowedRange = newestCaptureDaysRange(rangeInput, days: loadingRange.days)
+            let acceptedOutput = boundaryReached && allowedRange != nil
+                ? parsedOutput.filter { file in
+                    file.captureDate == nil || allowedRange?.contains(file.captureDate) == true
+                }
+                : parsedOutput
+            let acceptedIDs = Set(acceptedOutput.map(\.id))
+            for file in acceptedOutput {
                 let key = logicalIdentity(file)
                 indexed[file.id] = file
                 if let old = byIdentity[key] {
@@ -1711,15 +1876,32 @@ actor CameraRepository {
             catalogFiles = Dictionary(files.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             indexedCatalogFiles = indexed
             catalogOrder = files.map(\.id)
+            if boundaryReached {
+                // Preserve the first batch crossing the boundary for the
+                // next wider scan. Accepted rows are committed; the tail is
+                // deliberately left unprocessed in the snapshot.
+                let acceptedProcessed = pendingProcessedHandles.filter { acceptedIDs.contains($0) }
+                scanSnapshot?.processedHandles.formUnion(acceptedProcessed)
+                stoppedAtLoadingRange = true
+                catalogFiles = Dictionary(files.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+                indexedCatalogFiles = indexed
+                catalogOrder = files.map(\.id)
+                catalogReady = metadataComplete && handleQueriesSucceeded
+                lastCatalogCheck = .now
+                publishCatalog()
+                break
+            }
             scanSnapshot?.processedHandles.formUnion(pendingProcessedHandles)
             batch.removeAll(keepingCapacity: true)
             pendingProcessedHandles.removeAll(keepingCapacity: true)
         }
-        if !batch.isEmpty { try await onBatch?(batch) }
+        if !stoppedAtLoadingRange, !batch.isEmpty { try await onBatch?(batch) }
         // The final partial batch is accepted only after its callback returns;
         // duplicate logical rows may have no UI addition but still count as
         // consumed handles in the resumable Android snapshot.
-        scanSnapshot?.processedHandles.formUnion(pendingProcessedHandles)
+        if !stoppedAtLoadingRange {
+            scanSnapshot?.processedHandles.formUnion(pendingProcessedHandles)
+        }
         try Task.checkCancellation()
         catalogFiles = Dictionary(files.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         indexedCatalogFiles = indexed
@@ -1734,13 +1916,14 @@ actor CameraRepository {
         }
         catalogReady = metadataComplete && handleQueriesSucceeded
         lastCatalogCheck = .now
-        if catalogReady { scanSnapshot = nil }
+        if catalogReady && !stoppedAtLoadingRange { scanSnapshot = nil }
         publishCatalog()
         return PhotoScanResult(files: files, removedHandles: removedHandles,
                                addedHandles: addedHandles,
                                handleQueriesSucceeded: handleQueriesSucceeded,
                                metadataComplete: metadataComplete,
-                               filterStorageIDs: filterStorageIDs)
+                               filterStorageIDs: filterStorageIDs,
+                               stoppedAtLoadingRange: stoppedAtLoadingRange)
     }
 
     private func logicalIdentity(_ file: CameraFile) -> String {
