@@ -4,6 +4,39 @@ import XCTest
 #endif
 
 final class PhotoThumbnailStoreTests: XCTestCase {
+    func testEnhancedSTAJpegRejectsEveryOldCacheRouteAndReusesNewEntry() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let disk = PhotoThumbnailDiskCache(root: root)
+        let file = CameraFile(id: 42, storageID: 1, format: 0x3801, size: 123,
+                              fileName: "DSC_0042.JPG", captureDate: "20261001T120000", isProtected: false)
+        let camera = disk.openCamera(identity: "jpeg-quality")
+        for key in [
+            PhotoThumbnailDiskCache.staCacheFileName(handle: file.id, size: file.size),
+            PhotoThumbnailDiskCache.cacheFileName(fileName: file.fileName, size: file.size, captureDate: file.captureDate),
+            PhotoThumbnailDiskCache.legacyCacheFileName(fileName: file.fileName, size: file.size, captureDate: file.captureDate)
+        ] { XCTAssertTrue(camera.write(Data([1]), as: key)) }
+        let store = PhotoThumbnailStore(disk: disk)
+        let oldHit = try await store.load(file: file, identity: "jpeg-quality", directSTA: true, allowRemote: false) {
+            XCTFail("Cache-only lookup cannot read the camera")
+            return Data()
+        }
+        XCTAssertNil(oldHit)
+        let calls = LockedCounter()
+        let filled = try await store.prefetch(file: file, identity: "jpeg-quality", directSTA: true) {
+            calls.increment()
+            return Data([2, 3])
+        }
+        XCTAssertTrue(filled)
+        XCTAssertEqual(calls.value, 1)
+        let relaunched = PhotoThumbnailStore(disk: disk)
+        let reused = try await relaunched.load(file: file, identity: "jpeg-quality", directSTA: true, allowRemote: true) {
+            XCTFail("New quality key must survive relaunch")
+            return Data()
+        }
+        XCTAssertEqual(reused, Data([2, 3]))
+    }
+
     func testSequentialSTAIncludesNEFAndRejectsBadDiskAndRemoteBytes() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

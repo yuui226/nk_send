@@ -72,6 +72,13 @@ struct TransferQueueItem: Identifiable, Equatable, Sendable {
     var frameGenerationElapsedMs: Int64?
     var frameURL: URL?
     var frameError: String?
+    var metadataSourceBound = false
+    var metadataCameraIdentity: PhotoMetadataCameraIdentity?
+    var sourceMetadataSnapshot: PhotoFrameMetadata?
+    /// Optional lossless crop captured from the preview; the original transfer
+    /// is published first, then the derived JPEG is generated beside it.
+    var cropTask: LosslessCropTask?
+    var cropURL: URL?
 
 
 }
@@ -174,6 +181,8 @@ protocol TransferDownloading: Sendable {
     func downloadResult(file: CameraFile, to directory: URL, captureHeader: Bool,
                         progress: (@Sendable (TransferDownloadProgress) -> Void)?) async throws -> CameraDownloadResult
     func frameMetadataHeader(file: CameraFile) async throws -> Data?
+    func photoMetadataIdentity() async -> PhotoMetadataCameraIdentity?
+    func frameMetadataHeader(file: CameraFile, expectedSource: PhotoMetadataCameraIdentity?) async throws -> Data?
 }
 
 extension CameraSession: TransferDownloading {}
@@ -181,6 +190,12 @@ extension CameraSession: TransferDownloading {}
 extension TransferDownloading {
     var allowsBackgroundTransferContinuation: Bool { true }
     func frameMetadataHeader(file: CameraFile) async throws -> Data? { nil }
+    func photoMetadataIdentity() async -> PhotoMetadataCameraIdentity? { nil }
+    func frameMetadataHeader(file: CameraFile, expectedSource: PhotoMetadataCameraIdentity?) async throws -> Data? {
+        // Legacy/test downloaders cannot prove a reconnected source identity.
+        guard expectedSource == nil else { return nil }
+        return try await frameMetadataHeader(file: file)
+    }
 
     func downloadResult(file: CameraFile, to directory: URL, captureHeader: Bool,
                         progress: (@Sendable (TransferDownloadProgress) -> Void)?) async throws -> CameraDownloadResult {
@@ -239,17 +254,7 @@ struct PendingTransferQueue {
 /// Android treats an already exported original as a completed, skipped task.
 /// Keeping this check separate makes the rule deterministic and unit-testable.
 func existingTransferDestination(for file: CameraFile, in directory: URL) -> URL? {
-    guard let entries = try? FileManager.default.contentsOfDirectory(
-        at: directory, includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey]
-    ) else { return nil }
-    let expectedName = exportedOriginalBaseName(file.fileName).lowercased()
-    return entries.first { candidate in
-        let values = try? candidate.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
-        guard values?.isRegularFile == true,
-              exportedOriginalBaseName(candidate.lastPathComponent).lowercased() == expectedName else { return false }
-        guard file.size == UInt64(UInt32.max) else { return values?.fileSize.map { UInt64($0) } == Optional(file.size) }
-        return true
-    }
+    TransferDirectoryIndex.scan(directory: directory).existingOriginal(for: file)
 }
 
 /// Resolves the exact Android destination: root when the option is off, or a
@@ -293,7 +298,15 @@ actor TransferQueue {
     private var session: (any TransferDownloading)?
     private var directory: URL?
     private var invalidatedDirectory: URL?
-    private var frameMetadataCache: [UInt32: PhotoFrameMetadata] = [:]
+    private struct MetadataKey: Hashable {
+        let source: URL
+        let camera: String?
+        let handle: UInt32
+        let size: UInt64
+        let name: String
+        let captureDate: String?
+    }
+    private var frameMetadataCache: [MetadataKey: PhotoFrameMetadata] = [:]
     private var continuations: [UUID: AsyncStream<TransferQueueSnapshot>.Continuation] = [:]
     private var progressContinuations: [UUID: AsyncStream<TransferActiveProgress?>.Continuation] = [:]
     private var activeProgress: TransferActiveProgress?
@@ -358,6 +371,16 @@ actor TransferQueue {
     }
 
     @discardableResult
+    func enqueueCrop(_ file: CameraFile, task: LosslessCropTask,
+                     organizeByDate: Bool = false, effects: PhotoEffectsSettings? = nil) -> UUID? {
+        let effects = effects.map { effectivePhotoEffectsSettings($0, isPro: premiumAccess.isPro) }
+        let item = TransferQueueItem(id: UUID(), file: file,
+                                     destinationFolderName: organizeByDate ? transferDateFolderName(file.captureDate) : nil,
+                                     effects: effects, cropTask: task)
+        items.append(item); pending.append(item.id); publish(); return item.id
+    }
+
+    @discardableResult
     func enqueue(_ files: [CameraFile], organizeByDate: Bool = false,
                  effects: PhotoEffectsSettings? = nil) -> [UUID] {
         // User-confirmed P05: all files in this enqueue share the effective
@@ -379,16 +402,18 @@ actor TransferQueue {
     }
 
     @discardableResult
-    func enqueueAutomatic(_ file: CameraFile, organizeByDate: Bool = false,
+    func enqueueAutomatic(_ file: CameraFile, mode: AutoTransferMode = .all, organizeByDate: Bool = false,
                           effects: PhotoEffectsSettings? = nil) -> UUID? {
-        enqueueAutomatic([file], organizeByDate: organizeByDate, effects: effects).first
+        enqueueAutomatic([file], mode: mode, organizeByDate: organizeByDate, effects: effects).first
     }
 
     @discardableResult
-    func enqueueAutomatic(_ files: [CameraFile], organizeByDate: Bool = false,
+    func enqueueAutomatic(_ files: [CameraFile], mode: AutoTransferMode = .all, organizeByDate: Bool = false,
                           effects: PhotoEffectsSettings? = nil) -> [UUID] {
         var identities = Set(items.map { automaticIdentity(for: $0.file) })
-        let candidates = files.filter { identities.insert(automaticIdentity(for: $0)).inserted }
+        let candidates = files.filter {
+            mode.accepts($0.fileName) && identities.insert(automaticIdentity(for: $0)).inserted
+        }
         return enqueue(candidates, organizeByDate: organizeByDate, effects: effects)
     }
 
@@ -540,7 +565,12 @@ actor TransferQueue {
             id: UUID(), file: old.file,
             outputURL: old.outputURL,
             destinationFolderName: old.destinationFolderName,
-            effects: old.effects
+            effects: old.effects,
+            metadataSourceBound: old.metadataSourceBound,
+            metadataCameraIdentity: old.metadataCameraIdentity,
+            sourceMetadataSnapshot: old.sourceMetadataSnapshot,
+            cropTask: old.cropTask,
+            cropURL: old.cropURL
         )
         items[index] = replacement
         pending.append(replacement.id)
@@ -586,7 +616,12 @@ actor TransferQueue {
                 id: UUID(), file: old.file,
                 outputURL: old.outputURL,
                 destinationFolderName: old.destinationFolderName,
-                effects: old.effects
+                effects: old.effects,
+                metadataSourceBound: old.metadataSourceBound,
+                metadataCameraIdentity: old.metadataCameraIdentity,
+                sourceMetadataSnapshot: old.sourceMetadataSnapshot,
+                cropTask: old.cropTask,
+                cropURL: old.cropURL
             )
             pending.append(items[index].id)
             replacements = true
@@ -640,11 +675,22 @@ actor TransferQueue {
                 guard isWaiting(itemID) else { continue }
                 try Task.checkCancellation()
                 if let destination = directoryIndexes[destinationDirectory]?.existingOriginal(for: task.file) {
+                    var derivedSource = destination
+                    var croppedOutput: URL?
+                    if let cropTask = task.cropTask {
+                        if let saved = task.cropURL, FileManager.default.fileExists(atPath: saved.path) {
+                            derivedSource = saved; croppedOutput = saved
+                        } else if let cropped = try? LosslessCropProcessor.process(task: cropTask, sourceURL: destination, directory: destinationDirectory) {
+                            derivedSource = cropped; croppedOutput = cropped
+                            LosslessCropTaskStore().remove(fileID: task.file.id)
+                        }
+                    }
                     let effects = task.effects.flatMap { $0.hasEffect && Self.supportsRenderedOutput(task.file.fileExtension) ? $0 : nil }
+                    let sourceForEffects = derivedSource
                     let existingFrame: URL?
                     if let effects {
                         existingFrame = await Task.detached(priority: .utility) {
-                            Self.existingFrameURL(source: destination, settings: effects, in: destinationDirectory)
+                            Self.existingFrameURL(source: sourceForEffects, settings: effects, in: destinationDirectory)
                         }.value
                     } else { existingFrame = nil }
                     guard isWaiting(itemID) else { continue }
@@ -657,9 +703,10 @@ actor TransferQueue {
                     items[index].elapsedMs = nil
                     items[index].skipped = effects == nil || existingFrame != nil
                     items[index].outputURL = destination
+                    items[index].cropURL = croppedOutput
                     items[index].frameURL = existingFrame
                     if let effects, existingFrame == nil {
-                        await startFrameGeneration(for: itemID, source: destination, file: task.file, settings: effects,
+                        await startFrameGeneration(for: itemID, source: derivedSource, file: task.file, settings: effects,
                                                    in: destinationDirectory, failTaskOnError: true)
                     }
                     publish()
@@ -738,6 +785,19 @@ actor TransferQueue {
                 // The original is committed. Derived rendering failure must
                 // not undo this count or count its offline retry a second time.
                 freeUsage.recordTransfer(id: itemID, isPro: premiumAccess.isPro)
+                var derivedSource = output
+                var croppedOutput: URL?
+                if let cropTask = task.cropTask {
+                    do {
+                        let cropped = try await Task.detached(priority: .utility) {
+                            try LosslessCropProcessor.process(task: cropTask, sourceURL: output, directory: destinationDirectory)
+                        }.value
+                        derivedSource = cropped; croppedOutput = cropped
+                        LosslessCropTaskStore().remove(fileID: task.file.id)
+                    } catch {
+                        // Keep the original published; the crop task remains for retry.
+                    }
+                }
                 if let index = items.firstIndex(where: { $0.id == itemID }) {
                     items[index].status = .completed
                     items[index].progress = 1
@@ -748,11 +808,13 @@ actor TransferQueue {
                     )) / (1024 * 1024)
                     items[index].elapsedMs = elapsed
                     items[index].outputURL = output
+                    items[index].cropURL = croppedOutput
                     if let effects = task.effects, effects.hasEffect, Self.supportsRenderedOutput(task.file.fileExtension) {
                         await startFrameGeneration(
-                            for: itemID, source: output, file: task.file, settings: effects, in: destinationDirectory,
+                            for: itemID, source: derivedSource, file: task.file, settings: effects, in: destinationDirectory,
                             metadata: result.headerPrefix.flatMap(PhotoFrameMetadata.cameraSnapshot),
-                            allowCameraMetadataRead: result.bytes > result.transferredBytes
+                            allowCameraMetadataRead: result.bytes > result.transferredBytes,
+                            sourceCamera: session
                         )
                     }
                     publish()
@@ -854,7 +916,8 @@ actor TransferQueue {
     /// and queued renders, without delaying subsequent original downloads.
     private func startFrameGeneration(for id: UUID, source: URL, file: CameraFile, settings: PhotoEffectsSettings,
                                       in directory: URL, failTaskOnError: Bool = false,
-                                      metadata: PhotoFrameMetadata? = nil, allowCameraMetadataRead: Bool = true) async {
+                                      metadata: PhotoFrameMetadata? = nil, allowCameraMetadataRead: Bool = true,
+                                      sourceCamera: (any TransferDownloading)? = nil) async {
         guard frameJobs[id] == nil, let index = items.firstIndex(where: { $0.id == id }) else { return }
         let started = ContinuousClock.now
         items[index].isGeneratingFrame = true
@@ -862,10 +925,24 @@ actor TransferQueue {
         items[index].frameGenerationElapsedMs = nil
         items[index].frameError = nil
         publish()
-        var cameraMetadata = frameMetadataCache[file.id] ?? metadata
+        // Retain the source object across suspension: attach() may replace
+        // the queue's current camera while this preparation is waiting.
+        let camera = sourceCamera ?? session
+        let currentIdentity = await camera?.photoMetadataIdentity()
+        guard let currentIndex = items.firstIndex(where: { $0.id == id && $0.isGeneratingFrame }) else { return }
+        let wasBound = items[currentIndex].metadataSourceBound
+        let expectedIdentity = wasBound ? items[currentIndex].metadataCameraIdentity : currentIdentity
+        items[currentIndex].metadataSourceBound = true
+        items[currentIndex].metadataCameraIdentity = expectedIdentity
+        let key = MetadataKey(source: source, camera: expectedIdentity?.camera,
+                              handle: file.id, size: file.size, name: file.fileName, captureDate: file.captureDate)
+        let sourceMatches = expectedIdentity.map { $0.camera == currentIdentity?.camera }
+            ?? (!wasBound && currentIdentity == nil)
+        var cameraMetadata = items[currentIndex].sourceMetadataSnapshot ?? frameMetadataCache[key]
+            ?? (sourceMatches ? metadata : nil)
         if cameraMetadata == nil && allowCameraMetadataRead && Self.needsCameraMetadata(settings, file: file) {
             do {
-                if let header = try await session?.frameMetadataHeader(file: file) {
+                if sourceMatches, let header = try await camera?.frameMetadataHeader(file: file, expectedSource: expectedIdentity) {
                     cameraMetadata = await Task.detached(priority: .utility) {
                         PhotoFrameMetadata.cameraSnapshot(header)
                     }.value
@@ -879,7 +956,12 @@ actor TransferQueue {
             } catch { /* Android: header failure only affects the derivative. */ }
         }
         guard items.contains(where: { $0.id == id && $0.isGeneratingFrame }) else { return }
-        if let cameraMetadata { frameMetadataCache[file.id] = cameraMetadata }
+        if let cameraMetadata {
+            frameMetadataCache[key] = cameraMetadata
+            if let currentIndex = items.firstIndex(where: { $0.id == id }) {
+                items[currentIndex].sourceMetadataSnapshot = cameraMetadata
+            }
+        }
         frameJobs[id] = FrameJob(id: id, source: source, settings: settings, directory: directory,
                                  metadata: cameraMetadata, failTaskOnError: failTaskOnError, started: started)
         pendingFrames.append(id)

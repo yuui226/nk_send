@@ -61,6 +61,18 @@ func photoEffectsFilterTileRows(sourceWidth: Int) -> Int {
 /// Native renderer following PhotoFrameExporter.kt's ordered pipeline.
 /// Source -> NP3 filter -> frame backdrop/photo -> metadata/watermark.
 enum PhotoEffectsRenderer {
+    static func renderWithResolvedPlace(_ image: UIImage, settings: PhotoEffectsSettings,
+                                        metadata: PhotoFrameMetadata?, placeResolver: PhotoFramePlaceResolver,
+                                        previewPlaceholders: Bool = false, backdropSource: UIImage? = nil,
+                                        previewLongEdge: CGFloat? = nil) async throws -> UIImage {
+        try Task.checkCancellation()
+        let enriched: PhotoFrameMetadata?
+        if let metadata { enriched = await placeResolver.enriching(metadata) } else { enriched = nil }
+        try Task.checkCancellation()
+        return try render(image, settings: settings, metadata: enriched,
+                          previewPlaceholders: previewPlaceholders, backdropSource: backdropSource,
+                          previewLongEdge: previewLongEdge)
+    }
     private struct Layout {
         var canvas: CGSize
         var photo: CGRect
@@ -140,6 +152,14 @@ enum PhotoEffectsRenderer {
     }
 
     private static func applyFilter(_ image: UIImage, selection: PhotoFilterSelection) throws -> UIImage {
+        if selection.preset.id.hasPrefix("cube:") {
+            guard let table = PhotoLUTRuntime.table(digest: String(selection.preset.id.dropFirst(5))),
+                  let source = processingCGImage(image),
+                  let filtered = PhotoCubeLUTMapper.apply(source, lut: table, intensityPercent: selection.normalizedIntensityPercent) else {
+                throw PhotoEffectsRenderError.unknownFilter
+            }
+            return UIImage(cgImage: filtered, scale: image.scale, orientation: image.imageOrientation)
+        }
         guard let preset = Np3FilterCatalog.preset(id: selection.preset.id) else {
             throw PhotoEffectsRenderError.unknownFilter
         }
@@ -164,8 +184,8 @@ enum PhotoEffectsRenderer {
                                        previewLongEdge: CGFloat?) throws -> UIImage {
         let sourceSize = imagePixelSize(image)
         let layout = previewLongEdge.map {
-            makePreviewLayout(sourceSize, preset: settings.photoFramePreset, longEdge: $0)
-        } ?? makeLayout(sourceSize, preset: settings.photoFramePreset)
+            makePreviewLayout(sourceSize, preset: settings.photoFramePreset, longEdge: $0, widthPercent: settings.metadata.widthPercent)
+        } ?? makeLayout(sourceSize, preset: settings.photoFramePreset, widthPercent: settings.metadata.widthPercent)
         let decorationImage = try settings.photoFramePreset == .colorArchive
             ? filteredPalettePreview(image, selection: tiledFilter) : image
         let format = UIGraphicsImageRendererFormat()
@@ -174,7 +194,9 @@ enum PhotoEffectsRenderer {
         var renderError: Error?
         let rendered = UIGraphicsImageRenderer(size: layout.canvas, format: format).image { renderer in
             let cg = renderer.cgContext
-            drawBackdrop(cg, image: backdropImage, layout: layout, preset: settings.photoFramePreset)
+            drawBackdrop(cg, image: backdropImage, layout: layout, preset: settings.photoFramePreset,
+                         blurPercent: settings.metadata.backgroundBlurPercent,
+                         maskPercent: settings.metadata.backgroundMaskPercent)
             if Task.isCancelled {
                 renderError = CancellationError()
                 return
@@ -252,7 +274,7 @@ enum PhotoEffectsRenderer {
 
     // MARK: Layout (ratios ported from PhotoFrameExporter.kt)
 
-    private static func makeLayout(_ source: CGSize, preset: PhotoFramePreset) -> Layout {
+    private static func makeLayout(_ source: CGSize, preset: PhotoFramePreset, widthPercent: Int = 100) -> Layout {
         let w = max(source.width, 1), h = max(source.height, 1), aspect = w / h
         let px: (CGFloat) -> CGFloat = { max(1, $0.rounded()) }
         switch preset {
@@ -262,27 +284,29 @@ enum PhotoEffectsRenderer {
         case .immersive:
             return Layout(canvas: source, photo: CGRect(origin: .zero, size: source), metadataTop: h)
         case .brandInset, .brandGallery:
-            let side = px(w * 0.032)
-            let bottom = px(w * (preset == .brandInset ? 0.032 : 0.16))
+            let frameScale = CGFloat(normalizePhotoFrameWidthPercent(widthPercent)) / 100
+            let side = px(w * 0.032 * frameScale)
+            let bottom = px(w * (preset == .brandInset ? 0.032 : 0.16) * frameScale)
             return Layout(canvas: CGSize(width: w + side * 2, height: h + side + bottom),
                           photo: CGRect(x: side, y: side, width: w, height: h), metadataTop: side + h)
         case .classicSignature, .galleryMat, .colorArchive, .filmGallery, .filmEdge:
+            let frameScale = CGFloat(normalizePhotoFrameWidthPercent(widthPercent)) / 100
             switch preset {
             case .classicSignature:
-                let side = px(w * 0.03), top = px(w * 0.095), bottom = px(w * 0.15)
+                let side = px(w * 0.03 * frameScale), top = px(w * 0.095 * frameScale), bottom = px(w * 0.15 * frameScale)
                 return Layout(canvas: CGSize(width: w + side * 2, height: h + top + bottom), photo: CGRect(x: side, y: top, width: w, height: h), metadataTop: top + h)
             case .galleryMat:
                 let (wf, hf): (CGFloat, CGFloat) = aspect > 1.08 ? (0.80, 0.56) : aspect < 0.92 ? (0.56, 0.80) : (0.68, 0.68)
-                let side = max(w / wf, h / hf), left = (side - w) / 2, top = (side - h) * 0.45
+                let side = max(w / wf, h / hf) * frameScale, left = (side - w) / 2, top = (side - h) * 0.45
                 return Layout(canvas: CGSize(width: side, height: side), photo: CGRect(x: left, y: top, width: w, height: h), metadataTop: top + h)
             case .colorArchive:
-                let side = px(w * 0.04), top = px(w * 0.04), bottom = px(w * 0.17)
+                let side = px(w * 0.04 * frameScale), top = px(w * 0.04 * frameScale), bottom = px(w * 0.17 * frameScale)
                 return Layout(canvas: CGSize(width: w + side * 2, height: h + top + bottom), photo: CGRect(x: side, y: top, width: w, height: h), metadataTop: top + h)
             case .filmGallery:
-                let side = px(w * 0.085), top = px(w * 0.16), bar = px(w * 0.09), bottom = px(w * 0.34)
+                let side = px(w * 0.085 * frameScale), top = px(w * 0.16 * frameScale), bar = px(w * 0.09 * frameScale), bottom = px(w * 0.34 * frameScale)
                 return Layout(canvas: CGSize(width: w + side * 2, height: h + top + bar * 2 + bottom), photo: CGRect(x: side, y: top + bar, width: w, height: h), metadataTop: top + bar + h + bar)
             case .filmEdge:
-                let side = px(w * 0.07), top = px(w * 0.035), bottom = px(w * 0.085)
+                let side = px(w * 0.07 * frameScale), top = px(w * 0.035 * frameScale), bottom = px(w * 0.085 * frameScale)
                 return Layout(canvas: CGSize(width: w + side * 2, height: h + top + bottom), photo: CGRect(x: side, y: top, width: w, height: h), metadataTop: top + h)
             default: fatalError()
             }
@@ -296,7 +320,7 @@ enum PhotoEffectsRenderer {
     /// export layout above: preview may scale the decoded source, while export
     /// always preserves every source pixel at 1:1 inside the decoration.
     private static func makePreviewLayout(
-        _ source: CGSize, preset: PhotoFramePreset, longEdge: CGFloat
+        _ source: CGSize, preset: PhotoFramePreset, longEdge: CGFloat, widthPercent: Int = 100
     ) -> Layout {
         let w = max(source.width, 1), h = max(source.height, 1)
         let target = max(longEdge.rounded(), 1)
@@ -364,8 +388,9 @@ enum PhotoEffectsRenderer {
             return Layout(canvas: canvas, photo: CGRect(origin: .zero, size: canvas),
                           metadataTop: canvas.height)
         case .brandInset, .brandGallery:
-            let sideRatio: CGFloat = 0.032
-            let bottomRatio: CGFloat = preset == .brandInset ? 0.032 : 0.16
+            let frameScale = CGFloat(normalizePhotoFrameWidthPercent(widthPercent)) / 100
+            let sideRatio: CGFloat = 0.032 * frameScale
+            let bottomRatio: CGFloat = (preset == .brandInset ? 0.032 : 0.16) * frameScale
             let compositeWidth = w * (1 + sideRatio * 2)
             let compositeHeight = h + w * (sideRatio + bottomRatio)
             let scale = min(target / compositeWidth, target / compositeHeight)
@@ -380,7 +405,7 @@ enum PhotoEffectsRenderer {
                 metadataTop: side + photoHeight
             )
         case .classicSignature, .galleryMat, .colorArchive, .filmGallery, .filmEdge:
-            let original = makeLayout(source, preset: preset)
+            let original = makeLayout(source, preset: preset, widthPercent: widthPercent)
             return scaleLayout(original, target / max(original.canvas.width, original.canvas.height), false)
         }
     }
@@ -421,13 +446,14 @@ enum PhotoEffectsRenderer {
 
     // MARK: Backdrops and photo layer
 
-    private static func drawBackdrop(_ cg: CGContext, image: UIImage, layout: Layout, preset: PhotoFramePreset) {
+    private static func drawBackdrop(_ cg: CGContext, image: UIImage, layout: Layout, preset: PhotoFramePreset,
+                                     blurPercent: Int = 100, maskPercent: Int = 100) {
         let rect = CGRect(origin: .zero, size: layout.canvas)
         switch preset {
         case .minimal:
             drawGradient(cg, rect: rect, top: UIColor(red: 0.98, green: 0.976, blue: 0.969, alpha: 1), bottom: UIColor(red: 0.937, green: 0.929, blue: 0.91, alpha: 1))
         case .mist, .cinema, .frosted, .filmGallery:
-            let bg = blurredBackground(image, size: layout.canvas)
+            let bg = blurredBackground(image, size: layout.canvas, blurPercent: blurPercent)
             bg.draw(in: rect)
             if preset == .mist {
                 cg.setFillColor(UIColor(red: 0.93, green: 0.95, blue: 0.97, alpha: 62.0 / 255.0).cgColor); cg.fill(rect)
@@ -449,6 +475,11 @@ enum PhotoEffectsRenderer {
                 cg.setFillColor(UIColor(red: 18.0 / 255.0, green: 12.0 / 255.0, blue: 10.0 / 255.0, alpha: 66.0 / 255.0).cgColor); cg.fill(rect)
                 drawGradient(cg, rect: CGRect(x: 0, y: rect.height * 0.48, width: rect.width, height: rect.height * 0.52),
                              top: UIColor(white: 0, alpha: 0), bottom: UIColor(red: 15.0 / 255.0, green: 10.0 / 255.0, blue: 8.0 / 255.0, alpha: 92.0 / 255.0))
+            }
+            if maskPercent < 100 {
+                let mask = CGFloat(normalizePhotoFrameBackdropPercent(maskPercent)) / 200
+                cg.setFillColor(UIColor.black.withAlphaComponent(mask).cgColor)
+                cg.fill(rect)
             }
         case .plaque, .brandInset, .brandGallery, .classicSignature, .galleryMat, .colorArchive:
             cg.setFillColor(UIColor(red: 0.992, green: 0.992, blue: 0.988, alpha: 1).cgColor); cg.fill(rect)
@@ -624,7 +655,7 @@ enum PhotoEffectsRenderer {
         cg.draw(proxyCG, in: CGRect(origin: .zero, size: canvasSize), byTiling: false)
     }
 
-    private static func blurredBackground(_ image: UIImage, size: CGSize) -> UIImage {
+    private static func blurredBackground(_ image: UIImage, size: CGSize, blurPercent: Int = 100) -> UIImage {
         guard size.width > 0, size.height > 0 else { return image }
         let sourceSize = imagePixelSize(image)
         guard sourceSize.width > 0, sourceSize.height > 0 else { return image }
@@ -649,7 +680,8 @@ enum PhotoEffectsRenderer {
                                        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return proxy }
         context.interpolationQuality = .high
         context.draw(proxyCG, in: CGRect(origin: .zero, size: proxySize))
-        androidBoxBlur(&pixels, width: Int(proxySize.width), height: Int(proxySize.height), radius: 8, passes: 2)
+        let radius = max(1, Int(round(8 * CGFloat(normalizePhotoFrameBackdropPercent(blurPercent)) / 100)))
+        androidBoxBlur(&pixels, width: Int(proxySize.width), height: Int(proxySize.height), radius: radius, passes: 2)
         guard let blurredContext = CGContext(data: &pixels, width: Int(proxySize.width), height: Int(proxySize.height),
                                               bitsPerComponent: 8, bytesPerRow: Int(proxySize.width) * 4,
                                               space: CGColorSpace(name: CGColorSpace.sRGB)!,
@@ -927,18 +959,24 @@ enum PhotoEffectsRenderer {
         if preset == .brandGallery && watermark.content == .text && !photoPlacement(watermark.position) && watermark.position != .auto {
             photoWatermark.enabled = false
         }
-        let identity = metadata.identity
+        // Android's FrameBrandLogo first resolves the make prefix and then
+        // renders the remaining camera model beside the brand mark. The
+        // vector asset is platform-specific; the shared identity string keeps
+        // the same measured content for the Core Graphics fallback.
+        let identity = photoFrameBrandIdentity(make: metadata.make, model: metadata.model).displayText
         let details = [[metadata.frameDetailLine, metadata.dateTime ?? ""].filter { !$0.isEmpty }.joined(separator: "   "), metadata.locationRow ?? ""].filter { !$0.isEmpty }
         let occupied = brandWatermarkBounds(photo: photo, watermark: photoWatermark)
+        let brandIdentity = settings.brandStyle == .logo ? photoFrameBrandIdentity(make: metadata.make, model: metadata.model) : PhotoFrameBrandIdentity(brand: nil, remainingModel: "")
         if preset == .brandInset {
-            drawBrandInsetMetadata(cg, photo: photo, brand: identity, lens: metadata.lensModel ?? "", details: details, occupied: occupied)
+            drawBrandInsetMetadata(cg, photo: photo, brand: identity, logoIdentity: brandIdentity,
+                                   lens: metadata.lensModel ?? "", details: details, occupied: occupied)
         } else {
             drawBrandGalleryDetails(cg, photo: photo, lens: metadata.lensModel ?? "", details: details, occupied: occupied)
         }
         drawWatermark(cg, watermark: photoWatermark, photo: photo, canvas: layout.canvas, preset: preset,
                       metadataBand: CGRect(x: 0, y: photo.maxY, width: layout.canvas.width, height: layout.canvas.height - photo.maxY))
         if preset == .brandGallery {
-            drawBrandGalleryBand(cg, band: CGRect(x: 0, y: photo.maxY, width: layout.canvas.width, height: layout.canvas.height - photo.maxY), brand: identity, watermark: watermark)
+            drawBrandGalleryBand(cg, band: CGRect(x: 0, y: photo.maxY, width: layout.canvas.width, height: layout.canvas.height - photo.maxY), brand: identity, watermark: watermark, logoEnabled: settings.brandStyle == .logo)
         }
     }
 
@@ -946,12 +984,33 @@ enum PhotoEffectsRenderer {
         UIFont(name: "HelveticaNeue-CondensedBoldOblique", size: size) ?? UIFont.italicSystemFont(ofSize: size)
     }
 
-    private static func drawBrandInsetMetadata(_ cg: CGContext, photo: CGRect, brand: String, lens: String, details: [String], occupied: BrandBounds?) {
+    private static func drawBrandInsetMetadata(_ cg: CGContext, photo: CGRect, brand: String,
+                                               logoIdentity: PhotoFrameBrandIdentity,
+                                               lens: String, details: [String], occupied: BrandBounds?) {
         var rows: [(String, UIFont)] = []
-        if !brand.isEmpty { rows.append((brand, UIFont.systemFont(ofSize: photo.width * 0.043, weight: .black))) }
+        let hasLogo = logoIdentity.brand.flatMap { PhotoFrameBrandLogoCatalog.load($0) }?.makePath() != nil
+        if !hasLogo, !brand.isEmpty { rows.append((brand, UIFont.systemFont(ofSize: photo.width * 0.043, weight: .black))) }
+        if hasLogo, !logoIdentity.remainingModel.isEmpty {
+            rows.append((logoIdentity.remainingModel, UIFont.systemFont(ofSize: photo.width * 0.043, weight: .black)))
+        }
         if !lens.isEmpty { rows.append((lens, brandDetailFont(size: photo.width * 0.019))) }
         rows.append(contentsOf: details.filter { !$0.isEmpty }.map { ($0, brandDetailFont(size: photo.width * 0.021)) })
         drawBrandRows(cg, photo: photo, rows: rows, occupied: occupied, preferredBottomRatio: 0.030, gapRatio: 0.020)
+        if hasLogo, let brand = logoIdentity.brand, let asset = PhotoFrameBrandLogoCatalog.load(brand), let path = asset.makePath() {
+            let side = min(photo.width * 0.16, photo.height * 0.14) * brand.logoHeightFactor
+            let scale = min(side / asset.viewBox.width, side / asset.viewBox.height)
+            let x = photo.minX + photo.width * 0.08
+            let y = photo.maxY - side - photo.height * 0.045
+            cg.saveGState(); cg.translateBy(x: x, y: y); cg.scaleBy(x: scale, y: scale)
+            cg.translateBy(x: -asset.viewBox.minX, y: -asset.viewBox.minY)
+            cg.setFillColor(brand == .nikon ? UIColor(red: 1, green: 0.894, blue: 0.098, alpha: 1).cgColor : UIColor.white.cgColor)
+            for (index, data) in asset.pathDatas.enumerated() {
+                if let layer = PhotoFrameBrandLogoAsset(brand: asset.brand, viewBox: asset.viewBox, pathData: data).makePath() {
+                    drawBrandLogoLayer(cg, path: layer, bounds: asset.viewBox, gradient: brand == .nikon, layerIndex: index)
+                }
+            }
+            cg.restoreGState()
+        }
     }
 
     private static func drawBrandGalleryDetails(_ cg: CGContext, photo: CGRect, lens: String, details: [String], occupied: BrandBounds?) {
@@ -981,15 +1040,18 @@ enum PhotoEffectsRenderer {
         }
     }
 
-    private static func drawBrandGalleryBand(_ cg: CGContext, band: CGRect, brand: String, watermark: PhotoFrameWatermark) {
+    private static func drawBrandGalleryBand(_ cg: CGContext, band: CGRect, brand: String, watermark: PhotoFrameWatermark, logoEnabled: Bool) {
         let bandWatermark = watermark.enabled && watermark.content == .text && !photoPlacement(watermark.position) && watermark.position != .auto ? watermark : nil
         var rows: [(String, UIFont, UIColor)] = []
         if let bandWatermark {
             let color = bandWatermark.color == .adaptive ? UIColor(red: 0.06, green: 0.07, blue: 0.08, alpha: 1) : watermarkColor(bandWatermark.color, .brandGallery)
             rows.append((bandWatermark.displayText, watermarkFont(bandWatermark.font, size: band.width * 0.019), color.withAlphaComponent(CGFloat(bandWatermark.opacityPercent) / 100)))
         }
-        if !brand.isEmpty { rows.append((brand, UIFont.systemFont(ofSize: band.width * 0.052, weight: .black), UIColor(red: 0.06, green: 0.07, blue: 0.08, alpha: 1))) }
-        guard !rows.isEmpty else { return }
+        let resolved = logoEnabled ? photoFrameBrandIdentity(make: brand, model: nil) : PhotoFrameBrandIdentity(brand: nil, remainingModel: "")
+        let logoAsset = resolved.brand.flatMap { PhotoFrameBrandLogoCatalog.load($0) }
+        let logoPath = logoAsset?.makePath()
+        if logoPath == nil, !brand.isEmpty { rows.append((brand, UIFont.systemFont(ofSize: band.width * 0.052, weight: .black), UIColor(red: 0.06, green: 0.07, blue: 0.08, alpha: 1))) }
+        guard !rows.isEmpty || logoPath != nil else { return }
         let area = CGRect(x: band.minX, y: band.minY + band.height * 0.08, width: band.width, height: band.height * 0.82)
         let textRows = rows.map { metadataRow($0.0, font: $0.1, color: $0.2).fitting(width: band.width * 0.86) }
         let placement = PhotoFrameTextLayout(area: area, bounds: textRows.map(\.bounds), preferredGap: band.height * 0.12)
@@ -1001,6 +1063,34 @@ enum PhotoEffectsRenderer {
             drawMetadataRow(row, in: cg, x: x, baseline: placement.baselines[index], scale: placement.scale,
                             shadowOpacity: isWatermark && bandWatermark?.effect == .shadow ? 0.35 : 0)
         }
+        if let logoAsset, logoPath != nil {
+            let side = min(band.height * 0.62, band.width * 0.16) * logoAsset.brand.logoHeightFactor
+            let scale = min(side / logoAsset.viewBox.width, side / logoAsset.viewBox.height)
+            let x = band.midX - logoAsset.viewBox.width * scale * 0.5
+            let y = band.minY + band.height * 0.17
+            cg.saveGState(); cg.translateBy(x: x, y: y); cg.scaleBy(x: scale, y: scale)
+            cg.translateBy(x: -logoAsset.viewBox.minX, y: -logoAsset.viewBox.minY)
+            cg.setFillColor(logoAsset.brand == .nikon ? UIColor(red: 1, green: 0.894, blue: 0.098, alpha: 1).cgColor : UIColor(red: 0.06, green: 0.07, blue: 0.08, alpha: 1).cgColor)
+            for (index, data) in logoAsset.pathDatas.enumerated() {
+                if let layer = PhotoFrameBrandLogoAsset(brand: logoAsset.brand, viewBox: logoAsset.viewBox, pathData: data).makePath() {
+                    drawBrandLogoLayer(cg, path: layer, bounds: logoAsset.viewBox, gradient: logoAsset.brand == .nikon, layerIndex: index)
+                }
+            }
+            cg.restoreGState()
+        }
+    }
+
+    private static func drawBrandLogoLayer(_ cg: CGContext, path: CGPath, bounds: CGRect, gradient: Bool, layerIndex: Int) {
+        guard gradient else { cg.addPath(path); cg.fillPath(); return }
+        cg.saveGState(); cg.addPath(path); cg.clip()
+        let colors = [UIColor(red: 1, green: 0.894, blue: 0.098, alpha: 1).cgColor,
+                      UIColor.white.cgColor, UIColor.white.cgColor,
+                      UIColor(red: 1, green: 0.894, blue: 0.098, alpha: 1).cgColor] as CFArray
+        guard let shader = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors,
+                                      locations: [0, 0.34, 0.66, 1]) else { cg.restoreGState(); return }
+        let spec = NikonBrandGradients.specs[min(layerIndex, NikonBrandGradients.specs.count - 1)]
+        cg.drawLinearGradient(shader, start: spec.start, end: spec.end, options: [])
+        cg.restoreGState()
     }
 
     private static func brandWatermarkBounds(photo: CGRect, watermark: PhotoFrameWatermark) -> BrandBounds? {
@@ -1432,7 +1522,7 @@ func presentedPhotoFrameMetadata(
     (metadata ?? .empty).resolved(for: settings, preview: preview, now: now)
 }
 
-private extension PhotoFrameMetadata {
+extension PhotoFrameMetadata {
     static let empty = PhotoFrameMetadata(make: nil, model: nil, lensModel: nil, focalLength: nil, aperture: nil, shutter: nil, iso: nil, exposureCompensation: nil, dateTime: nil)
     /// Android resolves metadata visibility and date/time formatting before any
     /// frame branch draws. Keep the same single filtered snapshot on iOS so
@@ -1467,7 +1557,9 @@ private extension PhotoFrameMetadata {
             dateTime: formatDateTime(dateTime, settings: settings, preview: preview, now: now),
             latitude: settings.showCoordinates ? (validCoordinates ? latitude : preview ? 66.6666 : nil) : nil,
             longitude: settings.showCoordinates ? (validCoordinates ? longitude : preview ? 66.6666 : nil) : nil,
-            altitude: settings.showAltitude ? (validAltitude ? altitude : preview ? 23_333 : nil) : nil
+            altitude: settings.showAltitude ? (validAltitude ? altitude : preview ? 23_333 : nil) : nil,
+            city: settings.showCity ? city : nil,
+            region: settings.showRegion ? region : nil
         )
     }
     var locationRow: String? {
@@ -1478,12 +1570,18 @@ private extension PhotoFrameMetadata {
                   (-90...90).contains(latitude), (-180...180).contains(longitude) else { return nil }
             func degree(_ value: Double, positive: Character, negative: Character) -> String {
                 let hemisphere = value < 0 ? negative : positive
-                return String(format: "%.4f°%@", abs(value), String(hemisphere))
+                let absolute = abs(value)
+                let degrees = Int(floor(absolute))
+                let minutesValue = (absolute - Double(degrees)) * 60
+                let minutes = Int(floor(minutesValue))
+                let seconds = (minutesValue - Double(minutes)) * 60
+                return String(format: "%d°%02d′%05.2f″%@", degrees, minutes, seconds, String(hemisphere))
             }
             return "\(degree(latitude, positive: "N", negative: "S")), \(degree(longitude, positive: "E", negative: "W"))"
         }()
         let altitudeText = altitude.flatMap { $0.isFinite && $0 != 0 ? String(format: "%.0fm", $0) : nil }
-        return [coordinate, altitudeText].compactMap { $0 }.joined(separator: "  ").nilIfEmpty
+        let place = [city, region].compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty }.joined(separator: " · ").nilIfEmpty
+        return [place, coordinate, altitudeText].compactMap { $0 }.joined(separator: "  ").nilIfEmpty
     }
     var identity: String { [normalizedMake, normalizedModel].filter { !$0.isEmpty }.joined(separator: " ") }
     var frameDetailLine: String {

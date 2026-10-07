@@ -1,0 +1,483 @@
+{
+  "source": "Compose 1.7.6 TargetBasedAnimation<Color>/Color.VectorConverter",
+  "artifacts": [
+    {
+      "artifact": "ui-graphics-android:1.7.6",
+      "sha256": "00c96a2e54b03bc0b72b8fc4327bd2a75b689c689aa01295d870141eb9ddddd0"
+    },
+    {
+      "artifact": "ui-util-android:1.7.6",
+      "sha256": "f74120949fd8f82fbfbcc3793246108f9554df0f51ecc7fb5d721ac971c4394a"
+    },
+    {
+      "artifact": "ui-unit-android:1.7.6",
+      "sha256": "9ed6214fdd4da272b0b2582c428f8c3dce5ce6a186c47daaf9fc01aec226a199"
+    },
+    {
+      "artifact": "ui-geometry-android:1.7.6",
+      "sha256": "63eb3d049a8c819e3805d51ce15b9203249ce960ecfd53251126592047bc2ff0"
+    },
+    {
+      "artifact": "animation-android:1.7.6",
+      "sha256": "01f349d54cf9ec41cd0adf5d8c2a869c2c245b8dbb6be5a57e7ebe3d68d31791"
+    },
+    {
+      "artifact": "animation-core-android:1.7.6",
+      "sha256": "9722d4fccd4a9e95910baa16652563ba92a5829f9d6e09194850447e3cd9983a"
+    },
+    {
+      "artifact": "runtime-android:1.7.6",
+      "sha256": "482942683274e1961727b2a76d68fe4ab4abb8145fd8b3146142144ce0b25311"
+    }
+  ],
+  "samples": [
+    {
+      "start": "ffffc857",
+      "end": "ff52f58b",
+      "interruptedAtMs": 0,
+      "timeMs": 0,
+      "result": "ffffc857"
+    },
+    {
+      "start": "ffffc857",
+      "end": "ff52f58b",
+      "interruptedAtMs": 0,
+      "timeMs": 8,
+      "result": "fffec857"
+    },
+    {
+      "start": "ffffc857",
+      "end": "ff52f58b",
+      "interruptedAtMs": 0,
+      "timeMs": 16,
+      "result": "fffcc959"
+    },
+    {
+      "start": "ffffc857",
+      "end": "ff52f58b",
+      "interruptedAtMs": 0,
+      "timeMs": 32,
+      "result": "fff0cf5f"
+    },
+    {
+      "start": "ffffc857",
+      "end": "ff52f58b",
+      "interruptedAtMs": 0,
+      "timeMs": 50,
+      "result": "ffcddc6e"
+    },
+    {
+      "start": "ffffc857",
+      "end": "ff52f58b",
+      "interruptedAtMs": 0,
+      "timeMs": 80,
+      "result": "ff90ec81"
+    },
+    {
+      "start": "ffffc857",
+      "end": "ff52f58b",
+      "interruptedAtMs": 0,
+      "timeMs": 120,
+      "result": "ff61f389"
+    },
+    {
+      "start": "ffffc857",
+      "end": "ff52f58b",
+      "interruptedAtMs": 0,
+      "timeMs": 159,
+      "result": "ff52f58b"
+    },
+    {
+      "start": "ffffc857",
+      "end": "ff52f58b",
+      "interruptedAtMs": 0,
+      "timeMs": 160,
+      "result": "ff52f58b"
+    },
+    {
+      "start": "ffffc857",
+      "end": "ff52f58b",
+      "interruptedAtMs": 50,
+      "timeMs": 0,
+      "result": "ffcddc6e"
+    },
+    {
+      "start": "ffffc857",
+      "end": "ff52f58b",
+      "interruptedAtMs": 50,
+      "timeMs": 8,
+      "result": "ffcddc6e"
+    },
+    {
+      "start": "ffffc857",
+      "end": "ff52f58b",
+      "interruptedAtMs": 50,
+      "timeMs": 16,
+      "result": "ffcedc6d"
+    },
+    {
+      "start": "ffffc857",
+      "end": "ff52f58b",
+      "interruptedAtMs": 50,
+      "timeMs": 32,
+      "result": "ffd4d96b"
+    },
+    {
+      "start": "ffffc857",
+      "end": "ff52f58b",
+      "interruptedAtMs": 50,
+      "timeMs": 80,
+      "result": "fff5cd5d"
+    },
+    {
+      "start": "ffffc857",
+      "end": "ff52f58b",
+      "interruptedAtMs": 50,
+      "timeMs": 159,
+      "result": "ffffc857"
+    },
+    {
+      "start": "ffffc857",
+      "end": "ff52f58b",
+      "interruptedAtMs": 50,
+      "timeMs": 160,
+      "result": "ffffc857"
+    },
+    {
+      "start": "ff52f58b",
+      "end": "ffffc857",
+      "interruptedAtMs": 0,
+      "timeMs": 0,
+      "result": "ff52f58b"
+    },
+    {
+      "start": "ff52f58b",
+      "end": "ffffc857",
+      "interruptedAtMs": 0,
+      "timeMs": 8,
+      "result": "ff54f58b"
+    },
+    {
+      "start": "ff52f58b",
+      "end": "ffffc857",
+      "interruptedAtMs": 0,
+      "timeMs": 16,
+      "result": "ff5cf48a"
+    },
+    {
+      "start": "ff52f58b",
+      "end": "ffffc857",
+      "interruptedAtMs": 0,
+      "timeMs": 32,
+      "result": "ff7bf085"
+    },
+    {
+      "start": "ff52f58b",
+      "end": "ffffc857",
+      "interruptedAtMs": 0,
+      "timeMs": 50,
+      "result": "ffb0e578"
+    },
+    {
+      "start": "ff52f58b",
+      "end": "ffffc857",
+      "interruptedAtMs": 0,
+      "timeMs": 80,
+      "result": "ffe5d464"
+    },
+    {
+      "start": "ff52f58b",
+      "end": "ffffc857",
+      "interruptedAtMs": 0,
+      "timeMs": 120,
+      "result": "fffaca59"
+    },
+    {
+      "start": "ff52f58b",
+      "end": "ffffc857",
+      "interruptedAtMs": 0,
+      "timeMs": 159,
+      "result": "ffffc857"
+    },
+    {
+      "start": "ff52f58b",
+      "end": "ffffc857",
+      "interruptedAtMs": 0,
+      "timeMs": 160,
+      "result": "ffffc857"
+    },
+    {
+      "start": "ff52f58b",
+      "end": "ffffc857",
+      "interruptedAtMs": 50,
+      "timeMs": 0,
+      "result": "ffb0e578"
+    },
+    {
+      "start": "ff52f58b",
+      "end": "ffffc857",
+      "interruptedAtMs": 50,
+      "timeMs": 8,
+      "result": "ffb0e578"
+    },
+    {
+      "start": "ff52f58b",
+      "end": "ffffc857",
+      "interruptedAtMs": 50,
+      "timeMs": 16,
+      "result": "ffaee579"
+    },
+    {
+      "start": "ff52f58b",
+      "end": "ffffc857",
+      "interruptedAtMs": 50,
+      "timeMs": 32,
+      "result": "ffa7e77b"
+    },
+    {
+      "start": "ff52f58b",
+      "end": "ffffc857",
+      "interruptedAtMs": 50,
+      "timeMs": 80,
+      "result": "ff70f287"
+    },
+    {
+      "start": "ff52f58b",
+      "end": "ffffc857",
+      "interruptedAtMs": 50,
+      "timeMs": 159,
+      "result": "ff52f58b"
+    },
+    {
+      "start": "ff52f58b",
+      "end": "ffffc857",
+      "interruptedAtMs": 50,
+      "timeMs": 160,
+      "result": "ff52f58b"
+    },
+    {
+      "start": "a6ffffff",
+      "end": "ff52f58b",
+      "interruptedAtMs": 0,
+      "timeMs": 0,
+      "result": "a6ffffff"
+    },
+    {
+      "start": "a6ffffff",
+      "end": "ff52f58b",
+      "interruptedAtMs": 0,
+      "timeMs": 8,
+      "result": "a7fefffe"
+    },
+    {
+      "start": "a6ffffff",
+      "end": "ff52f58b",
+      "interruptedAtMs": 0,
+      "timeMs": 16,
+      "result": "a8fcfffc"
+    },
+    {
+      "start": "a6ffffff",
+      "end": "ff52f58b",
+      "interruptedAtMs": 0,
+      "timeMs": 32,
+      "result": "b2edfef0"
+    },
+    {
+      "start": "a6ffffff",
+      "end": "ff52f58b",
+      "interruptedAtMs": 0,
+      "timeMs": 50,
+      "result": "cac6fdd2"
+    },
+    {
+      "start": "a6ffffff",
+      "end": "ff52f58b",
+      "interruptedAtMs": 0,
+      "timeMs": 80,
+      "result": "eb87f8a7"
+    },
+    {
+      "start": "a6ffffff",
+      "end": "ff52f58b",
+      "interruptedAtMs": 0,
+      "timeMs": 120,
+      "result": "fb5ef690"
+    },
+    {
+      "start": "a6ffffff",
+      "end": "ff52f58b",
+      "interruptedAtMs": 0,
+      "timeMs": 159,
+      "result": "ff52f58b"
+    },
+    {
+      "start": "a6ffffff",
+      "end": "ff52f58b",
+      "interruptedAtMs": 0,
+      "timeMs": 160,
+      "result": "ff52f58b"
+    },
+    {
+      "start": "a6ffffff",
+      "end": "ff52f58b",
+      "interruptedAtMs": 50,
+      "timeMs": 0,
+      "result": "cac6fdd2"
+    },
+    {
+      "start": "a6ffffff",
+      "end": "ff52f58b",
+      "interruptedAtMs": 50,
+      "timeMs": 8,
+      "result": "cac7fdd2"
+    },
+    {
+      "start": "a6ffffff",
+      "end": "ff52f58b",
+      "interruptedAtMs": 50,
+      "timeMs": 16,
+      "result": "c9c8fdd3"
+    },
+    {
+      "start": "a6ffffff",
+      "end": "ff52f58b",
+      "interruptedAtMs": 50,
+      "timeMs": 32,
+      "result": "c5cefdd8"
+    },
+    {
+      "start": "a6ffffff",
+      "end": "ff52f58b",
+      "interruptedAtMs": 50,
+      "timeMs": 80,
+      "result": "aef3fff5"
+    },
+    {
+      "start": "a6ffffff",
+      "end": "ff52f58b",
+      "interruptedAtMs": 50,
+      "timeMs": 159,
+      "result": "a6ffffff"
+    },
+    {
+      "start": "a6ffffff",
+      "end": "ff52f58b",
+      "interruptedAtMs": 50,
+      "timeMs": 160,
+      "result": "a6ffffff"
+    },
+    {
+      "start": "42ffffff",
+      "end": "6152f58b",
+      "interruptedAtMs": 0,
+      "timeMs": 0,
+      "result": "42ffffff"
+    },
+    {
+      "start": "42ffffff",
+      "end": "6152f58b",
+      "interruptedAtMs": 0,
+      "timeMs": 8,
+      "result": "42fefffe"
+    },
+    {
+      "start": "42ffffff",
+      "end": "6152f58b",
+      "interruptedAtMs": 0,
+      "timeMs": 16,
+      "result": "43fcfffc"
+    },
+    {
+      "start": "42ffffff",
+      "end": "6152f58b",
+      "interruptedAtMs": 0,
+      "timeMs": 32,
+      "result": "46edfef0"
+    },
+    {
+      "start": "42ffffff",
+      "end": "6152f58b",
+      "interruptedAtMs": 0,
+      "timeMs": 50,
+      "result": "4fc6fdd2"
+    },
+    {
+      "start": "42ffffff",
+      "end": "6152f58b",
+      "interruptedAtMs": 0,
+      "timeMs": 80,
+      "result": "5a87f8a7"
+    },
+    {
+      "start": "42ffffff",
+      "end": "6152f58b",
+      "interruptedAtMs": 0,
+      "timeMs": 120,
+      "result": "605ef690"
+    },
+    {
+      "start": "42ffffff",
+      "end": "6152f58b",
+      "interruptedAtMs": 0,
+      "timeMs": 159,
+      "result": "6152f58b"
+    },
+    {
+      "start": "42ffffff",
+      "end": "6152f58b",
+      "interruptedAtMs": 0,
+      "timeMs": 160,
+      "result": "6152f58b"
+    },
+    {
+      "start": "42ffffff",
+      "end": "6152f58b",
+      "interruptedAtMs": 50,
+      "timeMs": 0,
+      "result": "4fc6fdd2"
+    },
+    {
+      "start": "42ffffff",
+      "end": "6152f58b",
+      "interruptedAtMs": 50,
+      "timeMs": 8,
+      "result": "4fc7fdd2"
+    },
+    {
+      "start": "42ffffff",
+      "end": "6152f58b",
+      "interruptedAtMs": 50,
+      "timeMs": 16,
+      "result": "4fc8fdd3"
+    },
+    {
+      "start": "42ffffff",
+      "end": "6152f58b",
+      "interruptedAtMs": 50,
+      "timeMs": 32,
+      "result": "4dcefdd8"
+    },
+    {
+      "start": "42ffffff",
+      "end": "6152f58b",
+      "interruptedAtMs": 50,
+      "timeMs": 80,
+      "result": "45f3fff5"
+    },
+    {
+      "start": "42ffffff",
+      "end": "6152f58b",
+      "interruptedAtMs": 50,
+      "timeMs": 159,
+      "result": "42ffffff"
+    },
+    {
+      "start": "42ffffff",
+      "end": "6152f58b",
+      "interruptedAtMs": 50,
+      "timeMs": 160,
+      "result": "42ffffff"
+    }
+  ]
+}

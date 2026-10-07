@@ -47,6 +47,14 @@ final class TransferQueueViewModel: ObservableObject {
     }
 
     func enqueue(_ file: CameraFile, organizeByDate: Bool = false, effects: PhotoEffectsSettings? = nil) { Task { _ = await queue.enqueue(file, organizeByDate: organizeByDate, effects: effects) } }
+    func enqueueCrop(_ file: CameraFile, task: LosslessCropTask, organizeByDate: Bool = false,
+                     session: CameraSession? = nil, directory: URL? = nil,
+                     effects: PhotoEffectsSettings? = nil) {
+        Task {
+            _ = await queue.enqueueCrop(file, task: task, organizeByDate: organizeByDate, effects: effects)
+            if let session, let directory { await queue.start(session: session, directory: directory) }
+        }
+    }
     /// Batch entry point used by Android's collapsed burst preview. Tasks are
     /// appended in source order and the worker is started once, so a burst
     /// cannot interleave with another enqueue between members.
@@ -66,10 +74,10 @@ final class TransferQueueViewModel: ObservableObject {
     /// Android's automatic-new-media entry point deduplicates by logical
     /// identity before adding and starts the worker only when the user has not
     /// deferred transfer start.
-    func enqueueAutomatic(_ files: [CameraFile], session: CameraSession?, directory: URL?, autoStart: Bool, organizeByDate: Bool = false, effects: PhotoEffectsSettings? = nil) {
-        guard !files.isEmpty, let session, let directory else { return }
+    func enqueueAutomatic(_ files: [CameraFile], mode: AutoTransferMode, session: CameraSession?, directory: URL?, autoStart: Bool, organizeByDate: Bool = false, effects: PhotoEffectsSettings? = nil) {
+        guard mode != .off, !files.isEmpty, let session, let directory else { return }
         Task {
-            let accepted = await queue.enqueueAutomatic(files, organizeByDate: organizeByDate, effects: effects)
+            let accepted = await queue.enqueueAutomatic(files, mode: mode, organizeByDate: organizeByDate, effects: effects)
             if !accepted.isEmpty, autoStart {
                 await queue.start(session: session, directory: directory)
             }

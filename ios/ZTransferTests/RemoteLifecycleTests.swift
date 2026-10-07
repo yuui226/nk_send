@@ -5,6 +5,291 @@ import UIKit
 
 @MainActor
 final class RemoteLifecycleTests: XCTestCase {
+    func testZoomedTapCoordinatesReachCameraAndConfirmedMarker() async throws {
+        let camera = RemoteLifecycleCamera()
+        let model = RemoteViewModel(camera: camera)
+        addTeardownBlock { await model.stopAndWait() }
+        model.start()
+        try await waitFor { model.state.session == .ready }
+        var viewport = RemoteViewfinderViewport()
+        viewport.resize(CGSize(width: 1000, height: 600), aspect: 5 / 3)
+        viewport.transform(centroid: CGPoint(x: 500, y: 300), pan: CGSize(width: 100, height: -50), zoom: 2, aspect: 5 / 3)
+        let point = try XCTUnwrap(viewport.focusPoint(at: CGPoint(x: 700, y: 400), aspect: 5 / 3))
+        model.focus(at: point, coordinateSize: CGSize(width: 2000, height: 1200))
+        try await waitFor { model.confirmedFocusMarker != nil }
+        let coordinates = await camera.lastFocusCoordinates
+        XCTAssertEqual(coordinates, [1099, 749, 1099, 749])
+        XCTAssertEqual(model.confirmedFocusMarker?.fallbackPoint, point)
+    }
+
+    func testFocusAreaWriteRequiresTrackingReleaseAndClearsConfirmedFocusOnlyOnSuccess() async throws {
+        let camera = RemoteLifecycleCamera()
+        await camera.setProperty(.init(property: .focusArea, dataType: 4, writable: true,
+                                       current: 0x8010, values: [0x8010, 0x8011]))
+        await camera.acceptWrites(.focusArea)
+        await camera.queueFocusResults([.init(trackingStarted: true, polls: 0, timedOut: false)])
+        let model = RemoteViewModel(camera: camera)
+        addTeardownBlock { await model.stopAndWait() }
+        model.start()
+        try await waitFor { model.state.session == .ready }
+        model.focus(at: .init(x: 0.4, y: 0.6))
+        try await waitFor { model.state.focus.tracking && model.confirmedFocusMarker != nil }
+        model.openCameraTool(.focusArea)
+        let panel = try XCTUnwrap(model.cameraToolPanel)
+        try await waitFor { !panel.loading }
+        await camera.setTrackingReleaseResponse(PTPConstants.deviceBusy)
+        panel.select(0x8011)
+        try await waitFor { !panel.busy }
+        XCTAssertEqual(panel.errorResource, "remote_camera_tool_failed")
+        XCTAssertTrue(model.state.focus.tracking)
+        XCTAssertNotNil(model.confirmedFocusMarker)
+        let refused = await camera.log
+        XCTAssertFalse(refused.contains("write:focusArea:32785"))
+        // Android accepts invalid-status as an already-ended tracking session.
+        await camera.setTrackingReleaseResponse(0xA004)
+        panel.select(0x8011)
+        try await waitFor { !panel.busy }
+        XCTAssertFalse(model.state.focus.tracking)
+        XCTAssertNil(model.confirmedFocusMarker)
+        XCTAssertEqual(model.state.focus.phase, .idle)
+        XCTAssertTrue(panel.closeRequested)
+        XCTAssertEqual(panel.descriptor?.current, 0x8011)
+        let completed = await camera.log
+        XCTAssertEqual(completed.filter { $0 == "end-tracking-tool" }.count, 2)
+        XCTAssertEqual(completed.filter { $0 == "write:focusArea:32785" }.count, 1)
+        XCTAssertTrue(completed.suffix(4).contains("focus"))
+    }
+
+    func testCameraToolLaterReadFailureKeepsRowsButUnavailableReadClearsThem() async throws {
+        let camera = RemoteLifecycleCamera()
+        var unavailable = 0
+        let panel = RemoteCameraToolController(camera: camera, tool: .whiteBalance, movie: false,
+            isCurrent: { true }, currentMovie: { false }, canWrite: { true }, beforeWrite: { true },
+            onApplied: {}, onUnavailable: { unavailable += 1 }, onDismiss: {}, pollInterval: .milliseconds(20))
+        panel.start()
+        try await waitFor { !panel.loading }
+        let first = panel.descriptor
+        await camera.failProperty(.whiteBalance, error: .timeout)
+        try await waitFor { await camera.log.filter { $0 == "property:whiteBalance" }.count >= 3 }
+        XCTAssertEqual(panel.descriptor, first)
+        XCTAssertEqual(unavailable, 0)
+        await camera.failProperty(.whiteBalance, error: .responseCode(0x200A))
+        try await waitFor { panel.descriptor == nil }
+        XCTAssertTrue(panel.active)
+        XCTAssertFalse(panel.loading)
+        XCTAssertEqual(unavailable, 0)
+        panel.dismiss()
+        await panel.drain()
+    }
+
+    func testCameraToolLoadingCloseNeverPublishesLateRowsOrCancelsWireRead() async throws {
+        let camera = RemoteLifecycleCamera()
+        await camera.delayProperty(.whiteBalance, milliseconds: 120)
+        var unavailable = 0
+        var dismissed = 0
+        let panel = RemoteCameraToolController(camera: camera, tool: .whiteBalance, movie: false,
+            isCurrent: { true }, currentMovie: { false }, canWrite: { true }, beforeWrite: { true },
+            onApplied: {}, onUnavailable: { unavailable += 1 }, onDismiss: { dismissed += 1 })
+        panel.start()
+        try await waitFor { await camera.log.contains("property:whiteBalance") }
+        panel.requestClose()
+        XCTAssertFalse(panel.active)
+        await panel.drain()
+        XCTAssertNil(panel.descriptor)
+        XCTAssertEqual(unavailable, 0)
+        XCTAssertEqual(dismissed, 1)
+        let calls = await camera.log
+        XCTAssertEqual(calls, ["property:whiteBalance"])
+    }
+
+    func testCameraToolPanelRechecksChangedOptionsWithoutWriting() async throws {
+        let camera = RemoteLifecycleCamera()
+        await camera.setProperty(.init(property: .whiteBalance, writable: true, current: 2, values: [2, 4]))
+        let model = RemoteViewModel(camera: camera)
+        model.start()
+        try await waitFor { model.state.session == .ready }
+        model.openCameraTool(.whiteBalance)
+        let panel = try XCTUnwrap(model.cameraToolPanel)
+        try await waitFor { !panel.loading }
+        await camera.setProperty(.init(property: .whiteBalance, writable: true, current: 2, values: [2, 5]))
+        panel.select(4)
+        XCTAssertEqual(panel.pendingValue, 4)
+        try await waitFor { !panel.busy }
+        XCTAssertEqual(panel.errorResource, "remote_camera_tool_changed")
+        XCTAssertEqual(panel.descriptor?.values, [2, 5])
+        XCTAssertFalse(panel.closeRequested)
+        let calls = await camera.log
+        XCTAssertFalse(calls.contains { $0.hasPrefix("write:whiteBalance:") })
+        await model.stopAndWait()
+    }
+
+    func testCameraToolPanelRejectsPhysicalModeChangeBeforeWriting() async throws {
+        let camera = RemoteLifecycleCamera()
+        await camera.setProperty(.init(property: .whiteBalance, writable: true, current: 2, values: [2, 4]))
+        let model = RemoteViewModel(camera: camera)
+        model.start()
+        try await waitFor { model.state.session == .ready }
+        model.openCameraTool(.whiteBalance)
+        let panel = try XCTUnwrap(model.cameraToolPanel)
+        try await waitFor { !panel.loading }
+        await camera.setProperty(.init(property: .liveViewSelector, writable: false, current: 1, values: []))
+        panel.select(4)
+        try await waitFor { !panel.busy }
+        let calls = await camera.log
+        XCTAssertFalse(calls.contains { $0.hasPrefix("write:whiteBalance:") })
+        XCTAssertTrue(!panel.active || panel.errorResource == "remote_camera_tool_changed")
+        await model.stopAndWait()
+    }
+
+    func testCameraToolWriteDrainsAfterMonitorExitWithoutLatePopup() async throws {
+        let camera = RemoteLifecycleCamera()
+        await camera.setProperty(.init(property: .whiteBalance, writable: true, current: 2, values: [2, 4]))
+        await camera.acceptWrites(.whiteBalance)
+        await camera.delayWrites(milliseconds: 180)
+        let model = RemoteViewModel(camera: camera)
+        model.start()
+        try await waitFor { model.state.session == .ready }
+        model.openCameraTool(.whiteBalance)
+        let panel = try XCTUnwrap(model.cameraToolPanel)
+        try await waitFor { !panel.loading }
+        panel.select(4)
+        try await waitFor { await camera.log.contains("write:whiteBalance:4") }
+        await model.stopAndWait()
+        XCTAssertNil(model.cameraToolPanel)
+        XCTAssertFalse(panel.busy)
+        XCTAssertFalse(panel.active)
+        let actual = await camera.current(.whiteBalance)
+        XCTAssertEqual(actual, 4)
+        let calls = await camera.log
+        XCTAssertTrue(calls.contains("refresh:whiteBalance"))
+        XCTAssertLessThan(try XCTUnwrap(calls.firstIndex(of: "refresh:whiteBalance")),
+                          try XCTUnwrap(calls.firstIndex(of: "gate:false")))
+    }
+
+    func testCameraToolSelectionClosesOnlyAfterConfirmedReadback() async throws {
+        let camera = RemoteLifecycleCamera()
+        await camera.setProperty(.init(property: .whiteBalance, writable: true, current: 2, values: [2, 4]))
+        await camera.acceptWrites(.whiteBalance)
+        let model = RemoteViewModel(camera: camera)
+        model.start()
+        try await waitFor { model.state.session == .ready }
+        model.openCameraTool(.whiteBalance)
+        let panel = try XCTUnwrap(model.cameraToolPanel)
+        try await waitFor { !panel.loading }
+        panel.select(99)
+        XCTAssertFalse(panel.busy)
+        panel.select(4)
+        panel.select(2) // Busy admission ignores a second tap.
+        try await waitFor { !panel.busy }
+        XCTAssertEqual(panel.descriptor?.current, 4)
+        XCTAssertTrue(panel.closeRequested)
+        XCTAssertNil(panel.errorResource)
+        let calls = await camera.log
+        XCTAssertEqual(calls.filter { $0.hasPrefix("write:whiteBalance:") }, ["write:whiteBalance:4"])
+        await model.stopAndWait()
+    }
+
+    func testCameraToolFirstReadTimeoutDismissesButDrainsUncancelledTransaction() async throws {
+        let camera = RemoteLifecycleCamera()
+        await camera.delayProperty(.whiteBalance, milliseconds: 180)
+        var unavailable = 0
+        var dismissed = 0
+        let panel = RemoteCameraToolController(camera: camera, tool: .whiteBalance, movie: false,
+            isCurrent: { true }, currentMovie: { false }, canWrite: { true }, beforeWrite: { true },
+            onApplied: {}, onUnavailable: { unavailable += 1 }, onDismiss: { dismissed += 1 },
+            readTimeout: .milliseconds(20))
+        panel.start()
+        try await waitFor { !panel.active }
+        XCTAssertTrue(panel.loading)
+        XCTAssertEqual(unavailable, 1)
+        XCTAssertEqual(dismissed, 1)
+        await panel.drain()
+        let calls = await camera.log
+        XCTAssertEqual(calls, ["property:whiteBalance"])
+        XCTAssertNil(panel.descriptor)
+    }
+
+    func testCameraToolFailedWriteRetainsActualValueAndAllowsRetry() async throws {
+        let camera = RemoteLifecycleCamera()
+        await camera.setProperty(.init(property: .whiteBalance, writable: true, current: 2, values: [2, 4]))
+        let panel = RemoteCameraToolController(camera: camera, tool: .whiteBalance, movie: false,
+            isCurrent: { true }, currentMovie: { false }, canWrite: { true }, beforeWrite: { true },
+            onApplied: {}, onUnavailable: {}, onDismiss: {})
+        panel.start()
+        try await waitFor { !panel.loading }
+        panel.select(4)
+        try await waitFor { !panel.busy }
+        XCTAssertEqual(panel.descriptor?.current, 2)
+        XCTAssertEqual(panel.errorResource, "remote_camera_tool_failed")
+        XCTAssertFalse(panel.closeRequested)
+        await camera.acceptWrites(.whiteBalance)
+        panel.select(4)
+        XCTAssertNil(panel.errorResource)
+        try await waitFor { !panel.busy }
+        XCTAssertEqual(panel.descriptor?.current, 4)
+        XCTAssertTrue(panel.closeRequested)
+        panel.dismiss()
+        await panel.drain()
+    }
+
+    func testCameraToolQueriesActualCandidatesAndPrefersWritableDomain() async throws {
+        let camera = RemoteLifecycleCamera()
+        let readOnly = RemotePropertyDescriptor(property: .focusArea, writable: false, current: 2, values: [2])
+        let live = RemotePropertyDescriptor(property: .liveViewFocusArea, dataType: 2, writable: true, current: 1, values: [0, 1, 2])
+        await camera.setProperty(readOnly)
+        await camera.setProperty(live)
+        let chosen = try await camera.remoteCameraTool(.focusArea, movie: false)
+        XCTAssertEqual(chosen, live)
+        let calls = await camera.log
+        XCTAssertEqual(calls, ["property:focusArea", "property:liveViewFocusArea"])
+        await camera.markUnsupported(.liveViewFocusArea)
+        let fallback = try await camera.remoteCameraTool(.focusArea, movie: false)
+        XCTAssertEqual(fallback, readOnly)
+    }
+
+    func testMovieCameraToolNeverFallsBackToPhotoProperty() async throws {
+        let camera = RemoteLifecycleCamera()
+        await camera.markUnsupported(.movieWhiteBalance)
+        let alternative = RemotePropertyDescriptor(property: .movieWhiteBalanceAlternate, writable: true, current: 2, values: [2, 4])
+        await camera.setProperty(alternative)
+        let whiteBalance = try await camera.remoteCameraTool(.whiteBalance, movie: true)
+        XCTAssertEqual(whiteBalance, alternative)
+        await camera.markUnsupported(.movieFocusArea)
+        let focus = try await camera.remoteCameraTool(.focusArea, movie: true)
+        XCTAssertNil(focus)
+        let calls = await camera.log
+        XCTAssertEqual(calls, ["property:movieWhiteBalance", "property:movieWhiteBalanceAlternate", "property:movieFocusArea"])
+    }
+
+    func testCameraToolUnsupportedResponseFallsBackButTransportFailureDoesNot() async throws {
+        let camera = RemoteLifecycleCamera()
+        await camera.failProperty(.focusArea, error: .responseCode(0x200A))
+        let fallback = try await camera.remoteCameraTool(.focusArea, movie: false)
+        XCTAssertEqual(fallback?.property, .liveViewFocusArea)
+        await camera.failProperty(.movieWhiteBalance, error: .timeout)
+        do {
+            _ = try await camera.remoteCameraTool(.whiteBalance, movie: true)
+            XCTFail("Transport timeout must propagate")
+        } catch PTPSessionError.timeout { }
+        let calls = await camera.log
+        XCTAssertEqual(calls, ["property:focusArea", "property:liveViewFocusArea", "property:movieWhiteBalance"])
+    }
+
+    func testFirstWritableCameraToolStopsQueryAndUsesVerifiedWrite() async throws {
+        let camera = RemoteLifecycleCamera()
+        let descriptor = RemotePropertyDescriptor(property: .focusArea, dataType: 4, writable: true,
+                                                   current: 0x8010, values: [0x8010, 0x8011])
+        await camera.setProperty(descriptor)
+        let queried = try await camera.remoteCameraTool(.focusArea, movie: false)
+        let selected = try XCTUnwrap(queried)
+        let reads = await camera.log
+        XCTAssertEqual(reads, ["property:focusArea"])
+        await camera.acceptWrites(.focusArea)
+        let result = try await camera.setRemotePropertyVerified(selected, value: 0x8011)
+        XCTAssertTrue(result.confirmed)
+        XCTAssertEqual(result.actual?.current, 0x8011)
+    }
+
     func testConcurrentTrialAndPageExitShareOneCleanup() async throws {
         let camera = RemoteLifecycleCamera()
         let model = RemoteViewModel(camera: camera)
@@ -29,6 +314,54 @@ final class RemoteLifecycleTests: XCTestCase {
 
     func testExpiryFinalizesPlayableRecordingBeforeExhaustedMonitorExits() async throws {
         try await verifyRecordingLoss(expiry: true)
+    }
+
+    func testHiddenRecordingToolBlocksAdmissionBeforeFrameOrPermission() {
+        let model = RemoteViewModel(camera: RemoteLifecycleCamera(),
+                                    entitlements: PremiumEntitlementStore(access: PremiumAccess(.lifetime)))
+        model.setLocalRecordingToolVisible(false, fixedRecorder: true)
+        model.startLocalRecording()
+        XCTAssertEqual(model.localRecordingPhase, .idle)
+        XCTAssertNil(model.localRecordingHint)
+        model.setLocalRecordingToolVisible(true, fixedRecorder: false)
+        model.startLocalRecording()
+        XCTAssertEqual(model.localRecordingHint, AppLocalized.resource("remote_rec_start_failed"))
+    }
+
+    func testHiddenPortraitRecorderFinalizesButLandscapeFixedRecorderKeepsRecording() async throws {
+        guard AVAudioSession.sharedInstance().recordPermission == .denied else {
+            throw XCTSkip("Test simulator microphone permission must be denied")
+        }
+        let name = "RemoteHiddenRecording.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+        let model = RemoteViewModel(camera: RemoteLifecycleCamera(frameSize: CGSize(width: 64, height: 48)),
+                                    recordingDirectory: directory,
+                                    entitlements: PremiumEntitlementStore(access: PremiumAccess(.lifetime)),
+                                    freeUsage: FreeUsageStore(defaults: defaults))
+        addTeardownBlock {
+            await model.stopAndWait()
+            UserDefaults(suiteName: name)?.removePersistentDomain(forName: name)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        model.start()
+        try await waitFor { model.state.session == .ready && model.frameImage != nil }
+        model.startLocalRecording()
+        try await waitFor { model.localRecordingPhase == .recording }
+        try await Task.sleep(for: .milliseconds(400))
+        model.setLocalRecordingToolVisible(false, fixedRecorder: true)
+        XCTAssertEqual(model.localRecordingPhase, .recording)
+        model.toggleLocalRecordingPause()
+        XCTAssertEqual(model.localRecordingPhase, .paused)
+        model.setLocalRecordingToolVisible(false, fixedRecorder: false)
+        XCTAssertEqual(model.localRecordingPhase, .finalizing)
+        model.setLocalRecordingToolVisible(false, fixedRecorder: false)
+        try await waitFor { model.localRecordingPhase == .saved }
+        let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+        XCTAssertEqual(files.count, 1)
+        try await assertDecodableSilentRecording(XCTUnwrap(files.first))
+        model.startLocalRecording()
+        XCTAssertEqual(model.localRecordingPhase, .saved)
     }
 
     func testPausedRecordingFinalizesOnRevocationAndConcurrentPageExit() async throws {
@@ -223,6 +556,47 @@ final class RemoteLifecycleTests: XCTestCase {
         XCTAssertEqual(model.exposureDescriptors[.iso]?.property, .iso)
     }
 
+    func testFreshDualAxisHeaderSuspendsPropertyPollingAndStaleHeaderFallsBack() async throws {
+        let camera = RemoteLifecycleCamera()
+        await camera.setAttitudeFrame(roll: 12.5, pitch: -3.2)
+        await camera.setProperty(.init(property: .angleLevel, dataType: 5, writable: false,
+                                       current: 23_514_322, values: []))
+        let model = RemoteViewModel(camera: camera)
+        addTeardownBlock { await model.stopAndWait() }
+        model.start()
+        try await waitFor { model.frameMetadata?.attitude != nil }
+        model.setLevelVisible(true)
+        try await waitFor { model.levelPitch != nil }
+        XCTAssertEqual(try XCTUnwrap(model.levelRoll), 12.5, accuracy: 0.01)
+        XCTAssertEqual(try XCTUnwrap(model.levelPitch), -3.2, accuracy: 0.01)
+        let headerCalls = await camera.log
+        XCTAssertFalse(headerCalls.contains("property:angleLevel"))
+        await camera.setAttitudeFrame(roll: 12.5, pitch: -3.2, age: 2)
+        try await waitFor { model.levelPitch == nil && model.levelRoll != nil }
+        XCTAssertEqual(try XCTUnwrap(model.levelRoll), -1.2, accuracy: 0.01)
+        let fallbackCalls = await camera.log
+        XCTAssertTrue(fallbackCalls.contains("property:angleLevel"))
+    }
+
+    func testDualAxisHeaderRecoversAfterPropertyDeclaredUnavailable() async throws {
+        let camera = RemoteLifecycleCamera()
+        await camera.markUnsupported(.angleLevel)
+        let model = RemoteViewModel(camera: camera)
+        addTeardownBlock { await model.stopAndWait() }
+        model.start()
+        model.setLevelVisible(true)
+        try await waitFor { await camera.log.filter { $0 == "property:angleLevel" }.count == 3 }
+        await camera.setAttitudeFrame(roll: 7.5, pitch: 2)
+        try await waitFor { model.levelPitch == 2 }
+        XCTAssertEqual(try XCTUnwrap(model.levelRoll), 7.5, accuracy: 0.01)
+        XCTAssertTrue(model.levelVisible)
+        let calls = await camera.log
+        XCTAssertEqual(calls.filter { $0 == "property:angleLevel" }.count, 3)
+        model.setLevelVisible(false)
+        XCTAssertNil(model.levelRoll)
+        XCTAssertNil(model.levelPitch)
+    }
+
     func testLevelDescribesOnDemandAndKeepsSwitchOnAfterThreeReadFailures() async throws {
         let camera = RemoteLifecycleCamera()
         await camera.setProperty(.init(property: .angleLevel, dataType: 5, writable: false,
@@ -237,10 +611,13 @@ final class RemoteLifecycleTests: XCTestCase {
         model.setLevelVisible(true)
         try await waitFor { model.levelRoll != nil }
         XCTAssertEqual(try XCTUnwrap(model.levelRoll), -1.2, accuracy: 0.01)
+        await camera.markUnsupported(.angleLevel)
         try await waitFor { model.levelRoll == nil }
         XCTAssertTrue(model.levelVisible)
         let stopped = await camera.log.filter { $0 == "refresh:angleLevel" }.count
-        XCTAssertEqual(stopped, 3)
+        XCTAssertEqual(stopped, 1) // Failed refresh is followed by fresh descriptors.
+        let descriptions = await camera.log.filter { $0 == "property:angleLevel" }.count
+        XCTAssertEqual(descriptions, 3) // Initial success plus two failed re-describes.
         try await Task.sleep(for: .milliseconds(300))
         let after = await camera.log.filter { $0 == "refresh:angleLevel" }.count
         XCTAssertEqual(after, stopped)
@@ -248,15 +625,19 @@ final class RemoteLifecycleTests: XCTestCase {
         XCTAssertFalse(model.levelVisible)
     }
 
-    func testUnsupportedLevelClosesTheSameSwitchRenderedByTheView() async throws {
+    func testUnsupportedLevelKeepsPreferenceAndStopsOnlyPropertyPolling() async throws {
         let camera = RemoteLifecycleCamera()
         await camera.markUnsupported(.angleLevel)
         let model = RemoteViewModel(camera: camera)
         addTeardownBlock { await model.stopAndWait() }
         model.start()
         model.setLevelVisible(true)
-        try await waitFor { !model.levelVisible }
+        try await waitFor { await camera.log.filter { $0 == "property:angleLevel" }.count == 3 }
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertTrue(model.levelVisible)
+        XCTAssertNil(model.levelRoll)
         let calls = await camera.log
+        XCTAssertEqual(calls.filter { $0 == "property:angleLevel" }.count, 3)
         XCTAssertLessThan(try XCTUnwrap(calls.firstIndex(of: "property:batteryLevel")),
                           try XCTUnwrap(calls.firstIndex(of: "property:angleLevel")))
         XCTAssertFalse(calls.contains("refresh:angleLevel"))
@@ -655,7 +1036,7 @@ final class RemoteFrameDecodePipelineTests: XCTestCase {
         }
 
         await pipeline.reset(generation: 1)
-        await pipeline.setAnalysis(histogram: true, zebra: true)
+        await pipeline.setAnalysis(histogram: true, zebra: true, falseColor: true)
         await pipeline.submit(request(1, generation: 1))
         let deadline = ContinuousClock.now + .seconds(1)
         while !(await pipeline.isDecoding), ContinuousClock.now < deadline {
@@ -667,21 +1048,25 @@ final class RemoteFrameDecodePipelineTests: XCTestCase {
         await pipeline.waitUntilIdle()
         var frames = await MainActor.run { collector.frames }
         XCTAssertEqual(frames.map(\.fps), [1, 4])
-        XCTAssertEqual(frames.last?.histogram?.count, 24)
+        XCTAssertEqual(frames.last?.histogram?.count, 256)
         XCTAssertNotNil(frames.last?.zebraMask)
+        XCTAssertEqual(frames.last?.falseColorPixels?.count, 72 * 48)
+        XCTAssertEqual(frames.last?.falseColorWidth, 72)
+        XCTAssertEqual(frames.last?.falseColorHeight, 48)
 
         await pipeline.submit(request(5, generation: 1))
         while !(await pipeline.isDecoding), ContinuousClock.now < deadline + .seconds(1) {
             try await Task.sleep(for: .milliseconds(1))
         }
         await pipeline.reset(generation: 2)
-        await pipeline.setAnalysis(histogram: false, zebra: false)
+        await pipeline.setAnalysis(histogram: false, zebra: false, falseColor: false)
         await pipeline.submit(request(6, generation: 2))
         await pipeline.waitUntilIdle()
         frames = await MainActor.run { collector.frames }
         XCTAssertEqual(frames.map(\.fps), [1, 4, 6])
         XCTAssertNil(frames.last?.histogram)
         XCTAssertNil(frames.last?.zebraMask)
+        XCTAssertNil(frames.last?.falseColorPixels)
     }
 }
 
@@ -757,6 +1142,8 @@ private actor RemoteLifecycleCamera: RemoteCameraControlling {
     private var batteryEvent = false
     private var overrides: [RemoteProperty: RemotePropertyDescriptor] = [:]
     private var unsupported = Set<RemoteProperty>()
+    private var propertyErrors: [RemoteProperty: PTPSessionError] = [:]
+    private var propertyDelays: [RemoteProperty: Int] = [:]
     private var refreshFailures = Set<RemoteProperty>()
     private var queuedEvents: [STAEvent] = []
     private var captureFails = false
@@ -765,6 +1152,7 @@ private actor RemoteLifecycleCamera: RemoteCameraControlling {
     private var writeDelay = 0
     private var focusDelay = 0
     private var focusResults: [RemoteFocusResult] = []
+    private var trackingReleaseResponse: UInt16? = nil
     private var movieStarts: [RemoteMovieStartResult] = []
     private var preparedMovieStartDelay = 0
     private var remoteControlMode = false
@@ -791,14 +1179,41 @@ private actor RemoteLifecycleCamera: RemoteCameraControlling {
         catch { log.append("cancelled-frame"); throw error }
         if transportFailure { transportFailure = false; throw PTPSessionError.timeout }
         if failingFrames > 0 { failingFrames -= 1; throw PTPSessionError.responseCode(0xA004) }
+        if let enhancedFrame {
+            return .init(bytes: enhancedFrame, jpegOffset: 512, operation: PTPConstants.getLiveViewImageEx,
+                         receivedAtUptime: ProcessInfo.processInfo.systemUptime - frameAge)
+        }
         return .init(bytes: frame, jpegOffset: 0, operation: PTPConstants.getLiveViewImage)
+    }
+    private var enhancedFrame: Data?
+    private var frameAge: TimeInterval = 0
+    func setAttitudeFrame(roll: Float, pitch: Float, age: TimeInterval = 0) {
+        var bytes = [UInt8](repeating: 0, count: 512)
+        func put16(_ offset: Int, _ value: Int) {
+            bytes[offset] = UInt8(truncatingIfNeeded: value >> 8)
+            bytes[offset + 1] = UInt8(truncatingIfNeeded: value)
+        }
+        func put32(_ offset: Int, _ value: UInt32) {
+            for i in 0..<4 { bytes[offset+i] = UInt8(truncatingIfNeeded: value >> (24-i*8)) }
+        }
+        put16(0, 1); put32(8, 512); put32(12, UInt32(frame.count))
+        put16(16, 2000); put16(18, 1200); put16(28, 200); put16(30, 120)
+        put32(404, UInt32((roll < 0 ? roll + 360 : roll) * 65536))
+        put32(408, UInt32((pitch < 0 ? pitch + 360 : pitch) * 65536))
+        enhancedFrame = Data(bytes) + frame
+        frameAge = age
     }
     func remoteMovieMode() -> Bool? {
         log.append("selector")
         return overrides[.liveViewSelector].map { $0.current != 0 } ?? movie
     }
-    func remoteProperty(_ property: RemoteProperty) -> RemotePropertyDescriptor? {
+    func remoteProperty(_ property: RemoteProperty) async throws -> RemotePropertyDescriptor? {
         log.append("property:\(property)")
+        if let delay = propertyDelays[property] {
+            do { try await Task.sleep(for: .milliseconds(delay)) }
+            catch { log.append("cancelled-property:\(property)"); throw error }
+        }
+        if let error = propertyErrors[property] { throw error }
         if unsupported.contains(property) { return nil }
         if let descriptor = overrides[property] { return descriptor }
         return .init(property: property, dataType: property == .batteryLevel ? 0x0002 : 0x0006, writable: true,
@@ -815,6 +1230,8 @@ private actor RemoteLifecycleCamera: RemoteCameraControlling {
     }
     func emitBatteryEvent() { batteryEvent = true }
     func setProperty(_ descriptor: RemotePropertyDescriptor) { overrides[descriptor.property] = descriptor }
+    func delayProperty(_ property: RemoteProperty, milliseconds: Int) { propertyDelays[property] = milliseconds }
+    func failProperty(_ property: RemoteProperty, error: PTPSessionError) { propertyErrors[property] = error }
     func markUnsupported(_ property: RemoteProperty) { unsupported.insert(property) }
     func failRefresh(_ property: RemoteProperty) { refreshFailures.insert(property) }
     func queueEvents(_ events: [STAEvent]) { queuedEvents += events }
@@ -850,8 +1267,10 @@ private actor RemoteLifecycleCamera: RemoteCameraControlling {
         log.append("capture")
         if captureFails { throw PTPSessionError.responseCode(0xA004) }
     }
+    private(set) var lastFocusCoordinates: [UInt32]?
     func focusAt(trackingX: UInt32, trackingY: UInt32, focusX: UInt32, focusY: UInt32) async throws -> RemoteFocusResult {
-        try await finishFocus("tapfocus")
+        lastFocusCoordinates = [trackingX, trackingY, focusX, focusY]
+        return try await finishFocus("tapfocus")
     }
     func halfPressFocus() async throws -> RemoteFocusResult { try await finishFocus("halfpress") }
     private func finishFocus(_ prefix: String) async throws -> RemoteFocusResult {
@@ -863,6 +1282,11 @@ private actor RemoteLifecycleCamera: RemoteCameraControlling {
         return .init(trackingStarted: false, polls: 0, timedOut: false)
     }
     func endSubjectTracking() {}
+    func setTrackingReleaseResponse(_ response: UInt16?) { trackingReleaseResponse = response }
+    func endSubjectTrackingForTool() -> UInt16? {
+        log.append("end-tracking-tool")
+        return trackingReleaseResponse
+    }
     func startMovieRecording() -> RemoteMovieStartResult {
         log.append("movie:start")
         guard !movieStarts.isEmpty else {

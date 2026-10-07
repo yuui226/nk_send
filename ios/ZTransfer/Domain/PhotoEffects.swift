@@ -1,4 +1,27 @@
 import Foundation
+
+enum PhotoEffectModule: Int, CaseIterable, Sendable {
+    case filter = 1, lut = 2, frame = 4, watermark = 8
+}
+
+let allPhotoEffectModules = 15
+
+func normalizePhotoEffectModules(_ mask: Int) -> Int {
+    let value = mask & allPhotoEffectModules
+    return value == 0 ? allPhotoEffectModules : value
+}
+
+func effectivePhotoEffectModules(_ mask: Int, isPro: Bool) -> Int {
+    let normalized = normalizePhotoEffectModules(mask)
+    return !isPro && (normalized & (PhotoEffectModule.frame.rawValue | PhotoEffectModule.watermark.rawValue)) != 0
+        ? normalized | PhotoEffectModule.frame.rawValue | PhotoEffectModule.watermark.rawValue
+        : normalized
+}
+
+func photoEffectModuleIsVisible(_ mask: Int, _ module: PhotoEffectModule) -> Bool {
+    mask & module.rawValue != 0
+}
+import CoreFoundation
 import Combine
 import CryptoKit
 import ImageIO
@@ -109,7 +132,7 @@ func restoredPhotoFrameWatermarkSizePercent(
     guard let persisted else { return 80 }
     let named: Bool
     let raw: Int
-    if persisted is Bool {
+    if let number = persisted as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() {
         raw = 80
         named = false
     } else if let number = persisted as? NSNumber {
@@ -139,7 +162,7 @@ func restoredPhotoFrameWatermarkSizePercent(
 
 func restoredPhotoFrameWatermarkOpacityPercent(_ persisted: Any?) -> Int {
     let raw: Int
-    if persisted is Bool {
+    if let number = persisted as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() {
         raw = 72
     } else if let number = persisted as? NSNumber {
         raw = number.intValue
@@ -179,6 +202,11 @@ struct PhotoFrameFavorite: Codable, Equatable, Sendable {
     }
 }
 
+enum PhotoFrameBrandStyle: String, Codable, CaseIterable, Sendable { case text, logo }
+func normalizePhotoFrameWidthPercent(_ value: Int) -> Int { min(max(value, 60), 200).rounded(toMultipleOf: 5) }
+func normalizePhotoFrameBackdropPercent(_ value: Int) -> Int { min(max(value, 0), 200) }
+private extension Int { func rounded(toMultipleOf step: Int) -> Int { ((self + step / 2) / step) * step } }
+
 struct PhotoFrameMetadataSettings: Codable, Equatable, Sendable {
     var showDate = true
     var showTime = true
@@ -189,8 +217,60 @@ struct PhotoFrameMetadataSettings: Codable, Equatable, Sendable {
     var showLensModel = false
     var showCoordinates = false
     var showAltitude = false
+    var showAddress = false
+    var showCity = false
+    var showRegion = false
+    var brandStyle: PhotoFrameBrandStyle = .text
+    var widthPercent = 100
+    var backgroundBlurPercent = 100
+    var backgroundMaskPercent = 100
     var datePattern = "yyyy-MM-dd"
     var timePattern = "HH:mm:ss"
+
+    private enum CodingKeys: String, CodingKey { case showDate, showTime, showFocalLength, showExposure, showBrand, showModel, showLensModel, showCoordinates, showAltitude, showAddress, showCity, showRegion, brandStyle, widthPercent, backgroundBlurPercent, backgroundMaskPercent, datePattern, timePattern }
+    init() {}
+    init(showCoordinates: Bool) { self.init(); self.showCoordinates = showCoordinates }
+    init(showDate: Bool, showTime: Bool, showCoordinates: Bool, showAltitude: Bool) { self.init(); self.showDate = showDate; self.showTime = showTime; self.showCoordinates = showCoordinates; self.showAltitude = showAltitude }
+    init(showCoordinates: Bool, showAltitude: Bool, datePattern: String, timePattern: String) { self.init(); self.showCoordinates = showCoordinates; self.showAltitude = showAltitude; self.datePattern = datePattern; self.timePattern = timePattern }
+    init(showDate: Bool, showTime: Bool, showFocalLength: Bool, showExposure: Bool, showBrand: Bool, showModel: Bool, showLensModel: Bool, showCoordinates: Bool, showAltitude: Bool, datePattern: String, timePattern: String, brandStyle: PhotoFrameBrandStyle = .text, showAddress: Bool = false, showCity: Bool = false, showRegion: Bool = false, widthPercent: Int = 100, backgroundBlurPercent: Int = 100, backgroundMaskPercent: Int = 100) {
+        self.showDate = showDate; self.showTime = showTime; self.showFocalLength = showFocalLength; self.showExposure = showExposure
+        self.showBrand = showBrand; self.showModel = showModel; self.showLensModel = showLensModel; self.showCoordinates = showCoordinates; self.showAltitude = showAltitude
+        self.showAddress = showAddress; self.showCity = showCity; self.showRegion = showRegion; self.brandStyle = brandStyle
+        self.widthPercent = widthPercent; self.backgroundBlurPercent = backgroundBlurPercent; self.backgroundMaskPercent = backgroundMaskPercent
+        self.datePattern = datePattern; self.timePattern = timePattern
+    }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        showDate = try c.decodeIfPresent(Bool.self, forKey: .showDate) ?? true
+        showTime = try c.decodeIfPresent(Bool.self, forKey: .showTime) ?? true
+        showFocalLength = try c.decodeIfPresent(Bool.self, forKey: .showFocalLength) ?? true
+        showExposure = try c.decodeIfPresent(Bool.self, forKey: .showExposure) ?? true
+        showBrand = try c.decodeIfPresent(Bool.self, forKey: .showBrand) ?? true
+        showModel = try c.decodeIfPresent(Bool.self, forKey: .showModel) ?? true
+        showLensModel = try c.decodeIfPresent(Bool.self, forKey: .showLensModel) ?? false
+        showCoordinates = try c.decodeIfPresent(Bool.self, forKey: .showCoordinates) ?? false
+        showAltitude = try c.decodeIfPresent(Bool.self, forKey: .showAltitude) ?? false
+        showAddress = try c.decodeIfPresent(Bool.self, forKey: .showAddress) ?? false
+        showCity = try c.decodeIfPresent(Bool.self, forKey: .showCity) ?? false
+        showRegion = try c.decodeIfPresent(Bool.self, forKey: .showRegion) ?? false
+        brandStyle = try c.decodeIfPresent(PhotoFrameBrandStyle.self, forKey: .brandStyle) ?? .text
+        widthPercent = normalizePhotoFrameWidthPercent(try c.decodeIfPresent(Int.self, forKey: .widthPercent) ?? 100)
+        backgroundBlurPercent = normalizePhotoFrameBackdropPercent(try c.decodeIfPresent(Int.self, forKey: .backgroundBlurPercent) ?? 100)
+        backgroundMaskPercent = normalizePhotoFrameBackdropPercent(try c.decodeIfPresent(Int.self, forKey: .backgroundMaskPercent) ?? 100)
+        datePattern = try c.decodeIfPresent(String.self, forKey: .datePattern) ?? "yyyy-MM-dd"
+        timePattern = try c.decodeIfPresent(String.self, forKey: .timePattern) ?? "HH:mm:ss"
+    }
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(showDate, forKey: .showDate); try c.encode(showTime, forKey: .showTime)
+        try c.encode(showFocalLength, forKey: .showFocalLength); try c.encode(showExposure, forKey: .showExposure)
+        try c.encode(showBrand, forKey: .showBrand); try c.encode(showModel, forKey: .showModel)
+        try c.encode(showLensModel, forKey: .showLensModel); try c.encode(showCoordinates, forKey: .showCoordinates)
+        try c.encode(showAltitude, forKey: .showAltitude); try c.encode(brandStyle, forKey: .brandStyle)
+        try c.encode(showAddress, forKey: .showAddress); try c.encode(showCity, forKey: .showCity); try c.encode(showRegion, forKey: .showRegion)
+        try c.encode(widthPercent, forKey: .widthPercent); try c.encode(backgroundBlurPercent, forKey: .backgroundBlurPercent); try c.encode(backgroundMaskPercent, forKey: .backgroundMaskPercent)
+        try c.encode(datePattern, forKey: .datePattern); try c.encode(timePattern, forKey: .timePattern)
+    }
 
     static func defaults(for preset: PhotoFramePreset) -> Self {
         var value = Self()
@@ -235,6 +315,8 @@ enum PhotoFilterCatalog {
 struct PhotoEffectsSettings: Codable, Equatable, Sendable {
     var photoFrameEnabled = false
     var photoFrameBorderEnabled = true
+    /// Android stores editor visibility separately from whether an effect is enabled.
+    var photoEffectModules = allPhotoEffectModules
     var photoFramePreset: PhotoFramePreset = .mist
     var watermark = PhotoFrameWatermark()
     var metadata = PhotoFrameMetadataSettings.defaults(for: .mist)
@@ -276,10 +358,17 @@ struct PhotoEffectsSettings: Codable, Equatable, Sendable {
     }
 
     mutating func selectFilter(_ id: String?) {
-        guard let id, let preset = PhotoFilterCatalog.resolve(id) else {
+        guard let id else {
             photoFilterEnabled = false
             return
         }
+        let preset: PhotoFilterPreset
+        if id.hasPrefix("cube:") {
+            guard let table = PhotoLUTRuntime.table(digest: String(id.dropFirst(5))) else { photoFilterEnabled = false; return }
+            preset = PhotoFilterPreset(id: id, name: "LUT \(table.digest.prefix(8))")
+        } else if let resolved = PhotoFilterCatalog.resolve(id) {
+            preset = resolved
+        } else { photoFilterEnabled = false; return }
         let key = Self.filterKey(id)
         let intensity = filterIntensities[key] ?? Np3FilterEngine.defaultIntensityPercent
         selectedFilter = .init(preset: preset, intensityPercent: intensity)
@@ -301,6 +390,7 @@ struct PhotoEffectsSettings: Codable, Equatable, Sendable {
         result.favoriteFilterIDs = draft.favoriteFilterIDs
         result.favoriteFrameEffects = draft.favoriteFrameEffects
         result.favoriteFramePresets = draft.favoriteFramePresets
+        result.photoEffectModules = normalizePhotoEffectModules(draft.photoEffectModules)
         result.metadataByPreset = draft.metadataByPreset
         result.metadata = result.metadataByPreset[result.photoFramePreset.rawValue]
             ?? PhotoFrameMetadataSettings.defaults(for: result.photoFramePreset)
@@ -308,7 +398,7 @@ struct PhotoEffectsSettings: Codable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case photoFrameEnabled, photoFrameBorderEnabled, photoFramePreset, watermark,
+        case photoFrameEnabled, photoFrameBorderEnabled, photoEffectModules, photoFramePreset, watermark,
              metadata, metadataByPreset, photoFilterEnabled, selectedFilter, filterIntensities, favoriteFilterIDs,
              favoriteFramePresets, favoriteFrameEffects
     }
@@ -317,6 +407,7 @@ struct PhotoEffectsSettings: Codable, Equatable, Sendable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         photoFrameEnabled = try c.decodeIfPresent(Bool.self, forKey: .photoFrameEnabled) ?? false
         photoFrameBorderEnabled = try c.decodeIfPresent(Bool.self, forKey: .photoFrameBorderEnabled) ?? true
+        photoEffectModules = normalizePhotoEffectModules(try c.decodeIfPresent(Int.self, forKey: .photoEffectModules) ?? allPhotoEffectModules)
         photoFramePreset = try c.decodeIfPresent(PhotoFramePreset.self, forKey: .photoFramePreset) ?? .mist
         watermark = try c.decodeIfPresent(PhotoFrameWatermark.self, forKey: .watermark) ?? PhotoFrameWatermark()
         metadata = try c.decodeIfPresent(PhotoFrameMetadataSettings.self, forKey: .metadata) ?? PhotoFrameMetadataSettings()
@@ -424,10 +515,17 @@ func effectivePhotoFrameWatermark(isPro: Bool, preference: PhotoFrameWatermark,
 
 func effectivePhotoEffectsSettings(_ preference: PhotoEffectsSettings, isPro: Bool) -> PhotoEffectsSettings {
     var value = preference
+    let modules = effectivePhotoEffectModules(preference.photoEffectModules, isPro: isPro)
+    value.photoEffectModules = modules
+    value.photoFilterEnabled = preference.photoFilterEnabled && photoEffectModuleIsVisible(modules, .filter)
+    value.photoFrameBorderEnabled = preference.photoFrameBorderEnabled && photoEffectModuleIsVisible(modules, .frame)
     value.watermark = preference.photoFrameEnabled
         ? effectivePhotoFrameWatermark(isPro: isPro, preference: preference.watermark,
-                                       borderEnabled: preference.photoFrameBorderEnabled)
+                                       borderEnabled: value.photoFrameBorderEnabled && photoEffectModuleIsVisible(modules, .watermark))
         : PhotoFrameWatermark(enabled: false)
+    if !photoEffectModuleIsVisible(modules, .watermark) { value.watermark.enabled = false }
+    value.photoFrameEnabled = preference.photoFrameEnabled &&
+        (value.photoFrameBorderEnabled || value.watermark.enabled)
     return value
 }
 
@@ -867,6 +965,11 @@ final class PhotoEffectsStore: ObservableObject {
 
     private static func normalized(_ value: PhotoEffectsSettings, scope: Scope) -> PhotoEffectsSettings {
         var result = value
+        result.photoEffectModules = normalizePhotoEffectModules(value.photoEffectModules)
+        let modules = result.photoEffectModules
+        result.photoFilterEnabled = result.photoFilterEnabled && photoEffectModuleIsVisible(modules, .filter)
+        result.photoFrameBorderEnabled = result.photoFrameBorderEnabled && photoEffectModuleIsVisible(modules, .frame)
+        if !photoEffectModuleIsVisible(modules, .watermark) { result.watermark.enabled = false }
         var watermark = value.watermark
         let candidateHash = watermark.imageHash?.lowercased()
         let validHash: String?
@@ -980,10 +1083,11 @@ final class PhotoEffectsStore: ObservableObject {
             "photo_frame_watermark_opacity", "photo_frame_watermark_effect",
             "photo_filter_enabled", "photo_filter_selected_id", "photo_filter_intensity",
             "photo_filter_intensities_v1", "favorite_photo_filters_v1",
-            "favorite_frame_effects_v1",
+            "favorite_frame_effects_v1", "photo_effect_modules",
         ]
         guard markerKeys.contains(where: { defaults.object(forKey: $0) != nil }) else { return nil }
         var value = PhotoEffectsSettings()
+        value.photoEffectModules = normalizePhotoEffectModules(defaults.object(forKey: "photo_effect_modules") as? Int ?? allPhotoEffectModules)
         value.photoFrameEnabled = defaults.object(forKey: "photo_frame_enabled") as? Bool ?? false
         value.photoFrameBorderEnabled = defaults.object(forKey: "photo_frame_border_enabled") as? Bool ?? true
         value.photoFramePreset = PhotoFramePreset(rawValue: defaults.string(forKey: "photo_frame_preset") ?? "MIST") ?? .mist
@@ -1036,6 +1140,7 @@ final class PhotoEffectsStore: ObservableObject {
     }
 
     private static func persistAndroidTransferSettings(_ value: PhotoEffectsSettings, defaults: UserDefaults) {
+        defaults.set(value.photoEffectModules, forKey: "photo_effect_modules")
         defaults.set(value.photoFrameEnabled, forKey: "photo_frame_enabled")
         defaults.set(value.photoFrameBorderEnabled, forKey: "photo_frame_border_enabled")
         defaults.set(value.photoFramePreset.rawValue, forKey: "photo_frame_preset")
@@ -1064,6 +1169,7 @@ final class PhotoEffectsStore: ObservableObject {
         guard defaults.object(forKey: "settings_version") != nil || defaults.object(forKey: "frame_preset") != nil else { return nil }
         var value = PhotoEffectsSettings()
         value.photoFrameEnabled = defaults.object(forKey: "decoration_enabled") as? Bool ?? false
+        value.photoEffectModules = normalizePhotoEffectModules(defaults.object(forKey: "photo_effect_modules") as? Int ?? allPhotoEffectModules)
         value.photoFrameBorderEnabled = defaults.object(forKey: "border_enabled") as? Bool ?? true
         value.photoFramePreset = PhotoFramePreset(rawValue: defaults.string(forKey: "frame_preset") ?? "MIST") ?? .mist
         value.metadataByPreset = decodeAndroidMetadata(defaults.string(forKey: "frame_metadata_settings_v1"))
@@ -1095,6 +1201,7 @@ final class PhotoEffectsStore: ObservableObject {
     private static func persistAndroidLocalSettings(_ value: PhotoEffectsSettings, defaults: UserDefaults) {
         defaults.set(3, forKey: "settings_version")
         defaults.set(value.photoFrameEnabled, forKey: "decoration_enabled")
+        defaults.set(value.photoEffectModules, forKey: "photo_effect_modules")
         defaults.set(value.photoFrameBorderEnabled, forKey: "border_enabled")
         defaults.set(value.photoFramePreset.rawValue, forKey: "frame_preset")
         defaults.set(encodeAndroidMetadata(value.metadataByPreset), forKey: "frame_metadata_settings_v1")

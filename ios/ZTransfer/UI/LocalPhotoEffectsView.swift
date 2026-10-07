@@ -8,6 +8,7 @@ struct LocalPhotoEffectsView: View {
     let onNavigateUp: () -> Void
     @StateObject private var effectsStore = PhotoEffectsStore(scope: .localPhotos)
     @StateObject private var batch = LocalPhotoBatchViewModel()
+    @StateObject private var photoLUTStore = PhotoLUTStore()
     @State private var pickerItems: [PhotosPickerItem] = []
     @State private var watermarkPickerItems: [PhotosPickerItem] = []
     @State private var previewPage = 0
@@ -35,6 +36,18 @@ struct LocalPhotoEffectsView: View {
                                        filterChooser: $filterChooser,
                                        onFavoriteImageMissing: { effectsHint = .init(resource: "photo_effect_favorite_image_missing") })
                 .padding(.top, 10).padding(.bottom, 18)
+                PhotoLUTChooser(store: photoLUTStore, onSelect: { id, name, intensity in
+                    var settings = effectsStore.settings
+                    settings.selectedFilter = PhotoFilterSelection(preset: PhotoFilterPreset(id: id, name: name), intensityPercent: intensity)
+                    settings.photoFilterEnabled = true
+                    effectsStore.update(settings)
+                }, onIntensity: { value in
+                    var settings = effectsStore.settings
+                    settings.selectedFilter?.intensityPercent = value
+                    settings.photoFilterEnabled = settings.selectedFilter != nil
+                    effectsStore.update(settings)
+                })
+                    .padding(.bottom, 18)
             }
             .padding(.horizontal, 20).padding(.vertical, 16)
             .frame(maxWidth: 680).frame(maxWidth: .infinity)
@@ -86,6 +99,15 @@ struct LocalPhotoEffectsView: View {
             }
         }
         .photoEffectsHint($effectsHint, duration: 2)
+        .onAppear {
+            guard let identifier = photoLUTStore.selectedIdentifier,
+                  identifier.hasPrefix("cube:"),
+                  let table = PhotoLUTRuntime.table(digest: String(identifier.dropFirst(5))) ?? photoLUTStore.restoreSnapshot(digest: String(identifier.dropFirst(5))) else { return }
+            var settings = effectsStore.settings
+            settings.selectedFilter = PhotoFilterSelection(preset: PhotoFilterPreset(id: identifier, name: "LUT \(table.digest.prefix(8))"), intensityPercent: photoLUTStore.intensityPercent)
+            settings.photoFilterEnabled = true
+            effectsStore.update(settings)
+        }
         .photosPicker(isPresented: $showingPicker, selection: $pickerItems,
                       matching: .images, preferredItemEncoding: .current)
         .photosPicker(isPresented: $showingWatermarkPicker, selection: $watermarkPickerItems,
@@ -205,10 +227,12 @@ struct LocalPhotoEffectsView: View {
             } else {
                 TabView(selection: $previewPage) {
                     ForEach(batch.state.photos.indices, id: \.self) { index in
-                        Group {
-                            // Only the visible page and immediate neighbours
-                            // retain bounded 1280-pixel previews.
-                            if abs(index - previewPage) <= 1 {
+                        GeometryReader { proxy in
+                            // Android beyondViewportPageCount=0: decode pages
+                            // intersecting the viewport, including the incoming
+                            // page during a swipe, without retaining idle neighbours.
+                            let frame = proxy.frame(in: .named("localPreviewPager"))
+                            if localPreviewPageIsVisible(frame: frame, viewportWidth: proxy.size.width) {
                                 LocalEffectPreview(
                                     item: batch.state.photos[index],
                                     settings: previewSettings,
@@ -219,6 +243,7 @@ struct LocalPhotoEffectsView: View {
                     }
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
+                .coordinateSpace(name: "localPreviewPager")
                 // Keep the whole 4:3 preview as the pager's hit region. The
                 // child preview also has a long-press comparison gesture, so
                 // the pager must be allowed to win ordinary horizontal drags.
@@ -542,4 +567,9 @@ private struct LocalPreviewPrefetchRequest: Equatable {
     let item: PhotosPickerItem
     let settings: PhotoEffectsSettings
     let enabled: Bool
+}
+
+/// Half-open viewport intersection excludes pages resting exactly one width away.
+func localPreviewPageIsVisible(frame: CGRect, viewportWidth: CGFloat) -> Bool {
+    viewportWidth > 0 && frame.maxX > 0 && frame.minX < viewportWidth
 }

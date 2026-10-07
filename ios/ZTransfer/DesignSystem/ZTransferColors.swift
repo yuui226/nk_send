@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 
 enum ZTransferColors {
+    static let surface = adaptiveHex(light: (0xFF, 0xFF, 0xFF), dark: (0x1E, 0x1E, 0x1E))
     static let background = adaptiveHex(light: (0xF2, 0xF2, 0xF7), dark: (0x12, 0x12, 0x12))
     static let primaryText = adaptiveHex(light: (0x1C, 0x1C, 0x1E), dark: (0xE0, 0xE0, 0xE0))
     static let secondaryText = adaptiveHex(light: (0x6E, 0x6E, 0x73), dark: (0xB0, 0xB0, 0xB0))
@@ -137,11 +138,11 @@ func zTransferButtonAccentPalette(
     }
 }
 
-/// The iOS counterpart of Android `GlassButton`. On iOS 26+, ordinary themed
-/// buttons use native Liquid Glass without flat rims or alpha suppression.
+/// The iOS counterpart of Android `GlassButton`. The separately selected
+/// Liquid Glass skin keeps the user-approved native iOS material.
 /// `panel` remains the snapshot-stable embedded variant used inside Genie
 /// popup animation content.
-struct ZTransferGlassButtonStyle: ButtonStyle {
+struct ZTransferGlassButtonStyle: PrimitiveButtonStyle {
     var tint: Color?
     var cornerRadius: CGFloat
     var followsSkin: Bool
@@ -153,6 +154,10 @@ struct ZTransferGlassButtonStyle: ButtonStyle {
     var materialContentColor: Color?
     var disabledAlpha: CGFloat
     var prominentPressFeedback: Bool
+    var showSheen: Bool
+    var frostedOpacityBoost: Double
+    var shadowElevation: CGFloat?
+    var textureSeed: Int32
 
     @AppStorage("skin_preset") private var skinPreset = ZTransferButtonSkin.frostedGlass.rawValue
     @Environment(\.colorScheme) private var colorScheme
@@ -169,7 +174,13 @@ struct ZTransferGlassButtonStyle: ButtonStyle {
         liquidGlassBoundary: Bool = false,
         materialContentColor: Color? = nil,
         disabledAlpha: CGFloat = 0.45,
-        prominentPressFeedback: Bool = false
+        prominentPressFeedback: Bool = false,
+        showSheen: Bool = true,
+        frostedOpacityBoost: Double = 0,
+        shadowElevation: CGFloat? = nil,
+        textureSeed: Int32? = nil,
+        sourceFile: StaticString = #fileID,
+        sourceLine: UInt = #line
     ) {
         self.tint = tint
         self.cornerRadius = cornerRadius
@@ -182,6 +193,10 @@ struct ZTransferGlassButtonStyle: ButtonStyle {
         self.materialContentColor = materialContentColor
         self.disabledAlpha = disabledAlpha
         self.prominentPressFeedback = prominentPressFeedback
+        self.showSheen = showSheen
+        self.frostedOpacityBoost = frostedOpacityBoost
+        self.shadowElevation = shadowElevation
+        self.textureSeed = textureSeed ?? ZTransferTextureKey.stableSeed("\(sourceFile):\(sourceLine)")
     }
 
     private var skin: ZTransferButtonSkin {
@@ -189,77 +204,121 @@ struct ZTransferGlassButtonStyle: ButtonStyle {
     }
 
     func makeBody(configuration: Configuration) -> some View {
-        let physical = skin != .frostedGlass && skin != .liquidGlass && !panel
-        let pressedScale: CGFloat = {
-            guard configuration.isPressed && isEnabled else { return 1 }
-            if prominentPressFeedback { return 0.94 }
-            switch skin {
-            case .liquidGlass: return 1
-            case .cameraControls: return 0.982
-            case .titanium: return 0.970
-            default: return 0.965
-            }
-        }()
-        let pressedOffset: CGFloat = configuration.isPressed && isEnabled && physical
-            ? (skin == .cameraControls ? 2.1 : 1.6)
-            : 0
+        ZTransferAnimatedGlassButton(style: self, configuration: configuration,
+            skin: skin, enabled: isEnabled)
+    }
 
-        treatedLabel(configuration.label)
-            // Make the complete rendered button surface the hit target. This
-            // is especially important for icon-only Liquid Glass buttons,
-            // whose visible material extends beyond the glyph itself.
-            .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+    fileprivate func materialBody<Label: View>(_ label: Label, skin: ZTransferButtonSkin,
+                                               frame: ZTransferButtonMotion.Frame,
+                                               nativePressed: Bool) -> some View {
+        let nativeGlass = skin == .liquidGlass
+        let physical = !nativeGlass && skin != .frostedGlass && !panel
+        let resolvedDisabledAlpha = min(max(disabledAlpha, 0), 1)
+        let needsDisabledLayer = !isEnabled && resolvedDisabledAlpha < 0.999
+        let transformed = frame.scale != 1 || needsDisabledLayer
+        let scale: CGFloat = nativeGlass
+            ? (nativePressed && isEnabled && prominentPressFeedback ? 0.94 : 1)
+            : CGFloat(frame.scale)
+        // Android omits the entire graphics layer once scale has returned to 1.
+        let translation: CGFloat = physical && transformed
+            ? (skin == .cameraControls ? 2.1 : 1.6) * CGFloat(frame.light) : 0
+        return treatedLabel(label, skin: skin, press: CGFloat(frame.light), active: CGFloat(frame.active))
+            .contentShape(RoundedRectangle(cornerRadius: cornerRadius,
+                style: nativeGlass ? .continuous : .circular))
             .background {
                 ZTransferButtonMaterialSurface(
-                    skin: skin,
-                    cornerRadius: cornerRadius,
-                    panel: panel,
-                    active: active,
-                    activeColor: activeColor,
-                    activeOutline: activeOutline,
+                    skin: skin, cornerRadius: cornerRadius, panel: panel,
+                    active: active, activeColor: activeColor, activeOutline: activeOutline,
                     liquidGlassBoundary: liquidGlassBoundary,
-                    pressed: configuration.isPressed && isEnabled
+                    pressed: nativePressed && isEnabled,
+                    showSheen: showSheen, frostedOpacityBoost: frostedOpacityBoost,
+                    shadowElevation: shadowElevation, textureSeed: textureSeed,
+                    pressProgress: CGFloat(frame.light), activeProgress: CGFloat(frame.active)
                 )
             }
-            .scaleEffect(pressedScale)
-            .offset(y: pressedOffset)
-            .brightness(configuration.isPressed && prominentPressFeedback ? -0.035 : 0)
-            .opacity(isEnabled ? 1 : disabledAlpha)
-            .animation(configuration.isPressed
-                       ? .easeOut(duration: 0.08)
-                       : (skin == .cameraControls
-                          ? .easeOut(duration: 0.14)
-                          : .spring(response: 0.34, dampingFraction: 0.72)),
-                       value: configuration.isPressed)
-            .animation(.easeInOut(duration: 0.18), value: active)
+            .scaleEffect(scale)
+            .offset(y: translation)
+            .brightness(nativeGlass && nativePressed && prominentPressFeedback ? -0.035 : 0)
+            .opacity(!isEnabled && (nativeGlass || transformed) ? resolvedDisabledAlpha : 1)
+            .animation(nativeGlass
+                ? (nativePressed ? .easeOut(duration: 0.08) : .spring(response: 0.34, dampingFraction: 0.72))
+                : nil, value: nativePressed)
     }
 
     @ViewBuilder
-    private func treatedLabel<Label: View>(_ label: Label) -> some View {
+    private func treatedLabel<Label: View>(_ label: Label, skin: ZTransferButtonSkin,
+                                           press: CGFloat, active: CGFloat) -> some View {
         switch skin {
         case .titanium:
-            // Android's titanium modifier always turns the complete row into
-            // a recessed stamp. Without an explicit inlay it uses the dark
-            // groove face, not the material-aware high-contrast text color.
-            let stamp = materialContentColor ?? zTransferMaterialContentColor(
-                skin: skin, scheme: colorScheme, fallback: ZTransferColors.primaryText)
-            label.hidden().overlay { stamp.mask(label) }
+            label.modifier(ZTransferTitaniumStamp(dark: colorScheme == .dark,
+                inlay: materialContentColor, pressProgress: press))
         case .cameraControls where !panel:
-            // A camera keycap uses cool-grey printing by default. Active
-            // controls blend that ink towards their status-light color.
-            let print = materialContentColor ?? zTransferMaterialContentColor(
-                skin: skin,
-                scheme: colorScheme,
-                fallback: ZTransferColors.primaryText,
-                active: active,
-                activeColor: activeColor
-            )
-            label.hidden().overlay { print.mask(label) }
+            label.modifier(ZTransferCameraPrint(scheme: colorScheme, inlay: materialContentColor,
+                activeColor: activeColor, progress: active))
         case .frostedGlass, .liquidGlass, .wood, .cameraControls:
-            // Android does not recolor frosted/wood rows. Preserve each
-            // caller's Text/Icon color; tint is only a fallback for controls
-            // whose content intentionally inherits from the button.
             if let tint { label.foregroundStyle(tint) } else { label }
+        }
+    }
+}
+
+private struct ZTransferAnimatedGlassButton: View {
+    let style: ZTransferGlassButtonStyle
+    let configuration: PrimitiveButtonStyleConfiguration
+    let skin: ZTransferButtonSkin
+    let enabled: Bool
+    @Environment(\.scenePhase) private var scenePhase
+    @StateObject private var motion: ZTransferButtonMotionController
+
+    init(style: ZTransferGlassButtonStyle, configuration: PrimitiveButtonStyleConfiguration,
+         skin: ZTransferButtonSkin, enabled: Bool) {
+        self.style = style
+        self.configuration = configuration
+        self.skin = skin
+        self.enabled = enabled
+        _motion = StateObject(wrappedValue: ZTransferButtonMotionController(
+            skin: skin, panel: style.panel, active: style.active, enabled: enabled))
+    }
+
+    var body: some View {
+        Button(role: configuration.role) {
+            motion.successfulActivation()
+            configuration.trigger()
+        } label: {
+            configuration.label
+        }
+        .buttonStyle(FeedbackStyle(style: style, skin: skin, motion: motion))
+        // Android's semantics onClick bypasses PressInteraction. Preserve that
+        // distinction while keeping native Button focus/keyboard/action handling.
+        .accessibilityAction {
+            if enabled { configuration.trigger() }
+        }
+        .background { ZTransferButtonScrollContext { motion.inScrollableContainer = $0 } }
+        .onAppear(perform: configure)
+        .onChange(of: enabled) { _ in configure() }
+        .onChange(of: skin) { _ in configure() }
+        .onChange(of: style.panel) { _ in configure() }
+        .onChange(of: style.active) { _ in configure() }
+        .onChange(of: scenePhase) { phase in
+            if phase != .active { motion.stop() } else { configure() }
+        }
+        .onDisappear { motion.stop() }
+    }
+
+    private func configure() {
+        #if DEBUG
+        motion.traceID = style.textureSeed
+        #endif
+        motion.configure(skin: skin, panel: style.panel, active: style.active, enabled: enabled)
+    }
+
+    private struct FeedbackStyle: ButtonStyle {
+        let style: ZTransferGlassButtonStyle
+        let skin: ZTransferButtonSkin
+        @ObservedObject var motion: ZTransferButtonMotionController
+        func makeBody(configuration: Configuration) -> some View {
+            style.materialBody(configuration.label, skin: skin, frame: motion.frame,
+                               nativePressed: configuration.isPressed)
+                .onChange(of: configuration.isPressed) { motion.nativePressChanged($0) }
         }
     }
 }
@@ -274,17 +333,19 @@ private extension Color {
         var r2: CGFloat = 0, g2: CGFloat = 0, b2: CGFloat = 0, a2: CGFloat = 0
         guard first.getRed(&r1, green: &g1, blue: &b1, alpha: &a1),
               second.getRed(&r2, green: &g2, blue: &b2, alpha: &a2) else { return self }
-        return Color(red: r1 + (r2 - r1) * t,
-                     green: g1 + (g2 - g1) * t,
-                     blue: b1 + (b2 - b1) * t,
-                     opacity: a1 + (a2 - a1) * t)
+        let start = ZTransferAndroidColor.pack(red: Float(r1), green: Float(g1), blue: Float(b1), alpha: Float(a1))
+        let end = ZTransferAndroidColor.pack(red: Float(r2), green: Float(g2), blue: Float(b2), alpha: Float(a2))
+        let result = ZTransferAndroidColor.lerp(start: start, end: end, fraction: Float(t))
+        return Color(.sRGB, red: Double((result >> 16) & 255) / 255,
+                     green: Double((result >> 8) & 255) / 255,
+                     blue: Double(result & 255) / 255, opacity: Double(result >> 24) / 255)
     }
 }
 
 /// Static material face shared by themed ButtonStyle and the queue's collapsed
 /// icon state. Procedural marks are deterministic and clipped to the final
 /// shape, so there is no rectangular texture seam during scaling.
-struct ZTransferButtonMaterialSurface: View {
+struct ZTransferButtonMaterialSurface: View, Animatable {
     let skin: ZTransferButtonSkin
     let cornerRadius: CGFloat
     var panel = false
@@ -293,18 +354,29 @@ struct ZTransferButtonMaterialSurface: View {
     var activeOutline = false
     var liquidGlassBoundary = false
     var pressed = false
+    var showSheen = true
+    var frostedOpacityBoost: Double = 0
+    var shadowElevation: CGFloat?
+    var textureSeed: Int32 = 0
+    var pressProgress: CGFloat? = nil
+    var activeProgress: CGFloat? = nil
+
+    nonisolated var animatableData: AnimatablePair<CGFloat, CGFloat> {
+        get { AnimatablePair(pressProgress ?? (pressed ? 1 : 0), activeProgress ?? (active && !panel ? 1 : 0)) }
+        set { pressProgress = newValue.first; activeProgress = newValue.second }
+    }
+    private var pressAmount: CGFloat { min(max(pressProgress ?? (pressed ? 1 : 0), 0), 1) }
+    private var activeAmount: CGFloat { panel ? 0 : min(max(activeProgress ?? (active ? 1 : 0), 0), 1) }
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.displayScale) private var displayScale
     @ObservedObject private var textureStore = ZTransferMaterialTextureStore.shared
     private var dark: Bool { colorScheme == .dark }
     private var shape: RoundedRectangle {
-        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        RoundedRectangle(cornerRadius: cornerRadius, style: skin == .liquidGlass ? .continuous : .circular)
     }
     private var shadowSuppressed: Bool {
-        panel || (!dark && skin == .frostedGlass)
-    }
-    private var needsFlatLightRim: Bool {
-        !dark && skin == .frostedGlass
+        (panel && shadowElevation == nil) || skin == .frostedGlass
     }
 
     var body: some View {
@@ -315,15 +387,18 @@ struct ZTransferButtonMaterialSurface: View {
                 material
                     .clipShape(shape)
                     .overlay {
-                        if activeOutline && active {
-                            shape.strokeBorder(activeColor.opacity(0.58), lineWidth: 1.25)
+                        if activeOutline && activeAmount > 0.001 {
+                            shape.strokeBorder(activeColor.opacity(0.58 * activeAmount), lineWidth: 1.25)
                         }
                     }
                     .shadow(
                         color: shadowSuppressed ? .clear : .black.opacity(shadowOpacity),
-                        radius: shadowSuppressed ? 0 : shadowRadius,
-                        y: shadowSuppressed ? 0 : shadowY
+                        radius: shadowSuppressed ? 0 : shadowRadius * elevationScale,
+                        y: shadowSuppressed ? 0 : shadowY * elevationScale
                     )
+                    // Surface owns the interpolated scalars. Child finishes
+                    // must draw this frame, not start a second animation.
+                    .transaction { $0.animation = nil }
             }
         }
         .overlay {
@@ -333,53 +408,67 @@ struct ZTransferButtonMaterialSurface: View {
                     lineWidth: 0.75
                 )
             }
-            if needsFlatLightRim {
-                // Android's flat light frosted button has no exterior drop
-                // shadow, but it remains defined by a broad dark inner edge
-                // and a fine white boundary. Apply that rule to every light
-                // frosted control.
-                shape.strokeBorder(
-                    Color(red: 97 / 255, green: 113 / 255, blue: 123 / 255)
-                        .opacity(0.13),
-                    lineWidth: 3.2
-                )
-                .overlay(shape.strokeBorder(.white.opacity(0.66), lineWidth: 1))
-            }
         }
-        .shadow(
-            color: needsFlatLightRim ? .black.opacity(0.055) : .clear,
-            radius: needsFlatLightRim ? 2.5 : 0,
-            y: needsFlatLightRim ? 1.25 : 0
-        )
         // Material is purely visual. Keeping it outside hit testing ensures
         // every skin (including native liquid glass) leaves the Button label
         // as the sole interaction owner.
         .allowsHitTesting(false)
-        .task(id: "\(skin.rawValue)-\(dark)") {
-            if skin == .wood { textureStore.loadWoodIfNeeded(dark: dark) }
+        .task(id: textureKey) {
+            if let key = textureKey { await textureStore.load(key) }
+        }
+    }
+
+    private var textureKey: ZTransferTextureKey? {
+        ZTransferTextureKey(skin: skin, dark: dark, seed: textureSeed, panel: panel)
+    }
+
+    @ViewBuilder private var materialTexture: some View {
+        if let key = textureKey, let image = textureStore.image(for: key) {
+            shape.fill(ImagePaint(image: Image(decorative: image, scale: max(displayScale, 1)),
+                                  scale: 1))
         }
     }
 
     @ViewBuilder private var material: some View {
-        if panel {
-            // Android panel buttons stay embedded in the popup and use no
-            // raised camera keycap. A restrained material tint remains.
-            shape.fill(ZTransferColors.primaryText.opacity(0.05))
-                .overlay(shape.fill(panelSheen))
+        if skin == .frostedGlass {
+            frostedMaterial
+        } else if skin == .liquidGlass {
+            if panel {
+                shape.fill(ZTransferColors.primaryText.opacity(0.05))
+                    .overlay(shape.fill(panelSheen))
+            } else { frostedMaterial }
         } else {
-            switch skin {
-            case .frostedGlass: frostedMaterial
-            case .liquidGlass: frostedMaterial
-            case .titanium: titaniumMaterial
-            case .wood: woodMaterial
-            case .cameraControls: cameraMaterial
-            }
+            shape.fill(panel ? ZTransferColors.primaryText.opacity(0.05) : physicalBase)
+                .overlay(materialTexture)
+                .overlay(shape.fill(physicalHighlight))
+                .overlay {
+                    ZTransferPhysicalMaterialFinish(skin: skin, cornerRadius: cornerRadius,
+                        dark: dark, panel: panel, activeColor: activeColor,
+                        pressProgress: pressAmount, activeProgress: activeAmount)
+                }
+        }
+    }
+
+    private func rgb(_ hex: UInt32, alpha: Double = 1) -> Color {
+        Color(.sRGB, red: Double((hex >> 16) & 255) / 255,
+              green: Double((hex >> 8) & 255) / 255,
+              blue: Double(hex & 255) / 255, opacity: alpha)
+    }
+
+    private var physicalBase: Color {
+        switch skin {
+        case .titanium: return rgb(dark ? 0x68737A : 0xBBC3C8, alpha: 0.98)
+        case .wood: return rgb(dark ? 0x3F2818 : 0xC89554, alpha: dark ? 0.86 : 0.96)
+        case .cameraControls: return rgb(dark ? 0x151719 : 0x1B1D20, alpha: 0.995)
+        case .frostedGlass, .liquidGlass: return .clear
         }
     }
 
     private var frostedMaterial: some View {
-        ZTransferGlassSurface(cornerRadius: cornerRadius, kind: .button,
-                              tint: active ? activeColor.opacity(0.14) : .clear)
+        ZTransferFrostedButtonSurface(cornerRadius: cornerRadius, dark: dark, panel: panel,
+                                     showSheen: showSheen, opacityBoost: frostedOpacityBoost,
+                                     activeColor: activeColor, active: active && !panel, pressed: pressed,
+                                     pressProgress: pressAmount, activeProgress: activeAmount)
     }
 
     @ViewBuilder private var nativeLiquidGlassMaterial: some View {
@@ -411,172 +500,50 @@ struct ZTransferButtonMaterialSurface: View {
         }
     }
 
-    private var titaniumMaterial: some View {
-        let base = dark
-            ? Color(red: 0.408, green: 0.451, blue: 0.478).opacity(0.98)
-            : Color(red: 0.733, green: 0.765, blue: 0.784).opacity(0.98)
-        return shape.fill(base)
-            .overlay(shape.fill(RadialGradient(
-                colors: [.white.opacity(pressed ? 0.06 : 0.18),
-                         .white.opacity(0.045), .clear,
-                         Color(red: 0.19, green: 0.23, blue: 0.25).opacity(0.14)],
-                center: UnitPoint(x: 0.40, y: 0.30), startRadius: 0, endRadius: 130
-            )))
-            .overlay(shape.fill(LinearGradient(
-                stops: [.init(color: .white.opacity(pressed ? 0.05 : 0.16), location: 0),
-                        .init(color: .clear, location: 0.50),
-                        .init(color: .black.opacity(pressed ? 0.08 : 0.22), location: 1)],
-                startPoint: .top, endPoint: .bottom
-            )))
-            .overlay(materialGrain(kind: .titanium))
-            .overlay(shape.fill(active ? activeColor.opacity(0.12) : .clear))
-    }
-
-    private var woodMaterial: some View {
-        let base = dark
-            ? Color(red: 0.247, green: 0.157, blue: 0.094).opacity(0.86)
-            : Color(red: 0.784, green: 0.584, blue: 0.329).opacity(0.96)
-        let normalTop = dark
-            ? Color(red: 216.0 / 255, green: 167.0 / 255, blue: 101.0 / 255).opacity(0.030)
-            : Color(red: 242.0 / 255, green: 207.0 / 255, blue: 147.0 / 255).opacity(0.060)
-        let normalBottom = dark
-            ? Color(red: 216.0 / 255, green: 167.0 / 255, blue: 101.0 / 255).opacity(0.010)
-            : Color(red: 242.0 / 255, green: 207.0 / 255, blue: 147.0 / 255).opacity(0.015)
-        return shape.fill(base)
-            // Android order: opaque wood base -> stable 256 px natural tile
-            // -> active/highlight wash -> sculpted hard-wood volume.
-            .overlay(shape.fill(ImagePaint(
-                image: textureStore.woodImage(dark: dark).map(Image.init(uiImage:)) ?? Image(systemName: "square.fill"),
-                sourceRect: CGRect(x: 0, y: 0, width: 1, height: 1),
-                scale: 1
-            )).opacity(textureStore.woodImage(dark: dark) == nil ? 0 : 1))
-            .overlay(shape.fill(LinearGradient(
-                colors: active
-                    ? [activeColor.opacity(0.30), activeColor.opacity(0.12)]
-                    : [normalTop, normalBottom],
-                startPoint: .top,
-                endPoint: .bottom
-            )))
-            .overlay(woodSculptedFinish)
-    }
-
-    private var woodSculptedFinish: some View {
-        GeometryReader { proxy in
-            let size = proxy.size
-            let volume: CGFloat = pressed ? 0.36 : 1
-            let warm = dark
-                ? Color(red: 247.0 / 255, green: 214.0 / 255, blue: 155.0 / 255)
-                : Color(red: 1, green: 224.0 / 255, blue: 169.0 / 255)
-            let shadow = dark
-                ? Color(red: 20.0 / 255, green: 10.0 / 255, blue: 4.0 / 255)
-                : Color(red: 92.0 / 255, green: 48.0 / 255, blue: 19.0 / 255)
-            let radius = max(size.width * 0.53, size.height * 1.98)
-
-            shape.fill(RadialGradient(
-                stops: [
-                    .init(color: warm.opacity((dark ? 0.115 : 0.130) * volume), location: 0),
-                    .init(color: warm.opacity((dark ? 0.068 : 0.080) * volume), location: 0.35),
-                    .init(color: warm.opacity(0.025 * volume), location: 0.61),
-                    .init(color: shadow.opacity(0.045 * volume), location: 0.81),
-                    .init(color: shadow.opacity((dark ? 0.135 : 0.100) * volume), location: 1)
-                ],
-                center: UnitPoint(x: 0.39, y: 0.30),
-                startRadius: 0,
-                endRadius: radius
-            ))
-            .overlay(shape.fill(LinearGradient(
-                stops: [
-                    .init(color: warm.opacity((dark ? 0.105 : 0.140) * volume), location: 0),
-                    .init(color: warm.opacity((dark ? 0.040 : 0.055) * volume), location: 0.20),
-                    .init(color: .clear, location: 0.46),
-                    .init(color: .clear, location: 1)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )))
-            .overlay(shape.fill(LinearGradient(
-                stops: [
-                    .init(color: warm.opacity(0.025 * volume), location: 0),
-                    .init(color: .clear, location: 0.22),
-                    .init(color: .clear, location: 0.72),
-                    .init(color: shadow.opacity((dark ? 0.135 : 0.095) * volume), location: 1)
-                ],
-                startPoint: .leading,
-                endPoint: .trailing
-            )))
-            .overlay(shape.fill(LinearGradient(
-                stops: [
-                    .init(color: .clear, location: 0),
-                    .init(color: .clear, location: 0.58),
-                    .init(color: shadow.opacity(0.055 * volume), location: 0.78),
-                    .init(color: shadow.opacity((dark ? 0.31 : 0.21) * volume), location: 1)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )))
-            .overlay(shape.fill(RadialGradient(
-                colors: [shadow.opacity(pressed ? 0.045 : 0), .clear],
-                center: UnitPoint(x: 0.5, y: 0.52),
-                startRadius: 0,
-                endRadius: max(size.width, size.height) * 0.72
-            )))
+    private var physicalHighlight: LinearGradient {
+        let top: Color
+        let bottom: Color
+        if !showSheen {
+            top = .clear; bottom = .clear
+        } else if panel {
+            switch skin {
+            case .titanium: top = rgb(dark ? 0xEAF1F4 : 0xFAFCFD).opacity(dark ? 0.070 : 0.120)
+            case .wood: top = rgb(dark ? 0xD8A765 : 0xF2CF93).opacity(dark ? 0.025 : 0.045)
+            case .cameraControls: top = rgb(0xB9C0C4).opacity(dark ? 0.035 : 0.040)
+            case .frostedGlass, .liquidGlass: top = .clear
+            }
+            bottom = .clear
+        } else {
+            switch skin {
+            case .titanium:
+                top = rgb(dark ? 0xEAF1F4 : 0xFAFCFD).opacity(dark ? 0.080 : 0.150)
+                bottom = rgb(dark ? 0x303A41 : 0x68737B).opacity(0.035)
+            case .wood:
+                top = rgb(dark ? 0xD8A765 : 0xF2CF93).opacity(dark ? 0.030 : 0.060)
+                bottom = rgb(dark ? 0xD8A765 : 0xF2CF93).opacity(dark ? 0.010 : 0.015)
+            case .cameraControls:
+                top = rgb(0xB9C0C4).opacity(dark ? 0.040 : 0.050)
+                bottom = .black.opacity(dark ? 0.18 : 0.20)
+            case .frostedGlass, .liquidGlass:
+                top = .clear; bottom = .clear
+            }
         }
+        return LinearGradient(colors: [
+            top.mix(with: activeColor.opacity(0.30), by: activeAmount, scheme: colorScheme),
+            bottom.mix(with: activeColor.opacity(0.12), by: activeAmount, scheme: colorScheme)
+        ], startPoint: .top, endPoint: .bottom)
     }
 
-    private var cameraMaterial: some View {
-        let base = dark ? Color(red: 0.082, green: 0.090, blue: 0.098)
-                        : Color(red: 0.106, green: 0.114, blue: 0.125)
-        let cool = dark ? Color(red: 0.824, green: 0.843, blue: 0.855)
-                        : Color(red: 0.745, green: 0.769, blue: 0.780)
-        return shape.fill(base.opacity(0.995))
-            .overlay(shape.fill(RadialGradient(
-                colors: [cool.opacity(pressed ? 0.025 : 0.075), .clear,
-                         .black.opacity(0.11)],
-                center: UnitPoint(x: 0.42, y: 0.28), startRadius: 0, endRadius: 100
-            )))
-            .overlay(shape.fill(LinearGradient(
-                stops: [.init(color: cool.opacity(pressed ? 0.05 : 0.16), location: 0),
-                        .init(color: .clear, location: 0.34),
-                        .init(color: .black.opacity(0.34), location: 1)],
-                startPoint: .top, endPoint: .bottom
-            )))
-            .overlay(materialGrain(kind: .cameraControls))
-            .overlay(shape.strokeBorder(LinearGradient(
-                colors: [.black.opacity(0.20), .black.opacity(0.68)],
-                startPoint: .top, endPoint: .bottom), lineWidth: 3.2))
-            .overlay(shape.strokeBorder(LinearGradient(
-                colors: [cool.opacity(dark ? 0.22 : 0.16), .black.opacity(0.82)],
-                startPoint: .top, endPoint: .bottom), lineWidth: 1.05))
-            .overlay(shape.fill(active ? activeColor.opacity(0.14) : .clear))
+    private var elevationScale: CGFloat {
+        guard skin != .liquidGlass else { return 1 }
+        let reference = ZTransferButtonElevation.base(skin: skin, active: false, panel: false)
+        return ZTransferButtonElevation.value(skin: skin, activeProgress: activeAmount, panel: panel,
+            override: shadowElevation, pressProgress: pressAmount) / max(reference, 1)
     }
 
     private var panelSheen: LinearGradient {
-        LinearGradient(colors: [.white.opacity(dark ? 0.025 : 0.10), .clear],
+        LinearGradient(colors: [.white.opacity(showSheen ? (dark ? 0.025 : 0.10) : 0), .clear],
                        startPoint: .top, endPoint: .bottom)
-    }
-
-    private enum GrainKind { case titanium, cameraControls }
-
-    private func materialGrain(kind: GrainKind) -> some View {
-        Canvas(rendersAsynchronously: true) { context, size in
-            switch kind {
-            case .titanium:
-                for index in 0..<28 {
-                    let x = size.width * CGFloat(index) / 28
-                    var line = Path()
-                    line.move(to: CGPoint(x: x, y: 0))
-                    line.addLine(to: CGPoint(x: x + 0.35, y: size.height))
-                    context.stroke(line, with: .color(.white.opacity(index.isMultiple(of: 3) ? 0.026 : 0.012)), lineWidth: 0.45)
-                }
-            case .cameraControls:
-                for index in 0..<36 {
-                    let x = size.width * CGFloat((index * 37) % 101) / 101
-                    let y = size.height * CGFloat((index * 61 + 17) % 103) / 103
-                    context.fill(Path(ellipseIn: CGRect(x: x, y: y, width: 0.7, height: 0.7)),
-                                 with: .color(.white.opacity(0.035)))
-                }
-            }
-        }
     }
 
     private var shadowOpacity: CGFloat {
@@ -654,232 +621,23 @@ private final class ZTransferRoundedShadowView: UIView {
     }
 }
 
-/// Android generates its 256 px material tiles away from the UI thread and
-/// temporarily shows the solid material base. Keep that loading behavior on
-/// iOS so switching to wood cannot stall popup interaction or scrolling.
-@MainActor
-private final class ZTransferMaterialTextureStore: ObservableObject {
-    static let shared = ZTransferMaterialTextureStore()
-
-    @Published private var darkWood: UIImage?
-    @Published private var lightWood: UIImage?
-    private var loadingDarkWood = false
-    private var loadingLightWood = false
-
-    func woodImage(dark: Bool) -> UIImage? { dark ? darkWood : lightWood }
-
-    func loadWoodIfNeeded(dark: Bool) {
-        if dark {
-            guard darkWood == nil, !loadingDarkWood else { return }
-            loadingDarkWood = true
-        } else {
-            guard lightWood == nil, !loadingLightWood else { return }
-            loadingLightWood = true
-        }
-        let displayScale = UITraitCollection.current.displayScale
-        Task {
-            let rendered = await Task.detached(priority: .utility) {
-                ZTransferWoodTexture.RenderedImage(
-                    image: ZTransferWoodTexture.render(dark: dark, scale: displayScale)
-                )
-            }.value.image
-            if dark {
-                darkWood = rendered
-                loadingDarkWood = false
-            } else {
-                lightWood = rendered
-                loadingLightWood = false
-            }
-        }
+/// Animate the scalar before computing the ink. Animating two endpoint Colors
+/// would make SwiftUI choose its own interpolation space between those colors.
+struct ZTransferCameraPrint: ViewModifier, Animatable {
+    let scheme: ColorScheme
+    let inlay: Color?
+    let activeColor: Color
+    var progress: CGFloat
+    nonisolated var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
     }
-}
-
-/// Pixel-for-pixel port of Android SkinTexture.kt's wood tile equations:
-/// asymmetric growth rings, two-scale domain warp, longitudinal fibres,
-/// vessels and a softly warped knot. The same 256 px tile size, color pairs
-/// and alpha ranges are used before the sculpted-light layers are applied.
-private enum ZTransferWoodTexture {
-    struct RenderedImage: @unchecked Sendable { let image: UIImage }
-    private static let tile = 256
-    private static let tau = Float.pi * 2
-
-    static func render(dark: Bool, scale: CGFloat) -> UIImage {
-        let skinOrdinal = Int32(2) // Android SkinPreset.WOOD ordinal.
-        let materialSeed = Int32(bitPattern: 0x5F3759DF)
-            ^ (skinOrdinal &* Int32(bitPattern: 0x045D9F3B))
-        let seed = mixSeed(materialSeed) // stable variant zero
-        let maxAlpha: Float = dark ? 0.30 : 0.21
-        let lightRGB = dark ? 0xE0B16E : 0xF6D59A
-        let darkRGB = dark ? 0x160B05 : 0x5C3013
-        let phase = cellHash(seed, 11, seed &+ 31)
-        let ringCount = 4 + Int(cellHash(seed, 29, seed &+ 71) * 3)
-        let fiberCount = 24 + Int(cellHash(seed, 31, seed &+ 83) * 8)
-        let fineCount = 14 + Int(cellHash(seed, 37, seed &+ 97) * 6)
-        let bendStrength = 0.060 + 0.025 * cellHash(seed, 41, seed &+ 109)
-        let knotEnabled = cellHash(seed, 43, seed &+ 127) > 0.58
-        let knotX = 0.18 + 0.64 * cellHash(seed, 17, seed &+ 43)
-        let knotY = 0.18 + 0.64 * cellHash(seed, 23, seed &+ 59)
-        var bytes = [UInt8](repeating: 0, count: tile * tile * 4)
-
-        for y in 0..<tile {
-            let v = Float(y) / Float(tile)
-            for x in 0..<tile {
-                let u = Float(x) / Float(tile)
-                let low = periodicNoise(u, v, 2, 2, seed &+ 101)
-                let mid = periodicNoise(u, v, 5, 4, seed &+ 211)
-                let bend = bendStrength * low + 0.028 * mid
-                    + 0.018 * sinf(tau * (u + phase)) * cosf(tau * v)
-
-                let knotDX = torusDelta(u, knotX)
-                let knotDY = torusDelta(v, knotY)
-                let knotDistance = sqrtf(
-                    (knotDX / 0.17) * (knotDX / 0.17)
-                        + (knotDY / 0.25) * (knotDY / 0.25)
-                )
-                let knotMask = knotEnabled ? expf(-2.7 * knotDistance * knotDistance) : 0
-                let knotWarp = knotMask * 0.48
-                    * sinf(tau * (u - knotX + periodicNoise(u, v, 3, 3, seed &+ 307)))
-                let knotCore = knotEnabled ? expf(-10 * knotDistance * knotDistance) : 0
-                let knotRing = knotMask * sinf(tau * (3.4 * knotDistance + 0.15 * mid))
-
-                let ringCoordinate = Float(ringCount) * (v + bend)
-                    + 0.20 * sinf(tau * (u + phase)) + knotWarp
-                let ringCycle = fract(ringCoordinate)
-                let lateWoodCenter = 0.79 + 0.045 * mid
-                let lateWoodDistance = (ringCycle - lateWoodCenter) / 0.075
-                let lateWood = expf(-lateWoodDistance * lateWoodDistance)
-                let shoulderDistance = (ringCycle - lateWoodCenter + 0.105) / 0.14
-                let lateWoodShoulder = expf(-shoulderDistance * shoulderDistance)
-                let earlyWood = cosf(tau * ringCycle)
-
-                let fiberWarp = periodicNoise(u, v, 9, 7, seed &+ 401)
-                let fiber = sinf(tau * (Float(fiberCount) * v + 0.55 * fiberWarp + bend * 4))
-                let fineCoordinate = Float(fineCount) * (v + 0.55 * bend) + 0.38 * fiberWarp
-                let fineCycle = fract(fineCoordinate)
-                let fineDistance = (fineCycle - 0.82) / 0.07
-                let fineLine = expf(-fineDistance * fineDistance)
-                let fibreNoise = periodicNoise(u, v, 7, 3, seed &+ 503)
-                let fiberMask = 0.55 + 0.45 * min(max(fibreNoise, -0.8), 0.8)
-                let macroTone = periodicNoise(u, v, 3, 2, seed &+ 601)
-
-                let vesselGridX = u * 12
-                let vesselGridY = v * 26
-                let vesselCellX = Int32(floorf(vesselGridX))
-                let vesselCellY = Int32(floorf(vesselGridY))
-                let vesselLocalX = fract(vesselGridX)
-                let vesselLocalY = fract(vesselGridY)
-                let vesselHash = cellHash(vesselCellX, vesselCellY, seed &+ 719)
-                let vesselCenterX = 0.18 + 0.64 * cellHash(vesselCellX, vesselCellY, seed &+ 761)
-                let vesselCenterY = 0.20 + 0.60 * cellHash(vesselCellX, vesselCellY, seed &+ 809)
-                let vesselDX = (vesselLocalX - vesselCenterX) / 0.34
-                let vesselDY = (vesselLocalY - vesselCenterY) / 0.09
-                let vessel = vesselHash > 0.72
-                    ? expf(-3.2 * (vesselDX * vesselDX + vesselDY * vesselDY))
-                        * smoothStep(0.72, 0.96, vesselHash)
-                    : 0
-
-                let texture = 0.16 * macroTone + 0.14 * earlyWood
-                    - 0.72 * lateWood - 0.12 * lateWoodShoulder
-                    - 0.12 * fineLine * fiberMask + 0.045 * fiber
-                    - 0.18 * vessel - 0.24 * knotCore + 0.08 * knotRing
-                writeSigned(texture, maxAlpha: maxAlpha, lightRGB: lightRGB,
-                            darkRGB: darkRGB, into: &bytes, at: (y * tile + x) * 4)
-            }
-        }
-
-        let data = Data(bytes) as CFData
-        let provider = CGDataProvider(data: data)!
-        let info = CGBitmapInfo.byteOrder32Big.union(
-            CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
-        )
-        let image = CGImage(
-            width: tile,
-            height: tile,
-            bitsPerComponent: 8,
-            bitsPerPixel: 32,
-            bytesPerRow: tile * 4,
-            space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: info,
-            provider: provider,
-            decode: nil,
-            shouldInterpolate: true,
-            intent: .defaultIntent
-        )!
-        return UIImage(cgImage: image, scale: max(1, scale), orientation: .up)
+    var resolvedInk: Color {
+        inlay ?? Color(.sRGB, red: 213.0 / 255, green: 216.0 / 255, blue: 218.0 / 255)
+            .mix(with: activeColor, by: 0.72 * min(max(progress, 0), 1), scheme: scheme)
     }
-
-    private static func writeSigned(
-        _ value: Float,
-        maxAlpha: Float,
-        lightRGB: Int,
-        darkRGB: Int,
-        into bytes: inout [UInt8],
-        at offset: Int
-    ) {
-        let clamped = min(max(value, -1), 1)
-        let alpha = abs(clamped) * maxAlpha
-        let rgb = clamped >= 0 ? lightRGB : darkRGB
-        bytes[offset] = UInt8(Float((rgb >> 16) & 0xFF) * alpha + 0.5)
-        bytes[offset + 1] = UInt8(Float((rgb >> 8) & 0xFF) * alpha + 0.5)
-        bytes[offset + 2] = UInt8(Float(rgb & 0xFF) * alpha + 0.5)
-        bytes[offset + 3] = UInt8(alpha * 255 + 0.5)
-    }
-
-    private static func mixSeed(_ value: Int32) -> Int32 {
-        var x = value
-        x = (x ^ (x >> 16)) &* Int32(bitPattern: 0x7FEB352D)
-        x = (x ^ (x >> 15)) &* Int32(bitPattern: 0x846CA68B)
-        return x ^ (x >> 16)
-    }
-
-    private static func cellHash(_ i: Int32, _ j: Int32, _ seed: Int32) -> Float {
-        var h = i &* 374_761_393 &+ j &* 668_265_263 &+ seed &* 974_711
-        h ^= h >> 13
-        h = h &* 1_274_126_177
-        h ^= h >> 16
-        return Float(h & 0x7FFF_FFFF) / Float(Int32.max)
-    }
-
-    private static func smoothCurve(_ value: Float) -> Float {
-        value * value * (3 - 2 * value)
-    }
-
-    private static func smoothStep(_ edge0: Float, _ edge1: Float, _ value: Float) -> Float {
-        let x = min(max((value - edge0) / (edge1 - edge0), 0), 1)
-        return smoothCurve(x)
-    }
-
-    private static func fract(_ value: Float) -> Float { value - floorf(value) }
-
-    private static func periodicNoise(
-        _ u: Float,
-        _ v: Float,
-        _ cellsX: Int32,
-        _ cellsY: Int32,
-        _ seed: Int32
-    ) -> Float {
-        let gx = u * Float(cellsX)
-        let gy = v * Float(cellsY)
-        let x0 = Int32(floorf(gx))
-        let y0 = Int32(floorf(gy))
-        let tx = smoothCurve(gx - floorf(gx))
-        let ty = smoothCurve(gy - floorf(gy))
-        func sample(_ x: Int32, _ y: Int32) -> Float {
-            let wx = ((x % cellsX) + cellsX) % cellsX
-            let wy = ((y % cellsY) + cellsY) % cellsY
-            return cellHash(wx, wy, seed) * 2 - 1
-        }
-        let a = sample(x0, y0)
-        let b = sample(x0 &+ 1, y0)
-        let c = sample(x0, y0 &+ 1)
-        let d = sample(x0 &+ 1, y0 &+ 1)
-        let top = a + (b - a) * tx
-        let bottom = c + (d - c) * tx
-        return top + (bottom - top) * ty
-    }
-
-    private static func torusDelta(_ a: Float, _ b: Float) -> Float {
-        let direct = abs(a - b)
-        return min(direct, 1 - direct)
+    func body(content: Content) -> some View {
+        content.hidden().overlay { resolvedInk.mask(content).opacity(0.96) }
+            .transaction { $0.animation = nil }
     }
 }

@@ -279,11 +279,49 @@ final class STAMetadataTests: XCTestCase {
         try assertThumbnailJPEG(image, expected: jpeg)
     }
 
-    private func thumbnailJPEG() throws -> Data {
-        let pixels = Data(repeating: 127, count: 16 * 12 * 3)
+    func testJpegThumbnailReadsOneBoundedPreviewAndProtectsItFromLaterHeaderReads() async throws {
+        let fallback = try thumbnailJPEG()
+        let preview = try thumbnailJPEG(width: 800, height: 600)
+        let handle: UInt32 = 0x29000071
+        var header = Data(repeating: 0, count: 128 * 1024)
+        header.replaceSubrange(0..<10, with: [255, 216, 255, 226, 0, 76, 77, 80, 70, 0])
+        header.replaceSubrange(10..<12, with: [73, 73])
+        put(&header, 12, UInt16(42)); put(&header, 14, UInt32(8))
+        put(&header, 18, UInt16(2))
+        put(&header, 20, UInt16(0xB001)); put(&header, 22, UInt16(4))
+        put(&header, 24, UInt32(1)); put(&header, 28, UInt32(2))
+        put(&header, 32, UInt16(0xB002)); put(&header, 34, UInt16(7))
+        put(&header, 36, UInt32(32)); put(&header, 40, UInt32(38))
+        put(&header, 48, UInt32(0x030000)); put(&header, 52, UInt32(1_000_000))
+        put(&header, 64, UInt32(0x010001)); put(&header, 68, UInt32(preview.count))
+        put(&header, 72, UInt32(300_000 - 10))
+        header.replaceSubrange(80..<82, with: [255, 218])
+        header.replaceSubrange(1000..<(1000 + fallback.count), with: fallback)
+        let wire = STAScriptTransport([
+            .init(0x9421, [handle], payload: staInteger(UInt64(1_000_000))),
+            .init(0x9431, [handle, 0, 0, 128 * 1024, 0], payload: header),
+            .init(0x9431, [handle, 300_000, 0, UInt32(preview.count), 0], payload: preview),
+            // Preview reads the header again after unsupported camera operations.
+            .init(PTPConstants.getFHDPicture, [handle], response: PTPConstants.operationNotSupported),
+            .init(0x9431, [handle, 300_000, 0, UInt32(preview.count), 0], payload: preview)
+        ])
+        let reader = STAObjectReader(session: PTPSession(transport: wire), operations: [0x9431])
+        let first = try await reader.thumbnail(handle: handle)
+        XCTAssertEqual(STAJpegThumbnail.longEdge(first), 640)
+        let repeated = try await reader.thumbnail(handle: handle)
+        XCTAssertEqual(repeated, first)
+        _ = try await reader.preview(handle: handle)
+        let afterPreview = try await reader.thumbnail(handle: handle)
+        XCTAssertEqual(afterPreview, first)
+        let remaining = await wire.remaining
+        XCTAssertEqual(remaining, 0)
+    }
+
+    private func thumbnailJPEG(width: Int = 16, height: Int = 12) throws -> Data {
+        let pixels = Data(repeating: 127, count: width * height * 3)
         let provider = try XCTUnwrap(CGDataProvider(data: pixels as CFData))
-        let image = try XCTUnwrap(CGImage(width: 16, height: 12, bitsPerComponent: 8,
-            bitsPerPixel: 24, bytesPerRow: 16 * 3, space: CGColorSpaceCreateDeviceRGB(),
+        let image = try XCTUnwrap(CGImage(width: width, height: height, bitsPerComponent: 8,
+            bitsPerPixel: 24, bytesPerRow: width * 3, space: CGColorSpaceCreateDeviceRGB(),
             bitmapInfo: CGBitmapInfo(rawValue: 0), provider: provider,
             decode: nil, shouldInterpolate: false, intent: .defaultIntent))
         let encoded = NSMutableData()

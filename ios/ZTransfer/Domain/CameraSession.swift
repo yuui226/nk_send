@@ -88,6 +88,7 @@ actor CameraSession {
         preserveExisting: Bool,
         resumeSnapshot: PhotoScanSnapshot? = nil,
         detectNewHandles: Bool = false,
+        nextBatchSize: @escaping @Sendable () async -> Int = { 12 },
         onBatch: @escaping @Sendable ([CameraFile]) async throws -> Void
     ) async throws -> PhotoScanResult {
         if !preserveExisting {
@@ -99,6 +100,7 @@ actor CameraSession {
         return try await repository.scanCatalog(preserveExisting: preserveExisting,
                                           resumeSnapshot: resumeSnapshot,
                                           detectNewHandles: detectNewHandles,
+                                          nextBatchSize: nextBatchSize,
                                           onBatch: onBatch)
     }
 
@@ -165,6 +167,10 @@ actor CameraSession {
     }
 
     func prefetchThumbnail(file: CameraFile) async throws -> Bool {
+        try await prefetchThumbnailOutcome(file: file).isSettled
+    }
+
+    func prefetchThumbnailOutcome(file: CameraFile) async throws -> ThumbnailPrefetchOutcome {
         let direct = await repository.usesDirectThumbnailRead()
         let identity = await thumbnailCacheIdentity()
         let sequential = wirelessMode == .sta
@@ -173,16 +179,16 @@ actor CameraSession {
         let validator: (@Sendable (Data) -> Bool)? = sequential ? { @Sendable data in
             autoreleasepool { UIImage(data: data)?.cgImage != nil }
         } : nil
-        let settled = try await thumbnailStore.prefetch(
+        let outcome = try await thumbnailStore.prefetchOutcome(
             file: file,
             identity: identity,
             directSTA: direct,
             validate: validator,
             fetch: { try await self.thumbnail(handle: file.id) }
         )
-        if settled { await thumbnailStore.publish(handle: file.id) }
+        if outcome.isSettled { await thumbnailStore.publish(handle: file.id) }
         else if sequential { await repository.discardRejectedThumbnail(handle: file.id) }
-        return settled
+        return outcome
     }
 
     func thumbnailUpdates(handle: UInt32) async -> AsyncStream<Void> {
@@ -262,11 +268,19 @@ actor CameraSession {
     /// reservation across both operations so a download slice cannot be
     /// inserted between them.  A failed FHD request does not suppress the
     /// subsequent EXIF attempt.
-    func previewAndExif(file: CameraFile, loadPreview: Bool = true) async -> (Data?, PhotoExif?) {
+    func previewAndExif(file: CameraFile, loadPreview: Bool = true, loadExif: Bool = true,
+                        onPreviewLoaded: (@MainActor @Sendable (Data?) -> Void)? = nil) async -> (Data?, PhotoExif?) {
         await (try? repository.withInteractivePreviewPriority {
             let image = loadPreview ? (try? await self.repository.preview(handle: file.id)) : nil
-            let metadata = try? await self.exifStore.load(file: file) { length in
-                try await self.repository.readPrefix(handle: file.id, length: length)
+            if loadPreview, !Task.isCancelled { await onPreviewLoaded?(image) }
+            guard !Task.isCancelled else { return (image, nil) }
+            let metadata: PhotoExif?
+            if loadExif {
+                metadata = try? await self.exifStore.load(file: file) { length in
+                    try await self.repository.readPrefix(handle: file.id, length: length)
+                }
+            } else {
+                metadata = nil
             }
             return (image, metadata)
         }) ?? (nil, nil)
@@ -315,8 +329,16 @@ actor CameraSession {
                                              captureHeader: captureHeader, progress: progress)
     }
 
+    func photoMetadataIdentity() async -> PhotoMetadataCameraIdentity? {
+        await repository.photoMetadataIdentity()
+    }
+
     func frameMetadataHeader(file: CameraFile) async throws -> Data? {
-        try await repository.readPrefix(handle: file.id, length: Int64(cameraExifHeaderCaptureBytes))
+        try await repository.frameMetadataHeader(file: file, expectedSource: nil)
+    }
+
+    func frameMetadataHeader(file: CameraFile, expectedSource: PhotoMetadataCameraIdentity?) async throws -> Data? {
+        try await repository.frameMetadataHeader(file: file, expectedSource: expectedSource)
     }
 
     // Remote monitor operations share the same serialized PTP session as the
@@ -341,6 +363,8 @@ actor CameraSession {
         try await repository.capturePhoto()
     }
 
+    func remoteDeviceModel() async -> String? { await repository.remoteDeviceModel() }
+
     func remoteProperty(_ property: RemoteProperty) async throws -> RemotePropertyDescriptor? {
         try await repository.remoteProperty(property)
     }
@@ -360,6 +384,7 @@ actor CameraSession {
     }
 
     func endSubjectTracking() async throws { try await repository.endSubjectTracking() }
+    func endSubjectTrackingForTool() async throws -> UInt16? { try await repository.endSubjectTrackingForTool() }
     func refreshUSBRemoteSession() async throws -> String { try await repository.refreshUSBRemoteSession() }
     func setRemoteControlMode(_ enabled: Bool) async throws -> UInt16 {
         try await repository.setRemoteControlMode(enabled)
@@ -379,6 +404,7 @@ actor CameraSession {
 
 protocol RemoteCameraControlling: Sendable {
     var isUSB: Bool { get }
+    func remoteDeviceModel() async -> String?
     func setRemoteActive(_ active: Bool) async
     func refreshRemoteProperty(_ descriptor: RemotePropertyDescriptor) async throws -> RemotePropertyDescriptor?
     func remoteFocusMode() async throws -> RemotePropertyDescriptor?
@@ -394,6 +420,7 @@ protocol RemoteCameraControlling: Sendable {
                  focusX: UInt32, focusY: UInt32) async throws -> RemoteFocusResult
     func halfPressFocus() async throws -> RemoteFocusResult
     func endSubjectTracking() async throws
+    func endSubjectTrackingForTool() async throws -> UInt16?
     func startMovieRecording() async throws -> RemoteMovieStartResult
     func endMovieRecording() async throws -> UInt16
     func refreshUSBRemoteSession() async throws -> String
@@ -406,6 +433,11 @@ protocol RemoteCameraControlling: Sendable {
 }
 
 extension RemoteCameraControlling {
+    func remoteDeviceModel() async -> String? { nil }
+    func endSubjectTrackingForTool() async throws -> UInt16? {
+        try await endSubjectTracking()
+        return nil
+    }
     func refreshUSBRemoteSession() async throws -> String { "" }
     func setRemoteControlMode(_ enabled: Bool) async throws -> UInt16 { PTPConstants.responseOK }
     func hasRemoteControlMode() async -> Bool { false }

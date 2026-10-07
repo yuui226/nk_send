@@ -185,6 +185,7 @@ final class PhotoThumbnailDiskCache: @unchecked Sendable {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let marker = directory.appendingPathComponent(".last_connected")
         try? Data(String(now.timeIntervalSince1970).utf8).write(to: marker, options: .atomic)
+        try? FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: marker.path)
         try? FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: directory.path)
         if let existing = stores[directory.lastPathComponent] {
             if !directoryAlreadyExisted { existing.resetIndexAfterDirectoryRecreated() }
@@ -205,8 +206,10 @@ final class PhotoThumbnailDiskCache: @unchecked Sendable {
         for dir in dirs where dir.lastPathComponent.hasPrefix("camera_") && dir.hasDirectoryPath {
             let marker = dir.appendingPathComponent(".last_connected")
             let value = Double((try? String(contentsOf: marker, encoding: .utf8)) ?? "") ?? 0
-            let mtime = (try? dir.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate?.timeIntervalSince1970) ?? 0
-            if max(value, mtime) < cutoff { try? fm.removeItem(at: dir); removed += 1 }
+            let markerExists = (try? marker.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
+            let timestampURL = markerExists ? marker : dir
+            let mtime = (try? timestampURL.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate?.timeIntervalSince1970) ?? 0
+            if max(markerExists ? value : 0, mtime) < cutoff { try? fm.removeItem(at: dir); removed += 1 }
             else if let store = stores[dir.lastPathComponent] {
                 // The background sweep may overlap an active scan. Android
                 // takes the CameraCache lock here so it cannot delete the
@@ -240,9 +243,14 @@ final class PhotoThumbnailDiskCache: @unchecked Sendable {
         sha256("sta\u{0}\(UInt64(handle))\u{0}\(size)") + ".jpg"
     }
 
+    /// Android's quality-versioned key must never migrate EXIF-only JPG entries.
+    static func staJpegCacheFileName(handle: UInt32, size: UInt64) -> String {
+        sha256("sta-jpeg-640-v1\u{0}\(UInt64(handle))\u{0}\(size)") + ".jpg"
+    }
+
     static func legacyCacheFileName(fileName: String, size: UInt64, captureDate: String?) -> String {
-        let safe = fileName.map { $0.isLetter || $0.isNumber || ".-_".contains($0) ? $0 : "_" }
-        return "\(String(safe))_\(size)_\(captureDate ?? "0").jpg"
+        "\(fileName)_\(size)_\(captureDate ?? "0")"
+            .replacingOccurrences(of: "[^A-Za-z0-9._-]", with: "_", options: .regularExpression) + ".jpg"
     }
 
     private static func sha256(_ value: String) -> String {

@@ -1,0 +1,14 @@
+AndroidX Compose color interpolation (version 1.7.6)
+Copyright 2019, 2020, 2021 The Android Open Source Project
+Licensed under the Apache License, Version 2.0 (Apache-2.0.txt).
+
+ZTransferAndroidColor.swift adapts the sRGB/Oklab conversion, Color packing,
+half-precision rounding and fast cube-root routines to native Swift. It uses
+resolved 1.7.6 transform matrix bit patterns and preserves Float32 arithmetic.
+It does not bundle or execute the Android/Kotlin libraries in the iOS app.
+
+Sources: Color.kt, Float16.kt, colorspace/Oklab.kt, colorspace/Rgb.kt,
+colorspace/Connector.kt, colorspace/ColorSpace.kt, colorspace/ColorSpaces.kt,
+and ui-util/MathHelpers.kt from:
+https://dl.google.com/dl/android/maven2/androidx/compose/ui/ui-graphics/1.7.6/ui-graphics-1.7.6-sources.jar
+https://dl.google.com/dl/android/maven2/androidx/compose/ui/ui-util/1.7.6/ui-util-1.7.6-sources.jar

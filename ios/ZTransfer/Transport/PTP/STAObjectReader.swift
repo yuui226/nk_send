@@ -23,6 +23,7 @@ actor STAObjectReader {
     private var thumbnailOrder: [UInt32] = []
     private var thumbnailBytes = 0
     private var noThumbnail = Set<UInt32>()
+    private var jpegThumbnailChecked = Set<UInt32>()
     private var rawPreviews: [UInt32: [STAMediaMetadata.Preview]] = [:]
     private var rawIndexedHandles = Set<UInt32>()
     private var mpfPreviews: [UInt32: [STAMediaMetadata.Preview]] = [:]
@@ -73,6 +74,13 @@ actor STAObjectReader {
         }
     }
 
+    func cachedMetadataHeader(handle: UInt32, length: Int) -> Data? {
+        guard let prefix = prefixes[handle], prefix.count >= length else { return nil }
+        return Data(prefix.prefix(length))
+    }
+
+    func cachedFile(handle: UInt32) -> CameraFile? { files[handle] }
+
     func file(handle: UInt32, storage: UInt32) async throws -> CameraFile {
         if let file = files[handle] { return file }
         if let ext = STAMediaMetadata.extensionFromHandle(handle), let date = dates[handle] {
@@ -90,6 +98,9 @@ actor STAObjectReader {
     }
 
     func thumbnail(handle: UInt32) async throws -> Data {
+        if (files[handle]?.fileExtension ?? STAMediaMetadata.extensionFromHandle(handle)) == ".jpg" {
+            return try await jpegThumbnail(handle)
+        }
         if let cached = thumbnails[handle] { return cached }
         if noThumbnail.contains(handle) { return Data() }
         // NikonCamera.getThumbnail chooses its route from the catalog cache.
@@ -122,6 +133,31 @@ actor STAObjectReader {
             if bytes == nil { noThumbnail.insert(handle) }
         }
         if let bytes { rememberThumbnail(handle, bytes); return bytes }
+        return Data()
+    }
+
+    /// Android reads only the 128 KiB index and one bounded MPF candidate.
+    /// A rejected/short candidate retains EXIF; transport cancellation propagates.
+    private func jpegThumbnail(_ handle: UInt32) async throws -> Data {
+        let cached = thumbnails[handle]
+        if jpegThumbnailChecked.contains(handle), let cached { return cached }
+        _ = try await readHeader(handle: handle, storage: files[handle]?.storageID ?? .max,
+                                 requirePreview: true)
+        let fallback = thumbnails[handle] ?? cached
+        let fallbackEdge = STAJpegThumbnail.longEdge(fallback)
+        var enhanced: Data?
+        if fallbackEdge < STAJpegThumbnail.edge,
+           let reference = STAJpegThumbnail.select(mpfPreviews[handle] ?? []),
+           let bytes = try await rawPartial(handle, offset: reference.offset, length: reference.length),
+           bytes.count == reference.length {
+            enhanced = STAJpegThumbnail.create(bytes, fallbackLongEdge: fallbackEdge)
+        }
+        if let result = enhanced ?? fallback {
+            rememberThumbnail(handle, result)
+            jpegThumbnailChecked.insert(handle)
+            noThumbnail.remove(handle)
+            return result
+        }
         return Data()
     }
 
@@ -163,6 +199,7 @@ actor STAObjectReader {
     }
 
     func invalidate(handle: UInt32) {
+        jpegThumbnailChecked.remove(handle)
         files.removeValue(forKey: handle); names.removeValue(forKey: handle); dates.removeValue(forKey: handle)
         prefixes.removeValue(forKey: handle); prefixOrder.removeAll { $0 == handle }
         thumbnailBytes -= thumbnails.removeValue(forKey: handle)?.count ?? 0
@@ -173,6 +210,7 @@ actor STAObjectReader {
     /// Decode rejection is not a successful cached image. Keep catalog data
     /// and preview indexes, but let the next attempt read the camera again.
     func discardThumbnail(handle: UInt32) {
+        jpegThumbnailChecked.remove(handle)
         thumbnailBytes -= thumbnails.removeValue(forKey: handle)?.count ?? 0
         thumbnailOrder.removeAll { $0 == handle }
         noThumbnail.remove(handle)
@@ -226,7 +264,11 @@ actor STAObjectReader {
         let name = original?.lowercased().hasSuffix(finalExtension) == true ? original! : fallback
         let file = makeFile(handle, storage, size, name, date)
         files[handle] = file
-        if let thumbnail { rememberThumbnail(handle, thumbnail) }
+        if let thumbnail {
+            if !jpegThumbnailChecked.contains(handle) || thumbnails[handle] == nil {
+                rememberThumbnail(handle, thumbnail)
+            }
+        }
         else if ext == ".jpg" { noThumbnail.insert(handle) }
         return file
     }
@@ -293,10 +335,12 @@ actor STAObjectReader {
     private func rememberThumbnail(_ handle: UInt32, _ data: Data) {
         thumbnailBytes -= thumbnails.removeValue(forKey: handle)?.count ?? 0
         thumbnailOrder.removeAll { $0 == handle }
-        guard data.count <= 4 * 1024 * 1024 else { return }
+        guard data.count <= 4 * 1024 * 1024 else { jpegThumbnailChecked.remove(handle); return }
         thumbnails[handle] = data; thumbnailOrder.append(handle); thumbnailBytes += data.count
         while thumbnailBytes > 4 * 1024 * 1024 && thumbnailOrder.count > 1 {
-            thumbnailBytes -= thumbnails.removeValue(forKey: thumbnailOrder.removeFirst())?.count ?? 0
+            let removed = thumbnailOrder.removeFirst()
+            jpegThumbnailChecked.remove(removed)
+            thumbnailBytes -= thumbnails.removeValue(forKey: removed)?.count ?? 0
         }
     }
     private func makeFile(_ handle: UInt32, _ storage: UInt32, _ size: UInt64, _ name: String, _ date: String?) -> CameraFile {

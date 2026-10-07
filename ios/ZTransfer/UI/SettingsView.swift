@@ -39,6 +39,7 @@ struct SettingsView: View {
     @State private var directoryAttentionProgress: CGFloat = 0
     @AppStorage("organize_transfers_by_date") private var organizeByDate = false
     @AppStorage("auto_transfer_new_media") private var autoTransfer = false
+    @AppStorage("auto_transfer_mode") private var autoTransferModeRaw = ""
     @AppStorage("defer_transfer_start") private var deferStart = false
     @AppStorage("thumbnail_columns") private var columns = 3
     @AppStorage("collapse_burst_photos") private var collapseBurst = true
@@ -402,7 +403,7 @@ struct SettingsView: View {
             SettingsDivider()
             HStack(spacing: 8) {
                 ToggleWheel(label: AppLocalized.resource("organize_transfers_by_date"), isOn: $organizeByDate, disabled: directory.directoryURL == nil)
-                ToggleWheel(label: AppLocalized.resource("auto_transfer_new_media"), isOn: $autoTransfer, disabled: directory.directoryURL == nil)
+                autoTransferWheel
                 ToggleWheel(label: AppLocalized.resource("defer_transfer_start"), isOn: $deferStart, disabled: directory.directoryURL == nil)
             }
         }
@@ -411,6 +412,34 @@ struct SettingsView: View {
 
     private var directoryAttentionActive: Bool {
         requestTransferDirectoryAttention && directory.directoryURL == nil
+    }
+
+    /// Android AutoTransferSettingsWheel: same five detents, 50/18/14 metrics,
+    /// release-to-commit gesture and global haptic preference as other wheels.
+    private var autoTransferWheel: some View {
+        let mode = AutoTransferMode.restored(autoTransferModeRaw, legacyEnabled: autoTransfer)
+        return DetentWheel(
+            label: AppLocalized.resource("auto_transfer_new_media"),
+            options: AutoTransferMode.allCases,
+            selected: mode,
+            optionLabel: { value in
+                switch value {
+                case .off: return AppLocalized.resource("setting_off")
+                case .all: return AppLocalized.resource("filter_all")
+                case .jpg: return "JPG"
+                case .raw: return "RAW"
+                case .video: return AppLocalized.resource("auto_transfer_video")
+                }
+            },
+            onCommit: { $0.save() },
+            rowHeight: 18, wheelHeight: 50,
+            enabled: directory.directoryURL != nil,
+            accentColor: mode == .off ? ZTransferColors.statusWaiting : ZTransferColors.accentBlue,
+            emphasized: mode != .off,
+            onDetent: { ZTransferHaptics.shared.tick() }
+        )
+        .frame(maxWidth: .infinity)
+        .accessibilityIdentifier("settings-auto-transfer-mode")
     }
 
     private var listCard: some View {
@@ -517,7 +546,7 @@ struct SettingsView: View {
 
     private var footer: some View {
         HStack(spacing: 8) {
-            VersionPlaque(text: AppLocalized.versionText(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.82"))
+                        VersionPlaque(text: AppLocalized.versionText(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.91"))
             Spacer()
             SettingsFooterButton(AppLocalized.resource("feedback")) { UIPasteboard.general.string = "953000922"; feedbackHint = true }
         }

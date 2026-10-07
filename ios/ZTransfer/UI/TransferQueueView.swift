@@ -115,6 +115,8 @@ struct TransferQueueView: View {
                         }
                     } else if session.wirelessMode == .sta && !isSessionConnected {
                         onRetrySTA()
+                    } else if !isSessionConnected {
+                        CameraWirelessSettings.open(.ap)
                     }
                 } label: {
                     HStack(spacing: signalExpanded ? 5 : 0) {
@@ -130,6 +132,7 @@ struct TransferQueueView: View {
                         .frame(minWidth: 40, minHeight: 40, maxHeight: 40)
                 }
                 .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
+                .modifier(DisconnectedSignalBreath(connected: isSessionConnected))
             }
             Spacer()
 

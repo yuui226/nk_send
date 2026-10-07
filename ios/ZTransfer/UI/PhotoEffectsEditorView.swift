@@ -34,6 +34,8 @@ struct PhotoEffectsControls: View {
     var imageImporting = false
     @State private var metadataExpanded = false
     @State private var watermarkExpanded = false
+    @StateObject private var photoLUTStore = PhotoLUTStore()
+    @State private var lutExpanded = false
     @Binding var filterChooser: PhotoFilterChooserState
     var onWatermarkTextCommitted: (String) -> Void = { _ in }
     var onFavoriteImageMissing: () -> Void = {}
@@ -81,9 +83,71 @@ struct PhotoEffectsControls: View {
         draft = value
     }
 
+    private func toggleModule(_ module: PhotoEffectModule) {
+        var value = draft
+        let current = effectivePhotoEffectModules(value.photoEffectModules, isPro: isPro)
+        let next = current ^ module.rawValue
+        value.photoEffectModules = normalizePhotoEffectModules(next)
+        draft = value
+    }
+
+    private var moduleMenu: some View {
+        HStack(spacing: 6) {
+            ForEach(PhotoEffectModule.allCases, id: \.self) { module in
+                Button {
+                    toggleModule(module)
+                } label: {
+                    Text(moduleTitle(module))
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(photoEffectModuleIsVisible(effectivePhotoEffectModules(draft.photoEffectModules, isPro: isPro), module) ? .white : ZTransferColors.secondaryText)
+                        .padding(.horizontal, 8).padding(.vertical, 5)
+                        .background(Capsule().fill(photoEffectModuleIsVisible(effectivePhotoEffectModules(draft.photoEffectModules, isPro: isPro), module) ? ZTransferColors.accentBlue.opacity(0.75) : Color.white.opacity(0.08)))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private func moduleTitle(_ module: PhotoEffectModule) -> String {
+        switch module {
+        case .filter: return AppLocalized.resource("photo_filter")
+        case .lut: return AppLocalized.resource("photo_lut")
+        case .frame: return AppLocalized.resource("photo_frame_style_short")
+        case .watermark: return AppLocalized.resource("photo_frame_watermark_short")
+        }
+    }
+
     var body: some View {
         VStack(spacing: 10) {
-            filterCard
+            moduleMenu
+            if photoEffectModuleIsVisible(effectivePhotoEffectModules(draft.photoEffectModules, isPro: isPro), .filter), draft.selectedFilter?.preset.id.hasPrefix("cube:") != true {
+                filterCard
+            }
+            if photoEffectModuleIsVisible(effectivePhotoEffectModules(draft.photoEffectModules, isPro: isPro), .lut),
+               (draft.selectedFilter == nil || draft.selectedFilter?.preset.id.hasPrefix("cube:") == true) {
+                PhotoEffectsCard(accent: ZTransferColors.accentPurple) {
+                    Button {
+                        withAnimation(ZTransferMotion.inlineExpansion) { lutExpanded.toggle() }
+                    } label: {
+                        HStack { Text(AppLocalized.resource("photo_lut")); Spacer(); Text(draft.selectedFilter?.preset.id.hasPrefix("cube:") == true ? "LUT" : AppLocalized.resource("photo_filter_off_option")) }
+                    }.buttonStyle(.plain)
+                    if lutExpanded {
+                        PhotoLUTChooser(store: photoLUTStore,
+                                        onSelect: { id, _, intensity in
+                                            var value = draft
+                                            value.selectFilter(id)
+                                            if var selected = value.selectedFilter { selected.intensityPercent = intensity; value.selectedFilter = selected }
+                                            value.photoFilterEnabled = true
+                                            draft = value
+                                        },
+                                        onIntensity: { intensity in
+                                            guard var selected = draft.selectedFilter else { return }
+                                            selected.intensityPercent = intensity
+                                            var value = draft; value.selectedFilter = selected; draft = value
+                                        })
+                    }
+                }
+            }
             frameCard
         }
         .photoEffectsHint($premiumHint, duration: 2)
@@ -143,6 +207,8 @@ struct PhotoEffectsControls: View {
                     }
                 }
             }
+            .opacity(photoEffectModuleIsVisible(effectivePhotoEffectModules(draft.photoEffectModules, isPro: isPro), .filter) ? 1 : 0.45)
+            .disabled(!photoEffectModuleIsVisible(effectivePhotoEffectModules(draft.photoEffectModules, isPro: isPro), .filter))
     }
 
     private var frameCard: some View {
@@ -201,12 +267,25 @@ struct PhotoEffectsControls: View {
                         HStack(spacing: 8) {
                             metadataButton(AppLocalized.resource("photo_frame_metadata_brand"), activeMetadata.showBrand) { updateMetadata { $0.showBrand.toggle() } }
                             metadataButton(AppLocalized.resource("photo_frame_metadata_model"), activeMetadata.showModel) { updateMetadata { $0.showModel.toggle() } }
+                            DetentWheel(label: AppLocalized.resource("photo_frame_metadata_brand_logo"), options: PhotoFrameBrandStyle.allCases,
+                                        selected: activeMetadata.brandStyle,
+                                        optionLabel: { $0 == .logo ? AppLocalized.resource("photo_frame_metadata_brand_logo") : AppLocalized.resource("photo_frame_metadata_brand_text") },
+                                        onCommit: { value in updateMetadata { $0.brandStyle = value } }, rowHeight: 18,
+                                        wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentOrange)
                             if showLocationFields {
                                 metadataButton(AppLocalized.resource("photo_frame_metadata_coordinates"), activeMetadata.showCoordinates) { updateMetadata { $0.showCoordinates.toggle() } }
                             }
                         }
                         if showLocationFields {
                             metadataButton(AppLocalized.resource("photo_frame_metadata_altitude"), activeMetadata.showAltitude) { updateMetadata { $0.showAltitude.toggle() } }
+                        }
+                        HStack(spacing: 8) {
+                            DetentWheel(label: AppLocalized.resource("photo_frame_width"), options: Array(stride(from: 60, through: 200, by: 5)), selected: activeMetadata.widthPercent,
+                                        optionLabel: { "\($0)%" }, onCommit: { value in updateMetadata { $0.widthPercent = value } }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentOrange)
+                            DetentWheel(label: AppLocalized.resource("photo_frame_background_blur"), options: Array(stride(from: 0, through: 200, by: 5)), selected: activeMetadata.backgroundBlurPercent,
+                                        optionLabel: { "\($0)%" }, onCommit: { value in updateMetadata { $0.backgroundBlurPercent = value } }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentOrange)
+                            DetentWheel(label: AppLocalized.resource("photo_frame_background_mask"), options: Array(stride(from: 0, through: 200, by: 5)), selected: activeMetadata.backgroundMaskPercent,
+                                        optionLabel: { "\($0)%" }, onCommit: { value in updateMetadata { $0.backgroundMaskPercent = value } }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentOrange)
                         }
                         HStack(spacing: 8) {
                             let datePatterns: [String?] = [nil, "yyyy-MM-dd", "yyyy/MM/dd", "yyyy.MM.dd", "MM-dd-yyyy"]
@@ -362,6 +441,8 @@ struct PhotoEffectsControls: View {
                 .overlay(RoundedRectangle(cornerRadius: 12).stroke(ZTransferColors.accentPurple.opacity(0.18)))
                 .padding(.top, 8)
             }
+            .opacity(photoEffectModuleIsVisible(effectivePhotoEffectModules(draft.photoEffectModules, isPro: isPro), .frame) ? 1 : 0.45)
+            .disabled(!photoEffectModuleIsVisible(effectivePhotoEffectModules(draft.photoEffectModules, isPro: isPro), .frame))
     }
 
     private func showPremiumHint() {

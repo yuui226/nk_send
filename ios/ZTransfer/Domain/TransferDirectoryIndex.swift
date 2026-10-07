@@ -1,8 +1,20 @@
 import Foundation
 
+/// Android directoryLookupKey: connection modes may report different prefixes
+/// for the same numbered original. Type, size and destination remain separate.
+func transferDirectoryLookupKey(_ name: String) -> String {
+    let base = exportedOriginalBaseName(name).lowercased()
+    if let range = base.range(of: #"([0-9]+)\.([a-z0-9]+)$"#, options: .regularExpression) {
+        return "number:" + base[range]
+    }
+    return "name:" + base
+}
+
+
 struct TransferDirectoryIndex: Sendable {
     let directory: URL
     private(set) var files: [String: [(size: UInt64, url: URL)]] = [:]
+    private var exactNames: [String: (size: UInt64, url: URL)] = [:]
     private(set) var partials: [String: URL] = [:]
 
     static func scan(directory: URL) -> TransferDirectoryIndex {
@@ -22,8 +34,7 @@ struct TransferDirectoryIndex: Sendable {
                 continue
             }
             let size = UInt64(max(0, values.fileSize ?? 0))
-            let key = exportedOriginalBaseName(name).lowercased()
-            index.files[key, default: []].append((size: size, url: url))
+            index.addOriginal(url, size: size)
         }
         return index
     }
@@ -61,8 +72,11 @@ struct TransferDirectoryIndex: Sendable {
     }
 
     func existingOriginal(for file: CameraFile) -> URL? {
-        let key = exportedOriginalBaseName(file.fileName).lowercased()
-        return files[key]?.first(where: { file.size == UInt64(UInt32.max) || $0.size == file.size })?.url
+        if let exact = exactNames[file.fileName], file.size == UInt64(UInt32.max) || exact.size == file.size {
+            return exact.url
+        }
+        return files[transferDirectoryLookupKey(file.fileName)]?
+            .first(where: { file.size == UInt64(UInt32.max) || $0.size == file.size })?.url
     }
 
     func completePartial(for file: CameraFile) -> URL? {
@@ -82,7 +96,13 @@ struct TransferDirectoryIndex: Sendable {
     }
 
     mutating func addOriginal(_ url: URL, size: UInt64) {
-        let key = exportedOriginalBaseName(url.lastPathComponent).lowercased()
+        let name = url.lastPathComponent
+        let key = transferDirectoryLookupKey(name)
+        // Android replaces the exact entry and removes its old size from the
+        // normalized bucket. A rewritten local file cannot leave a stale hit.
+        if exactNames.updateValue((size: size, url: url), forKey: name) != nil {
+            files[key]?.removeAll { $0.url.lastPathComponent == name }
+        }
         files[key, default: []].append((size: size, url: url))
     }
 }
@@ -95,7 +115,7 @@ struct ExportedOriginalIndex: Sendable {
     @discardableResult
     mutating func add(_ url: URL, size: UInt64, folderName: String?) -> Bool {
         let folder = folderName?.lowercased() ?? ""
-        let name = exportedOriginalBaseName(url.lastPathComponent).lowercased()
+        let name = transferDirectoryLookupKey(url.lastPathComponent)
         guard destinations[folder]?[name]?[size] != url else { return false }
         destinations[folder, default: [:]][name, default: [:]][size] = url
         return true
@@ -120,7 +140,7 @@ struct ExportedOriginalIndex: Sendable {
     }
 
     func original(for file: CameraFile, folderName: String?) -> URL? {
-        let name = exportedOriginalBaseName(file.fileName).lowercased()
+        let name = transferDirectoryLookupKey(file.fileName)
         guard let sizes = destinations[folderName?.lowercased() ?? ""]?[name] else { return nil }
         return file.size == UInt64(UInt32.max) ? sizes.values.first : sizes[file.size]
     }

@@ -1,5 +1,15 @@
 import Foundation
 
+func keepsPartialOnCancellation(fileName: String) -> Bool {
+    ["mov", "mp4", "nev", "avi"].contains(URL(fileURLWithPath: fileName).pathExtension.lowercased())
+}
+
+/// Android's resumable video set; still images intentionally use one-shot
+/// transfer semantics unless a transport explicitly forces partial reads.
+func supportsVideoResume(fileName: String) -> Bool {
+    keepsPartialOnCancellation(fileName: fileName)
+}
+
 /// Android rejects placeholder serials before selecting the physical
 /// transport identity. Keep the same rule so cameras that report an empty or
 /// synthetic DeviceInfo serial still share their own thumbnail cache.
@@ -57,11 +67,12 @@ func shouldUsePartialObjectDownload(
     isUSBConnection: Bool = false,
     preferHighThroughput: Bool = false,
     forcePartial: Bool = false,
+    videoTransfer: Bool = true,
 ) -> Bool {
     partialObjectSupported != false &&
         effectiveSize > 0 && effectiveSize != UInt64(UInt32.max) &&
-        (forcePartial || !(isUSBConnection || preferHighThroughput) ||
-         resumeOffset > 0 || effectiveSize > transferHighThroughputThreshold)
+        (forcePartial || (videoTransfer && (!(isUSBConnection || preferHighThroughput) ||
+         resumeOffset > 0 || effectiveSize > transferHighThroughputThreshold)))
 }
 
 func transferDownloadChunkSize(
@@ -281,6 +292,7 @@ actor CameraRepository {
     private var subjectTrackingActive = false
     private var subjectTrackingSupported: Bool?
     private let focusGate = CameraIOGate()
+    private let metadataSessionIdentity = UUID().uuidString
     private var cachedDeviceInfo: PTPDeviceInfo?
     private var liveViewImageOperation: UInt16?
     private var liveViewEnhancedFailures = 0
@@ -432,9 +444,13 @@ actor CameraRepository {
     }
 
     func endSubjectTracking() async throws {
+        _ = try await endSubjectTrackingForTool()
+    }
+
+    func endSubjectTrackingForTool() async throws -> UInt16? {
         try await focusGate.withCommand { [self] in
             let deadline = ContinuousClock.now + .seconds(6)
-            _ = try await session.withCommandSequence { [self] commands in
+            return try await session.withCommandSequence { [self] commands in
                 try await endTrackingLocked(commands, deadline: deadline)
             }
         }
@@ -771,6 +787,8 @@ actor CameraRepository {
         }
     }
 
+    func remoteDeviceModel() -> String? { cachedDeviceInfo?.model }
+
     func loadDeviceInfo() async throws -> PTPDeviceInfo {
         if let info = cachedDeviceInfo { return info }
         let result = try await session.execute(operation: PTPConstants.getDeviceInfo)
@@ -785,6 +803,37 @@ actor CameraRepository {
     func thumbnailCacheIdentity() -> String {
         cameraThumbnailCacheIdentity(deviceInfo: cachedDeviceInfo,
                                      transportIdentifier: transportCameraIdentifier)
+    }
+
+    func photoMetadataIdentity() -> PhotoMetadataCameraIdentity {
+        PhotoMetadataCameraIdentity(cacheIdentity: thumbnailCacheIdentity(), session: metadataSessionIdentity)
+    }
+
+    /// Identity verification and header read share one transaction slot, so a
+    /// reused handle can never be validated after its EXIF has been consumed.
+    func frameMetadataHeader(file: CameraFile, expectedSource: PhotoMetadataCameraIdentity?) async throws -> Data? {
+        let current = photoMetadataIdentity()
+        if let expectedSource, expectedSource.camera != current.camera { return nil }
+        let verifyFile = expectedSource.map { $0.session != current.session } ?? false
+        return try await ioGate.withTransferSlice {
+            if verifyFile {
+                let actual: CameraFile?
+                if let cached = await self.directReader?.cachedFile(handle: file.id) {
+                    actual = cached
+                } else {
+                    let response = try await self.session.executeResponse(operation: PTPConstants.getObjectInfo, parameters: [file.id])
+                    let parsed = PTPDatasetParser.parseObjectInfoResult(handle: file.id, response.data)
+                    actual = response.code == PTPConstants.responseOK && parsed.successful ? parsed.file : nil
+                }
+                guard samePhotoMetadataSource(file, actual) else { return nil }
+            }
+            if let cached = await self.directReader?.cachedMetadataHeader(handle: file.id, length: cameraExifHeaderCaptureBytes) {
+                return cached
+            }
+            let result = try await self.session.executeResponse(operation: PTPConstants.getPartialObjectEx,
+                parameters: [file.id, 0, 0, UInt32(cameraExifHeaderCaptureBytes), 0])
+            return result.code == PTPConstants.responseOK && !result.data.isEmpty ? result.data : nil
+        }
     }
 
     func usesDirectThumbnailRead() -> Bool { directReader != nil }
@@ -919,72 +968,89 @@ actor CameraRepository {
         return file
     }
 
-    /// Reads one Android-sized metadata batch while holding the ordinary
-    /// catalog mutex. The caller performs dual-card ordering and publication
-    /// after this method returns, so callbacks never run under the camera lock.
-    private func readCatalogMetadataBatch(
-        _ requests: [(groupIndex: Int, handle: UInt32, storage: UInt32)]
-    ) async throws -> [CatalogMetadataResult] {
-        if staAlbum != nil {
-            var results: [CatalogMetadataResult] = []
-            for request in requests {
-                // Wait outside ioGate: the foreground owner must be able to
-                // acquire it while the scan retains its current cursor.
-                try await waitForForegroundPreview()
-                results += try await readCatalogMetadataCommands([request])
+    /// Caller owns ioGate. Preserve parser completeness independently from
+    /// whether a fallback display row can be recovered from the dataset.
+    private func readCatalogMetadataCommand(group: Int, handle: UInt32, storage: UInt32) async throws -> CatalogMetadataResult {
+        try Task.checkCancellation()
+        try checkRemoteScanOwnership()
+        do {
+            if let directReader {
+                let file = try await directReader.file(handle: handle, storage: storage)
+                return CatalogMetadataResult(groupIndex: group, handle: handle, file: file, successful: true)
             }
-            return results
+            let response = try await session.execute(operation: PTPConstants.getObjectInfo, parameters: [handle])
+            let parsed = PTPDatasetParser.parseObjectInfoResult(handle: handle, response.data)
+            return CatalogMetadataResult(groupIndex: group, handle: handle,
+                                         file: parsed.file, successful: parsed.successful)
+        } catch let error as PTPSessionError where error == .invalidated || error == .timeout {
+            throw error
+        } catch is CancellationError { throw CancellationError() }
+        catch {
+            return CatalogMetadataResult(groupIndex: group, handle: handle, file: nil, successful: false)
         }
-        return try await readCatalogMetadataCommands(requests)
     }
 
-    private func readCatalogMetadataCommands(
-        _ requests: [(groupIndex: Int, handle: UInt32, storage: UInt32)]
-    ) async throws -> [CatalogMetadataResult] {
-        let session = self.session
-        let directReader = self.directReader
-        return try await ioGate.withCommand {
-            var results: [CatalogMetadataResult] = []
-            results.reserveCapacity(requests.count)
-            for request in requests {
-                // Finish a command already on the wire, but never start the
-                // next ObjectInfo/header read after the remote page takes over.
-                try await self.checkRemoteScanOwnership()
-                do {
-                    let file: CameraFile
-                    if let directReader {
-                        file = try await directReader.file(handle: request.handle, storage: request.storage)
-                    } else {
-                        let response = try await session.execute(
-                            operation: PTPConstants.getObjectInfo,
-                            parameters: [request.handle]
-                        )
-                        guard let parsed = PTPDatasetParser.parseObjectInfo(handle: request.handle, response.data) else {
-                            results.append(CatalogMetadataResult(groupIndex: request.groupIndex,
-                                                                 handle: request.handle,
-                                                                 file: nil,
-                                                                 successful: false))
-                            continue
+    private struct CatalogMergeState: Sendable {
+        var cursors: [Int]
+        var heads: [CameraFile?]
+        var completed = 0
+    }
+
+    private struct CatalogMergeBatch: Sendable {
+        var state: CatalogMergeState
+        var files: [CameraFile] = []
+        var processed: [UInt32] = []
+        var successful = true
+        var requests = 0
+    }
+
+    /// Android streamMergedFileInfo/streamStaDirectMergedFileInfo: retain one
+    /// head per card and only request the card whose head has been consumed.
+    /// Ordinary scans hold the gate for the whole batch; the approved STA
+    /// foreground-pause behavior retains this local cursor between commands.
+    private func readMergedCatalogBatch(
+        groups: [(storage: UInt32, handles: [UInt32])], state: CatalogMergeState,
+        limit: Int, budget: Int, total: Int, pauseBetweenCommands: Bool
+    ) async throws -> CatalogMergeBatch {
+        var batch = CatalogMergeBatch(state: state)
+        while batch.files.count < limit && batch.state.completed < total {
+            for group in groups.indices where batch.state.heads[group] == nil {
+                while batch.state.cursors[group] < groups[group].handles.count && batch.requests < budget {
+                    try Task.checkCancellation()
+                    let handle = groups[group].handles[batch.state.cursors[group]]
+                    batch.state.cursors[group] += 1
+                    batch.requests += 1
+                    let result: CatalogMetadataResult
+                    if pauseBetweenCommands {
+                        try await waitForForegroundPreview()
+                        let storage = groups[group].storage
+                        result = try await ioGate.withCommand {
+                            try await self.readCatalogMetadataCommand(group: group, handle: handle, storage: storage)
                         }
-                        file = parsed
+                    } else {
+                        result = try await readCatalogMetadataCommand(group: group, handle: handle, storage: groups[group].storage)
                     }
-                    results.append(CatalogMetadataResult(groupIndex: request.groupIndex,
-                                                         handle: request.handle,
-                                                         file: file,
-                                                         successful: true))
-                } catch let error as PTPSessionError where error == .invalidated || error == .timeout {
-                    throw error
-                } catch is CancellationError {
-                    throw CancellationError()
-                } catch {
-                    results.append(CatalogMetadataResult(groupIndex: request.groupIndex,
-                                                         handle: request.handle,
-                                                         file: nil,
-                                                         successful: false))
+                    batch.successful = batch.successful && result.successful
+                    if let file = result.file {
+                        batch.state.heads[group] = file
+                        break
+                    }
+                    batch.state.completed += 1
+                    batch.processed.append(handle)
                 }
             }
-            return results
+            let unresolved = groups.indices.contains {
+                batch.state.heads[$0] == nil && batch.state.cursors[$0] < groups[$0].handles.count
+            }
+            if unresolved { break }
+            guard let selected = selectNewestPhotoHeadIndex(batch.state.heads),
+                  let file = batch.state.heads[selected] else { break }
+            batch.files.append(file)
+            batch.processed.append(file.id)
+            batch.state.heads[selected] = nil
+            batch.state.completed += 1
         }
+        return batch
     }
 
     private func checkRemoteScanOwnership() throws {
@@ -1098,6 +1164,13 @@ actor CameraRepository {
         let temporary = directory.appendingPathComponent(
             transferPartialFileName(size: size, captureDate: captureDate, fileName: safeName), isDirectory: false
         )
+        defer {
+            // Android keeps resumable video parts, but a cancelled still-image
+            // transfer starts cleanly next time and must not publish its part.
+            if Task.isCancelled && !keepsPartialOnCancellation(fileName: safeName) {
+                try? FileManager.default.removeItem(at: temporary)
+            }
+        }
         let existingSize = (try? temporary.resourceValues(forKeys: [.fileSizeKey]).fileSize)
             .map { UInt64(max(0, $0)) } ?? 0
         let resumeOffset = transferResumeOffset(existingSize: existingSize, totalSize: size, reportedSize: size) ?? 0
@@ -1164,7 +1237,10 @@ actor CameraRepository {
             // Android raw USB can stream GetObject directly. ImageCaptureCore
             // returns the entire pass-through data phase in memory, so iOS USB
             // switches to bounded partial requests above one callback chunk.
-            forcePartial: directReader != nil || (isUSBConnection && effectiveSize > transferChunkSize)
+            forcePartial: directReader != nil || (isUSBConnection && effectiveSize > transferChunkSize),
+            // The transport may force bounded reads for stills (for example
+            // ImageCaptureCore); the policy gate must preserve that path.
+            videoTransfer: true
         )
         if resumeOffset > 0 && !usePartial { throw CameraRepositoryError.resumeUnavailable }
         let writer = CameraDownloadWriter(output: output, resumeOffset: resumeOffset,
@@ -1212,8 +1288,10 @@ actor CameraRepository {
                 throw CameraDownloadError.response(response.code)
             }
             partialObjectSupported = true
-            if let expected = response.declaredByteCount, expected > 0, expected != response.receivedByteCount {
-                throw CameraDownloadError.incomplete(received: response.receivedByteCount, expected: expected)
+            if let expected = response.declaredByteCount,
+               let mismatch = mismatchedFullObjectSize(received: response.receivedByteCount,
+                                                       declared: expected, known: 0) {
+                throw CameraDownloadError.incomplete(received: response.receivedByteCount, expected: mismatch)
             }
             if !sizeKnown && response.receivedByteCount == 0 {
                 effectiveSize = writer.bytes
@@ -1245,8 +1323,14 @@ actor CameraRepository {
                 return response
             }
             guard response.code == PTPConstants.responseOK else { throw CameraDownloadError.response(response.code) }
-            if let expected = response.declaredByteCount, expected > 0, expected != UInt64(UInt32.max), writer.bytes != expected {
-                throw CameraDownloadError.incomplete(received: writer.bytes, expected: expected)
+            if let expected = response.declaredByteCount,
+               let mismatch = mismatchedFullObjectSize(received: writer.bytes,
+                                                       declared: expected, known: 0) {
+                throw CameraDownloadError.incomplete(received: writer.bytes, expected: mismatch)
+            }
+            if response.declaredByteCount == nil,
+               let mismatch = mismatchedFullObjectSize(received: writer.bytes, declared: 0, known: sizeKnown ? effectiveSize : 0) {
+                throw CameraDownloadError.incomplete(received: writer.bytes, expected: mismatch)
             }
         } else if sizeKnown && writer.bytes != effectiveSize {
             throw CameraDownloadError.incomplete(received: writer.bytes, expected: effectiveSize)
@@ -1283,6 +1367,7 @@ actor CameraRepository {
         preserveExisting: Bool = false,
         resumeSnapshot: PhotoScanSnapshot? = nil,
         detectNewHandles: Bool = false,
+        nextBatchSize: @escaping @Sendable () async -> Int = { 12 },
         onBatch: (@Sendable ([CameraFile]) async throws -> Void)? = nil
     ) async throws -> PhotoScanResult {
         activeCatalogScans += 1
@@ -1292,9 +1377,13 @@ actor CameraRepository {
         if let debugData {
             let files = debugData.files
             if let onBatch, !preserveExisting {
-                for start in stride(from: 0, to: files.count, by: 12) {
+                var start = 0
+                while start < files.count {
                     try Task.checkCancellation()
-                    try await onBatch(Array(files[start..<min(start + 12, files.count)]))
+                    let count = fileScanBatchSize(processed: start, requested: await nextBatchSize(), fastFirstBatch: true)
+                    let end = min(start + count, files.count)
+                    try await onBatch(Array(files[start..<end]))
+                    start = end
                 }
             }
             return PhotoScanResult(files: files, removedHandles: [],
@@ -1472,96 +1561,52 @@ actor CameraRepository {
         var byIdentity = Dictionary(uniqueKeysWithValues: files.map { (logicalIdentity($0), $0) })
         var indexed = indexedCatalogFiles
         var batch: [CameraFile] = []
-        // STA direct metadata intentionally publishes the first frame as a
-        // 1-item batch, then a 3-item warm-up batch, before settling at 12.
-        // This is the same first-content latency strategy as
-        // `streamStaDirectFileInfo`; ordinary ObjectInfo scans stay at 12.
-        var directPublishedCount = 0
         var metadataComplete = true
-        var cursors = Array(repeating: 0, count: groups.count)
-        var heads = Array<CameraFile?>(repeating: nil, count: groups.count)
-        var metadataBuffers = Array(repeating: [CatalogMetadataResult](), count: groups.count)
+        var mergeState = CatalogMergeState(cursors: Array(repeating: 0, count: groups.count),
+                                           heads: Array(repeating: nil, count: groups.count))
         let totalCatalogHandles = groups.reduce(0) { $0 + $1.handles.count }
-        var completedHandles = 0
         // A handle becomes resumable only after the batch containing it was
         // accepted by the list owner.  Android marks the snapshot in the same
         // accepted section; marking it when ObjectInfo returns would skip rows
         // if the UI callback is cancelled or the session generation changes.
         var pendingProcessedHandles: [UInt32] = []
-        while completedHandles < totalCatalogHandles {
+        while mergeState.completed < totalCatalogHandles {
             try Task.checkCancellation()
             try await waitForForegroundPreview()
-            let batchLimit: Int = directReader == nil ? 12 :
-                (directPublishedCount == 0 ? 1 : directPublishedCount < 4 ? 3 : 12)
-            let requestBudget = directReader == nil
-                ? batchLimit
-                : max(groups.count, batchLimit + groups.count - 1)
+            let requested = metadataComplete ? await nextBatchSize() : 12
+            let batchLimit = directReader != nil && mergeState.completed > 0 && mergeState.completed < 4
+                ? 3 : fileScanBatchSize(processed: mergeState.completed, requested: requested, fastFirstBatch: true)
+            let requestBudget = directReader != nil || mergeState.completed < 4
+                ? max(groups.count, batchLimit + groups.count - 1)
+                : batchLimit
 
-            // Drain already fetched heads first. A single ordinary-lock batch
-            // may contain more responses than the current publication; those
-            // responses stay buffered for the next batch instead of reacquiring
-            // the camera mutex one object at a time.
-            func fillHead(_ index: Int) {
-                guard heads[index] == nil else { return }
-                while !metadataBuffers[index].isEmpty {
-                    let result = metadataBuffers[index].removeFirst()
-                    if !result.successful { metadataComplete = false }
-                    if let file = result.file {
-                        heads[index] = file
-                        return
+            let merged: CatalogMergeBatch
+            do {
+                if staAlbum != nil {
+                    merged = try await readMergedCatalogBatch(groups: groups, state: mergeState,
+                        limit: batchLimit, budget: requestBudget, total: totalCatalogHandles, pauseBetweenCommands: true)
+                } else {
+                    let scanGroups = groups, scanState = mergeState
+                    merged = try await ioGate.withCommand {
+                        try await self.readMergedCatalogBatch(groups: scanGroups, state: scanState,
+                            limit: batchLimit, budget: requestBudget, total: totalCatalogHandles, pauseBetweenCommands: false)
                     }
-                    completedHandles += 1
-                    pendingProcessedHandles.append(result.handle)
                 }
+            } catch CameraRepositoryError.foregroundPreempted {
+                throw CameraRepositoryError.foregroundPreempted
+            } catch is CancellationError { throw CancellationError() }
+            catch {
+                if staAlbum != nil { throw CameraRepositoryError.transportLost }
+                throw error
             }
-            for index in groups.indices { fillHead(index) }
-
-            var requests: [(groupIndex: Int, handle: UInt32, storage: UInt32)] = []
-            if heads.allSatisfy({ $0 != nil }) == false {
-                // Request in storage order, matching Android's round-robin
-                // head fill. The budget is the same as the Android call site:
-                // ordinary ObjectInfo uses at most the publication batch;
-                // direct STA reserves one head per card plus the batch.
-                while requests.count < requestBudget {
-                    var added = false
-                    for index in groups.indices where requests.count < requestBudget {
-                        guard cursors[index] < groups[index].handles.count else { continue }
-                        let handle = groups[index].handles[cursors[index]]
-                        cursors[index] += 1
-                        requests.append((index, handle, groups[index].storage))
-                        added = true
-                    }
-                    if !added { break }
-                }
+            guard merged.state.completed > mergeState.completed || merged.requests > 0 else {
+                throw CameraRepositoryError.invalidDataset
             }
-            if !requests.isEmpty {
-                let results: [CatalogMetadataResult]
-                do {
-                    results = try await readCatalogMetadataBatch(requests)
-                } catch CameraRepositoryError.foregroundPreempted {
-                    throw CameraRepositoryError.foregroundPreempted
-                } catch {
-                    if staAlbum != nil { throw CameraRepositoryError.transportLost }
-                    throw error
-                }
-                for result in results { metadataBuffers[result.groupIndex].append(result) }
-                for index in groups.indices { fillHead(index) }
-            }
-
-            var output: [CameraFile] = []
-            while output.count < batchLimit {
-                guard let selectedIndex = selectNewestPhotoHeadIndex(heads),
-                      let file = heads[selectedIndex] else { break }
-                heads[selectedIndex] = nil
-                completedHandles += 1
-                pendingProcessedHandles.append(file.id)
-                output.append(file)
-                fillHead(selectedIndex)
-            }
-            if output.isEmpty {
-                if requests.isEmpty { break }
-                continue
-            }
+            mergeState = merged.state
+            metadataComplete = metadataComplete && merged.successful
+            pendingProcessedHandles += merged.processed
+            let output = merged.files
+            if output.isEmpty { continue }
             for rawFile in output {
                 let file = replacingStorageIDs(rawFile, with: directStorageIDsByHandle[rawFile.id] ?? [])
                 let key = logicalIdentity(file)
@@ -1576,6 +1621,9 @@ actor CameraRepository {
                     if merged != old, let position = files.firstIndex(of: old) {
                         files[position] = merged
                         byIdentity[key] = merged
+                        if let pendingIndex = batch.firstIndex(where: { $0.id == old.id }) {
+                            batch[pendingIndex] = merged
+                        }
                     }
                 } else {
                     byIdentity[key] = file
@@ -1590,7 +1638,6 @@ actor CameraRepository {
             indexedCatalogFiles = indexed
             catalogOrder = files.map(\.id)
             scanSnapshot?.processedHandles.formUnion(pendingProcessedHandles)
-            directPublishedCount += pendingProcessedHandles.count
             batch.removeAll(keepingCapacity: true)
             pendingProcessedHandles.removeAll(keepingCapacity: true)
         }

@@ -7,6 +7,32 @@ import UniformTypeIdentifiers
 @testable import ZTransfer
 
 final class DomainModelTests: XCTestCase {
+    @MainActor
+    func testGenieCloseBeforeFirstFrameNotifiesAndAboveAnchorMirrorsInlet() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let window = UIWindow(windowScene: scene)
+        let root = UIViewController()
+        window.rootViewController = root
+        window.makeKeyAndVisible()
+        let popup = GeniePopupHostView(frame: CGRect(x: 10, y: 10, width: 200, height: 100))
+        defer { popup.stop(); window.isHidden = true }
+        popup.host.rootView = AnyView(Color.red.frame(width: 200, height: 100))
+        root.view.addSubview(popup)
+        root.view.layoutIfNeeded()
+        var settled: [CGFloat] = []
+        popup.onSettled = { settled.append($0) }
+        popup.configure(target: 1, anchorX: 0.5, anchorWidth: 0.1, anchorGap: 8)
+        popup.configure(target: 0, anchorX: 0.5, anchorWidth: 0.1, anchorGap: 8)
+        popup.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(30))
+        XCTAssertEqual(settled, [0])
+        popup.configure(target: 1, anchorX: 0.5, anchorWidth: 0.1, anchorGap: 8, opensAbove: true)
+        popup.layoutIfNeeded()
+        let layers = try XCTUnwrap(popup.subviews.last?.layer.sublayers)
+        XCTAssertEqual(layers[24].transform.m42, 108, accuracy: 0.001)
+        XCTAssertFalse(popup.host.view.isUserInteractionEnabled)
+    }
+
     func testPreparedGenieGeometryMatchesOriginalCurve() {
         // Frozen pre-optimization equations: preparation must not approximate
         // the curve, including padded rows outside the visible panel bounds.
@@ -159,13 +185,13 @@ final class DomainModelTests: XCTestCase {
         let harness = SequentialListHarness()
         let files = (1...4).map { remoteLifecycleFile(UInt32($0), name: "\($0).NEF") }
         let model = PhotoListViewModel(
-            scanCatalog: { _, _, _, onBatch in
+            scanCatalog: { _, _, _, _, onBatch in
                 await harness.didStartScan()
                 try await onBatch(files)
                 return PhotoScanResult(files: files, removedHandles: [], addedHandles: [],
                                        handleQueriesSucceeded: true, metadataComplete: true)
             },
-            prefetchBatch: { await harness.prefetch($0) },
+            prefetchBatch: { ThumbnailBatchResult(settled: await harness.prefetch($0)) },
             canFill: { true },
             setRemoteGate: { await harness.setRemote($0) },
             sequentialLoading: true
@@ -354,6 +380,170 @@ final class DomainModelTests: XCTestCase {
         XCTAssertTrue(PhotoDateRange(start: "20240229", end: "20240229").contains("20240229T120000"))
         XCTAssertEqual(validPhotoCaptureDay("20260806T010000"), "20260806")
         XCTAssertNil(validPhotoCaptureDay("20260229T120000"))
+    }
+
+    func testPreviewVideoMetadataMatchesAndroidWithoutExtraQueries() {
+        func file(_ size: UInt64, _ date: String?) -> CameraFile {
+            CameraFile(id: 1, storageID: 1, format: 0x300D, size: size,
+                       fileName: "DSC_0001.MOV", captureDate: date, isProtected: false)
+        }
+        XCTAssertEqual(videoPreviewMetadata(file: file(1_572_864, "20260724T123456")),
+                       "1.5 MB  ·  2026-07-24 12:34:56")
+        XCTAssertEqual(videoPreviewMetadata(file: file(0, "20260724T996099")), "2026-07-24")
+        XCTAssertEqual(videoPreviewMetadata(file: file(0, "20261340T120000")), "")
+        for size in [UInt64(UInt32.max), UInt64(5) * 1024 * 1024 * 1024] {
+            XCTAssertEqual(videoPreviewMetadata(file: file(size, nil)), AppLocalized.resource("video_size_over_4gb"))
+        }
+    }
+
+    func testLocalPreviewDecodesVisiblePagesIncludingIncomingSwipe() {
+        for (x, visible) in [(CGFloat(-400), false), (-399.9, true), (-399, true), (0, true), (399, true), (399.9, true), (400, false)] {
+            XCTAssertEqual(localPreviewPageIsVisible(frame: CGRect(x: x, y: 0, width: 400, height: 300),
+                                                     viewportWidth: 400), visible)
+        }
+    }
+
+    func testPreviewContentChangesAtHalfPageWithContinuousOpacity() {
+        for (left, expected) in [(CGFloat(0), 0), (-0.49, 0), (-0.51, 1), (-1, 1)] {
+            let page = nearestPreviewPage(offsets: [0: left, 1: left + 1])
+            XCTAssertEqual(page?.index, expected)
+        }
+        XCTAssertEqual(previewPageInformationAlpha(-0.5), 0)
+        XCTAssertEqual(previewPageInformationAlpha(0.5), 0)
+        XCTAssertEqual(previewPageInformationAlpha(0), 1)
+        XCTAssertEqual(previewPageInformationAlpha(0.25), 0.5)
+        XCTAssertNil(nearestPreviewPage(offsets: [0: .nan, 1: 2]))
+    }
+
+    @MainActor
+    func testPreviewPinchObserverAttachesOnceAndDetachesFromWindow() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 400, height: 800))
+        let root = UIViewController()
+        window.rootViewController = root
+        let marker = PreviewPinchObserver.Marker(frame: CGRect(x: 0, y: 0, width: 400, height: 600))
+        root.view.addSubview(marker)
+        window.isHidden = false
+        defer { window.isHidden = true }
+        XCTAssertTrue(marker.recognizer.view === window)
+        XCTAssertFalse(marker.isUserInteractionEnabled)
+        marker.didMoveToWindow()
+        XCTAssertEqual(window.gestureRecognizers?.filter { $0 === marker.recognizer }.count, 1)
+        marker.removeFromSuperview()
+        XCTAssertNil(marker.recognizer.view)
+        XCTAssertFalse(window.gestureRecognizers?.contains { $0 === marker.recognizer } ?? false)
+        root.view.addSubview(marker)
+        XCTAssertTrue(marker.recognizer.view === window)
+        marker.detach()
+        marker.detach()
+        XCTAssertNil(marker.recognizer.view)
+    }
+
+    func testPreviewAnimatedRotationKeepsTargetDirectionInsets() {
+        let placement = photoPreviewPlacement(imageSize: CGSize(width: 400, height: 600),
+            viewportSize: CGSize(width: 400, height: 800), rotationDegrees: -30,
+            infoBottom: 80, targetRotationDegrees: -90)
+        XCTAssertEqual(placement.size.width, 376, accuracy: 0.001)
+        XCTAssertEqual(placement.center.y, 440, accuracy: 0.001)
+    }
+
+    func testPreviewPlacementAndGesturesShareInformationClearance() {
+        let viewport = CGSize(width: 400, height: 800)
+        let image = CGSize(width: 400, height: 600)
+        let placement = photoPreviewPlacement(imageSize: image, viewportSize: viewport,
+                                               rotationDegrees: 0, infoBottom: 80)
+        XCTAssertEqual(placement.size.width, 360, accuracy: 0.001)
+        XCTAssertEqual(placement.size.height, 540, accuracy: 0.001)
+        XCTAssertEqual(placement.center.y, 428, accuracy: 0.001)
+        let offset = photoPreviewClampedOffset(CGSize(width: 1000, height: 1000), scale: 2,
+                                               imageSize: image, viewportSize: viewport,
+                                               rotationDegrees: 0, infoBottom: 80)
+        XCTAssertEqual(offset, CGSize(width: 160, height: 112))
+        let centeredTap = photoPreviewDoubleTapOffset(location: placement.center, scale: 2.5,
+                                                      imageSize: image, viewportSize: viewport,
+                                                      rotationDegrees: 0, infoBottom: 80)
+        XCTAssertEqual(centeredTap, .zero)
+        let landscape = photoPreviewPlacement(imageSize: image, viewportSize: viewport,
+                                               rotationDegrees: -90, infoBottom: 80)
+        XCTAssertEqual(landscape.size.width, 376, accuracy: 0.001)
+        XCTAssertEqual(landscape.center.y, 440, accuracy: 0.001)
+    }
+
+    func testPreviewTouchSamplesPreservePanAndMultiFingerZoom() {
+        let sample = previewTouchTransform(
+            previous: [CGPoint(x: 0, y: 0), CGPoint(x: 20, y: 0)],
+            current: [CGPoint(x: 5, y: 10), CGPoint(x: 45, y: 10)])
+        XCTAssertEqual(sample.factor, 2)
+        XCTAssertEqual(sample.centroid, CGPoint(x: 25, y: 10))
+        XCTAssertEqual(sample.pan, CGSize(width: 15, height: 10))
+        let remainingFinger = previewTouchTransform(previous: [CGPoint(x: 10, y: 20)],
+                                                    current: [CGPoint(x: 14, y: 27)])
+        XCTAssertEqual(remainingFinger.factor, 1)
+        XCTAssertEqual(remainingFinger.pan, CGSize(width: 4, height: 7))
+        let three = previewTouchTransform(
+            previous: [CGPoint(x: -10, y: 0), .zero, CGPoint(x: 10, y: 0)],
+            current: [CGPoint(x: -20, y: 0), .zero, CGPoint(x: 20, y: 0)])
+        XCTAssertEqual(three.factor, 2)
+    }
+
+    func testAndroidPreviewPinchPreservesPixelAtExistingZoom() {
+        let old = CGSize(width: 30, height: -50)
+        let centroid = CGPoint(x: 80, y: 90)
+        let result = previewPinchOffset(offset: old, centroidFromCenter: centroid,
+                                        factor: 3.0 / 2, pan: .zero)
+        XCTAssertEqual((centroid.x - old.width) / 2 * 3 + result.width, centroid.x)
+        XCTAssertEqual((centroid.y - old.height) / 2 * 3 + result.height, centroid.y)
+    }
+
+    func testAndroidPreviewPanUsesActualRestingCenter() {
+        let image = CGSize(width: 400, height: 600)
+        let viewport = CGSize(width: 400, height: 800)
+        let center = CGPoint(x: 200, y: 340)
+        XCTAssertEqual(clampPreviewPan(scale: 2, offset: CGSize(width: 1000, height: 1000),
+                                       image: image, viewport: viewport, center: center),
+                       CGSize(width: 200, height: 260))
+        XCTAssertEqual(clampPreviewPan(scale: 2, offset: CGSize(width: -1000, height: -1000),
+                                       image: image, viewport: viewport, center: center),
+                       CGSize(width: -200, height: -140))
+        XCTAssertEqual(clampPreviewPan(scale: 1, offset: CGSize(width: 90, height: 120),
+                                       image: image, viewport: viewport, center: center), .zero)
+    }
+
+    func testAndroidPreviewLayoutNormalCropAndSmallViewport() {
+        func layout(_ image: CGFloat, _ progress: CGFloat, alignment: CGFloat = 1,
+                    top: CGFloat = 60) -> PreviewPhotoLayout {
+            previewPhotoLayout(viewportHeight: 800, imageHeight: image, infoBottom: 80,
+                               cropTop: top, cropExtraBottom: 84, progress: progress,
+                               cropTopAlignment: alignment)
+        }
+        XCTAssertEqual(layout(400, 0), PreviewPhotoLayout(scale: 1, centerY: 440))
+        for height in [CGFloat(400), CGFloat(1200)] {
+            let value = layout(height, 1)
+            XCTAssertEqual(value.centerY - height * value.scale / 2, 60, accuracy: 0.001)
+            XCTAssertLessThanOrEqual(value.centerY + height * value.scale / 2, 716.001)
+        }
+        let start = layout(1200, 0), end = layout(1200, 1), middle = layout(1200, 0.5)
+        XCTAssertEqual(middle.scale, (start.scale + end.scale) / 2, accuracy: 0.001)
+        XCTAssertEqual(middle.centerY, (start.centerY + end.centerY) / 2, accuracy: 0.001)
+        let small = previewPhotoLayout(viewportHeight: 100, imageHeight: 1200, infoBottom: 112,
+                                      cropTop: 140, cropExtraBottom: 84, progress: 1)
+        XCTAssertGreaterThan(small.scale, 0)
+        XCTAssertTrue(small.centerY.isFinite)
+        let landscape = layout(300, 1, alignment: 0.5, top: 140)
+        XCTAssertGreaterThan(landscape.centerY, layout(300, 1, top: 140).centerY)
+        XCTAssertLessThan(landscape.centerY, layout(300, 0, top: 140).centerY)
+        XCTAssertLessThanOrEqual(landscape.centerY + 150 * landscape.scale, 716)
+    }
+
+    func testAndroidPreviewFallbackWaitsForCurrentFHDAndExif() {
+        for current in [false, true] {
+            for unavailable in [false, true] {
+                for finished in [false, true] {
+                    XCTAssertEqual(allowPreviewRemoteThumbnailFallback(
+                        isCurrent: current, fhdUnavailable: unavailable, exifFinished: finished
+                    ), current && unavailable && finished)
+                }
+            }
+        }
     }
 
     func testPreviewCaptureDateFallsBackFromInvalidTimeAndRejectsInvalidDay() {
@@ -955,14 +1145,6 @@ final class DomainModelTests: XCTestCase {
         XCTAssertNil(snapshot.items[1].destinationFolderName)
     }
 
-    func testLocalOriginalPreviewRoutesMatchAndroidFileTypes() {
-        XCTAssertEqual(localOriginalPreviewRoute(for: ".JPG"), .directBitmap)
-        XCTAssertEqual(localOriginalPreviewRoute(for: ".nef"), .rawEmbeddedJPEG)
-        XCTAssertEqual(localOriginalPreviewRoute(for: ".nrw"), .rawEmbeddedJPEG)
-        XCTAssertEqual(localOriginalPreviewRoute(for: ".tiff"), .cameraFHD)
-        XCTAssertEqual(localOriginalPreviewRoute(for: ".mp4"), .cameraFHD)
-    }
-
     func testTransferPartialIdentityAndResumeBoundaryMatchAndroid() {
         XCTAssertEqual(
             transferPartialFileName(size: 42, captureDate: "20260817T142530", fileName: "A_B.JPG"),
@@ -1172,6 +1354,24 @@ final class DomainModelTests: XCTestCase {
         ))
     }
 
+    func testWatermarkStoredNumbersAreNotMistakenForBooleans() {
+        let suite = "watermark-number-types-\(UUID())"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        for value in [0, 1, 2, 72, 100] {
+            defaults.set(value, forKey: "value")
+            let stored = defaults.object(forKey: "value")
+            XCTAssertEqual(restoredPhotoFrameWatermarkOpacityPercent(stored), max(1, value))
+            XCTAssertEqual(restoredPhotoFrameWatermarkSizePercent(stored, content: .text), max(1, value))
+        }
+        for value in [false, true] {
+            defaults.set(value, forKey: "value")
+            let stored = defaults.object(forKey: "value")
+            XCTAssertEqual(restoredPhotoFrameWatermarkOpacityPercent(stored), 72)
+            XCTAssertEqual(restoredPhotoFrameWatermarkSizePercent(stored, content: .text), 80)
+        }
+    }
+
     @MainActor
     func testLegacyWatermarkSizeAndOpacityMigrateWithoutVisualJump() {
         XCTAssertEqual(restoredPhotoFrameWatermarkSizePercent(nil, content: .text), 80)
@@ -1221,10 +1421,13 @@ final class DomainModelTests: XCTestCase {
     func testRemoteDesqueezeRestoresWithinAndroidRange() {
         XCTAssertEqual(RemoteDisplayOptions.normalizedDesqueeze(0.25), 1)
         XCTAssertEqual(RemoteDisplayOptions.normalizedDesqueeze(1.33), 1.33)
-        XCTAssertEqual(RemoteDisplayOptions.normalizedDesqueeze(9), 2)
+        XCTAssertEqual(RemoteDisplayOptions.normalizedDesqueeze(9), 1)
         XCTAssertEqual(RemoteDisplayOptions.normalizedDesqueeze(.infinity), 1)
-        XCTAssertEqual(RemoteDisplayOptions.nextDesqueeze(after: 1.2), 1.33)
-        XCTAssertEqual(RemoteDisplayOptions.nextDesqueeze(after: 9), 1)
+        XCTAssertEqual(RemoteDisplayOptions.normalizedDesqueeze(.nan), 1)
+        XCTAssertEqual(RemoteDisplayOptions.nextDesqueeze(after: 1.2), 1.5)
+        XCTAssertEqual(RemoteDisplayOptions.nextDesqueeze(after: 9), 1.33)
+        XCTAssertEqual(RemoteDisplayOptions.nextDesqueeze(after: 1.7), 2)
+        XCTAssertEqual(RemoteDisplayOptions.nextDesqueeze(after: 2), 1)
     }
 
     func testThumbnailColumnsRestoreWithinAndroidRange() {
@@ -1454,7 +1657,7 @@ private actor RemoteListLifecycleHarness {
 @MainActor
 private func remoteLifecycleModel(_ harness: RemoteListLifecycleHarness) -> PhotoListViewModel {
     PhotoListViewModel(
-        scanCatalog: { preserve, snapshot, detectNew, onBatch in
+        scanCatalog: { preserve, snapshot, detectNew, _, onBatch in
             try await harness.scan(preserve: preserve, snapshot: snapshot,
                                    detectNew: detectNew, onBatch: onBatch)
         },

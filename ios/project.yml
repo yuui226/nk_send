@@ -12,6 +12,15 @@ settings:
 fileGroups:
   - StoreKit
 schemes:
+  ZTransfer-Interactions:
+    build:
+      targets:
+        ZTransfer: all
+    test:
+      config: Debug
+      targets:
+        - ZTransferTests
+        - ZTransferInteractionUITests
   ZTransfer-StoreKit:
     build:
       targets:
@@ -40,8 +49,112 @@ targets:
     platform: iOS
     sources:
       - path: ZTransfer
+      - path: ThirdParty/libjpeg-8bit/LosslessJpegBridge.c
+      - path: ThirdParty/libjpeg-8bit/src/transupp.c
+      - path: ThirdParty/libjpeg-8bit/src/jaricom.c
+      - path: ThirdParty/libjpeg-8bit/src/jcarith.c
+      - path: ThirdParty/libjpeg-8bit/src/jcapimin.c
+      - path: ThirdParty/libjpeg-8bit/src/jchuff.c
+      - path: ThirdParty/libjpeg-8bit/src/jcicc.c
+      - path: ThirdParty/libjpeg-8bit/src/jcinit.c
+      - path: ThirdParty/libjpeg-8bit/src/jclhuff.c
+      - path: ThirdParty/libjpeg-8bit/src/jcmarker.c
+      - path: ThirdParty/libjpeg-8bit/src/jcmaster.c
+      - path: ThirdParty/libjpeg-8bit/src/jcomapi.c
+      - path: ThirdParty/libjpeg-8bit/src/jcparam.c
+      - path: ThirdParty/libjpeg-8bit/src/jcphuff.c
+      - path: ThirdParty/libjpeg-8bit/src/jctrans.c
+      - path: ThirdParty/libjpeg-8bit/src/jdapimin.c
+      - path: ThirdParty/libjpeg-8bit/src/jdarith.c
+      - path: ThirdParty/libjpeg-8bit/src/jdatadst.c
+      - path: ThirdParty/libjpeg-8bit/src/jdatasrc.c
+      - path: ThirdParty/libjpeg-8bit/src/jdhuff.c
+      - path: ThirdParty/libjpeg-8bit/src/jdicc.c
+      - path: ThirdParty/libjpeg-8bit/src/jdinput.c
+      - path: ThirdParty/libjpeg-8bit/src/jdlhuff.c
+      - path: ThirdParty/libjpeg-8bit/src/jdmarker.c
+      - path: ThirdParty/libjpeg-8bit/src/jdmaster.c
+      - path: ThirdParty/libjpeg-8bit/src/jdphuff.c
+      - path: ThirdParty/libjpeg-8bit/src/jdtrans.c
+      - path: ThirdParty/libjpeg-8bit/src/jerror.c
+      - path: ThirdParty/libjpeg-8bit/src/jfdctflt.c
+      - path: ThirdParty/libjpeg-8bit/src/jmemmgr.c
+      - path: ThirdParty/libjpeg-8bit/src/jmemnobs.c
+      - path: ThirdParty/libjpeg-8bit/src/jpeg_nbits.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jcapistd-8.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jccoefct-8.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jccolor-8.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jcdctmgr-8.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jcdiffct-8.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jclossls-8.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jcmainct-8.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jcprepct-8.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jcsample-8.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jdapistd-8.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jdcoefct-8.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jdcolor-8.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jddctmgr-8.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jddiffct-8.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jdlossls-8.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jdmainct-8.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jdmerge-8.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jdpostct-8.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jdsample-8.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jfdctfst-8.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jfdctint-8.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jidctflt-8.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jidctfst-8.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jidctint-8.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jidctred-8.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jquant1-8.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jquant2-8.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jutils-8.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jcapistd-12.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jcapistd-16.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jccoefct-12.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jccolor-12.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jccolor-16.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jcdctmgr-12.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jcdiffct-12.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jcdiffct-16.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jclossls-12.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jclossls-16.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jcmainct-12.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jcmainct-16.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jcprepct-12.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jcprepct-16.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jcsample-12.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jcsample-16.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jdapistd-12.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jdapistd-16.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jdcoefct-12.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jdcolor-12.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jdcolor-16.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jddctmgr-12.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jddiffct-12.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jddiffct-16.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jdlossls-12.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jdlossls-16.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jdmainct-12.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jdmainct-16.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jdmerge-12.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jdpostct-12.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jdpostct-16.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jdsample-12.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jdsample-16.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jfdctfst-12.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jfdctint-12.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jidctflt-12.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jidctfst-12.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jidctint-12.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jidctred-12.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jquant1-12.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jquant2-12.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jutils-12.c
+      - path: ThirdParty/libjpeg-8bit/src/wrapper/jutils-16.c
     resources:
       - path: ZTransfer/Resources
+      - path: licenses
     info:
       path: ZTransfer/Info.plist
       properties:
@@ -84,7 +197,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.ztransfer.ios
-        MARKETING_VERSION: "1.82"
+        MARKETING_VERSION: "1.91"
         CURRENT_PROJECT_VERSION: "1"
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
@@ -98,6 +211,9 @@ targets:
         INFOPLIST_KEY_NSLocalNetworkUsageDescription: "用于连接相机"
         TARGETED_DEVICE_FAMILY: "1,2"
         SWIFT_EMIT_LOC_STRINGS: YES
+        HEADER_SEARCH_PATHS:
+          - "$(inherited)"
+          - "$(SRCROOT)/ThirdParty/libjpeg-8bit/src"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGN_ENTITLEMENTS: ZTransfer/ZTransfer.entitlements
       configs:
@@ -150,5 +266,17 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.ztransfer.ios.storekituitests
+        TEST_TARGET_NAME: ZTransfer
+        GENERATE_INFOPLIST_FILE: YES
+  ZTransferInteractionUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: InteractionUITests
+    dependencies:
+      - target: ZTransfer
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.ztransfer.ios.interactionuitests
         TEST_TARGET_NAME: ZTransfer
         GENERATE_INFOPLIST_FILE: YES

@@ -9,10 +9,19 @@ final class RemoteViewModel: ObservableObject {
     @Published private(set) var frameData: Data?
     @Published private(set) var frameMetadata: RemoteLiveViewMetadata?
     @Published private(set) var frameHistogram: [Int]?
+    @Published private(set) var frameHistogramRGB: [[Int]]?
+    @Published private(set) var frameWaveform: [[Int]]?
+    @Published private(set) var frameFalseColorPixels: [UInt32]?
+    @Published private(set) var frameFalseColorSize: CGSize = .zero
+    @Published private(set) var exposureMeterEV: Float?
+    private var exposureMeterTask: Task<Void, Never>?
+    private var exposureMeterGeneration: UInt64 = 0
     @Published private(set) var frameZebraMask: RemoteZebraMask?
     @Published private(set) var exposureDescriptors: [RemoteExposureField: RemotePropertyDescriptor] = [:]
     private var exposureDescriptorCache: [Bool: [RemoteExposureField: RemotePropertyDescriptor]] = [:]
     @Published private(set) var movieMode = false
+    @Published private(set) var cameraToolPanel: RemoteCameraToolController?
+    private var retiringCameraTools: [UUID: Task<Void, Never>] = [:]
     // Android HD changes VGA/XGA size independently of enhanced-frame support.
     @Published private(set) var hdLiveView = false
     @Published private(set) var autoISODescriptor: RemotePropertyDescriptor?
@@ -34,6 +43,7 @@ final class RemoteViewModel: ObservableObject {
     @Published private(set) var halfPressVisualActive = false
     @Published private(set) var frameReceivedAtUptime: TimeInterval = 0
     @Published private var recordingOperations = RemoteRecordingOperationGate()
+    @Published private(set) var levelPitch: Double?
     @Published private(set) var levelRoll: Double?
     @Published private(set) var batteryPercent: Int?
     @Published private(set) var trialEnded = false
@@ -342,6 +352,7 @@ final class RemoteViewModel: ObservableObject {
         guard !stopRequested,
               let nextMovie = try? await camera.remoteMovieMode() else { return }
         if nextMovie != movieMode {
+            dismissCameraTool()
             movieMode = nextMovie
             state.movieMode = nextMovie
             await loadExposure(movie: nextMovie)
@@ -371,13 +382,56 @@ final class RemoteViewModel: ObservableObject {
         restartLiveView = true
     }
 
-    func setFrameAnalysis(histogram: Bool, zebra: Bool) {
+    func setFrameAnalysis(histogram: Bool, zebra: Bool, waveform: RemoteWaveformMode = .off, falseColor: Bool = false, histogramRGB: Bool = false) {
         histogramEnabled = histogram
         zebraEnabled = zebra
-        if !histogram { frameHistogram = nil }
+        if !histogram { frameHistogram = nil; frameHistogramRGB = nil }
         if !zebra { frameZebraMask = nil }
+        if waveform == .off { frameWaveform = nil }
+        if !falseColor { frameFalseColorPixels = nil; frameFalseColorSize = .zero }
         Task { [frameDecoder] in
-            await frameDecoder.setAnalysis(histogram: histogram, zebra: zebra)
+            await frameDecoder.setAnalysis(histogram: histogram, zebra: zebra,
+                                           waveform: waveform != .off, waveformRGB: waveform == .rgb,
+                                           falseColor: falseColor, histogramRGB: histogramRGB)
+        }
+    }
+
+    func setExposureMeterVisible(_ visible: Bool) {
+        exposureMeterGeneration &+= 1
+        let generation = exposureMeterGeneration
+        exposureMeterTask?.cancel()
+        exposureMeterEV = nil
+        guard visible, !stopRequested else { return }
+        exposureMeterTask = Task { [weak self] in
+            guard let self else { return }
+            var descriptor: RemotePropertyDescriptor?
+            for property in [RemoteProperty.nikonLightMeter, .nikonExposureIndicate] {
+                descriptor = try? await camera.remoteProperty(property)
+                if let descriptor, descriptor.dataType == 1, !descriptor.writable { break }
+                descriptor = nil
+            }
+            guard let descriptor else { return }
+            var failures = 0
+            while !Task.isCancelled && generation == exposureMeterGeneration && !stopRequested {
+                if state.capture == .capturing || state.capture == .recording || state.capture == .stopping {
+                    try? await Task.sleep(for: .milliseconds(500))
+                    continue
+                }
+                let started = Int64(Date().timeIntervalSince1970 * 1000)
+                guard let value = try? await camera.refreshRemoteProperty(descriptor) else {
+                    failures += 1
+                    if failures >= 3 { break }
+                    try? await Task.sleep(for: .milliseconds(500)); continue
+                }
+                let now = Int64(Date().timeIntervalSince1970 * 1000)
+                if let ev = RemoteExposureMeter.ev(property: value.property.rawValue, dataType: value.dataType,
+                                                    writable: value.writable, current: Int64(bitPattern: value.current)),
+                   RemoteExposureMeter.isFresh(startedAt: started, now: now) {
+                    exposureMeterEV = ev; failures = 0
+                } else { failures += 1 }
+                if failures >= 3 { break }
+                try? await Task.sleep(for: .milliseconds(500))
+            }
         }
     }
 
@@ -388,6 +442,10 @@ final class RemoteViewModel: ObservableObject {
         frameMetadata = decoded.metadata
         frameReceivedAtUptime = decoded.receivedAtUptime
         frameHistogram = decoded.histogram
+        frameHistogramRGB = decoded.histogramRGB
+        frameWaveform = decoded.waveform
+        frameFalseColorPixels = decoded.falseColorPixels
+        frameFalseColorSize = CGSize(width: decoded.falseColorWidth, height: decoded.falseColorHeight)
         frameZebraMask = decoded.zebraMask
         state = state.applying(.frameReceived(fps: decoded.fps))
         if initialLoaded { usageMeter.markReady() }
@@ -396,10 +454,26 @@ final class RemoteViewModel: ObservableObject {
         }
     }
 
+    private var localRecordingToolVisible = true
+
+    /// A hidden portrait entry closes recording; the landscape fixed recorder
+    /// keeps an existing recording alive. Both paths disallow starting a new
+    /// recording, including a microphone permission reply arriving later.
+    func setLocalRecordingToolVisible(_ visible: Bool, fixedRecorder: Bool) {
+        localRecordingToolVisible = visible
+        guard !visible else { return }
+        if localRecordingPhase == .idle || localRecordingPhase == .saved {
+            localRecordingTask?.cancel()
+            localRecordingTask = nil
+        }
+        if !fixedRecorder { stopLocalRecording() }
+    }
+
     func startLocalRecording() {
         guard premiumAccess.isPro else {
             showLocalRecordingHint(AppLocalized.resource("remote_rec_pro_only")); return
         }
+        guard localRecordingToolVisible else { return }
         guard localRecordingPhase == .idle || localRecordingPhase == .saved,
               localRecorder == nil, let image = frameImage else {
             if frameImage == nil { showLocalRecordingHint(AppLocalized.resource("remote_rec_start_failed")) }
@@ -409,7 +483,7 @@ final class RemoteViewModel: ObservableObject {
         localRecordingTask = Task { [weak self] in
             guard let self else { return }
             let permission = await microphonePermission()
-            guard !Task.isCancelled, !stopRequested else { return }
+            guard !Task.isCancelled, !stopRequested, localRecordingToolVisible else { return }
             guard premiumAccess.isPro else {
                 showLocalRecordingHint(AppLocalized.resource("remote_rec_pro_only"))
                 localRecordingTask = nil
@@ -466,6 +540,8 @@ final class RemoteViewModel: ObservableObject {
     }
 
     private func startLocalRecordingResolved(size: CGSize, withAudio: Bool) {
+        guard localRecordingToolVisible, localRecorder == nil,
+              localRecordingPhase != .finalizing else { return }
         let preferred = RemoteViewfinderRecorder.outputURL(preferredDirectory: recordingDirectory)
         var recorder = RemoteViewfinderRecorder(outputURL: preferred, sourceSize: size, withAudio: withAudio)
         var started = recorder.start()
@@ -583,6 +659,7 @@ final class RemoteViewModel: ObservableObject {
         let generation = levelGeneration
         let previous = levelTask
         levelRoll = nil
+        levelPitch = nil
         guard visible else { return }
         levelTask = Task { [weak self] in
             // Finish an in-flight PTP transaction before replacing its owner.
@@ -593,29 +670,37 @@ final class RemoteViewModel: ObservableObject {
                 try? await Task.sleep(for: .milliseconds(150))
             }
             guard active() else { return }
-            let described = try? await camera.remoteProperty(.angleLevel)
-            guard active() else { return }
-            guard var param = described, param.angleLevelRoll != nil else {
-                levelVisible = false
-                return
-            }
+            var param: RemotePropertyDescriptor?
             var failures = 0
+            var fallbackUnavailable = false
+            var wasHeader = false
             while active() {
-                if let roll = param.angleLevelRoll {
-                    // Kotlin roundToInt resolves halfway values toward positive infinity.
-                    levelRoll = floor(roll * 10 + 0.5) / 10
+                let age = ProcessInfo.processInfo.systemUptime - frameReceivedAtUptime
+                if let attitude = frameMetadata?.attitude, age >= 0, age <= 1.5 {
+                    levelRoll = Double(floor(attitude.roll * 10 + 0.5) / 10)
+                    levelPitch = Double(floor(attitude.pitch * 10 + 0.5) / 10)
+                    wasHeader = true
+                } else {
+                    levelPitch = nil
+                    if wasHeader { levelRoll = nil }
+                    wasHeader = false
+                    if !fallbackUnavailable {
+                        if let previous = param { param = try? await camera.refreshRemoteProperty(previous) }
+                        else { param = try? await camera.remoteProperty(.angleLevel) }
+                        guard active() else { return }
+                        if let roll = param?.angleLevelRoll {
+                            levelRoll = Double(floor(Float(roll) * 10 + 0.5) / 10)
+                            failures = 0
+                        } else {
+                            failures += 1
+                            if failures >= 3 {
+                                levelRoll = nil
+                                fallbackUnavailable = true
+                            }
+                        }
+                    }
                 }
                 try? await Task.sleep(for: .milliseconds(250))
-                guard active() else { return }
-                let refreshed = try? await camera.refreshRemoteProperty(param)
-                guard active() else { return }
-                if let refreshed { param = refreshed; failures = 0 }
-                else {
-                    failures += 1
-                    // Android clears the stale angle after three failures but
-                    // leaves the user's switch on; toggling off/on retries.
-                    if failures >= 3 { levelRoll = nil; return }
-                }
             }
         }
     }
@@ -706,6 +791,62 @@ final class RemoteViewModel: ObservableObject {
         }
     }
 
+    var cameraToolWritesAllowed: Bool {
+        !stopRequested && initialLoaded && state.capture != .capturing && !recordingBusy &&
+            !halfPressHeld && halfPressTask == nil && tapFocusTask == nil
+    }
+
+    func openCameraTool(_ tool: RemoteCameraTool) {
+        guard !stopRequested else {
+            showInteractionHint(AppLocalized.resource("remote_camera_tool_unavailable"))
+            return
+        }
+        if let panel = cameraToolPanel, panel.tool == tool {
+            panel.requestClose()
+            return
+        }
+        dismissCameraTool()
+        let id = UUID()
+        let panel = RemoteCameraToolController(id: id, camera: camera, tool: tool, movie: movieMode,
+            isCurrent: { [weak self] in self.map { !$0.stopRequested } ?? false },
+            currentMovie: { [weak self] in self?.movieMode ?? false },
+            canWrite: { [weak self] in self?.cameraToolWritesAllowed ?? false },
+            beforeWrite: { [weak self] in
+                guard let self else { return false }
+                if tool == .focusArea && state.focus.tracking {
+                    do {
+                        let response = try await camera.endSubjectTrackingForTool()
+                        if let response, ![PTPConstants.responseOK, PTPConstants.operationNotSupported, 0xA004].contains(response) {
+                            return false
+                        }
+                        state.focus.tracking = false
+                        confirmedFocusMarker = nil
+                    } catch { return false }
+                }
+                return true
+            }, onApplied: { [weak self] in
+                guard let self, tool == .focusArea else { return }
+                confirmedFocusMarker = nil
+                state.focus.phase = .idle
+                await refreshFocusMode()
+            }, onUnavailable: { [weak self] in
+                self?.showInteractionHint(AppLocalized.resource("remote_camera_tool_unavailable"))
+            }, onDismiss: { [weak self] in self?.retireCameraTool(id) })
+        cameraToolPanel = panel
+        panel.start()
+    }
+
+    func dismissCameraTool() { cameraToolPanel?.dismiss() }
+
+    private func retireCameraTool(_ id: UUID) {
+        guard let panel = cameraToolPanel, panel.id == id else { return }
+        cameraToolPanel = nil
+        retiringCameraTools[id] = Task { [weak self] in
+            await panel.drain()
+            self?.retiringCameraTools[id] = nil
+        }
+    }
+
     private func remoteCommandsAllowed() -> Bool { !stopRequested }
 
     func setExposure(_ field: RemoteExposureField, value: UInt64, feedback: Bool = true, immediate: Bool = true) {
@@ -760,6 +901,7 @@ final class RemoteViewModel: ObservableObject {
         usageMeter.stop()
         disposed = true
         stopRequested = true
+        dismissCameraTool()
         // A USB start response can arrive after the page has begun leaving but
         // before local state changes to `.recording`. Remember the wire command
         // so teardown cannot leave the camera recording invisibly.
@@ -770,7 +912,11 @@ final class RemoteViewModel: ObservableObject {
         halfPressVisualActive = false
         levelGeneration &+= 1
         levelVisible = false
+        exposureMeterGeneration &+= 1
+        exposureMeterTask?.cancel()
+        exposureMeterEV = nil
         levelRoll = nil
+        levelPitch = nil
         focusHideTask?.cancel()
         recordingOperations.invalidate()
         recordingTimerTask?.cancel()
@@ -822,6 +968,8 @@ final class RemoteViewModel: ObservableObject {
         await autoISOCommandTask?.value
         for task in pendingSets.values { await task.value }
         pendingSets.removeAll()
+        for task in retiringCameraTools.values { await task.value }
+        retiringCameraTools.removeAll()
         await levelTask?.value
         levelTask = nil
         await frame?.value
@@ -1178,6 +1326,10 @@ final class RemoteViewModel: ObservableObject {
         }
     }
 
+    func showRotationLockHint(_ locked: Bool) {
+        showInteractionHint(AppLocalized.resource(locked ? "remote_rotation_stopped" : "remote_rotation_resumed"))
+    }
+
     private func showInteractionHint(_ message: String) {
         interactionHintTask?.cancel()
         interactionHint = message
@@ -1229,6 +1381,7 @@ final class RemoteViewModel: ObservableObject {
         modeTask?.cancel()
         batteryTask?.cancel()
         levelTask?.cancel()
+        exposureMeterTask?.cancel()
         effectiveISOTask?.cancel()
         autoISOCommandTask?.cancel()
         for task in pendingSets.values { task.cancel() }
@@ -1252,6 +1405,7 @@ final class RemoteViewModel: ObservableObject {
         usageMeter.stop()
         transportLossNotified = true
         stopRequested = true
+        dismissCameraTool()
         modeTask?.cancel()
         frameImage = nil
         frameData = nil

@@ -1,0 +1,5908 @@
+{
+  "source": "app/src/main/java/com/ztransfer/ui/theme/SkinTexture.kt",
+  "sourceSHA256": "cbd1d6e03fe6cbf292967f3bcc0468c99e7adac35baa9f6044acc54a0cc9b9b6",
+  "compiler": "Kotlin 1.9.20, JVM target 17",
+  "scope": "Unpremultiplied ARGB pixel equations; excludes Bitmap/Shader/GPU rendering",
+  "tileSize": 256,
+  "digestEncoding": "SHA-256 of all ARGB UInt32 pixels in row-major big-endian order",
+  "seedProbes": [
+    {
+      "input": 0,
+      "mixed": 0,
+      "titaniumVariant": 0,
+      "woodVariant": 0,
+      "cameraVariant": 0
+    },
+    {
+      "input": 1,
+      "mixed": 1753845952,
+      "titaniumVariant": 4,
+      "woodVariant": 16,
+      "cameraVariant": 0
+    },
+    {
+      "input": -1,
+      "mixed": 1734902346,
+      "titaniumVariant": 6,
+      "woodVariant": 18,
+      "cameraVariant": 2
+    },
+    {
+      "input": -2147483648,
+      "mixed": -867483356,
+      "titaniumVariant": 4,
+      "woodVariant": 4,
+      "cameraVariant": 0
+    },
+    {
+      "input": 2147483647,
+      "mixed": -1926627400,
+      "titaniumVariant": 8,
+      "woodVariant": 8,
+      "cameraVariant": 0
+    },
+    {
+      "input": 17,
+      "mixed": 1285909221,
+      "titaniumVariant": 9,
+      "woodVariant": 21,
+      "cameraVariant": 1
+    },
+    {
+      "input": -913,
+      "mixed": -1667942555,
+      "titaniumVariant": 1,
+      "woodVariant": 13,
+      "cameraVariant": 1
+    },
+    {
+      "input": 1597463007,
+      "mixed": 1543408090,
+      "titaniumVariant": 10,
+      "woodVariant": 10,
+      "cameraVariant": 2
+    }
+  ],
+  "tiles": [
+    {
+      "skinOrdinal": 1,
+      "dark": false,
+      "variant": 0,
+      "seed": -616592223,
+      "sha256": "370dd38e09c3688b0f36f96bfa73a311298ca35c0215717bab9475447a32bcab",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "0769747b"
+        },
+        {
+          "index": 1,
+          "argb": "0369747b"
+        },
+        {
+          "index": 127,
+          "argb": "00ffffff"
+        },
+        {
+          "index": 255,
+          "argb": "0669747b"
+        },
+        {
+          "index": 256,
+          "argb": "0769747b"
+        },
+        {
+          "index": 257,
+          "argb": "0869747b"
+        },
+        {
+          "index": 4095,
+          "argb": "0069747b"
+        },
+        {
+          "index": 8192,
+          "argb": "07ffffff"
+        },
+        {
+          "index": 16384,
+          "argb": "0affffff"
+        },
+        {
+          "index": 32767,
+          "argb": "0869747b"
+        },
+        {
+          "index": 32768,
+          "argb": "0269747b"
+        },
+        {
+          "index": 49151,
+          "argb": "0269747b"
+        },
+        {
+          "index": 65024,
+          "argb": "04ffffff"
+        },
+        {
+          "index": 65279,
+          "argb": "0169747b"
+        },
+        {
+          "index": 65534,
+          "argb": "0269747b"
+        },
+        {
+          "index": 65535,
+          "argb": "0369747b"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 1,
+      "dark": false,
+      "variant": 1,
+      "seed": 254386050,
+      "sha256": "7deaf38f946974d39f95eeca547f84b4a524c3c1b9352247304ac3e57451454a",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "0469747b"
+        },
+        {
+          "index": 1,
+          "argb": "02ffffff"
+        },
+        {
+          "index": 127,
+          "argb": "0369747b"
+        },
+        {
+          "index": 255,
+          "argb": "02ffffff"
+        },
+        {
+          "index": 256,
+          "argb": "01ffffff"
+        },
+        {
+          "index": 257,
+          "argb": "04ffffff"
+        },
+        {
+          "index": 4095,
+          "argb": "08ffffff"
+        },
+        {
+          "index": 8192,
+          "argb": "0269747b"
+        },
+        {
+          "index": 16384,
+          "argb": "0469747b"
+        },
+        {
+          "index": 32767,
+          "argb": "03ffffff"
+        },
+        {
+          "index": 32768,
+          "argb": "01ffffff"
+        },
+        {
+          "index": 49151,
+          "argb": "0a69747b"
+        },
+        {
+          "index": 65024,
+          "argb": "0269747b"
+        },
+        {
+          "index": 65279,
+          "argb": "0269747b"
+        },
+        {
+          "index": 65534,
+          "argb": "0569747b"
+        },
+        {
+          "index": 65535,
+          "argb": "0269747b"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 1,
+      "dark": false,
+      "variant": 2,
+      "seed": 1629846052,
+      "sha256": "edc439aca54824a79ad70b4f35295ff0f3df0bd7224ebb4ee22938378d26471b",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "0169747b"
+        },
+        {
+          "index": 1,
+          "argb": "01ffffff"
+        },
+        {
+          "index": 127,
+          "argb": "04ffffff"
+        },
+        {
+          "index": 255,
+          "argb": "0369747b"
+        },
+        {
+          "index": 256,
+          "argb": "00ffffff"
+        },
+        {
+          "index": 257,
+          "argb": "01ffffff"
+        },
+        {
+          "index": 4095,
+          "argb": "02ffffff"
+        },
+        {
+          "index": 8192,
+          "argb": "05ffffff"
+        },
+        {
+          "index": 16384,
+          "argb": "0469747b"
+        },
+        {
+          "index": 32767,
+          "argb": "0669747b"
+        },
+        {
+          "index": 32768,
+          "argb": "0669747b"
+        },
+        {
+          "index": 49151,
+          "argb": "0569747b"
+        },
+        {
+          "index": 65024,
+          "argb": "0369747b"
+        },
+        {
+          "index": 65279,
+          "argb": "0469747b"
+        },
+        {
+          "index": 65534,
+          "argb": "0269747b"
+        },
+        {
+          "index": 65535,
+          "argb": "00ffffff"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 1,
+      "dark": false,
+      "variant": 3,
+      "seed": -603999477,
+      "sha256": "c10766f3c8c1dae869eb0aef886f586ae91be275ca77f6ed0eb2f16ee3c45e33",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "00ffffff"
+        },
+        {
+          "index": 1,
+          "argb": "02ffffff"
+        },
+        {
+          "index": 127,
+          "argb": "0069747b"
+        },
+        {
+          "index": 255,
+          "argb": "03ffffff"
+        },
+        {
+          "index": 256,
+          "argb": "04ffffff"
+        },
+        {
+          "index": 257,
+          "argb": "03ffffff"
+        },
+        {
+          "index": 4095,
+          "argb": "0269747b"
+        },
+        {
+          "index": 8192,
+          "argb": "0a69747b"
+        },
+        {
+          "index": 16384,
+          "argb": "08ffffff"
+        },
+        {
+          "index": 32767,
+          "argb": "0469747b"
+        },
+        {
+          "index": 32768,
+          "argb": "0769747b"
+        },
+        {
+          "index": 49151,
+          "argb": "0269747b"
+        },
+        {
+          "index": 65024,
+          "argb": "0b69747b"
+        },
+        {
+          "index": 65279,
+          "argb": "0769747b"
+        },
+        {
+          "index": 65534,
+          "argb": "0769747b"
+        },
+        {
+          "index": 65535,
+          "argb": "0769747b"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 1,
+      "dark": false,
+      "variant": 4,
+      "seed": 1241839220,
+      "sha256": "b822e4addaad492d819db99de970748fd52a00c02602f4b6b87a88b54e1e43a8",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "01ffffff"
+        },
+        {
+          "index": 1,
+          "argb": "01ffffff"
+        },
+        {
+          "index": 127,
+          "argb": "0369747b"
+        },
+        {
+          "index": 255,
+          "argb": "01ffffff"
+        },
+        {
+          "index": 256,
+          "argb": "0169747b"
+        },
+        {
+          "index": 257,
+          "argb": "02ffffff"
+        },
+        {
+          "index": 4095,
+          "argb": "04ffffff"
+        },
+        {
+          "index": 8192,
+          "argb": "07ffffff"
+        },
+        {
+          "index": 16384,
+          "argb": "04ffffff"
+        },
+        {
+          "index": 32767,
+          "argb": "0b69747b"
+        },
+        {
+          "index": 32768,
+          "argb": "0b69747b"
+        },
+        {
+          "index": 49151,
+          "argb": "0569747b"
+        },
+        {
+          "index": 65024,
+          "argb": "0169747b"
+        },
+        {
+          "index": 65279,
+          "argb": "0769747b"
+        },
+        {
+          "index": 65534,
+          "argb": "00ffffff"
+        },
+        {
+          "index": 65535,
+          "argb": "0369747b"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 1,
+      "dark": false,
+      "variant": 5,
+      "seed": 1481181188,
+      "sha256": "2c9db6a148429867557a0e60e89e29b9179be733742778e89dd06ade97bdf9d7",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "01ffffff"
+        },
+        {
+          "index": 1,
+          "argb": "0069747b"
+        },
+        {
+          "index": 127,
+          "argb": "05ffffff"
+        },
+        {
+          "index": 255,
+          "argb": "02ffffff"
+        },
+        {
+          "index": 256,
+          "argb": "01ffffff"
+        },
+        {
+          "index": 257,
+          "argb": "03ffffff"
+        },
+        {
+          "index": 4095,
+          "argb": "04ffffff"
+        },
+        {
+          "index": 8192,
+          "argb": "03ffffff"
+        },
+        {
+          "index": 16384,
+          "argb": "01ffffff"
+        },
+        {
+          "index": 32767,
+          "argb": "0369747b"
+        },
+        {
+          "index": 32768,
+          "argb": "0269747b"
+        },
+        {
+          "index": 49151,
+          "argb": "00ffffff"
+        },
+        {
+          "index": 65024,
+          "argb": "0269747b"
+        },
+        {
+          "index": 65279,
+          "argb": "0469747b"
+        },
+        {
+          "index": 65534,
+          "argb": "0069747b"
+        },
+        {
+          "index": 65535,
+          "argb": "0369747b"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 1,
+      "dark": false,
+      "variant": 6,
+      "seed": 742973127,
+      "sha256": "0ceb131f13ff20b04cda6d9baadc5afd2e9770e5a0e0dceb475f2faada821ec1",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "03ffffff"
+        },
+        {
+          "index": 1,
+          "argb": "02ffffff"
+        },
+        {
+          "index": 127,
+          "argb": "0169747b"
+        },
+        {
+          "index": 255,
+          "argb": "01ffffff"
+        },
+        {
+          "index": 256,
+          "argb": "04ffffff"
+        },
+        {
+          "index": 257,
+          "argb": "03ffffff"
+        },
+        {
+          "index": 4095,
+          "argb": "0569747b"
+        },
+        {
+          "index": 8192,
+          "argb": "0169747b"
+        },
+        {
+          "index": 16384,
+          "argb": "04ffffff"
+        },
+        {
+          "index": 32767,
+          "argb": "0169747b"
+        },
+        {
+          "index": 32768,
+          "argb": "0069747b"
+        },
+        {
+          "index": 49151,
+          "argb": "00ffffff"
+        },
+        {
+          "index": 65024,
+          "argb": "0569747b"
+        },
+        {
+          "index": 65279,
+          "argb": "0869747b"
+        },
+        {
+          "index": 65534,
+          "argb": "0269747b"
+        },
+        {
+          "index": 65535,
+          "argb": "0469747b"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 1,
+      "dark": false,
+      "variant": 7,
+      "seed": -1036725129,
+      "sha256": "7052309bfb3f0983aad24a37a0ca291dc969f9eb65f5c92c71525baf5fbc923c",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "0969747b"
+        },
+        {
+          "index": 1,
+          "argb": "0869747b"
+        },
+        {
+          "index": 127,
+          "argb": "0269747b"
+        },
+        {
+          "index": 255,
+          "argb": "0c69747b"
+        },
+        {
+          "index": 256,
+          "argb": "0d69747b"
+        },
+        {
+          "index": 257,
+          "argb": "0769747b"
+        },
+        {
+          "index": 4095,
+          "argb": "00ffffff"
+        },
+        {
+          "index": 8192,
+          "argb": "03ffffff"
+        },
+        {
+          "index": 16384,
+          "argb": "00ffffff"
+        },
+        {
+          "index": 32767,
+          "argb": "01ffffff"
+        },
+        {
+          "index": 32768,
+          "argb": "08ffffff"
+        },
+        {
+          "index": 49151,
+          "argb": "07ffffff"
+        },
+        {
+          "index": 65024,
+          "argb": "01ffffff"
+        },
+        {
+          "index": 65279,
+          "argb": "00ffffff"
+        },
+        {
+          "index": 65534,
+          "argb": "01ffffff"
+        },
+        {
+          "index": 65535,
+          "argb": "0169747b"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 1,
+      "dark": false,
+      "variant": 8,
+      "seed": -329021647,
+      "sha256": "00a5ee1c74f24721dbbcef6b8f0f41d4899e6ec4f7eb0cf386a50190303d531a",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "01ffffff"
+        },
+        {
+          "index": 1,
+          "argb": "0369747b"
+        },
+        {
+          "index": 127,
+          "argb": "01ffffff"
+        },
+        {
+          "index": 255,
+          "argb": "02ffffff"
+        },
+        {
+          "index": 256,
+          "argb": "00ffffff"
+        },
+        {
+          "index": 257,
+          "argb": "03ffffff"
+        },
+        {
+          "index": 4095,
+          "argb": "0069747b"
+        },
+        {
+          "index": 8192,
+          "argb": "0469747b"
+        },
+        {
+          "index": 16384,
+          "argb": "0bffffff"
+        },
+        {
+          "index": 32767,
+          "argb": "0369747b"
+        },
+        {
+          "index": 32768,
+          "argb": "01ffffff"
+        },
+        {
+          "index": 49151,
+          "argb": "0169747b"
+        },
+        {
+          "index": 65024,
+          "argb": "04ffffff"
+        },
+        {
+          "index": 65279,
+          "argb": "05ffffff"
+        },
+        {
+          "index": 65534,
+          "argb": "02ffffff"
+        },
+        {
+          "index": 65535,
+          "argb": "0269747b"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 1,
+      "dark": false,
+      "variant": 9,
+      "seed": -447184796,
+      "sha256": "1968f7a4eb20176a1bd93819a49177a000d66e6076525f939fde37a99e51768c",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "0769747b"
+        },
+        {
+          "index": 1,
+          "argb": "0269747b"
+        },
+        {
+          "index": 127,
+          "argb": "03ffffff"
+        },
+        {
+          "index": 255,
+          "argb": "0269747b"
+        },
+        {
+          "index": 256,
+          "argb": "0369747b"
+        },
+        {
+          "index": 257,
+          "argb": "01ffffff"
+        },
+        {
+          "index": 4095,
+          "argb": "07ffffff"
+        },
+        {
+          "index": 8192,
+          "argb": "0369747b"
+        },
+        {
+          "index": 16384,
+          "argb": "07ffffff"
+        },
+        {
+          "index": 32767,
+          "argb": "05ffffff"
+        },
+        {
+          "index": 32768,
+          "argb": "03ffffff"
+        },
+        {
+          "index": 49151,
+          "argb": "0369747b"
+        },
+        {
+          "index": 65024,
+          "argb": "0269747b"
+        },
+        {
+          "index": 65279,
+          "argb": "0469747b"
+        },
+        {
+          "index": 65534,
+          "argb": "0669747b"
+        },
+        {
+          "index": 65535,
+          "argb": "0369747b"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 1,
+      "dark": false,
+      "variant": 10,
+      "seed": 883147211,
+      "sha256": "810f35463e1758c42767c1a21dd37a3cce75151ef7a84fef9a08b2217b572f4f",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "01ffffff"
+        },
+        {
+          "index": 1,
+          "argb": "0269747b"
+        },
+        {
+          "index": 127,
+          "argb": "04ffffff"
+        },
+        {
+          "index": 255,
+          "argb": "01ffffff"
+        },
+        {
+          "index": 256,
+          "argb": "0469747b"
+        },
+        {
+          "index": 257,
+          "argb": "02ffffff"
+        },
+        {
+          "index": 4095,
+          "argb": "05ffffff"
+        },
+        {
+          "index": 8192,
+          "argb": "01ffffff"
+        },
+        {
+          "index": 16384,
+          "argb": "0869747b"
+        },
+        {
+          "index": 32767,
+          "argb": "0869747b"
+        },
+        {
+          "index": 32768,
+          "argb": "0769747b"
+        },
+        {
+          "index": 49151,
+          "argb": "0569747b"
+        },
+        {
+          "index": 65024,
+          "argb": "06ffffff"
+        },
+        {
+          "index": 65279,
+          "argb": "07ffffff"
+        },
+        {
+          "index": 65534,
+          "argb": "02ffffff"
+        },
+        {
+          "index": 65535,
+          "argb": "0269747b"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 1,
+      "dark": false,
+      "variant": 11,
+      "seed": -2082054201,
+      "sha256": "77c2591341ab1da9b740fbd68eaf1a687e4aa74b83541b65137796dd3277f1ae",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "0269747b"
+        },
+        {
+          "index": 1,
+          "argb": "0069747b"
+        },
+        {
+          "index": 127,
+          "argb": "07ffffff"
+        },
+        {
+          "index": 255,
+          "argb": "0269747b"
+        },
+        {
+          "index": 256,
+          "argb": "0269747b"
+        },
+        {
+          "index": 257,
+          "argb": "0269747b"
+        },
+        {
+          "index": 4095,
+          "argb": "04ffffff"
+        },
+        {
+          "index": 8192,
+          "argb": "02ffffff"
+        },
+        {
+          "index": 16384,
+          "argb": "02ffffff"
+        },
+        {
+          "index": 32767,
+          "argb": "09ffffff"
+        },
+        {
+          "index": 32768,
+          "argb": "05ffffff"
+        },
+        {
+          "index": 49151,
+          "argb": "0469747b"
+        },
+        {
+          "index": 65024,
+          "argb": "06ffffff"
+        },
+        {
+          "index": 65279,
+          "argb": "02ffffff"
+        },
+        {
+          "index": 65534,
+          "argb": "0169747b"
+        },
+        {
+          "index": 65535,
+          "argb": "0169747b"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 1,
+      "dark": true,
+      "variant": 0,
+      "seed": -616592223,
+      "sha256": "9da3a0246bc6585c3058eda5127479a981bea8f05f651ea6892c25cb03363898",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "0a28333a"
+        },
+        {
+          "index": 1,
+          "argb": "0428333a"
+        },
+        {
+          "index": 127,
+          "argb": "01dde7ec"
+        },
+        {
+          "index": 255,
+          "argb": "0928333a"
+        },
+        {
+          "index": 256,
+          "argb": "0a28333a"
+        },
+        {
+          "index": 257,
+          "argb": "0c28333a"
+        },
+        {
+          "index": 4095,
+          "argb": "0128333a"
+        },
+        {
+          "index": 8192,
+          "argb": "0adde7ec"
+        },
+        {
+          "index": 16384,
+          "argb": "0fdde7ec"
+        },
+        {
+          "index": 32767,
+          "argb": "0b28333a"
+        },
+        {
+          "index": 32768,
+          "argb": "0328333a"
+        },
+        {
+          "index": 49151,
+          "argb": "0328333a"
+        },
+        {
+          "index": 65024,
+          "argb": "06dde7ec"
+        },
+        {
+          "index": 65279,
+          "argb": "0128333a"
+        },
+        {
+          "index": 65534,
+          "argb": "0228333a"
+        },
+        {
+          "index": 65535,
+          "argb": "0428333a"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 1,
+      "dark": true,
+      "variant": 1,
+      "seed": 254386050,
+      "sha256": "b6a53f06d275156ed3f2bee73b520393a56d292034b18d8976aa9aff9c7f8cdc",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "0628333a"
+        },
+        {
+          "index": 1,
+          "argb": "03dde7ec"
+        },
+        {
+          "index": 127,
+          "argb": "0428333a"
+        },
+        {
+          "index": 255,
+          "argb": "03dde7ec"
+        },
+        {
+          "index": 256,
+          "argb": "01dde7ec"
+        },
+        {
+          "index": 257,
+          "argb": "06dde7ec"
+        },
+        {
+          "index": 4095,
+          "argb": "0bdde7ec"
+        },
+        {
+          "index": 8192,
+          "argb": "0228333a"
+        },
+        {
+          "index": 16384,
+          "argb": "0628333a"
+        },
+        {
+          "index": 32767,
+          "argb": "05dde7ec"
+        },
+        {
+          "index": 32768,
+          "argb": "01dde7ec"
+        },
+        {
+          "index": 49151,
+          "argb": "0f28333a"
+        },
+        {
+          "index": 65024,
+          "argb": "0228333a"
+        },
+        {
+          "index": 65279,
+          "argb": "0328333a"
+        },
+        {
+          "index": 65534,
+          "argb": "0728333a"
+        },
+        {
+          "index": 65535,
+          "argb": "0328333a"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 1,
+      "dark": true,
+      "variant": 2,
+      "seed": 1629846052,
+      "sha256": "670c6e84d0e807367cec35a92319e625ee5357a7e0cc8b159967ddc632acf798",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "0228333a"
+        },
+        {
+          "index": 1,
+          "argb": "01dde7ec"
+        },
+        {
+          "index": 127,
+          "argb": "06dde7ec"
+        },
+        {
+          "index": 255,
+          "argb": "0428333a"
+        },
+        {
+          "index": 256,
+          "argb": "00dde7ec"
+        },
+        {
+          "index": 257,
+          "argb": "02dde7ec"
+        },
+        {
+          "index": 4095,
+          "argb": "03dde7ec"
+        },
+        {
+          "index": 8192,
+          "argb": "08dde7ec"
+        },
+        {
+          "index": 16384,
+          "argb": "0628333a"
+        },
+        {
+          "index": 32767,
+          "argb": "0928333a"
+        },
+        {
+          "index": 32768,
+          "argb": "0828333a"
+        },
+        {
+          "index": 49151,
+          "argb": "0828333a"
+        },
+        {
+          "index": 65024,
+          "argb": "0528333a"
+        },
+        {
+          "index": 65279,
+          "argb": "0628333a"
+        },
+        {
+          "index": 65534,
+          "argb": "0328333a"
+        },
+        {
+          "index": 65535,
+          "argb": "00dde7ec"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 1,
+      "dark": true,
+      "variant": 3,
+      "seed": -603999477,
+      "sha256": "d589d185e0ef2473c264e8c544ede4e67b4ba13c3d64795a34079bd625fbbe6d",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "00dde7ec"
+        },
+        {
+          "index": 1,
+          "argb": "03dde7ec"
+        },
+        {
+          "index": 127,
+          "argb": "0028333a"
+        },
+        {
+          "index": 255,
+          "argb": "04dde7ec"
+        },
+        {
+          "index": 256,
+          "argb": "05dde7ec"
+        },
+        {
+          "index": 257,
+          "argb": "05dde7ec"
+        },
+        {
+          "index": 4095,
+          "argb": "0328333a"
+        },
+        {
+          "index": 8192,
+          "argb": "0f28333a"
+        },
+        {
+          "index": 16384,
+          "argb": "0bdde7ec"
+        },
+        {
+          "index": 32767,
+          "argb": "0628333a"
+        },
+        {
+          "index": 32768,
+          "argb": "0b28333a"
+        },
+        {
+          "index": 49151,
+          "argb": "0328333a"
+        },
+        {
+          "index": 65024,
+          "argb": "1028333a"
+        },
+        {
+          "index": 65279,
+          "argb": "0b28333a"
+        },
+        {
+          "index": 65534,
+          "argb": "0a28333a"
+        },
+        {
+          "index": 65535,
+          "argb": "0928333a"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 1,
+      "dark": true,
+      "variant": 4,
+      "seed": 1241839220,
+      "sha256": "b9088326232895fbb34697e979e5b25911c0717111259b9bc6a879c15a94915d",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "01dde7ec"
+        },
+        {
+          "index": 1,
+          "argb": "01dde7ec"
+        },
+        {
+          "index": 127,
+          "argb": "0528333a"
+        },
+        {
+          "index": 255,
+          "argb": "02dde7ec"
+        },
+        {
+          "index": 256,
+          "argb": "0128333a"
+        },
+        {
+          "index": 257,
+          "argb": "03dde7ec"
+        },
+        {
+          "index": 4095,
+          "argb": "05dde7ec"
+        },
+        {
+          "index": 8192,
+          "argb": "0adde7ec"
+        },
+        {
+          "index": 16384,
+          "argb": "06dde7ec"
+        },
+        {
+          "index": 32767,
+          "argb": "0f28333a"
+        },
+        {
+          "index": 32768,
+          "argb": "1028333a"
+        },
+        {
+          "index": 49151,
+          "argb": "0728333a"
+        },
+        {
+          "index": 65024,
+          "argb": "0128333a"
+        },
+        {
+          "index": 65279,
+          "argb": "0b28333a"
+        },
+        {
+          "index": 65534,
+          "argb": "00dde7ec"
+        },
+        {
+          "index": 65535,
+          "argb": "0528333a"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 1,
+      "dark": true,
+      "variant": 5,
+      "seed": 1481181188,
+      "sha256": "f16b0e69ff88ab4718dd39f8563ab673b4152eccbdf36d527484f3bd41a8c181",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "02dde7ec"
+        },
+        {
+          "index": 1,
+          "argb": "0028333a"
+        },
+        {
+          "index": 127,
+          "argb": "07dde7ec"
+        },
+        {
+          "index": 255,
+          "argb": "03dde7ec"
+        },
+        {
+          "index": 256,
+          "argb": "02dde7ec"
+        },
+        {
+          "index": 257,
+          "argb": "05dde7ec"
+        },
+        {
+          "index": 4095,
+          "argb": "06dde7ec"
+        },
+        {
+          "index": 8192,
+          "argb": "05dde7ec"
+        },
+        {
+          "index": 16384,
+          "argb": "02dde7ec"
+        },
+        {
+          "index": 32767,
+          "argb": "0528333a"
+        },
+        {
+          "index": 32768,
+          "argb": "0328333a"
+        },
+        {
+          "index": 49151,
+          "argb": "00dde7ec"
+        },
+        {
+          "index": 65024,
+          "argb": "0328333a"
+        },
+        {
+          "index": 65279,
+          "argb": "0528333a"
+        },
+        {
+          "index": 65534,
+          "argb": "0128333a"
+        },
+        {
+          "index": 65535,
+          "argb": "0528333a"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 1,
+      "dark": true,
+      "variant": 6,
+      "seed": 742973127,
+      "sha256": "b4a57119a434fff363f8e6351912382031ea6c5cf118989aa3720d6f35e1ae93",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "04dde7ec"
+        },
+        {
+          "index": 1,
+          "argb": "03dde7ec"
+        },
+        {
+          "index": 127,
+          "argb": "0128333a"
+        },
+        {
+          "index": 255,
+          "argb": "02dde7ec"
+        },
+        {
+          "index": 256,
+          "argb": "06dde7ec"
+        },
+        {
+          "index": 257,
+          "argb": "05dde7ec"
+        },
+        {
+          "index": 4095,
+          "argb": "0728333a"
+        },
+        {
+          "index": 8192,
+          "argb": "0128333a"
+        },
+        {
+          "index": 16384,
+          "argb": "06dde7ec"
+        },
+        {
+          "index": 32767,
+          "argb": "0228333a"
+        },
+        {
+          "index": 32768,
+          "argb": "0128333a"
+        },
+        {
+          "index": 49151,
+          "argb": "00dde7ec"
+        },
+        {
+          "index": 65024,
+          "argb": "0828333a"
+        },
+        {
+          "index": 65279,
+          "argb": "0c28333a"
+        },
+        {
+          "index": 65534,
+          "argb": "0228333a"
+        },
+        {
+          "index": 65535,
+          "argb": "0628333a"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 1,
+      "dark": true,
+      "variant": 7,
+      "seed": -1036725129,
+      "sha256": "c1cd7fb2b204a1f8f3b56e75215b13f57eaec417ee52a3015adc2e8d3532617a",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "0d28333a"
+        },
+        {
+          "index": 1,
+          "argb": "0c28333a"
+        },
+        {
+          "index": 127,
+          "argb": "0328333a"
+        },
+        {
+          "index": 255,
+          "argb": "1128333a"
+        },
+        {
+          "index": 256,
+          "argb": "1328333a"
+        },
+        {
+          "index": 257,
+          "argb": "0a28333a"
+        },
+        {
+          "index": 4095,
+          "argb": "00dde7ec"
+        },
+        {
+          "index": 8192,
+          "argb": "05dde7ec"
+        },
+        {
+          "index": 16384,
+          "argb": "01dde7ec"
+        },
+        {
+          "index": 32767,
+          "argb": "02dde7ec"
+        },
+        {
+          "index": 32768,
+          "argb": "0bdde7ec"
+        },
+        {
+          "index": 49151,
+          "argb": "0adde7ec"
+        },
+        {
+          "index": 65024,
+          "argb": "02dde7ec"
+        },
+        {
+          "index": 65279,
+          "argb": "00dde7ec"
+        },
+        {
+          "index": 65534,
+          "argb": "01dde7ec"
+        },
+        {
+          "index": 65535,
+          "argb": "0128333a"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 1,
+      "dark": true,
+      "variant": 8,
+      "seed": -329021647,
+      "sha256": "f516a946c05a273d8acd256acfbe1ca87c127707828efc2744169c052d28b218",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "02dde7ec"
+        },
+        {
+          "index": 1,
+          "argb": "0428333a"
+        },
+        {
+          "index": 127,
+          "argb": "01dde7ec"
+        },
+        {
+          "index": 255,
+          "argb": "03dde7ec"
+        },
+        {
+          "index": 256,
+          "argb": "01dde7ec"
+        },
+        {
+          "index": 257,
+          "argb": "04dde7ec"
+        },
+        {
+          "index": 4095,
+          "argb": "0028333a"
+        },
+        {
+          "index": 8192,
+          "argb": "0528333a"
+        },
+        {
+          "index": 16384,
+          "argb": "10dde7ec"
+        },
+        {
+          "index": 32767,
+          "argb": "0428333a"
+        },
+        {
+          "index": 32768,
+          "argb": "01dde7ec"
+        },
+        {
+          "index": 49151,
+          "argb": "0128333a"
+        },
+        {
+          "index": 65024,
+          "argb": "06dde7ec"
+        },
+        {
+          "index": 65279,
+          "argb": "08dde7ec"
+        },
+        {
+          "index": 65534,
+          "argb": "02dde7ec"
+        },
+        {
+          "index": 65535,
+          "argb": "0228333a"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 1,
+      "dark": true,
+      "variant": 9,
+      "seed": -447184796,
+      "sha256": "e12dfa1bb9aa0b2e2fb77078b89c27102addfdb0226e7933772a167c5b44fd77",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "0a28333a"
+        },
+        {
+          "index": 1,
+          "argb": "0328333a"
+        },
+        {
+          "index": 127,
+          "argb": "04dde7ec"
+        },
+        {
+          "index": 255,
+          "argb": "0228333a"
+        },
+        {
+          "index": 256,
+          "argb": "0428333a"
+        },
+        {
+          "index": 257,
+          "argb": "02dde7ec"
+        },
+        {
+          "index": 4095,
+          "argb": "0adde7ec"
+        },
+        {
+          "index": 8192,
+          "argb": "0528333a"
+        },
+        {
+          "index": 16384,
+          "argb": "09dde7ec"
+        },
+        {
+          "index": 32767,
+          "argb": "07dde7ec"
+        },
+        {
+          "index": 32768,
+          "argb": "04dde7ec"
+        },
+        {
+          "index": 49151,
+          "argb": "0428333a"
+        },
+        {
+          "index": 65024,
+          "argb": "0228333a"
+        },
+        {
+          "index": 65279,
+          "argb": "0628333a"
+        },
+        {
+          "index": 65534,
+          "argb": "0828333a"
+        },
+        {
+          "index": 65535,
+          "argb": "0528333a"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 1,
+      "dark": true,
+      "variant": 10,
+      "seed": 883147211,
+      "sha256": "99f82ced665f7387f111eba852435b113a2286c493297ba941c2cdaa92cff3aa",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "01dde7ec"
+        },
+        {
+          "index": 1,
+          "argb": "0328333a"
+        },
+        {
+          "index": 127,
+          "argb": "05dde7ec"
+        },
+        {
+          "index": 255,
+          "argb": "02dde7ec"
+        },
+        {
+          "index": 256,
+          "argb": "0528333a"
+        },
+        {
+          "index": 257,
+          "argb": "02dde7ec"
+        },
+        {
+          "index": 4095,
+          "argb": "07dde7ec"
+        },
+        {
+          "index": 8192,
+          "argb": "01dde7ec"
+        },
+        {
+          "index": 16384,
+          "argb": "0b28333a"
+        },
+        {
+          "index": 32767,
+          "argb": "0c28333a"
+        },
+        {
+          "index": 32768,
+          "argb": "0a28333a"
+        },
+        {
+          "index": 49151,
+          "argb": "0728333a"
+        },
+        {
+          "index": 65024,
+          "argb": "09dde7ec"
+        },
+        {
+          "index": 65279,
+          "argb": "0bdde7ec"
+        },
+        {
+          "index": 65534,
+          "argb": "03dde7ec"
+        },
+        {
+          "index": 65535,
+          "argb": "0328333a"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 1,
+      "dark": true,
+      "variant": 11,
+      "seed": -2082054201,
+      "sha256": "81c125826ddb468d4279e5d2853e71c28d4993072166036a0eb359b42d147a2b",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "0228333a"
+        },
+        {
+          "index": 1,
+          "argb": "0028333a"
+        },
+        {
+          "index": 127,
+          "argb": "0adde7ec"
+        },
+        {
+          "index": 255,
+          "argb": "0328333a"
+        },
+        {
+          "index": 256,
+          "argb": "0228333a"
+        },
+        {
+          "index": 257,
+          "argb": "0428333a"
+        },
+        {
+          "index": 4095,
+          "argb": "06dde7ec"
+        },
+        {
+          "index": 8192,
+          "argb": "03dde7ec"
+        },
+        {
+          "index": 16384,
+          "argb": "03dde7ec"
+        },
+        {
+          "index": 32767,
+          "argb": "0ddde7ec"
+        },
+        {
+          "index": 32768,
+          "argb": "08dde7ec"
+        },
+        {
+          "index": 49151,
+          "argb": "0528333a"
+        },
+        {
+          "index": 65024,
+          "argb": "08dde7ec"
+        },
+        {
+          "index": 65279,
+          "argb": "03dde7ec"
+        },
+        {
+          "index": 65534,
+          "argb": "0128333a"
+        },
+        {
+          "index": 65535,
+          "argb": "0128333a"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 2,
+      "dark": false,
+      "variant": 0,
+      "seed": -1516851397,
+      "sha256": "5fa706391d90b022c7ce5b65714d01280909a12a86301e36c5d59dda99830143",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "095c3013"
+        },
+        {
+          "index": 1,
+          "argb": "095c3013"
+        },
+        {
+          "index": 127,
+          "argb": "055c3013"
+        },
+        {
+          "index": 255,
+          "argb": "095c3013"
+        },
+        {
+          "index": 256,
+          "argb": "075c3013"
+        },
+        {
+          "index": 257,
+          "argb": "075c3013"
+        },
+        {
+          "index": 4095,
+          "argb": "06f6d59a"
+        },
+        {
+          "index": 8192,
+          "argb": "00f6d59a"
+        },
+        {
+          "index": 16384,
+          "argb": "0cf6d59a"
+        },
+        {
+          "index": 32767,
+          "argb": "1d5c3013"
+        },
+        {
+          "index": 32768,
+          "argb": "1f5c3013"
+        },
+        {
+          "index": 49151,
+          "argb": "0df6d59a"
+        },
+        {
+          "index": 65024,
+          "argb": "095c3013"
+        },
+        {
+          "index": 65279,
+          "argb": "095c3013"
+        },
+        {
+          "index": 65534,
+          "argb": "095c3013"
+        },
+        {
+          "index": 65535,
+          "argb": "095c3013"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 2,
+      "dark": false,
+      "variant": 1,
+      "seed": -1498350823,
+      "sha256": "4147968c4b799acd06c15a6aa9b6d2fb8e5f1a22aaf4177bf6251d2624f145b9",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "065c3013"
+        },
+        {
+          "index": 1,
+          "argb": "065c3013"
+        },
+        {
+          "index": 127,
+          "argb": "015c3013"
+        },
+        {
+          "index": 255,
+          "argb": "065c3013"
+        },
+        {
+          "index": 256,
+          "argb": "085c3013"
+        },
+        {
+          "index": 257,
+          "argb": "085c3013"
+        },
+        {
+          "index": 4095,
+          "argb": "0ef6d59a"
+        },
+        {
+          "index": 8192,
+          "argb": "01f6d59a"
+        },
+        {
+          "index": 16384,
+          "argb": "04f6d59a"
+        },
+        {
+          "index": 32767,
+          "argb": "11f6d59a"
+        },
+        {
+          "index": 32768,
+          "argb": "10f6d59a"
+        },
+        {
+          "index": 49151,
+          "argb": "01f6d59a"
+        },
+        {
+          "index": 65024,
+          "argb": "055c3013"
+        },
+        {
+          "index": 65279,
+          "argb": "055c3013"
+        },
+        {
+          "index": 65534,
+          "argb": "055c3013"
+        },
+        {
+          "index": 65535,
+          "argb": "055c3013"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 2,
+      "dark": false,
+      "variant": 2,
+      "seed": 999436490,
+      "sha256": "816c720d6d62efe305e3c87f3c43f62fe35f142396dbb3132f4a02e40842c50e",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "285c3013"
+        },
+        {
+          "index": 1,
+          "argb": "275c3013"
+        },
+        {
+          "index": 127,
+          "argb": "00f6d59a"
+        },
+        {
+          "index": 255,
+          "argb": "285c3013"
+        },
+        {
+          "index": 256,
+          "argb": "205c3013"
+        },
+        {
+          "index": 257,
+          "argb": "1f5c3013"
+        },
+        {
+          "index": 4095,
+          "argb": "035c3013"
+        },
+        {
+          "index": 8192,
+          "argb": "0b5c3013"
+        },
+        {
+          "index": 16384,
+          "argb": "04f6d59a"
+        },
+        {
+          "index": 32767,
+          "argb": "01f6d59a"
+        },
+        {
+          "index": 32768,
+          "argb": "01f6d59a"
+        },
+        {
+          "index": 49151,
+          "argb": "0a5c3013"
+        },
+        {
+          "index": 65024,
+          "argb": "2e5c3013"
+        },
+        {
+          "index": 65279,
+          "argb": "2e5c3013"
+        },
+        {
+          "index": 65534,
+          "argb": "2e5c3013"
+        },
+        {
+          "index": 65535,
+          "argb": "2d5c3013"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 2,
+      "dark": false,
+      "variant": 3,
+      "seed": -1930703763,
+      "sha256": "354c7ded68dabf2943390bb53d870c5a58836bfa525214d2a22e163606522f7c",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "035c3013"
+        },
+        {
+          "index": 1,
+          "argb": "045c3013"
+        },
+        {
+          "index": 127,
+          "argb": "0cf6d59a"
+        },
+        {
+          "index": 255,
+          "argb": "035c3013"
+        },
+        {
+          "index": 256,
+          "argb": "065c3013"
+        },
+        {
+          "index": 257,
+          "argb": "065c3013"
+        },
+        {
+          "index": 4095,
+          "argb": "1f5c3013"
+        },
+        {
+          "index": 8192,
+          "argb": "02f6d59a"
+        },
+        {
+          "index": 16384,
+          "argb": "06f6d59a"
+        },
+        {
+          "index": 32767,
+          "argb": "0e5c3013"
+        },
+        {
+          "index": 32768,
+          "argb": "145c3013"
+        },
+        {
+          "index": 49151,
+          "argb": "08f6d59a"
+        },
+        {
+          "index": 65024,
+          "argb": "015c3013"
+        },
+        {
+          "index": 65279,
+          "argb": "015c3013"
+        },
+        {
+          "index": 65534,
+          "argb": "025c3013"
+        },
+        {
+          "index": 65535,
+          "argb": "025c3013"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 2,
+      "dark": false,
+      "variant": 4,
+      "seed": 1048473077,
+      "sha256": "f56929343f623b9472610e9ed0b8089727855d0cbec6d98f793bf135362835ea",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "045c3013"
+        },
+        {
+          "index": 1,
+          "argb": "055c3013"
+        },
+        {
+          "index": 127,
+          "argb": "02f6d59a"
+        },
+        {
+          "index": 255,
+          "argb": "045c3013"
+        },
+        {
+          "index": 256,
+          "argb": "055c3013"
+        },
+        {
+          "index": 257,
+          "argb": "065c3013"
+        },
+        {
+          "index": 4095,
+          "argb": "0c5c3013"
+        },
+        {
+          "index": 8192,
+          "argb": "02f6d59a"
+        },
+        {
+          "index": 16384,
+          "argb": "035c3013"
+        },
+        {
+          "index": 32767,
+          "argb": "035c3013"
+        },
+        {
+          "index": 32768,
+          "argb": "025c3013"
+        },
+        {
+          "index": 49151,
+          "argb": "1c5c3013"
+        },
+        {
+          "index": 65024,
+          "argb": "00f6d59a"
+        },
+        {
+          "index": 65279,
+          "argb": "01f6d59a"
+        },
+        {
+          "index": 65534,
+          "argb": "015c3013"
+        },
+        {
+          "index": 65535,
+          "argb": "025c3013"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 2,
+      "dark": false,
+      "variant": 5,
+      "seed": 438272173,
+      "sha256": "e2c3e2c2fc0320c608336b921caf14ee338787d1ed0b29f437dc352649e6c0b0",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "01f6d59a"
+        },
+        {
+          "index": 1,
+          "argb": "01f6d59a"
+        },
+        {
+          "index": 127,
+          "argb": "0a5c3013"
+        },
+        {
+          "index": 255,
+          "argb": "01f6d59a"
+        },
+        {
+          "index": 256,
+          "argb": "015c3013"
+        },
+        {
+          "index": 257,
+          "argb": "015c3013"
+        },
+        {
+          "index": 4095,
+          "argb": "095c3013"
+        },
+        {
+          "index": 8192,
+          "argb": "235c3013"
+        },
+        {
+          "index": 16384,
+          "argb": "0a5c3013"
+        },
+        {
+          "index": 32767,
+          "argb": "125c3013"
+        },
+        {
+          "index": 32768,
+          "argb": "125c3013"
+        },
+        {
+          "index": 49151,
+          "argb": "02f6d59a"
+        },
+        {
+          "index": 65024,
+          "argb": "05f6d59a"
+        },
+        {
+          "index": 65279,
+          "argb": "05f6d59a"
+        },
+        {
+          "index": 65534,
+          "argb": "03f6d59a"
+        },
+        {
+          "index": 65535,
+          "argb": "03f6d59a"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 2,
+      "dark": false,
+      "variant": 6,
+      "seed": 2143523017,
+      "sha256": "e15367464154af904419614b95923df43c195b39e3cffb3c24be434fc2775d0c",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "0af6d59a"
+        },
+        {
+          "index": 1,
+          "argb": "0bf6d59a"
+        },
+        {
+          "index": 127,
+          "argb": "005c3013"
+        },
+        {
+          "index": 255,
+          "argb": "0af6d59a"
+        },
+        {
+          "index": 256,
+          "argb": "0bf6d59a"
+        },
+        {
+          "index": 257,
+          "argb": "0bf6d59a"
+        },
+        {
+          "index": 4095,
+          "argb": "07f6d59a"
+        },
+        {
+          "index": 8192,
+          "argb": "025c3013"
+        },
+        {
+          "index": 16384,
+          "argb": "0cf6d59a"
+        },
+        {
+          "index": 32767,
+          "argb": "0af6d59a"
+        },
+        {
+          "index": 32768,
+          "argb": "0af6d59a"
+        },
+        {
+          "index": 49151,
+          "argb": "055c3013"
+        },
+        {
+          "index": 65024,
+          "argb": "05f6d59a"
+        },
+        {
+          "index": 65279,
+          "argb": "05f6d59a"
+        },
+        {
+          "index": 65534,
+          "argb": "07f6d59a"
+        },
+        {
+          "index": 65535,
+          "argb": "08f6d59a"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 2,
+      "dark": false,
+      "variant": 7,
+      "seed": -2050031609,
+      "sha256": "1326dbb7df2fb86a0fc3a3897c4f35df0e27ebd7fa683fd1a60a48a0a0be9beb",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "03f6d59a"
+        },
+        {
+          "index": 1,
+          "argb": "03f6d59a"
+        },
+        {
+          "index": 127,
+          "argb": "03f6d59a"
+        },
+        {
+          "index": 255,
+          "argb": "03f6d59a"
+        },
+        {
+          "index": 256,
+          "argb": "03f6d59a"
+        },
+        {
+          "index": 257,
+          "argb": "03f6d59a"
+        },
+        {
+          "index": 4095,
+          "argb": "015c3013"
+        },
+        {
+          "index": 8192,
+          "argb": "095c3013"
+        },
+        {
+          "index": 16384,
+          "argb": "09f6d59a"
+        },
+        {
+          "index": 32767,
+          "argb": "0af6d59a"
+        },
+        {
+          "index": 32768,
+          "argb": "0af6d59a"
+        },
+        {
+          "index": 49151,
+          "argb": "06f6d59a"
+        },
+        {
+          "index": 65024,
+          "argb": "04f6d59a"
+        },
+        {
+          "index": 65279,
+          "argb": "04f6d59a"
+        },
+        {
+          "index": 65534,
+          "argb": "02f6d59a"
+        },
+        {
+          "index": 65535,
+          "argb": "02f6d59a"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 2,
+      "dark": false,
+      "variant": 8,
+      "seed": -455876669,
+      "sha256": "f1686f8c3a28a182cc09f7b4fe126025a67ab00625afbeb30565248e96e53b48",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "015c3013"
+        },
+        {
+          "index": 1,
+          "argb": "015c3013"
+        },
+        {
+          "index": 127,
+          "argb": "0ef6d59a"
+        },
+        {
+          "index": 255,
+          "argb": "015c3013"
+        },
+        {
+          "index": 256,
+          "argb": "015c3013"
+        },
+        {
+          "index": 257,
+          "argb": "015c3013"
+        },
+        {
+          "index": 4095,
+          "argb": "065c3013"
+        },
+        {
+          "index": 8192,
+          "argb": "0ef6d59a"
+        },
+        {
+          "index": 16384,
+          "argb": "0a5c3013"
+        },
+        {
+          "index": 32767,
+          "argb": "03f6d59a"
+        },
+        {
+          "index": 32768,
+          "argb": "03f6d59a"
+        },
+        {
+          "index": 49151,
+          "argb": "095c3013"
+        },
+        {
+          "index": 65024,
+          "argb": "01f6d59a"
+        },
+        {
+          "index": 65279,
+          "argb": "02f6d59a"
+        },
+        {
+          "index": 65534,
+          "argb": "00f6d59a"
+        },
+        {
+          "index": 65535,
+          "argb": "005c3013"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 2,
+      "dark": false,
+      "variant": 9,
+      "seed": 1815763599,
+      "sha256": "9722efe9c4a2d8bd25d1d0ed5293f7b6677dcf0cfd286110f60c4143f7b4f6fa",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "045c3013"
+        },
+        {
+          "index": 1,
+          "argb": "035c3013"
+        },
+        {
+          "index": 127,
+          "argb": "07f6d59a"
+        },
+        {
+          "index": 255,
+          "argb": "045c3013"
+        },
+        {
+          "index": 256,
+          "argb": "075c3013"
+        },
+        {
+          "index": 257,
+          "argb": "065c3013"
+        },
+        {
+          "index": 4095,
+          "argb": "0d5c3013"
+        },
+        {
+          "index": 8192,
+          "argb": "07f6d59a"
+        },
+        {
+          "index": 16384,
+          "argb": "2a5c3013"
+        },
+        {
+          "index": 32767,
+          "argb": "075c3013"
+        },
+        {
+          "index": 32768,
+          "argb": "095c3013"
+        },
+        {
+          "index": 49151,
+          "argb": "035c3013"
+        },
+        {
+          "index": 65024,
+          "argb": "01f6d59a"
+        },
+        {
+          "index": 65279,
+          "argb": "00f6d59a"
+        },
+        {
+          "index": 65534,
+          "argb": "025c3013"
+        },
+        {
+          "index": 65535,
+          "argb": "015c3013"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 2,
+      "dark": false,
+      "variant": 10,
+      "seed": -797466496,
+      "sha256": "a1abd02fa87c96352e70ed79fe3d5bfade0fc0f515261a44375f60b7cbbcc7f9",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "095c3013"
+        },
+        {
+          "index": 1,
+          "argb": "095c3013"
+        },
+        {
+          "index": 127,
+          "argb": "075c3013"
+        },
+        {
+          "index": 255,
+          "argb": "095c3013"
+        },
+        {
+          "index": 256,
+          "argb": "095c3013"
+        },
+        {
+          "index": 257,
+          "argb": "095c3013"
+        },
+        {
+          "index": 4095,
+          "argb": "0b5c3013"
+        },
+        {
+          "index": 8192,
+          "argb": "015c3013"
+        },
+        {
+          "index": 16384,
+          "argb": "1f5c3013"
+        },
+        {
+          "index": 32767,
+          "argb": "01f6d59a"
+        },
+        {
+          "index": 32768,
+          "argb": "01f6d59a"
+        },
+        {
+          "index": 49151,
+          "argb": "02f6d59a"
+        },
+        {
+          "index": 65024,
+          "argb": "0b5c3013"
+        },
+        {
+          "index": 65279,
+          "argb": "0b5c3013"
+        },
+        {
+          "index": 65534,
+          "argb": "0a5c3013"
+        },
+        {
+          "index": 65535,
+          "argb": "0a5c3013"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 2,
+      "dark": false,
+      "variant": 11,
+      "seed": 32161945,
+      "sha256": "7ac7c408be8874ed36f70224d3dacf96fe345ebaa8fb7a8ad62b22a26628fa32",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "06f6d59a"
+        },
+        {
+          "index": 1,
+          "argb": "06f6d59a"
+        },
+        {
+          "index": 127,
+          "argb": "225c3013"
+        },
+        {
+          "index": 255,
+          "argb": "07f6d59a"
+        },
+        {
+          "index": 256,
+          "argb": "06f6d59a"
+        },
+        {
+          "index": 257,
+          "argb": "07f6d59a"
+        },
+        {
+          "index": 4095,
+          "argb": "01f6d59a"
+        },
+        {
+          "index": 8192,
+          "argb": "075c3013"
+        },
+        {
+          "index": 16384,
+          "argb": "08f6d59a"
+        },
+        {
+          "index": 32767,
+          "argb": "0af6d59a"
+        },
+        {
+          "index": 32768,
+          "argb": "0bf6d59a"
+        },
+        {
+          "index": 49151,
+          "argb": "09f6d59a"
+        },
+        {
+          "index": 65024,
+          "argb": "0bf6d59a"
+        },
+        {
+          "index": 65279,
+          "argb": "0bf6d59a"
+        },
+        {
+          "index": 65534,
+          "argb": "0af6d59a"
+        },
+        {
+          "index": 65535,
+          "argb": "0af6d59a"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 2,
+      "dark": false,
+      "variant": 12,
+      "seed": 1588556417,
+      "sha256": "8479510fb93a991ed0fc2c729271710998ae3776274e816c0300941ffdfec9d0",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "0df6d59a"
+        },
+        {
+          "index": 1,
+          "argb": "0df6d59a"
+        },
+        {
+          "index": 127,
+          "argb": "055c3013"
+        },
+        {
+          "index": 255,
+          "argb": "0df6d59a"
+        },
+        {
+          "index": 256,
+          "argb": "0bf6d59a"
+        },
+        {
+          "index": 257,
+          "argb": "0bf6d59a"
+        },
+        {
+          "index": 4095,
+          "argb": "03f6d59a"
+        },
+        {
+          "index": 8192,
+          "argb": "1c5c3013"
+        },
+        {
+          "index": 16384,
+          "argb": "065c3013"
+        },
+        {
+          "index": 32767,
+          "argb": "015c3013"
+        },
+        {
+          "index": 32768,
+          "argb": "01f6d59a"
+        },
+        {
+          "index": 49151,
+          "argb": "06f6d59a"
+        },
+        {
+          "index": 65024,
+          "argb": "10f6d59a"
+        },
+        {
+          "index": 65279,
+          "argb": "10f6d59a"
+        },
+        {
+          "index": 65534,
+          "argb": "0ef6d59a"
+        },
+        {
+          "index": 65535,
+          "argb": "0ff6d59a"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 2,
+      "dark": false,
+      "variant": 13,
+      "seed": 972027780,
+      "sha256": "fdcb98997631536c2fa5f5b673867131e74c1adefd7518b6eeda8e81383d3d3d",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "115c3013"
+        },
+        {
+          "index": 1,
+          "argb": "115c3013"
+        },
+        {
+          "index": 127,
+          "argb": "095c3013"
+        },
+        {
+          "index": 255,
+          "argb": "115c3013"
+        },
+        {
+          "index": 256,
+          "argb": "125c3013"
+        },
+        {
+          "index": 257,
+          "argb": "125c3013"
+        },
+        {
+          "index": 4095,
+          "argb": "1a5c3013"
+        },
+        {
+          "index": 8192,
+          "argb": "0b5c3013"
+        },
+        {
+          "index": 16384,
+          "argb": "015c3013"
+        },
+        {
+          "index": 32767,
+          "argb": "045c3013"
+        },
+        {
+          "index": 32768,
+          "argb": "025c3013"
+        },
+        {
+          "index": 49151,
+          "argb": "025c3013"
+        },
+        {
+          "index": 65024,
+          "argb": "0d5c3013"
+        },
+        {
+          "index": 65279,
+          "argb": "0d5c3013"
+        },
+        {
+          "index": 65534,
+          "argb": "105c3013"
+        },
+        {
+          "index": 65535,
+          "argb": "105c3013"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 2,
+      "dark": false,
+      "variant": 14,
+      "seed": 1702352374,
+      "sha256": "71640dc68314ff4c41a754821b7425d020484c72ec95b1ee8a8b9c378bbdeea5",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "07f6d59a"
+        },
+        {
+          "index": 1,
+          "argb": "07f6d59a"
+        },
+        {
+          "index": 127,
+          "argb": "2b5c3013"
+        },
+        {
+          "index": 255,
+          "argb": "07f6d59a"
+        },
+        {
+          "index": 256,
+          "argb": "05f6d59a"
+        },
+        {
+          "index": 257,
+          "argb": "05f6d59a"
+        },
+        {
+          "index": 4095,
+          "argb": "035c3013"
+        },
+        {
+          "index": 8192,
+          "argb": "155c3013"
+        },
+        {
+          "index": 16384,
+          "argb": "00f6d59a"
+        },
+        {
+          "index": 32767,
+          "argb": "03f6d59a"
+        },
+        {
+          "index": 32768,
+          "argb": "03f6d59a"
+        },
+        {
+          "index": 49151,
+          "argb": "06f6d59a"
+        },
+        {
+          "index": 65024,
+          "argb": "09f6d59a"
+        },
+        {
+          "index": 65279,
+          "argb": "09f6d59a"
+        },
+        {
+          "index": 65534,
+          "argb": "09f6d59a"
+        },
+        {
+          "index": 65535,
+          "argb": "08f6d59a"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 2,
+      "dark": false,
+      "variant": 15,
+      "seed": -1919727953,
+      "sha256": "a4b955ad5961dff7ae567c3feda0368f71f1a38c2407f348a30ea3b1a1b71ff9",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "06f6d59a"
+        },
+        {
+          "index": 1,
+          "argb": "06f6d59a"
+        },
+        {
+          "index": 127,
+          "argb": "015c3013"
+        },
+        {
+          "index": 255,
+          "argb": "05f6d59a"
+        },
+        {
+          "index": 256,
+          "argb": "06f6d59a"
+        },
+        {
+          "index": 257,
+          "argb": "06f6d59a"
+        },
+        {
+          "index": 4095,
+          "argb": "005c3013"
+        },
+        {
+          "index": 8192,
+          "argb": "0d5c3013"
+        },
+        {
+          "index": 16384,
+          "argb": "08f6d59a"
+        },
+        {
+          "index": 32767,
+          "argb": "055c3013"
+        },
+        {
+          "index": 32768,
+          "argb": "095c3013"
+        },
+        {
+          "index": 49151,
+          "argb": "03f6d59a"
+        },
+        {
+          "index": 65024,
+          "argb": "015c3013"
+        },
+        {
+          "index": 65279,
+          "argb": "035c3013"
+        },
+        {
+          "index": 65534,
+          "argb": "01f6d59a"
+        },
+        {
+          "index": 65535,
+          "argb": "02f6d59a"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 2,
+      "dark": false,
+      "variant": 16,
+      "seed": 205210052,
+      "sha256": "ce45e8ba5335a97b4191a23edccd96533bc6d4a74a7a736ee1505f4829232bb1",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "005c3013"
+        },
+        {
+          "index": 1,
+          "argb": "035c3013"
+        },
+        {
+          "index": 127,
+          "argb": "01f6d59a"
+        },
+        {
+          "index": 255,
+          "argb": "01f6d59a"
+        },
+        {
+          "index": 256,
+          "argb": "05f6d59a"
+        },
+        {
+          "index": 257,
+          "argb": "04f6d59a"
+        },
+        {
+          "index": 4095,
+          "argb": "05f6d59a"
+        },
+        {
+          "index": 8192,
+          "argb": "055c3013"
+        },
+        {
+          "index": 16384,
+          "argb": "075c3013"
+        },
+        {
+          "index": 32767,
+          "argb": "09f6d59a"
+        },
+        {
+          "index": 32768,
+          "argb": "07f6d59a"
+        },
+        {
+          "index": 49151,
+          "argb": "08f6d59a"
+        },
+        {
+          "index": 65024,
+          "argb": "0f5c3013"
+        },
+        {
+          "index": 65279,
+          "argb": "0c5c3013"
+        },
+        {
+          "index": 65534,
+          "argb": "045c3013"
+        },
+        {
+          "index": 65535,
+          "argb": "065c3013"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 2,
+      "dark": false,
+      "variant": 17,
+      "seed": -2143405960,
+      "sha256": "9f662dd4bb735ba424f400552db85e36b20f653a4f905f9b4f0fae9b40d0b26d",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "015c3013"
+        },
+        {
+          "index": 1,
+          "argb": "015c3013"
+        },
+        {
+          "index": 127,
+          "argb": "0c5c3013"
+        },
+        {
+          "index": 255,
+          "argb": "025c3013"
+        },
+        {
+          "index": 256,
+          "argb": "025c3013"
+        },
+        {
+          "index": 257,
+          "argb": "025c3013"
+        },
+        {
+          "index": 4095,
+          "argb": "135c3013"
+        },
+        {
+          "index": 8192,
+          "argb": "07f6d59a"
+        },
+        {
+          "index": 16384,
+          "argb": "0a5c3013"
+        },
+        {
+          "index": 32767,
+          "argb": "065c3013"
+        },
+        {
+          "index": 32768,
+          "argb": "065c3013"
+        },
+        {
+          "index": 49151,
+          "argb": "2d5c3013"
+        },
+        {
+          "index": 65024,
+          "argb": "025c3013"
+        },
+        {
+          "index": 65279,
+          "argb": "035c3013"
+        },
+        {
+          "index": 65534,
+          "argb": "025c3013"
+        },
+        {
+          "index": 65535,
+          "argb": "025c3013"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 2,
+      "dark": false,
+      "variant": 18,
+      "seed": 1440159889,
+      "sha256": "a1e93db1d0c263788c6acc20c3a9d07f88ad308fb46e6fee87cf4cc5dd4e4240",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "0a5c3013"
+        },
+        {
+          "index": 1,
+          "argb": "095c3013"
+        },
+        {
+          "index": 127,
+          "argb": "0bf6d59a"
+        },
+        {
+          "index": 255,
+          "argb": "0a5c3013"
+        },
+        {
+          "index": 256,
+          "argb": "095c3013"
+        },
+        {
+          "index": 257,
+          "argb": "095c3013"
+        },
+        {
+          "index": 4095,
+          "argb": "115c3013"
+        },
+        {
+          "index": 8192,
+          "argb": "115c3013"
+        },
+        {
+          "index": 16384,
+          "argb": "005c3013"
+        },
+        {
+          "index": 32767,
+          "argb": "08f6d59a"
+        },
+        {
+          "index": 32768,
+          "argb": "09f6d59a"
+        },
+        {
+          "index": 49151,
+          "argb": "035c3013"
+        },
+        {
+          "index": 65024,
+          "argb": "045c3013"
+        },
+        {
+          "index": 65279,
+          "argb": "055c3013"
+        },
+        {
+          "index": 65534,
+          "argb": "095c3013"
+        },
+        {
+          "index": 65535,
+          "argb": "095c3013"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 2,
+      "dark": false,
+      "variant": 19,
+      "seed": 369212094,
+      "sha256": "5e08f94e1afcb2fd464f012f8328d93f965c276184ff56473156b1fc0ffd3431",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "205c3013"
+        },
+        {
+          "index": 1,
+          "argb": "215c3013"
+        },
+        {
+          "index": 127,
+          "argb": "08f6d59a"
+        },
+        {
+          "index": 255,
+          "argb": "1e5c3013"
+        },
+        {
+          "index": 256,
+          "argb": "235c3013"
+        },
+        {
+          "index": 257,
+          "argb": "235c3013"
+        },
+        {
+          "index": 4095,
+          "argb": "07f6d59a"
+        },
+        {
+          "index": 8192,
+          "argb": "01f6d59a"
+        },
+        {
+          "index": 16384,
+          "argb": "045c3013"
+        },
+        {
+          "index": 32767,
+          "argb": "03f6d59a"
+        },
+        {
+          "index": 32768,
+          "argb": "02f6d59a"
+        },
+        {
+          "index": 49151,
+          "argb": "295c3013"
+        },
+        {
+          "index": 65024,
+          "argb": "175c3013"
+        },
+        {
+          "index": 65279,
+          "argb": "155c3013"
+        },
+        {
+          "index": 65534,
+          "argb": "175c3013"
+        },
+        {
+          "index": 65535,
+          "argb": "195c3013"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 2,
+      "dark": false,
+      "variant": 20,
+      "seed": 2442335,
+      "sha256": "0c509e4a2b9553da2e3202243f6ad673ac8b43a7767c70a620fcb8bdb5845c38",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "0a5c3013"
+        },
+        {
+          "index": 1,
+          "argb": "0a5c3013"
+        },
+        {
+          "index": 127,
+          "argb": "05f6d59a"
+        },
+        {
+          "index": 255,
+          "argb": "0a5c3013"
+        },
+        {
+          "index": 256,
+          "argb": "095c3013"
+        },
+        {
+          "index": 257,
+          "argb": "095c3013"
+        },
+        {
+          "index": 4095,
+          "argb": "2f5c3013"
+        },
+        {
+          "index": 8192,
+          "argb": "015c3013"
+        },
+        {
+          "index": 16384,
+          "argb": "025c3013"
+        },
+        {
+          "index": 32767,
+          "argb": "015c3013"
+        },
+        {
+          "index": 32768,
+          "argb": "025c3013"
+        },
+        {
+          "index": 49151,
+          "argb": "07f6d59a"
+        },
+        {
+          "index": 65024,
+          "argb": "105c3013"
+        },
+        {
+          "index": 65279,
+          "argb": "105c3013"
+        },
+        {
+          "index": 65534,
+          "argb": "0d5c3013"
+        },
+        {
+          "index": 65535,
+          "argb": "0d5c3013"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 2,
+      "dark": false,
+      "variant": 21,
+      "seed": 358602171,
+      "sha256": "67b1c5880a7423d7a6701ac7f365e340073be83df6e13c0c88bd7348bf6dc4be",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "05f6d59a"
+        },
+        {
+          "index": 1,
+          "argb": "05f6d59a"
+        },
+        {
+          "index": 127,
+          "argb": "00f6d59a"
+        },
+        {
+          "index": 255,
+          "argb": "05f6d59a"
+        },
+        {
+          "index": 256,
+          "argb": "08f6d59a"
+        },
+        {
+          "index": 257,
+          "argb": "08f6d59a"
+        },
+        {
+          "index": 4095,
+          "argb": "045c3013"
+        },
+        {
+          "index": 8192,
+          "argb": "245c3013"
+        },
+        {
+          "index": 16384,
+          "argb": "0d5c3013"
+        },
+        {
+          "index": 32767,
+          "argb": "0bf6d59a"
+        },
+        {
+          "index": 32768,
+          "argb": "0af6d59a"
+        },
+        {
+          "index": 49151,
+          "argb": "015c3013"
+        },
+        {
+          "index": 65024,
+          "argb": "045c3013"
+        },
+        {
+          "index": 65279,
+          "argb": "035c3013"
+        },
+        {
+          "index": 65534,
+          "argb": "02f6d59a"
+        },
+        {
+          "index": 65535,
+          "argb": "02f6d59a"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 2,
+      "dark": false,
+      "variant": 22,
+      "seed": 105685809,
+      "sha256": "114670c4c35eca456121c1311c7870b86112ff4dcba741d6a47678fd3354045c",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "045c3013"
+        },
+        {
+          "index": 1,
+          "argb": "035c3013"
+        },
+        {
+          "index": 127,
+          "argb": "04f6d59a"
+        },
+        {
+          "index": 255,
+          "argb": "055c3013"
+        },
+        {
+          "index": 256,
+          "argb": "015c3013"
+        },
+        {
+          "index": 257,
+          "argb": "005c3013"
+        },
+        {
+          "index": 4095,
+          "argb": "005c3013"
+        },
+        {
+          "index": 8192,
+          "argb": "0f5c3013"
+        },
+        {
+          "index": 16384,
+          "argb": "03f6d59a"
+        },
+        {
+          "index": 32767,
+          "argb": "055c3013"
+        },
+        {
+          "index": 32768,
+          "argb": "065c3013"
+        },
+        {
+          "index": 49151,
+          "argb": "04f6d59a"
+        },
+        {
+          "index": 65024,
+          "argb": "0e5c3013"
+        },
+        {
+          "index": 65279,
+          "argb": "115c3013"
+        },
+        {
+          "index": 65534,
+          "argb": "0d5c3013"
+        },
+        {
+          "index": 65535,
+          "argb": "0b5c3013"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 2,
+      "dark": false,
+      "variant": 23,
+      "seed": 1988343906,
+      "sha256": "fd6b9daba4bb2a19f5802e075a15c8338223dea3aba17098d6fb7bd28b0baf40",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "015c3013"
+        },
+        {
+          "index": 1,
+          "argb": "025c3013"
+        },
+        {
+          "index": 127,
+          "argb": "07f6d59a"
+        },
+        {
+          "index": 255,
+          "argb": "015c3013"
+        },
+        {
+          "index": 256,
+          "argb": "035c3013"
+        },
+        {
+          "index": 257,
+          "argb": "035c3013"
+        },
+        {
+          "index": 4095,
+          "argb": "075c3013"
+        },
+        {
+          "index": 8192,
+          "argb": "165c3013"
+        },
+        {
+          "index": 16384,
+          "argb": "00f6d59a"
+        },
+        {
+          "index": 32767,
+          "argb": "015c3013"
+        },
+        {
+          "index": 32768,
+          "argb": "025c3013"
+        },
+        {
+          "index": 49151,
+          "argb": "035c3013"
+        },
+        {
+          "index": 65024,
+          "argb": "055c3013"
+        },
+        {
+          "index": 65279,
+          "argb": "045c3013"
+        },
+        {
+          "index": 65534,
+          "argb": "025c3013"
+        },
+        {
+          "index": 65535,
+          "argb": "025c3013"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 2,
+      "dark": true,
+      "variant": 0,
+      "seed": -1516851397,
+      "sha256": "36175191bde6f10274dd6b397a29d74343af56532e8e9a2f8636efcc947a2f49",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "0c160b05"
+        },
+        {
+          "index": 1,
+          "argb": "0c160b05"
+        },
+        {
+          "index": 127,
+          "argb": "08160b05"
+        },
+        {
+          "index": 255,
+          "argb": "0c160b05"
+        },
+        {
+          "index": 256,
+          "argb": "0a160b05"
+        },
+        {
+          "index": 257,
+          "argb": "0a160b05"
+        },
+        {
+          "index": 4095,
+          "argb": "09e0b16e"
+        },
+        {
+          "index": 8192,
+          "argb": "00e0b16e"
+        },
+        {
+          "index": 16384,
+          "argb": "12e0b16e"
+        },
+        {
+          "index": 32767,
+          "argb": "29160b05"
+        },
+        {
+          "index": 32768,
+          "argb": "2d160b05"
+        },
+        {
+          "index": 49151,
+          "argb": "13e0b16e"
+        },
+        {
+          "index": 65024,
+          "argb": "0d160b05"
+        },
+        {
+          "index": 65279,
+          "argb": "0e160b05"
+        },
+        {
+          "index": 65534,
+          "argb": "0e160b05"
+        },
+        {
+          "index": 65535,
+          "argb": "0d160b05"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 2,
+      "dark": true,
+      "variant": 1,
+      "seed": -1498350823,
+      "sha256": "ca054b9d41f3359e46e246aa2bc6ec9eb4c0562652a5c1b5067b85986230c6a3",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "09160b05"
+        },
+        {
+          "index": 1,
+          "argb": "09160b05"
+        },
+        {
+          "index": 127,
+          "argb": "01160b05"
+        },
+        {
+          "index": 255,
+          "argb": "08160b05"
+        },
+        {
+          "index": 256,
+          "argb": "0b160b05"
+        },
+        {
+          "index": 257,
+          "argb": "0c160b05"
+        },
+        {
+          "index": 4095,
+          "argb": "14e0b16e"
+        },
+        {
+          "index": 8192,
+          "argb": "01e0b16e"
+        },
+        {
+          "index": 16384,
+          "argb": "06e0b16e"
+        },
+        {
+          "index": 32767,
+          "argb": "19e0b16e"
+        },
+        {
+          "index": 32768,
+          "argb": "17e0b16e"
+        },
+        {
+          "index": 49151,
+          "argb": "01e0b16e"
+        },
+        {
+          "index": 65024,
+          "argb": "07160b05"
+        },
+        {
+          "index": 65279,
+          "argb": "07160b05"
+        },
+        {
+          "index": 65534,
+          "argb": "07160b05"
+        },
+        {
+          "index": 65535,
+          "argb": "07160b05"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 2,
+      "dark": true,
+      "variant": 2,
+      "seed": 999436490,
+      "sha256": "b9125d005897f17523ece762cb0989436e2628459704f683dbd99eba9599cc34",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "39160b05"
+        },
+        {
+          "index": 1,
+          "argb": "38160b05"
+        },
+        {
+          "index": 127,
+          "argb": "00e0b16e"
+        },
+        {
+          "index": 255,
+          "argb": "3a160b05"
+        },
+        {
+          "index": 256,
+          "argb": "2d160b05"
+        },
+        {
+          "index": 257,
+          "argb": "2c160b05"
+        },
+        {
+          "index": 4095,
+          "argb": "05160b05"
+        },
+        {
+          "index": 8192,
+          "argb": "10160b05"
+        },
+        {
+          "index": 16384,
+          "argb": "05e0b16e"
+        },
+        {
+          "index": 32767,
+          "argb": "01e0b16e"
+        },
+        {
+          "index": 32768,
+          "argb": "01e0b16e"
+        },
+        {
+          "index": 49151,
+          "argb": "0f160b05"
+        },
+        {
+          "index": 65024,
+          "argb": "42160b05"
+        },
+        {
+          "index": 65279,
+          "argb": "42160b05"
+        },
+        {
+          "index": 65534,
+          "argb": "41160b05"
+        },
+        {
+          "index": 65535,
+          "argb": "41160b05"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 2,
+      "dark": true,
+      "variant": 3,
+      "seed": -1930703763,
+      "sha256": "59175ce0d0b7385aac5cca7674f13d6f9cbf7d7b1d9a70571e228ef159fd6a17",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "05160b05"
+        },
+        {
+          "index": 1,
+          "argb": "05160b05"
+        },
+        {
+          "index": 127,
+          "argb": "12e0b16e"
+        },
+        {
+          "index": 255,
+          "argb": "05160b05"
+        },
+        {
+          "index": 256,
+          "argb": "08160b05"
+        },
+        {
+          "index": 257,
+          "argb": "08160b05"
+        },
+        {
+          "index": 4095,
+          "argb": "2d160b05"
+        },
+        {
+          "index": 8192,
+          "argb": "03e0b16e"
+        },
+        {
+          "index": 16384,
+          "argb": "08e0b16e"
+        },
+        {
+          "index": 32767,
+          "argb": "14160b05"
+        },
+        {
+          "index": 32768,
+          "argb": "1d160b05"
+        },
+        {
+          "index": 49151,
+          "argb": "0ce0b16e"
+        },
+        {
+          "index": 65024,
+          "argb": "02160b05"
+        },
+        {
+          "index": 65279,
+          "argb": "02160b05"
+        },
+        {
+          "index": 65534,
+          "argb": "03160b05"
+        },
+        {
+          "index": 65535,
+          "argb": "03160b05"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 2,
+      "dark": true,
+      "variant": 4,
+      "seed": 1048473077,
+      "sha256": "ccbf372aef090bc0fb1246d53d941745f0347c6ed6a9b3bdb45cc9c0aa6b3b4c",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "06160b05"
+        },
+        {
+          "index": 1,
+          "argb": "07160b05"
+        },
+        {
+          "index": 127,
+          "argb": "03e0b16e"
+        },
+        {
+          "index": 255,
+          "argb": "06160b05"
+        },
+        {
+          "index": 256,
+          "argb": "08160b05"
+        },
+        {
+          "index": 257,
+          "argb": "08160b05"
+        },
+        {
+          "index": 4095,
+          "argb": "11160b05"
+        },
+        {
+          "index": 8192,
+          "argb": "03e0b16e"
+        },
+        {
+          "index": 16384,
+          "argb": "05160b05"
+        },
+        {
+          "index": 32767,
+          "argb": "04160b05"
+        },
+        {
+          "index": 32768,
+          "argb": "03160b05"
+        },
+        {
+          "index": 49151,
+          "argb": "28160b05"
+        },
+        {
+          "index": 65024,
+          "argb": "00e0b16e"
+        },
+        {
+          "index": 65279,
+          "argb": "01e0b16e"
+        },
+        {
+          "index": 65534,
+          "argb": "02160b05"
+        },
+        {
+          "index": 65535,
+          "argb": "03160b05"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 2,
+      "dark": true,
+      "variant": 5,
+      "seed": 438272173,
+      "sha256": "b6160140d9d225b4fba3b8d94119744aebb69f7b20d65ee5cca1d0b3800ce5ce",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "02e0b16e"
+        },
+        {
+          "index": 1,
+          "argb": "02e0b16e"
+        },
+        {
+          "index": 127,
+          "argb": "0e160b05"
+        },
+        {
+          "index": 255,
+          "argb": "02e0b16e"
+        },
+        {
+          "index": 256,
+          "argb": "02160b05"
+        },
+        {
+          "index": 257,
+          "argb": "02160b05"
+        },
+        {
+          "index": 4095,
+          "argb": "0c160b05"
+        },
+        {
+          "index": 8192,
+          "argb": "32160b05"
+        },
+        {
+          "index": 16384,
+          "argb": "0f160b05"
+        },
+        {
+          "index": 32767,
+          "argb": "19160b05"
+        },
+        {
+          "index": 32768,
+          "argb": "19160b05"
+        },
+        {
+          "index": 49151,
+          "argb": "03e0b16e"
+        },
+        {
+          "index": 65024,
+          "argb": "07e0b16e"
+        },
+        {
+          "index": 65279,
+          "argb": "07e0b16e"
+        },
+        {
+          "index": 65534,
+          "argb": "05e0b16e"
+        },
+        {
+          "index": 65535,
+          "argb": "05e0b16e"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 2,
+      "dark": true,
+      "variant": 6,
+      "seed": 2143523017,
+      "sha256": "2bd0d40e59a5c3426c50d6c47fd4922ceae0580782797386c99bee22f9a88785",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "0fe0b16e"
+        },
+        {
+          "index": 1,
+          "argb": "0fe0b16e"
+        },
+        {
+          "index": 127,
+          "argb": "00160b05"
+        },
+        {
+          "index": 255,
+          "argb": "0fe0b16e"
+        },
+        {
+          "index": 256,
+          "argb": "10e0b16e"
+        },
+        {
+          "index": 257,
+          "argb": "10e0b16e"
+        },
+        {
+          "index": 4095,
+          "argb": "0ae0b16e"
+        },
+        {
+          "index": 8192,
+          "argb": "03160b05"
+        },
+        {
+          "index": 16384,
+          "argb": "11e0b16e"
+        },
+        {
+          "index": 32767,
+          "argb": "0ee0b16e"
+        },
+        {
+          "index": 32768,
+          "argb": "0ee0b16e"
+        },
+        {
+          "index": 49151,
+          "argb": "07160b05"
+        },
+        {
+          "index": 65024,
+          "argb": "08e0b16e"
+        },
+        {
+          "index": 65279,
+          "argb": "07e0b16e"
+        },
+        {
+          "index": 65534,
+          "argb": "0be0b16e"
+        },
+        {
+          "index": 65535,
+          "argb": "0be0b16e"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 2,
+      "dark": true,
+      "variant": 7,
+      "seed": -2050031609,
+      "sha256": "0cf275a4d42c7685a418b5712aef483c8d59a33e60b1b070118bc7b4cd7ab70b",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "05e0b16e"
+        },
+        {
+          "index": 1,
+          "argb": "05e0b16e"
+        },
+        {
+          "index": 127,
+          "argb": "04e0b16e"
+        },
+        {
+          "index": 255,
+          "argb": "05e0b16e"
+        },
+        {
+          "index": 256,
+          "argb": "05e0b16e"
+        },
+        {
+          "index": 257,
+          "argb": "05e0b16e"
+        },
+        {
+          "index": 4095,
+          "argb": "02160b05"
+        },
+        {
+          "index": 8192,
+          "argb": "0c160b05"
+        },
+        {
+          "index": 16384,
+          "argb": "0de0b16e"
+        },
+        {
+          "index": 32767,
+          "argb": "0ee0b16e"
+        },
+        {
+          "index": 32768,
+          "argb": "0ee0b16e"
+        },
+        {
+          "index": 49151,
+          "argb": "08e0b16e"
+        },
+        {
+          "index": 65024,
+          "argb": "06e0b16e"
+        },
+        {
+          "index": 65279,
+          "argb": "06e0b16e"
+        },
+        {
+          "index": 65534,
+          "argb": "03e0b16e"
+        },
+        {
+          "index": 65535,
+          "argb": "03e0b16e"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 2,
+      "dark": true,
+      "variant": 8,
+      "seed": -455876669,
+      "sha256": "d100e8018af1b9cf1da8a325d00a265cbb4511485f902b272f8268a4f02c225f",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "01160b05"
+        },
+        {
+          "index": 1,
+          "argb": "02160b05"
+        },
+        {
+          "index": 127,
+          "argb": "13e0b16e"
+        },
+        {
+          "index": 255,
+          "argb": "01160b05"
+        },
+        {
+          "index": 256,
+          "argb": "01160b05"
+        },
+        {
+          "index": 257,
+          "argb": "01160b05"
+        },
+        {
+          "index": 4095,
+          "argb": "09160b05"
+        },
+        {
+          "index": 8192,
+          "argb": "14e0b16e"
+        },
+        {
+          "index": 16384,
+          "argb": "0e160b05"
+        },
+        {
+          "index": 32767,
+          "argb": "04e0b16e"
+        },
+        {
+          "index": 32768,
+          "argb": "04e0b16e"
+        },
+        {
+          "index": 49151,
+          "argb": "0d160b05"
+        },
+        {
+          "index": 65024,
+          "argb": "02e0b16e"
+        },
+        {
+          "index": 65279,
+          "argb": "02e0b16e"
+        },
+        {
+          "index": 65534,
+          "argb": "00e0b16e"
+        },
+        {
+          "index": 65535,
+          "argb": "00160b05"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 2,
+      "dark": true,
+      "variant": 9,
+      "seed": 1815763599,
+      "sha256": "1a7509cb2cf06e5722da1a4913d6fc70cd581f8f0eb8fe5f6dcf14cff4df6537",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "05160b05"
+        },
+        {
+          "index": 1,
+          "argb": "05160b05"
+        },
+        {
+          "index": 127,
+          "argb": "0ae0b16e"
+        },
+        {
+          "index": 255,
+          "argb": "06160b05"
+        },
+        {
+          "index": 256,
+          "argb": "09160b05"
+        },
+        {
+          "index": 257,
+          "argb": "09160b05"
+        },
+        {
+          "index": 4095,
+          "argb": "12160b05"
+        },
+        {
+          "index": 8192,
+          "argb": "0ae0b16e"
+        },
+        {
+          "index": 16384,
+          "argb": "3c160b05"
+        },
+        {
+          "index": 32767,
+          "argb": "0a160b05"
+        },
+        {
+          "index": 32768,
+          "argb": "0d160b05"
+        },
+        {
+          "index": 49151,
+          "argb": "04160b05"
+        },
+        {
+          "index": 65024,
+          "argb": "01e0b16e"
+        },
+        {
+          "index": 65279,
+          "argb": "01e0b16e"
+        },
+        {
+          "index": 65534,
+          "argb": "02160b05"
+        },
+        {
+          "index": 65535,
+          "argb": "02160b05"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 2,
+      "dark": true,
+      "variant": 10,
+      "seed": -797466496,
+      "sha256": "54676fb800ab99c4e351296d12d4da3e72a44aa76efb388c5de6a6e914a3acec",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "0d160b05"
+        },
+        {
+          "index": 1,
+          "argb": "0d160b05"
+        },
+        {
+          "index": 127,
+          "argb": "0a160b05"
+        },
+        {
+          "index": 255,
+          "argb": "0d160b05"
+        },
+        {
+          "index": 256,
+          "argb": "0c160b05"
+        },
+        {
+          "index": 257,
+          "argb": "0c160b05"
+        },
+        {
+          "index": 4095,
+          "argb": "0f160b05"
+        },
+        {
+          "index": 8192,
+          "argb": "02160b05"
+        },
+        {
+          "index": 16384,
+          "argb": "2c160b05"
+        },
+        {
+          "index": 32767,
+          "argb": "01e0b16e"
+        },
+        {
+          "index": 32768,
+          "argb": "01e0b16e"
+        },
+        {
+          "index": 49151,
+          "argb": "03e0b16e"
+        },
+        {
+          "index": 65024,
+          "argb": "10160b05"
+        },
+        {
+          "index": 65279,
+          "argb": "10160b05"
+        },
+        {
+          "index": 65534,
+          "argb": "0f160b05"
+        },
+        {
+          "index": 65535,
+          "argb": "0f160b05"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 2,
+      "dark": true,
+      "variant": 11,
+      "seed": 32161945,
+      "sha256": "252c177a2e350dd85353b06bd31a9d9e198e2f7c4377ded74b4cf7f3138e6c8e",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "09e0b16e"
+        },
+        {
+          "index": 1,
+          "argb": "08e0b16e"
+        },
+        {
+          "index": 127,
+          "argb": "31160b05"
+        },
+        {
+          "index": 255,
+          "argb": "09e0b16e"
+        },
+        {
+          "index": 256,
+          "argb": "09e0b16e"
+        },
+        {
+          "index": 257,
+          "argb": "09e0b16e"
+        },
+        {
+          "index": 4095,
+          "argb": "01e0b16e"
+        },
+        {
+          "index": 8192,
+          "argb": "0b160b05"
+        },
+        {
+          "index": 16384,
+          "argb": "0be0b16e"
+        },
+        {
+          "index": 32767,
+          "argb": "0fe0b16e"
+        },
+        {
+          "index": 32768,
+          "argb": "10e0b16e"
+        },
+        {
+          "index": 49151,
+          "argb": "0de0b16e"
+        },
+        {
+          "index": 65024,
+          "argb": "0fe0b16e"
+        },
+        {
+          "index": 65279,
+          "argb": "0fe0b16e"
+        },
+        {
+          "index": 65534,
+          "argb": "0ee0b16e"
+        },
+        {
+          "index": 65535,
+          "argb": "0ee0b16e"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 2,
+      "dark": true,
+      "variant": 12,
+      "seed": 1588556417,
+      "sha256": "3669a1a410cdfdcad7de35e4c4f474729840eea912302d7ed01e609cbc7a87a0",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "12e0b16e"
+        },
+        {
+          "index": 1,
+          "argb": "12e0b16e"
+        },
+        {
+          "index": 127,
+          "argb": "08160b05"
+        },
+        {
+          "index": 255,
+          "argb": "12e0b16e"
+        },
+        {
+          "index": 256,
+          "argb": "10e0b16e"
+        },
+        {
+          "index": 257,
+          "argb": "10e0b16e"
+        },
+        {
+          "index": 4095,
+          "argb": "04e0b16e"
+        },
+        {
+          "index": 8192,
+          "argb": "29160b05"
+        },
+        {
+          "index": 16384,
+          "argb": "08160b05"
+        },
+        {
+          "index": 32767,
+          "argb": "02160b05"
+        },
+        {
+          "index": 32768,
+          "argb": "01e0b16e"
+        },
+        {
+          "index": 49151,
+          "argb": "09e0b16e"
+        },
+        {
+          "index": 65024,
+          "argb": "17e0b16e"
+        },
+        {
+          "index": 65279,
+          "argb": "17e0b16e"
+        },
+        {
+          "index": 65534,
+          "argb": "15e0b16e"
+        },
+        {
+          "index": 65535,
+          "argb": "15e0b16e"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 2,
+      "dark": true,
+      "variant": 13,
+      "seed": 972027780,
+      "sha256": "5ce52cdc462c8c91e36f5bcf6ce3c9f57af256f7bab284fe4dd4077c010ba3da",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "18160b05"
+        },
+        {
+          "index": 1,
+          "argb": "18160b05"
+        },
+        {
+          "index": 127,
+          "argb": "0c160b05"
+        },
+        {
+          "index": 255,
+          "argb": "18160b05"
+        },
+        {
+          "index": 256,
+          "argb": "19160b05"
+        },
+        {
+          "index": 257,
+          "argb": "19160b05"
+        },
+        {
+          "index": 4095,
+          "argb": "25160b05"
+        },
+        {
+          "index": 8192,
+          "argb": "0f160b05"
+        },
+        {
+          "index": 16384,
+          "argb": "01160b05"
+        },
+        {
+          "index": 32767,
+          "argb": "05160b05"
+        },
+        {
+          "index": 32768,
+          "argb": "03160b05"
+        },
+        {
+          "index": 49151,
+          "argb": "03160b05"
+        },
+        {
+          "index": 65024,
+          "argb": "13160b05"
+        },
+        {
+          "index": 65279,
+          "argb": "13160b05"
+        },
+        {
+          "index": 65534,
+          "argb": "17160b05"
+        },
+        {
+          "index": 65535,
+          "argb": "17160b05"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 2,
+      "dark": true,
+      "variant": 14,
+      "seed": 1702352374,
+      "sha256": "2275bcbbb57faa56f9f79349403714711094d032523ad8d7b815b324e84d1e35",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "0ae0b16e"
+        },
+        {
+          "index": 1,
+          "argb": "09e0b16e"
+        },
+        {
+          "index": 127,
+          "argb": "3d160b05"
+        },
+        {
+          "index": 255,
+          "argb": "0ae0b16e"
+        },
+        {
+          "index": 256,
+          "argb": "07e0b16e"
+        },
+        {
+          "index": 257,
+          "argb": "07e0b16e"
+        },
+        {
+          "index": 4095,
+          "argb": "05160b05"
+        },
+        {
+          "index": 8192,
+          "argb": "1e160b05"
+        },
+        {
+          "index": 16384,
+          "argb": "01e0b16e"
+        },
+        {
+          "index": 32767,
+          "argb": "04e0b16e"
+        },
+        {
+          "index": 32768,
+          "argb": "04e0b16e"
+        },
+        {
+          "index": 49151,
+          "argb": "09e0b16e"
+        },
+        {
+          "index": 65024,
+          "argb": "0ce0b16e"
+        },
+        {
+          "index": 65279,
+          "argb": "0de0b16e"
+        },
+        {
+          "index": 65534,
+          "argb": "0ce0b16e"
+        },
+        {
+          "index": 65535,
+          "argb": "0ce0b16e"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 2,
+      "dark": true,
+      "variant": 15,
+      "seed": -1919727953,
+      "sha256": "53631ca8043e2d3a520ad8f48b082e14a1c17f6bc06b6a1cd17ab0834b5ea8fa",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "08e0b16e"
+        },
+        {
+          "index": 1,
+          "argb": "09e0b16e"
+        },
+        {
+          "index": 127,
+          "argb": "02160b05"
+        },
+        {
+          "index": 255,
+          "argb": "08e0b16e"
+        },
+        {
+          "index": 256,
+          "argb": "09e0b16e"
+        },
+        {
+          "index": 257,
+          "argb": "09e0b16e"
+        },
+        {
+          "index": 4095,
+          "argb": "00160b05"
+        },
+        {
+          "index": 8192,
+          "argb": "12160b05"
+        },
+        {
+          "index": 16384,
+          "argb": "0be0b16e"
+        },
+        {
+          "index": 32767,
+          "argb": "08160b05"
+        },
+        {
+          "index": 32768,
+          "argb": "0d160b05"
+        },
+        {
+          "index": 49151,
+          "argb": "04e0b16e"
+        },
+        {
+          "index": 65024,
+          "argb": "02160b05"
+        },
+        {
+          "index": 65279,
+          "argb": "04160b05"
+        },
+        {
+          "index": 65534,
+          "argb": "01e0b16e"
+        },
+        {
+          "index": 65535,
+          "argb": "03e0b16e"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 2,
+      "dark": true,
+      "variant": 16,
+      "seed": 205210052,
+      "sha256": "a4afa66e6b155dceaf9e43a73158a2a695764578158ca2c907fbb9981471e384",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "01160b05"
+        },
+        {
+          "index": 1,
+          "argb": "04160b05"
+        },
+        {
+          "index": 127,
+          "argb": "02e0b16e"
+        },
+        {
+          "index": 255,
+          "argb": "02e0b16e"
+        },
+        {
+          "index": 256,
+          "argb": "08e0b16e"
+        },
+        {
+          "index": 257,
+          "argb": "06e0b16e"
+        },
+        {
+          "index": 4095,
+          "argb": "07e0b16e"
+        },
+        {
+          "index": 8192,
+          "argb": "08160b05"
+        },
+        {
+          "index": 16384,
+          "argb": "0a160b05"
+        },
+        {
+          "index": 32767,
+          "argb": "0de0b16e"
+        },
+        {
+          "index": 32768,
+          "argb": "0ae0b16e"
+        },
+        {
+          "index": 49151,
+          "argb": "0be0b16e"
+        },
+        {
+          "index": 65024,
+          "argb": "15160b05"
+        },
+        {
+          "index": 65279,
+          "argb": "11160b05"
+        },
+        {
+          "index": 65534,
+          "argb": "06160b05"
+        },
+        {
+          "index": 65535,
+          "argb": "09160b05"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 2,
+      "dark": true,
+      "variant": 17,
+      "seed": -2143405960,
+      "sha256": "7872a859f48e532efbae1ff9521df0a757014e6a190c9d51504f1780b2ec24cc",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "02160b05"
+        },
+        {
+          "index": 1,
+          "argb": "02160b05"
+        },
+        {
+          "index": 127,
+          "argb": "11160b05"
+        },
+        {
+          "index": 255,
+          "argb": "02160b05"
+        },
+        {
+          "index": 256,
+          "argb": "03160b05"
+        },
+        {
+          "index": 257,
+          "argb": "03160b05"
+        },
+        {
+          "index": 4095,
+          "argb": "1c160b05"
+        },
+        {
+          "index": 8192,
+          "argb": "0ae0b16e"
+        },
+        {
+          "index": 16384,
+          "argb": "0f160b05"
+        },
+        {
+          "index": 32767,
+          "argb": "08160b05"
+        },
+        {
+          "index": 32768,
+          "argb": "09160b05"
+        },
+        {
+          "index": 49151,
+          "argb": "41160b05"
+        },
+        {
+          "index": 65024,
+          "argb": "04160b05"
+        },
+        {
+          "index": 65279,
+          "argb": "04160b05"
+        },
+        {
+          "index": 65534,
+          "argb": "03160b05"
+        },
+        {
+          "index": 65535,
+          "argb": "03160b05"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 2,
+      "dark": true,
+      "variant": 18,
+      "seed": 1440159889,
+      "sha256": "1c6b3e33958e42a9dbf5bc93a4962d6972fd16150fe7a91d216f16339b10f62d",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "0e160b05"
+        },
+        {
+          "index": 1,
+          "argb": "0d160b05"
+        },
+        {
+          "index": 127,
+          "argb": "10e0b16e"
+        },
+        {
+          "index": 255,
+          "argb": "0e160b05"
+        },
+        {
+          "index": 256,
+          "argb": "0e160b05"
+        },
+        {
+          "index": 257,
+          "argb": "0d160b05"
+        },
+        {
+          "index": 4095,
+          "argb": "18160b05"
+        },
+        {
+          "index": 8192,
+          "argb": "19160b05"
+        },
+        {
+          "index": 16384,
+          "argb": "00160b05"
+        },
+        {
+          "index": 32767,
+          "argb": "0be0b16e"
+        },
+        {
+          "index": 32768,
+          "argb": "0ee0b16e"
+        },
+        {
+          "index": 49151,
+          "argb": "05160b05"
+        },
+        {
+          "index": 65024,
+          "argb": "06160b05"
+        },
+        {
+          "index": 65279,
+          "argb": "07160b05"
+        },
+        {
+          "index": 65534,
+          "argb": "0d160b05"
+        },
+        {
+          "index": 65535,
+          "argb": "0d160b05"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 2,
+      "dark": true,
+      "variant": 19,
+      "seed": 369212094,
+      "sha256": "45dcebd459ed028e4b9f7d5448d6e4bf4c9c0a34e8314b1702dcd38eef4b7c27",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "2d160b05"
+        },
+        {
+          "index": 1,
+          "argb": "2f160b05"
+        },
+        {
+          "index": 127,
+          "argb": "0be0b16e"
+        },
+        {
+          "index": 255,
+          "argb": "2b160b05"
+        },
+        {
+          "index": 256,
+          "argb": "32160b05"
+        },
+        {
+          "index": 257,
+          "argb": "32160b05"
+        },
+        {
+          "index": 4095,
+          "argb": "0ae0b16e"
+        },
+        {
+          "index": 8192,
+          "argb": "02e0b16e"
+        },
+        {
+          "index": 16384,
+          "argb": "06160b05"
+        },
+        {
+          "index": 32767,
+          "argb": "05e0b16e"
+        },
+        {
+          "index": 32768,
+          "argb": "03e0b16e"
+        },
+        {
+          "index": 49151,
+          "argb": "3a160b05"
+        },
+        {
+          "index": 65024,
+          "argb": "20160b05"
+        },
+        {
+          "index": 65279,
+          "argb": "1d160b05"
+        },
+        {
+          "index": 65534,
+          "argb": "21160b05"
+        },
+        {
+          "index": 65535,
+          "argb": "24160b05"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 2,
+      "dark": true,
+      "variant": 20,
+      "seed": 2442335,
+      "sha256": "fb934ad353fd2ce16e3d0953f3e4bb3ae790cc574d5f5ec17b25fd3f103360fb",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "0e160b05"
+        },
+        {
+          "index": 1,
+          "argb": "0e160b05"
+        },
+        {
+          "index": 127,
+          "argb": "07e0b16e"
+        },
+        {
+          "index": 255,
+          "argb": "0e160b05"
+        },
+        {
+          "index": 256,
+          "argb": "0d160b05"
+        },
+        {
+          "index": 257,
+          "argb": "0d160b05"
+        },
+        {
+          "index": 4095,
+          "argb": "43160b05"
+        },
+        {
+          "index": 8192,
+          "argb": "02160b05"
+        },
+        {
+          "index": 16384,
+          "argb": "02160b05"
+        },
+        {
+          "index": 32767,
+          "argb": "01160b05"
+        },
+        {
+          "index": 32768,
+          "argb": "03160b05"
+        },
+        {
+          "index": 49151,
+          "argb": "0ae0b16e"
+        },
+        {
+          "index": 65024,
+          "argb": "16160b05"
+        },
+        {
+          "index": 65279,
+          "argb": "17160b05"
+        },
+        {
+          "index": 65534,
+          "argb": "13160b05"
+        },
+        {
+          "index": 65535,
+          "argb": "13160b05"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 2,
+      "dark": true,
+      "variant": 21,
+      "seed": 358602171,
+      "sha256": "fd7f4ff380457c07766054596e6e255b58a30309921e0de738e35733bdc8eb3d",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "07e0b16e"
+        },
+        {
+          "index": 1,
+          "argb": "07e0b16e"
+        },
+        {
+          "index": 127,
+          "argb": "00e0b16e"
+        },
+        {
+          "index": 255,
+          "argb": "07e0b16e"
+        },
+        {
+          "index": 256,
+          "argb": "0be0b16e"
+        },
+        {
+          "index": 257,
+          "argb": "0be0b16e"
+        },
+        {
+          "index": 4095,
+          "argb": "06160b05"
+        },
+        {
+          "index": 8192,
+          "argb": "33160b05"
+        },
+        {
+          "index": 16384,
+          "argb": "12160b05"
+        },
+        {
+          "index": 32767,
+          "argb": "10e0b16e"
+        },
+        {
+          "index": 32768,
+          "argb": "0ee0b16e"
+        },
+        {
+          "index": 49151,
+          "argb": "02160b05"
+        },
+        {
+          "index": 65024,
+          "argb": "05160b05"
+        },
+        {
+          "index": 65279,
+          "argb": "04160b05"
+        },
+        {
+          "index": 65534,
+          "argb": "03e0b16e"
+        },
+        {
+          "index": 65535,
+          "argb": "03e0b16e"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 2,
+      "dark": true,
+      "variant": 22,
+      "seed": 105685809,
+      "sha256": "12950d9e7ee7d1e4312c4bea9f7fc258a07b71500ca75d3694514d63ebaaaa4d",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "06160b05"
+        },
+        {
+          "index": 1,
+          "argb": "05160b05"
+        },
+        {
+          "index": 127,
+          "argb": "05e0b16e"
+        },
+        {
+          "index": 255,
+          "argb": "08160b05"
+        },
+        {
+          "index": 256,
+          "argb": "01160b05"
+        },
+        {
+          "index": 257,
+          "argb": "00160b05"
+        },
+        {
+          "index": 4095,
+          "argb": "00160b05"
+        },
+        {
+          "index": 8192,
+          "argb": "16160b05"
+        },
+        {
+          "index": 16384,
+          "argb": "04e0b16e"
+        },
+        {
+          "index": 32767,
+          "argb": "08160b05"
+        },
+        {
+          "index": 32768,
+          "argb": "08160b05"
+        },
+        {
+          "index": 49151,
+          "argb": "06e0b16e"
+        },
+        {
+          "index": 65024,
+          "argb": "15160b05"
+        },
+        {
+          "index": 65279,
+          "argb": "18160b05"
+        },
+        {
+          "index": 65534,
+          "argb": "13160b05"
+        },
+        {
+          "index": 65535,
+          "argb": "10160b05"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 2,
+      "dark": true,
+      "variant": 23,
+      "seed": 1988343906,
+      "sha256": "58a1ba20eeb606c20d7c32f28afa0c216c803c89fea7b73efa30494f0a6a986a",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "02160b05"
+        },
+        {
+          "index": 1,
+          "argb": "02160b05"
+        },
+        {
+          "index": 127,
+          "argb": "0be0b16e"
+        },
+        {
+          "index": 255,
+          "argb": "02160b05"
+        },
+        {
+          "index": 256,
+          "argb": "05160b05"
+        },
+        {
+          "index": 257,
+          "argb": "05160b05"
+        },
+        {
+          "index": 4095,
+          "argb": "0a160b05"
+        },
+        {
+          "index": 8192,
+          "argb": "1f160b05"
+        },
+        {
+          "index": 16384,
+          "argb": "00e0b16e"
+        },
+        {
+          "index": 32767,
+          "argb": "02160b05"
+        },
+        {
+          "index": 32768,
+          "argb": "03160b05"
+        },
+        {
+          "index": 49151,
+          "argb": "04160b05"
+        },
+        {
+          "index": 65024,
+          "argb": "07160b05"
+        },
+        {
+          "index": 65279,
+          "argb": "06160b05"
+        },
+        {
+          "index": 65534,
+          "argb": "03160b05"
+        },
+        {
+          "index": 65535,
+          "argb": "03160b05"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 3,
+      "dark": false,
+      "variant": 0,
+      "seed": -952599031,
+      "sha256": "6f2bad75b5d1c73be55b18bd6849bf9735443124f1452f97e20c69b1115da7ea",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "00c5cbcf"
+        },
+        {
+          "index": 1,
+          "argb": "00c5cbcf"
+        },
+        {
+          "index": 127,
+          "argb": "07030405"
+        },
+        {
+          "index": 255,
+          "argb": "03030405"
+        },
+        {
+          "index": 256,
+          "argb": "08030405"
+        },
+        {
+          "index": 257,
+          "argb": "03c5cbcf"
+        },
+        {
+          "index": 4095,
+          "argb": "08c5cbcf"
+        },
+        {
+          "index": 8192,
+          "argb": "07030405"
+        },
+        {
+          "index": 16384,
+          "argb": "07030405"
+        },
+        {
+          "index": 32767,
+          "argb": "02030405"
+        },
+        {
+          "index": 32768,
+          "argb": "02c5cbcf"
+        },
+        {
+          "index": 49151,
+          "argb": "04c5cbcf"
+        },
+        {
+          "index": 65024,
+          "argb": "05c5cbcf"
+        },
+        {
+          "index": 65279,
+          "argb": "06030405"
+        },
+        {
+          "index": 65534,
+          "argb": "05c5cbcf"
+        },
+        {
+          "index": 65535,
+          "argb": "08030405"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 3,
+      "dark": false,
+      "variant": 1,
+      "seed": 1069957963,
+      "sha256": "f5fa30738e3393308043fa8bebcfd39a1e8a55f3035133014f914e821978f900",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "02c5cbcf"
+        },
+        {
+          "index": 1,
+          "argb": "09c5cbcf"
+        },
+        {
+          "index": 127,
+          "argb": "01030405"
+        },
+        {
+          "index": 255,
+          "argb": "05030405"
+        },
+        {
+          "index": 256,
+          "argb": "09c5cbcf"
+        },
+        {
+          "index": 257,
+          "argb": "02030405"
+        },
+        {
+          "index": 4095,
+          "argb": "09c5cbcf"
+        },
+        {
+          "index": 8192,
+          "argb": "07c5cbcf"
+        },
+        {
+          "index": 16384,
+          "argb": "02030405"
+        },
+        {
+          "index": 32767,
+          "argb": "01030405"
+        },
+        {
+          "index": 32768,
+          "argb": "07030405"
+        },
+        {
+          "index": 49151,
+          "argb": "01c5cbcf"
+        },
+        {
+          "index": 65024,
+          "argb": "08030405"
+        },
+        {
+          "index": 65279,
+          "argb": "06c5cbcf"
+        },
+        {
+          "index": 65534,
+          "argb": "06c5cbcf"
+        },
+        {
+          "index": 65535,
+          "argb": "03c5cbcf"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 3,
+      "dark": false,
+      "variant": 2,
+      "seed": -397249258,
+      "sha256": "57f7a97792f9fea557c6a9adef4b11ca00c03e850eea47ab4f18c86c763a2765",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "08c5cbcf"
+        },
+        {
+          "index": 1,
+          "argb": "05c5cbcf"
+        },
+        {
+          "index": 127,
+          "argb": "04c5cbcf"
+        },
+        {
+          "index": 255,
+          "argb": "02030405"
+        },
+        {
+          "index": 256,
+          "argb": "07c5cbcf"
+        },
+        {
+          "index": 257,
+          "argb": "03030405"
+        },
+        {
+          "index": 4095,
+          "argb": "03030405"
+        },
+        {
+          "index": 8192,
+          "argb": "03c5cbcf"
+        },
+        {
+          "index": 16384,
+          "argb": "02030405"
+        },
+        {
+          "index": 32767,
+          "argb": "07030405"
+        },
+        {
+          "index": 32768,
+          "argb": "05c5cbcf"
+        },
+        {
+          "index": 49151,
+          "argb": "01030405"
+        },
+        {
+          "index": 65024,
+          "argb": "08c5cbcf"
+        },
+        {
+          "index": 65279,
+          "argb": "08c5cbcf"
+        },
+        {
+          "index": 65534,
+          "argb": "06c5cbcf"
+        },
+        {
+          "index": 65535,
+          "argb": "04c5cbcf"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 3,
+      "dark": false,
+      "variant": 3,
+      "seed": 637675512,
+      "sha256": "0583970bd59a516ab524af130606465fa8b3839c8d6c068939415ba574ce9cc6",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "00c5cbcf"
+        },
+        {
+          "index": 1,
+          "argb": "09c5cbcf"
+        },
+        {
+          "index": 127,
+          "argb": "01030405"
+        },
+        {
+          "index": 255,
+          "argb": "00c5cbcf"
+        },
+        {
+          "index": 256,
+          "argb": "03030405"
+        },
+        {
+          "index": 257,
+          "argb": "01030405"
+        },
+        {
+          "index": 4095,
+          "argb": "01030405"
+        },
+        {
+          "index": 8192,
+          "argb": "04c5cbcf"
+        },
+        {
+          "index": 16384,
+          "argb": "08030405"
+        },
+        {
+          "index": 32767,
+          "argb": "04030405"
+        },
+        {
+          "index": 32768,
+          "argb": "03030405"
+        },
+        {
+          "index": 49151,
+          "argb": "00030405"
+        },
+        {
+          "index": 65024,
+          "argb": "05030405"
+        },
+        {
+          "index": 65279,
+          "argb": "01030405"
+        },
+        {
+          "index": 65534,
+          "argb": "04030405"
+        },
+        {
+          "index": 65535,
+          "argb": "03c5cbcf"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 3,
+      "dark": true,
+      "variant": 0,
+      "seed": -952599031,
+      "sha256": "61c432151aae2b6a51358fe9e625114dd63dbc35e8c5de9b7bc315fd2e1efb93",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "00aeb5b9"
+        },
+        {
+          "index": 1,
+          "argb": "00aeb5b9"
+        },
+        {
+          "index": 127,
+          "argb": "08030405"
+        },
+        {
+          "index": 255,
+          "argb": "04030405"
+        },
+        {
+          "index": 256,
+          "argb": "0a030405"
+        },
+        {
+          "index": 257,
+          "argb": "03aeb5b9"
+        },
+        {
+          "index": 4095,
+          "argb": "09aeb5b9"
+        },
+        {
+          "index": 8192,
+          "argb": "08030405"
+        },
+        {
+          "index": 16384,
+          "argb": "09030405"
+        },
+        {
+          "index": 32767,
+          "argb": "03030405"
+        },
+        {
+          "index": 32768,
+          "argb": "03aeb5b9"
+        },
+        {
+          "index": 49151,
+          "argb": "05aeb5b9"
+        },
+        {
+          "index": 65024,
+          "argb": "07aeb5b9"
+        },
+        {
+          "index": 65279,
+          "argb": "08030405"
+        },
+        {
+          "index": 65534,
+          "argb": "05aeb5b9"
+        },
+        {
+          "index": 65535,
+          "argb": "0a030405"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 3,
+      "dark": true,
+      "variant": 1,
+      "seed": 1069957963,
+      "sha256": "6ea68276b158639b478fd8eb06b7942495407ae6a4f21cd28e45d8710aab104a",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "03aeb5b9"
+        },
+        {
+          "index": 1,
+          "argb": "0baeb5b9"
+        },
+        {
+          "index": 127,
+          "argb": "01030405"
+        },
+        {
+          "index": 255,
+          "argb": "05030405"
+        },
+        {
+          "index": 256,
+          "argb": "0baeb5b9"
+        },
+        {
+          "index": 257,
+          "argb": "02030405"
+        },
+        {
+          "index": 4095,
+          "argb": "0baeb5b9"
+        },
+        {
+          "index": 8192,
+          "argb": "08aeb5b9"
+        },
+        {
+          "index": 16384,
+          "argb": "02030405"
+        },
+        {
+          "index": 32767,
+          "argb": "01030405"
+        },
+        {
+          "index": 32768,
+          "argb": "09030405"
+        },
+        {
+          "index": 49151,
+          "argb": "02aeb5b9"
+        },
+        {
+          "index": 65024,
+          "argb": "09030405"
+        },
+        {
+          "index": 65279,
+          "argb": "07aeb5b9"
+        },
+        {
+          "index": 65534,
+          "argb": "07aeb5b9"
+        },
+        {
+          "index": 65535,
+          "argb": "03aeb5b9"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 3,
+      "dark": true,
+      "variant": 2,
+      "seed": -397249258,
+      "sha256": "c5aa6c719d0ab8d7d55acf536ef26f19684aa2078d8a05c70a5aa27d852d7fc5",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "0aaeb5b9"
+        },
+        {
+          "index": 1,
+          "argb": "06aeb5b9"
+        },
+        {
+          "index": 127,
+          "argb": "05aeb5b9"
+        },
+        {
+          "index": 255,
+          "argb": "03030405"
+        },
+        {
+          "index": 256,
+          "argb": "08aeb5b9"
+        },
+        {
+          "index": 257,
+          "argb": "03030405"
+        },
+        {
+          "index": 4095,
+          "argb": "03030405"
+        },
+        {
+          "index": 8192,
+          "argb": "04aeb5b9"
+        },
+        {
+          "index": 16384,
+          "argb": "03030405"
+        },
+        {
+          "index": 32767,
+          "argb": "08030405"
+        },
+        {
+          "index": 32768,
+          "argb": "06aeb5b9"
+        },
+        {
+          "index": 49151,
+          "argb": "02030405"
+        },
+        {
+          "index": 65024,
+          "argb": "09aeb5b9"
+        },
+        {
+          "index": 65279,
+          "argb": "09aeb5b9"
+        },
+        {
+          "index": 65534,
+          "argb": "07aeb5b9"
+        },
+        {
+          "index": 65535,
+          "argb": "05aeb5b9"
+        }
+      ]
+    },
+    {
+      "skinOrdinal": 3,
+      "dark": true,
+      "variant": 3,
+      "seed": 637675512,
+      "sha256": "839c77594c3b8ba280dfc89c96045acba274c83dd6933caae64a5aae61c4ec9d",
+      "samples": [
+        {
+          "index": 0,
+          "argb": "00aeb5b9"
+        },
+        {
+          "index": 1,
+          "argb": "0aaeb5b9"
+        },
+        {
+          "index": 127,
+          "argb": "01030405"
+        },
+        {
+          "index": 255,
+          "argb": "00aeb5b9"
+        },
+        {
+          "index": 256,
+          "argb": "03030405"
+        },
+        {
+          "index": 257,
+          "argb": "01030405"
+        },
+        {
+          "index": 4095,
+          "argb": "02030405"
+        },
+        {
+          "index": 8192,
+          "argb": "05aeb5b9"
+        },
+        {
+          "index": 16384,
+          "argb": "0a030405"
+        },
+        {
+          "index": 32767,
+          "argb": "05030405"
+        },
+        {
+          "index": 32768,
+          "argb": "04030405"
+        },
+        {
+          "index": 49151,
+          "argb": "00030405"
+        },
+        {
+          "index": 65024,
+          "argb": "06030405"
+        },
+        {
+          "index": 65279,
+          "argb": "01030405"
+        },
+        {
+          "index": 65534,
+          "argb": "05030405"
+        },
+        {
+          "index": 65535,
+          "argb": "03aeb5b9"
+        }
+      ]
+    }
+  ]
+}

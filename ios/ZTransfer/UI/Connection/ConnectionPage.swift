@@ -245,12 +245,7 @@ struct ConnectionPage: View {
     /// corresponding system route and fall back to the app settings page if
     /// the installed iOS version rejects that route.
     private func openWirelessSettings(_ mode: WirelessMode) {
-        let route = mode == .sta ? "App-Prefs:root=INTERNET_TETHERING" : "App-Prefs:root=WIFI"
-        guard let url = URL(string: route) else { return }
-        UIApplication.shared.open(url, options: [:]) { opened in
-            guard !opened, let fallback = URL(string: UIApplication.openSettingsURLString) else { return }
-            UIApplication.shared.open(fallback)
-        }
+        CameraWirelessSettings.open(mode)
     }
 }
 

@@ -12,6 +12,8 @@ struct GeniePopupPanel<Content: View>: UIViewRepresentable {
     let anchorX: CGFloat
     let anchorWidth: CGFloat
     let anchorGap: CGFloat
+    var opensAbove = false
+    var onSettled: ((CGFloat) -> Void)? = nil
 
     func makeUIView(context: Context) -> GeniePopupHostView {
         // SwiftUI calls updateUIView after creation; assigning the hosted
@@ -22,8 +24,9 @@ struct GeniePopupPanel<Content: View>: UIViewRepresentable {
     func updateUIView(_ view: GeniePopupHostView, context: Context) {
         view.host.rootView = AnyView(content.environment(\.self, context.environment))
         view.accessibilityIdentifier = "popup-panel-\(trigger.rawValue)"
+        view.onSettled = onSettled
         view.configure(target: targetProgress, anchorX: anchorX,
-                       anchorWidth: anchorWidth, anchorGap: anchorGap)
+                       anchorWidth: anchorWidth, anchorGap: anchorGap, opensAbove: opensAbove)
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: GeniePopupHostView,
@@ -61,6 +64,8 @@ final class GeniePopupHostView: UIView {
     private var anchorGap: CGFloat = 8
     private var lastDrawnProgress: CGFloat?
     private var settledTarget: CGFloat?
+    private var opensAbove = false
+    var onSettled: ((CGFloat) -> Void)?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -107,15 +112,17 @@ final class GeniePopupHostView: UIView {
     }
 
     func configure(target next: CGFloat, anchorX: CGFloat,
-                   anchorWidth: CGFloat, anchorGap: CGFloat) {
-        if self.anchorX != anchorX || self.anchorWidth != anchorWidth || self.anchorGap != anchorGap {
+                   anchorWidth: CGFloat, anchorGap: CGFloat, opensAbove: Bool = false) {
+        if self.anchorX != anchorX || self.anchorWidth != anchorWidth || self.anchorGap != anchorGap || self.opensAbove != opensAbove {
             lastDrawnProgress = nil
         }
+        self.opensAbove = opensAbove
         self.anchorX = anchorX
         self.anchorWidth = anchorWidth
         self.anchorGap = anchorGap
         let next = GeniePopupMotion.progress(next)
         if next != target {
+            if next == progress { settledTarget = nil }
             target = next
             // Reverse from the currently drawn frame; no delayed completion
             // can unmount or hide a popup that has already been reopened.
@@ -212,11 +219,16 @@ final class GeniePopupHostView: UIView {
         let source = CGRect(x: anchorX * size.width - anchorWidth * size.width / 2,
                             y: -anchorGap, width: anchorWidth * size.width, height: 0)
         let geometry = GeniePopupMotion.FrameGeometry(progress: progress, source: source, size: size)
-        var top = geometry.row(at: crossSections[0]).padded(by: paddingFraction)
+        func row(_ index: Int) -> GeniePopupMotion.Row {
+            let section = crossSections[opensAbove ? bands.count - index : index]
+            let original = geometry.row(at: section).padded(by: paddingFraction)
+            return opensAbove ? .init(left: original.left, right: original.right, y: size.height - original.y) : original
+        }
+        var top = row(0)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         for (index, band) in bands.enumerated() {
-            let bottom = geometry.row(at: crossSections[index + 1]).padded(by: paddingFraction)
+            let bottom = row(index + 1)
             band.transform = GeniePopupMotion.bandTransform(
                 size: band.bounds.size,
                 top: top,
@@ -255,6 +267,8 @@ final class GeniePopupHostView: UIView {
         }
         CATransaction.commit()
         settledTarget = target
+        let settled = target
+        if let onSettled { DispatchQueue.main.async { onSettled(settled) } }
     }
 
     func stop() {
@@ -268,7 +282,7 @@ final class GeniePopupHostView: UIView {
 /// synthetic fallback is involved. Bounds are outside the button's press
 /// effect, so feedback does not move the attachment edge.
 enum GeniePopupTrigger: String, Hashable {
-    case filter, settings, gps
+    case filter, settings, gps, remoteWhiteBalance, remoteFocusArea, remoteGrid
 }
 
 struct GeniePopupAnchorPreferenceKey: PreferenceKey {

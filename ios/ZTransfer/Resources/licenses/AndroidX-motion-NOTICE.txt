@@ -1,0 +1,16 @@
+AndroidX Compose animation and Bézier mathematics (version 1.7.6)
+Copyright 2019–2024 The Android Open Source Project
+Licensed under the Apache License, Version 2.0 (Apache-2.0.txt).
+
+ZTransferAndroidMotion.swift and ZTransferAndroidMath.swift adapt the Float
+tween, underdamped spring, duration estimation, cubic root solver and fast
+cube root to native Swift. ZTransferScalarAnimation.swift follows Animatable's
+first-frame, interruption and completion semantics. No Android/Kotlin runtime
+is bundled or executed in the iOS product.
+
+Sources: FloatAnimationSpec.kt, SpringSimulation.kt, SpringEstimation.kt,
+Easing.kt, Animatable.kt, SuspendAnimation.kt, AnimateAsState.kt, Bezier.kt,
+and ui-util/MathHelpers.kt from:
+https://dl.google.com/dl/android/maven2/androidx/compose/animation/animation-core/1.7.6/animation-core-1.7.6-sources.jar
+https://dl.google.com/dl/android/maven2/androidx/compose/ui/ui-graphics/1.7.6/ui-graphics-1.7.6-sources.jar
+https://dl.google.com/dl/android/maven2/androidx/compose/ui/ui-util/1.7.6/ui-util-1.7.6-sources.jar

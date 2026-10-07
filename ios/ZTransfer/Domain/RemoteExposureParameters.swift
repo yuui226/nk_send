@@ -4,6 +4,12 @@ import Foundation
 /// iOS monitor can follow the Android RemoteLab protocol without inventing a second mapping.
 enum RemoteProperty: UInt32, CaseIterable, Sendable {
     case batteryLevel = 0x5001
+    case whiteBalance = 0x5005
+    case movieWhiteBalance = 0xD23A
+    case movieWhiteBalanceAlternate = 0xD1A7
+    case focusArea = 0x501C
+    case liveViewFocusArea = 0xD05D
+    case movieFocusArea = 0xD1F8
     case focusMode = 0x500A
     case nikonAFMode = 0xD161
     case angleLevel = 0xD067
@@ -26,6 +32,8 @@ enum RemoteProperty: UInt32, CaseIterable, Sendable {
     case liveViewSelector = 0xD1A6
     case liveViewImageSize = 0xD1AC
     case applicationMode = 0xD1F0
+    case nikonLightMeter = 0xD10A
+    case nikonExposureIndicate = 0xD1B1
 }
 
 enum RemoteExposureField: Hashable, Identifiable, Sendable {
@@ -172,7 +180,8 @@ enum RemoteExposureParameters {
         case .nikonAFMode:
             return [0: "AF-S", 1: "AF-C", 2: "AF-A"][raw] ?? String(format: "0x%llx", raw)
         case .angleLevel: return String(format: "%.1f°", Double(Int64(bitPattern: raw)) / 65536)
-        case .liveViewImageSize, .applicationMode: return String(raw)
+        case .liveViewImageSize, .applicationMode, .nikonLightMeter, .nikonExposureIndicate, .whiteBalance, .movieWhiteBalance,
+             .movieWhiteBalanceAlternate, .focusArea, .liveViewFocusArea, .movieFocusArea: return String(raw)
         }
     }
 }

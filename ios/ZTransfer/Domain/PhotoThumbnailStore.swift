@@ -107,13 +107,12 @@ actor PhotoThumbnailStore {
     ) async throws -> Data? {
         beginSession(identity: identity)
         guard let expectedIdentity = cameraIdentity else { return nil }
-        let (key, standardKey) = cacheKeys(for: file, directSTA: directSTA)
+        let keys = cacheKeys(for: file, directSTA: directSTA)
+        let key = keys.primary
         if let value = memory[key] { touch(key); return value }
         if negative.contains(key) { return nil }
         if let store = cameraStore,
-           let url = store.find(key, legacyName: PhotoThumbnailDiskCache.legacyCacheFileName(
-               fileName: file.fileName, size: file.size, captureDate: file.captureDate
-           ), alternateName: directSTA ? standardKey : nil),
+           let url = store.find(key, legacyName: keys.legacy, alternateName: keys.alternate),
            let raw = try? Data(contentsOf: url), !raw.isEmpty {
             let value = transform(raw)
             if validate(value) {
@@ -177,31 +176,38 @@ actor PhotoThumbnailStore {
     /// written to disk only and does not populate the decoded-memory cache.
     /// Android uses this path after each accepted metadata batch.
     func prefetch(
+        file: CameraFile, identity: String, directSTA: Bool = false,
+        validate: (@Sendable (Data) -> Bool)? = nil,
+        fetch: @escaping @Sendable () async throws -> Data
+    ) async throws -> Bool {
+        try await prefetchOutcome(file: file, identity: identity, directSTA: directSTA,
+                                  validate: validate, fetch: fetch).isSettled
+    }
+
+    func prefetchOutcome(
         file: CameraFile,
         identity: String,
         directSTA: Bool = false,
         validate: (@Sendable (Data) -> Bool)? = nil,
         fetch: @escaping @Sendable () async throws -> Data
-    ) async throws -> Bool {
+    ) async throws -> ThumbnailPrefetchOutcome {
         beginSession(identity: identity)
-        guard let expectedIdentity = cameraIdentity else { return false }
-        let (key, standardKey) = cacheKeys(for: file, directSTA: directSTA)
+        guard let expectedIdentity = cameraIdentity else { return .unsettled }
+        let keys = cacheKeys(for: file, directSTA: directSTA)
+        let key = keys.primary
         // Android's no-thumbnail set is a settled result, not a transient
         // failure. A disk-fill pass must not keep retrying the same handle.
-        if let value = memory[key], validate?(value) != false { touch(key); return true }
-        if negative.contains(key), validate == nil { return true }
+        if negative.contains(key), validate == nil { return .settled }
         if validate != nil { negative.remove(key) }
         if let store = cameraStore,
-           let url = store.find(key, legacyName: PhotoThumbnailDiskCache.legacyCacheFileName(
-               fileName: file.fileName, size: file.size, captureDate: file.captureDate
-           ), alternateName: directSTA ? standardKey : nil) {
+           let url = store.find(key, legacyName: keys.legacy, alternateName: keys.alternate) {
             // Ordinary Android-compatible fill uses indexed file length.
             // Sequential STA also validates old entries, so an in-place app
             // update cannot keep treating rejected bytes as completed work.
             if let validate {
-                if let raw = try? Data(contentsOf: url), validate(raw) { return true }
+                if let raw = try? Data(contentsOf: url), validate(raw) { return .cached }
                 store.remove(key, url: url)
-            } else { return true }
+            } else { return .cached }
         }
         // All formats participate in the ordered fill, including direct-STA
         // RAW/video. Visibility is never a prerequisite for camera reads.
@@ -209,10 +215,10 @@ actor PhotoThumbnailStore {
             flight.waiters += 1
             let value = try await awaitFlight(WaiterToken(key: key, flight: flight))
             guard cameraIdentity == expectedIdentity else { throw CancellationError() }
-            if let validate, !validate(value) { cameraStore?.remove(key); return false }
-            guard !value.isEmpty else { return true }
-            guard cameraStore?.write(value, as: key) == true else { return false }
-            return true
+            if let validate, !validate(value) { cameraStore?.remove(key); return .unsettled }
+            guard !value.isEmpty else { return .settled }
+            guard cameraStore?.write(value, as: key) == true else { return .unsettled }
+            return .settled
         }
         // Keep the completion behind the disk write. A visible request that
         // waits for this flight must observe the same cache state as Android
@@ -230,11 +236,11 @@ actor PhotoThumbnailStore {
             guard cameraIdentity == expectedIdentity else { throw CancellationError() }
             // With a validator only usable bytes reach persistence. Ordinary
             // GetThumb also retains its authoritative empty-response handling.
-            return true
+            return .settled
         } catch is PrefetchCacheWriteError {
             // Neither invalid image bytes nor a failed write settles the item.
             // The sequential owner can retry without relying on cell visibility.
-            return false
+            return .unsettled
         } catch { throw error }
     }
 
@@ -292,16 +298,21 @@ actor PhotoThumbnailStore {
         }
     }
 
-    private func cacheKeys(for file: CameraFile, directSTA: Bool) -> (primary: String, standard: String) {
+    private func cacheKeys(for file: CameraFile, directSTA: Bool) -> (primary: String, legacy: String?, alternate: String?) {
         let standard = PhotoThumbnailDiskCache.cacheFileName(
             fileName: file.fileName,
             size: file.size,
             captureDate: file.captureDate
         )
+        if directSTA && file.fileExtension == ".jpg" {
+            return (PhotoThumbnailDiskCache.staJpegCacheFileName(handle: file.id, size: file.size), nil, nil)
+        }
         let primary = directSTA
             ? PhotoThumbnailDiskCache.staCacheFileName(handle: file.id, size: file.size)
             : standard
-        return (primary, standard)
+        return (primary, PhotoThumbnailDiskCache.legacyCacheFileName(
+            fileName: file.fileName, size: file.size, captureDate: file.captureDate),
+            directSTA ? standard : nil)
     }
 
     private func insert(_ value: Data, key: String) {
@@ -407,4 +418,17 @@ private actor ThumbnailRemoteGate {
             available = true
         }
     }
+}
+
+/// A completed/no-thumbnail result does not imply a pre-existing disk hit.
+/// Android CachedThumbnailBatchPolicy accelerates only `.cached` outcomes.
+enum ThumbnailPrefetchOutcome: Sendable {
+    case cached, settled, unsettled
+    var isSettled: Bool { self != .unsettled }
+}
+
+struct ThumbnailBatchResult: Sendable {
+    var settled = Set<UInt32>()
+    var cached = Set<UInt32>()
+    var interrupted = false
 }

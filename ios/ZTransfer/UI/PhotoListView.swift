@@ -200,14 +200,6 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
     return .identity
 }
 
-/// Android's FileListScreen shows the remote entry introduction across the
-/// first six app starts, incrementing only when the expansion actually begins.
-let remoteEntryIntroMaxPlays = 6
-
-func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
-    max(0, playCount) < remoteEntryIntroMaxPlays
-}
-
 @MainActor struct PhotoListView: View {
     @StateObject private var model: PhotoListViewModel
     @StateObject private var queueModel: TransferQueueViewModel
@@ -216,17 +208,23 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
     let isSessionConnected: Bool
     let onRetrySTA: () -> Void
     let onTransportLost: (CameraSession) -> Void
-    // RootView creates this workspace with an established session and keeps it
-    // mounted after transport loss; isSessionConnected tracks live connectivity.
-    private let session: CameraSession
+    // Restored pages may have only presentation history. Protocol work always
+    // requires the real session; remembering a mode never creates one.
+    private let session: CameraSession?
+    private let presentationMode: CameraPresentationMode
+    private var transferSession: CameraSession? { isSessionConnected ? session : nil }
     @AppStorage("tap_to_preview") private var tapToPreview = false
     @State private var selectedFile: CameraFile?
     @State private var previewAnchor: CGRect?
+    @Environment(\.displayScale) private var displayScale
+    private var remoteEntryAtTop: Bool {
+        PhotoListScrollActivity.isAtTop(offset: -photoListScrollOffset, scale: displayScale)
+    }
     @State private var photoListScrollProxy: ScrollViewProxy?
     @State private var previewReturnFileID: UInt32?
     @State private var previewReturnNonce = 0
     @State private var showingFilter = false
-    @State private var showingQueue = false
+    @SceneStorage("camera_workspace_queue") private var showingQueue = false
     @State private var queueTopControlsVisible = false
     @State private var queueWorkspaceTransitionNonce = 0
     @AppStorage("defer_transfer_start") private var deferTransferStart = false
@@ -269,9 +267,8 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
     @State private var remoteEntryHint: String?
     @State private var remoteEntryHintID = UUID()
     @State private var remoteExpandedAwayFromTop = false
-    @State private var remoteIntroExpanded = false
-    @State private var remoteIntroHandledForEntry = false
-    @AppStorage("remote_entry_intro_play_count") private var remoteEntryIntroPlayCount = 0
+    @StateObject private var remoteIntro = RemoteEntryIntroController()
+    @SceneStorage("camera_workspace_intro_handled") private var remoteIntroHandled = false
     @State private var showingSettings = false
     @State private var transferDirectoryAttention = false
     @State private var signalExpanded = false
@@ -293,12 +290,16 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
     @State private var heldFlightBaselineRemaining: Int?
     @State private var queueImpact = 0
 
-    init(session: CameraSession, queue: TransferQueue, directory: DirectoryAccessStore = DirectoryAccessStore(), effectsStore: PhotoEffectsStore = PhotoEffectsStore(), isSessionConnected: Bool = true, onRetrySTA: @escaping () -> Void = {}, remotePresentation: Binding<Bool>? = nil, onTransportLost: @escaping (CameraSession) -> Void = { _ in }) {
-        _model = StateObject(wrappedValue: PhotoListViewModel.cached(session: session,
-                                                                      onTransportLost: { onTransportLost(session) }))
+    init(session: CameraSession?, presentationMode: CameraPresentationMode = .sta, queue: TransferQueue, directory: DirectoryAccessStore = DirectoryAccessStore(), effectsStore: PhotoEffectsStore = PhotoEffectsStore(), isSessionConnected: Bool = true, onRetrySTA: @escaping () -> Void = {}, remotePresentation: Binding<Bool>? = nil, onTransportLost: @escaping (CameraSession) -> Void = { _ in }) {
+        let listModel = session.map { live in
+            PhotoListViewModel.cached(session: live, onTransportLost: { onTransportLost(live) })
+        } ?? PhotoListViewModel(disconnected: presentationMode)
+        _model = StateObject(wrappedValue: listModel)
+        self.presentationMode = session.map { CameraPresentationMode(isUSB: $0.isUSB, wirelessMode: $0.wirelessMode) }
+            ?? presentationMode
         _queueModel = StateObject(wrappedValue: TransferQueueViewModel(queue: queue))
         _directoryStore = ObservedObject(wrappedValue: directory)
-        self.effectsStore = effectsStore; self.isSessionConnected = isSessionConnected
+        self.effectsStore = effectsStore; self.isSessionConnected = isSessionConnected && session != nil
         self.onRetrySTA = onRetrySTA
         self.remotePresentation = remotePresentation
         self.onTransportLost = onTransportLost; self.session = session
@@ -335,6 +336,12 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
             ScrollViewReader { reader in
                 ScrollView(showsIndicators: false) {
                     Color.clear.frame(height: 1).id("photo-list-top")
+                        .background(PhotoListScrollActivity { atTop in
+                            if !atTop {
+                                remoteIntro.collapse()
+                                remoteExpandedAwayFromTop = false
+                            }
+                        })
                         .background {
                             GeometryReader { proxy in
                                 Color.clear.preference(key: PhotoListScrollOffsetKey.self,
@@ -506,8 +513,11 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
                                 }
                             }
                     } else {
-                        if session.isUSB && !isSessionConnected {
-                            PhotoListUSBDisconnectedState()
+                        if !isSessionConnected {
+                            CameraDisconnectedState(
+                                mode: presentationMode,
+                                onRetrySTA: onRetrySTA
+                            )
                                 .frame(maxWidth: .infinity)
                                 .padding(.horizontal, 32)
                                 .padding(.top, 150)
@@ -519,7 +529,7 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
                                 Text(message).zTransferText(size: ZTransferMetrics.body).padding()
                             case .loaded:
                                 PhotoListEmptyState(filterActive: model.filter.isActive,
-                                                    usb: session.isUSB,
+                                                    usb: (presentationMode == .usb),
                                                     onClearFilter: model.clearFilter)
                                     .frame(maxWidth: .infinity)
                                     .padding(.top, 150)
@@ -560,12 +570,7 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
                 .onPreferenceChange(PhotoListScrollOffsetKey.self) { value in
                     photoListScrollOffset = value
                     showTopButton = value < -360
-                    if value < -2 {
-                        withAnimation(ZTransferMotion.standard) {
-                            remoteIntroExpanded = false
-                            remoteExpandedAwayFromTop = false
-                        }
-                    }
+                    if PhotoListScrollActivity.isAtTop(offset: -value, scale: displayScale) { remoteExpandedAwayFromTop = false }
                 }
                 // Android's photo grid has no pull-to-refresh action. Adding
                 // SwiftUI refreshable made a downward drag restart the camera
@@ -616,18 +621,21 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
             queueFlightOverlay
         }
         .onPreferenceChange(PhotoListQueueTargetPreferenceKey.self) { queueTargetBounds = $0 }
-        .task {
+        .task(id: isSessionConnected) {
+            if showingRemote { showingQueue = false }
             if presentedSections.isEmpty {
                 presentedSections = model.sections
                 presentedCameraFiles = model.availableFiles
             }
-            await session.setPreferHighThroughputTransfers(!showingRemote)
-            queueModel.attach(session: session, directory: directoryStore.directoryURL)
+            await session?.setPreferHighThroughputTransfers(!showingRemote)
+            queueModel.attach(session: transferSession, directory: directoryStore.directoryURL)
             model.setNewMediaHandler { files in
-                guard UserDefaults.standard.bool(forKey: "auto_transfer_new_media"),
-                      let directory = directoryStore.directoryURL else { return }
+                guard let directory = directoryStore.directoryURL else { return }
+                // Read at the new-file event, not when the page first appeared.
+                // Changing the wheel does not rescan or replay rejected files.
+                let mode = AutoTransferMode.load()
                 let deferStart = UserDefaults.standard.bool(forKey: "defer_transfer_start")
-                queueModel.enqueueAutomatic(files, session: session, directory: directory,
+                queueModel.enqueueAutomatic(files, mode: mode, session: transferSession, directory: directory,
                                             autoStart: !deferStart, organizeByDate: organizeByDate,
                                             effects: effectsStore.settings)
             }
@@ -642,39 +650,27 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
         .task(id: queueModel.snapshot.isTransferring) {
             let busy = queueModel.snapshot.isTransferring
             model.setTransferBusy(busy)
-            await session.setTransfersBusy(busy)
+            await session?.setTransfersBusy(busy)
         }
-        .task {
-            guard isRemoteEntryIntroEligible(playCount: remoteEntryIntroPlayCount),
-                  !remoteIntroHandledForEntry else { return }
-            try? await Task.sleep(nanoseconds: 160_000_000)
-            guard !Task.isCancelled,
-                  !remoteIntroHandledForEntry,
-                  photoListScrollOffset >= -2,
-                  selectedFile == nil,
-                  !showingQueue else { return }
-            remoteIntroHandledForEntry = true
-            remoteEntryIntroPlayCount = max(0, remoteEntryIntroPlayCount) + 1
-            withAnimation(.spring(response: 0.34, dampingFraction: 0.58)) {
-                remoteIntroExpanded = true
-            }
-            try? await Task.sleep(nanoseconds: 2_200_000_000)
-            guard !Task.isCancelled else { return }
-            withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.24)) {
-                remoteIntroExpanded = false
-            }
+        .task(id: !showingQueue && !showingRemote) {
+            // Android removes FileListScreen's LaunchedEffect when navigating
+            // to queue/remote. These iOS routes keep the parent view alive, so
+            // cancel explicitly while hidden instead of spending a reminder.
+            guard !showingQueue, !showingRemote, !remoteIntroHandled else { return }
+            await remoteIntro.run(onStarted: { remoteIntroHandled = true })
         }
         .onChange(of: showingRemote) { remote in
+            if remote { showingQueue = false }
             // MainActivity.shouldPreferHighThroughputTransfers: both files and
             // transfer routes enable this; monitoring disables it.
-            Task { await session.setPreferHighThroughputTransfers(!remote) }
+            Task { await session?.setPreferHighThroughputTransfers(!remote) }
         }
         .onDisappear {
             cameraRemovalTask?.cancel()
             dateAnimationTask?.cancel()
             revealWindowTask?.cancel()
             burstAnimationTask?.cancel()
-            Task { await session.setPreferHighThroughputTransfers(false) }
+            Task { await session?.setPreferHighThroughputTransfers(false) }
         }
         .onChange(of: collapseBurstPhotos) { enabled in
             burstAnimationTask?.cancel()
@@ -716,7 +712,7 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
             model.refreshTransferredIDs(directory: directoryStore.directoryURL, organizeByDate: organizeByDate)
         }
         .onChange(of: directoryStore.directoryURL) { directory in
-            queueModel.attach(session: session, directory: directory)
+            queueModel.attach(session: transferSession, directory: directory)
             model.refreshTransferredIDs(directory: directory, organizeByDate: organizeByDate)
         }
         .onChange(of: organizeByDate) { _ in
@@ -761,7 +757,7 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
             }
         }
         .fullScreenCover(isPresented: $internalShowingRemote, onDismiss: RemoteTrialNotice.returnedToList) {
-            RemoteView(session: session,
+            RemoteView(session: session, presentationMode: presentationMode,
                        recordingDirectory: directoryStore.directoryURL,
                        isSessionConnected: isSessionConnected,
                        onRetrySTA: onRetrySTA,
@@ -777,7 +773,7 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
                            // Android keeps monitor navigation mounted
                            // during a dropped session so its STA signal
                            // control can request immediate recovery.
-                           onTransportLost(session)
+                           if let session { onTransportLost(session) }
                        })
         }
         .overlayPreferenceValue(GeniePopupAnchorPreferenceKey.self) { anchors in
@@ -812,8 +808,10 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
     }
 
     @ViewBuilder private var previewOverlay: some View {
+        if let session {
         let files = model.sections.flatMap(\.files)
         PhotoPreviewView(session: session, queueModel: queueModel, files: files,
+                         isSessionConnected: isSessionConnected,
                          burstIDByFile: model.burstIDByFile,
                          transferredFileIDs: model.transferredFileIDs, selectedFile: $selectedFile,
                          directory: directoryStore.directoryURL,
@@ -832,7 +830,7 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
                 return false
             }
             if !deferTransferStart {
-                queueModel.enqueue(file, autoStart: session, directory: directoryStore.directoryURL, organizeByDate: organizeByDate, effects: effectsStore.settings)
+                queueModel.enqueue(file, autoStart: transferSession, directory: directoryStore.directoryURL, organizeByDate: organizeByDate, effects: effectsStore.settings)
             } else {
                 queueModel.enqueue(file, organizeByDate: organizeByDate, effects: effectsStore.settings)
             }
@@ -844,7 +842,7 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
                 return false
             }
             if !deferTransferStart, let directory = directoryStore.directoryURL {
-                queueModel.enqueue(burstFiles, autoStart: session, directory: directory,
+                queueModel.enqueue(burstFiles, autoStart: transferSession, directory: directory,
                                    organizeByDate: organizeByDate, effects: effectsStore.settings)
             } else {
                 queueModel.enqueue(burstFiles, organizeByDate: organizeByDate, effects: effectsStore.settings)
@@ -869,11 +867,19 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
                 try? await Task.sleep(nanoseconds: 760_000_000)
                 if previewReturnNonce == nonce { previewReturnFileID = nil }
             }
+        } onCropConfirmed: { file, selection in
+            guard let directory = directoryStore.directoryURL,
+                  let task = LosslessCropTaskStore().load().first(where: { $0.fileID == file.id }) else { return }
+            queueModel.enqueueCrop(file, task: task, organizeByDate: organizeByDate,
+                                   session: deferTransferStart ? nil : transferSession,
+                                   directory: deferTransferStart ? nil : directory,
+                                   effects: effectsStore.settings)
         }
         .onAppear { model.pauseForPreview() }
         .onDisappear {
             model.resumeAfterPreview()
             model.wakeThumbnailFill()
+        }
         }
     }
 
@@ -898,22 +904,24 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
             .accessibilityIdentifier("popup-trigger-settings")
 
             Button {
-                if session.isUSB {
+                if (presentationMode == .usb) {
                     guard isSessionConnected else { return }
                     withAnimation(signalExpanded
                                   ? .timingCurve(0.4, 0, 0.2, 1, duration: 0.22)
                                   : .spring(response: 0.42, dampingFraction: 0.72)) {
                         signalExpanded.toggle()
                     }
-                } else if session.wirelessMode == .sta {
+                } else if (presentationMode == .sta ? WirelessMode.sta : .ap) == .sta {
                     if !isSessionConnected { onRetrySTA() }
+                } else if !isSessionConnected {
+                    CameraWirelessSettings.open(.ap)
                 }
             } label: {
                 HStack(spacing: signalExpanded ? 5 : 0) {
-                    PhotoListSignalIcon(isUSB: session.isUSB,
-                                        wirelessMode: session.wirelessMode,
+                    PhotoListSignalIcon(isUSB: (presentationMode == .usb),
+                                        wirelessMode: (presentationMode == .sta ? WirelessMode.sta : .ap),
                                         connected: isSessionConnected)
-                    if signalExpanded && session.isUSB && isSessionConnected {
+                    if signalExpanded && (presentationMode == .usb) && isSessionConnected {
                         Text(AppLocalized.resource("connection_usb"))
                             .zTransferTypography(.labelSmall, weight: .medium)
                             .foregroundStyle(ZTransferColors.accentBlue)
@@ -930,6 +938,7 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
                 )
             }
             .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
+            .modifier(DisconnectedSignalBreath(connected: isSessionConnected))
 
             let filterPalette = zTransferButtonAccentPalette(
                 skin: .init(storedValue: skinPreset),
@@ -1024,22 +1033,24 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
             .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
 
             Button {
-                if session.isUSB {
+                if (presentationMode == .usb) {
                     guard isSessionConnected else { return }
                     withAnimation(signalExpanded
                                   ? .timingCurve(0.4, 0, 0.2, 1, duration: 0.22)
                                   : .spring(response: 0.42, dampingFraction: 0.72)) {
                         signalExpanded.toggle()
                     }
-                } else if session.wirelessMode == .sta && !isSessionConnected {
+                } else if (presentationMode == .sta ? WirelessMode.sta : .ap) == .sta && !isSessionConnected {
                     onRetrySTA()
+                } else if !isSessionConnected {
+                    CameraWirelessSettings.open(.ap)
                 }
             } label: {
                 HStack(spacing: signalExpanded ? 5 : 0) {
-                    PhotoListSignalIcon(isUSB: session.isUSB,
-                                        wirelessMode: session.wirelessMode,
+                    PhotoListSignalIcon(isUSB: (presentationMode == .usb),
+                                        wirelessMode: (presentationMode == .sta ? WirelessMode.sta : .ap),
                                         connected: isSessionConnected)
-                    if signalExpanded && session.isUSB && isSessionConnected {
+                    if signalExpanded && (presentationMode == .usb) && isSessionConnected {
                         Text(AppLocalized.resource("connection_usb"))
                             .zTransferTypography(.labelSmall, weight: .medium)
                             .foregroundStyle(ZTransferColors.accentBlue)
@@ -1052,6 +1063,7 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
                 )
             }
             .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
+            .modifier(DisconnectedSignalBreath(connected: isSessionConnected))
         }
         .transition(.opacity)
     }
@@ -1094,7 +1106,7 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
                         ZTransferHaptics.shared.tick()
                         queueModel.pause()
                     case .start:
-                        guard let directory = directoryStore.directoryURL else { return }
+                        guard let session = transferSession, let directory = directoryStore.directoryURL else { return }
                         ZTransferHaptics.shared.tick()
                         queueModel.start(session: session, directory: directory)
                     }
@@ -1198,7 +1210,7 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
     /// preview and EXIF. A late response for an older file is discarded.
     private func requestEffectPreview() {
         effectPreviewRequested = true
-        guard let file = model.latestEffectPreviewFile else { return }
+        guard let session, let file = model.latestEffectPreviewFile else { return }
         let key = "\(file.id)|\(file.fileName)|\(file.size)|\(file.captureDate ?? "")"
         guard effectPreviewFileKey != key,
               effectPreviewAttemptKey != key,
@@ -1262,9 +1274,7 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
 
     @ViewBuilder
     private var remoteEntryOverlay: some View {
-        let remoteExpanded = photoListScrollOffset >= -2 || remoteExpandedAwayFromTop || remoteIntroExpanded
-        let introText = AppLocalized.resource("remote_entry_intro")
-            .replacingOccurrences(of: "\\n", with: "\n")
+        let remoteExpanded = remoteEntryAtTop || remoteExpandedAwayFromTop || remoteIntro.expanded
         VStack(alignment: .leading, spacing: 8) {
             if let remoteEntryHint {
                 Text(remoteEntryHint)
@@ -1275,44 +1285,19 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
                     .background(.regularMaterial, in: Capsule())
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
-            Button {
+            RemoteEntryButton(expanded: remoteExpanded, intro: remoteIntro.expanded,
+                              busy: queueModel.snapshot.isTransferring) {
+                // Even a blocked entry or a peek click ends the V2 campaign.
+                remoteIntro.markUsed()
                 if remoteExpanded {
                     openRemote()
                 } else {
                     ZTransferHaptics.shared.tick()
-                    withAnimation(.spring(response: 0.34, dampingFraction: 0.58)) {
-                        remoteExpandedAwayFromTop = true
-                    }
+                    remoteExpandedAwayFromTop = true
                 }
-            } label: {
-                HStack(spacing: remoteIntroExpanded ? 6 : 0) {
-                    Image(systemName: "camera.aperture")
-                        .font(.system(size: 18, weight: .semibold))
-                        .frame(width: 24, height: 24)
-                    if remoteIntroExpanded {
-                        Text(introText)
-                            .font(.system(size: 10, weight: .semibold))
-                            .multilineTextAlignment(.center)
-                            .lineLimit(2)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                .foregroundStyle(remoteIntroExpanded ? ZTransferColors.accentBlue : ZTransferColors.primaryText)
-                .frame(width: remoteIntroExpanded ? 108 : 44, height: 44)
             }
-            .buttonStyle(ZTransferGlassButtonStyle(
-                cornerRadius: 26,
-                active: remoteIntroExpanded,
-                activeColor: ZTransferColors.accentBlue,
-                activeOutline: remoteIntroExpanded
-            ))
         }
-        .padding(.leading, remoteExpanded ? 18 : -6)
-        .padding(.bottom, 22)
-        .scaleEffect(remoteExpanded ? 1 : 0.88, anchor: .leading)
-        .rotationEffect(.degrees(remoteExpanded ? 0 : -3.5), anchor: .leading)
-        .animation(.spring(response: 0.34, dampingFraction: 0.58), value: remoteExpanded)
-        .animation(.spring(response: 0.34, dampingFraction: 0.58), value: remoteIntroExpanded)
+        .padding(.bottom, 40)
         .animation(ZTransferMotion.standard, value: remoteEntryHint)
     }
 
@@ -1344,6 +1329,8 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
             showUsageHint(AppLocalized.resource("remote_trial_ended"))
             return
         }
+        remoteIntro.collapse()
+        remoteExpandedAwayFromTop = false
         withAnimation(ZTransferMotion.standard) { showingRemote = true }
     }
 
@@ -1503,7 +1490,7 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
         if deferTransferStart {
             queueModel.enqueue(files, organizeByDate: organizeByDate, effects: effectsStore.settings)
         } else {
-            queueModel.enqueue(files, autoStart: session, directory: directoryStore.directoryURL,
+            queueModel.enqueue(files, autoStart: transferSession, directory: directoryStore.directoryURL,
                                organizeByDate: organizeByDate, effects: effectsStore.settings)
         }
     }
@@ -1546,7 +1533,7 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
             ZTransferHaptics.shared.tick()
             beginQueueFlightHold(1)
             startListQueueFlight(for: file)
-            queueModel.enqueue(file, autoStart: session, directory: directoryStore.directoryURL,
+            queueModel.enqueue(file, autoStart: transferSession, directory: directoryStore.directoryURL,
                                organizeByDate: organizeByDate, effects: effectsStore.settings)
         } else {
             ZTransferHaptics.shared.tick()
@@ -1701,7 +1688,7 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
         let id = UUID()
         let flightCount = max(1, count)
         let visiblePackCandidates = count > 1 ? makeQueueFlightPacks(packFiles) : []
-        let topImage = session.memoryThumbnailImage(file: file)
+        let topImage = session?.memoryThumbnailImage(file: file)
         let packDuration = visiblePackCandidates.isEmpty ? 0.0 : 0.42
         queueFlights.append(PhotoListQueueFlight(
             id: id,
@@ -1766,7 +1753,7 @@ func isRemoteEntryIntroEligible(playCount: Int) -> Bool {
                   bounds.intersects(screen) else { continue }
             candidates.append(PhotoListQueuePackSoul(
                 bounds: bounds,
-                image: session.memoryThumbnailImage(file: file)
+                image: session?.memoryThumbnailImage(file: file)
             ))
         }
         candidates.sort {
@@ -1992,22 +1979,11 @@ struct PhotoListSignalIcon: View {
 
     var body: some View {
         if isUSB {
-            ClassicUSBIcon(tint: ZTransferColors.accentBlue)
+            ClassicUSBIcon(tint: connected ? ZTransferColors.accentBlue : ZTransferColors.statusError)
                 .frame(width: 18, height: 18)
         } else if wirelessMode == .sta {
             let tint = connected ? ZTransferColors.accentBlue : ZTransferColors.statusError
-            Canvas { context, size in
-                let width = size.width * 0.16
-                let gap = size.width * 0.10
-                let heights: [CGFloat] = [0.30, 0.48, 0.66, 0.84].map { size.height * $0 }
-                let total = width * 4 + gap * 3
-                let start = (size.width - total) / 2
-                for (index, height) in heights.enumerated() {
-                    let x = start + CGFloat(index) * (width + gap)
-                    let rect = CGRect(x: x, y: size.height - height, width: width, height: height)
-                        context.fill(Path(roundedRect: rect, cornerRadius: width * 0.35), with: .color(tint))
-                }
-            }
+            STASignalIcon(connected: connected, tint: tint)
             .frame(width: 19, height: 18)
             .accessibilityLabel(AppLocalized.resource(connected ? "sta_signal_connected" : "sta_signal_disconnected_reconnect"))
         } else {
@@ -2146,28 +2122,6 @@ private struct PhotoListEmptyState: View {
                 }
                     .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 18))
             }
-        }
-    }
-}
-
-/// Android keeps an established USB workspace mounted after cable/power loss.
-/// When no catalog was ever loaded, show the wired recovery guidance instead
-/// of an endless spinner or a generic protocol error. There is intentionally
-/// no disconnect/reconnect action: recovery remains physical reattach/power-on.
-private struct PhotoListUSBDisconnectedState: View {
-    var body: some View {
-        VStack(spacing: 0) {
-            ClassicUSBIcon(tint: ZTransferColors.accentOrange)
-                .frame(width: 64, height: 64)
-            Spacer().frame(height: 16)
-            Text(AppLocalized.resource("usb_connection_lost"))
-                .zTransferTypography(.titleMedium, weight: .medium)
-                .foregroundStyle(ZTransferColors.primaryText)
-            Spacer().frame(height: 6)
-            Text(AppLocalized.resource("reconnect_camera_usb"))
-                .zTransferTypography(.bodySmall)
-                .foregroundStyle(ZTransferColors.secondaryText)
-                .multilineTextAlignment(.center)
         }
     }
 }
@@ -2346,7 +2300,8 @@ struct QueuePill: View {
             if visualMode == .icon || usesNativeLiquidGlass {
                 ZTransferButtonMaterialSurface(
                     skin: .init(storedValue: skinPreset),
-                    cornerRadius: 22
+                    cornerRadius: 22,
+                    textureSeed: 0x2A71E001 // Android QUEUE_ENTRY_BUTTON_TEXTURE_SEED.
                 )
             } else {
                 // Android speed/count/generating/Done/paused capsule is a
@@ -2690,7 +2645,7 @@ private struct LiveTransferStatusBadge: View {
 }
 
 private struct CameraThumbnailView: View {
-    let session: CameraSession
+    let session: CameraSession?
     var file: CameraFile?
     var allowRemoteThumbnail = true
     var transferred: Bool = false
@@ -2701,7 +2656,7 @@ private struct CameraThumbnailView: View {
     @State private var image: UIImage?
 
     init(
-        session: CameraSession,
+        session: CameraSession?,
         file: CameraFile? = nil,
         allowRemoteThumbnail: Bool = true,
         transferred: Bool = false,
@@ -2718,7 +2673,7 @@ private struct CameraThumbnailView: View {
         self.showsCornerBadges = showsCornerBadges
         self.queueTask = queueTask
         self.progressModel = progressModel
-        _image = State(initialValue: file.flatMap { session.memoryThumbnailImage(file: $0) })
+        _image = State(initialValue: file.flatMap { session?.memoryThumbnailImage(file: $0) })
     }
 
     var body: some View {
@@ -2791,7 +2746,7 @@ private struct CameraThumbnailView: View {
         .clipped()
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .task(id: allowRemoteThumbnail) {
-            guard let file else { return }
+            guard let session, let file else { return }
             if session.wirelessMode == .sta {
                 // View lifetime owns only observation. The session's ordered
                 // pipeline keeps loading even when this cell leaves the grid.
@@ -2820,7 +2775,7 @@ private struct CameraThumbnailView: View {
 }
 
 private struct BurstThumbnailView: View {
-    let session: CameraSession
+    let session: CameraSession?
     let group: BurstPhotoGroup
     var allowRemoteThumbnails = true
     var transferred: Bool = false

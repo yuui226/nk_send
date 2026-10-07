@@ -282,3 +282,42 @@ final class CameraIOGateTests: XCTestCase {
         XCTAssertTrue(result)
     }
 }
+
+@MainActor
+private final class PreviewReadOrder {
+    var events: [String] = []
+}
+
+private actor PreviewTimingTransport: PTPCommandTransport {
+    let order: PreviewReadOrder
+    init(order: PreviewReadOrder) { self.order = order }
+    func sendPTP(command: Data, data: Data?) async throws -> (response: Data, payload: Data) {
+        let request = try PTPCodec.decode(command)
+        await MainActor.run {
+            order.events.append(request.code == PTPConstants.getFHDPicture ? "fhd" : "exif")
+        }
+        return (PTPCodec.encode(type: .response, code: PTPConstants.responseOK,
+                                transactionID: request.transactionID),
+                request.code == PTPConstants.getFHDPicture ? Data([1, 2, 3]) : Data())
+    }
+}
+
+extension CameraIOGateTests {
+    @MainActor
+    func testCurrentPreviewPublishesBeforeExifAndCachedReadsStaySkipped() async {
+        let order = PreviewReadOrder()
+        let camera = CameraSession(repository: CameraRepository(
+            session: PTPSession(transport: PreviewTimingTransport(order: order))))
+        let file = CameraFile(id: 9, storageID: 1, format: 0x3801, size: 100,
+                              fileName: "DSC_0009.JPG", captureDate: "20261001T120000", isProtected: false)
+        let (image, _) = await camera.previewAndExif(file: file, onPreviewLoaded: { data in
+            XCTAssertEqual(data, Data([1, 2, 3]))
+            order.events.append("preview-visible")
+        })
+        XCTAssertEqual(image, Data([1, 2, 3]))
+        XCTAssertEqual(order.events, ["fhd", "preview-visible", "exif"])
+        _ = await camera.previewAndExif(file: file, loadPreview: false, loadExif: false,
+                                       onPreviewLoaded: { _ in XCTFail("Cached FHD must not be republished") })
+        XCTAssertEqual(order.events, ["fhd", "preview-visible", "exif"])
+    }
+}

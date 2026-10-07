@@ -114,7 +114,7 @@ final class ConnectionStateTests: XCTestCase {
         XCTAssertEqual(complete.success, 1, accuracy: 0.0001)
     }
 
-    func testRemoteEntryIntroStopsAfterSixRecordedStarts() {
+    func testRemoteEntryIntroStopsAfterTwentyRecordedStarts() {
         XCTAssertTrue(isRemoteEntryIntroEligible(playCount: -1))
         XCTAssertTrue(isRemoteEntryIntroEligible(playCount: 0))
         XCTAssertTrue(isRemoteEntryIntroEligible(playCount: remoteEntryIntroMaxPlays - 1))

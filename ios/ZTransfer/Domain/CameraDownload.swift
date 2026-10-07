@@ -3,6 +3,16 @@ import Darwin
 
 let cameraExifHeaderCaptureBytes = 256 * 1024
 
+/// Mirrors Android DownloadIntegrity: prefer a positive, non-sentinel size
+/// that disagrees with the received full object, first from the transfer
+/// phase and then from the catalog/GetObjectSize result.
+func mismatchedFullObjectSize(received: UInt64, declared: UInt64, known: UInt64) -> UInt64? {
+    let unknown = UInt64(UInt32.max)
+    if declared > 0, declared != unknown, received != declared { return declared }
+    if known > 0, known != unknown, received != known { return known }
+    return nil
+}
+
 struct TransferFileOperations: Sendable {
     let exists: @Sendable (URL) -> Bool
     let move: @Sendable (URL, URL) throws -> Void

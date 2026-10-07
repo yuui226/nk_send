@@ -51,9 +51,9 @@ final class PhotoListViewModel: ObservableObject {
     private var storageIDsBySlot: [UInt32: Set<UInt32>] = [:]
     var availableFiles: [CameraFile] { allFiles }
     var transferredFileIDs: Set<UInt32> { transferredIDs }
-    private let scanCatalog: @Sendable (Bool, PhotoScanSnapshot?, Bool, @escaping @Sendable ([CameraFile]) async throws -> Void) async throws -> PhotoScanResult
+    private let scanCatalog: (@Sendable (Bool, PhotoScanSnapshot?, Bool, @escaping @Sendable () async -> Int, @escaping @Sendable ([CameraFile]) async throws -> Void) async throws -> PhotoScanResult)?
     private let resumeSnapshotProvider: @Sendable () async -> PhotoScanSnapshot?
-    private let prefetchBatch: @Sendable ([CameraFile]) async -> Set<UInt32>
+    private let prefetchBatch: @Sendable ([CameraFile]) async -> ThumbnailBatchResult
     private let canFill: @Sendable () async -> Bool
     private let reconcileCache: @Sendable ([CameraFile], Bool) async -> Void
     private let invalidateThumbnailState: @Sendable ([CameraFile]) async -> Void
@@ -103,26 +103,34 @@ final class PhotoListViewModel: ObservableObject {
         self._filter = Published(initialValue: PhotoFilterPersistence.load())
         self.onTransportLost = onTransportLost
         self.setRemoteGate = { await session.setRemoteActive($0) }
-        self.scanCatalog = { preserve, snapshot, detect, handler in
+        self.scanCatalog = { preserve, snapshot, detect, nextBatchSize, handler in
             try await session.scanCatalog(preserveExisting: preserve,
                                           resumeSnapshot: snapshot,
                                           detectNewHandles: detect,
+                                          nextBatchSize: nextBatchSize,
                                           onBatch: handler)
         }
         self.resumeSnapshotProvider = { await session.scanSnapshotForResume() }
         self.prefetchBatch = { files in
-            var settled = Set<UInt32>()
+            var result = ThumbnailBatchResult()
             for file in files {
                 if session.wirelessMode == .sta {
                     while !Task.isCancelled, !(await session.backgroundThumbnailFillAllowed()) {
+                        result.interrupted = true
                         do { try await Task.sleep(for: .milliseconds(50)) }
-                        catch { return settled }
+                        catch { return result }
                     }
                 }
-                guard !Task.isCancelled, await session.backgroundThumbnailFillAllowed() else { return settled }
-                if (try? await session.prefetchThumbnail(file: file)) == true { settled.insert(file.id) }
+                guard !Task.isCancelled, await session.backgroundThumbnailFillAllowed() else {
+                    result.interrupted = true
+                    return result
+                }
+                if let outcome = try? await session.prefetchThumbnailOutcome(file: file) {
+                    if outcome.isSettled { result.settled.insert(file.id) }
+                    if outcome == .cached { result.cached.insert(file.id) }
+                }
             }
-            return settled
+            return result
         }
         self.canFill = { await session.backgroundThumbnailFillAllowed() }
         self.reconcileCache = { files, authoritative in
@@ -140,14 +148,22 @@ final class PhotoListViewModel: ObservableObject {
         }
     }
 
+    /// A restored workspace has presentation state but no catalog transport.
+    /// It cannot start a scan, manufacture files or claim a completed scan.
+    convenience init(disconnected: CameraPresentationMode) {
+        self.init(scanCatalog: nil, setRemoteGate: { _ in },
+                  sequentialLoading: disconnected == .sta)
+        self.filter = PhotoFilterPersistence.load()
+    }
+
     /// Dependency seam for lifecycle tests. Production sessions use the
     /// initializer above; keeping the scan and gate closures injectable lets
     /// the remote/FHD preemption contract be verified without a synthetic PTP
     /// transport obscuring the ordering under test.
     init(
-        scanCatalog: @escaping @Sendable (Bool, PhotoScanSnapshot?, Bool, @escaping @Sendable ([CameraFile]) async throws -> Void) async throws -> PhotoScanResult,
+        scanCatalog: (@Sendable (Bool, PhotoScanSnapshot?, Bool, @escaping @Sendable () async -> Int, @escaping @Sendable ([CameraFile]) async throws -> Void) async throws -> PhotoScanResult)?,
         resumeSnapshotProvider: @escaping @Sendable () async -> PhotoScanSnapshot? = { nil },
-        prefetchBatch: @escaping @Sendable ([CameraFile]) async -> Set<UInt32> = { _ in [] },
+        prefetchBatch: @escaping @Sendable ([CameraFile]) async -> ThumbnailBatchResult = { _ in ThumbnailBatchResult() },
         canFill: @escaping @Sendable () async -> Bool = { false },
         reconcileCache: @escaping @Sendable ([CameraFile], Bool) async -> Void = { _, _ in },
         invalidateThumbnailState: @escaping @Sendable ([CameraFile]) async -> Void = { _ in },
@@ -198,7 +214,7 @@ final class PhotoListViewModel: ObservableObject {
     }
 
     private static func isAutoTransferMedia(_ file: CameraFile) -> Bool {
-        [".jpg", ".tif", ".png", ".bmp", ".gif", ".ico",
+        [".jpg", ".jpeg", ".tif", ".png", ".bmp", ".gif", ".ico",
          ".mov", ".avi", ".mp4", ".nef", ".crw", ".cr2", ".cr3",
          ".arw"].contains(file.fileExtension)
     }
@@ -227,6 +243,7 @@ final class PhotoListViewModel: ObservableObject {
     }
 
     func load() {
+        guard scanCatalog != nil else { return }
         guard case .idle = loadState else {
             // Returning from another workspace must not start a second scan.
             return
@@ -252,6 +269,7 @@ final class PhotoListViewModel: ObservableObject {
     /// Explicit refresh for non-STA owners. The list has no pull-to-refresh;
     /// repeated STA entry requests cannot replace the session's scan.
     func reload() async {
+        guard scanCatalog != nil else { return }
         // STA has one session-owned scan. UI refreshes cannot replace its cursor.
         guard !sequentialLoading else { load(); return }
         loadGeneration &+= 1
@@ -269,7 +287,7 @@ final class PhotoListViewModel: ObservableObject {
     }
 
     private func reload(generation: Int, resumeSnapshot: PhotoScanSnapshot?, preserve: Bool? = nil) async {
-        guard generation == loadGeneration else { return }
+        guard generation == loadGeneration, let scanCatalog else { return }
         // Android's fill collector is gated by hasCompletedFileScan. Cancel
         // the existing worker for refreshes too, otherwise an old worker can
         // issue GetThumb while this generation is enumerating handles.
@@ -295,7 +313,10 @@ final class PhotoListViewModel: ObservableObject {
             let accumulator = ScanAccumulator()
             accumulator.publishedIDs = Set(allFiles.map(\.id))
             accumulator.initialLogicalIDs = Set(allFiles.map(PublishedPhotoIdentity.init))
-            let result = try await scanCatalog(preserveExisting, resumeSnapshot, preserveExisting) { [weak self] batch in
+            let result = try await scanCatalog(preserveExisting, resumeSnapshot, preserveExisting, { [weak self] in
+                guard let self else { return 12 }
+                return await self.nextScanBatchSize(generation: generation, accumulator: accumulator)
+            }) { [weak self] batch in
                 guard let self else { throw CancellationError() }
                 try await self.acceptBatch(batch, generation: generation, accumulator: accumulator)
             }
@@ -398,43 +419,26 @@ final class PhotoListViewModel: ObservableObject {
             additions.append(file)
         }
         publishSections()
-        if sequentialLoading {
-            // User-defined STA contract: all formats, in publication order.
-            // This callback provides backpressure without tying IO to cells.
-            for file in additions {
+        var allCached = !additions.isEmpty
+        for file in additions {
+            try Task.checkCancellation()
+            guard generation == loadGeneration else { throw CancellationError() }
+            if sequentialLoading {
+                let allowed = await canFill()
+                if transferBusy || previewActive || remoteActive || !allowed { allCached = false }
                 try await waitForSequentialChannel()
-                let settled = await prefetchBatch([file])
-                for id in settled { await thumbnailFillQueue.markSettled(id) }
+            } else {
+                let allowed = await canFill()
+                guard !transferBusy, !previewActive, !remoteActive, allowed else {
+                    allCached = false
+                    break
+                }
             }
-            return
+            let result = await prefetchBatch([file])
+            for id in result.settled { await thumbnailFillQueue.markSettled(id) }
+            allCached = allCached && result.cached.contains(file.id) && !result.interrupted
         }
-        // The repository awaits this callback: scanning cannot request the
-        // next metadata batch until this batch's per-file prefetch has finished,
-        // matching Android's accepted-batch/backpressure order.
-        // Unlike ObjectAdded events, an accepted scan batch is not inserted into
-        // the background queue here. Android prefetches this batch directly and
-        // leaves misses out of the queue until the completed scan calls seed().
-        // Enqueuing first would make a transient miss remain pending forever and
-        // would change the order of the post-scan fill pass.
-        // Android abandons this batch's background prefetch when a foreground
-        // owner has the camera channel. The items stay pending for the normal
-        // fill worker; they are not failures and must not require an unrelated
-        // filter change to be retried.
-        let channelAllowed = await canFill()
-        let fillAllowed = !transferBusy && channelAllowed
-        // Android publishes thumbnail work in its configured pipeline windows
-        // (currently twelve photos). Keep
-        // the window small so each completed window can render immediately;
-        // cache hits are resolved by prefetchBatch without camera IO.
-        if fillAllowed {
-            let pipelineBatchSize = 12
-            for windowStart in stride(from: 0, to: additions.count, by: pipelineBatchSize) {
-                try Task.checkCancellation()
-                let end = min(windowStart + pipelineBatchSize, additions.count)
-                let settled = await prefetchBatch(Array(additions[windowStart..<end]))
-                for id in settled { await thumbnailFillQueue.markSettled(id) }
-            }
-        }
+        accumulator.batchPolicy.complete(count: additions.count, allCached: allCached)
         // Misses and transient errors are intentionally not marked failed here.
         // They are discovered by the post-scan seed and handled by the same
         // background worker as every other unsettled file, matching Android's
@@ -444,7 +448,17 @@ final class PhotoListViewModel: ObservableObject {
         await Task.yield()
     }
 
+    private func nextScanBatchSize(generation: Int, accumulator: ScanAccumulator) async -> Int {
+        guard generation == loadGeneration else { return 12 }
+        let allowed = await canFill()
+        if transferBusy || previewActive || remoteActive || !allowed {
+            accumulator.batchPolicy.complete(count: 0, allCached: false)
+        }
+        return accumulator.batchPolicy.size
+    }
+
     private final class ScanAccumulator: @unchecked Sendable {
+        var batchPolicy = CachedThumbnailBatchPolicy()
         var publishedIDs = Set<UInt32>()
         var initialLogicalIDs = Set<PublishedPhotoIdentity>()
     }
@@ -574,6 +588,7 @@ final class PhotoListViewModel: ObservableObject {
     }
 
     private func refreshAfterRemote() {
+        guard scanCatalog != nil else { return }
         loadTask?.cancel()
         loadGeneration &+= 1
         let generation = loadGeneration
@@ -701,7 +716,7 @@ final class PhotoListViewModel: ObservableObject {
                 if sequentialLoading {
                     do { try await waitForSequentialChannel() }
                     catch { return }
-                    let settled = await prefetchBatch([file])
+                    let settled = await prefetchBatch([file]).settled
                     if settled.contains(id) { await thumbnailFillQueue.markSettled(id) }
                     else { await thumbnailFillQueue.markFailed(id) }
                     continue
@@ -710,7 +725,7 @@ final class PhotoListViewModel: ObservableObject {
                     await thumbnailFillQueue.returnToFront(id, expectedRevision: polled.revision)
                     return
                 }
-                let settled = await prefetchBatch([file])
+                let settled = await prefetchBatch([file]).settled
                 // The Android worker treats a foreground owner taking the
                 // channel as a pause, not as a thumbnail failure. The session
                 // prefetch closure can return an empty set when that gate

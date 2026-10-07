@@ -4,6 +4,57 @@ import XCTest
 #endif
 
 final class PhotoThumbnailDiskCacheTests: XCTestCase {
+    func testCameraIsolationRetentionBoundaryAndReconnect() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let cache = PhotoThumbnailDiskCache(root: root)
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        let old = cache.openCamera(identity: "old", now: start)
+        let other = cache.openCamera(identity: "other", now: start)
+        XCTAssertTrue(old.write(Data([1]), as: "same.jpg"))
+        XCTAssertNil(other.find("same.jpg"))
+        XCTAssertNotEqual(old.target("same.jpg"), other.target("same.jpg"))
+        let boundary = start.addingTimeInterval(PhotoThumbnailDiskCache.maxIdleInterval)
+        XCTAssertEqual(cache.cleanupExpired(now: boundary), 0)
+        let refreshed = cache.openCamera(identity: "other", now: boundary)
+        XCTAssertTrue(refreshed === other)
+        XCTAssertEqual(cache.cleanupExpired(now: boundary.addingTimeInterval(0.001)), 1)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: old.target("same.jpg").deletingLastPathComponent().path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: other.target("same.jpg").deletingLastPathComponent().path))
+    }
+
+    func testLegacyAndDisplayNameMigrationAndWriteFailure() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let cache = PhotoThumbnailDiskCache(root: root)
+        let store = cache.openCamera(identity: "body")
+        let legacy = root.appendingPathComponent("legacy.jpg")
+        try Data([1]).write(to: legacy)
+        XCTAssertEqual(store.find("hashed.jpg", legacyName: "legacy.jpg"), store.target("hashed.jpg"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: legacy.path))
+        XCTAssertTrue(store.write(Data([2]), as: "display.jpg"))
+        XCTAssertEqual(store.find("stable.jpg", alternateName: "display.jpg"), store.target("stable.jpg"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: store.target("display.jpg").path))
+        let directory = store.target("unused").deletingLastPathComponent()
+        try FileManager.default.removeItem(at: directory)
+        try Data([3]).write(to: directory)
+        XCTAssertFalse(store.write(Data([4]), as: "failed.jpg"))
+        XCTAssertNil(store.find("failed.jpg"))
+        try FileManager.default.removeItem(at: directory)
+        let reopened = cache.openCamera(identity: "body")
+        XCTAssertTrue(reopened === store)
+        XCTAssertNil(reopened.find("hashed.jpg"))
+        XCTAssertTrue(reopened.write(Data([5]), as: "fresh.jpg"))
+    }
+
+    func testUnicodeKeysRemainDistinctWhileLegacyUsesAndroidASCII() {
+        let first = PhotoThumbnailDiskCache.cacheFileName(fileName: "照片 1.JPG", size: 123, captureDate: nil)
+        XCTAssertEqual(first, PhotoThumbnailDiskCache.cacheFileName(fileName: "照片 1.JPG", size: 123, captureDate: nil))
+        XCTAssertNotEqual(first, PhotoThumbnailDiskCache.cacheFileName(fileName: "照片-1.JPG", size: 123, captureDate: nil))
+        XCTAssertNotNil(first.range(of: #"^[0-9a-f]{64}\.jpg$"#, options: .regularExpression))
+        XCTAssertEqual(PhotoThumbnailDiskCache.legacyCacheFileName(fileName: "照片 1.JPG", size: 123, captureDate: nil), "___1.JPG_123_0.jpg")
+    }
+
     func testKeysAreStableAndSeparateByMetadata() {
         let first = PhotoThumbnailDiskCache.cacheFileName(
             fileName: "DSC_0001.JPG", size: 42, captureDate: "20260913T010203"

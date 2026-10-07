@@ -1,0 +1,1028 @@
+{
+  "source": "androidx.compose.ui.graphics.lerp 1.7.6",
+  "artifacts": [
+    {
+      "artifact": "ui-graphics-android:1.7.6",
+      "sha256": "00c96a2e54b03bc0b72b8fc4327bd2a75b689c689aa01295d870141eb9ddddd0"
+    },
+    {
+      "artifact": "ui-util-android:1.7.6",
+      "sha256": "f74120949fd8f82fbfbcc3793246108f9554df0f51ecc7fb5d721ac971c4394a"
+    },
+    {
+      "artifact": "ui-unit-android:1.7.6",
+      "sha256": "9ed6214fdd4da272b0b2582c428f8c3dce5ce6a186c47daaf9fc01aec226a199"
+    },
+    {
+      "artifact": "ui-geometry-android:1.7.6",
+      "sha256": "63eb3d049a8c819e3805d51ce15b9203249ce960ecfd53251126592047bc2ff0"
+    }
+  ],
+  "matrixEncoding": "Column-major Float32 bit patterns",
+  "matrices": {
+    "srgbToD50": [
+      "3edf3e3e",
+      "3e63d085",
+      "3c6432cf",
+      "3ec52cfc",
+      "3f378732",
+      "3dc6dd2b",
+      "3e1283e7",
+      "3d784ad4",
+      "3f36d31c"
+    ],
+    "d50ToSrgb": [
+      "40489893",
+      "bf7a8ef3",
+      "3d93598f",
+      "bfcf017d",
+      "3ff54339",
+      "be6a7b62",
+      "befb3b32",
+      "3d0902ac",
+      "3fb3dfe8"
+    ],
+    "M1": [
+      "3f454c06",
+      "3bb90975",
+      "3d3ded66",
+      "3eb2cde6",
+      "3f6fe3a5",
+      "3e817c3d",
+      "bde5717d",
+      "3d8eba37",
+      "3f5a0574"
+    ],
+    "M2": [
+      "3e578152",
+      "3ffd2f0e",
+      "3cd434b4",
+      "3f4b2a89",
+      "c01b6e0e",
+      "3f4863bb",
+      "bb856ece",
+      "3ee6b438",
+      "bf4f0560"
+    ],
+    "InverseM1": [
+      "3fa4f1d5",
+      "bb2ab843",
+      "bd8e1b17",
+      "bf09b253",
+      "3f8bd206",
+      "be971673",
+      "3e5aa850",
+      "bdb7c4b3",
+      "3f983844"
+    ],
+    "InverseM2": [
+      "3f800001",
+      "3f800000",
+      "3f800001",
+      "3ecaecca",
+      "bdd8308c",
+      "bdb7437b",
+      "3e5cfba9",
+      "bd82c5fb",
+      "bfa54f66"
+    ]
+  },
+  "samples": [
+    {
+      "start": "00000000",
+      "end": "4d4fc3f7",
+      "fraction": -0.12,
+      "result": "00000000"
+    },
+    {
+      "start": "00000000",
+      "end": "4d4fc3f7",
+      "fraction": 0.0,
+      "result": "00000000"
+    },
+    {
+      "start": "00000000",
+      "end": "4d4fc3f7",
+      "fraction": 0.001,
+      "result": "00000000"
+    },
+    {
+      "start": "00000000",
+      "end": "4d4fc3f7",
+      "fraction": 0.01,
+      "result": "01000000"
+    },
+    {
+      "start": "00000000",
+      "end": "4d4fc3f7",
+      "fraction": 0.1,
+      "result": "08000203"
+    },
+    {
+      "start": "00000000",
+      "end": "4d4fc3f7",
+      "fraction": 0.25,
+      "result": "13041720"
+    },
+    {
+      "start": "00000000",
+      "end": "4d4fc3f7",
+      "fraction": 0.36,
+      "result": "1c0c2c3b"
+    },
+    {
+      "start": "00000000",
+      "end": "4d4fc3f7",
+      "fraction": 0.5,
+      "result": "27194a60"
+    },
+    {
+      "start": "00000000",
+      "end": "4d4fc3f7",
+      "fraction": 0.72,
+      "result": "37307d9f"
+    },
+    {
+      "start": "00000000",
+      "end": "4d4fc3f7",
+      "fraction": 0.9,
+      "result": "4543a9d7"
+    },
+    {
+      "start": "00000000",
+      "end": "4d4fc3f7",
+      "fraction": 0.999,
+      "result": "4d4fc3f7"
+    },
+    {
+      "start": "00000000",
+      "end": "4d4fc3f7",
+      "fraction": 1.0,
+      "result": "4d4fc3f7"
+    },
+    {
+      "start": "00000000",
+      "end": "4d4fc3f7",
+      "fraction": 1.12,
+      "result": "4d4fc3f7"
+    },
+    {
+      "start": "14eaf1f4",
+      "end": "4d4fc3f7",
+      "fraction": -0.12,
+      "result": "14eaf1f4"
+    },
+    {
+      "start": "14eaf1f4",
+      "end": "4d4fc3f7",
+      "fraction": 0.0,
+      "result": "14eaf1f4"
+    },
+    {
+      "start": "14eaf1f4",
+      "end": "4d4fc3f7",
+      "fraction": 0.001,
+      "result": "14eaf1f4"
+    },
+    {
+      "start": "14eaf1f4",
+      "end": "4d4fc3f7",
+      "fraction": 0.01,
+      "result": "14e9f0f4"
+    },
+    {
+      "start": "14eaf1f4",
+      "end": "4d4fc3f7",
+      "fraction": 0.1,
+      "result": "1addedf5"
+    },
+    {
+      "start": "14eaf1f4",
+      "end": "4d4fc3f7",
+      "fraction": 0.25,
+      "result": "22c8e6f6"
+    },
+    {
+      "start": "14eaf1f4",
+      "end": "4d4fc3f7",
+      "fraction": 0.36,
+      "result": "28b9e1f6"
+    },
+    {
+      "start": "14eaf1f4",
+      "end": "4d4fc3f7",
+      "fraction": 0.5,
+      "result": "31a5dbf7"
+    },
+    {
+      "start": "14eaf1f4",
+      "end": "4d4fc3f7",
+      "fraction": 0.72,
+      "result": "3d83d1f7"
+    },
+    {
+      "start": "14eaf1f4",
+      "end": "4d4fc3f7",
+      "fraction": 0.9,
+      "result": "4764c8f7"
+    },
+    {
+      "start": "14eaf1f4",
+      "end": "4d4fc3f7",
+      "fraction": 0.999,
+      "result": "4d4fc3f7"
+    },
+    {
+      "start": "14eaf1f4",
+      "end": "4d4fc3f7",
+      "fraction": 1.0,
+      "result": "4d4fc3f7"
+    },
+    {
+      "start": "14eaf1f4",
+      "end": "4d4fc3f7",
+      "fraction": 1.12,
+      "result": "4d4fc3f7"
+    },
+    {
+      "start": "26fafcfd",
+      "end": "4d0277bd",
+      "fraction": -0.12,
+      "result": "26fafcfd"
+    },
+    {
+      "start": "26fafcfd",
+      "end": "4d0277bd",
+      "fraction": 0.0,
+      "result": "26fafcfd"
+    },
+    {
+      "start": "26fafcfd",
+      "end": "4d0277bd",
+      "fraction": 0.001,
+      "result": "26fafcfd"
+    },
+    {
+      "start": "26fafcfd",
+      "end": "4d0277bd",
+      "fraction": 0.01,
+      "result": "26f8fbfc"
+    },
+    {
+      "start": "26fafcfd",
+      "end": "4d0277bd",
+      "fraction": 0.1,
+      "result": "2ae4eff7"
+    },
+    {
+      "start": "26fafcfd",
+      "end": "4d0277bd",
+      "fraction": 0.25,
+      "result": "30c4dbef"
+    },
+    {
+      "start": "26fafcfd",
+      "end": "4d0277bd",
+      "fraction": 0.36,
+      "result": "34adcce8"
+    },
+    {
+      "start": "26fafcfd",
+      "end": "4d0277bd",
+      "fraction": 0.5,
+      "result": "3a8fbadf"
+    },
+    {
+      "start": "26fafcfd",
+      "end": "4d0277bd",
+      "fraction": 0.72,
+      "result": "425e9dd1"
+    },
+    {
+      "start": "26fafcfd",
+      "end": "4d0277bd",
+      "fraction": 0.9,
+      "result": "493185c4"
+    },
+    {
+      "start": "26fafcfd",
+      "end": "4d0277bd",
+      "fraction": 0.999,
+      "result": "4d0377bd"
+    },
+    {
+      "start": "26fafcfd",
+      "end": "4d0277bd",
+      "fraction": 1.0,
+      "result": "4d0277bd"
+    },
+    {
+      "start": "26fafcfd",
+      "end": "4d0277bd",
+      "fraction": 1.12,
+      "result": "4d0277bd"
+    },
+    {
+      "start": "ffd5d8da",
+      "end": "ff4fc3f7",
+      "fraction": -0.12,
+      "result": "ffd5d8da"
+    },
+    {
+      "start": "ffd5d8da",
+      "end": "ff4fc3f7",
+      "fraction": 0.0,
+      "result": "ffd5d8da"
+    },
+    {
+      "start": "ffd5d8da",
+      "end": "ff4fc3f7",
+      "fraction": 0.001,
+      "result": "ffd5d8da"
+    },
+    {
+      "start": "ffd5d8da",
+      "end": "ff4fc3f7",
+      "fraction": 0.01,
+      "result": "ffd4d8da"
+    },
+    {
+      "start": "ffd5d8da",
+      "end": "ff4fc3f7",
+      "fraction": 0.1,
+      "result": "ffcad6dd"
+    },
+    {
+      "start": "ffd5d8da",
+      "end": "ff4fc3f7",
+      "fraction": 0.25,
+      "result": "ffb9d4e2"
+    },
+    {
+      "start": "ffd5d8da",
+      "end": "ff4fc3f7",
+      "fraction": 0.36,
+      "result": "ffacd1e5"
+    },
+    {
+      "start": "ffd5d8da",
+      "end": "ff4fc3f7",
+      "fraction": 0.5,
+      "result": "ff9bcfea"
+    },
+    {
+      "start": "ffd5d8da",
+      "end": "ff4fc3f7",
+      "fraction": 0.72,
+      "result": "ff7ecaf0"
+    },
+    {
+      "start": "ffd5d8da",
+      "end": "ff4fc3f7",
+      "fraction": 0.9,
+      "result": "ff62c5f4"
+    },
+    {
+      "start": "ffd5d8da",
+      "end": "ff4fc3f7",
+      "fraction": 0.999,
+      "result": "ff4fc3f7"
+    },
+    {
+      "start": "ffd5d8da",
+      "end": "ff4fc3f7",
+      "fraction": 1.0,
+      "result": "ff4fc3f7"
+    },
+    {
+      "start": "ffd5d8da",
+      "end": "ff4fc3f7",
+      "fraction": 1.12,
+      "result": "ff4fc3f7"
+    },
+    {
+      "start": "ffd5d8da",
+      "end": "ff0277bd",
+      "fraction": -0.12,
+      "result": "ffd5d8da"
+    },
+    {
+      "start": "ffd5d8da",
+      "end": "ff0277bd",
+      "fraction": 0.0,
+      "result": "ffd5d8da"
+    },
+    {
+      "start": "ffd5d8da",
+      "end": "ff0277bd",
+      "fraction": 0.001,
+      "result": "ffd5d8da"
+    },
+    {
+      "start": "ffd5d8da",
+      "end": "ff0277bd",
+      "fraction": 0.01,
+      "result": "ffd3d7da"
+    },
+    {
+      "start": "ffd5d8da",
+      "end": "ff0277bd",
+      "fraction": 0.1,
+      "result": "ffc4cfd8"
+    },
+    {
+      "start": "ffd5d8da",
+      "end": "ff0277bd",
+      "fraction": 0.25,
+      "result": "ffa9c0d4"
+    },
+    {
+      "start": "ffd5d8da",
+      "end": "ff0277bd",
+      "fraction": 0.36,
+      "result": "ff96b6d2"
+    },
+    {
+      "start": "ffd5d8da",
+      "end": "ff0277bd",
+      "fraction": 0.5,
+      "result": "ff7da8ce"
+    },
+    {
+      "start": "ffd5d8da",
+      "end": "ff0277bd",
+      "fraction": 0.72,
+      "result": "ff5593c7"
+    },
+    {
+      "start": "ffd5d8da",
+      "end": "ff0277bd",
+      "fraction": 0.9,
+      "result": "ff2d81c1"
+    },
+    {
+      "start": "ffd5d8da",
+      "end": "ff0277bd",
+      "fraction": 0.999,
+      "result": "ff0377bd"
+    },
+    {
+      "start": "ffd5d8da",
+      "end": "ff0277bd",
+      "fraction": 1.0,
+      "result": "ff0277bd"
+    },
+    {
+      "start": "ffd5d8da",
+      "end": "ff0277bd",
+      "fraction": 1.12,
+      "result": "ff0277bd"
+    },
+    {
+      "start": "ffd5d8da",
+      "end": "ffffb74d",
+      "fraction": -0.12,
+      "result": "ffd5d8da"
+    },
+    {
+      "start": "ffd5d8da",
+      "end": "ffffb74d",
+      "fraction": 0.0,
+      "result": "ffd5d8da"
+    },
+    {
+      "start": "ffd5d8da",
+      "end": "ffffb74d",
+      "fraction": 0.001,
+      "result": "ffd5d8da"
+    },
+    {
+      "start": "ffd5d8da",
+      "end": "ffffb74d",
+      "fraction": 0.01,
+      "result": "ffd5d8d9"
+    },
+    {
+      "start": "ffd5d8da",
+      "end": "ffffb74d",
+      "fraction": 0.1,
+      "result": "ffdad5ce"
+    },
+    {
+      "start": "ffd5d8da",
+      "end": "ffffb74d",
+      "fraction": 0.25,
+      "result": "ffe1d1bc"
+    },
+    {
+      "start": "ffd5d8da",
+      "end": "ffffb74d",
+      "fraction": 0.36,
+      "result": "ffe5ceae"
+    },
+    {
+      "start": "ffd5d8da",
+      "end": "ffffb74d",
+      "fraction": 0.5,
+      "result": "ffebc99c"
+    },
+    {
+      "start": "ffd5d8da",
+      "end": "ffffb74d",
+      "fraction": 0.72,
+      "result": "fff4c27e"
+    },
+    {
+      "start": "ffd5d8da",
+      "end": "ffffb74d",
+      "fraction": 0.9,
+      "result": "fffbbb61"
+    },
+    {
+      "start": "ffd5d8da",
+      "end": "ffffb74d",
+      "fraction": 0.999,
+      "result": "ffffb74d"
+    },
+    {
+      "start": "ffd5d8da",
+      "end": "ffffb74d",
+      "fraction": 1.0,
+      "result": "ffffb74d"
+    },
+    {
+      "start": "ffd5d8da",
+      "end": "ffffb74d",
+      "fraction": 1.12,
+      "result": "ffffb74d"
+    },
+    {
+      "start": "ffffffff",
+      "end": "ff000000",
+      "fraction": -0.12,
+      "result": "ffffffff"
+    },
+    {
+      "start": "ffffffff",
+      "end": "ff000000",
+      "fraction": 0.0,
+      "result": "ffffffff"
+    },
+    {
+      "start": "ffffffff",
+      "end": "ff000000",
+      "fraction": 0.001,
+      "result": "ffffffff"
+    },
+    {
+      "start": "ffffffff",
+      "end": "ff000000",
+      "fraction": 0.01,
+      "result": "fffcfcfc"
+    },
+    {
+      "start": "ffffffff",
+      "end": "ff000000",
+      "fraction": 0.1,
+      "result": "ffdedede"
+    },
+    {
+      "start": "ffffffff",
+      "end": "ff000000",
+      "fraction": 0.25,
+      "result": "ffaeaeae"
+    },
+    {
+      "start": "ffffffff",
+      "end": "ff000000",
+      "fraction": 0.36,
+      "result": "ff8c8c8c"
+    },
+    {
+      "start": "ffffffff",
+      "end": "ff000000",
+      "fraction": 0.5,
+      "result": "ff636363"
+    },
+    {
+      "start": "ffffffff",
+      "end": "ff000000",
+      "fraction": 0.72,
+      "result": "ff292929"
+    },
+    {
+      "start": "ffffffff",
+      "end": "ff000000",
+      "fraction": 0.9,
+      "result": "ff030303"
+    },
+    {
+      "start": "ffffffff",
+      "end": "ff000000",
+      "fraction": 0.999,
+      "result": "ff000000"
+    },
+    {
+      "start": "ffffffff",
+      "end": "ff000000",
+      "fraction": 1.0,
+      "result": "ff000000"
+    },
+    {
+      "start": "ffffffff",
+      "end": "ff000000",
+      "fraction": 1.12,
+      "result": "ff000000"
+    },
+    {
+      "start": "ffff0000",
+      "end": "ff0000ff",
+      "fraction": -0.12,
+      "result": "ffff0000"
+    },
+    {
+      "start": "ffff0000",
+      "end": "ff0000ff",
+      "fraction": 0.0,
+      "result": "ffff0000"
+    },
+    {
+      "start": "ffff0000",
+      "end": "ff0000ff",
+      "fraction": 0.001,
+      "result": "ffff0102"
+    },
+    {
+      "start": "ffff0000",
+      "end": "ff0000ff",
+      "fraction": 0.01,
+      "result": "fffd0b10"
+    },
+    {
+      "start": "ffff0000",
+      "end": "ff0000ff",
+      "fraction": 0.1,
+      "result": "ffe83342"
+    },
+    {
+      "start": "ffff0000",
+      "end": "ff0000ff",
+      "fraction": 0.25,
+      "result": "ffc6496d"
+    },
+    {
+      "start": "ffff0000",
+      "end": "ff0000ff",
+      "fraction": 0.36,
+      "result": "ffad5086"
+    },
+    {
+      "start": "ffff0000",
+      "end": "ff0000ff",
+      "fraction": 0.5,
+      "result": "ff8c53a2"
+    },
+    {
+      "start": "ffff0000",
+      "end": "ff0000ff",
+      "fraction": 0.72,
+      "result": "ff584acc"
+    },
+    {
+      "start": "ffff0000",
+      "end": "ff0000ff",
+      "fraction": 0.9,
+      "result": "ff2930ed"
+    },
+    {
+      "start": "ffff0000",
+      "end": "ff0000ff",
+      "fraction": 0.999,
+      "result": "ff0001ff"
+    },
+    {
+      "start": "ffff0000",
+      "end": "ff0000ff",
+      "fraction": 1.0,
+      "result": "ff0000ff"
+    },
+    {
+      "start": "ffff0000",
+      "end": "ff0000ff",
+      "fraction": 1.12,
+      "result": "ff0000ff"
+    },
+    {
+      "start": "013f2818",
+      "end": "fec89554",
+      "fraction": -0.12,
+      "result": "013f2818"
+    },
+    {
+      "start": "013f2818",
+      "end": "fec89554",
+      "fraction": 0.0,
+      "result": "013f2818"
+    },
+    {
+      "start": "013f2818",
+      "end": "fec89554",
+      "fraction": 0.001,
+      "result": "013f2818"
+    },
+    {
+      "start": "013f2818",
+      "end": "fec89554",
+      "fraction": 0.01,
+      "result": "03402919"
+    },
+    {
+      "start": "013f2818",
+      "end": "fec89554",
+      "fraction": 0.1,
+      "result": "1a4b321e"
+    },
+    {
+      "start": "013f2818",
+      "end": "fec89554",
+      "fraction": 0.25,
+      "result": "405f4126"
+    },
+    {
+      "start": "013f2818",
+      "end": "fec89554",
+      "fraction": 0.36,
+      "result": "5c6d4d2c"
+    },
+    {
+      "start": "013f2818",
+      "end": "fec89554",
+      "fraction": 0.5,
+      "result": "80805c35"
+    },
+    {
+      "start": "013f2818",
+      "end": "fec89554",
+      "fraction": 0.72,
+      "result": "b79f7442"
+    },
+    {
+      "start": "013f2818",
+      "end": "fec89554",
+      "fraction": 0.9,
+      "result": "e5b9894d"
+    },
+    {
+      "start": "013f2818",
+      "end": "fec89554",
+      "fraction": 0.999,
+      "result": "fec89554"
+    },
+    {
+      "start": "013f2818",
+      "end": "fec89554",
+      "fraction": 1.0,
+      "result": "fec89554"
+    },
+    {
+      "start": "013f2818",
+      "end": "fec89554",
+      "fraction": 1.12,
+      "result": "fec89554"
+    },
+    {
+      "start": "ffffffff",
+      "end": "00ffffff",
+      "fraction": -0.12,
+      "result": "ffffffff"
+    },
+    {
+      "start": "ffffffff",
+      "end": "00ffffff",
+      "fraction": 0.0,
+      "result": "ffffffff"
+    },
+    {
+      "start": "ffffffff",
+      "end": "00ffffff",
+      "fraction": 0.001,
+      "result": "ffffffff"
+    },
+    {
+      "start": "ffffffff",
+      "end": "00ffffff",
+      "fraction": 0.01,
+      "result": "fdffffff"
+    },
+    {
+      "start": "ffffffff",
+      "end": "00ffffff",
+      "fraction": 0.1,
+      "result": "e6ffffff"
+    },
+    {
+      "start": "ffffffff",
+      "end": "00ffffff",
+      "fraction": 0.25,
+      "result": "bfffffff"
+    },
+    {
+      "start": "ffffffff",
+      "end": "00ffffff",
+      "fraction": 0.36,
+      "result": "a3ffffff"
+    },
+    {
+      "start": "ffffffff",
+      "end": "00ffffff",
+      "fraction": 0.5,
+      "result": "80ffffff"
+    },
+    {
+      "start": "ffffffff",
+      "end": "00ffffff",
+      "fraction": 0.72,
+      "result": "47ffffff"
+    },
+    {
+      "start": "ffffffff",
+      "end": "00ffffff",
+      "fraction": 0.9,
+      "result": "19ffffff"
+    },
+    {
+      "start": "ffffffff",
+      "end": "00ffffff",
+      "fraction": 0.999,
+      "result": "00ffffff"
+    },
+    {
+      "start": "ffffffff",
+      "end": "00ffffff",
+      "fraction": 1.0,
+      "result": "00ffffff"
+    },
+    {
+      "start": "ffffffff",
+      "end": "00ffffff",
+      "fraction": 1.12,
+      "result": "00ffffff"
+    },
+    {
+      "start": "ff010203",
+      "end": "ff030201",
+      "fraction": -0.12,
+      "result": "ff010203"
+    },
+    {
+      "start": "ff010203",
+      "end": "ff030201",
+      "fraction": 0.0,
+      "result": "ff010203"
+    },
+    {
+      "start": "ff010203",
+      "end": "ff030201",
+      "fraction": 0.001,
+      "result": "ff010203"
+    },
+    {
+      "start": "ff010203",
+      "end": "ff030201",
+      "fraction": 0.01,
+      "result": "ff010203"
+    },
+    {
+      "start": "ff010203",
+      "end": "ff030201",
+      "fraction": 0.1,
+      "result": "ff010203"
+    },
+    {
+      "start": "ff010203",
+      "end": "ff030201",
+      "fraction": 0.25,
+      "result": "ff010202"
+    },
+    {
+      "start": "ff010203",
+      "end": "ff030201",
+      "fraction": 0.36,
+      "result": "ff020202"
+    },
+    {
+      "start": "ff010203",
+      "end": "ff030201",
+      "fraction": 0.5,
+      "result": "ff020202"
+    },
+    {
+      "start": "ff010203",
+      "end": "ff030201",
+      "fraction": 0.72,
+      "result": "ff020201"
+    },
+    {
+      "start": "ff010203",
+      "end": "ff030201",
+      "fraction": 0.9,
+      "result": "ff030201"
+    },
+    {
+      "start": "ff010203",
+      "end": "ff030201",
+      "fraction": 0.999,
+      "result": "ff030201"
+    },
+    {
+      "start": "ff010203",
+      "end": "ff030201",
+      "fraction": 1.0,
+      "result": "ff030201"
+    },
+    {
+      "start": "ff010203",
+      "end": "ff030201",
+      "fraction": 1.12,
+      "result": "ff030201"
+    },
+    {
+      "start": "ffd5d8da",
+      "end": "fff44336",
+      "fraction": -0.12,
+      "result": "ffd5d8da"
+    },
+    {
+      "start": "ffd5d8da",
+      "end": "fff44336",
+      "fraction": 0.0,
+      "result": "ffd5d8da"
+    },
+    {
+      "start": "ffd5d8da",
+      "end": "fff44336",
+      "fraction": 0.001,
+      "result": "ffd5d8da"
+    },
+    {
+      "start": "ffd5d8da",
+      "end": "fff44336",
+      "fraction": 0.01,
+      "result": "ffd6d7d8"
+    },
+    {
+      "start": "ffd5d8da",
+      "end": "fff44336",
+      "fraction": 0.1,
+      "result": "ffdccbca"
+    },
+    {
+      "start": "ffd5d8da",
+      "end": "fff44336",
+      "fraction": 0.25,
+      "result": "ffe4b8b3"
+    },
+    {
+      "start": "ffd5d8da",
+      "end": "fff44336",
+      "fraction": 0.36,
+      "result": "ffe9aaa1"
+    },
+    {
+      "start": "ffd5d8da",
+      "end": "fff44336",
+      "fraction": 0.5,
+      "result": "ffed978c"
+    },
+    {
+      "start": "ffd5d8da",
+      "end": "fff44336",
+      "fraction": 0.72,
+      "result": "fff27768"
+    },
+    {
+      "start": "ffd5d8da",
+      "end": "fff44336",
+      "fraction": 0.9,
+      "result": "fff45849"
+    },
+    {
+      "start": "ffd5d8da",
+      "end": "fff44336",
+      "fraction": 0.999,
+      "result": "fff44336"
+    },
+    {
+      "start": "ffd5d8da",
+      "end": "fff44336",
+      "fraction": 1.0,
+      "result": "fff44336"
+    },
+    {
+      "start": "ffd5d8da",
+      "end": "fff44336",
+      "fraction": 1.12,
+      "result": "fff44336"
+    }
+  ]
+}

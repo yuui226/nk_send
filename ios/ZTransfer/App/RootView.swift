@@ -80,7 +80,14 @@ struct RootView: View {
     @State private var establishedSession: CameraSession?
     // The success scene is an entry transition, never a reconnect transition.
     @State private var connectionCelebrationConsumed = false
-    @State private var monitorPresented = false
+    @SceneStorage("camera_workspace_entered") private var workspaceEntered = false
+    @SceneStorage("camera_workspace_monitor") private var monitorPresented = false
+
+    private var workspaceSession: CameraSession? { connectionModel.cameraSession ?? establishedSession }
+    private var workspaceConnected: Bool { workspaceSession != nil && connectionModel.cameraSession === workspaceSession }
+    private var restoredPresentationMode: CameraPresentationMode {
+        connectionModel.state.presentationMode(transport: nil, isSTA: false)
+    }
 
     private var locale: Locale {
         switch appLanguage {
@@ -97,17 +104,18 @@ struct RootView: View {
     }
     var body: some View {
         Group {
-            if let session = connectionModel.cameraSession ?? establishedSession {
+            if workspaceSession != nil || workspaceEntered {
+                let session = workspaceSession
                 // Start the photo scan as soon as the session is ready, but
                 // keep the list visually hidden until the connection scene
                 // reaches its final cross-fade. A boolean hand-off keeps the
                 // large list out of the per-frame celebration redraw.
                 ZStack {
-                    PhotoListView(session: session,
+                    PhotoListView(session: session, presentationMode: restoredPresentationMode,
                                   queue: transferQueue,
                                   directory: directoryStore,
                                   effectsStore: effectsStore,
-                                  isSessionConnected: connectionModel.cameraSession === session,
+                                  isSessionConnected: workspaceConnected,
                                   onRetrySTA: { connectionModel.retrySTAConnection() },
                                   remotePresentation: $monitorPresented,
                                   onTransportLost: { failedSession in
@@ -116,7 +124,7 @@ struct RootView: View {
                     // A recovered transport owns a new CameraSession. Force
                     // the list model to bind to that session instead of
                     // retaining the failed repository from the old one.
-                    .id(ObjectIdentifier(session))
+                    .id(session.map(ObjectIdentifier.init))
                     .opacity(connectionCelebrationActive ? (connectionPhotoListVisible ? 1 : 0) : 1)
                     .allowsHitTesting(!connectionCelebrationActive || connectionPhotoListVisible)
                     if connectionCelebrationActive {
@@ -140,22 +148,20 @@ struct RootView: View {
         .preferredColorScheme(themeMode == "DARK" ? .dark : themeMode == "LIGHT" ? .light : nil)
         .environment(\.locale, locale)
         .fullScreenCover(isPresented: $monitorPresented, onDismiss: RemoteTrialNotice.returnedToList) {
-            if let session = connectionModel.cameraSession ?? establishedSession {
-                let listModel = PhotoListViewModel.cached(session: session)
-                RemoteView(session: session,
-                           recordingDirectory: directoryStore.directoryURL,
-                           isSessionConnected: connectionModel.cameraSession === session,
-                           onRetrySTA: { connectionModel.retrySTAConnection() },
-                           onPreparing: { await listModel.pauseForRemote() },
-                           onStopped: { transportLost in
-                               await listModel.resumeAfterRemote(
-                                   isConnected: connectionModel.cameraSession === session && !transportLost)
-                           },
-                           onTransportLost: {
-                               Task { await connectionModel.handleTransportLost(session) }
-                           })
-                    .id(ObjectIdentifier(session))
-            }
+            let session = workspaceSession
+            let listModel = session.map { PhotoListViewModel.cached(session: $0) }
+            RemoteView(session: session, presentationMode: restoredPresentationMode,
+                       recordingDirectory: directoryStore.directoryURL,
+                       isSessionConnected: workspaceConnected,
+                       onRetrySTA: { connectionModel.retrySTAConnection() },
+                       onPreparing: { await listModel?.pauseForRemote() },
+                       onStopped: { transportLost in
+                           await listModel?.resumeAfterRemote(isConnected: workspaceConnected && !transportLost)
+                       },
+                       onTransportLost: {
+                           if let session { Task { await connectionModel.handleTransportLost(session) } }
+                       })
+                .id(session.map(ObjectIdentifier.init))
         }
         .task {
             connectionModel.startUSBDiscovery()
@@ -175,6 +181,7 @@ struct RootView: View {
             if thumbnailColumns != restoredColumns { thumbnailColumns = restoredColumns }
             UIApplication.shared.isIdleTimerDisabled = keepScreenOn
             gpsCoordinator.setAPModeBlocked(gpsBlockedByAPCamera)
+            if workspaceEntered { connectionCelebrationConsumed = true }
             if connectionModel.cameraSession != nil, !connectionCelebrationConsumed {
                 connectionCelebrationConsumed = true
                 establishedSession = connectionModel.cameraSession
@@ -204,7 +211,7 @@ struct RootView: View {
                         }
                     }
                 }
-                if !connectionCelebrationConsumed {
+                if !connectionCelebrationConsumed && !workspaceEntered {
                     connectionCelebrationConsumed = true
                     connectionCelebrationStart = Date()
                     connectionPhotoListVisible = false
@@ -262,6 +269,7 @@ struct RootView: View {
                       connectionCelebrationActive else { return }
                 connectionCelebrationActive = false
                 connectionCelebrationStart = nil
+                workspaceEntered = true
             } catch {
                 // A disconnect or a replacement session cancels this hand-off.
             }

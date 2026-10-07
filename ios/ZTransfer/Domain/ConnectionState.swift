@@ -33,6 +33,7 @@ enum WiFiFailureKind: String, Equatable, Sendable {
 struct ConnectionState: Equatable, Sendable {
     var selectedMode: CameraConnectionMode = .usb
     var wirelessMode: WirelessMode = .sta
+    var rememberedPresentationMode: CameraPresentationMode?
     var usbPhase: USBConnectionPhase = .waitingForCamera
     var staProgressIP: String?
     var wifiPhase: WiFiConnectionPhase = .idle
@@ -41,6 +42,11 @@ struct ConnectionState: Equatable, Sendable {
     var discoveredDevices: [USBDeviceDescriptor] = []
     var selectedDeviceID: String?
     var errorMessage: String?
+
+    func presentationMode(transport: CameraConnectionMode?, isSTA: Bool) -> CameraPresentationMode {
+        CameraPresentationMode.resolve(transport: transport, isSTA: isSTA,
+                                       remembered: rememberedPresentationMode, wireless: wirelessMode)
+    }
 
     /// HomeScreen.connectionHapticOutcome folds changing error details into
     /// one outcome. A rebuilt view or an AP error subtype change stays silent.

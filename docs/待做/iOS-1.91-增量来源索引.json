@@ -1,0 +1,3450 @@
+{
+  "baseline": "617082c3511e2532a321128b2f39c57217e74fc2",
+  "previousIOS": "f5046780",
+  "note": "初始文件路由，不等于全部hunk已调查；同一文件可对应多个任务，调查时须补全。",
+  "files": [
+    {
+      "path": "app/build.gradle.kts",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/androidTest/AndroidManifest.xml",
+      "tasks": [
+        "T25"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/androidTest/java/com/ztransfer/crop/CropEditorInstrumentation.kt",
+      "tasks": [
+        "T19"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/androidTest/java/com/ztransfer/crop/CropFixtureProvider.kt",
+      "tasks": [
+        "T25"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/androidTest/java/com/ztransfer/crop/CropOutputInstrumentation.kt",
+      "tasks": [
+        "T20"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/androidTest/java/com/ztransfer/crop/LosslessCropInstrumentation.kt",
+      "tasks": [
+        "T20"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/androidTest/java/com/ztransfer/frame/FramePlaceLayoutInstrumentation.kt",
+      "tasks": [
+        "T25"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/androidTest/java/com/ztransfer/frame/ParameterPosterInstrumentation.kt",
+      "tasks": [
+        "T15"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/androidTest/java/com/ztransfer/lut/LutColorInstrumentation.kt",
+      "tasks": [
+        "T13"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/androidTest/java/com/ztransfer/lut/LutStateInstrumentation.kt",
+      "tasks": [
+        "T13"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/androidTest/java/com/ztransfer/protocol/StaJpegThumbnailInstrumentation.kt",
+      "tasks": [
+        "T03"
+      ],
+      "review": "T03范围最终源码/测试及生产接线已核对；对应iOS实现与验证见任务台账T03收尾表，待真机验收"
+    },
+    {
+      "path": "app/src/androidTest/java/com/ztransfer/ui/screen/MonitorExposurePerformanceInstrumentation.kt",
+      "tasks": [
+        "T25"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/androidTest/java/com/ztransfer/ui/screen/MonitorInteractionInstrumentation.kt",
+      "tasks": [
+        "T25"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/androidTest/java/com/ztransfer/ui/screen/PreviewHistogramPrecisionInstrumentation.kt",
+      "tasks": [
+        "T25"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/androidTest/java/com/ztransfer/ui/screen/RemotePreviewHistogramInstrumentation.kt",
+      "tasks": [
+        "T09"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/androidTest/java/com/ztransfer/ui/screen/RemoteScopeInstrumentation.kt",
+      "tasks": [
+        "T09"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/androidTest/java/com/ztransfer/ui/screen/RemoteToolEditorInstrumentation.kt",
+      "tasks": [
+        "T05"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/androidTest/java/com/ztransfer/ui/screen/RemoteToolsInstrumentation.kt",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/debug/java/com/ztransfer/diagnostics/PhotoGenerationProbe.kt",
+      "tasks": [
+        "T25"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/debug/java/com/ztransfer/ui/screen/DebugPhotoGenerationProbePanel.kt",
+      "tasks": [
+        "T25"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/debug/java/com/ztransfer/ui/screen/DebugSimulatorButton.kt",
+      "tasks": [
+        "T25"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/assets/licenses/libjpeg-turbo-LICENSE.md",
+      "tasks": [
+        "T20"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/assets/licenses/libjpeg-turbo-README.ijg",
+      "tasks": [
+        "T20",
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/cpp/CMakeLists.txt",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/cpp/crop.exports",
+      "tasks": [
+        "T20"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/cpp/jpeg_crop.cpp",
+      "tasks": [
+        "T20"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/cpp/photo_lut.cpp",
+      "tasks": [
+        "T14"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/cpp/vendor/LICENSE-libjpeg-turbo.md",
+      "tasks": [
+        "T20"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/cpp/vendor/README.ijg",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/cpp/vendor/README.md",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/cpp/vendor/libjpeg-turbo-3.1.2.tar.gz",
+      "tasks": [
+        "T20"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/MainActivity.kt",
+      "tasks": [
+        "T25"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/crop/CropOutputPublisher.kt",
+      "tasks": [
+        "T20"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/crop/CropPreview.kt",
+      "tasks": [
+        "T19"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/crop/CropPreviewBounds.kt",
+      "tasks": [
+        "T19"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/crop/CropSourceAccess.kt",
+      "tasks": [
+        "T20"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/crop/JpegCrop.kt",
+      "tasks": [
+        "T20"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/crop/JpegCropHeader.kt",
+      "tasks": [
+        "T20"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/crop/LosslessJpeg.kt",
+      "tasks": [
+        "T20"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/effects/PhotoEffectFavorites.kt",
+      "tasks": [
+        "T17"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/effects/PhotoEffectModules.kt",
+      "tasks": [
+        "T18"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/filter/CubePhotoFilterParameters.kt",
+      "tasks": [
+        "T14"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/filter/ExactRgbMemo.kt",
+      "tasks": [
+        "T14"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/filter/NativePhotoLut.kt",
+      "tasks": [
+        "T14"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/filter/PhotoCubeResourceCache.kt",
+      "tasks": [
+        "T14"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/filter/PhotoFilterRenderer.kt",
+      "tasks": [
+        "T14"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/filter/PhotoLutExecution.kt",
+      "tasks": [
+        "T14",
+        "T22"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/frame/BrandLogoPaths.kt",
+      "tasks": [
+        "T16"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/frame/FrameBrandLogo.kt",
+      "tasks": [
+        "T16"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/frame/FrameTextWrapping.kt",
+      "tasks": [
+        "T17"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/frame/MeasuredFrameText.kt",
+      "tasks": [
+        "T17"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/frame/NikonBrandLogo.kt",
+      "tasks": [
+        "T16"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/frame/ParameterPosterFrame.kt",
+      "tasks": [
+        "T15"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/frame/PhotoAllocationBudget.kt",
+      "tasks": [
+        "T22"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/frame/PhotoFrameExporter.kt",
+      "tasks": [
+        "T17"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/frame/PhotoFrameLocationResolver.kt",
+      "tasks": [
+        "T15"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/frame/PhotoFrameMetadataSettings.kt",
+      "tasks": [
+        "T17"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/frame/PhotoFrameWidth.kt",
+      "tasks": [
+        "T17"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/frame/PhotoMetadataSnapshotBounds.kt",
+      "tasks": [
+        "T22"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/lut/CubeLut.kt",
+      "tasks": [
+        "T12"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/lut/LutEglSurface.kt",
+      "tasks": [
+        "T13"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/lut/LutFolderRepository.kt",
+      "tasks": [
+        "T12"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/lut/LutGlProgram.kt",
+      "tasks": [
+        "T13"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/lut/LutIoQueue.kt",
+      "tasks": [
+        "T12"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/lut/LutMonitorState.kt",
+      "tasks": [
+        "T13"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/lut/LutPreferences.kt",
+      "tasks": [
+        "T13"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/lut/LutTextureView.kt",
+      "tasks": [
+        "T13"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/lut/ParsedLutCache.kt",
+      "tasks": [
+        "T12"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/lut/PhotoLutEditorState.kt",
+      "tasks": [
+        "T14"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/lut/PhotoLutSnapshotCodec.kt",
+      "tasks": [
+        "T12",
+        "T14"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/lut/PhotoLutStore.kt",
+      "tasks": [
+        "T14"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/protocol/DownloadIntegrity.kt",
+      "tasks": [
+        "T21"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/protocol/FileScanBatchSize.kt",
+      "tasks": [
+        "T03"
+      ],
+      "review": "T03范围最终源码/测试及生产接线已核对；对应iOS实现与验证见任务台账T03收尾表，待真机验收"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/protocol/LiveViewMetadata.kt",
+      "tasks": [
+        "T08"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/protocol/MonitorStorage.kt",
+      "tasks": [
+        "T25"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/protocol/NikonCamera.kt",
+      "tasks": [
+        "T25"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/protocol/PhotoMetadataIdentity.kt",
+      "tasks": [
+        "T03"
+      ],
+      "review": "T03范围最终源码/测试及生产接线已核对；对应iOS实现与验证见任务台账T03收尾表，待真机验收"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/protocol/RemoteCameraTools.kt",
+      "tasks": [
+        "T06",
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/protocol/RemoteExposureMeter.kt",
+      "tasks": [
+        "T10"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/protocol/RemoteLab.kt",
+      "tasks": [
+        "T06"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/protocol/StaJpegThumbnail.kt",
+      "tasks": [
+        "T03"
+      ],
+      "review": "T03范围最终源码/测试及生产接线已核对；对应iOS实现与验证见任务台账T03收尾表，待真机验收"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/protocol/VideoTransferPolicy.kt",
+      "tasks": [
+        "T21"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/recorder/ViewfinderRecorder.kt",
+      "tasks": [
+        "T25"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/AnchorPopup.kt",
+      "tasks": [
+        "T24"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/CropEditor.kt",
+      "tasks": [
+        "T19"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/CropEditorGeometry.kt",
+      "tasks": [
+        "T19"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/ExposureMeterOverlay.kt",
+      "tasks": [
+        "T10"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt",
+      "tasks": [
+        "T25"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/GeniePopupGeometry.kt",
+      "tasks": [
+        "T24"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/GeniePopupLayer.kt",
+      "tasks": [
+        "T24"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/GenieVisibility.kt",
+      "tasks": [
+        "T24"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/GlassBackButton.kt",
+      "tasks": [
+        "T24"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/GlassButton.kt",
+      "tasks": [
+        "T24"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/HomeScreen.kt",
+      "tasks": [
+        "T25"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/HomeWorkspacePager.kt",
+      "tasks": [
+        "T23"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/LandscapeMonitorControls.kt",
+      "tasks": [
+        "T11"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/LandscapeMonitorLayout.kt",
+      "tasks": [
+        "T11"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/LocalPhotoBatchButton.kt",
+      "tasks": [
+        "T23"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/LocalPhotoBatchViewModel.kt",
+      "tasks": [
+        "T25"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/LocalPhotoEffectsOverlay.kt",
+      "tasks": [
+        "T25"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/LocalPhotoEffectsPreferences.kt",
+      "tasks": [
+        "T25"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/LocalPhotoPreviewPager.kt",
+      "tasks": [
+        "T04",
+        "T23"
+      ],
+      "review": "T04 scope reviewed/implemented; shared T23 local opening remains pending where assigned. See closeout matrix and test evidence."
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/LutCategoryList.kt",
+      "tasks": [
+        "T12"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/MonitorOverlayStyle.kt",
+      "tasks": [
+        "T11"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/PhotoEffectModuleMenu.kt",
+      "tasks": [
+        "T18"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/PhotoLutEditor.kt",
+      "tasks": [
+        "T14"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/PhotoPreview.kt",
+      "tasks": [
+        "T04",
+        "T09",
+        "T19",
+        "T20",
+        "T23",
+        "T24"
+      ],
+      "review": "T04 ordinary preview reviewed/implemented; histogram, crop, single local overlay and shared controls remain owned by corresponding tasks. See closeout matrix."
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/PortraitMonitorLayout.kt",
+      "tasks": [
+        "T11"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/PreviewCropPlacement.kt",
+      "tasks": [
+        "T19"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/PreviewGestureGeometry.kt",
+      "tasks": [
+        "T04"
+      ],
+      "review": "T04 scope reviewed/implemented; shared T23 local opening remains pending where assigned. See closeout matrix and test evidence."
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/QueueCardSwipe.kt",
+      "tasks": [
+        "T23"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/RecControlBar.kt",
+      "tasks": [
+        "T11"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/ReleaseCommitWheel.kt",
+      "tasks": [
+        "T24"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/RemoteCameraToolPanel.kt",
+      "tasks": [
+        "T06"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/RemoteChoicePopup.kt",
+      "tasks": [
+        "T24"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/RemoteDiagnosticReport.kt",
+      "tasks": [
+        "T06"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/RemoteDispOverlay.kt",
+      "tasks": [
+        "T11"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/RemoteExposureAnalysis.kt",
+      "tasks": [
+        "T09"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/RemoteGridPanel.kt",
+      "tasks": [
+        "T07"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/RemoteLutImage.kt",
+      "tasks": [
+        "T13"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/RemoteLutPanel.kt",
+      "tasks": [
+        "T13"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/RemoteMonitorScopes.kt",
+      "tasks": [
+        "T09"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/RemoteParameterPanel.kt",
+      "tasks": [
+        "T25"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/RemoteScreen.kt",
+      "tasks": [
+        "T25"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/RemoteScreenServices.kt",
+      "tasks": [
+        "T25"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/RemoteToolBar.kt",
+      "tasks": [
+        "T05"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/RemoteToolPreferences.kt",
+      "tasks": [
+        "T05"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/RemoteViewfinderFeatures.kt",
+      "tasks": [
+        "T25"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/ScrollEdgeFade.kt",
+      "tasks": [
+        "T24"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/SettingsScreen.kt",
+      "tasks": [
+        "T25"
+      ],
+      "review": "待逐差异调查",
+      "reviewedScopes": [
+        "T01实时传输档位/迁移/准入/新媒体JPEG；其他差异仍待后续任务"
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/TipLightbulbButton.kt",
+      "tasks": [
+        "T24"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/TransferScreen.kt",
+      "tasks": [
+        "T23"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/ViewfinderViewport.kt",
+      "tasks": [
+        "T07"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/theme/Motion.kt",
+      "tasks": [
+        "T24"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/util/Haptics.kt",
+      "tasks": [
+        "T24"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/util/LongPressFeedback.kt",
+      "tasks": [
+        "T24"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/util/CoordinateFormat.kt",
+      "tasks": [
+        "T15"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/util/HistogramMode.kt",
+      "tasks": [
+        "T09"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/viewmodel/AutoTransferMode.kt",
+      "tasks": [
+        "T01"
+      ],
+      "review": "T01最终源码/测试及引入提交已完整调查，iOS对应迁移与定向测试完成"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/viewmodel/CachedThumbnailBatchPolicy.kt",
+      "tasks": [
+        "T03"
+      ],
+      "review": "T03范围最终源码/测试及生产接线已核对；对应iOS实现与验证见任务台账T03收尾表，待真机验收"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/viewmodel/CameraConnectionPresentation.kt",
+      "tasks": [
+        "T02"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/viewmodel/CameraViewModel.kt",
+      "tasks": [
+        "T25"
+      ],
+      "review": "待逐差异调查",
+      "reviewedScopes": [
+        "T01实时传输档位/迁移/准入/新媒体JPEG；其他差异仍待后续任务"
+      ]
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/viewmodel/JpegMetadataHeader.kt",
+      "tasks": [
+        "T21"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/viewmodel/PhotoGenerationQueue.kt",
+      "tasks": [
+        "T22"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/viewmodel/PhotoMetadataPreparation.kt",
+      "tasks": [
+        "T22"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/viewmodel/ThumbnailDiskCache.kt",
+      "tasks": [
+        "T03"
+      ],
+      "review": "T03范围最终源码/测试及生产接线已核对；对应iOS实现与验证见任务台账T03收尾表，待真机验收"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/viewmodel/TransferViewModel.kt",
+      "tasks": [
+        "T25"
+      ],
+      "review": "待逐差异调查",
+      "reviewedScopes": [
+        "T01实时传输档位/迁移/准入/新媒体JPEG；其他差异仍待后续任务"
+      ]
+    },
+    {
+      "path": "app/src/main/res/values-b+zh+Hant/crop.xml",
+      "tasks": [
+        "T25"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/res/values-b+zh+Hant/monitor_disp.xml",
+      "tasks": [
+        "T11",
+        "T25"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/res/values-b+zh+Hant/posture_diagnostic.xml",
+      "tasks": [
+        "T08",
+        "T25"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/res/values-b+zh+Hant/remote_tools.xml",
+      "tasks": [
+        "T25",
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/res/values-b+zh+Hant/strings.xml",
+      "tasks": [
+        "T25"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/res/values-zh/crop.xml",
+      "tasks": [
+        "T25"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/res/values-zh/monitor_disp.xml",
+      "tasks": [
+        "T11",
+        "T25"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/res/values-zh/posture_diagnostic.xml",
+      "tasks": [
+        "T08",
+        "T25"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/res/values-zh/remote_tools.xml",
+      "tasks": [
+        "T25",
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/res/values-zh/strings.xml",
+      "tasks": [
+        "T25"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/res/values/crop.xml",
+      "tasks": [
+        "T25"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/res/values/monitor_disp.xml",
+      "tasks": [
+        "T11",
+        "T25"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/res/values/posture_diagnostic.xml",
+      "tasks": [
+        "T08",
+        "T25"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/res/values/remote_tools.xml",
+      "tasks": [
+        "T25",
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/main/res/values/strings.xml",
+      "tasks": [
+        "T25"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/crop/CropSelectionTest.kt",
+      "tasks": [
+        "T19"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/crop/JpegCropTest.kt",
+      "tasks": [
+        "T20"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/effects/PhotoEffectFavoritesTest.kt",
+      "tasks": [
+        "T17"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/effects/PhotoEffectModulesTest.kt",
+      "tasks": [
+        "T18"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/filter/ExactRgbMemoTest.kt",
+      "tasks": [
+        "T14"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/filter/ExactRgbRendererParityTest.kt",
+      "tasks": [
+        "T14"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/filter/PhotoCubeBulkTest.kt",
+      "tasks": [
+        "T14"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/filter/PhotoCubeMapperTest.kt",
+      "tasks": [
+        "T14"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/filter/PhotoCubeResourceCacheTest.kt",
+      "tasks": [
+        "T14"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/filter/PhotoFilterRendererTest.kt",
+      "tasks": [
+        "T14"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/frame/BrandLogoPathsTest.kt",
+      "tasks": [
+        "T16"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/frame/ParameterPosterFrameTest.kt",
+      "tasks": [
+        "T15"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/frame/PhotoAllocationBudgetTest.kt",
+      "tasks": [
+        "T22"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/frame/PhotoFrameExporterTest.kt",
+      "tasks": [
+        "T17"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/frame/PhotoFrameMetadataRequirementsTest.kt",
+      "tasks": [
+        "T25"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/frame/PhotoFrameMetadataSettingsTest.kt",
+      "tasks": [
+        "T17"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/frame/PhotoFramePlaceTest.kt",
+      "tasks": [
+        "T15"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/frame/PhotoFrameWidthTest.kt",
+      "tasks": [
+        "T17"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/frame/PhotoMetadataSnapshotBoundsTest.kt",
+      "tasks": [
+        "T22"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/lut/CubeLutParserTest.kt",
+      "tasks": [
+        "T12"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/lut/ParsedLutCacheTest.kt",
+      "tasks": [
+        "T12"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/lut/PhotoLutSnapshotCodecTest.kt",
+      "tasks": [
+        "T12",
+        "T14"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/protocol/DownloadIntegrityTest.kt",
+      "tasks": [
+        "T21"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/protocol/FileScanBatchSizeTest.kt",
+      "tasks": [
+        "T03"
+      ],
+      "review": "T03范围最终源码/测试及生产接线已核对；对应iOS实现与验证见任务台账T03收尾表，待真机验收"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/protocol/LiveViewAttitudeTest.kt",
+      "tasks": [
+        "T08"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/protocol/MonitorStorageTest.kt",
+      "tasks": [
+        "T25"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/protocol/PhotoMetadataIdentityTest.kt",
+      "tasks": [
+        "T03"
+      ],
+      "review": "T03范围最终源码/测试及生产接线已核对；对应iOS实现与验证见任务台账T03收尾表，待真机验收"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/protocol/RemoteDiagnosticExposureTest.kt",
+      "tasks": [
+        "T06",
+        "T10"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/protocol/RemoteExposureMeterTest.kt",
+      "tasks": [
+        "T10"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/protocol/StaJpegThumbnailTest.kt",
+      "tasks": [
+        "T03"
+      ],
+      "review": "T03范围最终源码/测试及生产接线已核对；对应iOS实现与验证见任务台账T03收尾表，待真机验收"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/protocol/VideoTransferPolicyTest.kt",
+      "tasks": [
+        "T21"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/ui/screen/CropEditorGeometryTest.kt",
+      "tasks": [
+        "T19"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/ui/screen/DisconnectedCameraPresentationTest.kt",
+      "tasks": [
+        "T02"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/ui/screen/FileListPresentationTest.kt",
+      "tasks": [
+        "T25"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/ui/screen/FramingGridTest.kt",
+      "tasks": [
+        "T07"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/ui/screen/GenieAboveAnchorTest.kt",
+      "tasks": [
+        "T24"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/ui/screen/GenieBandMatrixTest.kt",
+      "tasks": [
+        "T24"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/ui/screen/HomeWorkspacePagerTest.kt",
+      "tasks": [
+        "T23"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/ui/screen/LandscapeMonitorLayoutTest.kt",
+      "tasks": [
+        "T11"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/ui/screen/LocalPhotoEffectsPreferencesTest.kt",
+      "tasks": [
+        "T25"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/ui/screen/PhotoPreviewItemsTest.kt",
+      "tasks": [
+        "T04"
+      ],
+      "review": "T04 scope reviewed/implemented; shared T23 local opening remains pending where assigned. See closeout matrix and test evidence."
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/ui/screen/PortraitMonitorLayoutTest.kt",
+      "tasks": [
+        "T11"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/ui/screen/PreviewCropPlacementTest.kt",
+      "tasks": [
+        "T19"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/ui/screen/PreviewGestureGeometryTest.kt",
+      "tasks": [
+        "T04"
+      ],
+      "review": "T04 scope reviewed/implemented; shared T23 local opening remains pending where assigned. See closeout matrix and test evidence."
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/ui/screen/QueuePillStateTest.kt",
+      "tasks": [
+        "T23"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/ui/screen/RemoteCameraToolLabelTest.kt",
+      "tasks": [
+        "T06"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/ui/screen/RemoteDiagnosticReportTest.kt",
+      "tasks": [
+        "T06"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/ui/screen/RemoteLiveViewSchedulingTest.kt",
+      "tasks": [
+        "T25"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/ui/screen/ThumbnailPreviewPriorityTest.kt",
+      "tasks": [
+        "T04"
+      ],
+      "review": "T04 scope reviewed/implemented; shared T23 local opening remains pending where assigned. See closeout matrix and test evidence."
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/ui/screen/TransferQueueActionVisibilityTest.kt",
+      "tasks": [
+        "T23"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/ui/screen/ViewfinderViewportTest.kt",
+      "tasks": [
+        "T07"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/ui/util/ProgressiveHoldTimingsTest.kt",
+      "tasks": [
+        "T24"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/util/CoordinateFormatTest.kt",
+      "tasks": [
+        "T15"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/viewmodel/AutoTransferModeTest.kt",
+      "tasks": [
+        "T01"
+      ],
+      "review": "T01最终源码/测试及引入提交已完整调查，iOS对应迁移与定向测试完成"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/viewmodel/CachedThumbnailBatchPolicyTest.kt",
+      "tasks": [
+        "T03"
+      ],
+      "review": "T03范围最终源码/测试及生产接线已核对；对应iOS实现与验证见任务台账T03收尾表，待真机验收"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/viewmodel/ExistingFileNameIndexTest.kt",
+      "tasks": [
+        "T03"
+      ],
+      "review": "T03范围最终源码/测试及生产接线已核对；对应iOS实现与验证见任务台账T03收尾表，待真机验收"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/viewmodel/JpegMetadataHeaderTest.kt",
+      "tasks": [
+        "T21"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/viewmodel/NewMediaTransferPolicyTest.kt",
+      "tasks": [
+        "T01"
+      ],
+      "review": "待逐差异调查",
+      "reviewedScopes": [
+        "T01实时传输档位/迁移/准入/新媒体JPEG；其他差异仍待后续任务"
+      ]
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/viewmodel/PhotoGenerationQueueTest.kt",
+      "tasks": [
+        "T22"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/viewmodel/PhotoMetadataPreparationTest.kt",
+      "tasks": [
+        "T22"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/viewmodel/RemoteEntryIntroPolicyTest.kt",
+      "tasks": [
+        "T02"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/viewmodel/ThumbnailDiskCacheTest.kt",
+      "tasks": [
+        "T03"
+      ],
+      "review": "T03范围最终源码/测试及生产接线已核对；对应iOS实现与验证见任务台账T03收尾表，待真机验收"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/viewmodel/TransferStateTest.kt",
+      "tasks": [
+        "T25"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/testDebug/java/com/ztransfer/diagnostics/TimingReportTest.kt",
+      "tasks": [
+        "T25"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "app/src/testDebug/java/com/ztransfer/filter/PhotoLutExecutionTest.kt",
+      "tasks": [
+        "T14",
+        "T22"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "dist-debug/build-debug.bat",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "dist-debug/build.command",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "docs/README.md",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "docs/brand-logo-research/README.md",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "docs/brand-logo-research/apple.svg",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "docs/brand-logo-research/dji.svg",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "docs/brand-logo-research/fujifilm.svg",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "docs/brand-logo-research/google.svg",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "docs/brand-logo-research/honor.svg",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "docs/brand-logo-research/huawei.svg",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "docs/brand-logo-research/leica.svg",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "docs/brand-logo-research/metadata-source.json",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "docs/brand-logo-research/motorola.svg",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "docs/brand-logo-research/nikon-official.svg",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "docs/brand-logo-research/nikon.svg",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "docs/brand-logo-research/nokia.svg",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "docs/brand-logo-research/oneplus.svg",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "docs/brand-logo-research/oppo.svg",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "docs/brand-logo-research/panasonic.svg",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "docs/brand-logo-research/samsung.svg",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "docs/brand-logo-research/sony.svg",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "docs/brand-logo-research/sources.json",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "docs/brand-logo-research/vivo.svg",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "docs/brand-logo-research/xiaomi.svg",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "docs/reviews/transfer-generation-flow.html",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "docs/reviews/传输生成与滤镜LUT性能复查.md",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "docs/reviews/照片LUT单线程对比测试.md",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "docs/已完成/参考线缩放与实时传输类型筛选.md",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "docs/已完成/监看参考线选择与轻量弹窗动画.md",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "docs/已完成/监看双轴姿态诊断.md",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "docs/已完成/监看工具栏自定义与辅助工具需求清单.md",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "docs/已完成/边框宽度自定义.md",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "docs/已完成/预览无损裁切传输.md",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "docs/待做/2026-09-24-监看与照片效果需求跟进.md",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "docs/待做/STA照片保护状态读取与上传标记解锁调查.md",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "docs/待做/传输与照片生成双线并行性能优化.md",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "docs/待做/全局触感反馈梳理与优化方案.md",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "docs/待做/星级筛选重新开放.md",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "docs/待做/横屏监看统一布局与Dock.md",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "docs/待做/照片效果LUT独立分区.md",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "docs/待做/监看LUT文件夹与选择菜单.md",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "docs/待做/监看拍照后FHD回看.md",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "docs/待做/监看曝光尺调查与实现.md",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "docs/待做/边框缩窄与内容自适应布局.md",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "docs/技术调研/计算机Wi-Fi客户端与智能设备STA模式.md",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "docs/测试与验证/2026-09-28-监看与品牌功能复查.md",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "server/Mac管理工具说明.md",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "server/OSS发布设置.md",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "server/admin.ps1",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "server/mac-admin-tools.sh",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "server/mac-update-notes.js",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "server/tests/admin-mac.test.ps1",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "server/激活码管理.command",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    },
+    {
+      "path": "tools/test-photo-lut-host.sh",
+      "tasks": [
+        "T26"
+      ],
+      "review": "待逐差异调查"
+    }
+  ],
+  "commits": [
+    {
+      "commit": "5c61a0db48af18ff0e8d4e0ef81cf96eb98d2aa3",
+      "title": "fix: improve Nikon shutter compatibility diagnostics",
+      "tasks": [
+        "T06",
+        "T25",
+        "T26"
+      ],
+      "files": [
+        "app/build.gradle.kts",
+        "app/src/main/java/com/ztransfer/protocol/RemoteLab.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteScreen.kt"
+      ]
+    },
+    {
+      "commit": "7ef0647cfac972debae3f446b8701aa6ef7a4918",
+      "title": "feat: add diagnostic PC control toggle for Nikon shutter testing",
+      "tasks": [
+        "T06",
+        "T10",
+        "T25"
+      ],
+      "files": [
+        "app/src/main/java/com/ztransfer/protocol/NikonCamera.kt",
+        "app/src/main/java/com/ztransfer/protocol/RemoteLab.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteDiagnosticReport.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteScreen.kt",
+        "app/src/main/res/values-b+zh+Hant/strings.xml",
+        "app/src/main/res/values-zh/strings.xml",
+        "app/src/main/res/values/strings.xml",
+        "app/src/test/java/com/ztransfer/protocol/RemoteDiagnosticExposureTest.kt",
+        "app/src/test/java/com/ztransfer/ui/screen/RemoteDiagnosticReportTest.kt",
+        "app/src/test/java/com/ztransfer/ui/screen/RemoteLiveViewSchedulingTest.kt"
+      ]
+    },
+    {
+      "commit": "e644ccf45091f7825938470d05bd826038b8d985",
+      "title": "feat: add viewfinder grid styles and refine monitor buttons",
+      "tasks": [
+        "T07",
+        "T24",
+        "T25"
+      ],
+      "files": [
+        "app/src/main/java/com/ztransfer/ui/screen/GlassButton.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteViewfinderFeatures.kt",
+        "app/src/main/res/values-b+zh+Hant/strings.xml",
+        "app/src/main/res/values-zh/strings.xml",
+        "app/src/main/res/values/strings.xml",
+        "app/src/test/java/com/ztransfer/ui/screen/FramingGridTest.kt"
+      ]
+    },
+    {
+      "commit": "2dc12ce4675208771b45c1bb35f7bc557ff8b63a",
+      "title": "feat: add city and district frame metadata and camera-style coordinates",
+      "tasks": [
+        "T15",
+        "T17",
+        "T25"
+      ],
+      "files": [
+        "app/src/androidTest/AndroidManifest.xml",
+        "app/src/androidTest/java/com/ztransfer/frame/FramePlaceLayoutInstrumentation.kt",
+        "app/src/main/java/com/ztransfer/frame/PhotoFrameExporter.kt",
+        "app/src/main/java/com/ztransfer/frame/PhotoFrameLocationResolver.kt",
+        "app/src/main/java/com/ztransfer/frame/PhotoFrameMetadataSettings.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/SettingsScreen.kt",
+        "app/src/main/java/com/ztransfer/util/CoordinateFormat.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/CameraViewModel.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/TransferViewModel.kt",
+        "app/src/main/res/values-b+zh+Hant/strings.xml",
+        "app/src/main/res/values-zh/strings.xml",
+        "app/src/main/res/values/strings.xml",
+        "app/src/test/java/com/ztransfer/frame/PhotoFrameExporterTest.kt",
+        "app/src/test/java/com/ztransfer/frame/PhotoFramePlaceTest.kt",
+        "app/src/test/java/com/ztransfer/util/CoordinateFormatTest.kt"
+      ]
+    },
+    {
+      "commit": "e738542d6778587d4d36679641149cd6205288da",
+      "title": "fix: load STA thumbnails sequentially and improve JPEG clarity",
+      "tasks": [
+        "T03",
+        "T25",
+        "T26"
+      ],
+      "files": [
+        "app/build.gradle.kts",
+        "app/src/androidTest/AndroidManifest.xml",
+        "app/src/androidTest/java/com/ztransfer/protocol/StaJpegThumbnailInstrumentation.kt",
+        "app/src/main/java/com/ztransfer/protocol/NikonCamera.kt",
+        "app/src/main/java/com/ztransfer/protocol/StaJpegThumbnail.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/CameraViewModel.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/ThumbnailDiskCache.kt",
+        "app/src/test/java/com/ztransfer/protocol/StaJpegThumbnailTest.kt",
+        "app/src/test/java/com/ztransfer/viewmodel/ThumbnailDiskCacheTest.kt"
+      ]
+    },
+    {
+      "commit": "28bc15c021166468f794aad5a84794d5f2fb4843",
+      "title": "feat: add parameter poster photo frame with exposure labels",
+      "tasks": [
+        "T15",
+        "T17",
+        "T23",
+        "T25"
+      ],
+      "files": [
+        "app/src/androidTest/AndroidManifest.xml",
+        "app/src/androidTest/java/com/ztransfer/frame/ParameterPosterInstrumentation.kt",
+        "app/src/main/java/com/ztransfer/frame/ParameterPosterFrame.kt",
+        "app/src/main/java/com/ztransfer/frame/PhotoFrameExporter.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/SettingsScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/TransferScreen.kt",
+        "app/src/main/res/values-b+zh+Hant/strings.xml",
+        "app/src/main/res/values-zh/strings.xml",
+        "app/src/main/res/values/strings.xml",
+        "app/src/test/java/com/ztransfer/frame/ParameterPosterFrameTest.kt"
+      ]
+    },
+    {
+      "commit": "f9407e0d538200eeb40fd2c060fd363e8c35e33e",
+      "title": "feat: checkpoint monitor tools and Android support updates",
+      "tasks": [
+        "T05",
+        "T06",
+        "T09",
+        "T15",
+        "T25",
+        "T26"
+      ],
+      "files": [
+        "app/src/androidTest/AndroidManifest.xml",
+        "app/src/androidTest/java/com/ztransfer/ui/screen/RemoteToolsInstrumentation.kt",
+        "app/src/main/java/com/ztransfer/frame/ParameterPosterFrame.kt",
+        "app/src/main/java/com/ztransfer/protocol/RemoteCameraTools.kt",
+        "app/src/main/java/com/ztransfer/recorder/ViewfinderRecorder.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteCameraToolPanel.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteExposureAnalysis.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteToolManager.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteToolPreferences.kt",
+        "app/src/main/res/values-b+zh+Hant/remote_tools.xml",
+        "app/src/main/res/values-zh/remote_tools.xml",
+        "app/src/main/res/values/remote_tools.xml",
+        "docs/技术调研/计算机Wi-Fi客户端与智能设备STA模式.md",
+        "server/Mac管理工具说明.md",
+        "server/OSS发布设置.md",
+        "server/admin.ps1",
+        "server/mac-admin-tools.sh",
+        "server/mac-update-notes.js",
+        "server/tests/admin-mac.test.ps1",
+        "server/激活码管理.command",
+        "待做/STA照片保护状态读取与上传标记解锁调查.md",
+        "待做/监看工具栏自定义与辅助工具需求清单.md"
+      ]
+    },
+    {
+      "commit": "9fd5921bd88e31e5cb68b716aa80452fb46e1809",
+      "title": "yh",
+      "tasks": [
+        "T04",
+        "T05",
+        "T09",
+        "T25",
+        "T26"
+      ],
+      "files": [
+        "app/src/androidTest/AndroidManifest.xml",
+        "app/src/androidTest/java/com/ztransfer/ui/screen/RemotePreviewHistogramInstrumentation.kt",
+        "app/src/androidTest/java/com/ztransfer/ui/screen/RemoteScopeInstrumentation.kt",
+        "app/src/androidTest/java/com/ztransfer/ui/screen/RemoteToolEditorInstrumentation.kt",
+        "app/src/androidTest/java/com/ztransfer/ui/screen/RemoteToolsInstrumentation.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/PhotoPreview.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteExposureAnalysis.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteMonitorScopes.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteScreenServices.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteToolBar.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteToolManager.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteToolPreferences.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteViewfinderFeatures.kt",
+        "app/src/main/java/com/ztransfer/util/HistogramMode.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/TransferViewModel.kt",
+        "app/src/main/res/values-b+zh+Hant/remote_tools.xml",
+        "app/src/main/res/values-zh/remote_tools.xml",
+        "app/src/main/res/values/remote_tools.xml",
+        "待做/监看工具栏自定义与辅助工具需求清单.md"
+      ]
+    },
+    {
+      "commit": "95362d6662fdd9af47c756d225322650f619e45d",
+      "title": "修正三种模式断联后的样子",
+      "tasks": [
+        "T02",
+        "T23",
+        "T25"
+      ],
+      "files": [
+        "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/TransferScreen.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/CameraConnectionPresentation.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/CameraViewModel.kt",
+        "app/src/main/res/values-b+zh+Hant/strings.xml",
+        "app/src/main/res/values-zh/strings.xml",
+        "app/src/main/res/values/strings.xml",
+        "app/src/test/java/com/ztransfer/ui/screen/DisconnectedCameraPresentationTest.kt"
+      ]
+    },
+    {
+      "commit": "4fb336e288136fcd627f29419b1202e28609efab",
+      "title": "优化与新增功能",
+      "tasks": [
+        "T05",
+        "T07",
+        "T11",
+        "T15",
+        "T16",
+        "T17",
+        "T23",
+        "T25",
+        "T26"
+      ],
+      "files": [
+        "app/src/androidTest/AndroidManifest.xml",
+        "app/src/androidTest/java/com/ztransfer/frame/FramePlaceLayoutInstrumentation.kt",
+        "app/src/androidTest/java/com/ztransfer/ui/screen/MonitorInteractionInstrumentation.kt",
+        "app/src/androidTest/java/com/ztransfer/ui/screen/RemoteToolEditorInstrumentation.kt",
+        "app/src/main/java/com/ztransfer/frame/NikonBrandLogo.kt",
+        "app/src/main/java/com/ztransfer/frame/ParameterPosterFrame.kt",
+        "app/src/main/java/com/ztransfer/frame/PhotoFrameExporter.kt",
+        "app/src/main/java/com/ztransfer/frame/PhotoFrameMetadataSettings.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteDispOverlay.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteToolBar.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteToolPreferences.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteViewfinderFeatures.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/SettingsScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/TransferScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/ViewfinderViewport.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/TransferViewModel.kt",
+        "app/src/main/res/values-b+zh+Hant/strings.xml",
+        "app/src/main/res/values-zh/strings.xml",
+        "app/src/main/res/values/strings.xml",
+        "app/src/test/java/com/ztransfer/frame/PhotoFrameMetadataSettingsTest.kt",
+        "app/src/test/java/com/ztransfer/ui/screen/ViewfinderViewportTest.kt",
+        "app/src/test/java/com/ztransfer/viewmodel/TransferStateTest.kt",
+        "docs/待做/2026-09-24-监看与照片效果需求跟进.md",
+        "docs/待做/STA照片保护状态读取与上传标记解锁调查.md",
+        "docs/待做/监看工具栏自定义与辅助工具需求清单.md",
+        "待做/STA照片保护状态读取与上传标记解锁调查.md",
+        "待做/监看工具栏自定义与辅助工具需求清单.md"
+      ]
+    },
+    {
+      "commit": "320d7e6383f0cc5ae051a408ec84b6311f84bd6d",
+      "title": "+1",
+      "tasks": [
+        "T26"
+      ],
+      "files": [
+        "app/build.gradle.kts"
+      ]
+    },
+    {
+      "commit": "a7c4728610dbb93e2c56d0df4fe4576c77510d5c",
+      "title": "fix: limit local original preview decoding to current photo",
+      "tasks": [
+        "T04"
+      ],
+      "files": [
+        "app/src/main/java/com/ztransfer/ui/screen/PhotoPreview.kt",
+        "app/src/test/java/com/ztransfer/ui/screen/PhotoPreviewItemsTest.kt"
+      ]
+    },
+    {
+      "commit": "4c4ad1776540938dce42f5bc5ad41af9efb337a3",
+      "title": "fix: use camera FHD exclusively for photo preview",
+      "tasks": [
+        "T03",
+        "T04",
+        "T17",
+        "T25"
+      ],
+      "files": [
+        "app/src/main/java/com/ztransfer/frame/PhotoFrameExporter.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/PhotoPreview.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/CameraViewModel.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/TransferViewModel.kt",
+        "app/src/test/java/com/ztransfer/ui/screen/PhotoPreviewItemsTest.kt",
+        "app/src/test/java/com/ztransfer/ui/screen/ThumbnailPreviewPriorityTest.kt",
+        "app/src/test/java/com/ztransfer/viewmodel/ExistingFileNameIndexTest.kt"
+      ]
+    },
+    {
+      "commit": "178b9b8f0fa3061a34564a3cd5a38d3262814a20",
+      "title": "feat: 完善监看工具与姿态显示，新增参考线和实时传输类型筛选",
+      "tasks": [
+        "T01",
+        "T04",
+        "T05",
+        "T06",
+        "T07",
+        "T08",
+        "T09",
+        "T15",
+        "T16",
+        "T17",
+        "T25",
+        "T26"
+      ],
+      "files": [
+        "app/build.gradle.kts",
+        "app/src/androidTest/AndroidManifest.xml",
+        "app/src/androidTest/java/com/ztransfer/ui/screen/MonitorExposurePerformanceInstrumentation.kt",
+        "app/src/androidTest/java/com/ztransfer/ui/screen/MonitorInteractionInstrumentation.kt",
+        "app/src/androidTest/java/com/ztransfer/ui/screen/PreviewHistogramPrecisionInstrumentation.kt",
+        "app/src/androidTest/java/com/ztransfer/ui/screen/RemoteToolsInstrumentation.kt",
+        "app/src/main/java/com/ztransfer/frame/NikonBrandLogo.kt",
+        "app/src/main/java/com/ztransfer/frame/ParameterPosterFrame.kt",
+        "app/src/main/java/com/ztransfer/frame/PhotoFrameExporter.kt",
+        "app/src/main/java/com/ztransfer/protocol/LiveViewMetadata.kt",
+        "app/src/main/java/com/ztransfer/protocol/RemoteLab.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/PhotoPreview.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/PostureDiagnostic.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/PostureDiagnosticPanel.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteCameraToolPanel.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteExposureAnalysis.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteMonitorScopes.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteToolBar.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteViewfinderFeatures.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/SettingsScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/ViewfinderViewport.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/AutoTransferMode.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/CameraViewModel.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/TransferViewModel.kt",
+        "app/src/main/res/values-b+zh+Hant/posture_diagnostic.xml",
+        "app/src/main/res/values-b+zh+Hant/remote_tools.xml",
+        "app/src/main/res/values-b+zh+Hant/strings.xml",
+        "app/src/main/res/values-zh/posture_diagnostic.xml",
+        "app/src/main/res/values-zh/remote_tools.xml",
+        "app/src/main/res/values-zh/strings.xml",
+        "app/src/main/res/values/posture_diagnostic.xml",
+        "app/src/main/res/values/remote_tools.xml",
+        "app/src/main/res/values/strings.xml",
+        "app/src/test/java/com/ztransfer/protocol/LiveViewAttitudeTest.kt",
+        "app/src/test/java/com/ztransfer/ui/screen/FileListPresentationTest.kt",
+        "app/src/test/java/com/ztransfer/ui/screen/FramingGridTest.kt",
+        "app/src/test/java/com/ztransfer/ui/screen/PostureDiagnosticTest.kt",
+        "app/src/test/java/com/ztransfer/ui/screen/RemoteCameraToolLabelTest.kt",
+        "app/src/test/java/com/ztransfer/ui/screen/ViewfinderViewportTest.kt",
+        "app/src/test/java/com/ztransfer/viewmodel/AutoTransferModeTest.kt",
+        "app/src/test/java/com/ztransfer/viewmodel/NewMediaTransferPolicyTest.kt",
+        "docs/待做/参考线缩放与实时传输类型筛选.md",
+        "docs/待做/监看双轴姿态诊断.md",
+        "server/OSS发布设置.md",
+        "server/admin.ps1",
+        "server/tests/admin-mac.test.ps1"
+      ]
+    },
+    {
+      "commit": "f90ddbd50d626d99f5cea9084296764dc2fff505",
+      "title": "feat: add lossless crop transfers and refine monitor tool menus",
+      "tasks": [
+        "T04",
+        "T05",
+        "T06",
+        "T07",
+        "T19",
+        "T20",
+        "T23",
+        "T24",
+        "T25",
+        "T26"
+      ],
+      "files": [
+        "app/build.gradle.kts",
+        "app/src/androidTest/AndroidManifest.xml",
+        "app/src/androidTest/java/com/ztransfer/crop/CropEditorInstrumentation.kt",
+        "app/src/androidTest/java/com/ztransfer/crop/CropFixtureProvider.kt",
+        "app/src/androidTest/java/com/ztransfer/crop/CropOutputInstrumentation.kt",
+        "app/src/androidTest/java/com/ztransfer/crop/LosslessCropInstrumentation.kt",
+        "app/src/main/assets/licenses/libjpeg-turbo-LICENSE.md",
+        "app/src/main/assets/licenses/libjpeg-turbo-README.ijg",
+        "app/src/main/cpp/CMakeLists.txt",
+        "app/src/main/cpp/jpeg_crop.cpp",
+        "app/src/main/cpp/vendor/LICENSE-libjpeg-turbo.md",
+        "app/src/main/cpp/vendor/README.ijg",
+        "app/src/main/cpp/vendor/README.md",
+        "app/src/main/cpp/vendor/libjpeg-turbo-3.1.2.tar.gz",
+        "app/src/main/java/com/ztransfer/crop/CropOutputPublisher.kt",
+        "app/src/main/java/com/ztransfer/crop/CropPreview.kt",
+        "app/src/main/java/com/ztransfer/crop/CropPreviewBounds.kt",
+        "app/src/main/java/com/ztransfer/crop/JpegCrop.kt",
+        "app/src/main/java/com/ztransfer/crop/JpegCropHeader.kt",
+        "app/src/main/java/com/ztransfer/crop/LosslessJpeg.kt",
+        "app/src/main/java/com/ztransfer/protocol/NikonCamera.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/AnchorPopup.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/CropEditor.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/CropEditorGeometry.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/GeniePopupGeometry.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/GeniePopupLayer.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/PhotoPreview.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/PreviewCropPlacement.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteCameraToolPanel.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteChoicePopup.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteGridPanel.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteToolBar.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteViewfinderFeatures.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/TransferScreen.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/CameraViewModel.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/TransferViewModel.kt",
+        "app/src/main/res/values-b+zh+Hant/crop.xml",
+        "app/src/main/res/values-b+zh+Hant/strings.xml",
+        "app/src/main/res/values-zh/crop.xml",
+        "app/src/main/res/values-zh/strings.xml",
+        "app/src/main/res/values/crop.xml",
+        "app/src/main/res/values/strings.xml",
+        "app/src/test/java/com/ztransfer/crop/CropSelectionTest.kt",
+        "app/src/test/java/com/ztransfer/crop/JpegCropTest.kt",
+        "app/src/test/java/com/ztransfer/ui/screen/CropEditorGeometryTest.kt",
+        "app/src/test/java/com/ztransfer/ui/screen/FramingGridTest.kt",
+        "app/src/test/java/com/ztransfer/ui/screen/GenieAboveAnchorTest.kt",
+        "app/src/test/java/com/ztransfer/ui/screen/GenieBandMatrixTest.kt",
+        "app/src/test/java/com/ztransfer/ui/screen/PreviewCropPlacementTest.kt",
+        "docs/待做/监看参考线选择与轻量弹窗动画.md",
+        "docs/待做/预览无损裁切传输.md"
+      ]
+    },
+    {
+      "commit": "884735104a6138be152f2f951bb4f89a86b175d1",
+      "title": "feat: unify anchored menu animations and refine debug build workflow",
+      "tasks": [
+        "T23",
+        "T24",
+        "T25",
+        "T26"
+      ],
+      "files": [
+        "app/src/main/java/com/ztransfer/ui/screen/AnchorPopup.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/GenieVisibility.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/HomeScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/SettingsScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/TransferScreen.kt",
+        "dist-debug/build.command",
+        "docs/待做/监看参考线选择与轻量弹窗动画.md"
+      ]
+    },
+    {
+      "commit": "7c858f27019aaa442c898222a318c0b3a6d21d71",
+      "title": "fix: refine monitor toolbar transitions and defer menus until options load",
+      "tasks": [
+        "T05",
+        "T06",
+        "T24",
+        "T25",
+        "T26"
+      ],
+      "files": [
+        "app/src/main/java/com/ztransfer/ui/screen/AnchorPopup.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/GeniePopupLayer.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteCameraToolPanel.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteToolBar.kt",
+        "docs/待做/全局触感反馈梳理与优化方案.md",
+        "docs/待做/监看参考线选择与轻量弹窗动画.md"
+      ]
+    },
+    {
+      "commit": "78f8d6263d764c95675bc713783985efe6139c66",
+      "title": "perf: prepare popup content before first visible animation frame",
+      "tasks": [
+        "T24"
+      ],
+      "files": [
+        "app/src/main/java/com/ztransfer/ui/screen/GeniePopupLayer.kt"
+      ]
+    },
+    {
+      "commit": "a092538221c539dca90066a35ee52c35d5d18ef4",
+      "title": "feat: refine crop preview layout and preserve original exports",
+      "tasks": [
+        "T04",
+        "T06",
+        "T19",
+        "T23",
+        "T25",
+        "T26"
+      ],
+      "files": [
+        "app/build.gradle.kts",
+        "app/src/main/java/com/ztransfer/ui/screen/CropEditor.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/CropEditorGeometry.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/PhotoPreview.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/PreviewCropPlacement.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/PreviewGestureGeometry.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteCameraToolPanel.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/TransferViewModel.kt",
+        "app/src/test/java/com/ztransfer/ui/screen/PreviewGestureGeometryTest.kt",
+        "app/src/test/java/com/ztransfer/ui/screen/QueuePillStateTest.kt",
+        "dist-debug/build-debug.bat",
+        "dist-debug/build.command",
+        "docs/待做/预览无损裁切传输.md"
+      ]
+    },
+    {
+      "commit": "577f48087465881da76c5c582ef7d94f15df6776",
+      "title": "添加 USB 传输损坏诊断及自动保存报告",
+      "tasks": [
+        "T25",
+        "T26"
+      ],
+      "files": [
+        "app/src/main/java/com/ztransfer/diagnostics/UsbTransferDiagnostic.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/TransferViewModel.kt",
+        "app/src/main/res/values-b+zh+Hant/usb_diagnostic.xml",
+        "app/src/main/res/values-zh/usb_diagnostic.xml",
+        "app/src/main/res/values/usb_diagnostic.xml",
+        "app/src/test/java/com/ztransfer/diagnostics/TransferByteDigestTest.kt",
+        "app/src/test/java/com/ztransfer/protocol/UsbPayloadIntegrityInvestigationTest.kt",
+        "docs/技术调研/2026-09-26-USB传输花图与视频损坏调查.md"
+      ]
+    },
+    {
+      "commit": "a26c8c9b90b4df677d8b0620c851d5cf6a57fcd2",
+      "title": "Revert \"添加 USB 传输损坏诊断及自动保存报告\"",
+      "tasks": [
+        "T25",
+        "T26"
+      ],
+      "files": [
+        "app/src/main/java/com/ztransfer/diagnostics/UsbTransferDiagnostic.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/TransferViewModel.kt",
+        "app/src/main/res/values-b+zh+Hant/usb_diagnostic.xml",
+        "app/src/main/res/values-zh/usb_diagnostic.xml",
+        "app/src/main/res/values/usb_diagnostic.xml",
+        "app/src/test/java/com/ztransfer/diagnostics/TransferByteDigestTest.kt",
+        "app/src/test/java/com/ztransfer/protocol/UsbPayloadIntegrityInvestigationTest.kt",
+        "docs/技术调研/2026-09-26-USB传输花图与视频损坏调查.md"
+      ]
+    },
+    {
+      "commit": "14996a38213f44eeb0e3c3dba59b4317caebe470",
+      "title": "perf: 精简无损裁切原生库体积",
+      "tasks": [
+        "T20",
+        "T26"
+      ],
+      "files": [
+        "app/src/main/cpp/CMakeLists.txt",
+        "app/src/main/cpp/crop.exports",
+        "app/src/main/cpp/jpeg_crop.cpp"
+      ]
+    },
+    {
+      "commit": "1782f7b679bd95e633aa1ef0c54b096bcd3636a4",
+      "title": "perf: 压缩打包原生库以减小 APK 体积",
+      "tasks": [
+        "T26"
+      ],
+      "files": [
+        "app/build.gradle.kts"
+      ]
+    },
+    {
+      "commit": "751b4af48df2bf10665b564007ea170bfe8d3a30",
+      "title": "优化全局按钮轻点反馈及裁切预览布局",
+      "tasks": [
+        "T04",
+        "T19",
+        "T24"
+      ],
+      "files": [
+        "app/src/main/java/com/ztransfer/ui/screen/CropEditor.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/GlassButton.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/PhotoPreview.kt"
+      ]
+    },
+    {
+      "commit": "b82711c60b0112e567f2ad8d37c09407fcfa51f4",
+      "title": "改按钮名字",
+      "tasks": [
+        "T25"
+      ],
+      "files": [
+        "app/src/main/res/values-b+zh+Hant/strings.xml",
+        "app/src/main/res/values-zh/strings.xml",
+        "app/src/main/res/values/strings.xml"
+      ]
+    },
+    {
+      "commit": "6c689bbe38ea86bdd547ae63bdd1dcab50adce27",
+      "title": "改disp",
+      "tasks": [
+        "T05",
+        "T11",
+        "T25",
+        "T26"
+      ],
+      "files": [
+        "app/src/main/java/com/ztransfer/protocol/MonitorStorage.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteDispOverlay.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteToolPreferences.kt",
+        "app/src/main/res/values-b+zh+Hant/monitor_disp.xml",
+        "app/src/main/res/values-zh/monitor_disp.xml",
+        "app/src/main/res/values/monitor_disp.xml",
+        "app/src/test/java/com/ztransfer/protocol/MonitorStorageTest.kt",
+        "docs/待做/全局触感反馈梳理与优化方案.md"
+      ]
+    },
+    {
+      "commit": "9e0d755f997e33a906728c3b7a00f9de0ffe8c3a",
+      "title": "ui: 移除 DISP 顶部冗余拍摄模式文字",
+      "tasks": [
+        "T11",
+        "T25"
+      ],
+      "files": [
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteDispOverlay.kt",
+        "app/src/main/res/values-b+zh+Hant/monitor_disp.xml",
+        "app/src/main/res/values-zh/monitor_disp.xml",
+        "app/src/main/res/values/monitor_disp.xml"
+      ]
+    },
+    {
+      "commit": "b157f72e24ac36c3cd4f67de41bff7792e5e98c2",
+      "title": "feat: add LUT monitoring and multi-brand frame logos",
+      "tasks": [
+        "T04",
+        "T05",
+        "T12",
+        "T13",
+        "T15",
+        "T16",
+        "T17",
+        "T23",
+        "T25",
+        "T26"
+      ],
+      "files": [
+        "app/build.gradle.kts",
+        "app/src/androidTest/AndroidManifest.xml",
+        "app/src/androidTest/java/com/ztransfer/lut/LutColorInstrumentation.kt",
+        "app/src/androidTest/java/com/ztransfer/lut/LutStateInstrumentation.kt",
+        "app/src/main/java/com/ztransfer/frame/BrandLogoPaths.kt",
+        "app/src/main/java/com/ztransfer/frame/FrameBrandLogo.kt",
+        "app/src/main/java/com/ztransfer/frame/NikonBrandLogo.kt",
+        "app/src/main/java/com/ztransfer/frame/ParameterPosterFrame.kt",
+        "app/src/main/java/com/ztransfer/frame/PhotoFrameExporter.kt",
+        "app/src/main/java/com/ztransfer/lut/CubeLut.kt",
+        "app/src/main/java/com/ztransfer/lut/LutEglSurface.kt",
+        "app/src/main/java/com/ztransfer/lut/LutFolderRepository.kt",
+        "app/src/main/java/com/ztransfer/lut/LutGlProgram.kt",
+        "app/src/main/java/com/ztransfer/lut/LutIoQueue.kt",
+        "app/src/main/java/com/ztransfer/lut/LutMonitorState.kt",
+        "app/src/main/java/com/ztransfer/lut/LutPreferences.kt",
+        "app/src/main/java/com/ztransfer/lut/LutTextureView.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/LocalPhotoEffectsOverlay.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/LocalPhotoPreviewPager.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteLutImage.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteLutPanel.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteToolPreferences.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/SettingsScreen.kt",
+        "app/src/main/res/values-b+zh+Hant/strings.xml",
+        "app/src/main/res/values-zh/strings.xml",
+        "app/src/main/res/values/strings.xml",
+        "app/src/test/java/com/ztransfer/frame/PhotoFrameMetadataSettingsTest.kt",
+        "app/src/test/java/com/ztransfer/lut/CubeLutParserTest.kt",
+        "docs/brand-logo-research/README.md",
+        "docs/brand-logo-research/apple.svg",
+        "docs/brand-logo-research/dji.svg",
+        "docs/brand-logo-research/fujifilm.svg",
+        "docs/brand-logo-research/google.svg",
+        "docs/brand-logo-research/honor.svg",
+        "docs/brand-logo-research/huawei.svg",
+        "docs/brand-logo-research/leica.svg",
+        "docs/brand-logo-research/metadata-source.json",
+        "docs/brand-logo-research/motorola.svg",
+        "docs/brand-logo-research/nikon-official.svg",
+        "docs/brand-logo-research/nikon.svg",
+        "docs/brand-logo-research/nokia.svg",
+        "docs/brand-logo-research/oneplus.svg",
+        "docs/brand-logo-research/oppo.svg",
+        "docs/brand-logo-research/panasonic.svg",
+        "docs/brand-logo-research/samsung.svg",
+        "docs/brand-logo-research/sony.svg",
+        "docs/brand-logo-research/sources.json",
+        "docs/brand-logo-research/vivo.svg",
+        "docs/brand-logo-research/xiaomi.svg",
+        "docs/待做/监看LUT文件夹与选择菜单.md"
+      ]
+    },
+    {
+      "commit": "86887d5f5464c5a51cee140e0c80fb67bd345042",
+      "title": "feat: add read-only exposure meter with bounded diagnostics",
+      "tasks": [
+        "T05",
+        "T06",
+        "T10",
+        "T25",
+        "T26"
+      ],
+      "files": [
+        "app/src/main/java/com/ztransfer/protocol/RemoteExposureMeter.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/ExposureMeterOverlay.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteDiagnosticReport.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteToolPreferences.kt",
+        "app/src/main/res/values-b+zh+Hant/strings.xml",
+        "app/src/main/res/values-zh/strings.xml",
+        "app/src/main/res/values/strings.xml",
+        "app/src/test/java/com/ztransfer/protocol/RemoteExposureMeterTest.kt",
+        "app/src/test/java/com/ztransfer/ui/screen/RemoteDiagnosticReportTest.kt",
+        "docs/待做/监看曝光尺调查与实现.md"
+      ]
+    },
+    {
+      "commit": "11b75d38630ec8c0cf35164e1ac9e2e72fac8bc8",
+      "title": "统一横屏监看布局并加入自适应 Dock 控制区",
+      "tasks": [
+        "T05",
+        "T10",
+        "T11",
+        "T25",
+        "T26"
+      ],
+      "files": [
+        "app/src/androidTest/java/com/ztransfer/ui/screen/MonitorInteractionInstrumentation.kt",
+        "app/src/androidTest/java/com/ztransfer/ui/screen/RemoteToolEditorInstrumentation.kt",
+        "app/src/androidTest/java/com/ztransfer/ui/screen/RemoteToolsInstrumentation.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/ExposureMeterOverlay.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/LandscapeMonitorControls.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/LandscapeMonitorLayout.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteDispOverlay.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteToolBar.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteToolPreferences.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteViewfinderFeatures.kt",
+        "app/src/main/res/values-b+zh+Hant/remote_tools.xml",
+        "app/src/main/res/values-b+zh+Hant/strings.xml",
+        "app/src/main/res/values-zh/remote_tools.xml",
+        "app/src/main/res/values-zh/strings.xml",
+        "app/src/main/res/values/remote_tools.xml",
+        "app/src/main/res/values/strings.xml",
+        "app/src/test/java/com/ztransfer/ui/screen/LandscapeMonitorLayoutTest.kt",
+        "docs/待做/横屏监看统一布局与Dock.md"
+      ]
+    },
+    {
+      "commit": "21e704700895a0abc579e7be17b1a3b25876279f",
+      "title": "横屏布局优化",
+      "tasks": [
+        "T11",
+        "T25",
+        "T26"
+      ],
+      "files": [
+        "app/src/main/java/com/ztransfer/ui/screen/LandscapeMonitorControls.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteScreen.kt",
+        "docs/待做/横屏监看统一布局与Dock.md"
+      ]
+    },
+    {
+      "commit": "23b6af4302d89c2bd4d8769a7e0dc7b1b915274a",
+      "title": "优化与修复lut与监看横屏布局",
+      "tasks": [
+        "T05",
+        "T07",
+        "T09",
+        "T10",
+        "T11",
+        "T12",
+        "T13",
+        "T14",
+        "T16",
+        "T24",
+        "T25",
+        "T26"
+      ],
+      "files": [
+        "app/src/androidTest/java/com/ztransfer/lut/LutStateInstrumentation.kt",
+        "app/src/debug/java/com/ztransfer/ui/screen/DebugSimulatorButton.kt",
+        "app/src/main/java/com/ztransfer/MainActivity.kt",
+        "app/src/main/java/com/ztransfer/filter/CubePhotoFilterParameters.kt",
+        "app/src/main/java/com/ztransfer/filter/PhotoFilterRenderer.kt",
+        "app/src/main/java/com/ztransfer/frame/BrandLogoPaths.kt",
+        "app/src/main/java/com/ztransfer/lut/CubeLut.kt",
+        "app/src/main/java/com/ztransfer/lut/LutFolderRepository.kt",
+        "app/src/main/java/com/ztransfer/lut/LutMonitorState.kt",
+        "app/src/main/java/com/ztransfer/lut/ParsedLutCache.kt",
+        "app/src/main/java/com/ztransfer/lut/PhotoLutEditorState.kt",
+        "app/src/main/java/com/ztransfer/lut/PhotoLutSnapshotCodec.kt",
+        "app/src/main/java/com/ztransfer/lut/PhotoLutStore.kt",
+        "app/src/main/java/com/ztransfer/protocol/RemoteExposureMeter.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/ExposureMeterOverlay.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/LandscapeMonitorControls.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/LandscapeMonitorLayout.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/LocalPhotoEffectsOverlay.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/MonitorOverlayStyle.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/PhotoLutEditor.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/PostureDiagnostic.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/PostureDiagnosticPanel.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RecControlBar.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/ReleaseCommitWheel.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteChoicePopup.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteDispOverlay.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteLutPanel.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteMonitorScopes.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteParameterPanel.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteToolBar.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/ScrollEdgeFade.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/SettingsScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/TipLightbulbButton.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/ViewfinderViewport.kt",
+        "app/src/main/java/com/ztransfer/ui/util/Haptics.kt",
+        "app/src/main/java/com/ztransfer/ui/util/LongPressFeedback.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/TransferViewModel.kt",
+        "app/src/main/res/values-b+zh+Hant/strings.xml",
+        "app/src/main/res/values-zh/strings.xml",
+        "app/src/main/res/values/strings.xml",
+        "app/src/test/java/com/ztransfer/filter/PhotoCubeMapperTest.kt",
+        "app/src/test/java/com/ztransfer/frame/BrandLogoPathsTest.kt",
+        "app/src/test/java/com/ztransfer/lut/CubeLutParserTest.kt",
+        "app/src/test/java/com/ztransfer/lut/ParsedLutCacheTest.kt",
+        "app/src/test/java/com/ztransfer/lut/PhotoLutSnapshotCodecTest.kt",
+        "app/src/test/java/com/ztransfer/protocol/RemoteExposureMeterTest.kt",
+        "app/src/test/java/com/ztransfer/ui/screen/LandscapeMonitorLayoutTest.kt",
+        "app/src/test/java/com/ztransfer/ui/screen/PostureDiagnosticTest.kt",
+        "app/src/test/java/com/ztransfer/ui/util/ProgressiveHoldTimingsTest.kt",
+        "app/src/test/java/com/ztransfer/viewmodel/TransferStateTest.kt",
+        "docs/README.md",
+        "docs/已完成/参考线缩放与实时传输类型筛选.md",
+        "docs/已完成/监看参考线选择与轻量弹窗动画.md",
+        "docs/已完成/监看双轴姿态诊断.md",
+        "docs/已完成/监看工具栏自定义与辅助工具需求清单.md",
+        "docs/已完成/预览无损裁切传输.md",
+        "docs/待做/全局触感反馈梳理与优化方案.md",
+        "docs/待做/参考线缩放与实时传输类型筛选.md",
+        "docs/待做/横屏监看统一布局与Dock.md",
+        "docs/待做/照片效果LUT独立分区.md",
+        "docs/待做/监看LUT文件夹与选择菜单.md",
+        "docs/待做/监看参考线选择与轻量弹窗动画.md",
+        "docs/待做/监看双轴姿态诊断.md",
+        "docs/待做/监看工具栏自定义与辅助工具需求清单.md",
+        "docs/待做/监看拍照后FHD回看.md",
+        "docs/待做/预览无损裁切传输.md",
+        "docs/测试与验证/2026-09-28-监看与品牌功能复查.md"
+      ]
+    },
+    {
+      "commit": "4108b4877422c343ab013b4f7e4a4a8a48435867",
+      "title": "测试前",
+      "tasks": [
+        "T25"
+      ],
+      "files": [
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteScreen.kt"
+      ]
+    },
+    {
+      "commit": "b50637fa22c407dfd607ac6604fa8752b5a3a594",
+      "title": "优化生成计时与反挤压布局并记录双线并行重构方案",
+      "tasks": [
+        "T11",
+        "T23",
+        "T25",
+        "T26"
+      ],
+      "files": [
+        "app/src/main/java/com/ztransfer/ui/screen/LandscapeMonitorLayout.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/TransferScreen.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/TransferViewModel.kt",
+        "app/src/test/java/com/ztransfer/ui/screen/LandscapeMonitorLayoutTest.kt",
+        "app/src/test/java/com/ztransfer/viewmodel/TransferStateTest.kt",
+        "docs/待做/传输与照片生成双线并行性能优化.md"
+      ]
+    },
+    {
+      "commit": "8e1c9c6516666a6ac5a366d6016d7c83f71363c1",
+      "title": "解耦传输与照片生成并收拢计算及元数据资源",
+      "tasks": [
+        "T03",
+        "T14",
+        "T15",
+        "T17",
+        "T19",
+        "T20",
+        "T21",
+        "T22",
+        "T23",
+        "T25",
+        "T26"
+      ],
+      "files": [
+        "app/src/androidTest/java/com/ztransfer/crop/CropEditorInstrumentation.kt",
+        "app/src/androidTest/java/com/ztransfer/crop/LosslessCropInstrumentation.kt",
+        "app/src/main/java/com/ztransfer/crop/CropSourceAccess.kt",
+        "app/src/main/java/com/ztransfer/crop/LosslessJpeg.kt",
+        "app/src/main/java/com/ztransfer/filter/CubePhotoFilterParameters.kt",
+        "app/src/main/java/com/ztransfer/filter/ExactRgbMemo.kt",
+        "app/src/main/java/com/ztransfer/filter/PhotoCubeResourceCache.kt",
+        "app/src/main/java/com/ztransfer/filter/PhotoFilterRenderer.kt",
+        "app/src/main/java/com/ztransfer/frame/PhotoAllocationBudget.kt",
+        "app/src/main/java/com/ztransfer/frame/PhotoFrameExporter.kt",
+        "app/src/main/java/com/ztransfer/frame/PhotoFrameLocationResolver.kt",
+        "app/src/main/java/com/ztransfer/frame/PhotoFrameMetadataSettings.kt",
+        "app/src/main/java/com/ztransfer/frame/PhotoMetadataSnapshotBounds.kt",
+        "app/src/main/java/com/ztransfer/lut/PhotoLutStore.kt",
+        "app/src/main/java/com/ztransfer/protocol/NikonCamera.kt",
+        "app/src/main/java/com/ztransfer/protocol/PhotoMetadataIdentity.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/TransferScreen.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/JpegMetadataHeader.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/PhotoGenerationQueue.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/PhotoMetadataPreparation.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/TransferViewModel.kt",
+        "app/src/test/java/com/ztransfer/filter/ExactRgbMemoTest.kt",
+        "app/src/test/java/com/ztransfer/filter/ExactRgbRendererParityTest.kt",
+        "app/src/test/java/com/ztransfer/filter/PhotoCubeMapperTest.kt",
+        "app/src/test/java/com/ztransfer/filter/PhotoCubeResourceCacheTest.kt",
+        "app/src/test/java/com/ztransfer/frame/PhotoAllocationBudgetTest.kt",
+        "app/src/test/java/com/ztransfer/frame/PhotoFrameMetadataRequirementsTest.kt",
+        "app/src/test/java/com/ztransfer/frame/PhotoMetadataSnapshotBoundsTest.kt",
+        "app/src/test/java/com/ztransfer/protocol/PhotoMetadataIdentityTest.kt",
+        "app/src/test/java/com/ztransfer/ui/screen/TransferQueueActionVisibilityTest.kt",
+        "app/src/test/java/com/ztransfer/viewmodel/ExistingFileNameIndexTest.kt",
+        "app/src/test/java/com/ztransfer/viewmodel/JpegMetadataHeaderTest.kt",
+        "app/src/test/java/com/ztransfer/viewmodel/PhotoGenerationQueueTest.kt",
+        "app/src/test/java/com/ztransfer/viewmodel/PhotoMetadataPreparationTest.kt",
+        "app/src/test/java/com/ztransfer/viewmodel/TransferStateTest.kt",
+        "docs/待做/传输与照片生成双线并行性能优化.md"
+      ]
+    },
+    {
+      "commit": "ab99323ac51d39be31fa7ea7971e7bb6c1f549ba",
+      "title": "照片改为单次流式下载仅视频保留分块续传",
+      "tasks": [
+        "T21",
+        "T25",
+        "T26"
+      ],
+      "files": [
+        "app/src/main/java/com/ztransfer/protocol/NikonCamera.kt",
+        "app/src/main/java/com/ztransfer/protocol/VideoTransferPolicy.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/TransferViewModel.kt",
+        "app/src/test/java/com/ztransfer/protocol/VideoTransferPolicyTest.kt",
+        "docs/待做/传输与照片生成双线并行性能优化.md"
+      ]
+    },
+    {
+      "commit": "bb64908791b281b22febae526c5b534bc82dfe4c",
+      "title": "修正原图保存取消边界与LUT资源复用并补充双线流程说明",
+      "tasks": [
+        "T14",
+        "T25",
+        "T26"
+      ],
+      "files": [
+        "app/src/main/java/com/ztransfer/filter/CubePhotoFilterParameters.kt",
+        "app/src/main/java/com/ztransfer/filter/PhotoFilterRenderer.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/TransferViewModel.kt",
+        "app/src/test/java/com/ztransfer/filter/PhotoCubeResourceCacheTest.kt",
+        "docs/reviews/transfer-generation-flow.html"
+      ]
+    },
+    {
+      "commit": "c82e2d44a20f7ecd0167129af846f3bed1ae0525",
+      "title": "优化小图生成缓冲并补强整文件下载校验",
+      "tasks": [
+        "T14",
+        "T17",
+        "T21",
+        "T25",
+        "T26"
+      ],
+      "files": [
+        "app/src/main/java/com/ztransfer/filter/PhotoFilterRenderer.kt",
+        "app/src/main/java/com/ztransfer/frame/PhotoFrameExporter.kt",
+        "app/src/main/java/com/ztransfer/protocol/DownloadIntegrity.kt",
+        "app/src/main/java/com/ztransfer/protocol/NikonCamera.kt",
+        "app/src/test/java/com/ztransfer/filter/PhotoFilterRendererTest.kt",
+        "app/src/test/java/com/ztransfer/protocol/DownloadIntegrityTest.kt",
+        "docs/reviews/transfer-generation-flow.html",
+        "docs/reviews/传输生成与滤镜LUT性能复查.md"
+      ]
+    },
+    {
+      "commit": "06d6b67c5c479ea317f1797629e12ef4d6007b1e",
+      "title": "优化LUT原生生成与照片分批加载并调整界面转场",
+      "tasks": [
+        "T03",
+        "T11",
+        "T14",
+        "T17",
+        "T20",
+        "T22",
+        "T24",
+        "T25",
+        "T26"
+      ],
+      "files": [
+        "app/build.gradle.kts",
+        "app/src/debug/java/com/ztransfer/diagnostics/PhotoGenerationProbe.kt",
+        "app/src/debug/java/com/ztransfer/ui/screen/DebugPhotoGenerationProbePanel.kt",
+        "app/src/main/cpp/CMakeLists.txt",
+        "app/src/main/cpp/crop.exports",
+        "app/src/main/cpp/photo_lut.cpp",
+        "app/src/main/java/com/ztransfer/MainActivity.kt",
+        "app/src/main/java/com/ztransfer/filter/CubePhotoFilterParameters.kt",
+        "app/src/main/java/com/ztransfer/filter/NativePhotoLut.kt",
+        "app/src/main/java/com/ztransfer/filter/PhotoCubeResourceCache.kt",
+        "app/src/main/java/com/ztransfer/filter/PhotoFilterRenderer.kt",
+        "app/src/main/java/com/ztransfer/filter/PhotoLutExecution.kt",
+        "app/src/main/java/com/ztransfer/frame/PhotoFrameExporter.kt",
+        "app/src/main/java/com/ztransfer/protocol/FileScanBatchSize.kt",
+        "app/src/main/java/com/ztransfer/protocol/NikonCamera.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/LandscapeMonitorControls.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteDispOverlay.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/theme/Motion.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/CachedThumbnailBatchPolicy.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/CameraViewModel.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/TransferViewModel.kt",
+        "app/src/test/java/com/ztransfer/filter/PhotoCubeBulkTest.kt",
+        "app/src/test/java/com/ztransfer/protocol/FileScanBatchSizeTest.kt",
+        "app/src/test/java/com/ztransfer/viewmodel/CachedThumbnailBatchPolicyTest.kt",
+        "app/src/testDebug/java/com/ztransfer/diagnostics/TimingReportTest.kt",
+        "app/src/testDebug/java/com/ztransfer/filter/PhotoLutExecutionTest.kt",
+        "docs/reviews/transfer-generation-flow.html",
+        "docs/reviews/照片LUT单线程对比测试.md",
+        "tools/test-photo-lut-host.sh"
+      ]
+    },
+    {
+      "commit": "99eddc407cd77521230f1835373c837bdeea11b9",
+      "title": "调整队列顶栏淡入时机并稳定阴影合成",
+      "tasks": [
+        "T25"
+      ],
+      "files": [
+        "app/src/main/java/com/ztransfer/MainActivity.kt"
+      ]
+    },
+    {
+      "commit": "ded106da9c7d130842ecd58b59e7adccb102fa87",
+      "title": "新增照片与视频星级筛选并优化缓存和按需读取",
+      "tasks": [
+        "T25",
+        "T26"
+      ],
+      "files": [
+        "app/src/main/java/com/ztransfer/protocol/NikonCamera.kt",
+        "app/src/main/java/com/ztransfer/protocol/PhotoRating.kt",
+        "app/src/main/java/com/ztransfer/protocol/PhotoRatingPairs.kt",
+        "app/src/main/java/com/ztransfer/protocol/VideoRating.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/PhotoRatingScan.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/SettingsScreen.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/CameraViewModel.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/TransferViewModel.kt",
+        "app/src/main/res/values-b+zh+Hant/strings.xml",
+        "app/src/main/res/values-zh/strings.xml",
+        "app/src/main/res/values/strings.xml",
+        "app/src/test/java/com/ztransfer/protocol/PhotoRatingPairsTest.kt",
+        "app/src/test/java/com/ztransfer/protocol/PhotoRatingTest.kt",
+        "app/src/test/java/com/ztransfer/protocol/VideoRatingTest.kt",
+        "docs/待做/STA照片保护状态读取与上传标记解锁调查.md"
+      ]
+    },
+    {
+      "commit": "0a3d9b80920cae272eb5030693e0c60989cb47d1",
+      "title": "支持边框宽度自定义并修复折叠屏竖屏监看布局",
+      "tasks": [
+        "T11",
+        "T15",
+        "T17",
+        "T25",
+        "T26"
+      ],
+      "files": [
+        "app/src/main/java/com/ztransfer/effects/PhotoEffectFavorites.kt",
+        "app/src/main/java/com/ztransfer/frame/ParameterPosterFrame.kt",
+        "app/src/main/java/com/ztransfer/frame/PhotoFrameExporter.kt",
+        "app/src/main/java/com/ztransfer/frame/PhotoFrameMetadataSettings.kt",
+        "app/src/main/java/com/ztransfer/frame/PhotoFrameWidth.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/LocalPhotoEffectsOverlay.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/PortraitMonitorLayout.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/SettingsScreen.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/TransferViewModel.kt",
+        "app/src/main/res/values-b+zh+Hant/strings.xml",
+        "app/src/main/res/values-zh/strings.xml",
+        "app/src/main/res/values/strings.xml",
+        "app/src/test/java/com/ztransfer/effects/PhotoEffectFavoritesTest.kt",
+        "app/src/test/java/com/ztransfer/frame/PhotoFrameWidthTest.kt",
+        "app/src/test/java/com/ztransfer/ui/screen/LocalPhotoEffectsPreferencesTest.kt",
+        "app/src/test/java/com/ztransfer/ui/screen/PortraitMonitorLayoutTest.kt",
+        "docs/已完成/边框宽度自定义.md"
+      ]
+    },
+    {
+      "commit": "0c9b286bdf526c888d9801e7545886032bf1dc8a",
+      "title": "回滚星级筛选功能并保留调查记录",
+      "tasks": [
+        "T25"
+      ],
+      "files": [
+        "app/src/main/java/com/ztransfer/protocol/NikonCamera.kt",
+        "app/src/main/java/com/ztransfer/protocol/PhotoRating.kt",
+        "app/src/main/java/com/ztransfer/protocol/PhotoRatingPairs.kt",
+        "app/src/main/java/com/ztransfer/protocol/VideoRating.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/PhotoRatingScan.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/SettingsScreen.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/CameraViewModel.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/TransferViewModel.kt",
+        "app/src/main/res/values-b+zh+Hant/strings.xml",
+        "app/src/main/res/values-zh/strings.xml",
+        "app/src/main/res/values/strings.xml",
+        "app/src/test/java/com/ztransfer/protocol/PhotoRatingPairsTest.kt",
+        "app/src/test/java/com/ztransfer/protocol/PhotoRatingTest.kt",
+        "app/src/test/java/com/ztransfer/protocol/VideoRatingTest.kt"
+      ]
+    },
+    {
+      "commit": "a99c78d58d0f132d76e02a2f6ef66aa7fc3e6518",
+      "title": "记录星级回滚哈希与恢复方式",
+      "tasks": [
+        "T26"
+      ],
+      "files": [
+        "docs/待做/STA照片保护状态读取与上传标记解锁调查.md",
+        "docs/待做/星级筛选重新开放.md"
+      ]
+    },
+    {
+      "commit": "88353a1857f0009a27336a13969bfb5e60a47df7",
+      "title": "支持LUT子目录分类并优化跨模式已传识别与卡片展示",
+      "tasks": [
+        "T03",
+        "T12",
+        "T13",
+        "T14",
+        "T23",
+        "T25"
+      ],
+      "files": [
+        "app/src/main/java/com/ztransfer/lut/LutFolderRepository.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/HomeScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/LutCategoryList.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/PhotoLutEditor.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteLutPanel.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/TransferScreen.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/TransferViewModel.kt",
+        "app/src/main/res/values-b+zh+Hant/strings.xml",
+        "app/src/main/res/values-zh/strings.xml",
+        "app/src/main/res/values/strings.xml",
+        "app/src/test/java/com/ztransfer/viewmodel/ExistingFileNameIndexTest.kt"
+      ]
+    },
+    {
+      "commit": "a679db39838afbf97e75c8606a276b4a28e690e4",
+      "title": "优化管理工具",
+      "tasks": [
+        "T12",
+        "T13",
+        "T14",
+        "T25",
+        "T26"
+      ],
+      "files": [
+        "app/src/main/java/com/ztransfer/ui/screen/LutCategoryList.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/PhotoLutEditor.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteLutPanel.kt",
+        "app/src/main/res/values-b+zh+Hant/strings.xml",
+        "app/src/main/res/values-zh/strings.xml",
+        "app/src/main/res/values/strings.xml",
+        "server/admin.ps1",
+        "server/tests/admin-mac.test.ps1"
+      ]
+    },
+    {
+      "commit": "9896ba47103370a9fe443fd322925c491199b935",
+      "title": "feat: add frame background blur and overlay controls",
+      "tasks": [
+        "T12",
+        "T17",
+        "T25"
+      ],
+      "files": [
+        "app/src/main/java/com/ztransfer/effects/PhotoEffectFavorites.kt",
+        "app/src/main/java/com/ztransfer/frame/PhotoFrameExporter.kt",
+        "app/src/main/java/com/ztransfer/frame/PhotoFrameMetadataSettings.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/LocalPhotoEffectsOverlay.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/LutCategoryList.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/SettingsScreen.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/TransferViewModel.kt",
+        "app/src/main/res/values-b+zh+Hant/strings.xml",
+        "app/src/main/res/values-zh/strings.xml",
+        "app/src/main/res/values/strings.xml",
+        "app/src/test/java/com/ztransfer/effects/PhotoEffectFavoritesTest.kt",
+        "app/src/test/java/com/ztransfer/frame/PhotoFrameMetadataSettingsTest.kt"
+      ]
+    },
+    {
+      "commit": "ba476f19c6e1e404c4940f6ee7ead9ced7df6326",
+      "title": "fix: prevent accidental swipe exit from photo workbench",
+      "tasks": [
+        "T23"
+      ],
+      "files": [
+        "app/src/main/java/com/ztransfer/ui/screen/HomeWorkspacePager.kt",
+        "app/src/test/java/com/ztransfer/ui/screen/HomeWorkspacePagerTest.kt"
+      ]
+    },
+    {
+      "commit": "0e3c9e1003788fe8980a8e4ad345aa73eb61ac8e",
+      "title": "fix: align queue actions and improve remote entry introduction",
+      "tasks": [
+        "T02",
+        "T23",
+        "T25"
+      ],
+      "files": [
+        "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/TransferScreen.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/TransferViewModel.kt",
+        "app/src/main/res/values-b+zh+Hant/strings.xml",
+        "app/src/main/res/values-zh/strings.xml",
+        "app/src/main/res/values/strings.xml",
+        "app/src/test/java/com/ztransfer/viewmodel/RemoteEntryIntroPolicyTest.kt"
+      ]
+    },
+    {
+      "commit": "2ad5d550983a2ca3be253825c089f4f1774bda63",
+      "title": "优化紧凑拨轮与照片效果布局，支持放大预览长按对比",
+      "tasks": [
+        "T04",
+        "T23",
+        "T24",
+        "T25",
+        "T26"
+      ],
+      "files": [
+        "app/build.gradle.kts",
+        "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/LocalPhotoEffectsOverlay.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/LocalPhotoPreviewPager.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/PhotoPreview.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/ReleaseCommitWheel.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/SettingsScreen.kt",
+        "app/src/main/res/values-b+zh+Hant/strings.xml",
+        "app/src/main/res/values-zh/strings.xml",
+        "app/src/main/res/values/strings.xml"
+      ]
+    },
+    {
+      "commit": "ca0285aefe2f1becdcebca4c67f34b2022dc174e",
+      "title": "优化队列卡片与页面转场，修复生成内存误判和拨轮角标裁切",
+      "tasks": [
+        "T04",
+        "T17",
+        "T22",
+        "T23",
+        "T24",
+        "T25",
+        "T26"
+      ],
+      "files": [
+        "app/build.gradle.kts",
+        "app/src/main/java/com/ztransfer/MainActivity.kt",
+        "app/src/main/java/com/ztransfer/frame/PhotoAllocationBudget.kt",
+        "app/src/main/java/com/ztransfer/frame/PhotoFrameExporter.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/GlassBackButton.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/LocalPhotoBatchViewModel.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/LocalPhotoEffectsOverlay.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/PhotoPreview.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/QueueCardSwipe.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/ReleaseCommitWheel.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/SettingsScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/TransferScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/theme/Motion.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/TransferViewModel.kt",
+        "app/src/main/res/values-b+zh+Hant/strings.xml",
+        "app/src/main/res/values-zh/strings.xml",
+        "app/src/main/res/values/strings.xml",
+        "app/src/test/java/com/ztransfer/frame/PhotoAllocationBudgetTest.kt"
+      ]
+    },
+    {
+      "commit": "a027913623dbacdcc8b3adae20cc82f81b852d80",
+      "title": "优化样式，边框算法优化",
+      "tasks": [
+        "T15",
+        "T17",
+        "T24",
+        "T25",
+        "T26"
+      ],
+      "files": [
+        "app/src/androidTest/java/com/ztransfer/frame/ParameterPosterInstrumentation.kt",
+        "app/src/androidTest/java/com/ztransfer/ui/screen/MonitorInteractionInstrumentation.kt",
+        "app/src/main/java/com/ztransfer/frame/FrameTextWrapping.kt",
+        "app/src/main/java/com/ztransfer/frame/MeasuredFrameText.kt",
+        "app/src/main/java/com/ztransfer/frame/ParameterPosterFrame.kt",
+        "app/src/main/java/com/ztransfer/frame/PhotoFrameExporter.kt",
+        "app/src/main/java/com/ztransfer/frame/PhotoFrameMetadataSettings.kt",
+        "app/src/main/java/com/ztransfer/frame/PhotoFrameWidth.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/GlassButton.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/SettingsScreen.kt",
+        "app/src/test/java/com/ztransfer/effects/PhotoEffectFavoritesTest.kt",
+        "app/src/test/java/com/ztransfer/frame/PhotoFrameWidthTest.kt",
+        "app/src/test/java/com/ztransfer/ui/screen/LocalPhotoEffectsPreferencesTest.kt",
+        "docs/待做/边框缩窄与内容自适应布局.md"
+      ]
+    },
+    {
+      "commit": "98d69cec81bd1e30649aa35940b839268febdc3b",
+      "title": "feat: add independent photo effect module controls and refine workbench actions",
+      "tasks": [
+        "T04",
+        "T14",
+        "T17",
+        "T18",
+        "T23",
+        "T25"
+      ],
+      "files": [
+        "app/src/main/java/com/ztransfer/effects/PhotoEffectModules.kt",
+        "app/src/main/java/com/ztransfer/frame/PhotoFrameMetadataSettings.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/LocalPhotoBatchButton.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/LocalPhotoEffectsOverlay.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/LocalPhotoEffectsPreferences.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/LocalPhotoPreviewPager.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/PhotoEffectModuleMenu.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/PhotoLutEditor.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/SettingsScreen.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/TransferViewModel.kt",
+        "app/src/main/res/values-b+zh+Hant/strings.xml",
+        "app/src/main/res/values-zh/strings.xml",
+        "app/src/main/res/values/strings.xml",
+        "app/src/test/java/com/ztransfer/effects/PhotoEffectModulesTest.kt",
+        "app/src/test/java/com/ztransfer/frame/PhotoFrameWidthTest.kt"
+      ]
+    },
+    {
+      "commit": "d91f05bfa1a5bb97fa3e0a1567423fa8413280f2",
+      "title": "ui: refine effect module transitions and selected control styling",
+      "tasks": [
+        "T14",
+        "T18",
+        "T24",
+        "T25",
+        "T26"
+      ],
+      "files": [
+        "app/build.gradle.kts",
+        "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/PhotoEffectModuleMenu.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/PhotoLutEditor.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/ReleaseCommitWheel.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/SettingsScreen.kt"
+      ]
+    },
+    {
+      "commit": "3c273a84ce7950f93eb4ca30f726c5ffb97b3972",
+      "title": "chore: bump version name to 1.91",
+      "tasks": [
+        "T26"
+      ],
+      "files": [
+        "app/build.gradle.kts"
+      ]
+    },
+    {
+      "commit": "eb1a964aefe803028881ebb3e0558512f14b725c",
+      "title": "优化简白暗夜雾白边框信息的阴影避让与留白",
+      "tasks": [
+        "T17"
+      ],
+      "files": [
+        "app/src/main/java/com/ztransfer/frame/PhotoFrameExporter.kt"
+      ]
+    },
+    {
+      "commit": "617082c3511e2532a321128b2f39c57217e74fc2",
+      "title": "修复效果菜单主题切换定位跳动并精简界面",
+      "tasks": [
+        "T18",
+        "T24",
+        "T25"
+      ],
+      "files": [
+        "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/PhotoEffectModuleMenu.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/SettingsScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/TipLightbulbButton.kt",
+        "app/src/main/res/values-b+zh+Hant/strings.xml",
+        "app/src/main/res/values-zh/strings.xml",
+        "app/src/main/res/values/strings.xml"
+      ]
+    }
+  ],
+  "iosProgress": {
+    "completedAwaitingUserAcceptance": [
+      "T01",
+      "T02",
+      "T03",
+      "T04",
+      "T07"
+    ],
+    "investigating": [],
+    "lastVerification": "T08 rendering 2/2; Compose color-vector reference first exposed 3 mismatches, fixed all-component retarget. t08-color-vector-fixed TEST SUCCEEDED 13/13, 64 exact ARGB references. Production page single/dual-axis transition final audit pending. Total 5/26.",
+    "scopeCorrection": "2026-10-01: Shared material rendering and general button input/animation work moved from T02 to T24 after user identified scope creep. T02 remains connection/disconnection/restoration and remote entry; no completed count changed by this reassignment.",
+    "implementing": [
+      "T05",
+      "T06",
+      "T08",
+      "T24"
+    ]
+  }
+}

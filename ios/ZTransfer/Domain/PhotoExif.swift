@@ -14,6 +14,8 @@ struct PhotoExif: Equatable, Sendable {
     let latitude: Double?
     let longitude: Double?
     let altitude: Double?
+    let city: String?
+    let region: String?
 }
 
 /// Metadata presentation values consumed by the frame renderer. The strings
@@ -31,14 +33,16 @@ struct PhotoFrameMetadata: Equatable, Sendable {
     let latitude: Double?
     let longitude: Double?
     let altitude: Double?
+    let city: String?
+    let region: String?
 
     init(make: String?, model: String?, lensModel: String?, focalLength: String?,
          aperture: String?, shutter: String?, iso: String?, exposureCompensation: String?,
-         dateTime: String?, latitude: Double? = nil, longitude: Double? = nil, altitude: Double? = nil) {
+         dateTime: String?, latitude: Double? = nil, longitude: Double? = nil, altitude: Double? = nil, city: String? = nil, region: String? = nil) {
         self.make = make; self.model = model; self.lensModel = lensModel
         self.focalLength = focalLength; self.aperture = aperture; self.shutter = shutter
         self.iso = iso; self.exposureCompensation = exposureCompensation; self.dateTime = dateTime
-        self.latitude = latitude; self.longitude = longitude; self.altitude = altitude
+        self.latitude = latitude; self.longitude = longitude; self.altitude = altitude; self.city = city; self.region = region
     }
 
     init(_ exif: PhotoExif) {
@@ -46,7 +50,7 @@ struct PhotoFrameMetadata: Equatable, Sendable {
         focalLength = exif.focalLength; aperture = exif.aperture
         shutter = exif.shutterSpeed; iso = exif.iso
         exposureCompensation = exif.exposureCompensation; dateTime = exif.dateTime
-        latitude = exif.latitude; longitude = exif.longitude; altitude = exif.altitude
+        latitude = exif.latitude; longitude = exif.longitude; altitude = exif.altitude; city = nil; region = nil
     }
 }
 
@@ -84,7 +88,7 @@ enum PhotoExifParser {
         let longitude = signedCoordinate(gps?[kCGImagePropertyGPSLongitude] as? NSNumber, reference: gps?[kCGImagePropertyGPSLongitudeRef] as? String, maximum: 180)
         let altitudeValue = (gps?[kCGImagePropertyGPSAltitude] as? NSNumber)?.doubleValue
         let altitude = altitudeValue.map { (gps?[kCGImagePropertyGPSAltitudeRef] as? NSNumber)?.intValue == 1 ? -abs($0) : $0 }
-        return PhotoExif(make: make, model: model, aperture: aperture, shutterSpeed: shutter, iso: iso, focalLength: focal, dateTime: dateTime, lensModel: lens, exposureCompensation: compensation, latitude: latitude, longitude: longitude, altitude: altitude)
+        return PhotoExif(make: make, model: model, aperture: aperture, shutterSpeed: shutter, iso: iso, focalLength: focal, dateTime: dateTime, lensModel: lens, exposureCompensation: compensation, latitude: latitude, longitude: longitude, altitude: altitude, city: nil, region: nil)
     }
 
     private static func formatAperture(_ value: NSNumber) -> String {

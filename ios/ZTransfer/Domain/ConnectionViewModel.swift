@@ -57,6 +57,8 @@ final class ConnectionViewModel: ObservableObject {
 
     init() {
         state.wirelessMode = wirelessPreferences.string(forKey: "wireless_mode") == "AP" ? .ap : .sta
+        state.rememberedPresentationMode = wirelessPreferences.string(forKey: CameraPresentationMode.preferenceKey)
+            .flatMap(CameraPresentationMode.init(rawValue:))
         Task { [weak self] in await self?.refreshSTAProfiles() }
     }
 
@@ -299,6 +301,7 @@ final class ConnectionViewModel: ObservableObject {
                 }
                 self.cameraRepository = repository
                 self.cameraSession = CameraSession(repository: repository, wirelessMode: mode)
+                self.rememberPresentationMode(mode == .sta ? .sta : .ap)
                 if mode == .sta { self.staWorkspaceEstablished = true }
                 self.state.wifiPhase = .connected
                 self.state.staProgressIP = nil
@@ -361,7 +364,8 @@ final class ConnectionViewModel: ObservableObject {
     /// already-running discovery keeps ownership of its sockets; the tap only
     /// replaces the scheduled backoff when no discovery is active.
     func retrySTAConnection() {
-        guard !connectionDiscoveryPaused, staWorkspaceEstablished,
+        guard !connectionDiscoveryPaused,
+              state.presentationMode(transport: nil, isSTA: false).canRetrySTA(connected: cameraSession != nil),
               !usbWorkspaceEstablished, state.selectedDeviceID == nil,
               cameraSession == nil, state.wirelessMode == .sta,
               state.usbPhase != .connecting else { return }
@@ -488,6 +492,7 @@ final class ConnectionViewModel: ObservableObject {
             if let cameraRepository, let sessionToken = usbTransport.openedSessionToken(for: id) {
                 cameraSession = CameraSession(repository: cameraRepository, transport: usbTransport,
                                               deviceID: id, sessionToken: sessionToken)
+                rememberPresentationMode(.usb)
                 lastEstablishedUSBDeviceID = id
                 usbWorkspaceEstablished = true
                 if let cameraSession {
@@ -625,9 +630,12 @@ final class ConnectionViewModel: ObservableObject {
     }
 
     func select(wirelessMode: WirelessMode) {
-        guard state.wirelessMode != wirelessMode else { return }
         guard cameraSession == nil, !usbWorkspaceEstablished,
               state.selectedDeviceID == nil else { return }
+        // Android persists an explicit selection even when the wireless choice
+        // is unchanged: it supersedes a remembered USB presentation.
+        rememberPresentationMode(wirelessMode == .sta ? .sta : .ap)
+        guard state.wirelessMode != wirelessMode else { return }
         cancelWiFiConnection()
         state.wirelessMode = wirelessMode
         state.wifiFailureKind = nil
@@ -636,6 +644,11 @@ final class ConnectionViewModel: ObservableObject {
             wifiWatcherTask?.cancel()
             wifiWatcherTask = nil
         }
+    }
+
+    private func rememberPresentationMode(_ mode: CameraPresentationMode) {
+        state.rememberedPresentationMode = mode
+        wirelessPreferences.set(mode.rawValue, forKey: CameraPresentationMode.preferenceKey)
     }
 
     /// Android pauses automatic connection discovery while the local workspace

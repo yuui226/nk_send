@@ -543,3 +543,8 @@
 "默认水印" = "Default";
 "（可多选）" = "(Select multiple photos)";
 "）或连现有 Wi-Fi" = ") or join an existing Wi-Fi network";
+"经典签名" = "Classic Signature";
+"胶片画廊" = "Film Gallery";
+"胶片边框" = "Film Edge";
+"艺术装裱" = "Gallery Mat";
+"按档位自动加入新增文件：全部、JPG、RAW（NEF 照片）或视频（MOV/MP4）。不影响已有任务和手动传输。" = "New files are queued automatically by mode: All, JPG, RAW (NEF photos), or Video (MOV/MP4). Existing tasks and manual transfers are unaffected.";

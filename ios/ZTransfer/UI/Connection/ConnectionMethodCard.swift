@@ -216,7 +216,8 @@ struct ConnectionMethodCard: View {
                 skin: .init(storedValue: skinPreset),
                 cornerRadius: 13,
                 active: success,
-                activeColor: badgeAccent
+                activeColor: badgeAccent,
+                textureSeed: ZTransferTextureKey.stableSeed(mode == .usb ? "connection-badge-usb" : "connection-badge-wifi")
             )
             .overlay(RoundedRectangle(cornerRadius: 13)
                 .fill(badgeAccent.opacity(0.08)))

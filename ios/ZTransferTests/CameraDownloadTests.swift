@@ -312,9 +312,9 @@ final class CameraDownloadTests: XCTestCase {
         let second = Data(repeating: 0x22, count: 400_000)
 
         try writer.sink.received(first)
-        XCTAssertEqual((try target.resourceValues(forKeys: [.fileSizeKey]).fileSize), 0)
+        XCTAssertEqual((try FileManager.default.attributesOfItem(atPath: target.path)[.size] as? NSNumber)?.intValue, 0)
         try writer.sink.received(second)
-        XCTAssertEqual((try target.resourceValues(forKeys: [.fileSizeKey]).fileSize), first.count)
+        XCTAssertEqual((try FileManager.default.attributesOfItem(atPath: target.path)[.size] as? NSNumber)?.intValue, first.count)
         XCTAssertEqual(writer.bytes, UInt64(first.count + second.count))
 
         try writer.close()
@@ -360,6 +360,82 @@ final class CameraDownloadTests: XCTestCase {
         XCTAssertEqual(snapshot.items.first?.frameError, AppLocalized.resource("error_camera_metadata_unavailable"))
         XCTAssertFalse(rendered.value)
         XCTAssertTrue(FileManager.default.fileExists(atPath: target.appendingPathComponent(cameraFile.fileName).path))
+    }
+
+    func testMetadataSnapshotAndOriginalBodySurviveIndividualAndBatchRetry() async throws {
+        for batchRetry in [false, true] {
+            let target = try directory(), jpeg = Self.jpegWithCameraMetadata()
+            let original = file(size: UInt64(jpeg.count))
+            try jpeg.write(to: target.appendingPathComponent(original.fileName))
+            let info = try XCTUnwrap(PTPDatasetParser.parseDeviceInfo(staDeviceInfo()))
+            let firstWire = STAScriptTransport([
+                .init(PTPConstants.getPartialObjectEx, [7, 0, 0, UInt32(cameraExifHeaderCaptureBytes), 0], payload: jpeg)
+            ])
+            let firstSession = CameraSession(repository: CameraRepository(session: PTPSession(transport: firstWire), deviceInfo: info))
+            let rendered = DownloadValueBox<[PhotoFrameMetadata?]>([])
+            let queue = TransferQueue(premiumAccess: PremiumAccess(.lifetime), renderFrame: { source, _, _, metadata in
+                rendered.mutate { $0.append(metadata) }
+                if rendered.value.count == 1 { throw CocoaError(.fileWriteUnknown) }
+                return source
+            })
+            var effects = PhotoEffectsSettings(); effects.photoFrameEnabled = true
+            await queue.enqueue(original, effects: effects)
+            await queue.start(session: firstSession, directory: target)
+            let failed = try await finish(queue)
+            let firstTask = try XCTUnwrap(failed.items.first)
+            XCTAssertEqual(firstTask.status, .failed)
+            XCTAssertEqual(firstTask.sourceMetadataSnapshot?.model, "Z 30")
+            let secondWire = STAScriptTransport([])
+            let differentCamera = CameraSession(repository: CameraRepository(session: PTPSession(transport: secondWire),
+                transportCameraIdentifier: "different-camera"))
+            await queue.attach(session: differentCamera, directory: target)
+            if batchRetry { await queue.retryFailed() }
+            else {
+                let replacement = await queue.retry(id: firstTask.id)
+                XCTAssertNotNil(replacement)
+            }
+            let completed = try await finish(queue)
+            XCTAssertEqual(completed.items.first?.status, .completed)
+            XCTAssertEqual(completed.items.first?.metadataCameraIdentity, firstTask.metadataCameraIdentity)
+            XCTAssertEqual(rendered.value.count, 2)
+            XCTAssertEqual((rendered.value.last ?? nil)?.model, "Z 30")
+            let unexpected = await secondWire.commands
+            XCTAssertTrue(unexpected.isEmpty, "Retry must use retained metadata without querying a different camera")
+        }
+    }
+
+    func testFailedMetadataCannotBeRetriedFromANewCamera() async throws {
+        for initiallyConnected in [true, false] {
+            let target = try directory(), jpeg = Self.jpegWithCameraMetadata()
+            let original = file(size: UInt64(jpeg.count))
+            try jpeg.write(to: target.appendingPathComponent(original.fileName))
+            let info = try XCTUnwrap(PTPDatasetParser.parseDeviceInfo(staDeviceInfo()))
+            let firstWire = STAScriptTransport([
+                .init(PTPConstants.getPartialObjectEx, [7, 0, 0, UInt32(cameraExifHeaderCaptureBytes), 0], response: 0x2005)
+            ])
+            let firstSession = CameraSession(repository: CameraRepository(session: PTPSession(transport: firstWire), deviceInfo: info))
+            let queue = TransferQueue(premiumAccess: PremiumAccess(.lifetime), renderFrame: { source, _, _, _ in
+                XCTFail("Missing source metadata must fail before rendering")
+                return source
+            })
+            var effects = PhotoEffectsSettings(); effects.photoFrameEnabled = true
+            await queue.enqueue(original, effects: effects)
+            await queue.start(session: initiallyConnected ? firstSession : nil, directory: target)
+            let first = try await finish(queue)
+            let originalTask = try XCTUnwrap(first.items.first)
+            XCTAssertEqual(originalTask.status, .failed)
+            XCTAssertTrue(originalTask.metadataSourceBound)
+            let secondWire = STAScriptTransport([])
+            let differentCamera = CameraSession(repository: CameraRepository(session: PTPSession(transport: secondWire),
+                transportCameraIdentifier: "different-camera"))
+            await queue.attach(session: differentCamera, directory: target)
+            _ = await queue.retry(id: originalTask.id)
+            let retried = try await finish(queue)
+            XCTAssertEqual(retried.items.first?.status, .failed)
+            XCTAssertEqual(retried.items.first?.metadataCameraIdentity, originalTask.metadataCameraIdentity)
+            let unexpected = await secondWire.commands
+            XCTAssertTrue(unexpected.isEmpty)
+        }
     }
 
     private func finish(_ queue: TransferQueue) async throws -> TransferQueueSnapshot {
