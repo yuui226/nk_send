@@ -253,6 +253,17 @@ actor CameraSession {
 
     func beginRatingPhase() async { await repository.beginRatingPhase() }
     func endRatingPhase() async { await repository.endRatingPhase() }
+    func photoRatingGeneration() async -> Int { await repository.photoRatingGeneration() }
+    func cachedPhotoRating(_ handle: UInt32) async -> Int? {
+        await repository.cachedPhotoRating(handle)
+    }
+    func cachedPhotoRatingOrigin(_ handle: UInt32) async -> String? {
+        await repository.cachedPhotoRatingOrigin(handle)
+    }
+    @discardableResult
+    func invalidatePhotoRatings() async -> Int {
+        await repository.invalidatePhotoRatings()
+    }
     func readObjectRating(file: CameraFile) async throws -> Int? {
         try await repository.readObjectRating(file: file)
     }

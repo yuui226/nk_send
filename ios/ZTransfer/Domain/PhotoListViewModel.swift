@@ -50,6 +50,9 @@ final class PhotoListViewModel: ObservableObject {
     /// view may receive several published batches before the scan completes.
     @Published private(set) var isLoadingFiles = false
     @Published private(set) var hasCompletedFileScan = false
+    /// Rating filter consumers observe the lifecycle state separately from
+    /// the grid, so toggling the loader never replays list animations.
+    @Published private(set) var ratingScan = PhotoRatingScan()
     private var allFiles: [CameraFile] = []
     private var transferredIDs: Set<UInt32> = []
     private var storageIDsBySlot: [UInt32: Set<UInt32>] = [:]
@@ -65,6 +68,8 @@ final class PhotoListViewModel: ObservableObject {
     private let onTransportLost: (() -> Void)?
     private let thumbnailFillQueue: PhotoThumbnailFillQueue
     private let sequentialLoading: Bool
+    private let ratingScanController: PhotoRatingScanController
+    private var ratingScanObservation: AnyCancellable?
     private var catalogUpdatesTask: Task<Void, Never>?
     private var loadTask: Task<Void, Never>?
     private var fillTask: Task<Void, Never>?
@@ -105,6 +110,7 @@ final class PhotoListViewModel: ObservableObject {
     init(session: CameraSession, onTransportLost: (() -> Void)? = nil) {
         sequentialLoading = session.wirelessMode == .sta
         thumbnailFillQueue = PhotoThumbnailFillQueue(sequential: session.wirelessMode == .sta)
+        ratingScanController = PhotoRatingScanController(io: PhotoRatingScanIO(session: session))
         self._filter = Published(initialValue: PhotoFilterPersistence.load())
         self.onTransportLost = onTransportLost
         self.setRemoteGate = { await session.setRemoteActive($0) }
@@ -153,6 +159,9 @@ final class PhotoListViewModel: ObservableObject {
                 self?.applyCatalogUpdate(files)
             }
         }
+        ratingScanObservation = ratingScanController.$state.sink { [weak self] value in
+            self?.ratingScan = value
+        }
     }
 
     /// A restored workspace has presentation state but no catalog transport.
@@ -180,6 +189,7 @@ final class PhotoListViewModel: ObservableObject {
     ) {
         self.sequentialLoading = sequentialLoading
         self.thumbnailFillQueue = PhotoThumbnailFillQueue(sequential: sequentialLoading)
+        self.ratingScanController = PhotoRatingScanController(io: .noop)
         self.scanCatalog = scanCatalog
         self.resumeSnapshotProvider = resumeSnapshotProvider
         self.prefetchBatch = prefetchBatch
@@ -188,6 +198,9 @@ final class PhotoListViewModel: ObservableObject {
         self.invalidateThumbnailState = invalidateThumbnailState
         self.setRemoteGate = setRemoteGate
         self.onTransportLost = onTransportLost
+        ratingScanObservation = ratingScanController.$state.sink { [weak self] value in
+            self?.ratingScan = value
+        }
     }
     private func applyCatalogUpdate(_ files: [CameraFile]) {
         guard loadState == .loaded else { return }
@@ -240,6 +253,7 @@ final class PhotoListViewModel: ObservableObject {
         loadTask = nil
         fillTask?.cancel()
         fillTask = nil
+        ratingScanController.cancel()
         fillResumeTask?.cancel()
         fillResumeTask = nil
         fillWorkerActive = false
@@ -575,6 +589,30 @@ final class PhotoListViewModel: ObservableObject {
                 await self?.reload(generation: generation, resumeSnapshot: snapshot, preserve: true)
             }
         }
+    }
+
+    /// Feeds the Android-equivalent rating lifecycle. The UI owns the switch,
+    /// pause boundary and selected rating days; the controller owns snapshot,
+    /// cache, progress and cancellation semantics.
+    func updateRatingScan(enabled: Bool, paused: Bool = false,
+                          recentThumbnailReadyDays: Int = 0,
+                          ratingDays: Int = 3,
+                          files: [CameraFile]? = nil) {
+        let input = PhotoRatingScanInput(
+            files: files ?? allFiles,
+            paused: paused,
+            useObjectRating: !sequentialLoading,
+            staConnection: sequentialLoading,
+            listLoading: isLoadingFiles,
+            recentThumbnailReadyDays: recentThumbnailReadyDays,
+            ratingDays: ratingDays,
+            photoLoadingDays: photoLoadingRange.days
+        )
+        ratingScanController.update(input, enabled: enabled)
+    }
+
+    func cancelRatingScan() {
+        ratingScanController.cancel()
     }
 
     /// TransferViewModel exposes the same foreground gate Android feeds into

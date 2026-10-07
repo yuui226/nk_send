@@ -302,6 +302,10 @@ actor CameraRepository {
     private var ratingOperationUnsupported = false
     private var ratingNikonHeaderUnsupported = false
     private var ratingStandardHeaderUnsupported = false
+    /// Decoded ratings are scoped to this repository/connection.  A scan
+    /// generation makes an old read unable to publish after invalidation or
+    /// reconnect; PhotoRatingCache keeps the Android FIFO bound.
+    private var photoRatingCache = PhotoRatingCache()
     private var subjectTrackingActive = false
     private var subjectTrackingSupported: Bool?
     private let focusGate = CameraIOGate()
@@ -383,6 +387,32 @@ actor CameraRepository {
 
     func beginRatingPhase() async { await ioGate.beginRatingPhase() }
     func endRatingPhase() async { await ioGate.endRatingPhase() }
+
+    func photoRatingGeneration() -> Int { photoRatingCache.generation }
+    func cachedPhotoRating(_ handle: UInt32) -> Int? { photoRatingCache.value(for: handle)?.value }
+    func cachedPhotoRatingOrigin(_ handle: UInt32) -> String? { photoRatingCache.value(for: handle)?.origin }
+
+    /// Starts a fresh camera snapshot.  The generation is advanced before the
+    /// caller begins reading so an in-flight old task can only return unknown.
+    @discardableResult
+    func invalidatePhotoRatings() -> Int {
+        photoRatingCache.invalidate()
+        return photoRatingCache.generation
+    }
+
+    private func rememberPhotoRating(_ handle: UInt32, _ rating: Int,
+                                    generation: Int, origin: String) {
+        photoRatingCache.remember(handle: handle, value: rating, origin: origin, generation: generation)
+    }
+
+    private func capturePhotoRating(_ handle: UInt32, _ data: Data, origin: String,
+                                    generation: Int? = nil) {
+        let bounded = data.prefix(262_144)
+        guard bounded.count >= 8 else { return }
+        guard let rating = parsePhotoRating(Data(bounded)) ??
+                parseNikonVideoRating(Data(bounded)) else { return }
+        rememberPhotoRating(handle, rating, generation: generation ?? photoRatingCache.generation, origin: origin)
+    }
 
     func keepalive() async -> Bool {
         if activeForegroundReads > 0 { return true }
@@ -1183,15 +1213,19 @@ actor CameraRepository {
 
     func readPrefix(handle: UInt32, length: Int64) async throws -> Data {
         activeForegroundReads += 1; defer { activeForegroundReads -= 1; scheduleObjectResolver() }
-        return try await ioGate.withPreviewTransaction(owner: "PREVIEW_EXIF") {
+        let generation = photoRatingCache.generation
+        return try await ioGate.withPreviewTransaction(owner: "PREVIEW_EXIF") { [self] in
             let count = max(0, min(length, Int64(UInt32.max)))
             if let directReader {
-                return try await directReader.exifHeader(handle: handle, length: Int(count))
+                let data = try await directReader.exifHeader(handle: handle, length: Int(count))
+                await self.capturePhotoRating(handle, data, origin: "header", generation: generation)
+                return data
             }
             let result = try await session.execute(
                 operation: PTPConstants.getPartialObjectEx,
                 parameters: [handle, 0, 0, UInt32(count & 0xFFFF_FFFF), UInt32(count >> 32)]
             )
+            await self.capturePhotoRating(handle, result.data, origin: "header", generation: generation)
             return result.data
         }
     }
@@ -1211,13 +1245,17 @@ actor CameraRepository {
         if ratingOperationUnsupported || ratingUnsupportedExtensions.contains(file.fileExtension) {
             return nil
         }
+        let generation = photoRatingCache.generation
         let response = try await session.executeResponse(
             operation: PTPConstants.getObjectPropValue,
             parameters: [file.id, PTPConstants.objectPropRating]
         )
         switch response.code {
         case PTPConstants.responseOK:
-            return parseNikonObjectRating(response.data)
+            guard generation == photoRatingCache.generation else { return nil }
+            guard let rating = parseNikonObjectRating(response.data) else { return nil }
+            rememberPhotoRating(file.id, rating, generation: generation, origin: "object-read")
+            return rating
         case PTPConstants.operationNotSupported:
             ratingOperationUnsupported = true
             return nil
@@ -1263,6 +1301,7 @@ actor CameraRepository {
         let firstLimit = 100 * 1024
         let extensionSize = 8 * 1024
         let maximum = 256 * 1024
+        let generation = photoRatingCache.generation
         var bytes = try await readRatingChunk(file: file, offset: 0, count: firstLimit)
         guard bytes.count <= firstLimit else { return nil }
         var rating = parsePhotoRating(bytes)
@@ -1273,6 +1312,8 @@ actor CameraRepository {
             bytes.append(tail)
             rating = parsePhotoRating(bytes)
         }
+        guard generation == photoRatingCache.generation else { return nil }
+        if let rating { rememberPhotoRating(file.id, rating, generation: generation, origin: "rating-header") }
         return rating
     }
 
@@ -1280,11 +1321,15 @@ actor CameraRepository {
     /// `moov`; the structural reader requests only the missing 8 KiB windows
     /// and caps the total remote windows at 32.
     func readVideoRating(file: CameraFile) async throws -> Int? {
-        try await readNikonVideoRatingThrowing(fileSize: file.size) { [self] offset, count in
+        let generation = photoRatingCache.generation
+        let rating = try await readNikonVideoRatingThrowing(fileSize: file.size) { [self] offset, count in
             try await ioGate.withRatingTransaction(owner: "RATING") {
                 try await readRatingChunk(file: file, offset: offset, count: count)
             }
         }
+        guard generation == photoRatingCache.generation else { return nil }
+        if let rating { rememberPhotoRating(file.id, rating, generation: generation, origin: "rating-video") }
+        return rating
     }
 
     /// Clears connection-scoped rating capability latches. Connections are
@@ -1599,6 +1644,16 @@ actor CameraRepository {
         activeCatalogScans += 1
         defer { activeCatalogScans -= 1; scheduleObjectResolver() }
 
+        // A new non-resume enumeration is Android's connection snapshot
+        // boundary. Do this before the debug catalog early return as well, so
+        // simulator fixtures cannot accidentally retain a previous session's
+        // ratings.
+        let reusable = resumeSnapshot
+        if !preserveExisting && reusable == nil {
+            invalidatePhotoRatings()
+            resetRatingCapabilityState()
+        }
+
         #if DEBUG
         if let debugData {
             let files = debugData.files
@@ -1627,7 +1682,6 @@ actor CameraRepository {
 
         // A resume snapshot is valid only for this repository/session.  A fresh
         // scan invalidates old rows and cache state exactly like Android.
-        let reusable = resumeSnapshot
         if reusable == nil { scanSnapshot = nil }
         if !preserveExisting && reusable == nil {
             catalogFiles.removeAll(keepingCapacity: true)
