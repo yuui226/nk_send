@@ -805,6 +805,7 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
                     availableStorageSlots: model.availableStorageSlots.count > 1
                         ? model.availableStorageSlots : [],
                     suggestedDate: model.latestKnownCaptureDay,
+                    ratingProgress: model.ratingScan,
                     onChange: applyFilter
                 )
             }
@@ -1420,16 +1421,25 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
     }
 
     private func applyFilter(_ filter: PhotoFilterState) {
-        revealTick &+= 1
-        recentlyExpandedDay = nil
-        filterRevealWindow = true
-        revealWindowTask?.cancel()
-        let tick = revealTick
-        revealWindowTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 600_000_000)
-            guard !Task.isCancelled, revealTick == tick else { return }
-            filterRevealWindow = false
-            revealWindowTask = nil
+        // Android keeps the rating loader and its date range out of the
+        // visible-grid filter. Only a concrete star (or another filter field)
+        // starts the 600 ms cascade/reflow animation.
+        var lifecycleOnly = model.filter
+        lifecycleOnly.ratingEnabled = filter.ratingEnabled
+        lifecycleOnly.ratingDays = filter.ratingDays
+        let changesList = lifecycleOnly != filter
+        if changesList {
+            revealTick &+= 1
+            recentlyExpandedDay = nil
+            filterRevealWindow = true
+            revealWindowTask?.cancel()
+            let tick = revealTick
+            revealWindowTask = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 600_000_000)
+                guard !Task.isCancelled, revealTick == tick else { return }
+                filterRevealWindow = false
+                revealWindowTask = nil
+            }
         }
         model.setFilter(filter)
     }

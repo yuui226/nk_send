@@ -11,21 +11,28 @@ struct PhotoFilterPopupOverlay: View {
     let availableExtensions: [String]
     let availableStorageSlots: [UInt32]
     let suggestedDate: String?
+    let ratingProgress: PhotoRatingScan
     let onChange: (PhotoFilterState) -> Void
 
     @State private var working: PhotoFilterState
     @State private var editingDate = false
+    @State private var showRatingTip = false
+    @State private var ratingTipFrame: CGRect = .zero
+    @State private var ratingPulse: CGFloat = 1
+    @AppStorage("haptics_enabled") private var hapticsEnabled = true
 
     init(isPresented: Binding<Bool>, anchor: Anchor<CGRect>,
          initial: PhotoFilterState,
          availableExtensions: [String], availableStorageSlots: [UInt32],
-         suggestedDate: String?, onChange: @escaping (PhotoFilterState) -> Void) {
+         suggestedDate: String?, ratingProgress: PhotoRatingScan = PhotoRatingScan(),
+         onChange: @escaping (PhotoFilterState) -> Void) {
         _isPresented = isPresented
         self.anchor = anchor
         self.initial = initial
         self.availableExtensions = availableExtensions.map { $0.lowercased() }
         self.availableStorageSlots = availableStorageSlots
         self.suggestedDate = suggestedDate
+        self.ratingProgress = ratingProgress
         self.onChange = onChange
         _working = State(initialValue: initial)
     }
@@ -33,7 +40,9 @@ struct PhotoFilterPopupOverlay: View {
     var body: some View {
         GeometryReader { proxy in
             let localAnchor = proxy[anchor]
-            let width = min(340, max(1, proxy.size.width - 24))
+            // Android's final rating row fixes the panel at 14 + 81 + 8 +
+            // 154 + 14 dp. Keep that width stable while controls crossfade.
+            let width = min(271, max(1, proxy.size.width - 24))
             // Android FilterOverlay: final panel is 8pt below the actual
             // trigger, with only its horizontal placement clamped on screen.
             let left = min(max(localAnchor.minX, 12),
@@ -62,7 +71,11 @@ struct PhotoFilterPopupOverlay: View {
                 )
                 .frame(width: width, alignment: .top)
                 .padding(.leading, left)
-                .padding(.top, top)
+                    .padding(.top, top)
+
+                if showRatingTip, ratingTipFrame != .zero {
+                    ratingHelpBubble(in: proxy, anchor: ratingTipFrame)
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .allowsHitTesting(isPresented)
@@ -73,7 +86,17 @@ struct PhotoFilterPopupOverlay: View {
             if isPresented { resetDraft() }
         }
         .onChange(of: isPresented) { presented in
-            if presented { resetDraft() }
+            if presented { resetDraft(); showRatingTip = false }
+        }
+        .task(id: ratingProgress.loading) {
+            guard ratingProgress.loading else {
+                ratingPulse = 1
+                return
+            }
+            ratingPulse = 0.72
+            withAnimation(.linear(duration: 0.9).repeatForever(autoreverses: true)) {
+                ratingPulse = 1
+            }
         }
     }
 
@@ -157,6 +180,8 @@ struct PhotoFilterPopupOverlay: View {
                 }
             }
             divider
+            ratingFilterRow
+            divider
             section(AppLocalized.resource("filter_section_date"))
             HStack(spacing: 8) {
                 FilterChip(label: working.dateRange.map(formatRange) ?? AppLocalized.resource("filter_date"), selected: working.dateRange != nil) {
@@ -176,6 +201,147 @@ struct PhotoFilterPopupOverlay: View {
             commit(working.withDateRange(range))
             editingDate = false
         }
+    }
+
+    /// Android's fixed-width rating row. The loader switch is independent from
+    /// the concrete star filter: enabling it alone keeps the photo grid intact
+    /// while it fills the connection-scoped snapshot.
+    private var ratingFilterRow: some View {
+        let statusLabel: String = {
+            if !working.ratingEnabled { return AppLocalized.resource("filter_rating_off") }
+            if ratingProgress.waitingForRange {
+                return "0/\(ratingProgress.total)"
+            }
+            if ratingProgress.loading {
+                return "\(min(ratingProgress.completed, ratingProgress.total))/\(ratingProgress.total)"
+            }
+            return AppLocalized.resource("filter_rating_on")
+        }()
+        let accent: Color = {
+            if !working.ratingEnabled { return ZTransferColors.accentBlue }
+            if ratingProgress.waitingForRange { return ZTransferColors.accentYellow }
+            if ratingProgress.loading { return ZTransferColors.accentBlue }
+            return ZTransferColors.statusConnected
+        }()
+
+        return HStack(spacing: 8) {
+            FilterChip(
+                label: statusLabel,
+                selected: working.ratingEnabled,
+                accentColor: accent,
+                minHeight: 34,
+                onLongPress: working.ratingEnabled ? {
+                    UIPasteboard.general.string = PhotoRatingDiagnostics.snapshot()
+                } : nil
+            ) {
+                commit(working.withRating(
+                    enabled: !working.ratingEnabled,
+                    rating: working.ratingEnabled ? nil : working.rating
+                ))
+                ZTransferHaptics.shared.tick()
+            }
+            .frame(width: 81)
+            .opacity(working.ratingEnabled && ratingProgress.loading ? ratingPulse : 1)
+            .accessibilityLabel(AppLocalized.resource("filter_rating_enabled"))
+
+            ZStack(alignment: .leading) {
+                if !working.ratingEnabled {
+                    HStack(spacing: 8) {
+                        DetentWheel(
+                            label: AppLocalized.resource("filter_rating_range_label"),
+                            options: [1, 3, 5, 0],
+                            selected: [1, 3, 5, 0].contains(working.ratingDays) ? working.ratingDays : 3,
+                            optionLabel: { days in
+                                days == 0
+                                    ? AppLocalized.resource("filter_rating_range_all")
+                                    : AppLocalized.formattedResource("filter_rating_range_days", ["%1$d": String(days)])
+                            },
+                            onCommit: { days in commit(working.withRatingDays(days)) },
+                            rowHeight: 18,
+                            wheelHeight: 34,
+                            cornerRadius: 10,
+                            optionFontSize: 12,
+                            optionFontWeight: .medium,
+                            showDragHint: false,
+                            onDetent: { ZTransferHaptics.shared.tick() }
+                        )
+                        .frame(width: 81, height: 34)
+                        TipLightbulbButton(
+                            attention: false,
+                            size: 34,
+                            accessibilityLabel: AppLocalized.resource("filter_rating_help_title"),
+                            embeddedInPanel: true,
+                            action: { showRatingTip = true }
+                        )
+                        .background(
+                            GeometryReader { geometry in
+                                Color.clear.preference(
+                                    key: RatingTipFramePreferenceKey.self,
+                                    value: geometry.frame(in: .named("rating-panel"))
+                                )
+                            }
+                        )
+                    }
+                    .transition(.opacity)
+                } else {
+                    HStack(spacing: 1) {
+                        ForEach(1...5, id: \.self) { star in
+                            Button {
+                                ZTransferHaptics.shared.tick()
+                                commit(working.withRating(
+                                    enabled: true,
+                                    rating: working.rating == star ? nil : star
+                                ))
+                            } label: {
+                                Image(systemName: star <= (working.rating ?? 0) ? "star.fill" : "star")
+                                    .font(.system(size: 18, weight: .semibold))
+                                    .foregroundStyle(star <= (working.rating ?? 0)
+                                        ? ZTransferColors.accentYellow
+                                        : ZTransferColors.secondaryText.opacity(0.55))
+                                    .frame(width: 30, height: 34)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(AppLocalized.formattedResource("filter_rating_stars", ["%1$d": String(star)]))
+                        }
+                    }
+                    .frame(width: 154, height: 34, alignment: .leading)
+                    .transition(.opacity)
+                }
+            }
+            .frame(width: 154, height: 34, alignment: .leading)
+            .animation(.linear(duration: 0.18), value: working.ratingEnabled)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .coordinateSpace(name: "rating-panel")
+        .onPreferenceChange(RatingTipFramePreferenceKey.self) { ratingTipFrame = $0 }
+    }
+
+    @ViewBuilder
+    private func ratingHelpBubble(in proxy: GeometryProxy, anchor: CGRect) -> some View {
+        let width = min(260, max(220, proxy.size.width - 36))
+        VStack(alignment: .leading, spacing: 8) {
+            Text(AppLocalized.resource("filter_rating_help_title"))
+                .zTransferTypography(.titleMedium, weight: .semibold)
+            Text(AppLocalized.resource("filter_rating_help_description"))
+                .zTransferText(size: ZTransferMetrics.caption)
+                .foregroundStyle(ZTransferColors.primaryText)
+        }
+        .padding(16)
+        .frame(width: width, alignment: .leading)
+        .background {
+            ZTransferGlassSurface(cornerRadius: 16, kind: .panel)
+                .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(ZTransferColors.primaryText.opacity(0.12), lineWidth: 1))
+                .shadow(color: .black.opacity(0.16), radius: 14, y: 7)
+        }
+        .position(
+            x: min(max(18 + width / 2, anchor.midX), proxy.size.width - 18 - width / 2),
+            y: anchor.maxY + 8 + 48
+        )
+        .transition(.opacity)
+        .zIndex(2)
+        .onTapGesture { showRatingTip = false }
+        .animation(.timingCurve(0.4, 0, 0.2, 1, duration: showRatingTip ? 0.34 : 0.26), value: showRatingTip)
     }
 
     private func section(_ title: String) -> some View {
@@ -336,7 +502,17 @@ private extension PhotoFilterState {
     func withExtensions(_ value: Set<String>?) -> PhotoFilterState { var copy = self; copy.extensions = value; return copy }
     func withStorageSlot(_ value: UInt32?) -> PhotoFilterState { var copy = self; copy.storageSlot = value; return copy }
     func withDateRange(_ value: PhotoDateRange?) -> PhotoFilterState { var copy = self; copy.dateRange = value; return copy }
+    func withRating(enabled: Bool, rating: Int?) -> PhotoFilterState { var copy = self; copy.ratingEnabled = enabled; copy.rating = rating; return copy }
+    func withRatingDays(_ value: Int) -> PhotoFilterState { var copy = self; copy.ratingDays = value; return copy }
     func togglingProtected() -> PhotoFilterState { var copy = self; copy.protectedOnly.toggle(); return copy }
     func togglingBurst() -> PhotoFilterState { var copy = self; copy.burstOnly.toggle(); return copy }
     func togglingUntransferred() -> PhotoFilterState { var copy = self; copy.untransferredOnly.toggle(); return copy }
+}
+
+private struct RatingTipFramePreferenceKey: PreferenceKey {
+    static let defaultValue: CGRect = .zero
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        let next = nextValue()
+        if next != .zero { value = next }
+    }
 }

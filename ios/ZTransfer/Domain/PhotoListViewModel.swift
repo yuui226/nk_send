@@ -53,6 +53,9 @@ final class PhotoListViewModel: ObservableObject {
     /// Rating filter consumers observe the lifecycle state separately from
     /// the grid, so toggling the loader never replays list animations.
     @Published private(set) var ratingScan = PhotoRatingScan()
+    /// Newest actual shooting days whose ordered thumbnail batches crossed
+    /// the STA rating boundary.
+    @Published private(set) var recentThumbnailReadyDays = 0
     private var allFiles: [CameraFile] = []
     private var transferredIDs: Set<UInt32> = []
     private var storageIDsBySlot: [UInt32: Set<UInt32>] = [:]
@@ -161,6 +164,7 @@ final class PhotoListViewModel: ObservableObject {
         }
         ratingScanObservation = ratingScanController.$state.sink { [weak self] value in
             self?.ratingScan = value
+            self?.publishFilteredSections()
         }
     }
 
@@ -200,6 +204,7 @@ final class PhotoListViewModel: ObservableObject {
         self.onTransportLost = onTransportLost
         ratingScanObservation = ratingScanController.$state.sink { [weak self] value in
             self?.ratingScan = value
+            self?.publishFilteredSections()
         }
     }
     private func applyCatalogUpdate(_ files: [CameraFile]) {
@@ -281,6 +286,7 @@ final class PhotoListViewModel: ObservableObject {
         allFiles.removeAll(keepingCapacity: true)
         displayedFiles.removeAll(keepingCapacity: true)
         sections.removeAll()
+        recentThumbnailReadyDays = 0
         hasCompletedFileScan = false
         isLoadingFiles = true
         loadState = .loading
@@ -321,6 +327,7 @@ final class PhotoListViewModel: ObservableObject {
         fillWorkerActive = false
         await thumbnailFillQueue.beginScan()
         loadingRangeScanStopped = false
+        recentThumbnailReadyDays = 0
         loadState = .loading
         isLoadingFiles = true
         hasCompletedFileScan = false
@@ -348,6 +355,15 @@ final class PhotoListViewModel: ObservableObject {
             // Repository returns the merged logical rows in stable display
             // order, including dual-card membership replacements.
             allFiles = result.files
+            if sequentialLoading {
+                // A completed or range-bounded catalog is the authoritative
+                // shorter-range boundary, just like CameraViewModel's final
+                // updateRecentThumbnailReady call.
+                recentThumbnailReadyDays = max(
+                    recentThumbnailReadyDays,
+                    PhotoRatingScanPolicy.dates(allFiles).count
+                )
+            }
             loadingRangeScanStopped = result.stoppedAtLoadingRange
             if result.handleQueriesSucceeded {
                 storageIDsBySlot = photoStorageIDsBySlot(result.filterStorageIDs)
@@ -368,6 +384,7 @@ final class PhotoListViewModel: ObservableObject {
             loadState = .loaded
             isLoadingFiles = false
             hasCompletedFileScan = true
+            updateRatingScanFromCurrentState()
             if !result.addedHandles.isEmpty {
                 let added = result.files.filter {
                     result.addedHandles.contains($0.id) &&
@@ -439,7 +456,21 @@ final class PhotoListViewModel: ObservableObject {
         sections = PhotoCatalogGrouping.byCaptureDay(
             PhotoFilter.apply(scopedFiles, state: filter,
                               transferredIDs: transferredIDs.subtracting(exitingTransferredFileIDs),
-                              storageIDsBySlot: storageIDsBySlot),
+                              storageIDsBySlot: storageIDsBySlot,
+                              ratingValues: ratingScan.values),
+        )
+        updateRatingScanFromCurrentState()
+    }
+
+    /// Rating values arrive independently of catalog publication. Refresh only
+    /// the filtered section model so the grid does not replay catalog changes.
+    private func publishFilteredSections() {
+        guard !displayedFiles.isEmpty || !sections.isEmpty else { return }
+        sections = PhotoCatalogGrouping.byCaptureDay(
+            PhotoFilter.apply(displayedFiles, state: filter,
+                              transferredIDs: transferredIDs.subtracting(exitingTransferredFileIDs),
+                              storageIDsBySlot: storageIDsBySlot,
+                              ratingValues: ratingScan.values),
         )
     }
 
@@ -457,6 +488,7 @@ final class PhotoListViewModel: ObservableObject {
         }
         publishSections()
         var allCached = !additions.isEmpty
+        var batchSettled = !additions.isEmpty
         for file in additions {
             try Task.checkCancellation()
             guard generation == loadGeneration else { throw CancellationError() }
@@ -474,7 +506,9 @@ final class PhotoListViewModel: ObservableObject {
             let result = await prefetchBatch([file])
             for id in result.settled { await thumbnailFillQueue.markSettled(id) }
             allCached = allCached && result.cached.contains(file.id) && !result.interrupted
+            batchSettled = batchSettled && result.settled.contains(file.id) && !result.interrupted
         }
+        updateRecentThumbnailReadyDays(completedBatch: additions, batchSettled: batchSettled)
         accumulator.batchPolicy.complete(count: additions.count, allCached: allCached)
         // Misses and transient errors are intentionally not marked failed here.
         // They are discovered by the post-scan seed and handled by the same
@@ -483,6 +517,22 @@ final class PhotoListViewModel: ObservableObject {
         try Task.checkCancellation()
         guard generation == loadGeneration else { throw CancellationError() }
         await Task.yield()
+    }
+
+    private func updateRecentThumbnailReadyDays(completedBatch: [CameraFile], batchSettled: Bool) {
+        guard sequentialLoading, batchSettled, !completedBatch.isEmpty else { return }
+        let dates = PhotoRatingScanPolicy.dates(allFiles)
+        guard !dates.isEmpty else { return }
+        var ready = recentThumbnailReadyDays
+        for (index, date) in dates.enumerated() {
+            if completedBatch.contains(where: { file in
+                guard let fileDate = file.captureDate, fileDate.count >= 8 else { return false }
+                return String(fileDate.prefix(8)) < date
+            }) {
+                ready = max(ready, index + 1)
+            }
+        }
+        recentThumbnailReadyDays = ready
     }
 
     private func nextScanBatchSize(generation: Int, accumulator: ScanAccumulator) async -> Int {
@@ -512,6 +562,7 @@ final class PhotoListViewModel: ObservableObject {
     /// owns the camera channel, retaining the published rows for resumption.
     func pauseForPreview() {
         previewActive = true
+        updateRatingScanFromCurrentState()
         guard !sequentialLoading else { return }
         guard isLoadingFiles else { return }
         previewPausedScan = true
@@ -523,6 +574,7 @@ final class PhotoListViewModel: ObservableObject {
 
     func resumeAfterPreview() {
         previewActive = false
+        updateRatingScanFromCurrentState()
         if sequentialLoading { wakeThumbnailFill(); return }
         guard !remoteActive else { return }
         if remoteRefreshPending {
@@ -550,6 +602,7 @@ final class PhotoListViewModel: ObservableObject {
         if !filter.untransferredOnly { exitingTransferredFileIDs.removeAll() }
         PhotoFilterPersistence.save(filter)
         publishSections()
+        updateRatingScanFromCurrentState()
         guard !sequentialLoading else { return }
         Task { [weak self] in
             guard let self else { return }
@@ -569,6 +622,7 @@ final class PhotoListViewModel: ObservableObject {
         PhotoFilterPersistence.savePhotoLoadingRange(range)
         photoLoadingRange = range
         publishSections()
+        updateRatingScanFromCurrentState()
         let allowed = newestCaptureDaysRange(allFiles, days: range.days)
         Task { [weak self] in
             guard let self else { return }
@@ -611,6 +665,16 @@ final class PhotoListViewModel: ObservableObject {
         ratingScanController.update(input, enabled: enabled)
     }
 
+    private func updateRatingScanFromCurrentState() {
+        updateRatingScan(
+            enabled: filter.ratingEnabled,
+            paused: transferBusy || previewActive || remoteActive,
+            recentThumbnailReadyDays: recentThumbnailReadyDays,
+            ratingDays: filter.ratingDays,
+            files: allFiles
+        )
+    }
+
     func cancelRatingScan() {
         ratingScanController.cancel()
     }
@@ -621,6 +685,7 @@ final class PhotoListViewModel: ObservableObject {
     func setTransferBusy(_ busy: Bool) {
         guard transferBusy != busy else { return }
         transferBusy = busy
+        updateRatingScanFromCurrentState()
         if sequentialLoading {
             if !busy { wakeThumbnailFill() }
             return
@@ -660,6 +725,7 @@ final class PhotoListViewModel: ObservableObject {
     func pauseForRemote() async {
         guard !remoteActive else { return }
         remoteActive = true
+        updateRatingScanFromCurrentState()
         await setRemoteGate(true)
         guard !sequentialLoading else { return }
         await loadTask?.value
@@ -669,6 +735,7 @@ final class PhotoListViewModel: ObservableObject {
     func resumeAfterRemote(isConnected: Bool) async {
         guard remoteActive else { return }
         remoteActive = false
+        updateRatingScanFromCurrentState()
         // Balance pauseForRemote's ownership here instead of relying on the
         // monitor model to release the same repository flag as a side effect.
         // The fresh handle scan must not be queued until the foreground gate

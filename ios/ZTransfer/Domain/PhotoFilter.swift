@@ -79,6 +79,15 @@ func restoredPhotoDateRange(start: String?, end: String?) -> PhotoDateRange? {
 struct PhotoFilterState: Equatable, Sendable, Codable {
     var extensions: Set<String>? = nil
     var protectedOnly = false
+    /// The loader is a session-only switch. It starts the Android-compatible
+    /// rating scan but does not itself filter or re-layout the photo grid.
+    var ratingEnabled = false
+    /// A selected star is also session-only; nil means the loader is on while
+    /// the user has not selected a concrete rating.
+    var rating: Int? = nil
+    /// Only this range choice persists between launches. Android accepts
+    /// exactly 0 (all), 1, 3, or 5 actual shooting days.
+    var ratingDays = 3
     var burstOnly = false
     var untransferredOnly = false
     /// Logical physical slot (1/2), not the camera's opaque PTP StorageID.
@@ -87,7 +96,7 @@ struct PhotoFilterState: Equatable, Sendable, Codable {
     var dateRange: PhotoDateRange?
 
     var isActive: Bool {
-        extensions != nil || protectedOnly || burstOnly || untransferredOnly ||
+        extensions != nil || protectedOnly || rating != nil || burstOnly || untransferredOnly ||
             storageSlot != nil || dateRange != nil
     }
 }
@@ -95,7 +104,8 @@ struct PhotoFilterState: Equatable, Sendable, Codable {
 enum PhotoFilter {
     static func apply(_ files: [CameraFile], state: PhotoFilterState,
                       transferredIDs: Set<UInt32> = [],
-                      storageIDsBySlot: [UInt32: Set<UInt32>] = [:]) -> [CameraFile] {
+                      storageIDsBySlot: [UInt32: Set<UInt32>] = [:],
+                      ratingValues: [UInt32: PhotoRatingValue] = [:]) -> [CameraFile] {
         let burstIDs: Set<UInt32>? = state.burstOnly
             ? Set(PhotoCatalogGrouping.bursts(in: files).flatMap { $0.files.map(\.id) })
             : nil
@@ -103,6 +113,10 @@ enum PhotoFilter {
             let ext = file.fileExtension.lowercased()
             guard state.extensions == nil || state.extensions!.contains(ext) else { return false }
             guard !state.protectedOnly || file.isProtected else { return false }
+            if let rating = state.rating {
+                guard state.ratingEnabled,
+                      ratingValues[file.id] == .known(rating) else { return false }
+            }
             guard !state.burstOnly || burstIDs?.contains(file.id) == true else { return false }
             guard !state.untransferredOnly || !transferredIDs.contains(file.id) else { return false }
             if let slot = state.storageSlot {
@@ -179,6 +193,7 @@ func toggledPhotoStorageSlot(_ selected: UInt32?, toggled: UInt32,
 enum PhotoFilterPersistence {
     private static let extensionsKey = "filter_exts"
     private static let protectedKey = "filter_protected"
+    static let ratingDaysKey = "filter_rating_days"
     private static let burstKey = "filter_burst"
     private static let untransferredKey = "filter_untransferred"
     private static let startKey = "filter_date_start"
@@ -198,6 +213,9 @@ enum PhotoFilterPersistence {
         let extensions = defaults.stringArray(forKey: extensionsKey).map { Set($0.map { $0.lowercased() }) }
         return PhotoFilterState(extensions: extensions?.isEmpty == false ? extensions : nil,
                                 protectedOnly: defaults.bool(forKey: protectedKey),
+                                ratingEnabled: false,
+                                rating: nil,
+                                ratingDays: normalizedRatingDays(defaults.integer(forKey: ratingDaysKey)),
                                 burstOnly: defaults.bool(forKey: burstKey),
                                 untransferredOnly: defaults.bool(forKey: untransferredKey),
                                 storageSlot: nil,
@@ -211,6 +229,12 @@ enum PhotoFilterPersistence {
         if let extensions = state.extensions { defaults.set(Array(extensions).sorted(), forKey: extensionsKey) }
         else { defaults.removeObject(forKey: extensionsKey) }
         set(state.protectedOnly, key: protectedKey, defaults: defaults)
+        // The selected star and loader are intentionally not persisted. A
+        // reopened camera must ask for a fresh snapshot; only the range wheel
+        // survives, matching Android's SharedPreferences contract.
+        defaults.set(normalizedRatingDays(state.ratingDays), forKey: ratingDaysKey)
+        defaults.removeObject(forKey: "filter_rating")
+        defaults.removeObject(forKey: "filter_rating_enabled")
         set(state.burstOnly, key: burstKey, defaults: defaults)
         set(state.untransferredOnly, key: untransferredKey, defaults: defaults)
         // Slot selection belongs to the current camera process only.
@@ -227,6 +251,10 @@ enum PhotoFilterPersistence {
     private static func set(_ enabled: Bool, key: String, defaults: UserDefaults) {
         if enabled { defaults.set(true, forKey: key) }
         else { defaults.removeObject(forKey: key) }
+    }
+
+    private static func normalizedRatingDays(_ value: Int) -> Int {
+        value == 0 || value == 1 || value == 3 || value == 5 ? value : 3
     }
 
     private static func hyphenated(_ value: String) -> String {

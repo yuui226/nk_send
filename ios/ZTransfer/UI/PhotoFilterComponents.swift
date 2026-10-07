@@ -5,6 +5,9 @@ struct FilterChip: View {
     let selected: Bool
     var systemImage: String? = nil
     var burstIcon = false
+    var accentColor: Color = ZTransferColors.accentBlue
+    var minHeight: CGFloat = 38
+    var onLongPress: (() -> Void)? = nil
     let action: () -> Void
     var body: some View {
         Button(action: action) {
@@ -18,11 +21,15 @@ struct FilterChip: View {
                     Text(label).zTransferText(size: ZTransferMetrics.caption, weight: selected ? .semibold : .regular)
                 }
             }
-            .foregroundStyle(selected ? ZTransferColors.accentBlue : ZTransferColors.primaryText)
-            .frame(maxWidth: .infinity).frame(minHeight: 38)
-            .background(selected ? ZTransferColors.accentBlue.opacity(0.13) : Color.black.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(selected ? ZTransferColors.accentBlue.opacity(0.32) : Color.clear, lineWidth: 1))
+            .foregroundStyle(selected ? accentColor : ZTransferColors.primaryText)
+            .frame(maxWidth: .infinity).frame(minHeight: minHeight)
+            .background(selected ? accentColor.opacity(0.13) : Color.black.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(selected ? accentColor.opacity(0.32) : Color.clear, lineWidth: 1))
         }.buttonStyle(.plain)
+        .simultaneousGesture(
+            LongPressGesture(minimumDuration: 0.5)
+                .onEnded { _ in onLongPress?() }
+        )
     }
 }
 
