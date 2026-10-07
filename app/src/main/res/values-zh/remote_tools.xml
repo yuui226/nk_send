@@ -12,6 +12,7 @@
     <string name="remote_tool_focus_area">对焦区域</string>
     <string name="remote_tool_waveform">波形图</string>
     <string name="remote_tool_lock">锁定布局</string>
+    <string name="remote_tool_computer_control">完全控制</string>
     <string name="remote_tool_rotate">旋转布局</string>
     <string name="remote_tool_manage">管理工具</string>
     <string name="remote_tool_fixed">位置固定</string>
@@ -37,6 +38,9 @@
     <string name="remote_wb_off">关闭</string>
     <string name="remote_wb_natural">自然光自动</string>
     <string name="remote_af_dynamic">动态区域 AF</string>
+    <string name="remote_af_dynamic_s">动态区域 AF（S）</string>
+    <string name="remote_af_dynamic_m">动态区域 AF（M）</string>
+    <string name="remote_af_dynamic_l">动态区域 AF（L）</string>
     <string name="remote_af_single">单点 AF</string>
     <string name="remote_af_auto">自动区域 AF</string>
     <string name="remote_af_tracking">3D 跟踪</string>
@@ -53,6 +57,7 @@
     <string name="remote_af_auto_animals">自动区域 AF（动物）</string>
     <string name="remote_af_tap_badge">可点按对焦</string>
     <string name="remote_tap_focus_area_retry">请切换对焦区域后重试</string>
+    <string name="remote_tap_focus_area_unsupported">当前对焦区域不支持点按对焦，请切换为单点、动态区域或宽区域 AF</string>
     <string name="remote_tap_focus_retry">对焦失败，请重试</string>
     <string name="remote_rotation_stopped">自动旋转停止</string>
     <string name="remote_rotation_resumed">自动旋转恢复</string>

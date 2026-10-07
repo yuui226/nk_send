@@ -144,6 +144,11 @@
     <string name="defer_transfer_start">Transfer after selecting</string>
     <string name="defer_transfer_start_summary">Items added to the transfer queue do not start transferring immediately, so you can keep previewing and selecting photos.</string>
     <string name="organize_transfers_by_date">Save by day</string>
+    <string name="storage_mode">Storage mode</string>
+    <string name="storage_mode_unified">Unified</string>
+    <string name="storage_mode_by_day">By day</string>
+    <string name="storage_mode_by_type">By type</string>
+    <string name="storage_mode_summary">Choose unified, by day, or by file type. Photo effects stay in their separate folder.</string>
     <string name="organize_transfers_by_date_summary">Save files in folders by capture date. When off, save them directly in the transfer folder.</string>
     <string name="cd_start_transfers">Start transfers</string>
     <string name="cd_pause_after_current">Pause after the current item</string>
@@ -197,6 +202,7 @@
     <string name="photo_frame_color_archive">Color Archive</string>
     <string name="photo_frame_film_gallery">Film Gallery</string>
     <string name="photo_frame_film_edge">Film Edge</string>
+    <string name="photo_frame_film_negative">Film Negative</string>
     <string name="photo_frame_metadata_button">Frame settings</string>
     <string name="photo_frame_metadata_focal_length">Focal</string>
     <string name="photo_frame_metadata_exposure">Exposure</string>
@@ -426,7 +432,7 @@
     <string name="err_code_revoked">This activation code has been revoked</string>
     <string name="err_code_expired">Subscription expired — renew to continue</string>
     <string name="err_rate_limited">Too many attempts — try again in a minute</string>
-    <string name="err_server_unreachable">Couldn\'t reach the activation server. Check your network; if the network is fine, update to the latest version (via QQ group).</string>
+    <string name="err_server_unreachable">Unable to reach the activation server. Check your connection or update to the latest version, then retry.</string>
     <string name="err_generic">Activation failed (%1$s)</string>
     <string name="revert_free">Reverted to free (testing)</string>
     <string name="pro_version">Pro</string>
@@ -519,8 +525,8 @@
     <string name="purchase_paid_not_active">Payment received but auto-activation failed — copy the code above and use "Enter activation code".</string>
     <string name="purchase_code_copied">Activation code copied</string>
     <string name="purchase_done">Done</string>
-    <string name="err_purchase_no_network">Disconnect the camera hotspot before purchasing, then connect to the internet and retry.</string>
-    <string name="err_purchase_unreachable">Couldn\'t reach the server. If you\'re on the camera\'s Wi-Fi, disconnect first and retry on a network with internet access.</string>
+    <string name="err_purchase_no_network">Check your connection and retry. If it still fails, try another phone hotspot or Wi-Fi network.</string>
+    <string name="err_purchase_unreachable">Check your connection and retry. If it still fails, try another phone hotspot or Wi-Fi network.</string>
     <string name="err_purchase_failed">Couldn\'t create the order — try again later or contact support.</string>
     <string name="err_purchase_activation_failed">Activation failed. Please contact support.</string>
     <string name="err_purchase_price_missing">The order total could not be verified. Payment was stopped; please retry.</string>
@@ -673,4 +679,30 @@
     <string name="photo_effect_module_lut">LUT</string>
     <string name="photo_effect_module_frame">Frame</string>
     <string name="photo_effect_module_watermark">Watermark</string>
+
+    <string name="remote_tool_focus_frame">Focus frame</string>
+    <string name="remote_focus_diagnostic_start">Start</string>
+    <string name="remote_focus_diagnostic_stop">Stop</string>
+    <string name="remote_focus_diagnostic_mark">Mark step</string>
+    <string name="remote_focus_diagnostic_hint">Passive focus sampling for 60 seconds. Move the camera focus point, switch photo/video or AF area, and mark each step. Copy the report afterwards.</string>
+    <string name="remote_tool_focus_mode">Focus mode</string>
+    <string name="remote_focus_manual_fixed">MF (fixed)</string>
+    <string name="probe_video_remaining">Probe recording time left</string>
+    <string name="probe_movie_format">Probe video resolution / frame rate</string>
+    <string name="photo_lut_contrast">Contrast</string>
+    <string name="photo_lut_saturation">Saturation</string>
+    <string name="photo_lut_highlights">Highlights</string>
+    <string name="photo_lut_shadows">Shadows</string>
+    <string name="photo_lut_concentration">Concentration</string>
+    <string name="photo_lut_settings">LUT settings</string>
+    <string name="filter_rating_stars">%1$d stars</string>
+    <string name="filter_rating_enabled">Rating filter</string>
+    <string name="filter_rating_help_title">Star rating</string>
+    <string name="filter_rating_range_all">all</string>
+    <string name="filter_rating_range_days">%1$d days</string>
+    <string name="filter_rating_range_label">Range</string>
+    <string name="filter_rating_waiting">Waiting</string>
+    <string name="filter_rating_help_description">Enable to load ratings in the selected range and filter photos by rating. Turn it off and on again to reload the latest ratings.</string>
+    <string name="filter_rating_off">Off</string>
+    <string name="filter_rating_on">On</string>
 </resources>

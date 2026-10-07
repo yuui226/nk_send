@@ -123,11 +123,48 @@ internal fun rememberMonitorStorage(camera: NikonCamera?, storageIds: List<Int>,
     return if (enabled) values else emptyList()
 }
 
+/** Read once on entry, then cheaply refresh only while video DISP is visible and idle. */
+@Composable
+internal fun rememberMonitorMovieFormat(camera: NikonCamera?, enabled: Boolean, pollingAllowed: Boolean): String? {
+    var label by remember(camera) { mutableStateOf<String?>(null) }
+    val canPoll by rememberUpdatedState(pollingAllowed)
+    LaunchedEffect(camera, enabled) {
+        label = null
+        if (!enabled || camera == null) return@LaunchedEffect
+        try {
+            while (!canPoll) delay(250)
+            val descriptor = camera.rcGetParam(0xD0A0) ?: return@LaunchedEffect
+            if (descriptor.dataType != 0x0008) return@LaunchedEffect
+            label = monitorMovieFormatLabel(descriptor.dataType, descriptor.current)
+            while (true) {
+                delay(10_000)
+                while (!canPoll) delay(250)
+                try {
+                    val current = camera.rcRefreshParam(descriptor)
+                    label = current?.let { monitorMovieFormatLabel(it.dataType, it.current) }
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { label = null } // A transient failure must not stop all future refreshes.
+            }
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { label = null }
+    }
+    return label.takeIf { enabled }
+}
+
+internal fun monitorRemainingTimeLabel(seconds: Long): String =
+    if (seconds >= 3600) String.format(java.util.Locale.ROOT, "%d:%02d:%02d", seconds / 3600, seconds / 60 % 60, seconds % 60)
+    else String.format(java.util.Locale.ROOT, "%02d:%02d", seconds / 60, seconds % 60)
+
 /** Camera-style readout; no background panel over the live image. */
 @Composable
 internal fun CameraMonitorDisp(cells: List<Pair<String, String>>, storage: List<Pair<Int, Long>>,
     movie: Boolean, battery: Int?, recording: Boolean, modifier: Modifier = Modifier,
-    storageSlotCount: Int = storage.size) {
+    storageSlotCount: Int = storage.size,
+    remainingVideoMs: () -> Long? = { null }, movieFormat: String? = null) {
+    val videoSource by rememberUpdatedState(remainingVideoMs)
+    val videoSeconds by remember(movie) { derivedStateOf { if (movie) videoSource()?.div(1000) else null } }
+    val remaining = if (movie) videoSeconds?.let { "[${monitorRemainingTimeLabel(it)}]" }
+        else null
     val shadow = androidx.compose.ui.text.TextStyle(shadow = androidx.compose.ui.graphics.Shadow(
         androidx.compose.ui.graphics.Color.Black.copy(alpha = .85f), blurRadius = 4f))
     val white = androidx.compose.ui.graphics.Color.White
@@ -135,10 +172,13 @@ internal fun CameraMonitorDisp(cells: List<Pair<String, String>>, storage: List<
         val topItems = storage.map { (number, free) ->
                 val capacity = String.format(java.util.Locale.getDefault(), "%.1f GB", free / 1_000_000_000.0)
                 if (storageSlotCount <= 1) capacity else stringResource(R.string.monitor_disp_card, number, capacity)
-            } + listOfNotNull(battery?.let { "$it%" })
+            } + listOfNotNull(
+                listOfNotNull(movieFormat.takeIf { movie }, remaining).joinToString(" ").takeIf { it.isNotEmpty() },
+                battery?.let { "$it%" })
         Text(topItems.joinToString("   ·   "),
-            Modifier.align(Alignment.TopStart).fillMaxWidth().padding(end = 100.dp),
-            color = white, fontSize = 12.sp, style = shadow, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            modifier = Modifier.align(Alignment.TopStart).fillMaxWidth().padding(end = 100.dp),
+            color = white, fontSize = 12.sp, style = shadow,
+            maxLines = 1, overflow = TextOverflow.Ellipsis)
         if (movie && !recording) Text("STBY", Modifier.align(Alignment.TopEnd),
             color = white.copy(alpha = .8f), fontSize = 11.sp, style = shadow)
         Row(

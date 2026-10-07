@@ -16,6 +16,7 @@ internal class ThumbnailFillQueue {
     private val failed = LinkedHashMap<Int, NikonCamera.FileInfo>()
     private val settledHandles = HashSet<Int>()
     private var range: PhotoDateRange? = null
+    private var loadingRange: PhotoDateRange? = null
     private var seededRevision = -1L
 
     val pendingCount: Int get() = pendingHandles.size
@@ -31,6 +32,7 @@ internal class ThumbnailFillQueue {
         failed.clear()
         settledHandles.clear()
         range = null
+        loadingRange = null
     }
 
     /** Starts a new enumeration in the same camera session without forgetting proven disk hits. */
@@ -64,14 +66,33 @@ internal class ThumbnailFillQueue {
     }
 
     /** Seeds only work not already completed by the 12-item scan pipeline. */
-    fun seed(files: List<NikonCamera.FileInfo>, priorityRange: PhotoDateRange?) {
+    fun seed(files: List<NikonCamera.FileInfo>, priorityRange: PhotoDateRange?, allowedRange: PhotoDateRange? = null) {
         if (seededRevision == revision) return
         seededRevision = revision
+        loadingRange = allowedRange
         updatePriorityRange(priorityRange)
         val missing = files.filterNot { file ->
             file.handle in settledHandles || file.handle in pendingHandles || file.handle in failed
-        }
+        }.filter { allowedRange == null || allowedRange.containsCaptureDate(it.captureDate) || it.captureDate == null }
         prioritizedThumbnailFiles(missing, priorityRange).forEach(::addLast)
+    }
+
+    fun updateLoadingRange(allowedRange: PhotoDateRange?) {
+        if (loadingRange == allowedRange) return
+        loadingRange = allowedRange
+        val unfinished = ArrayList<NikonCamera.FileInfo>(pendingHandles.size + failed.size)
+        unfinished.addAll(priority)
+        unfinished.addAll(regular)
+        // A range change is an explicit new loading scope. Failed items from the old scope
+        // must be eligible again when the user widens it; otherwise seed() would skip them
+        // forever because they remain in the failed set.
+        unfinished.addAll(failed.values)
+        priority.clear(); regular.clear(); pendingHandles.clear()
+        failed.clear()
+        revision++
+        seededRevision = -1L
+        unfinished.filter { allowedRange == null || allowedRange.containsCaptureDate(it.captureDate) || it.captureDate == null }
+            .forEach(::addLast)
     }
 
     /** Camera ObjectAdded events are normally newest, so they belong at the front of their lane. */
@@ -120,6 +141,7 @@ internal class ThumbnailFillQueue {
     }
 
     private fun addLast(file: NikonCamera.FileInfo) {
+        if (loadingRange != null && file.captureDate != null && !loadingRange!!.containsCaptureDate(file.captureDate)) return
         if (file.handle in settledHandles || !pendingHandles.add(file.handle)) return
         laneFor(file).addLast(file)
     }

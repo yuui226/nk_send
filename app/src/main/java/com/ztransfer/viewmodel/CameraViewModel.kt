@@ -34,6 +34,7 @@ import com.ztransfer.protocol.CameraRefusedException
 import com.ztransfer.protocol.Lab
 import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.protocol.PairingCompletedException
+import com.ztransfer.protocol.PairingNotConfirmedException
 import com.ztransfer.protocol.PTPIP_IDENTITY_PREFERENCES
 import com.ztransfer.protocol.PtpConstants
 import com.ztransfer.protocol.PtpIpCandidate
@@ -487,6 +488,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         ),
     )
     val state: StateFlow<CameraState> = _state.asStateFlow()
+    private val _recentThumbnailReady = MutableStateFlow(false)
+    val recentThumbnailReady: StateFlow<Boolean> = _recentThumbnailReady.asStateFlow()
+    // Number of newest actual shooting dates whose thumbnail boundary is complete.
+    private val _recentThumbnailReadyDays = MutableStateFlow(0)
+    val recentThumbnailReadyDays: StateFlow<Int> = _recentThumbnailReadyDays.asStateFlow()
     private val _newMediaFiles = MutableSharedFlow<NewCameraMedia>(
         extraBufferCapacity = 32,
     )
@@ -498,6 +504,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     private var camera: NikonCamera? = null
     private var keepaliveJob: Job? = null
+    // STA 的短暂网络抖动不应立即拆掉已建立的会话。只有连续保活失败后，才进入
+    // 统一的断线重连路径；若确实重连，则尽量沿用当前列表，避免用户看到整页重载。
+    private var staReconnectPreserveExisting = false
     private var watcherJob: Job? = null
     private var eventPollJob: Job? = null
     private data class PendingNewCameraObject(
@@ -514,7 +523,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private var lastHandleCatalogCheckAtMs = 0L
     private var fileLoadJob: Job? = null
     // 首次连接的整卡 ObjectInfo 枚举可能跨越数秒。进入监看时取消并记住尚未完成，
-    // 退出后从已发布的文件继续，避免 GetObjectInfo 与 Live View 取帧争抢 ioMutex。
+    // 退出后从已发布的文件继续，避免 GetObjectInfo 与 Live View 取帧争抢相机事务调度器。
     private var fileLoadPending = false
     // ObjectInfo 开始前已经取得的 StorageID + handles 快照。大图预览短暂停顿后，同一
     // NikonCamera 实例可直接继续剩余 handles，不重复向相机请求整卡 handle 列表。
@@ -567,7 +576,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     // 后台落盘先于可见格发起时也要共享请求；否则二者会在 remoteThumbGate 两侧各取一次。
     // value 只负责把字节落盘，不解码入内存，完成后由主线程清理。
     private val inflightPrefetches = HashMap<Int, CompletableDeferred<Boolean>>()
-    // PTP 命令通道本身严格串行；若整屏可见格子都提前排进 NikonCamera.ioMutex，
+    // PTP 命令通道本身严格串行；若整屏可见格子都提前排进统一事务调度器，
     // 后来的交互型 FHD 会被十几个 GetThumb 挡住。这里只允许一个远程缩略图进入
     // PTP 等待队列，其余在外层等待；不降低相机吞吐，却给 FHD 留出插队机会。
     private val remoteThumbGate = Semaphore(1)
@@ -881,6 +890,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 eventPollJob?.cancel()
                 val previous = camera
                 camera = null
+                fileLoadJob?.cancel()
                 previous?.close()
                 releaseSessionWifiLock()
                 CameraSessionService.stop(getApplication())
@@ -1068,6 +1078,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         CameraSessionService.stop(getApplication())
         keepaliveJob?.cancel()
         eventPollJob?.cancel()
+        fileLoadJob?.cancel()
         val cam = camera
         camera = null
         _state.update {
@@ -1112,6 +1123,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     //（TransferViewModel 与本 VM 相互独立，经 MainScreen 桥接）。
     private val transfersBusyFlow = MutableStateFlow(false)
     private val thumbnailPriorityRangeFlow = MutableStateFlow<PhotoDateRange?>(null)
+    private val thumbnailLoadingDaysFlow = MutableStateFlow(0)
+    /** Set when the initial catalog stopped at the selected newest-day boundary. */
+    private var photoRangeScanStopped = false
 
     fun setTransfersBusy(busy: Boolean) {
         transfersBusyFlow.value = busy
@@ -1121,8 +1135,35 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         thumbnailPriorityRangeFlow.value = range
     }
 
+    /** Limits background thumbnail work to the newest actual shooting days. */
+    fun setThumbnailLoadingDays(days: Int) {
+        val previous = thumbnailLoadingDaysFlow.value
+        val normalized = days.takeIf { it == 1 || it == 3 || it == 5 } ?: 0
+        thumbnailLoadingDaysFlow.value = normalized
+        thumbnailFillQueue.updateLoadingRange(newestCaptureDaysRange(state.value.files, normalized))
+        thumbnailFillWake.trySend(Unit)
+        // A previous bounded scan keeps its unprocessed handles in the session snapshot. When
+        // the user widens the range, resume that snapshot instead of enumerating the camera again.
+        val widened = previous != 0 && (normalized == 0 || normalized > previous)
+        if (normalized != previous && widened && photoRangeScanStopped &&
+            state.value.isConnectedToCamera && state.value.hasCompletedFileScan
+        ) {
+            val snapshot = fileScanHandleSnapshot
+            if (snapshot != null) {
+                loadFiles(
+                    preserveExisting = true,
+                    resumeSnapshot = snapshot,
+                )
+            } else {
+                // A deletion/catalog-sync can invalidate the partial snapshot. Re-enumerate
+                // handles while preserving the visible files instead of losing the old tail.
+                loadFiles(preserveExisting = true, detectNewHandles = true)
+            }
+        }
+    }
+
     // 遥控页活跃期间同样完全停止填充：监看取帧是连续流量，填充的 GetThumb 会与
-    // 参数加载/取帧争抢 ioMutex（表现为进页要等半天、帧率骤降）。与"传输中停止"
+    // 参数加载/取帧争抢相机事务调度器（表现为进页要等半天、帧率骤降）。与"传输中停止"
     // 同一哲学——前台交互独占通道；退出遥控页自动恢复。
     private val remoteActiveFlow = MutableStateFlow(false)
 
@@ -1147,7 +1188,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     // FHD 长按预览活跃期间暂停后台缩略图填充：FHD 取图比缩略图慢得多（1-3s vs 100ms），
-    // 持续填充的 GetThumb 排队会把 FHD 请求憋在 ioMutex 队列后面、用户感知加载慢。
+    // 持续填充的 GetThumb 排队会把 FHD 请求憋在 相机事务调度器 队列后面、用户感知加载慢。
     // 与 remoteActive 同机制——前台交互独占通道；退出预览自动恢复。
     private val fhdActiveFlow = MutableStateFlow(false)
 
@@ -1273,7 +1314,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 if (blocked || !connected || !scanComplete) return@collectLatest
                 val expectedCacheGeneration = thumbnailCacheSessionGeneration
                 val expectedQueueRevision = thumbnailFillQueue.revision
-                thumbnailFillQueue.seed(state.value.files, thumbnailPriorityRangeFlow.value)
+                thumbnailFillQueue.seed(
+                    state.value.files,
+                    thumbnailPriorityRangeFlow.value,
+                    newestCaptureDaysRange(state.value.files, thumbnailLoadingDaysFlow.value),
+                )
                 thumbnailFillQueue.retryFailed()
                 log { "THUMB_FILL resume pending=${thumbnailFillQueue.pendingCount}" }
                 var loaded = 0
@@ -1627,6 +1672,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         keepaliveJob?.cancel()
         eventPollJob?.cancel()
         releaseSessionWifiLock()
+        fileLoadJob?.cancel()
         val cam = camera
         camera = null
         _state.update {
@@ -1697,6 +1743,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     fun selectApMode() {
         val current = _state.value
         if (current.isConnectedToCamera || current.connectionType == CameraConnectionType.USB) return
+        staReconnectPreserveExisting = false
         com.ztransfer.frame.PhotoFrameLocationResolver.apBlocked.value = true
         persistWirelessMode(WirelessMode.AP)
         if (current.wirelessMode == WirelessMode.AP) {
@@ -1725,6 +1772,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     fun selectStaMode() {
         val current = _state.value
         if (current.isConnectedToCamera || current.connectionType == CameraConnectionType.USB) return
+        staReconnectPreserveExisting = false
         persistWirelessMode(WirelessMode.STA)
         if (current.wirelessMode == WirelessMode.STA) return
 
@@ -2000,6 +2048,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         var candidateKnown = staProfileStore.isKnownCandidate(ip)
         var pairedReachedStorageProbe = false
         var pairingReconnectUsed = false
+        var pairingRecoveryUsed = false
         var readinessRetryUsed = false
         while (true) {
             if (generation != staDiscoveryGeneration || purchaseHold ||
@@ -2022,6 +2071,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 allowPairing = preferredIdentity == StaInitiatorIdentity.PAIRED_COMPUTER,
                 exploreAlbumAccess = true,
                 forceProfilePairing = preferredIdentity == StaInitiatorIdentity.PAIRED_COMPUTER,
+                verifyPairingCompletion = pairingReconnectUsed &&
+                    preferredIdentity == StaInitiatorIdentity.PAIRED_COMPUTER,
                 onConnectingStarted = {
                     publishStaConnectingStarted(generation, ip)
                 },
@@ -2093,6 +2144,23 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     staLastFailureMessage = null
                     delay(STA_PAIRING_RECONNECT_DELAY_MS)
                 }
+                error is PairingNotConfirmedException -> {
+                    // Do not turn a camera that is still waiting on its pairing screen into a
+                    // successful session. One bounded recovery clears the stale marker and lets
+                    // the next pass run the normal pairing handshake instead of requiring the
+                    // user to disconnect and reconnect manually.
+                    if (!pairingRecoveryUsed) {
+                        pairingRecoveryUsed = true
+                        pairingReconnectUsed = false
+                        staLastFailureMessage = null
+                        delay(STA_PAIRING_RECONNECT_DELAY_MS)
+                    } else {
+                        staLastFailureMessage = localizedContext.getString(
+                            com.ztransfer.R.string.sta_camera_refused_repair,
+                        )
+                        break
+                    }
+                }
                 isTransientStaServiceReadinessFailure(error) && !readinessRetryUsed -> {
                     // The camera may expose its saved-profile address before port 15740 is ready.
                     // Retry this STA-only probe once so album validation is not skipped merely due
@@ -2130,6 +2198,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 allowPairing = alternateIdentity == StaInitiatorIdentity.PAIRED_COMPUTER,
                 exploreAlbumAccess = true,
                 forceProfilePairing = alternateIdentity == StaInitiatorIdentity.PAIRED_COMPUTER,
+                verifyPairingCompletion = pairingReconnectUsed &&
+                    alternateIdentity == StaInitiatorIdentity.PAIRED_COMPUTER,
                 onConnectingStarted = {
                     publishStaConnectingStarted(generation, ip)
                 },
@@ -2286,6 +2356,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         ) {
             "STA camera must validate album access and pairing before activation"
         }
+        val preserveExisting = staReconnectPreserveExisting
+        staReconnectPreserveExisting = false
         staConnectingCamera = null
         staReconnectAttempt = 0
         camera = candidateCamera
@@ -2309,11 +2381,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 // frame and send the user straight to the false "no photos" screen.
                 isLoadingFiles = true,
                 hasCompletedFileScan = false,
-                files = emptyList(),
-                storageIds = emptyList(),
-                effectPreviewBitmap = null,
-                effectPreviewFileKey = null,
-                effectPreviewExif = null,
+                files = if (preserveExisting) it.files else emptyList(),
+                storageIds = if (preserveExisting) it.storageIds else emptyList(),
+                effectPreviewBitmap = if (preserveExisting) it.effectPreviewBitmap else null,
+                effectPreviewFileKey = if (preserveExisting) it.effectPreviewFileKey else null,
+                effectPreviewExif = if (preserveExisting) it.effectPreviewExif else null,
             )
         }
         CameraSessionService.start(getApplication())
@@ -2327,7 +2399,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             log { "STA thumbnail cache unavailable: ${error.javaClass.simpleName}" }
         }
         if (camera !== candidateCamera || !_state.value.isConnectedToCamera) return
-        loadFiles()
+        loadFiles(
+            preserveExisting = preserveExisting,
+            detectNewHandles = preserveExisting,
+        )
         startEventPolling()
     }
 
@@ -2570,15 +2645,29 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private fun startKeepalive() {
         keepaliveJob?.cancel()
         keepaliveJob = viewModelScope.launch {
+            var consecutiveFailures = 0
             while (isActive) {
                 delay(KEEPALIVE_INTERVAL_MS)
                 val cam = camera ?: break
-                if (!cam.keepalive()) {
+                if (cam.keepalive()) {
+                    consecutiveFailures = 0
+                    continue
+                }
+                consecutiveFailures++
+                log {
+                    "KEEPALIVE failed count=$consecutiveFailures/$KEEPALIVE_FAILURE_LIMIT " +
+                        "sta=${_state.value.wirelessMode == WirelessMode.STA}"
+                }
+                if (consecutiveFailures >= KEEPALIVE_FAILURE_LIMIT) {
                     // Keep the current camera reference intact until the centralized handler claims
                     // it. Clearing it here first would trip that handler's stale-session guard.
                     onCameraTransportLost(cam)
                     break
                 }
+                // A single failed probe is commonly caused by the phone briefly dozing or by a
+                // route handoff while the app is backgrounded. Give the existing socket one more
+                // chance before tearing down the session and starting discovery again.
+                delay(KEEPALIVE_RETRY_DELAY_MS)
             }
         }
     }
@@ -2630,7 +2719,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         }
                         if (camera !== cam || !_state.value.isConnectedToCamera) break
                     }
-                    val events = runCatching { cam.rcPollEvents() }.getOrDefault(emptyList())
+                    val events = runCatching { cam.rcPollEvents(background = true) }.getOrDefault(emptyList())
                     events.forEach { event -> handleCameraObjectEvent(cam, event) }
                 }
             } finally {
@@ -2643,6 +2732,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         when (event.first) {
             Lab.EVT_OBJECT_ADDED -> enqueueNewCameraObject(cam, event.second.toInt())
             Lab.EVT_OBJECT_REMOVED -> requestHandleCatalogSync(cam, event.second.toInt())
+            PtpConstants.EVENT_OBJECT_INFO_CHANGED,
+            PtpConstants.EVENT_MTP_OBJECT_PROP_CHANGED -> {
+                // Keep the rating snapshot stable for this connection. Nikon emits the same
+                // object/property events for unrelated metadata changes, and the event payload
+                // does not contain a reliable rating value. A new connection starts a fresh
+                // snapshot through loadFiles(); do not cancel and restart the active scan here.
+            }
         }
     }
 
@@ -2905,9 +3001,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 )
             }
         } else {
-            cam.streamFileInfo(listOf(handle), batchSize = 1) { batch, _, _ ->
-                result = batch.firstOrNull()
-            }
+            cam.streamFileInfo(
+                handles = listOf(handle),
+                batchSize = 1,
+                onBatch = { batch, _, _ -> result = batch.firstOrNull() },
+            )
         }
         result
     } catch (cancelled: CancellationException) {
@@ -2976,7 +3074,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         detectNewHandles: Boolean = false,
     ) {
         val cam = camera ?: return
+        _recentThumbnailReady.value = false
+        _recentThumbnailReadyDays.value = 0
+        if (!preserveExisting && resumeSnapshot == null) cam.invalidatePhotoRatings()
         val diskCacheForScan = activeThumbnailDiskCache
+        photoRangeScanStopped = false
         if (cam.staDirectObjectReadValidated && !preserveExisting) {
             staScanThumbnailDiskHits = 0
             staScanThumbnailDiskMisses = 0
@@ -3013,7 +3115,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 effectPreviewExif = if (preserveExisting) it.effectPreviewExif else null,
             )
         }
-        // 监看和交互式大图都先于列表枚举：保留待加载标记，不向 ioMutex 排队。
+        // 监看和交互式大图都先于列表枚举：保留待加载标记，不向相机事务调度器排队。
         if (isFileScanPaused()) return
 
         if (FileOrderProbe.enabled) {
@@ -3296,6 +3398,17 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     it.newestFirstHandles.size
                 }
                 if (remainingHandleCount == 0) {
+                    val completedDates = _state.value.files.asSequence()
+                        .mapNotNull { it.captureDate?.take(8) }
+                        .distinct()
+                        .count()
+                    if (completedDates > 0) {
+                        _recentThumbnailReadyDays.value = maxOf(
+                            _recentThumbnailReadyDays.value,
+                            completedDates,
+                        )
+                        _recentThumbnailReady.value = true
+                    }
                     if (fileScanHandleSnapshot === activeSnapshot) fileScanHandleSnapshot = null
                     fileLoadPending = false
                     _state.update { it.copy(isLoadingFiles = false, hasCompletedFileScan = true) }
@@ -3327,6 +3440,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     it.newestFirstHandles.isNotEmpty()
                 } > 1
                 val scanBatchPolicy = CachedThumbnailBatchPolicy()
+                var stopAtPhotoRange = false
                 val nextScanBatchSize: () -> Int = {
                     // Foreground work may start after the preceding batch has completed.
                     if (transfersBusyFlow.value || remoteActiveFlow.value || fhdActiveFlow.value ||
@@ -3349,9 +3463,27 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         rawBatch
                     }
                     val publishedSizeBeforeBatch = publishedFiles.size
-                    val additions = ArrayList<NikonCamera.FileInfo>(batch.size)
+                    val configuredDays = thumbnailLoadingDaysFlow.value
+                    val observedDates = (publishedFiles.asSequence() + batch.asSequence())
+                        .mapNotNull { it.captureDate?.take(8) }
+                        .distinct()
+                        .toList()
+                    val rangeBoundaryReached = configuredDays > 0 &&
+                        observedDates.size > configuredDays
+                    val currentRange = newestCaptureDaysRange(
+                        (publishedFiles.asSequence() + batch.asSequence()).asIterable(),
+                        configuredDays,
+                    )
+                    val acceptedBatch = if (rangeBoundaryReached && currentRange != null) {
+                        batch.filter { file ->
+                            file.captureDate == null || currentRange.containsCaptureDate(file.captureDate)
+                        }
+                    } else {
+                        batch
+                    }
+                    val additions = ArrayList<NikonCamera.FileInfo>(acceptedBatch.size)
                     val replacements = HashMap<Int, NikonCamera.FileInfo>()
-                    batch.forEach { file ->
+                    acceptedBatch.forEach { file ->
                         val identity = file.logicalIdentity()
                         val existingIndex = indexByIdentity[identity]
                         if (existingIndex == null) {
@@ -3387,8 +3519,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         } else {
                             // A cancelled batch is not resumable until its rows are actually
                             // published. Keep the snapshot marker in this same accepted section.
-                            activeSnapshot.markProcessed(batch.map { it.handle })
-                            batch.forEach { file -> indexedCameraFiles[file.handle] = file }
+                            activeSnapshot.markProcessed(acceptedBatch.map { it.handle })
+                            acceptedBatch.forEach { file -> indexedCameraFiles[file.handle] = file }
                             _state.update {
                                 it.copy(files = snapshot, isLoadingFiles = loaded < total)
                             }
@@ -3397,7 +3529,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     }
                     if (accepted) {
                         if (FileOrderProbe.enabled && dynamicDualCardSchedule) {
-                            FileOrderProbe.appendScheduledHandles(batch.map { it.handle })
+                            FileOrderProbe.appendScheduledHandles(acceptedBatch.map { it.handle })
                         }
                         if (PhotoGenerationProbe.enabled && cam.staDirectObjectReadValidated) {
                             cam.staDirectMetadataDiagnosticReports.forEach { diagnostic ->
@@ -3413,14 +3545,32 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                                 file.handle in newHandlesToReport && isAutoTransferMedia(file)
                             }
                         }
+                        // The photo loading range is a request boundary, not merely a UI filter.
+                        // Do not enqueue out-of-range additions during the initial catalog scan;
+                        // otherwise the grid hides them but the camera still streams every
+                        // thumbnail in the background.
+                        val thumbnailRange = newestCaptureDaysRange(
+                            snapshot,
+                            thumbnailLoadingDaysFlow.value,
+                        )
+                        val thumbnailBatch = additions.filter { file ->
+                            thumbnailRange == null ||
+                                file.captureDate == null ||
+                                thumbnailRange.containsCaptureDate(file.captureDate)
+                        }
                         val allCached = prefetchPublishedFileBatch(
                             // 双卡备份模式下，原始 batch 可能包含不会单独显示的重复副本；
                             // 只为本批真正加入列表的逻辑照片获取一次缩略图。
-                            batch = additions,
+                            batch = thumbnailBatch,
                             expectedCamera = cam,
                             expectedGeneration = generation,
                         )
+                        // Keep the first out-of-range date as the boundary evidence. Passing only
+                        // the filtered thumbnail batch would hide that evidence and leave rating
+                        // waiting even though the selected photo days are complete.
+                        updateRecentThumbnailReady(snapshot, batch, loaded, total)
                         scanBatchPolicy.complete(additions.size, allCached)
+                        stopAtPhotoRange = rangeBoundaryReached
                     } else {
                         scanBatchPolicy.complete(0, false)
                     }
@@ -3442,6 +3592,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         batchSize = FILE_THUMBNAIL_PIPELINE_BATCH_SIZE,
                         nextBatchSize = nextScanBatchSize,
                         onBatch = publishBatch,
+                        stopAfterBatch = { stopAtPhotoRange },
                     )
                 } else if (nonEmptyRemainingOrders.size == 1) {
                     cam.streamFileInfo(
@@ -3450,6 +3601,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         fastFirstBatch = true,
                         nextBatchSize = nextScanBatchSize,
                         onBatch = publishBatch,
+                        stopAfterBatch = { stopAtPhotoRange },
                     )
                 } else {
                     cam.streamMergedFileInfo(
@@ -3460,6 +3612,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         fastFirstBatch = true,
                         nextBatchSize = nextScanBatchSize,
                         onBatch = publishBatch,
+                        stopAfterBatch = { stopAtPhotoRange },
                     )
                 }
 
@@ -3482,6 +3635,25 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 }
 
                 if (fileLoadGeneration != generation || camera !== cam) return@launch
+                if (stopAtPhotoRange) {
+                    // Keep the handle snapshot and its unprocessed tail for a later range
+                    // expansion. The currently selected days are a complete, usable list.
+                    photoRangeScanStopped = true
+                    val boundedDates = _state.value.files.asSequence()
+                        .mapNotNull { it.captureDate?.take(8) }
+                        .distinct()
+                        .count()
+                    _recentThumbnailReadyDays.value = maxOf(
+                        _recentThumbnailReadyDays.value,
+                        boundedDates,
+                    )
+                    _recentThumbnailReady.value = true
+                    fileLoadPending = false
+                    _state.update { it.copy(isLoadingFiles = false, hasCompletedFileScan = true) }
+                    log { "FILE_SCAN bounded at ${thumbnailLoadingDaysFlow.value} shooting days files=${allFiles.size}" }
+                    return@launch
+                }
+                photoRangeScanStopped = false
                 if (fileScanHandleSnapshot === activeSnapshot) fileScanHandleSnapshot = null
                 fileLoadPending = false
                 log { "FILE_SCAN done files=${allFiles.size}" }
@@ -3538,6 +3710,38 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         job.start()
     }
 
+    /**
+     * Rating passes start after the completed thumbnail batch crosses the selected
+     * shooting-date boundary. Local cache hits still run through this same fast path;
+     * they never enter the camera gate.
+     */
+    private fun updateRecentThumbnailReady(
+        published: List<NikonCamera.FileInfo>,
+        completedBatch: List<NikonCamera.FileInfo>,
+        loaded: Int,
+        total: Int,
+    ) {
+        if (published.isEmpty()) return
+        val dates = published.asSequence().mapNotNull { it.captureDate?.take(8) }
+            .distinct().toList()
+        // A card may contain fewer than three shooting days. Once the authoritative list and
+        // its final thumbnail batch are complete, that shorter range is already definitive.
+        if (loaded >= total && dates.isNotEmpty()) {
+            _recentThumbnailReadyDays.value = maxOf(_recentThumbnailReadyDays.value, dates.size)
+            _recentThumbnailReady.value = true
+            return
+        }
+        var readyDays = _recentThumbnailReadyDays.value
+        dates.forEachIndexed { index, date ->
+            if (completedBatch.any { it.captureDate?.take(8)?.let { d -> d < date } == true }) {
+                readyDays = maxOf(readyDays, index + 1)
+            }
+        }
+        _recentThumbnailReadyDays.value = readyDays
+        val requiredDays = thumbnailLoadingDaysFlow.value.takeIf { it > 0 } ?: 3
+        if (readyDays >= requiredDays) _recentThumbnailReady.value = true
+    }
+
     fun getCamera(): NikonCamera? = camera
 
     /**
@@ -3546,6 +3750,15 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      */
     fun onCameraTransportLost(failedCamera: NikonCamera) {
         if (camera !== failedCamera) return
+        if (failedCamera.connectionType == CameraConnectionType.WIFI &&
+            _state.value.wirelessMode == WirelessMode.STA &&
+            (_state.value.files.isNotEmpty() || _state.value.hasCompletedFileScan)
+        ) {
+            // The next STA session is a recovery of the same connected camera. Keep the visible
+            // catalog and let the new session re-enumerate handles with preserveExisting=true.
+            staReconnectPreserveExisting = true
+        }
+        fileLoadJob?.cancel()
         camera = null
         keepaliveJob?.cancel()
         eventPollJob?.cancel()
@@ -3699,7 +3912,18 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         expectedGeneration: Long,
     ): Boolean = withContext(Dispatchers.Main.immediate) {
         var allCached = batch.isNotEmpty()
+        val allowedRange = newestCaptureDaysRange(
+            state.value.files.asSequence().plus(batch.asSequence()).asIterable(),
+            thumbnailLoadingDaysFlow.value,
+        )
         for (file in batch) {
+            // The scan still publishes the complete ObjectInfo catalog, but thumbnail requests
+            // outside the selected newest shooting-day boundary are deferred entirely.
+            if (allowedRange != null && file.captureDate != null &&
+                !allowedRange.containsCaptureDate(file.captureDate)
+            ) {
+                continue
+            }
             if (camera !== expectedCamera || fileLoadGeneration != expectedGeneration ||
                 !state.value.isConnectedToCamera
             ) {
@@ -3741,7 +3965,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             if (FileOrderProbe.enabled) {
                 getRemoteThumbnailProbed(expectedCamera, handle, "background")
             } else {
-                expectedCamera.getThumbnail(handle)
+                expectedCamera.getThumbnail(handle, visible = false)
             }
         }   // 瞬时失败会抛出，由扫描循环按单张失败处理
         if (camera !== expectedCamera ||
@@ -3779,7 +4003,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             -1
         }
         return try {
-            val bytes = cam.getThumbnail(handle)
+            val bytes = cam.getThumbnail(handle, visible = lane == "visible")
             if (FileOrderProbe.enabled) {
                 FileOrderProbe.finishThumbnail(
                     sequence = sequence,
@@ -3945,7 +4169,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 if (FileOrderProbe.enabled) {
                     getRemoteThumbnailProbed(expectedCamera, handle, "visible")
                 } else {
-                    expectedCamera.getThumbnail(handle)
+                    expectedCamera.getThumbnail(handle, visible = true)
                 }
             }
             if (camera !== expectedCamera ||
@@ -4471,6 +4695,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         const val USB_PERMISSION_POLL_MS = 100L
         const val USB_CONNECT_MAX_ATTEMPTS = 3
         const val KEEPALIVE_INTERVAL_MS = 10_000L
+        private const val KEEPALIVE_FAILURE_LIMIT = 2
+        private const val KEEPALIVE_RETRY_DELAY_MS = 1_000L
         // STA 正常走事件通道；2 秒轮询只承担丢包、旧机型和 USB/AP 的原有兜底职责。
         private const val EVENT_POLL_INTERVAL_MS = 2_000L
         private const val HANDLE_CATALOG_SYNC_INTERVAL_MS = 10_000L

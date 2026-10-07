@@ -100,6 +100,15 @@ internal fun defaultPhotoFrameMetadataSettings(
         showModel = true,
         showLensModel = false,
     )
+    PhotoFramePreset.FILM_NEGATIVE -> PhotoFrameMetadataSettings(
+        showDate = true,
+        showTime = false,
+        showFocalLength = true,
+        showExposure = true,
+        showBrand = true,
+        showModel = true,
+        showLensModel = false,
+    )
     else -> PhotoFrameMetadataSettings(
         showDate = preset == PhotoFramePreset.PLAQUE,
         showTime = preset == PhotoFramePreset.PLAQUE,

@@ -147,7 +147,10 @@ private fun RemoteToolBarContent(
                         val up = stringResource(R.string.remote_tool_move_up)
                         val down = stringResource(R.string.remote_tool_move_down)
                         val iconOpacity = animateFloatAsState(if (visible) 1f else 0.38f, tween(180), label = "toolIconOpacity-$id")
-                        Box {
+                        // Keep the manager slot identical to the normal portrait slot. The eye
+                        // is an overlay only; it must never participate in measurement and push
+                        // the neighbouring tools into a new column or row.
+                        Box(Modifier.size(36.dp), contentAlignment = Alignment.Center) {
                             TopIconToggle(visible, title, { onVisible(tool, !layout.visible(tool)) },
                                 modifier = Modifier.semantics {
                                     stateDescription = stateLabel
@@ -166,7 +169,15 @@ private fun RemoteToolBarContent(
                                 modifier = Modifier.align(Alignment.TopEnd).offset(x = 2.dp, y = (-2).dp)
                                     .size(14.dp).background(colors.surface, CircleShape).padding(1.dp))
                         }
-                    } else button(tool)
+                    } else if (tool == RemoteTool.RECORD) {
+                        // 录制胶囊需要在录制时扩展到相邻槽位；其他工具始终占用
+                        // 一个固定槽位，管理模式加入隐藏项时不会重新测量整行。
+                        button(tool)
+                    } else {
+                        Box(Modifier.size(36.dp), contentAlignment = Alignment.Center) {
+                            button(tool)
+                        }
+                    }
                 }
             }
     }
@@ -189,9 +200,16 @@ private fun AnimatedToolSlot(
 ) {
     val slot = state.slots[id]
     val dragging = tool != null && state.dragging == tool
+    // 录制胶囊展开、管理模式显示隐藏项都会改变后续槽位的位置。保留
+    // animateOffsetAsState 的上一个目标，即使不在编辑模式也能让受影响按钮
+    // 平滑换位/换行；首帧 slot 为空时不创建动画，避免工具栏入场从左上角飞入。
     val position = if (slot != null) animateOffsetAsState(
         if (dragging) state.topLeft else slot.topLeft,
-        animationSpec = if (dragging || !editing) snap() else spring(dampingRatio = 0.86f, stiffness = 500f),
+        animationSpec = if (dragging) snap() else spring(
+            dampingRatio = 0.88f,
+            stiffness = 520f,
+            visibilityThreshold = androidx.compose.ui.geometry.Offset.VisibilityThreshold,
+        ),
         label = "toolPosition-$id",
     ) else null
     val scale = animateFloatAsState(if (dragging) 1.10f else 1f, tween(120), label = "toolLift-$id")
@@ -211,8 +229,8 @@ private fun AnimatedToolSlot(
     }.zIndex(if (dragging) 1f else 0f).graphicsLayer {
         val base = state.slots[id]?.topLeft ?: Offset.Zero
         val animated = position?.value ?: base
-        translationX = if (editing) animated.x - base.x else 0f
-        translationY = if (editing) animated.y - base.y else 0f
+        translationX = animated.x - base.x
+        translationY = animated.y - base.y
         rotationZ = wiggle?.value ?: 0f
         scaleX = scale.value
         scaleY = scale.value

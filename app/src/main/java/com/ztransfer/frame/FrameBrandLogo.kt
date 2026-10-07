@@ -90,7 +90,8 @@ internal fun frameIdentityVisualBounds(text: String, paint: Paint, logo: Boolean
 // Ratios are relative to visible brand lettering, not the font's em box.
 internal fun PhotoFramePreset.brandLogoScale(): Float = when (this) {
     PhotoFramePreset.FILM_GALLERY -> 1.15f // Narrow strip above the perforations.
-    PhotoFramePreset.FILM_EDGE -> 1.20f
+    PhotoFramePreset.FILM_EDGE,
+    PhotoFramePreset.FILM_NEGATIVE -> 1.20f
     PhotoFramePreset.IMMERSIVE, PhotoFramePreset.COLOR_ARCHIVE -> 1.30f
     PhotoFramePreset.MIST, PhotoFramePreset.CINEMA, PhotoFramePreset.MINIMAL,
     PhotoFramePreset.FROSTED, PhotoFramePreset.PLAQUE -> 1.35f

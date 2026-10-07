@@ -460,6 +460,11 @@ internal fun retryableTransferTaskIds(
 private fun NikonCamera.FileInfo.autoTransferIdentity(): String =
     "$fileName|$size|$captureDate"
 
+enum class TransferStorageMode { UNIFIED, BY_DAY, BY_TYPE }
+
+/** 缩略图加载范围：按最新的实际拍摄日计数，0 表示全部。 */
+enum class PhotoLoadingRange(val days: Int) { ONE(1), THREE(3), FIVE(5), ALL(0) }
+
 data class TransferState(
     val tasks: List<TransferTask> = emptyList(),
     /** 仅在任务增删或替换时递增；纯状态变化不会让照片页重建 handle -> 列表下标索引。 */
@@ -494,7 +499,7 @@ data class TransferState(
     // 待传模式：空闲时入队只保留 WAITING，由传输页的开始按钮显式放行；默认关闭。
     val deferTransferStart: Boolean = false,
     // 原图按拍摄日写入 ZTyyyy-MM-dd 子目录，派生效果图位于该目录的 ZTFrames 中；默认开启。
-    val organizeTransfersByDate: Boolean = false,
+    val storageMode: TransferStorageMode = TransferStorageMode.UNIFIED,
     // 主题模式：默认跟随系统深浅色，可在设置里固定深色/浅色。
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     // UI 皮肤预设（毛玻璃/经典等），全局配色与纹理风格。
@@ -504,6 +509,12 @@ data class TransferState(
     val filterExtensions: Set<String>? = null,
     // 只看机内"保护"(🔑)标记过的照片（机内选片工作流）。持久化。
     val filterProtectedOnly: Boolean = false,
+    val filterRatingEnabled: Boolean = false,
+    val filterRating: Int? = null,
+    // 评级读取范围：1/3/5 个实际拍摄日；0 = 全部。默认保持原来的三日范围。
+    val filterRatingDays: Int = 3,
+    /** 照片列表后台缩略图加载范围；默认全部，保持旧版本行为。 */
+    val photoLoadingRange: PhotoLoadingRange = PhotoLoadingRange.ALL,
     // 只看连拍照片（检测算法见 FileListScreen.computeBurstGroups）。持久化。
     val filterBurstOnly: Boolean = false,
     // 只看导出目录中尚未存在的照片。与缩略图已传对号共用同一份索引。持久化。
@@ -580,6 +591,9 @@ internal fun retainLastValidTransferSpeed(previous: Long, sample: Long): Long =
 data class PhotoFilterCriteria(
     val extensions: Set<String>? = null,
     val protectedOnly: Boolean = false,
+    val ratingEnabled: Boolean = false,
+    val rating: Int? = null,
+    val ratingDays: Int = 3,
     val burstOnly: Boolean = false,
     val untransferredOnly: Boolean = false,
     val storageSlot: Int? = null,
@@ -631,6 +645,10 @@ internal fun restoredPhotoFrameWatermarkOpacityPercent(persisted: Any?): Int {
     }
     return normalizePhotoFrameWatermarkOpacityPercent(rawPercent)
 }
+
+/** Compatibility view for existing callers; new code uses [storageMode]. */
+val TransferState.organizeTransfersByDate: Boolean
+    get() = storageMode == TransferStorageMode.BY_DAY
 
 internal val TransferState.photoFrameWatermark: PhotoFrameWatermark
     get() = PhotoFrameWatermark(
@@ -727,24 +745,33 @@ internal fun transferDateFolderName(
 
 internal fun transferDestinationFolderName(
     captureDate: String?,
-    organizeTransfersByDate: Boolean,
+    storageMode: TransferStorageMode,
     fallbackDate: LocalDate = LocalDate.now(),
 ): String? {
-    if (!organizeTransfersByDate) return null
-    return transferDateFolderName(captureDate, fallbackDate)
+    return when (storageMode) {
+        TransferStorageMode.UNIFIED -> null
+        TransferStorageMode.BY_DAY -> transferDateFolderName(captureDate, fallbackDate)
+        TransferStorageMode.BY_TYPE -> null // resolved from file extension by the task creator
+    }
 }
+
+
+internal fun storageTypeFolderName(fileName: String, mode: TransferStorageMode): String? =
+    if (mode == TransferStorageMode.BY_TYPE) {
+        fileName.substringAfterLast('.', "UNKNOWN").trim().uppercase(Locale.ROOT).ifBlank { "UNKNOWN" }
+    } else null
 
 /** 相机文件是否已在当前保存目录中落盘；列表对号、筛选和任务模式必须共用该判定。 */
 internal fun isTransferredOriginal(
     file: NikonCamera.FileInfo,
     existingExportIndex: ExportedOriginalIndex,
-    organizeTransfersByDate: Boolean,
+    storageMode: TransferStorageMode,
 ): Boolean = existingExportIndex.contains(
     file = file,
     destinationFolderName = transferDestinationFolderName(
         captureDate = file.captureDate,
-        organizeTransfersByDate = organizeTransfersByDate,
-    ),
+        storageMode = storageMode,
+    ) ?: storageTypeFolderName(file.fileName, storageMode),
 )
 
 /** 已入队任务使用入队时锁定的目标目录，不受之后的“按天保存”开关变化影响。 */
@@ -753,6 +780,15 @@ internal fun isTransferredOriginal(
     existingExportIndex: ExportedOriginalIndex,
     destinationFolderName: String?,
 ): Boolean = existingExportIndex.contains(file, destinationFolderName)
+
+internal fun isTransferredOriginal(
+    file: NikonCamera.FileInfo,
+    existingExportIndex: ExportedOriginalIndex,
+    organizeTransfersByDate: Boolean,
+): Boolean = isTransferredOriginal(
+    file, existingExportIndex,
+    if (organizeTransfersByDate) TransferStorageMode.BY_DAY else TransferStorageMode.UNIFIED,
+)
 
 internal fun createQueueTasks(
     files: List<NikonCamera.FileInfo>,
@@ -763,7 +799,25 @@ internal fun createQueueTasks(
     photoFrameMetadataSettings: PhotoFrameMetadataSettings =
         defaultPhotoFrameMetadataSettings(photoFramePreset),
     photoFilter: PhotoFilterSelection? = null,
-    organizeTransfersByDate: Boolean = false,
+    organizeTransfersByDate: Boolean,
+    queuedDate: LocalDate = LocalDate.now(),
+): List<TransferTask> = createQueueTasks(
+    files, photoFrameEnabled, photoFrameBorderEnabled, photoFramePreset,
+    photoFrameWatermark, photoFrameMetadataSettings, photoFilter,
+    if (organizeTransfersByDate) TransferStorageMode.BY_DAY else TransferStorageMode.UNIFIED,
+    queuedDate,
+)
+
+internal fun createQueueTasks(
+    files: List<NikonCamera.FileInfo>,
+    photoFrameEnabled: Boolean,
+    photoFrameBorderEnabled: Boolean = true,
+    photoFramePreset: PhotoFramePreset,
+    photoFrameWatermark: PhotoFrameWatermark,
+    photoFrameMetadataSettings: PhotoFrameMetadataSettings =
+        defaultPhotoFrameMetadataSettings(photoFramePreset),
+    photoFilter: PhotoFilterSelection? = null,
+    storageMode: TransferStorageMode = TransferStorageMode.UNIFIED,
     queuedDate: LocalDate = LocalDate.now(),
 ): List<TransferTask> = files.asSequence()
     // 同一次批量点击按相机文件去重；不同点击始终创建独立任务。
@@ -782,9 +836,9 @@ internal fun createQueueTasks(
             },
             destinationFolderName = transferDestinationFolderName(
                 captureDate = file.captureDate,
-                organizeTransfersByDate = organizeTransfersByDate,
+                storageMode = storageMode,
                 fallbackDate = queuedDate,
-            ),
+            ) ?: storageTypeFolderName(file.fileName, storageMode),
         )
     }
     .toList()
@@ -1196,7 +1250,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 ),
                 autoTransferMode = AutoTransferMode.restored(prefs.getString("auto_transfer_mode", null), prefs.getBoolean("auto_transfer_new_media", false)),
                 deferTransferStart = prefs.getBoolean("defer_transfer_start", false),
-                organizeTransfersByDate = prefs.getBoolean("organize_transfers_by_date", false),
+                storageMode = runCatching { TransferStorageMode.valueOf(prefs.getString("storage_storage_mode", null) ?: if (prefs.getBoolean("organize_transfers_by_date", false)) "BY_DAY" else "UNIFIED") }.getOrDefault(TransferStorageMode.UNIFIED),
                 themeMode = prefs.getString("theme_mode", null)
                     ?.let { m -> ThemeMode.entries.firstOrNull { e -> e.name == m } }
                     ?: ThemeMode.SYSTEM,
@@ -1204,6 +1258,14 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 // getStringSet 返回的实例不可直接持有（SharedPreferences 约定），拷贝一份。
                 filterExtensions = prefs.getStringSet("filter_exts", null)?.toSet()?.takeIf { it.isNotEmpty() },
                 filterProtectedOnly = prefs.getBoolean("filter_protected", false),
+                // A selected rating is session-only. Requiring a fresh choice after reopening
+                // prevents stale camera ratings from silently filtering the next session.
+                filterRatingEnabled = false,
+                filterRating = null,
+                filterRatingDays = prefs.getInt("filter_rating_days", 3).let { if (it == 0 || it in setOf(1, 3, 5)) it else 3 },
+                photoLoadingRange = prefs.getInt("photo_loading_range_days", 0).let { stored ->
+                    PhotoLoadingRange.entries.firstOrNull { it.days == stored } ?: PhotoLoadingRange.ALL
+                },
                 filterBurstOnly = prefs.getBoolean("filter_burst", false),
                 filterUntransferredOnly = prefs.getBoolean("filter_untransferred", false),
                 filterDateRange = PhotoDateRange.restore(
@@ -1304,6 +1366,23 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         _state.update { it.copy(thumbnailColumns = c) }
     }
 
+    /**
+     * Changing the photo loading boundary invalidates the current rating scan.  Rating selection
+     * is deliberately session-only, so the simplest and safest behavior is to close it and make
+     * the user explicitly enable it again after changing the boundary.
+     */
+    fun setPhotoLoadingRange(range: PhotoLoadingRange) {
+        if (_state.value.photoLoadingRange == range) return
+        prefs.edit().putInt("photo_loading_range_days", range.days).apply()
+        _state.update {
+            it.copy(
+                photoLoadingRange = range,
+                filterRatingEnabled = false,
+                filterRating = null,
+            )
+        }
+    }
+
     fun setCollapseBurstPhotos(enabled: Boolean) {
         prefs.edit().putBoolean("collapse_burst_photos", enabled).apply()
         _state.update { it.copy(collapseBurstPhotos = enabled) }
@@ -1382,9 +1461,14 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         _state.update { it.copy(deferTransferStart = enabled) }
     }
 
-    fun setOrganizeTransfersByDate(enabled: Boolean) {
-        prefs.edit().putBoolean("organize_transfers_by_date", enabled).apply()
-        _state.update { it.copy(organizeTransfersByDate = enabled) }
+    fun setStorageMode(mode: TransferStorageMode) {
+        prefs.edit().putString("storage_storage_mode", mode.name)
+            .putBoolean("organize_transfers_by_date", mode == TransferStorageMode.BY_DAY).apply()
+        _state.update { it.copy(storageMode = mode, existingExportRevision = it.existingExportRevision + 1L) }
+        // 只扫描新档位自己的目录；不会把其它存放方式纳入已传判定。
+        _state.value.transferDirUri?.let { uri ->
+            viewModelScope.launch(Dispatchers.IO) { refreshExistingExportFiles(Uri.parse(uri), deleteParts = false) }
+        }
     }
 
     /** 保存预览大图的全局旋转方向；任何照片和下次启动都复用。 */
@@ -1675,12 +1759,17 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         _state.update { it.copy(appLanguage = tag) }
     }
 
-    /** 应用筛选（类型/保护/连拍/未传输/卡槽/日期）；卡槽仅当前进程生效，其余持久化。 */
+    /** 应用筛选（类型/保护/评级/连拍/未传输/卡槽/日期）；评级选择仅当前会话生效。 */
     fun setFilters(requested: PhotoFilterCriteria) {
         val criteria = requested.copy(extensions = requested.extensions?.takeIf { it.isNotEmpty() })
         prefs.edit().apply {
             if (criteria.extensions == null) remove("filter_exts")
             else putStringSet("filter_exts", criteria.extensions)
+            // Rating selection and its loader switch are deliberately not persisted. Clear keys
+            // written by older builds so an upgrade cannot restore a stale rating filter.
+            remove("filter_rating")
+            remove("filter_rating_enabled")
+            putInt("filter_rating_days", criteria.ratingDays.takeIf { it == 0 || it in setOf(1, 3, 5) } ?: 3)
             if (criteria.protectedOnly) putBoolean("filter_protected", true) else remove("filter_protected")
             if (criteria.burstOnly) putBoolean("filter_burst", true) else remove("filter_burst")
             if (criteria.untransferredOnly) putBoolean("filter_untransferred", true)
@@ -1699,6 +1788,9 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             it.copy(
                 filterExtensions = criteria.extensions,
                 filterProtectedOnly = criteria.protectedOnly,
+                filterRatingEnabled = criteria.ratingEnabled,
+                filterRating = criteria.rating?.takeIf { it in 1..5 },
+                filterRatingDays = criteria.ratingDays,
                 filterBurstOnly = criteria.burstOnly,
                 filterUntransferredOnly = criteria.untransferredOnly,
                 filterStorageSlot = criteria.storageSlot,
@@ -1918,7 +2010,11 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 add(null to getDirectoryIndex(uri, deleteParts))
                 childDirectories(uri, rootDirectoryUri)
                     .asSequence()
-                    .filter { DATED_TRANSFER_FOLDER_REGEX.matches(it.first) }
+                    .filter { child ->
+                        val mode = _state.value.storageMode
+                        mode == TransferStorageMode.BY_DAY && DATED_TRANSFER_FOLDER_REGEX.matches(child.first) ||
+                            mode == TransferStorageMode.BY_TYPE && !child.first.equals(PHOTO_FRAME_OUTPUT_DIRECTORY, ignoreCase = true)
+                    }
                     .forEach { (folderName, directoryUri) ->
                         add(folderName to getDirectoryIndex(uri, directoryUri, deleteParts))
                     }
@@ -2003,7 +2099,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 snapshot.photoFramePreset,
             ),
             photoFilter = snapshot.photoFilterSelection,
-            organizeTransfersByDate = snapshot.organizeTransfersByDate,
+            storageMode = snapshot.storageMode,
         )
         val admittedTasks = if (cropRecipe == null) newTasks else newTasks.map { it.copy(cropRecipe = cropRecipe) }
         if (admittedTasks.isEmpty()) return
@@ -2045,10 +2141,20 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     /** Starts every existing WAITING task. This explicit action also releases a manual pause. */
     fun startPendingTransfers(cameraProvider: () -> NikonCamera?) {
         val snapshot = _state.value
-        if (snapshot.isTransferring) return
-        val dirUri = snapshot.transferDirUri ?: return
-        val waiting = snapshot.tasks.filter { it.status == TransferStatus.WAITING }
-        if (waiting.isEmpty()) return
+        if (snapshot.isTransferring) {
+            log { "QUEUE_START_SKIP reason=state-transferring" }
+            return
+        }
+        val dirUri = snapshot.transferDirUri ?: run {
+            log { "QUEUE_START_SKIP reason=no-directory" }
+            return
+        }
+        val waiting = snapshot.tasks.count { it.status == TransferStatus.WAITING }
+        if (waiting == 0) {
+            log { "QUEUE_START_SKIP reason=no-waiting" }
+            return
+        }
+        log { "QUEUE_START waiting=$waiting" }
         _state.update { it.copy(pauseAfterCurrent = false) }
         processQueue(dirUri, cameraProvider)
     }
@@ -2061,15 +2167,27 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     }
 
     private fun processQueue(dirUri: String, cameraProvider: () -> NikonCamera?) {
+        log {
+            "QUEUE_REQUEST waiting=${_state.value.tasks.count { it.status == TransferStatus.WAITING }} " +
+                "transferring=${_state.value.isTransferring} activeJob=${transferJob?.isActive == true}"
+        }
         // 手动暂停是队列总闸门：除“开始”会先显式解除外，重试等任何旁路都不能偷偷恢复队列。
-        if (_state.value.pauseAfterCurrent) return
-        if (transferJob?.isActive == true) return
+        if (_state.value.pauseAfterCurrent) {
+            log { "QUEUE_SKIP reason=paused" }
+            return
+        }
+        if (transferJob?.isActive == true) {
+            log { "QUEUE_SKIP reason=active-job" }
+            return
+        }
         val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
                 val self = coroutineContext[Job]
                 var serviceStarted = false
                 var stoppedAfterCurrent = false
 
                 try {
+                    val prepareStartedAt = android.os.SystemClock.elapsedRealtime()
+                    log { "QUEUE_PREP start" }
                     val uri = Uri.parse(dirUri)
                     val rootDirectoryUri = rootDocumentUri(uri)
 
@@ -2087,6 +2205,10 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     } catch (_: Exception) {
                         false
                     }
+                }
+                log {
+                    "QUEUE_PREP directory=${if (dirValid) "ok" else "invalid"} " +
+                        "elapsed=${android.os.SystemClock.elapsedRealtime() - prepareStartedAt}ms"
                 }
                 if (!dirValid) {
                     pendingTransferQueue.clear()
@@ -2111,6 +2233,9 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 // 启动/选目录时已建立索引；这里复用同一单飞结果。正常连续队列不再重复
                 // query SAF，后续成功文件和断点文件会增量写回该索引。
                 val rootDirectoryIndex = getDirectoryIndex(uri, deleteParts = false)
+                log {
+                    "QUEUE_READY elapsed=${android.os.SystemClock.elapsedRealtime() - prepareStartedAt}ms"
+                }
                 var taskToRecheck: TransferTask? = null
                 while (true) {
                     // Pause is deliberately checked only at task boundaries. The current PTP
@@ -2236,6 +2361,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     // 而不是队列启动时捕获的旧实例（旧实例 socket 已死，只会全部快速失败）。
                     val camera = cameraProvider()
                     if (camera == null) {
+                        log { "QUEUE_CAMERA_NULL file=${task.file.fileName}" }
                         updateTask(taskId) {
                             it.copy(status = TransferStatus.FAILED, error = str(R.string.camera_not_connected), speed = 0)
                         }

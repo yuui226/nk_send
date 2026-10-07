@@ -13,6 +13,7 @@ import com.ztransfer.BuildConfig
 import com.ztransfer.R
 import com.ztransfer.diagnostics.FileOrderProbe
 import com.ztransfer.diagnostics.PhotoGenerationProbe
+import com.ztransfer.diagnostics.RatingDiagnostics
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -21,12 +22,14 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.receiveAsFlow
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CompletableDeferred
+import kotlin.coroutines.AbstractCoroutineContextElement
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.coroutineContext
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -187,64 +190,307 @@ internal fun updateFhdSupport(
     FhdResponseDisposition.TRANSIENT_FAILURE -> current
 }
 
+/** Camera operations are serialized at complete PTP transaction boundaries. */
+internal enum class CameraRequestKind(val priority: Int) {
+    INTERACTIVE(0),
+    PREVIEW(1),
+    TRANSFER(2),
+    // Once the three-date boundary is ready, rating reads must get the next camera slot;
+    // local thumbnail hits never enter this queue and remote thumbnail work waits behind them.
+    RATING(3),
+    VISIBLE_THUMBNAIL(4),
+    BACKGROUND_THUMBNAIL(5),
+    IDLE(6),
+    /** Fallback GetEvent polling; legacy interactive ordering outside a rating phase. */
+    EVENT_POLL(0),
+}
+
+internal data class CameraSchedulerSnapshot(
+    val queued: Int,
+    val activeKind: CameraRequestKind?,
+    val activeOwner: String,
+    val interactiveReservations: Int,
+    val activeDownloads: Int,
+)
+
 /**
- * 单命令通道的轻量调度器。普通命令仍直接使用 [mutex]；交互式大图/EXIF 在排队前
- * 登记，分块传输在每个完整 PTP 事务之间检查登记，让交互请求先取得下一段通道。
+ * One FIFO priority queue for the camera command channel.  A queue item represents one
+ * complete protocol transaction; it is never interrupted after admission.  The old helper
+ * methods below are compatibility adapters and all new callers should use
+ * [withCameraTransaction] directly.
  */
 internal class CameraIoGate(
     val mutex: Mutex = Mutex(),
 ) {
-    private val interactiveWaiters = MutableStateFlow(0)
-    private val activeDownloads = MutableStateFlow(0)
+    private class TransactionMarker(
+        val scheduler: CameraIoGate,
+    ) : AbstractCoroutineContextElement(Key) {
+        companion object Key : CoroutineContext.Key<TransactionMarker>
+    }
 
+    private class Ticket(
+        val sequence: Long,
+        val kind: CameraRequestKind,
+        val owner: String,
+        val allowDuringShutdown: Boolean = false,
+        val ready: CompletableDeferred<Unit> = CompletableDeferred(),
+    )
+
+    private val state = Mutex()
+    private val pending = ArrayList<Ticket>()
+    private var sequence = 0L
+    private var activeTicket: Ticket? = null
+    private var interactiveReservations = 0
+    private var activeDownloadCount = 0
+    /** Once shutdown starts, no new business request may enter this camera session. */
+    private var shuttingDown = false
+    private var shutdownReason = "camera session closed"
+    /** Number of active rating phases; low-priority work is screened while this is nonzero. */
+    private var ratingPhaseCount = 0
+    private val ratingPhaseActive: Boolean get() = ratingPhaseCount > 0
+    @Volatile private var activeOwner: String = "none"
+    @Volatile private var activeKind: CameraRequestKind? = null
+
+    fun currentOwner(): String = activeOwner
+    fun currentKind(): CameraRequestKind? = activeKind
+
+    suspend fun snapshot(): CameraSchedulerSnapshot = state.withLock {
+        CameraSchedulerSnapshot(
+            queued = pending.size,
+            activeKind = activeKind,
+            activeOwner = activeOwner,
+            interactiveReservations = interactiveReservations,
+            activeDownloads = activeDownloadCount,
+        )
+    }
+
+    /**
+     * Drop requests that have not entered the protocol yet. An old camera session must not let
+     * queued background work run after its sockets are closed; the currently active transaction
+     * is deliberately left alone so its operation-specific cleanup can finish first.
+     */
+    suspend fun beginShutdown(reason: String = "camera session closed") =
+        withContext(NonCancellable) {
+            state.withLock {
+                shuttingDown = true
+                shutdownReason = reason
+                val queued = pending.toList()
+                pending.clear()
+                queued.forEach { ticket ->
+                    ticket.ready.cancel(CancellationException(reason))
+                }
+                if (activeTicket == null) pumpLocked()
+            }
+        }
+
+    /** Compatibility name for tests/older callers; shutdown is now also a submission barrier. */
+    suspend fun cancelQueuedTransactions(reason: String = "camera session closed") =
+        beginShutdown(reason)
+
+    /** Prefer rating over remote thumbnail work without reserving or holding the channel. */
+    suspend fun beginRatingPhase() {
+        state.withLock {
+            ratingPhaseCount++
+            if (activeTicket == null) pumpLocked()
+        }
+    }
+
+    suspend fun endRatingPhase() = withContext(NonCancellable) {
+        state.withLock {
+            ratingPhaseCount = (ratingPhaseCount - 1).coerceAtLeast(0)
+            if (activeTicket == null) pumpLocked()
+        }
+    }
+
+    /** Execute exactly one non-preemptible camera transaction. */
+    suspend fun <T> withCameraTransaction(
+        kind: CameraRequestKind,
+        owner: String = kind.name,
+        block: suspend () -> T,
+    ): T = withCameraTransaction(kind, owner, false, block)
+
+    suspend fun <T> withCameraTransaction(
+        kind: CameraRequestKind,
+        owner: String,
+        allowDuringShutdown: Boolean,
+        block: suspend () -> T,
+    ): T {
+        check(coroutineContext[TransactionMarker]?.scheduler !== this) {
+            "Nested camera transaction is not allowed: $owner"
+        }
+        val ticket = state.withLock {
+            if (shuttingDown && !allowDuringShutdown) {
+                throw CancellationException(shutdownReason)
+            }
+            Ticket(sequence++, kind, owner, allowDuringShutdown)
+        }
+        var acquired = false
+        return try {
+            acquire(ticket)
+            acquired = true
+            withContext(TransactionMarker(this)) { block() }
+        } finally {
+            if (acquired) release(ticket)
+        }
+    }
+
+    /** Legacy reservation adapter. It reserves priority without holding the channel. */
     suspend fun <T> withInteractivePriority(block: suspend () -> T): T {
-        interactiveWaiters.update { it + 1 }
+        state.withLock { interactiveReservations++ }
         try {
             return block()
         } finally {
-            interactiveWaiters.update { it - 1 }
+            withContext(NonCancellable) {
+                state.withLock {
+                    interactiveReservations = (interactiveReservations - 1).coerceAtLeast(0)
+                    if (activeTicket == null) pumpLocked()
+                }
+            }
         }
     }
 
     suspend fun <T> withInteractive(block: suspend () -> T): T =
-        withInteractivePriority { mutex.withLock { block() } }
+        withInteractiveTagged("INTERACTIVE", block)
 
-    suspend fun <T> withTransferSlice(block: suspend () -> T): T {
-        while (true) {
-            interactiveWaiters.first { it == 0 }
-            mutex.lock()
-            if (interactiveWaiters.value == 0) {
-                try {
-                    return block()
-                } finally {
-                    mutex.unlock()
-                }
-            }
-            mutex.unlock()
-        }
-    }
+    suspend fun <T> withInteractiveTagged(owner: String, block: suspend () -> T): T =
+        withCameraTransaction(CameraRequestKind.INTERACTIVE, owner, block)
 
-    /**
-     * 登记一整个协议下载，而不是某一个分块。下载在块间释放 [mutex] 时仍保持登记，
-     * 让只应在空闲期执行的连接探测不会误插入下一块之前。
-     */
+    suspend fun <T> withPreviewTransaction(owner: String = "PREVIEW", block: suspend () -> T): T =
+        withCameraTransaction(CameraRequestKind.PREVIEW, owner, block)
+
+    suspend fun <T> withTransferSlice(block: suspend () -> T): T =
+        withCameraTransaction(CameraRequestKind.TRANSFER, "TRANSFER", block)
+
+    suspend fun <T> withVisibleThumbnail(block: suspend () -> T): T =
+        withCameraTransaction(CameraRequestKind.VISIBLE_THUMBNAIL, "VISIBLE_THUMBNAIL", block)
+
+    suspend fun <T> withRatingTransaction(owner: String = "RATING", block: suspend () -> T): T =
+        withCameraTransaction(CameraRequestKind.RATING, owner, block)
+
+    suspend fun <T> withBackgroundThumbnail(block: suspend () -> T): T =
+        withCameraTransaction(CameraRequestKind.BACKGROUND_THUMBNAIL, "BACKGROUND_THUMBNAIL", block)
+
     suspend fun <T> withDownloadActivity(block: suspend () -> T): T {
-        activeDownloads.update { it + 1 }
+        state.withLock {
+            activeDownloadCount++
+            if (activeTicket == null) pumpLocked()
+        }
         try {
             return block()
         } finally {
-            activeDownloads.update { (it - 1).coerceAtLeast(0) }
+            withContext(NonCancellable) {
+                state.withLock {
+                    activeDownloadCount = (activeDownloadCount - 1).coerceAtLeast(0)
+                    if (activeTicket == null) pumpLocked()
+                }
+            }
         }
     }
 
-    /**
-     * 只在没有协议下载时执行普通命令。锁外快速判断避免无意义排队；拿到锁后必须再次
-     * 判断，封住“心跳先判断空闲、下载随后开始、心跳排到某个分块后面”的竞态窗口。
-     */
     suspend fun <T> withIdleCommand(skippedValue: T, block: suspend () -> T): T {
-        if (activeDownloads.value > 0) return skippedValue
-        return mutex.withLock {
-            if (activeDownloads.value > 0) skippedValue else block()
+        if (snapshot().activeDownloads > 0) return skippedValue
+        return withCameraTransaction(CameraRequestKind.IDLE, "IDLE") {
+            // Recheck after admission: a full download may have started while this command waited.
+            if (state.withLock { activeDownloadCount > 0 }) skippedValue else block()
+        }
+    }
+
+    private fun eligibleLocked(ticket: Ticket): Boolean {
+        if (activeDownloadCount > 0 && ticket.kind == CameraRequestKind.IDLE) return false
+        // Compatibility reservation blocks low-priority work until its nested interactive/preview
+        // transactions finish. The new scheduler path does not need this reservation.
+        if (interactiveReservations > 0 && ticket.kind.priority > CameraRequestKind.PREVIEW.priority) {
+            return false
+        }
+        // During a rating pass, do not let a low-priority request start in the tiny gap between
+        // two rating files. Priority sorting only orders tickets that are already queued; this
+        // admission rule keeps directory/thumbnail/event work from taking that gap while still
+        // allowing interactive, preview, and transfer transactions to proceed.
+        if (ratingPhaseActive && (
+                ticket.kind == CameraRequestKind.VISIBLE_THUMBNAIL ||
+                    ticket.kind == CameraRequestKind.BACKGROUND_THUMBNAIL ||
+                    ticket.kind == CameraRequestKind.IDLE ||
+                    ticket.kind == CameraRequestKind.EVENT_POLL
+            )
+        ) {
+            return false
+        }
+        return true
+    }
+
+    private fun effectivePriority(ticket: Ticket): Int = when {
+        ratingPhaseActive && ticket.kind == CameraRequestKind.EVENT_POLL ->
+            CameraRequestKind.IDLE.priority
+        !ratingPhaseActive && ticket.kind == CameraRequestKind.EVENT_POLL ->
+            CameraRequestKind.TRANSFER.priority
+        else -> ticket.kind.priority
+    }
+
+    private fun nextTicketLocked(): Ticket? = pending
+        .asSequence()
+        .filter(::eligibleLocked)
+        .minWithOrNull(compareBy<Ticket> { effectivePriority(it) }.thenBy { it.sequence })
+
+    /** state mutex must be held. Marks the selected ticket active before resuming it. */
+    private fun pumpLocked() {
+        if (activeTicket != null) return
+        while (true) {
+            val ticket = nextTicketLocked() ?: return
+            pending.remove(ticket)
+            activeTicket = ticket
+            activeOwner = ticket.owner
+            activeKind = ticket.kind
+            if (ticket.ready.complete(Unit)) return
+            // A waiter was cancelled after selection; do not leave a phantom active ticket.
+            activeTicket = null
+            activeOwner = "none"
+            activeKind = null
+        }
+    }
+
+    private suspend fun acquire(ticket: Ticket) {
+        state.withLock {
+            // Shutdown may start after ticket creation but before queue admission.
+            if (shuttingDown && !ticket.allowDuringShutdown) {
+                throw CancellationException(shutdownReason)
+            }
+            pending += ticket
+            pumpLocked()
+        }
+        try {
+            ticket.ready.await()
+            // Only the selected ticket can enter the protocol mutex.
+            mutex.lock()
+        } catch (cancelled: CancellationException) {
+            cancel(ticket)
+            throw cancelled
+        }
+    }
+
+    private suspend fun cancel(ticket: Ticket) = withContext(NonCancellable) {
+        state.withLock {
+            if (pending.remove(ticket)) {
+                pumpLocked()
+            } else if (activeTicket === ticket) {
+                activeTicket = null
+                activeOwner = "none"
+                activeKind = null
+                pumpLocked()
+            }
+        }
+    }
+
+    private suspend fun release(ticket: Ticket) = withContext(NonCancellable) {
+        // `mutex` is owned by this transaction after acquire returned. Unlock before handing the
+        // scheduler permit to another ticket so the next transaction cannot suspend forever.
+        mutex.unlock()
+        state.withLock {
+            if (activeTicket === ticket) {
+                activeTicket = null
+                activeOwner = "none"
+                activeKind = null
+                pumpLocked()
+            }
         }
     }
 }
@@ -294,13 +540,30 @@ internal fun endToEndBytesPerSecond(
 internal fun transferredBytesThisAttempt(downloaded: Long, resumeOffset: Long): Long =
     (downloaded - resumeOffset).coerceAtLeast(0L)
 
-internal class PairingCompletedException : Exception("Nikon pairing completed; reconnect required")
+internal class PairingCompletedException :
+    Exception("Nikon pairing result acknowledged; reconnect required")
+
+/** The camera accepted the pairing command, but the following session still reports pairing-only. */
+internal class PairingNotConfirmedException :
+    Exception("Nikon pairing was not confirmed by the camera")
 
 internal class UnexpectedStaResponderException(actualResponderGuid: String?) :
     Exception("Unexpected Nikon STA responder: $actualResponderGuid")
 
 internal const val PTPIP_IDENTITY_PREFERENCES = "ptpip_identity"
 internal const val STA_PAIRING_MARKER_PREFIX = "sta_paired_"
+/** Marker written only after a post-pairing reconnect has passed the album capability probe. */
+internal const val STA_PAIRING_VERIFIED_MARKER_PREFIX = "sta_pairing_verified_v2_"
+
+/**
+ * Old releases wrote the pairing marker as soon as the camera acknowledged the pairing command.
+ * Such a marker is useful as a route hint, but it must be revalidated once before it becomes
+ * trusted by the current connection flow.
+ */
+internal fun shouldVerifyStaPairingMarker(
+    hasAnyMarker: Boolean,
+    hasTrustedMarker: Boolean,
+): Boolean = hasAnyMarker && !hasTrustedMarker
 
 internal fun isStaPairingOnlyOperationSet(operations: Set<Int>): Boolean = operations == setOf(
     PtpConstants.GET_DEVICE_INFO,
@@ -1325,8 +1588,245 @@ class NikonCamera(private val context: Context) {
     private val staDirectRawIndexedPreviews = HashSet<Int>()
     private val staDirectOriginalFileNames = HashMap<Int, String>()
     private val staDirectCaptureDates = HashMap<Int, String>()
-    // 最近读取的少量文件前缀同时服务 MPF、EXIF、RAW 索引与缩略图；每项最多 512 KiB、
-    // 总共 4 项，避免冷缓存扫描把整卡数据留在堆中。所有访问都在同一 PTP IO gate 内串行。
+    // Only small decoded ratings are retained; encoded photo prefixes have their separate budget.
+    private val photoRatings = java.util.Collections.synchronizedMap(LinkedHashMap<Int, Int>())
+    private val photoRatingOrigins = java.util.Collections.synchronizedMap(LinkedHashMap<Int, String>())
+    internal val photoRatingGeneration = MutableStateFlow(0)
+
+    internal fun cachedPhotoRating(handle: Int): Int? = photoRatings[handle]
+    internal fun cachedPhotoRatingOrigin(handle: Int): String? = photoRatingOrigins[handle]
+
+    internal fun invalidatePhotoRatings() {
+        synchronized(photoRatings) {
+            photoRatings.clear()
+            photoRatingOrigins.clear()
+            photoRatingGeneration.value += 1
+        }
+    }
+
+    private fun capturePhotoRating(handle: Int, bytes: ByteArray, validLength: Int = bytes.size, origin: String = "header") {
+        val generation = photoRatingGeneration.value
+        val length = minOf(validLength, bytes.size, 262144)
+        if (length < 8) return
+        val prefix = if (length == bytes.size) bytes else bytes.copyOf(length)
+        val rating = parsePhotoRating(prefix) ?: parseNikonVideoRating(prefix) ?: return
+        rememberPhotoRating(handle, rating, generation, origin)
+    }
+
+    private fun rememberPhotoRating(handle: Int, rating: Int, generation: Int, origin: String = "header") {
+        synchronized(photoRatings) {
+            if (generation != photoRatingGeneration.value) return
+            photoRatings[handle] = rating
+            photoRatingOrigins[handle] = origin
+            while (photoRatings.size > 8192) photoRatings.remove(photoRatings.keys.first())
+        }
+    }
+
+    // Capability failures belong to a connection and media kind, never to another camera/mode.
+    private class RatingReadDeferred : Exception("Camera busy; rating scan deferred")
+    private val ratingUnsupportedExtensions = HashSet<String>()
+    private var ratingOperationUnsupported = false
+
+    private fun resetRatingCapabilityState() {
+        ratingUnsupportedExtensions.clear()
+        ratingOperationUnsupported = false
+        ratingNikonHeaderUnsupported = false
+        ratingStandardHeaderUnsupported = false
+    }
+
+    internal suspend fun readObjectRating(file: FileInfo): Int? = ioGate.withRatingTransaction("RATING") {
+        withContext(Dispatchers.IO) {
+            if (ratingOperationUnsupported || file.extension in ratingUnsupportedExtensions) return@withContext null
+            if (!sessionOpen) throw RatingReadDeferred()
+            val generation = photoRatingGeneration.value
+            try {
+                // AP bodies may implement this without advertising it in DeviceInfo.
+                sendCmd(PtpConstants.GET_OBJECT_PROP_VALUE, file.handle, 0xDC8A)
+                val (response, bytes) = recvRespWithPayload()
+                if (generation != photoRatingGeneration.value) return@withContext null
+                when (response) {
+                    0x2001 -> bytes?.let(::parseNikonObjectRating)?.also { rememberPhotoRating(file.handle, it, generation, "object-read") }
+                    0x2005 -> { ratingOperationUnsupported = true; null }
+                    0xA80A, 0xA801 -> { ratingUnsupportedExtensions += file.extension; null }
+                    0x2019 -> throw RatingReadDeferred()
+                    // Denied and object errors do not prove persistent lack of support.
+                    else -> null
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (e !is RatingReadDeferred) closeQuietly()
+                // Stop the scan after a transport failure, rather than retrying every file.
+                throw e
+            }
+        }
+    }
+
+    /**
+     * AP/USB rating read used by the list scan. JPEG remains an object-property read. A RAW
+     * object-property miss is remembered for this connection after the first probe, because the
+     * camera has already demonstrated that 0xDC8A is not implemented for that extension; the
+     * current and subsequent NEF/NRW files then use their own header rating directly.
+     */
+    internal suspend fun readObjectOrRawHeaderRating(file: FileInfo): Int? {
+        val isRaw = file.extension.equals(".NEF", true) || file.extension.equals(".NRW", true)
+        if (!isRaw) return readObjectRating(file)
+        if (file.extension in ratingUnsupportedExtensions) {
+            return readPhotoRatingHeader(file)
+        }
+        val objectValue = readObjectRating(file)
+        if (objectValue != null) return objectValue
+        // A null RAW object read is enough to stop probing this extension repeatedly. The header
+        // path is the verified Nikon RAW fallback and also resolves the first file immediately.
+        ratingUnsupportedExtensions += file.extension
+        return readPhotoRatingHeader(file)
+    }
+
+    private var ratingNikonHeaderUnsupported = false
+    private var ratingStandardHeaderUnsupported = false
+
+    /** At most 256KiB total; extend the prefix rather than download its first half twice. */
+    internal suspend fun readPhotoRatingHeader(file: FileInfo): Int? {
+        val requestedAt = SystemClock.elapsedRealtime()
+        return ioGate.withRatingTransaction("RATING") {
+            readPhotoRatingHeaderInternal(file, SystemClock.elapsedRealtime() - requestedAt)
+        }
+    }
+
+    /** One-shot diagnostic for AP/USB RAW rating support; deliberately probes one RAW only. */
+    internal suspend fun probeRawRating(file: FileInfo) {
+        RatingDiagnostics.note(
+            "raw probe mode=${if (connectionType == CameraConnectionType.USB) "USB" else "WIFI"} " +
+                "file=${file.fileName} handle=0x%08X".format(file.handle),
+        )
+        val objectValue = runCatching { readObjectRating(file) }
+            .onFailure { RatingDiagnostics.note("object error=${it.javaClass.simpleName}") }
+            .getOrNull()
+        RatingDiagnostics.note("object property=0xDC8A result=${objectValue ?: "unsupported-or-unknown"}")
+        val headerValue = runCatching { readPhotoRatingHeader(file) }
+            .onFailure { RatingDiagnostics.note("header error=${it.javaClass.simpleName}") }
+            .getOrNull()
+        RatingDiagnostics.note("header result=${headerValue ?: "unknown"}")
+        RatingDiagnostics.note("raw probe complete")
+    }
+
+    private suspend fun readPhotoRatingHeaderInternal(file: FileInfo, gateWaitMs: Long): Int? {
+        val probeStartedAt = SystemClock.elapsedRealtime()
+        // The tested Z30 JPEGs parse successfully with a 100 KiB prefix.
+        // This is a measured prefix size, not a fixed rating-field offset.
+        val ratingChunkBytes = 100 * 1024
+        val ratingExtensionBytes = 8 * 1024
+        val generation = photoRatingGeneration.value
+        var readCommandMs = 0L
+        var readChunks = 0
+        suspend fun chunk(offset: Int, count: Int): ByteArray? {
+            // The caller holds the gate across this bounded prefix probe.
+            return withContext(Dispatchers.IO) {
+                var commandStarted: Long
+                if (!sessionOpen || generation != photoRatingGeneration.value) return@withContext null
+                try {
+                    commandStarted = SystemClock.elapsedRealtime()
+                    if (!ratingNikonHeaderUnsupported) {
+                        sendCmd(PtpConstants.NK_GET_PARTIAL_OBJECT_EX, file.handle, offset, 0, count, 0)
+                        val (response, bytes) = recvRespWithPayload()
+                        if (response == PtpConstants.RESPONSE_OK) {
+                            readCommandMs += SystemClock.elapsedRealtime() - commandStarted
+                            readChunks++
+                            return@withContext bytes
+                        }
+                        if (response == 0x2019) throw RatingReadDeferred()
+                        if (response != 0x2005) return@withContext null
+                        ratingNikonHeaderUnsupported = true
+                    }
+                    if (ratingStandardHeaderUnsupported) return@withContext null
+                    sendCmd(0x101B, file.handle, offset, count)
+                    val (response, bytes) = recvRespWithPayload()
+                    if (response == 0x2019) throw RatingReadDeferred()
+                    if (response == 0x2005) ratingStandardHeaderUnsupported = true
+                    bytes?.takeIf { response == PtpConstants.RESPONSE_OK }?.also {
+                        readCommandMs += SystemClock.elapsedRealtime() - commandStarted
+                        readChunks++
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    if (e !is RatingReadDeferred) closeQuietly()
+                    throw e
+                }
+            }
+        }
+        val first = chunk(0, ratingChunkBytes) ?: return null
+        if (first.size > ratingChunkBytes) return null
+        var parseMs = 0L
+        suspend fun parse(bytes: ByteArray): Int? = withContext(Dispatchers.Default) {
+            val startedAt = SystemClock.elapsedRealtime()
+            try { parsePhotoRating(bytes) }
+            finally { parseMs += SystemClock.elapsedRealtime() - startedAt }
+        }
+        var rating = parse(first)
+        var parsedBytes = first
+        while (rating == null && parsedBytes.size < 262144) {
+            val count = minOf(ratingExtensionBytes, 262144 - parsedBytes.size)
+            val tail = chunk(parsedBytes.size, count) ?: break
+            if (tail.isEmpty() || tail.size > count) break
+            parsedBytes += tail
+            rating = parse(parsedBytes)
+        }
+        RatingDiagnostics.detail(
+                "read file=${file.fileName} bytes=${parsedBytes.size} chunks=$readChunks " +
+                "gate=${gateWaitMs}ms command=${readCommandMs}ms " +
+                "parse=${parseMs}ms " +
+                "other=${(SystemClock.elapsedRealtime() - probeStartedAt - readCommandMs - parseMs).coerceAtLeast(0)}ms " +
+                "result=${rating ?: "unknown"}",
+        )
+        if (generation != photoRatingGeneration.value) return null
+        rating?.let { rememberPhotoRating(file.handle, it, generation, "rating-header") }
+        return rating
+    }
+
+    internal suspend fun readVideoRating(file: FileInfo): Int? = withContext(Dispatchers.Default) {
+        val generation = photoRatingGeneration.value
+        val startedAt = SystemClock.elapsedRealtime()
+        // Use the verified structural locator. It reads only the required MP4 regions
+        // (normally the moov/NCTG field), never the video payload.
+        val rating = readNikonVideoRating(file.size) { offset, count ->
+            ioGate.withRatingTransaction("RATING") {
+                withContext(Dispatchers.IO) {
+                    if (!sessionOpen) throw RatingReadDeferred()
+                    if (generation != photoRatingGeneration.value) return@withContext null
+                    try {
+                        if (!ratingNikonHeaderUnsupported) {
+                            sendCmd(PtpConstants.NK_GET_PARTIAL_OBJECT_EX, file.handle, offset.toInt(), (offset ushr 32).toInt(), count, 0)
+                            val (response, bytes) = recvRespWithPayload()
+                            if (response == PtpConstants.RESPONSE_OK) return@withContext bytes
+                            if (response == 0x2019) throw RatingReadDeferred()
+                            if (response != 0x2005) return@withContext null
+                            ratingNikonHeaderUnsupported = true
+                        }
+                        if (ratingStandardHeaderUnsupported || offset > 0xffffffffL) return@withContext null
+                        sendCmd(0x101B, file.handle, offset.toInt(), count)
+                        val (response, bytes) = recvRespWithPayload()
+                        if (response == 0x2019) throw RatingReadDeferred()
+                        if (response == 0x2005) ratingStandardHeaderUnsupported = true
+                        bytes?.takeIf { response == PtpConstants.RESPONSE_OK }
+                    } catch (e: CancellationException) { throw e }
+                    catch (e: Exception) {
+                        if (e !is RatingReadDeferred) closeQuietly()
+                        throw e
+                    }
+                }
+            }
+        }
+        if (generation != photoRatingGeneration.value) return@withContext null
+        RatingDiagnostics.detail(
+            "read video=${file.fileName} elapsed=${SystemClock.elapsedRealtime() - startedAt}ms " +
+                "result=${rating ?: "unknown"}",
+        )
+        rating?.let { rememberPhotoRating(file.handle, it, generation, "rating-video") }
+        rating
+    }
+
+    // Recent photo prefixes: bounded independently of the small rating cache.
     private val staDirectRecentHeaders = LinkedHashMap<Int, ByteArray>(4, 0.75f, true)
     private var staDirectFileNumberAnchor: NikonFileNumberAnchor? = null
     // A dual-card body may maintain independent object-handle sequences per slot. A single anchor
@@ -1336,13 +1836,30 @@ class NikonCamera(private val context: Context) {
     private var staDirectFileNameListAttempted = false
     private var staDirectFileNameValueSupported: Boolean? = null
     private var staDirectObjectsMetadataAttempted = false
-    // internal 而非 private:遥控实验(RemoteLab.kt)以扩展函数复用同一互斥与收发原语,
-    // 保证实验命令与传输/缩略图/心跳严格串行,不引入第二条 IO 路径。
+    // All protocol callers enter through ioGate's transaction queue. Keeping the mutex private
+    // prevents a new feature from bypassing request priority and cancellation handling.
     private val ioGate = CameraIoGate()
-    internal val ioMutex: Mutex
-        get() = ioGate.mutex
-    // 一次自动对焦由多条独立 PTP 事务组成。对焦流程和普通遥控命令仍须严格串行，
-    // 只有 Live View 取帧绕过此锁；因此不会为了释放 ioMutex 引入参数/拍摄命令穿插。
+    /** Shared transaction entry for protocol extensions; keeps business code off the raw mutex. */
+    internal suspend fun <T> withCameraTransaction(
+        kind: CameraRequestKind,
+        owner: String = kind.name,
+        block: suspend () -> T,
+    ): T = ioGate.withCameraTransaction(kind, owner, block)
+
+    internal suspend fun <T> withCameraTransaction(
+        kind: CameraRequestKind,
+        owner: String,
+        allowDuringShutdown: Boolean,
+        block: suspend () -> T,
+    ): T = ioGate.withCameraTransaction(kind, owner, allowDuringShutdown, block)
+
+    internal suspend fun beginRatingPhase() = ioGate.beginRatingPhase()
+    internal suspend fun endRatingPhase() = ioGate.endRatingPhase()
+
+    /** Lightweight diagnostic snapshot; does not enqueue or touch the camera socket. */
+    internal suspend fun cameraSchedulerSnapshot(): CameraSchedulerSnapshot = ioGate.snapshot()
+    // 一次自动对焦由多条独立 PTP 事务组成。对焦流程和普通遥控命令仍须严格串行；
+    // Live View 取帧也以短的 INTERACTIVE 事务进入同一调度器，不会绕过命令通道。
     internal val focusMutex = Mutex()
     // 会话是否已 OpenSession 成功；用于决定 close() 是否需要发送 CloseSession，
     // 避免在握手中途失败时空等 CloseSession 响应（最长可达 soTimeout）。
@@ -1354,7 +1871,7 @@ class NikonCamera(private val context: Context) {
     // FHD 预览(0x920F)支持探测：null=未知, true=支持, false=明确不支持。
     // 只有标准 Operation_Not_Supported 才能整会话熔断；DeviceBusy 等暂态响应不得污染
     // 能力状态。一次成功后保持 true，避免后续单个 handle 的异常推翻已验证能力。
-    // 每次 connect 新建 NikonCamera 实例，故换相机自动重新探测。仅 ioMutex 内访问。
+    // 每次 connect 新建 NikonCamera 实例，故换相机自动重新探测。仅在相机事务内访问。
     @Volatile private var fhdSupported: Boolean? = null
     // Paired STA uses an independent, read-only preview capability probe. Keeping these separate
     // ensures the established AP FHD latch and request behavior remain byte-for-byte unchanged.
@@ -1380,11 +1897,11 @@ class NikonCamera(private val context: Context) {
     @Volatile internal var liveViewReadyAtElapsedMs = 0L
     // Nikon 主体追踪操作码（StartTracking/EndTracking）的会话级能力与生命周期。
     // null=尚未实际尝试，false=明确返回 Operation_Not_Supported；瞬时错误不熔断。
-    // 两个字段只在 focusMutex 内读写；实际 Start/End 命令再按 focusMutex -> ioMutex 串行。
+    // 两个字段只在 focusMutex 内读写；实际 Start/End 命令再按 focusMutex -> 相机事务串行。
     internal var subjectTrackingSupported: Boolean? = null
     internal var subjectTrackingActive = false
     // 增强取帧偶发空/坏帧不能等同于“不支持”；连续两次才降级，成功即清零。
-    // 仅在 ioMutex 内访问。
+    // 仅在相机事务内访问。
     internal var liveViewEnhancedFailureCount = 0
     // 远程录像兼容模式的成对记账放在连接对象上，而不是 Compose 页面里：
     // 横竖屏重建或离开后重进监看页时仍能正确停止录像并恢复相机状态；
@@ -1409,9 +1926,13 @@ class NikonCamera(private val context: Context) {
     /** Stable PTP/IP body identity returned by InitCommandAck; available before DeviceInfo. */
     internal val staResponderGuid: String?
         get() = responderGuid
-    /** True only after this installation has received an OK Nikon pairing result for this body. */
+    /** True only after this installation has confirmed the body is usable after pairing. */
     internal val staPairingConfirmed: Boolean
-        get() = hasCompletedStaPairing()
+        get() = pairingVerifiedForSession || hasCompletedStaPairing()
+    // A pairing result response only acknowledges the command. This session flag is set after
+    // the reconnect has passed the normal browsing capability checks; it is intentionally reset
+    // for every new NikonCamera instance.
+    @Volatile private var pairingVerifiedForSession = false
     /**
      * 跨连接稳定的机身身份，用于隔离缩略图磁盘缓存。有效的 PTP DeviceInfo 序列号
      * 可统一同一机身的 Wi-Fi/USB 缓存；缺失或为占位值时再用当前链路的物理标识兜底。
@@ -1484,7 +2005,7 @@ class NikonCamera(private val context: Context) {
         // 关 Wi-Fi，重连可达数十秒，"停止后重试卡很久"，所以只作为兜底而非首选）。
         const val CANCEL_DRAIN_BUDGET = 32L * 1024 * 1024
         // 排空期间的读超时：部分机型收到 Cancel 停发数据后并不回 CMD_RESPONSE，按常规
-        // 60s 超时会抱着 ioMutex 白等一分钟——重试的首个下载全程被挡住，表现为
+        // 60s 超时会占用相机事务通道白等一分钟——重试的首个下载全程被挡住，表现为
         // "停止后重试卡半天没速度"。静默 3s 即认定连接不可用，断开走自动重连。
         const val CANCEL_DRAIN_TIMEOUT_MS = 3_000
         // Wi-Fi 浏览模式的已知大小文件优先走 GetPartialObjectEx，以便在块间让路；USB 以及
@@ -1584,6 +2105,7 @@ class NikonCamera(private val context: Context) {
                 return@withContext Result.failure(Exception(context.getString(R.string.error_open_session, PtpConstants.translateResponse(context, resp))))
             }
             sessionOpen = true
+            resetRatingCapabilityState()
 
             // Read the identity once while establishing the session so every camera-backed UI can
             // use the real body model without inserting a later command into thumbnail/transfer IO.
@@ -1634,11 +2156,13 @@ class NikonCamera(private val context: Context) {
         allowPairing: Boolean = true,
         exploreAlbumAccess: Boolean = false,
         forceProfilePairing: Boolean = false,
+        verifyPairingCompletion: Boolean = false,
         onConnectingStarted: (() -> Unit)? = null,
         onPairingStarted: (() -> Unit)? = null,
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             staAlbumAccessValidated = false
+            pairingVerifiedForSession = false
             staStorageProbeReached = false
             staEmptyObjectListObserved = false
             staObjectHandlesObserved = false
@@ -1708,6 +2232,13 @@ class NikonCamera(private val context: Context) {
                     "responder=UNEXPECTED expected=$expectedResponderGuid actual=$responderGuid"
                 throw UnexpectedStaResponderException(responderGuid)
             }
+            val effectiveVerifyPairingCompletion = verifyPairingCompletion ||
+                shouldVerifyStaPairingMarker(
+                    hasAnyMarker = hasCompletedStaPairing(),
+                    hasTrustedMarker = hasTrustedStaPairing(),
+                )
+            staDiagnosticLines +=
+                "pairing verifyRequested=$verifyPairingCompletion verify=$effectiveVerifyPairingCompletion"
             evtSocket = newSocket().apply {
                 soTimeout = STA_HANDSHAKE_TIMEOUT_MS
                 connect(InetSocketAddress(ip, PtpConstants.PTP_PORT), CONNECT_TIMEOUT_MS)
@@ -1747,10 +2278,12 @@ class NikonCamera(private val context: Context) {
                 )
             }
             sessionOpen = true
+            resetRatingCapabilityState()
             initializeStaBrowsingSession(
                 allowPairing = allowPairing,
                 exploreAlbumAccess = exploreAlbumAccess,
                 forceProfilePairing = forceProfilePairing,
+                verifyPairingCompletion = effectiveVerifyPairingCompletion,
                 onConnectingStarted = onConnectingStarted,
                 onPairingStarted = onPairingStarted,
             )
@@ -1798,6 +2331,7 @@ class NikonCamera(private val context: Context) {
                 )
             }
             sessionOpen = true
+            resetRatingCapabilityState()
 
             log { "USB_CONNECT device-info" }
             sendCmd(PtpConstants.GET_DEVICE_INFO)
@@ -1854,7 +2388,7 @@ class NikonCamera(private val context: Context) {
      * switching from browsing to remote control does not query it a second time.
      */
     internal suspend fun refreshUsbRemoteSession(): String =
-        ioMutex.withLock {
+        withCameraTransaction(CameraRequestKind.INTERACTIVE, "USB_REMOTE_SESSION") {
             withContext(Dispatchers.IO) {
                 val manager = connectedUsbManager
                     ?: throw IllegalStateException("USB manager unavailable")
@@ -1902,6 +2436,7 @@ class NikonCamera(private val context: Context) {
                             )
                         }
                         sessionOpen = true
+                        resetRatingCapabilityState()
 
                         sendCmd(0x941C) // Nikon GetEventEx: drain stale events after OpenSession.
                         val drainResponse = recvRespWithPayload().first
@@ -1969,7 +2504,10 @@ class NikonCamera(private val context: Context) {
         }
     }
 
-    suspend fun getStorageIds(): List<Int> = ioMutex.withLock {
+    suspend fun getStorageIds(): List<Int> = withCameraTransaction(
+        CameraRequestKind.BACKGROUND_THUMBNAIL,
+        "GET_STORAGE_IDS",
+    ) {
         withContext(Dispatchers.IO) {
             try {
                 prefetchedStorageIds?.let { storageIds ->
@@ -1998,7 +2536,10 @@ class NikonCamera(private val context: Context) {
     )
 
     /** STA-only status-preserving variant; an IO/response failure must not become an empty card. */
-    internal suspend fun getStaStorageIdsWithStatus(): StorageIdsResult = ioMutex.withLock {
+    internal suspend fun getStaStorageIdsWithStatus(): StorageIdsResult = withCameraTransaction(
+        CameraRequestKind.BACKGROUND_THUMBNAIL,
+        "GET_STA_STORAGE_IDS",
+    ) {
         withContext(Dispatchers.IO) {
             prefetchedStorageIds?.let { storageIds ->
                 prefetchedStorageIds = null
@@ -2076,7 +2617,10 @@ class NikonCamera(private val context: Context) {
 
     internal suspend fun getObjectHandlesWithStatus(
         storageId: Int = -1,
-    ): ObjectHandlesResult = ioMutex.withLock {
+    ): ObjectHandlesResult = withCameraTransaction(
+        CameraRequestKind.BACKGROUND_THUMBNAIL,
+        "GET_OBJECT_HANDLES",
+    ) {
         withContext(Dispatchers.IO) {
             prefetchedStaObjectHandles?.takeIf { it.queryStorageId == storageId }?.let { cached ->
                 prefetchedStaObjectHandles = null
@@ -2151,10 +2695,11 @@ class NikonCamera(private val context: Context) {
      * 通过 PTP GetThumb 获取缩略图 JPEG 字节。相机【确认】无缩略图（No_Thumbnail_Present /
      * Invalid_Object_Handle）返回 null——调用方可安全负缓存、不再重试；
      * 其它非 OK 响应（如设备忙）与 IO 失败一律抛出——那是瞬时状态，负缓存会把
-     * 恰好赶上相机忙碌时段的整批缩略图永久打成"无图"。与其它命令共用 ioMutex。
+     * 恰好赶上相机忙碌时段的整批缩略图永久打成"无图"。与其它命令共用相机事务调度器。
      */
-    suspend fun getThumbnail(handle: Int): ByteArray? = ioMutex.withLock {
-        withContext(Dispatchers.IO) {
+    suspend fun getThumbnail(handle: Int, visible: Boolean = false): ByteArray? {
+        val read: suspend () -> ByteArray? = {
+            withContext(Dispatchers.IO) {
             if (staDirectObjectReadValidated) {
                 if ((staDirectFiles[handle]?.extension ?: staDirectExtensionFromHandle(handle)) == ".jpg") {
                     return@withContext readStaDirectJpegThumbnailInternal(handle)
@@ -2195,18 +2740,21 @@ class NikonCamera(private val context: Context) {
                 PtpConstants.INVALID_OBJECT_HANDLE -> null
                 else -> throw Exception("GetThumb: ${PtpConstants.translateResponse(context, respCode)}")
             }
+            }
         }
+        return if (visible) ioGate.withVisibleThumbnail(read)
+        else ioGate.withBackgroundThumbnail(read)
     }
 
     /**
-     * 获取 FHD (1920×1080) 预览图 JPEG 字节。与 [getThumbnail] 共用 [ioMutex] 串行化。
+     * 获取 FHD (1920×1080) 预览图 JPEG 字节。与 [getThumbnail] 共用相机事务调度器串行化。
      * 仅相机明确返回“不支持”时才记住该会话无 FHD 能力；忙、对象异常和空数据都按临时失败处理。
      * 临时失败返回 null，调用方静默回退到缩略图，不影响后续照片再次尝试。
      */
     suspend fun getFhdPicture(
         handle: Int,
         retryDeviceBusy: Boolean = true,
-    ): ByteArray? = ioGate.withInteractive {
+    ): ByteArray? = ioGate.withPreviewTransaction("FHD_PREVIEW") {
         withContext(Dispatchers.IO) {
             val startedAt = android.os.SystemClock.elapsedRealtime()
             // 已判定不支持：直接返回，免去每页一次注定失败的往返（预览秒回退缩略图）。
@@ -2277,7 +2825,7 @@ class NikonCamera(private val context: Context) {
     suspend fun getStaFhdPicture(
         handle: Int,
         retryDeviceBusy: Boolean = true,
-    ): ByteArray? = ioGate.withInteractive {
+    ): ByteArray? = ioGate.withPreviewTransaction("STA_FHD_PREVIEW") {
         withContext(Dispatchers.IO) {
             if (!staDirectObjectReadValidated) return@withContext null
             val advertisedOperations = cachedDeviceInfo?.operations.orEmpty()
@@ -2398,8 +2946,7 @@ class NikonCamera(private val context: Context) {
 
     /**
      * 下载文件头若干字节用于 EXIF 解析。通过 [NK_GET_PARTIAL_OBJECT_EX] 从偏移 0 读取
-     * [maxSize] 字节（默认 128KB，足以覆盖绝大多数 JPEG 的 EXIF 段）；与 [ioMutex]
-     * 串行化。任何失败返回 null——EXIF 是纯体验增强，不应为失败产生视觉噪音。
+     * [maxSize] 字节（默认 128KB，足以覆盖绝大多数 JPEG 的 EXIF 段）；与相机事务调度器串行化。任何失败返回 null——EXIF 是纯体验增强，不应为失败产生视觉噪音。
      */
     suspend fun readExifHeader(handle: Int, maxSize: Int = 128 * 1024, bypassCache: Boolean = false,
         retryDeviceBusy: Boolean = false, background: Boolean = false,
@@ -2444,12 +2991,17 @@ class NikonCamera(private val context: Context) {
             }
         }
 
-        // Background metadata gets a fair transaction slot, without interactive priority.
-        return if (background) ioGate.withTransferSlice(read) else ioGate.withInteractive(read)
+        // Background metadata uses the low-priority thumbnail lane; the current preview uses the
+        // dedicated PREVIEW lane so a pending rating scan cannot outrank the visible image.
+        return if (background) {
+            ioGate.withBackgroundThumbnail(read)
+        } else {
+            ioGate.withPreviewTransaction("PREVIEW_EXIF", read)
+        }
     }
 
     /**
-     * 为当前大图的 FHD + EXIF 组合保留交互优先级，但不持续占用 [ioMutex]：两项之间的
+     * 为当前大图的 FHD + EXIF 组合保留交互优先级，但不持续占用相机事务：两项之间的
      * 手机解码仍可并行进行，只是不允许原片传输抢先开始下一块。
      */
     internal suspend fun <T> withInteractivePreviewPriority(block: suspend () -> T): T =
@@ -2460,7 +3012,8 @@ class NikonCamera(private val context: Context) {
         batchSize: Int = 20,
         fastFirstBatch: Boolean = false,
         nextBatchSize: (() -> Int)? = null,
-        onBatch: suspend (List<FileInfo>, Int, Int) -> Unit
+        onBatch: suspend (List<FileInfo>, Int, Int) -> Unit,
+        stopAfterBatch: () -> Boolean = { false },
     ): Boolean = withContext(Dispatchers.IO) {
         val loadContext = coroutineContext
         val total = handles.size
@@ -2474,14 +3027,12 @@ class NikonCamera(private val context: Context) {
             val batch = handles.subList(cursor, end)
             cursor = end
             val probeStartedAtMs = if (FileOrderProbe.enabled) SystemClock.elapsedRealtime() else 0L
-            // 每批单独持锁，批间释放 ioMutex：缩略图模式下缩略图请求可在批间插入，
-            // 从而随列表一起渐进出图，而不是等整份列表加载完才开始。
-            // 批内每个 ObjectInfo 之间也检查取消：进入监看时最多等当前一条事务收尾，
-            // 不会被余下 19 条已经开始的整批扫描挡住。
+            // 保持旧版边界：每批 ObjectInfo 共用一个低优先级事务，批间释放相机通道。
+            // 评级、监看和缩略图仍可在批间让路，不改变原有列表发布和顺序。
             // IO 异常（掉线/读超时）直接向上抛给调用方终止扫描：逐个 handle 硬试会让
             // 每个都等满 60s 读超时、扫描假死数十分钟；单文件 PTP 级失败在
             // getObjectInfoInternal 内已按 null 跳过，不会走到这里。
-            val files = ioMutex.withLock {
+            val files = ioGate.withBackgroundThumbnail {
                 batch.mapNotNull { handle ->
                     loadContext.ensureActive()
                     val result = getObjectInfoInternal(handle)
@@ -2499,6 +3050,7 @@ class NikonCamera(private val context: Context) {
             loaded += files.size
             if (files.isNotEmpty()) {
                 onBatch(files, loaded, total)
+                if (stopAfterBatch()) break
             }
         }
         allObjectInfoSucceeded
@@ -2521,7 +3073,7 @@ class NikonCamera(private val context: Context) {
         val total = handles.size
         var processed = 0
         var allSucceeded = true
-        ioMutex.withLock {
+        ioGate.withBackgroundThumbnail {
             loadStaDirectOriginalFileNamesInternal()
             loadStaDirectObjectsMetadataInternal(storageIds)
             ensureStaDirectFileNumberAnchorsInternal(
@@ -2540,7 +3092,7 @@ class NikonCamera(private val context: Context) {
             }
             val batchEnd = minOf(nextHandleIndex + currentBatchSize, total)
             val batch = handles.subList(nextHandleIndex, batchEnd)
-            val files = ioMutex.withLock {
+            val files = ioGate.withBackgroundThumbnail {
                 batch.mapNotNull { handle ->
                     loadContext.ensureActive()
                     val result = readStaDirectIndexedObjectInternal(
@@ -2571,6 +3123,7 @@ class NikonCamera(private val context: Context) {
         batchSize: Int = 12,
         nextBatchSize: (() -> Int)? = null,
         onBatch: suspend (List<FileInfo>, Int, Int) -> Unit,
+        stopAfterBatch: () -> Boolean = { false },
     ): Boolean = withContext(Dispatchers.IO) {
         check(staDirectObjectReadValidated) { "STA direct object reads were not validated" }
         require(batchSize > 0) { "batchSize must be positive" }
@@ -2578,10 +3131,12 @@ class NikonCamera(private val context: Context) {
         if (groups.isEmpty()) return@withContext true
 
         val loadContext = coroutineContext
-        ioMutex.withLock {
+        ioGate.withBackgroundThumbnail {
             loadStaDirectOriginalFileNamesInternal()
             loadStaDirectObjectsMetadataInternal(storageIds)
-            ensureStaDirectFileNumberAnchorsInternal(groups)
+            groups.forEach { group ->
+                ensureStaDirectFileNumberAnchorsInternal(listOf(group))
+            }
         }
 
         val total = groups.sumOf { it.second.size }
@@ -2599,8 +3154,7 @@ class NikonCamera(private val context: Context) {
             var requestedHandles = 0
             val completedBeforeBatch = completed
             val requestBudget = maxOf(groups.size, currentBatchSize + groups.size - 1)
-            val output = ioMutex.withLock {
-                buildList {
+            val output = ioGate.withBackgroundThumbnail { buildList {
                     while (size < currentBatchSize && completed < total) {
                         groups.indices.forEach { groupIndex ->
                             if (heads[groupIndex] != null) return@forEach
@@ -2634,10 +3188,10 @@ class NikonCamera(private val context: Context) {
                         heads[selected] = null
                         completed++
                     }
-                }
-            }
+            } }
             if (output.isNotEmpty()) {
                 onBatch(output, completed, total)
+                if (stopAfterBatch()) break
             } else if (completed == completedBeforeBatch && requestedHandles == 0) {
                 error("Merged STA direct scan made no progress")
             }
@@ -2645,7 +3199,7 @@ class NikonCamera(private val context: Context) {
         allSucceeded
     }
 
-    /** Must be called while [ioMutex] is held. One tiny index replaces one 128 KiB date probe/item. */
+    /** Must be called inside a camera transaction. One tiny index replaces one 128 KiB date probe/item. */
     private fun loadStaDirectObjectsMetadataInternal(
         storageIds: List<Int>,
         forceRefresh: Boolean = false,
@@ -2687,7 +3241,7 @@ class NikonCamera(private val context: Context) {
     internal suspend fun refreshStaDirectObjectsMetadata(storageIds: List<Int>) =
         withContext(Dispatchers.IO) {
             if (!staDirectObjectReadValidated) return@withContext
-            ioMutex.withLock {
+            withCameraTransaction(CameraRequestKind.BACKGROUND_THUMBNAIL, "STA_DIRECT_METADATA_REFRESH") {
                 loadStaDirectObjectsMetadataInternal(storageIds, forceRefresh = true)
             }
         }
@@ -2823,7 +3377,7 @@ class NikonCamera(private val context: Context) {
         val thumbnailChecked: Boolean = true,
     )
 
-    /** Must be called while [ioMutex] is held. Prefer exact standard MTP names when advertised. */
+    /** Must be called inside a camera transaction. Prefer exact standard MTP names when advertised. */
     private fun loadStaDirectOriginalFileNamesInternal() {
         if (staDirectFileNameListAttempted) return
         staDirectFileNameListAttempted = true
@@ -2864,7 +3418,7 @@ class NikonCamera(private val context: Context) {
         )
     }
 
-    /** Must be called while [ioMutex] is held. Used only when the one-shot list missed a handle. */
+    /** Must be called inside a camera transaction. Used only when the one-shot list missed a handle. */
     private fun readStaDirectOriginalFileNameInternal(handle: Int): String? {
         staDirectOriginalFileNames[handle]?.let { return it }
         if (staDirectFileNameValueSupported == false) return null
@@ -2905,7 +3459,7 @@ class NikonCamera(private val context: Context) {
         return fileName
     }
 
-    /** Must be called while [ioMutex] is held. */
+    /** Must be called inside a camera transaction. */
     private fun readStaDirectObjectHeaderInternal(
         handle: Int,
         preferredFileNumberAnchor: NikonFileNumberAnchor? = null,
@@ -3178,7 +3732,7 @@ class NikonCamera(private val context: Context) {
         }
     }
 
-    /** Must be called while [ioMutex] is held. */
+    /** Must be called inside a camera transaction. */
     private fun readStaDirectPartialInternal(
         handle: Int,
         offset: Long,
@@ -3197,7 +3751,7 @@ class NikonCamera(private val context: Context) {
         return data?.takeIf { response == PtpConstants.RESPONSE_OK && it.isNotEmpty() }
     }
 
-    /** Must be called while [ioMutex] is held; reads only an MPF-indexed secondary JPEG. */
+    /** Must be called inside a camera transaction; reads only an MPF-indexed secondary JPEG. */
     private fun readStaDirectJpegMpfPreviewInternal(handle: Int): ByteArray? {
         if (staDirectJpegMpfPreviews[handle].isNullOrEmpty()) {
             cacheStaDirectObjectHeader(
@@ -3309,7 +3863,7 @@ class NikonCamera(private val context: Context) {
         return result
     }
 
-    /** Must be called while [ioMutex] is held; used by visible cells and sequential batch loading. */
+    /** Must be called inside a camera transaction; used by visible cells and sequential batch loading. */
     private fun readStaDirectRawThumbnailInternal(file: FileInfo): ByteArray? {
         fun readReference(reference: NefPreviewReference): ByteArray? =
             readStaDirectPartialInternal(
@@ -3517,7 +4071,7 @@ class NikonCamera(private val context: Context) {
         return result
     }
 
-    /** Must be called while [ioMutex] is held; selects the smallest indexed RAW preview that is FHD. */
+    /** Must be called inside a camera transaction; selects the smallest indexed RAW preview that is FHD. */
     private fun readStaDirectRawPreviewInternal(file: FileInfo): ByteArray? {
         fun readReference(reference: NefPreviewReference): ByteArray? =
             readStaDirectPartialInternal(
@@ -3685,7 +4239,7 @@ class NikonCamera(private val context: Context) {
         return result
     }
 
-    /** Must be called while [ioMutex] is held; never reads the full video. */
+    /** Must be called inside a camera transaction; never reads the full video. */
     private fun readStaDirectVideoThumbnailInternal(file: FileInfo): ByteArray? {
         val requestSize = minOf(
             file.size,
@@ -3741,8 +4295,8 @@ class NikonCamera(private val context: Context) {
     /**
      * 双卡 ObjectInfo 流式归并。每组 handle 已按各自卡内的新到旧排列；这里只为每张卡
      * 保留一个已读取的 head，用其真实 captureDate 选择全机下一条。因此不会先扫完一张卡，
-     * 也不需要把全部 ObjectInfo 读完才显示。每个 handle 仍只请求一次，每次持锁最多
-     * 读取 [batchSize] 条 ObjectInfo 便释放 [ioMutex]，与单卡枚举的通道占用粒度一致。
+     * 也不需要把全部 ObjectInfo 读完才显示。每个 handle 仍只请求一次，批次之间释放相机
+     * 通道，保持原有列表发布和让路边界。
      */
     suspend fun streamMergedFileInfo(
         newestFirstHandlesByStorage: List<List<Int>>,
@@ -3750,6 +4304,7 @@ class NikonCamera(private val context: Context) {
         fastFirstBatch: Boolean = false,
         nextBatchSize: (() -> Int)? = null,
         onBatch: suspend (List<FileInfo>, Int, Int) -> Unit,
+        stopAfterBatch: () -> Boolean = { false },
     ): Boolean = withContext(Dispatchers.IO) {
         require(batchSize > 0) { "batchSize must be positive" }
         val groups = newestFirstHandlesByStorage.filter { it.isNotEmpty() }
@@ -3773,47 +4328,45 @@ class NikonCamera(private val context: Context) {
             val probeStartedAtMs = if (FileOrderProbe.enabled) SystemClock.elapsedRealtime() else 0L
             val completedBeforeBatch = completed
 
-            val output = ioMutex.withLock {
-                var objectInfoRequests = 0
-                buildList {
-                    while (size < currentBatchSize && completed < total) {
-                        groups.indices.forEach { groupIndex ->
-                            if (heads[groupIndex] != null) return@forEach
-                            val handles = groups[groupIndex]
-                            while (cursors[groupIndex] < handles.size) {
-                                if (objectInfoRequests >= requestBudget) return@forEach
-                                loadContext.ensureActive()
-                                val handle = handles[cursors[groupIndex]++]
-                                objectInfoRequests++
-                                requestedHandles += handle
-                                val result = getObjectInfoInternal(handle)
-                                val file = result.file
-                                if (!result.successful) allObjectInfoSucceeded = false
-                                if (file == null) {
-                                    completed++
-                                } else {
-                                    observedFiles += file
-                                    heads[groupIndex] = file
-                                    break
-                                }
+            var objectInfoRequests = 0
+            val output = ioGate.withBackgroundThumbnail { buildList {
+                while (size < currentBatchSize && completed < total) {
+                    groups.indices.forEach { groupIndex ->
+                        if (heads[groupIndex] != null) return@forEach
+                        val handles = groups[groupIndex]
+                        while (cursors[groupIndex] < handles.size) {
+                            if (objectInfoRequests >= requestBudget) return@forEach
+                            loadContext.ensureActive()
+                            val handle = handles[cursors[groupIndex]++]
+                            objectInfoRequests++
+                            requestedHandles += handle
+                            val result = getObjectInfoInternal(handle)
+                            val file = result.file
+                            if (!result.successful) allObjectInfoSucceeded = false
+                            if (file == null) {
+                                completed++
+                            } else {
+                                observedFiles += file
+                                heads[groupIndex] = file
+                                break
                             }
                         }
-
-                        // 还有一张卡的下一个文件尚未读到时，不能拿其它卡的旧 head 先输出，
-                        // 否则跨卡顺序失去依据。请求预算用完就先释放锁，下批补齐 head。
-                        val hasUnresolvedGroup = groups.indices.any { groupIndex ->
-                            heads[groupIndex] == null &&
-                                cursors[groupIndex] < groups[groupIndex].size
-                        }
-                        if (hasUnresolvedGroup) break
-
-                        val selected = selectNewestFileHeadIndex(heads) ?: break
-                        add(checkNotNull(heads[selected]))
-                        heads[selected] = null
-                        completed++
                     }
+
+                    // 还有一张卡的下一个文件尚未读到时，不能拿其它卡的旧 head 先输出，
+                    // 否则跨卡顺序失去依据。请求预算用完就先释放锁，下批补齐 head。
+                    val hasUnresolvedGroup = groups.indices.any { groupIndex ->
+                        heads[groupIndex] == null &&
+                            cursors[groupIndex] < groups[groupIndex].size
+                    }
+                    if (hasUnresolvedGroup) break
+
+                    val selected = selectNewestFileHeadIndex(heads) ?: break
+                    add(checkNotNull(heads[selected]))
+                    heads[selected] = null
+                    completed++
                 }
-            }
+            } }
 
             if (FileOrderProbe.enabled && requestedHandles.isNotEmpty()) {
                 FileOrderProbe.recordObjectInfoBatch(
@@ -3824,6 +4377,7 @@ class NikonCamera(private val context: Context) {
             }
             if (output.isNotEmpty()) {
                 onBatch(output, completed, total)
+                if (stopAfterBatch()) break
             } else if (completed == completedBeforeBatch && requestedHandles.isEmpty()) {
                 error("Merged ObjectInfo scan made no progress")
             }
@@ -4231,13 +4785,21 @@ class NikonCamera(private val context: Context) {
     }
 
     /**
-     * 关闭会话与连接。为 suspend 并纳入 [ioMutex] + IO 线程：
+     * 关闭会话与连接。为 suspend 并纳入相机事务调度器 + IO 线程：
      * - 避免在主线程发起 socket 写导致 NetworkOnMainThreadException；
      * - 与进行中的命令/下载互斥，消除并发读写同一 socket 的竞态；
      * - 用 NonCancellable 保证即使调用方作用域已取消也能完成清理。
      */
     suspend fun close() = withContext(NonCancellable + Dispatchers.IO) {
-        ioMutex.withLock {
+        // Close the submission gate before enqueueing the close command. An admitted transaction
+        // remains the only business operation allowed to finish; its own transfer/command cleanup
+        // keeps the PTP stream aligned before this close transaction takes the next slot.
+        ioGate.beginShutdown()
+        withCameraTransaction(
+            CameraRequestKind.INTERACTIVE,
+            "CLOSE_SESSION",
+            true,
+        ) {
             // 仅在会话确实打开时才发送 CloseSession，否则握手中途失败时会空等响应。
             if (sessionOpen) {
                 try {
@@ -4265,7 +4827,7 @@ class NikonCamera(private val context: Context) {
     }
 
     /**
-     * 临时修改命令通道读超时，返回原值。只允许已持有 [ioMutex] 的
+     * 临时修改命令通道读超时，返回原值。只允许在相机事务中调用的
      * 协议序列使用，避免其它事务观察到临时超时值。
      */
     internal fun setCommandReadTimeout(timeoutMs: Int): Int {
@@ -4291,7 +4853,7 @@ class NikonCamera(private val context: Context) {
 
     /**
      * 命令包读取超时后不得继续复用该 PTP/IP 流：PacketReader 可能已读了
-     * 半个包，迟到响应也会被下一事务误认。调用方必须已持有 [ioMutex]。
+     * 半个包，迟到响应也会被下一事务误认。调用方必须处于相机事务中。
      */
     internal fun abortProtocolTransport() {
         closeQuietly()
@@ -4306,6 +4868,7 @@ class NikonCamera(private val context: Context) {
         allowPairing: Boolean,
         exploreAlbumAccess: Boolean,
         forceProfilePairing: Boolean,
+        verifyPairingCompletion: Boolean,
         onConnectingStarted: (() -> Unit)?,
         onPairingStarted: (() -> Unit)?,
     ) {
@@ -4324,12 +4887,17 @@ class NikonCamera(private val context: Context) {
         val initialStorageIds = parseUInt32Array(storageData)
         staDiagnosticLines +=
             "GetStorageIDs=${hexResponse(storageResponse)} ids=${formatStorageIds(initialStorageIds)}"
+        val pairingMarker = hasCompletedStaPairing()
+        val trustedPairingMarker = hasTrustedStaPairing()
+        staDiagnosticLines +=
+            "pairing marker=$pairingMarker trusted=$trustedPairingMarker " +
+                "force=$forceProfilePairing verify=$verifyPairingCompletion"
         if (shouldForceStaProfilePairing(
                 storageResponse = storageResponse,
                 forceProfilePairing = forceProfilePairing,
                 allowPairing = allowPairing,
-                protocolPairingMarkerExists = hasCompletedStaPairing(),
-            )
+                protocolPairingMarkerExists = pairingMarker,
+            ) && !verifyPairingCompletion
         ) {
             // Z30 exposes full storage temporarily while the computer profile wizard is still
             // waiting for host pairing. Finish that one-time pairing first; otherwise the camera
@@ -4339,6 +4907,17 @@ class NikonCamera(private val context: Context) {
             onPairingStarted?.invoke()
             completeInitialPairing()
             throw PairingCompletedException()
+        }
+        // A pairing reconnect must not take the StorageIDs shortcut. DeviceInfo is already part
+        // of the normal STA exploration below, and its exact pairing-only operation set is the
+        // strongest available indication that the camera has not accepted the profile yet.
+        if (verifyPairingCompletion &&
+            hasUsableStaAlbumStorage(storageResponse, initialStorageIds) &&
+            !exploreAlbumAccess
+        ) {
+            invalidateStaPairingMarkers()
+            staDiagnosticLines += "state=PAIRING_VERIFICATION_REQUIRES_ALBUM_PROBE"
+            throw PairingNotConfirmedException()
         }
         // A paired WTU session may expose a real StorageID while GetObjectHandles still contains
         // only the upload queue. During exploration, StorageIDs alone are therefore not proof of
@@ -4364,11 +4943,28 @@ class NikonCamera(private val context: Context) {
         }
         staDiagnosticLines +=
             "GetDeviceInfo=${hexResponse(deviceInfoResponse)} operations=${operations.size}"
-        if (isStaPairingOnlyOperationSet(operations) && allowPairing) {
-            staDiagnosticLines += "state=PAIRING_REQUIRED"
+        if (verifyPairingCompletion &&
+            (deviceInfoResponse != PtpConstants.RESPONSE_OK ||
+                deviceInfoData == null || operations.isEmpty())
+        ) {
+            invalidateStaPairingMarkers()
+            staDiagnosticLines += "state=PAIRING_NOT_CONFIRMED reason=device-info-unavailable"
             onPairingStarted?.invoke()
-            completeInitialPairing()
-            throw PairingCompletedException()
+            throw PairingNotConfirmedException()
+        }
+        if (isStaPairingOnlyOperationSet(operations)) {
+            if (verifyPairingCompletion) {
+                invalidateStaPairingMarkers()
+                staDiagnosticLines += "state=PAIRING_NOT_CONFIRMED"
+                onPairingStarted?.invoke()
+                throw PairingNotConfirmedException()
+            }
+            if (allowPairing) {
+                staDiagnosticLines += "state=PAIRING_REQUIRED"
+                onPairingStarted?.invoke()
+                completeInitialPairing()
+                throw PairingCompletedException()
+            }
         }
         // Only now has the camera proved that this session does not require pairing. Publishing
         // CONNECTING earlier makes a stale app-side profile flash CONNECTING before PAIRING.
@@ -4383,6 +4979,7 @@ class NikonCamera(private val context: Context) {
             ) {
                 prefetchedStorageIds = initialStorageIds
                 staAlbumAccessValidated = true
+                confirmPairingIfNeeded(verifyPairingCompletion)
                 staDiagnosticLines += if (staDirectObjectReadValidated) {
                     "result=FULL_ALBUM_DIRECT_OBJECT_READ"
                 } else {
@@ -4412,6 +5009,7 @@ class NikonCamera(private val context: Context) {
                 ) {
                     prefetchedStorageIds = modeStorageIds
                     staAlbumAccessValidated = true
+                    confirmPairingIfNeeded(verifyPairingCompletion)
                     staDiagnosticLines += "result=FULL_ALBUM_APPLICATION_MODE"
                     return
                 }
@@ -4535,14 +5133,12 @@ class NikonCamera(private val context: Context) {
                 "Nikon pairing result failed: 0x${resultResponse.toString(16)}",
             )
         }
-        // Persist at the authoritative OK response, before waiting for the optional pacing event.
-        // This closes the process-death window without changing the camera-side protocol sequence.
-        markStaPairingCompleted()
-
-        // The OK response is authoritative. The following DeviceInfoChanged event is useful for
-        // pacing but is missing on some firmware, so timeout only affects the reconnect delay.
+        // The response only acknowledges the command. The camera may still be showing its
+        // pairing confirmation screen, so persistence is deliberately deferred until the fresh
+        // reconnect passes the browsing capability checks.
         val previousTimeout = evtSocket?.soTimeout ?: SO_TIMEOUT_MS
         val deadlineNanos = System.nanoTime() + PAIRING_EVENT_TIMEOUT_MS * 1_000_000L
+        var confirmationEventReceived = false
         try {
             while (System.nanoTime() < deadlineNanos) {
                 val remainingMs = ((deadlineNanos - System.nanoTime()) / 1_000_000L)
@@ -4560,19 +5156,49 @@ class NikonCamera(private val context: Context) {
                 } else {
                     0
                 }
-                if (eventCode == PtpConstants.EVENT_DEVICE_INFO_CHANGED) break
+                if (eventCode == PtpConstants.EVENT_DEVICE_INFO_CHANGED) {
+                    confirmationEventReceived = true
+                    break
+                }
             }
         } catch (_: Exception) {
             // Pairing was already acknowledged; reconnect below even without the optional event.
         } finally {
             evtSocket?.soTimeout = previousTimeout
         }
+        staDiagnosticLines +=
+            "pairing response acknowledged confirmationEvent=$confirmationEventReceived"
 
         runCatching {
             sendCmd(PtpConstants.CLOSE_SESSION)
             recvResp()
             sessionOpen = false
         }
+    }
+
+    private fun confirmPairingIfNeeded(verifyPairingCompletion: Boolean) {
+        if (!verifyPairingCompletion) return
+        pairingVerifiedForSession = true
+        markStaPairingCompleted()
+        staDiagnosticLines += "pairing=CONFIRMED_AFTER_RECONNECT"
+    }
+
+    /**
+     * A stale marker must not keep a camera permanently on the shortcut path after a failed
+     * verification. Clearing both generations makes the next explicit connection run the normal
+     * pairing handshake again instead of repeatedly reporting a false paired state.
+     */
+    private fun invalidateStaPairingMarkers() {
+        val cameraGuid = responderGuid ?: return
+        context.applicationContext.getSharedPreferences(
+            PTPIP_IDENTITY_PREFERENCES,
+            Context.MODE_PRIVATE,
+        )
+            .edit()
+            .remove("$STA_PAIRING_MARKER_PREFIX$cameraGuid")
+            .remove("$STA_PAIRING_VERIFIED_MARKER_PREFIX$cameraGuid")
+            .commit()
+        staDiagnosticLines += "pairing markers invalidated"
     }
 
     private fun persistentInitiatorId(preferenceKey: String = "initiator_id"): ByteArray {
@@ -4591,10 +5217,19 @@ class NikonCamera(private val context: Context) {
     }
 
     private fun hasCompletedStaPairing(): Boolean = responderGuid?.let { cameraGuid ->
+        val preferences = context.applicationContext.getSharedPreferences(
+            PTPIP_IDENTITY_PREFERENCES,
+            Context.MODE_PRIVATE,
+        )
+        preferences.getBoolean("$STA_PAIRING_MARKER_PREFIX$cameraGuid", false) ||
+            preferences.getBoolean("$STA_PAIRING_VERIFIED_MARKER_PREFIX$cameraGuid", false)
+    } ?: false
+
+    private fun hasTrustedStaPairing(): Boolean = responderGuid?.let { cameraGuid ->
         context.applicationContext.getSharedPreferences(
             PTPIP_IDENTITY_PREFERENCES,
             Context.MODE_PRIVATE,
-        ).getBoolean("$STA_PAIRING_MARKER_PREFIX$cameraGuid", false)
+        ).getBoolean("$STA_PAIRING_VERIFIED_MARKER_PREFIX$cameraGuid", false)
     } ?: false
 
     private fun markStaPairingCompleted() {
@@ -4605,6 +5240,7 @@ class NikonCamera(private val context: Context) {
         )
             .edit()
             .putBoolean("$STA_PAIRING_MARKER_PREFIX$cameraGuid", true)
+            .putBoolean("$STA_PAIRING_VERIFIED_MARKER_PREFIX$cameraGuid", true)
             .commit()
     }
 

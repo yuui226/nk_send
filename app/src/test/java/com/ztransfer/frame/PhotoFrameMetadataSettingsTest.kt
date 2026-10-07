@@ -157,6 +157,15 @@ class PhotoFrameMetadataSettingsTest {
         assertFalse(colorArchive.showDate)
         assertFalse(colorArchive.showTime)
 
+        val filmNegative = defaultPhotoFrameMetadataSettings(PhotoFramePreset.FILM_NEGATIVE)
+        assertTrue(filmNegative.showBrand)
+        assertTrue(filmNegative.showModel)
+        assertTrue(filmNegative.showFocalLength)
+        assertTrue(filmNegative.showExposure)
+        assertTrue(filmNegative.showDate)
+        assertFalse(filmNegative.showTime)
+        assertFalse(filmNegative.showLensModel)
+
         listOf(PhotoFramePreset.GALLERY_MAT, PhotoFramePreset.FILM_EDGE).forEach { preset ->
             val settings = defaultPhotoFrameMetadataSettings(preset)
             assertFalse(settings.showDate)

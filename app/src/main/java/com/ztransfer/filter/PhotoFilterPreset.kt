@@ -66,10 +66,39 @@ data class PhotoFilterColorBand(
 data class PhotoFilterSelection(
     val preset: PhotoFilterPreset,
     val intensityPercent: Int,
+    /** Per-LUT finishing controls. Non-LUT presets keep the neutral value. */
+    val lutAdjustments: LutAdjustments = LutAdjustments(),
 ) {
     val normalizedIntensityPercent: Int
         get() = normalizePhotoFilterIntensity(intensityPercent)
 }
+
+/** Small, deterministic post-LUT controls shared by preview and export. */
+data class LutAdjustments(
+    val contrast: Int = 0,
+    val saturation: Int = 0,
+    val highlights: Int = 0,
+    val shadows: Int = 0,
+) {
+    init {
+        require(contrast in LUT_ADJUSTMENT_RANGE)
+        require(saturation in LUT_ADJUSTMENT_RANGE)
+        require(highlights in LUT_ADJUSTMENT_RANGE)
+        require(shadows in LUT_ADJUSTMENT_RANGE)
+    }
+
+    fun normalized() = copy(
+        contrast = contrast.coerceIn(LUT_ADJUSTMENT_RANGE),
+        saturation = saturation.coerceIn(LUT_ADJUSTMENT_RANGE),
+        highlights = highlights.coerceIn(LUT_ADJUSTMENT_RANGE),
+        shadows = shadows.coerceIn(LUT_ADJUSTMENT_RANGE),
+    )
+
+    val isNeutral: Boolean
+        get() = contrast == 0 && saturation == 0 && highlights == 0 && shadows == 0
+}
+
+internal val LUT_ADJUSTMENT_RANGE = -100..100
 
 const val DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT = 80
 

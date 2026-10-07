@@ -4,7 +4,6 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.sync.withLock
 
 /** PTP StorageInfo fixed fields; unknown UINT64 values must never become a capacity. */
 internal fun parseMonitorFreeBytes(data: ByteArray): Long? {
@@ -17,15 +16,16 @@ internal fun parseMonitorFreeBytes(data: ByteArray): Long? {
 
 internal data class MonitorStorageRead(val freeBytes: Long? = null, val unsupported: Boolean = false)
 
-/** Standard GetStorageInfo, serialized with every other camera transaction. */
-internal suspend fun NikonCamera.monitorFreeBytes(storageId: Int, allowed: () -> Boolean): MonitorStorageRead = ioMutex.withLock {
-    if (!allowed()) return@withLock MonitorStorageRead()
-    withContext(Dispatchers.IO) {
-        sendCmd(0x1005, storageId)
-        val (response, data) = recvRespWithPayload()
-        MonitorStorageRead(
-            freeBytes = if (response == PtpConstants.RESPONSE_OK && data != null) parseMonitorFreeBytes(data) else null,
-            unsupported = response == 0x2005, // OperationNotSupported, not DeviceBusy or a temporary error.
-        )
+/** Standard GetStorageInfo, serialized as a low-priority idle transaction. */
+internal suspend fun NikonCamera.monitorFreeBytes(storageId: Int, allowed: () -> Boolean): MonitorStorageRead =
+    withCameraTransaction(CameraRequestKind.IDLE, "MONITOR_STORAGE") {
+        if (!allowed()) return@withCameraTransaction MonitorStorageRead()
+        withContext(Dispatchers.IO) {
+            sendCmd(0x1005, storageId)
+            val (response, data) = recvRespWithPayload()
+            MonitorStorageRead(
+                freeBytes = if (response == PtpConstants.RESPONSE_OK && data != null) parseMonitorFreeBytes(data) else null,
+                unsupported = response == 0x2005, // OperationNotSupported, not DeviceBusy or a temporary error.
+            )
+        }
     }
-}

@@ -1,6 +1,8 @@
 package com.ztransfer.protocol
 
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.joinAll
@@ -12,6 +14,7 @@ import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
 
 class CameraIoGateTest {
@@ -69,6 +72,345 @@ class CameraIoGateTest {
         transfer.join()
 
         assertEquals(listOf("fhd", "exif", "transfer"), order)
+    }
+
+    @Test
+    fun interactivePreemptsPreviewTransferAndRating() = runBlocking {
+        val gate = CameraIoGate()
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val order = mutableListOf<String>()
+        val active = launch {
+            gate.withBackgroundThumbnail {
+                entered.complete(Unit)
+                release.await()
+            }
+        }
+        entered.await()
+        val rating = launch { gate.withRatingTransaction { order += "rating" } }
+        val transfer = launch { gate.withTransferSlice { order += "transfer" } }
+        val preview = launch { gate.withPreviewTransaction { order += "preview" } }
+        val interactive = launch { gate.withInteractive { order += "interactive" } }
+        yield()
+        release.complete(Unit)
+        joinAll(active, interactive, preview, transfer, rating)
+        assertEquals(listOf("interactive", "preview", "transfer", "rating"), order)
+    }
+
+    @Test
+    fun ratingTransactionRunsBeforeQueuedVisibleThumbnail() = runBlocking {
+        val gate = CameraIoGate()
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val order = mutableListOf<String>()
+
+        val visible = launch {
+            gate.withVisibleThumbnail {
+                order += "visible-1"
+                entered.complete(Unit)
+                release.await()
+            }
+        }
+        entered.await()
+        gate.beginRatingPhase()
+        val background = async {
+            gate.withBackgroundThumbnail { order += "background" }
+        }
+        val rating = async {
+            gate.withRatingTransaction("rating") { order += "rating" }
+        }
+
+        release.complete(Unit)
+        joinAll(visible, rating)
+        gate.endRatingPhase()
+        background.await()
+        assertEquals(listOf("visible-1", "rating", "background"), order)
+    }
+
+    @Test
+    fun transferPreemptsQueuedThumbnailsOutsideRatingPhase() = runBlocking {
+        val gate = CameraIoGate()
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val order = mutableListOf<String>()
+        val first = launch {
+            gate.withTransferSlice {
+                order += "transfer-1"
+                entered.complete(Unit)
+                release.await()
+            }
+        }
+        entered.await()
+        val thumbnail = launch { gate.withBackgroundThumbnail { order += "thumbnail" } }
+        val second = launch { gate.withTransferSlice { order += "transfer-2" } }
+        yield()
+        release.complete(Unit)
+        joinAll(first, thumbnail, second)
+        assertEquals(listOf("transfer-1", "transfer-2", "thumbnail"), order)
+    }
+
+    @Test
+    fun firstTransferPreemptsBothVisibleAndBackgroundThumbnailBacklog() = runBlocking {
+        val gate = CameraIoGate()
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val order = mutableListOf<String>()
+        val activeThumbnail = launch {
+            gate.withBackgroundThumbnail {
+                order += "active-thumbnail"
+                entered.complete(Unit)
+                release.await()
+            }
+        }
+        entered.await()
+        val visible = launch { gate.withVisibleThumbnail { order += "visible-thumbnail" } }
+        val background = launch { gate.withBackgroundThumbnail { order += "background-thumbnail" } }
+        val firstTransfer = launch { gate.withTransferSlice { order += "first-transfer" } }
+        yield()
+        release.complete(Unit)
+        joinAll(activeThumbnail, visible, background, firstTransfer)
+        assertEquals(
+            listOf("active-thumbnail", "first-transfer", "visible-thumbnail", "background-thumbnail"),
+            order,
+        )
+    }
+
+    @Test
+    fun ratingPhaseLetsTransferWinButPutsRemoteThumbnailsAfterRating() = runBlocking {
+        val gate = CameraIoGate()
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val order = mutableListOf<String>()
+        val first = launch {
+            gate.withTransferSlice {
+                order += "transfer-1"
+                entered.complete(Unit)
+                release.await()
+            }
+        }
+        entered.await()
+        gate.beginRatingPhase()
+        val thumbnail = launch { gate.withBackgroundThumbnail { order += "thumbnail" } }
+        val rating = launch { gate.withRatingTransaction { order += "rating" } }
+        val second = launch { gate.withTransferSlice { order += "transfer-2" } }
+        yield()
+        release.complete(Unit)
+        joinAll(first, rating, second)
+        gate.endRatingPhase()
+        thumbnail.join()
+        assertEquals(listOf("transfer-1", "transfer-2", "rating", "thumbnail"), order)
+    }
+
+    @Test
+    fun ratingPhaseLetsPreviewWinButBlocksLowPriorityAdmission() = runBlocking {
+        val gate = CameraIoGate()
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val order = mutableListOf<String>()
+        val first = launch {
+            gate.withPreviewTransaction("preview-1") {
+                order += "preview-1"
+                entered.complete(Unit)
+                release.await()
+            }
+        }
+        entered.await()
+        gate.beginRatingPhase()
+        val background = launch { gate.withBackgroundThumbnail { order += "background" } }
+        val secondPreview = launch { gate.withPreviewTransaction("preview-2") { order += "preview-2" } }
+        val rating = launch { gate.withRatingTransaction { order += "rating" } }
+        release.complete(Unit)
+        joinAll(first, secondPreview, rating)
+        assertEquals(listOf("preview-1", "preview-2", "rating"), order)
+        gate.endRatingPhase()
+        background.join()
+        assertEquals(listOf("preview-1", "preview-2", "rating", "background"), order)
+    }
+
+    @Test
+    fun ratingPhaseBlocksIdleCommandsBetweenFilesButRunsThemAfterPhase() = runBlocking {
+        val gate = CameraIoGate()
+        val order = mutableListOf<String>()
+        gate.beginRatingPhase()
+        val idle = launch { gate.withIdleCommand(Unit) { order += "idle" } }
+        yield()
+        assertTrue(order.isEmpty())
+        val rating = launch { gate.withRatingTransaction { order += "rating" } }
+        rating.join()
+        assertEquals(listOf("rating"), order)
+        gate.endRatingPhase()
+        idle.join()
+        assertEquals(listOf("rating", "idle"), order)
+    }
+
+    @Test
+    fun ratingPhaseKeepsEventPollingBehindRating() = runBlocking {
+        val gate = CameraIoGate()
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val order = mutableListOf<String>()
+        val firstEvent = launch {
+            gate.withCameraTransaction(CameraRequestKind.EVENT_POLL, "EVENT_POLL") {
+                order += "event-1"
+                entered.complete(Unit)
+                release.await()
+            }
+        }
+        entered.await()
+        gate.beginRatingPhase()
+        val event = launch {
+            gate.withCameraTransaction(CameraRequestKind.EVENT_POLL, "EVENT_POLL") { order += "event-2" }
+        }
+        val nextRating = launch { gate.withRatingTransaction { order += "rating" } }
+        release.complete(Unit)
+        joinAll(firstEvent, nextRating)
+        gate.endRatingPhase()
+        event.join()
+        assertEquals(listOf("event-1", "rating", "event-2"), order)
+    }
+
+    @Test
+    fun eventPollingKeepsLegacyFifoOutsideRatingPhase() = runBlocking {
+        val gate = CameraIoGate()
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val order = mutableListOf<String>()
+        val first = launch {
+            gate.withTransferSlice {
+                order += "transfer-1"
+                entered.complete(Unit)
+                release.await()
+            }
+        }
+        entered.await()
+        val event = launch {
+            gate.withCameraTransaction(CameraRequestKind.EVENT_POLL, "EVENT_POLL") { order += "event" }
+        }
+        val second = launch { gate.withTransferSlice { order += "transfer-2" } }
+        yield()
+        release.complete(Unit)
+        joinAll(first, event, second)
+        assertEquals(listOf("transfer-1", "event", "transfer-2"), order)
+    }
+
+    @Test
+    fun cancelledQueuedTransactionDoesNotBlockNextRequest() = runBlocking {
+        val gate = CameraIoGate()
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val order = mutableListOf<String>()
+
+        val active = launch {
+            gate.withVisibleThumbnail {
+                entered.complete(Unit)
+                release.await()
+            }
+        }
+        entered.await()
+        val queued = launch {
+            gate.withBackgroundThumbnail { order += "cancelled" }
+        }
+        yield()
+        queued.cancelAndJoin()
+
+        val rating = launch {
+            gate.withRatingTransaction { order += "rating" }
+        }
+        release.complete(Unit)
+        joinAll(active, rating)
+        assertEquals(listOf("rating"), order)
+    }
+
+    @Test
+    fun closingSessionCancelsAllQueuedTransactionsButKeepsActiveOne() = runBlocking {
+        val gate = CameraIoGate()
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val cancelled = CompletableDeferred<Unit>()
+        val order = mutableListOf<String>()
+
+        val active = launch {
+            gate.withVisibleThumbnail {
+                order += "active"
+                entered.complete(Unit)
+                release.await()
+            }
+        }
+        entered.await()
+        launch {
+            try {
+                gate.withBackgroundThumbnail { order += "queued" }
+            } catch (_: CancellationException) {
+                cancelled.complete(Unit)
+            }
+        }
+        yield()
+
+        gate.beginShutdown()
+        cancelled.await()
+        release.complete(Unit)
+        active.join()
+
+        assertEquals(listOf("active"), order)
+        assertEquals(0, gate.snapshot().queued)
+    }
+
+    @Test
+    fun shutdownRejectsNewRequestsButAllowsCloseTransaction() = runBlocking {
+        val gate = CameraIoGate()
+        gate.beginShutdown("test shutdown")
+
+        try {
+            gate.withBackgroundThumbnail { fail("new request must be rejected after shutdown") }
+            fail("new request must be rejected after shutdown")
+        } catch (error: CancellationException) {
+            assertEquals("test shutdown", error.message)
+        }
+
+        var closed = false
+        gate.withCameraTransaction(
+            CameraRequestKind.INTERACTIVE,
+            "CLOSE_SESSION",
+            block = { closed = true },
+            allowDuringShutdown = true,
+        )
+        assertTrue(closed)
+    }
+
+    @Test
+    fun cancellingActiveTransactionReleasesSchedulerForNextRequest() = runBlocking {
+        val gate = CameraIoGate()
+        val entered = CompletableDeferred<Unit>()
+        val order = mutableListOf<String>()
+
+        val active = launch {
+            gate.withVisibleThumbnail {
+                entered.complete(Unit)
+                awaitCancellation()
+            }
+        }
+        entered.await()
+        val next = launch {
+            gate.withRatingTransaction { order += "rating" }
+        }
+        yield()
+
+        active.cancelAndJoin()
+        next.join()
+        assertEquals(listOf("rating"), order)
+    }
+
+    @Test
+    fun nestedCameraTransactionIsRejected() = runBlocking {
+        val gate = CameraIoGate()
+        try {
+            gate.withCameraTransaction(CameraRequestKind.INTERACTIVE, "outer") {
+                gate.withRatingTransaction("inner") { Unit }
+            }
+            fail("nested camera transactions must be rejected")
+        } catch (error: IllegalStateException) {
+            assertTrue(error.message.orEmpty().contains("Nested camera transaction"))
+        }
     }
 
     @Test
@@ -181,6 +523,109 @@ class CameraIoGateTest {
         download.cancelAndJoin()
 
         assertTrue(gate.withIdleCommand(skippedValue = false) { true })
+    }
+
+    @Test(timeout = 5000)
+    fun ratingGapsBlockEveryBackgroundKindButAllowForegroundAndLocalWork() = runBlocking {
+        val gate = CameraIoGate()
+        val background = listOf(CameraRequestKind.VISIBLE_THUMBNAIL,
+            CameraRequestKind.BACKGROUND_THUMBNAIL, CameraRequestKind.IDLE,
+            CameraRequestKind.EVENT_POLL)
+        val order = mutableListOf<String>()
+        gate.beginRatingPhase()
+        val waiting = background.map { kind ->
+            launch { gate.withCameraTransaction(kind) { order += kind.name } }
+        }
+        yield()
+        assertEquals(4, gate.snapshot().queued)
+        repeat(2) {
+            // No rating ticket is queued during this local work, but the phase stays active.
+            val local = async { "cached thumbnail" }
+            assertEquals("cached thumbnail", local.await())
+            for (kind in listOf(CameraRequestKind.INTERACTIVE, CameraRequestKind.PREVIEW,
+                CameraRequestKind.TRANSFER, CameraRequestKind.RATING)) {
+                gate.withCameraTransaction(kind) { order += kind.name }
+            }
+            assertFalse(order.any { name -> background.any { it.name == name } })
+        }
+        gate.endRatingPhase()
+        waiting.joinAll()
+        assertEquals(0, gate.snapshot().queued)
+        assertEquals(background.toSet(), order.takeLast(4).map { CameraRequestKind.valueOf(it) }.toSet())
+    }
+
+    @Test(timeout = 5000)
+    fun cancelledRatingPassReleasesBlockedRequestsInFinally() = runBlocking {
+        val gate = CameraIoGate()
+        val started = CompletableDeferred<Unit>()
+        val scan = launch {
+            gate.beginRatingPhase()
+            try {
+                started.complete(Unit)
+                awaitCancellation()
+            } finally { gate.endRatingPhase() }
+        }
+        started.await()
+        var ran = false
+        val thumbnail = launch { gate.withBackgroundThumbnail { ran = true } }
+        yield()
+        assertFalse(ran)
+        scan.cancelAndJoin()
+        thumbnail.join()
+        assertTrue(ran)
+    }
+
+    @Test(timeout = 5000)
+    fun shutdownClearsPhaseBlockedRequestsAndAllowsClose() = runBlocking {
+        val gate = CameraIoGate()
+        gate.beginRatingPhase()
+        val queued = listOf(CameraRequestKind.EVENT_POLL, CameraRequestKind.IDLE,
+            CameraRequestKind.BACKGROUND_THUMBNAIL).map { kind ->
+            launch { gate.withCameraTransaction(kind) { fail("blocked request ran") } }
+        }
+        yield()
+        gate.beginShutdown()
+        queued.joinAll()
+        assertTrue(queued.all { it.isCancelled })
+        gate.withCameraTransaction(CameraRequestKind.INTERACTIVE, "close", true) { Unit }
+        gate.endRatingPhase()
+        assertEquals(0, gate.snapshot().queued)
+    }
+
+    @Test(timeout = 5000)
+    fun monitorEventsRemainAvailableWhileBackgroundEventsWaitForRating() = runBlocking {
+        val gate = CameraIoGate()
+        gate.beginRatingPhase()
+        var backgroundRan = false
+        val background = launch {
+            gate.withCameraTransaction(eventPollRequestKind(true)) { backgroundRan = true }
+        }
+        yield()
+        assertFalse(backgroundRan)
+        var monitorRan = false
+        gate.withCameraTransaction(eventPollRequestKind(false)) { monitorRan = true }
+        assertTrue(monitorRan)
+        assertFalse(backgroundRan)
+        gate.endRatingPhase()
+        background.join()
+        assertTrue(backgroundRan)
+    }
+
+    @Test(timeout = 5000)
+    fun overlappingRatingLifecyclesCannotReleaseAnotherPassBarrier() = runBlocking {
+        val gate = CameraIoGate()
+        gate.beginRatingPhase()
+        gate.beginRatingPhase()
+        var ran = false
+        val thumbnail = launch { gate.withBackgroundThumbnail { ran = true } }
+        yield()
+        gate.endRatingPhase()
+        yield()
+        assertFalse(ran)
+        gate.withRatingTransaction { Unit }
+        gate.endRatingPhase()
+        thumbnail.join()
+        assertTrue(ran)
     }
 
     @Test

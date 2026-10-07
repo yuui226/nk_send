@@ -8,6 +8,8 @@ import com.ztransfer.effects.showsPhotoEffect
 import com.ztransfer.frame.supportsBackdropControls
 
 import com.ztransfer.viewmodel.AutoTransferMode
+import com.ztransfer.viewmodel.TransferStorageMode
+import com.ztransfer.viewmodel.PhotoLoadingRange
 
 import android.Manifest
 import android.bluetooth.BluetoothAdapter
@@ -1034,10 +1036,9 @@ fun SettingsOverlay(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    BooleanSettingsWheel(
-                        label = stringResource(R.string.organize_transfers_by_date),
-                        checked = state.organizeTransfersByDate,
-                        onCheckedChange = viewModel::setOrganizeTransfersByDate,
+                    StorageModeWheel(
+                        mode = state.storageMode,
+                        onModeChanged = viewModel::setStorageMode,
                         hapticsEnabled = state.hapticsEnabled,
                         enabled = state.transferDirUri != null,
                         modifier = Modifier.weight(1f),
@@ -1094,22 +1095,34 @@ fun SettingsOverlay(
 
                 CardDivider()
 
-                val selectedPhotoInteraction = photoInteractionChoices.first {
-                    it.first == state.tapToPreview
-                }
-                ReleaseCommitWheel(
-                    options = photoInteractionChoices,
-                    selected = selectedPhotoInteraction,
-                    optionLabel = { (_, label) -> label },
-                    onValueCommitted = { (tapToPreview, _) ->
-                        viewModel.setTapToPreview(tapToPreview)
-                    },
-                    onDetent = haptics::tick,
-                    label = stringResource(R.string.photo_interaction),
-                    optionRowHeight = 32.dp,
-                    optionMaxLines = 2,
+                val selectedPhotoInteraction = photoInteractionChoices.first { it.first == state.tapToPreview }
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth(),
-                )
+                ) {
+                    ReleaseCommitWheel(
+                        options = photoInteractionChoices,
+                        selected = selectedPhotoInteraction,
+                        optionLabel = { (_, label) -> label },
+                        onValueCommitted = { (tapToPreview, _) -> viewModel.setTapToPreview(tapToPreview) },
+                        onDetent = haptics::tick,
+                        label = stringResource(R.string.photo_interaction),
+                        optionRowHeight = 32.dp,
+                        optionMaxLines = 2,
+                        modifier = Modifier.weight(1.35f),
+                    )
+                    ReleaseCommitWheel(
+                        options = PhotoLoadingRange.entries,
+                        selected = state.photoLoadingRange,
+                        optionLabel = { range -> if (range == PhotoLoadingRange.ALL) "全部" else "${range.days}日" },
+                        onValueCommitted = viewModel::setPhotoLoadingRange,
+                        onDetent = haptics::tick,
+                        label = "照片加载范围",
+                        optionRowHeight = 32.dp,
+                        modifier = Modifier.weight(0.65f),
+                    )
+                }
             }
 
             Spacer(Modifier.height(8.dp))
@@ -1140,6 +1153,8 @@ fun SettingsOverlay(
                     stringResource(R.string.photo_frame_film_gallery),
                 PhotoFramePreset.FILM_EDGE to
                     stringResource(R.string.photo_frame_film_edge),
+                PhotoFramePreset.FILM_NEGATIVE to
+                    stringResource(R.string.photo_frame_film_negative),
                 PhotoFramePreset.PARAMETER_POSTER to
                     stringResource(R.string.photo_frame_parameter_poster),
             )
@@ -1525,8 +1540,8 @@ private fun MainSettingsInfoBubble(
     } ?: 64.dp
     val items = listOf(
         TipBubbleItem(
-            label = stringResource(R.string.organize_transfers_by_date),
-            text = stringResource(R.string.organize_transfers_by_date_summary),
+            label = stringResource(R.string.storage_mode),
+            text = stringResource(R.string.storage_mode_summary),
         ),
         TipBubbleItem(
             label = stringResource(R.string.auto_transfer_new_media),
@@ -1851,6 +1866,9 @@ internal fun FavoriteToggleButton(
     favorite: Boolean,
     enabled: Boolean,
     onClick: () -> Unit,
+    description: String? = null,
+    compact: Boolean = false,
+    compactSize: Dp = 28.dp,
 ) {
     val palette = rememberPhotoEffectFavoriteButtonPalette()
     val markColor by animateColorAsState(
@@ -1867,9 +1885,9 @@ internal fun FavoriteToggleButton(
         // 钛合金凹刻与相机键帽丝印会重绘内容；显式传入同一动画色，确保实体材质
         // 与毛玻璃、木纹主题拥有一致的收藏过渡，同时保持各自合适的对比度。
         materialContentColor = markColor,
-        shape = RoundedCornerShape(13.dp),
+        shape = RoundedCornerShape(if (compact) 10.dp else 13.dp),
         contentPadding = PaddingValues(0.dp),
-        modifier = Modifier.size(PHOTO_EFFECTS_CONTROL_HEIGHT),
+        modifier = Modifier.size(if (compact) compactSize else PHOTO_EFFECTS_CONTROL_HEIGHT),
     ) {
         AnimatedContent(
             targetState = favorite,
@@ -1881,12 +1899,12 @@ internal fun FavoriteToggleButton(
         ) { selected ->
             Icon(
                 imageVector = if (selected) Icons.Rounded.Star else Icons.Rounded.StarBorder,
-                contentDescription = stringResource(
+                contentDescription = description ?: stringResource(
                     if (selected) R.string.photo_effect_favorite_remove
                     else R.string.photo_effect_favorite_add,
                 ),
                 tint = markColor,
-                modifier = Modifier.size(22.dp),
+                modifier = Modifier.size(if (compact) (compactSize - 10.dp).coerceAtLeast(16.dp) else 22.dp),
             )
         }
     }
@@ -2008,6 +2026,7 @@ internal fun PhotoFrameWatermarkEditor(
         PhotoFramePreset.COLOR_ARCHIVE to stringResource(R.string.photo_frame_color_archive),
         PhotoFramePreset.FILM_GALLERY to stringResource(R.string.photo_frame_film_gallery),
         PhotoFramePreset.FILM_EDGE to stringResource(R.string.photo_frame_film_edge),
+        PhotoFramePreset.FILM_NEGATIVE to stringResource(R.string.photo_frame_film_negative),
         PhotoFramePreset.PARAMETER_POSTER to stringResource(R.string.photo_frame_parameter_poster),
     )
     val frameLabels = frameChoicesInCatalogOrder.toMap()
@@ -3417,6 +3436,10 @@ private data class PhotoEffectsPreviewFrameLayout(
 private data class PhotoEffectsPreviewCacheKey(
     val filterId: String?,
     val intensityPercent: Int,
+    val contrast: Int,
+    val saturation: Int,
+    val highlights: Int,
+    val shadows: Int,
 ) {
     companion object {
         fun from(selection: PhotoFilterSelection?): PhotoEffectsPreviewCacheKey =
@@ -3424,8 +3447,12 @@ private data class PhotoEffectsPreviewCacheKey(
                 PhotoEffectsPreviewCacheKey(
                     filterId = it.preset.id,
                     intensityPercent = it.normalizedIntensityPercent,
+                    contrast = it.lutAdjustments.contrast,
+                    saturation = it.lutAdjustments.saturation,
+                    highlights = it.lutAdjustments.highlights,
+                    shadows = it.lutAdjustments.shadows,
                 )
-            } ?: PhotoEffectsPreviewCacheKey(null, 0)
+            } ?: PhotoEffectsPreviewCacheKey(null, 0, 0, 0, 0, 0)
     }
 }
 
@@ -3620,6 +3647,32 @@ private fun BooleanSettingsWheel(
         optionFontSize = if (compact) COMPACT_SETTINGS_WHEEL_FONT_SIZE else 14.sp,
         modifier = modifier,
         enabled = enabled,
+    )
+}
+
+@Composable
+private fun StorageModeWheel(
+    mode: TransferStorageMode,
+    onModeChanged: (TransferStorageMode) -> Unit,
+    hapticsEnabled: Boolean,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val colors = AppTheme.colors
+    val haptics = rememberHaptics(hapticsEnabled)
+    val labels = mapOf(
+        TransferStorageMode.UNIFIED to stringResource(R.string.storage_mode_unified),
+        TransferStorageMode.BY_DAY to stringResource(R.string.storage_mode_by_day),
+        TransferStorageMode.BY_TYPE to stringResource(R.string.storage_mode_by_type),
+    )
+    ReleaseCommitWheel(
+        options = TransferStorageMode.entries.toList(), selected = mode,
+        optionLabel = { labels.getValue(it) }, onValueCommitted = onModeChanged,
+        onDetent = haptics::tick, label = stringResource(R.string.storage_mode),
+        accentColor = if (mode == TransferStorageMode.UNIFIED) colors.statusWaiting else colors.accentBlue,
+        emphasized = mode != TransferStorageMode.UNIFIED,
+        wheelHeight = BOOLEAN_SETTINGS_WHEEL_HEIGHT, optionRowHeight = 18.dp,
+        optionFontSize = 14.sp, modifier = modifier, enabled = enabled,
     )
 }
 

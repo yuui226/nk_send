@@ -854,7 +854,7 @@ internal fun PhotoPreviewOverlay(
         }
     }
 
-    // 预览期间暂停后台缩略图填充，把 ioMutex 让给 FHD/EXIF 取图。
+    // 预览期间暂停后台缩略图填充，把相机通道让给 FHD/EXIF 取图。
     DisposableEffect(Unit) {
         cameraViewModel.setFhdActive(true)
         onDispose { cameraViewModel.setFhdActive(false) }

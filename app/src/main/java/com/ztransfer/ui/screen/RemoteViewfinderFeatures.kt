@@ -24,7 +24,6 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.text.font.FontWeight
@@ -124,45 +123,6 @@ internal fun fitCenterRect(
     val left = (containerWidth - width) / 2f
     val top = (containerHeight - height) / 2f
     return Rect(left, top, left + width, top + height)
-}
-
-/** 统一的相机式四角 AF 框，中央半按与点按对焦共用同一绘制实现。 */
-internal fun DrawScope.drawFocusCornerReticle(
-    center: Offset,
-    halfSize: Float,
-    cornerLength: Float,
-    color: Color,
-    strokeWidth: Float
-) = drawFocusCornerReticle(
-    center = center,
-    halfWidth = halfSize,
-    halfHeight = halfSize,
-    cornerLength = cornerLength,
-    color = color,
-    strokeWidth = strokeWidth
-)
-
-/** 可保留相机真实 AF 区域宽高比的四角框。 */
-internal fun DrawScope.drawFocusCornerReticle(
-    center: Offset,
-    halfWidth: Float,
-    halfHeight: Float,
-    cornerLength: Float,
-    color: Color,
-    strokeWidth: Float
-) {
-    val x0 = center.x - halfWidth
-    val x1 = center.x + halfWidth
-    val y0 = center.y - halfHeight
-    val y1 = center.y + halfHeight
-    drawLine(color, Offset(x0, y0 + cornerLength), Offset(x0, y0), strokeWidth, StrokeCap.Round)
-    drawLine(color, Offset(x0, y0), Offset(x0 + cornerLength, y0), strokeWidth, StrokeCap.Round)
-    drawLine(color, Offset(x1 - cornerLength, y0), Offset(x1, y0), strokeWidth, StrokeCap.Round)
-    drawLine(color, Offset(x1, y0), Offset(x1, y0 + cornerLength), strokeWidth, StrokeCap.Round)
-    drawLine(color, Offset(x0, y1 - cornerLength), Offset(x0, y1), strokeWidth, StrokeCap.Round)
-    drawLine(color, Offset(x0, y1), Offset(x0 + cornerLength, y1), strokeWidth, StrokeCap.Round)
-    drawLine(color, Offset(x1, y1 - cornerLength), Offset(x1, y1), strokeWidth, StrokeCap.Round)
-    drawLine(color, Offset(x1 - cornerLength, y1), Offset(x1, y1), strokeWidth, StrokeCap.Round)
 }
 
 /** 线性归一化的亮度统计，以及按需附带的 RGB 三通道统计；绘制层不再读取源图。 */

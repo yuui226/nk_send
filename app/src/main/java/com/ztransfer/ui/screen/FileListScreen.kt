@@ -1,5 +1,8 @@
 package com.ztransfer.ui.screen
 
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
+
 import com.ztransfer.util.HistogramMode
 
 import android.app.Activity
@@ -106,12 +109,14 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
@@ -120,6 +125,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ztransfer.R
 import com.ztransfer.gps.NikonGpsService
+import com.ztransfer.diagnostics.RatingDiagnostics
 import com.ztransfer.license.LicenseManager
 import com.ztransfer.protocol.CameraConnectionType
 import com.ztransfer.protocol.NikonCamera
@@ -136,9 +142,11 @@ import com.ztransfer.viewmodel.ExportedOriginalIndex
 import com.ztransfer.viewmodel.PhotoExif
 import com.ztransfer.viewmodel.PhotoFilterCriteria
 import com.ztransfer.viewmodel.PhotoDateRange
+import com.ztransfer.viewmodel.newestCaptureDaysRange
 import com.ztransfer.viewmodel.TransferState
 import com.ztransfer.viewmodel.TransferStatus
 import com.ztransfer.viewmodel.TransferTask
+import com.ztransfer.viewmodel.TransferStorageMode
 import com.ztransfer.viewmodel.TransferViewModel
 import com.ztransfer.viewmodel.compactDateRangeLabel
 import com.ztransfer.viewmodel.isTransferredOriginal
@@ -231,9 +239,13 @@ internal data class FileListTransferUiState(
     val collapseBurstPhotos: Boolean,
     val tapToPreview: Boolean,
     val hapticsEnabled: Boolean,
-    val organizeTransfersByDate: Boolean,
+    val storageMode: TransferStorageMode,
     val filterExtensions: Set<String>?,
     val filterProtectedOnly: Boolean,
+    val filterRatingEnabled: Boolean = false,
+    val filterRating: Int? = null,
+    val filterRatingDays: Int = 3,
+    val photoLoadingDays: Int = 0,
     val filterBurstOnly: Boolean,
     val filterUntransferredOnly: Boolean,
     val filterStorageSlot: Int?,
@@ -254,9 +266,13 @@ internal fun TransferState.toFileListTransferUiState(): FileListTransferUiState 
         collapseBurstPhotos = collapseBurstPhotos,
         tapToPreview = tapToPreview,
         hapticsEnabled = hapticsEnabled,
-        organizeTransfersByDate = organizeTransfersByDate,
+        storageMode = storageMode,
         filterExtensions = filterExtensions,
         filterProtectedOnly = filterProtectedOnly,
+        filterRatingEnabled = filterRatingEnabled,
+        filterRating = filterRating,
+        filterRatingDays = filterRatingDays,
+        photoLoadingDays = photoLoadingRange.days,
         filterBurstOnly = filterBurstOnly,
         filterUntransferredOnly = filterUntransferredOnly,
         filterStorageSlot = filterStorageSlot,
@@ -320,10 +336,21 @@ internal fun exportedHandlesForUntransferredFilter(
     index: ExportedOriginalIndex,
     organizeTransfersByDate: Boolean,
     enabled: Boolean,
+): Set<Int> = exportedHandlesForUntransferredFilter(
+    files, index,
+    if (organizeTransfersByDate) TransferStorageMode.BY_DAY else TransferStorageMode.UNIFIED,
+    enabled,
+)
+
+internal fun exportedHandlesForUntransferredFilter(
+    files: List<NikonCamera.FileInfo>,
+    index: ExportedOriginalIndex,
+    storageMode: TransferStorageMode,
+    enabled: Boolean,
 ): Set<Int> = if (enabled) {
     files.asSequence()
         .filter { file ->
-            isTransferredOriginal(file, index, organizeTransfersByDate)
+            isTransferredOriginal(file, index, storageMode)
         }
         .mapTo(HashSet()) { it.handle }
 } else {
@@ -443,7 +470,11 @@ private val TOP_BAR_COMPACT_BUTTON_MIN_WIDTH = 40.dp
 // 主筛选与日期编辑共用固定宽度，切页时不横向重排面板。
 // 筛选内容包含五列类型按钮和三列日期波轮：手机上尽量利用横向空间，宽屏则封顶，
 // 避免固定窄面板挤压标签，也避免平板上横向铺得过散。
-private val FILTER_PANEL_MAX_WIDTH = 360.dp
+// Keep the panel just wide enough for the fixed rating row: 14dp content padding on both sides,
+// the 81dp switch, its 8dp gap, and five 30dp stars with 1dp gaps. This makes the last star's
+// trailing margin identical to the right margin of the full-width “未传” chip row, without
+// changing the panel width when the rating controls crossfade.
+private val FILTER_PANEL_MAX_WIDTH = 14.dp * 2 + 81.dp + 8.dp + (30.dp * 5) + (1.dp * 4)
 private val FILTER_PANEL_SCREEN_MARGIN = 12.dp
 private val DATE_FILTER_WHEEL_HEIGHT = 50.dp
 
@@ -560,6 +591,7 @@ fun FileListScreen(
     }.collectAsStateWithLifecycle(
         initialValue = transferViewModel.state.value.toFileListTransferUiState(),
     )
+    val recentThumbnailReadyDays by cameraViewModel.recentThumbnailReadyDays.collectAsStateWithLifecycle()
     val gpsContext = LocalContext.current
     val gpsBlockedByAp = state.isConnectedToCamera &&
         state.connectionType == CameraConnectionType.WIFI &&
@@ -613,6 +645,16 @@ fun FileListScreen(
                 cameraRemovalReflowActive = false
                 cameraRemovalAffectedDates = emptySet()
             }
+        }
+    }
+    // The catalog remains complete for transfer/rating bookkeeping, while the visible grid and
+    // its rating source snapshot honor the user's newest actual-shooting-day boundary.
+    val photoLoadingRange = remember(presentedCameraFiles, transferState.photoLoadingDays) {
+        newestCaptureDaysRange(presentedCameraFiles, transferState.photoLoadingDays)
+    }
+    val displayedCameraFiles = remember(presentedCameraFiles, photoLoadingRange) {
+        if (photoLoadingRange == null) presentedCameraFiles else presentedCameraFiles.filter { file ->
+            file.captureDate == null || photoLoadingRange.containsCaptureDate(file.captureDate)
         }
     }
     val colors = AppTheme.colors
@@ -801,12 +843,26 @@ fun FileListScreen(
         bottom = bottomInset + 12.dp
     )
 
-    // 筛选（类型/保护/连拍/未传输/卡槽/日期）：纯前端过滤——原始 state.files 不动、不触发重新读取；
+    // 筛选不修改原始 state.files；星级按需补读文件头，其余条件均为本地过滤。
     // 预览翻页/分组/网格全部基于过滤后的数据，自然一致。
     //（曾有"横竖构图"筛选,已摘除:ObjectInfo 的宽高是传感器原生方向,竖拍的方向
     // 只在 EXIF Orientation 里且依赖机内"自动旋转图像"设置——ObjectInfo 这条路
     // 判不出构图。将来若做,走 EXIF 头懒采集 + 磁盘缓存,可顺带修显示旋转。）
     val filterExts = transferState.filterExtensions
+    var previewIndex by remember { mutableStateOf<Int?>(null) }
+    val filterRating = transferState.filterRating
+    val filterRatingEnabled = transferState.filterRatingEnabled
+    val filterRatingDays = transferState.filterRatingDays
+    val photoLoadingDays = transferState.photoLoadingDays
+    val ratingScan = rememberPhotoRatings(
+        cameraViewModel.getCamera().takeIf { state.isConnectedToCamera },
+        filterRatingEnabled, displayedCameraFiles, paused = transferState.isTransferring || previewIndex != null,
+        useObjectRating = state.connectionType == CameraConnectionType.USB || !state.isStaConnection,
+        staConnection = state.isStaConnection,
+        listLoading = state.isLoadingFiles,
+        recentThumbnailReadyDays = recentThumbnailReadyDays,
+        ratingDays = filterRatingDays,
+        photoLoadingDays = photoLoadingDays)
     val filterProtected = transferState.filterProtectedOnly
     val filterBurst = transferState.filterBurstOnly
     val filterUntransferred = transferState.filterUntransferredOnly
@@ -819,6 +875,9 @@ fun FileListScreen(
     val selectedStorageIds = filterStorageSlot?.let(storageIdBySlot::get)
     val filterCriteria = remember(
         filterExts,
+        filterRating,
+        filterRatingEnabled,
+        filterRatingDays,
         filterProtected,
         filterBurst,
         filterUntransferred,
@@ -828,18 +887,23 @@ fun FileListScreen(
         PhotoFilterCriteria(
             extensions = filterExts,
             protectedOnly = filterProtected,
+            ratingEnabled = filterRatingEnabled,
+            rating = filterRating,
+            ratingDays = filterRatingDays,
             burstOnly = filterBurst,
             untransferredOnly = filterUntransferred,
             storageSlot = filterStorageSlot,
             dateRange = filterDateRange,
         )
     }
-    val filterActive = filterExts != null || filterProtected || filterBurst ||
+    // Turning on the rating loader alone must not filter or re-layout the photo grid.
+    // Only a concrete star value is a visible list filter.
+    val filterActive = filterRating != null || filterExts != null || filterProtected || filterBurst ||
         filterUntransferred || filterStorageSlot != null || filterDateRange != null
 
     // 设备上实际存在的类型（从未过滤的原始列表提取，供下拉选项自动生成）。
-    val availableExts = remember(presentedCameraFiles) {
-        presentedCameraFiles.map { it.extension }.distinct().sorted()
+    val availableExts = remember(displayedCameraFiles) {
+        displayedCameraFiles.map { it.extension }.distinct().sorted()
     }
     // 扫描途中保留当前选择；完整扫描后只有确认存在双卡才允许卡槽筛选。
     // 单卡时筛选没有意义，归回“全部”也能保证入口按钮不会卡在激活状态。
@@ -872,13 +936,13 @@ fun FileListScreen(
             filterRevealWindow = false
         }
     }
-    val latestKnownDate = remember(presentedCameraFiles) {
-        latestCaptureLocalDate(presentedCameraFiles.asSequence().map { it.captureDate })
+    val latestKnownDate = remember(displayedCameraFiles) {
+        latestCaptureLocalDate(displayedCameraFiles.asSequence().map { it.captureDate })
     }
     // 连拍检测基于原始列表，只在文件列表变化时重算。角标、筛选和合集都共享这一份
     // 结果，避免三个功能对“哪些照片属于连拍”产生分歧。
-    val burstGroups = remember(presentedCameraFiles) {
-        computeBurstGroups(presentedCameraFiles)
+    val burstGroups = remember(displayedCameraFiles) {
+        computeBurstGroups(displayedCameraFiles)
     }
     val burstHandles = remember(burstGroups) {
         burstGroups.flatMapTo(HashSet()) { group -> group.files.map { it.handle } }
@@ -895,13 +959,13 @@ fun FileListScreen(
     val exportedHandlesForFilter: Set<Int> = remember(
         presentedCameraFiles,
         transferState.existingExportRevision,
-        transferState.organizeTransfersByDate,
+        transferState.storageMode,
         filterUntransferred,
     ) {
         exportedHandlesForUntransferredFilter(
             files = presentedCameraFiles,
             index = transferState.existingExportIndex,
-            organizeTransfersByDate = transferState.organizeTransfersByDate,
+            storageMode = transferState.storageMode,
             enabled = filterUntransferred,
         )
     }
@@ -968,13 +1032,16 @@ fun FileListScreen(
         }
     }
     // 分组 / 扁平列表（供长按预览翻页）/ 传输忙碌（缩略图让路）——提到顶层，供内容区与预览层共用。
+    val activeRatingValues = if (filterRating != null) ratingScan.values else emptyMap()
     val groups = remember(
-        presentedCameraFiles, filterExts, filterProtected, filterBurst, filterUntransferred,
+        displayedCameraFiles, filterExts, filterProtected, filterBurst, filterUntransferred,
+        filterRating, activeRatingValues,
         filterStorageSlot, selectedStorageIds, filterDateRange,
         burstHandles, filteredExportHandles
     ) {
-        val files = presentedCameraFiles.asSequence()
+        val files = displayedCameraFiles.asSequence()
             .filter { filterExts == null || it.extension in filterExts }
+            .filter { filterRating == null || activeRatingValues[it.handle] == filterRating }
             .filter { !filterProtected || it.isProtected }
             .filter { !filterBurst || it.handle in burstHandles }
             .filter { !filterUntransferred || it.handle !in filteredExportHandles }
@@ -1049,7 +1116,6 @@ fun FileListScreen(
     val haptics = rememberHaptics(transferState.hapticsEnabled)
 
     // 长按预览：全屏翻页 + 从被长按格子的位置放大展开。
-    var previewIndex by remember { mutableStateOf<Int?>(null) }
     // Every explicit open owns a new pager/cache/gesture lifetime, including close→open races.
     var previewSessionId by remember { mutableStateOf(0L) }
     val latestPreviewVisibilityChanged by rememberUpdatedState(onPreviewVisibilityChanged)
@@ -1198,7 +1264,7 @@ fun FileListScreen(
         isTransferredOriginal(
             file,
             transferState.existingExportIndex,
-            transferState.organizeTransfersByDate,
+            transferState.storageMode,
         )
     }
     // 单文件入队共用同一套前置检查与任务创建；只有动画按操作来源分流：列表继续
@@ -1536,7 +1602,11 @@ fun FileListScreen(
                             color = colors.onSurfaceVariant.copy(alpha = breatheAlpha)
                         )
                         Spacer(modifier = Modifier.height(12.dp))
-                        Text(stringResource(R.string.no_photos_match_filter), color = colors.onSurfaceVariant)
+                        if (!(filterRatingEnabled && filterRating != null && ratingScan.loading)) {
+                            Text(stringResource(R.string.no_photos_match_filter),
+                                color = colors.onSurfaceVariant, modifier = Modifier.padding(horizontal = 24.dp),
+                                textAlign = TextAlign.Center)
+                        }
                         Spacer(modifier = Modifier.height(18.dp))
                         GlassButton(
                             onClick = {
@@ -1564,7 +1634,7 @@ fun FileListScreen(
                 queuedIndexByHandle = queuedIndexByHandle,
                 existingExportIndex = transferState.existingExportIndex,
                 existingExportRevision = transferState.existingExportRevision,
-                organizeTransfersByDate = transferState.organizeTransfersByDate,
+                storageMode = transferState.storageMode,
                 activeProgressFlow = transferViewModel.activeTransferProgress,
                 columns = transferState.thumbnailColumns,
                 isLoading = state.isLoadingFiles,
@@ -2014,15 +2084,18 @@ fun FileListScreen(
                 anchorBounds = frozenAnchor,
                 availableExts = availableExts,
                 current = filterCriteria,
+                ratingProgress = ratingScan,
                 storageSlots = visibleStorageSlots,
                 suggestedDate = latestKnownDate,
                 hapticsEnabled = transferState.hapticsEnabled,
-                onChange = { criteria ->
+                onChange = { criteria, animateList ->
                     // FilterOverlay 只在工作状态确实变化时回调；这里每次都提交。
                     // 不能用父层上一帧的 filter* 闭包拦截：快速双击同一项时，第二次
                     // 取消可能在重组前到达，会被误判为“未变化”而无法持久化。
-                    filterRevealTick++
-                    filterRevealWindow = true
+                    if (animateList) {
+                        filterRevealTick++
+                        filterRevealWindow = true
+                    }
                     transferViewModel.setFilters(
                         criteria.copy(
                             storageSlot = normalizeStorageSlotFilter(
@@ -2174,7 +2247,26 @@ fun FileListScreen(
         )
 
         // Debug 构建显示效果图生成耗时入口；Release 为同名空实现，不产生节点。
-        DebugPhotoGenerationProbePanel(modifier = Modifier.fillMaxSize())
+        DebugPhotoGenerationProbePanel(
+            modifier = Modifier.fillMaxSize(),
+            onProbeRawRating = if (state.connectionType == CameraConnectionType.USB || !state.isStaConnection) {
+                {
+                    val raw = displayedCameraFiles.firstOrNull {
+                        it.extension.equals(".NEF", true) || it.extension.equals(".NRW", true)
+                    }
+                    if (raw == null) null else {
+                        val previousCapture = RatingDiagnostics.beginProbe()
+                        try {
+                            runCatching { cameraViewModel.getCamera()?.probeRawRating(raw) }
+                                .onFailure { RatingDiagnostics.note("probe error=${it.javaClass.simpleName}") }
+                            RatingDiagnostics.snapshot()
+                        } finally {
+                            RatingDiagnostics.restore(previousCapture)
+                        }
+                    }
+                }
+            } else null,
+        )
     }
 }
 
@@ -3257,7 +3349,7 @@ private fun ThumbnailGrid(
     queuedIndexByHandle: Map<Int, Int>,
     existingExportIndex: ExportedOriginalIndex,
     existingExportRevision: Long,
-    organizeTransfersByDate: Boolean,
+    storageMode: TransferStorageMode,
     activeProgressFlow: StateFlow<ActiveTransferProgress?>,
     columns: Int,
     isLoading: Boolean,
@@ -3586,12 +3678,12 @@ private fun ThumbnailGrid(
                                     file,
                                     existingExportIndex,
                                     existingExportRevision,
-                                    organizeTransfersByDate,
+                                    storageMode,
                                 ) {
                                     isTransferredOriginal(
                                         file,
                                         existingExportIndex,
-                                        organizeTransfersByDate,
+                                        storageMode,
                                     )
                                 }
                                 ThumbnailCell(
@@ -4372,25 +4464,28 @@ private fun FilterOverlay(
     anchorBounds: Rect,
     availableExts: List<String>,
     current: PhotoFilterCriteria,
+    ratingProgress: PhotoRatingScan,
     storageSlots: List<Int>,
     suggestedDate: LocalDate?,
     hapticsEnabled: Boolean,
-    onChange: (PhotoFilterCriteria) -> Unit,
+    onChange: (PhotoFilterCriteria, Boolean) -> Unit,
     onDismiss: () -> Unit
 ) {
     val colors = AppTheme.colors
+    val clipboard = LocalClipboardManager.current
     val density = LocalDensity.current
+    val haptics = rememberHaptics(hapticsEnabled)
+    var showRatingTip by remember { mutableStateOf(false) }
+    var ratingTipAnchor by remember { mutableStateOf<Rect?>(null) }
     var editingDate by remember { mutableStateOf(false) }
     val screenWidth = LocalConfiguration.current.screenWidthDp.dp
     val panelWidth = minOf(
         FILTER_PANEL_MAX_WIDTH,
         screenWidth - FILTER_PANEL_SCREEN_MARGIN * 2,
     )
-    // 顶边贴按钮下缘 + 8dp；左缘对齐按钮，但不许超出屏幕右缘（信号条展开把按钮推得很靠右/
-    // 窄屏时，面板整体向左钳制到贴边 12dp）。
+    // 顶边贴按钮下缘 + 8dp；筛选窗左右居中，避免锚点靠右时面板贴边。
     val panelTop = with(density) { anchorBounds.bottom.toDp() } + 8.dp
-    val panelStart = with(density) { anchorBounds.left.toDp() }
-        .coerceAtMost(screenWidth - panelWidth - FILTER_PANEL_SCREEN_MARGIN)
+    val panelStart = ((screenWidth - panelWidth) / 2f)
         .coerceAtLeast(FILTER_PANEL_SCREEN_MARGIN)
 
     // 外部“一键清除”发生时同步丢弃面板草稿，不能让旧日期范围继续存活。
@@ -4400,8 +4495,17 @@ private fun FilterOverlay(
     fun extLabel(ext: String) = ext.removePrefix(".").uppercase().ifEmpty { otherLabel }
     fun commit(next: PhotoFilterCriteria) {
         if (next == working) return
+        // Compare against the current draft, including rapid taps before recomposition.
+        // Enabling data collection alone must never replay the grid's reveal animation.
+        // Loading-range changes only affect the background rating scan. They must not be
+        // treated as a visible grid-filter change, otherwise the whole thumbnail grid plays
+        // its reveal/reflow animation while the user merely turns the range wheel.
+        val changesList = working.copy(
+            ratingEnabled = next.ratingEnabled,
+            ratingDays = next.ratingDays,
+        ) != next
         working = next
-        onChange(next)
+        onChange(next, changesList)
     }
     fun toggle(ext: String) {
         val cur = working.extensions ?: availableExts.toSet()
@@ -4443,31 +4547,11 @@ private fun FilterOverlay(
                 )
             } else {
                 Column(
-                    modifier = Modifier.padding(14.dp),
+                    modifier = Modifier
+                        .heightIn(max = (LocalConfiguration.current.screenHeightDp.dp - panelTop - 20.dp).coerceAtLeast(100.dp))
+                        .verticalScroll(rememberScrollState())
+                        .padding(14.dp),
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        FilterMark(
-                            modifier = Modifier.size(18.dp),
-                            color = colors.accentBlue,
-                        )
-                        Text(
-                            text = stringResource(R.string.filter_title),
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold,
-                            color = colors.onBackground,
-                        )
-                    }
-
-                    Spacer(Modifier.height(14.dp))
-
-                    FilterSectionLabel(
-                        label = stringResource(R.string.filter_section_file_type),
-                    )
-                    Spacer(Modifier.height(8.dp))
-
                     // ---- 类型：全部 + 各扩展名，短标签最多五列，保持原有多选语义 ----
                     val typeChips: List<Triple<String, Boolean, () -> Unit>> = buildList {
                         add(Triple(stringResource(R.string.filter_all), working.extensions == null) {
@@ -4484,7 +4568,16 @@ private fun FilterOverlay(
                         typeChips.chunked(typeColumnCount).forEach { rowChips ->
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 rowChips.forEach { (label, selected, onClick) ->
-                                    FilterChip(label, selected, onClick, Modifier.weight(1f))
+                                    key(label) {
+                                        AnimatedVisibility(
+                                            visible = true,
+                                            enter = fadeIn(tween(180)) + expandHorizontally(expandFrom = Alignment.Start),
+                                            exit = fadeOut(tween(120)) + shrinkHorizontally(shrinkTowards = Alignment.Start),
+                                            modifier = Modifier.weight(1f),
+                                        ) {
+                                            FilterChip(label, selected, onClick, Modifier.fillMaxWidth())
+                                        }
+                                    }
                                 }
                                 repeat(typeColumnCount - rowChips.size) {
                                     Spacer(Modifier.weight(1f))
@@ -4494,11 +4587,6 @@ private fun FilterOverlay(
                     }
 
                     FilterSectionDivider()
-
-                    FilterSectionLabel(
-                        label = stringResource(R.string.filter_section_status),
-                    )
-                    Spacer(Modifier.height(8.dp))
 
                     // ---- 标记：保护 / 连拍 / 未传输（独立开关，与日期和类型叠加）----
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -4564,10 +4652,134 @@ private fun FilterOverlay(
 
                     FilterSectionDivider()
 
-                    FilterSectionLabel(
-                        label = stringResource(R.string.filter_section_date),
-                    )
-                    Spacer(Modifier.height(8.dp))
+                    val ratingAlpha = if (working.ratingEnabled && ratingProgress.loading) {
+                        val ratingPulse = rememberInfiniteTransition(label = "ratingFilterPulse")
+                        ratingPulse.animateFloat(
+                            initialValue = 0.72f,
+                            targetValue = 1f,
+                            animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
+                            label = "ratingFilterAlpha",
+                        ).value
+                    } else 1f
+                    val ratingAccent = when {
+                        !working.ratingEnabled -> colors.accentBlue
+                        ratingProgress.waitingForRange -> colors.accentYellow
+                        ratingProgress.loading -> colors.accentBlue
+                        else -> colors.statusConnected
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        FilterChip(
+                            label = when {
+                                !working.ratingEnabled -> stringResource(R.string.filter_rating_off)
+                                ratingProgress.waitingForRange -> "0/${ratingProgress.total}"
+                                ratingProgress.loading -> "${ratingProgress.completed.coerceAtMost(ratingProgress.total)}/${ratingProgress.total}"
+                                else -> stringResource(R.string.filter_rating_on)
+                            },
+                            selected = working.ratingEnabled,
+                            onClick = {
+                                commit(working.copy(
+                                    ratingEnabled = !working.ratingEnabled,
+                                    rating = if (working.ratingEnabled) null else working.rating,
+                                ))
+                            },
+                            modifier = Modifier
+                                .width(81.dp)
+                                .graphicsLayer {
+                                    alpha = if (working.ratingEnabled && ratingProgress.loading) ratingAlpha else 1f
+                                },
+                            accentColor = ratingAccent,
+                            cornerLabel = stringResource(R.string.filter_rating_enabled),
+                            onLongClick = if (working.ratingEnabled) {
+                                { clipboard.setText(AnnotatedString(RatingDiagnostics.snapshot())) }
+                            } else null,
+                        )
+                        // Keep both states in one fixed slot. Crossfade overlays the old and
+                        // new controls instead of letting Row remeasure and push neighbors.
+                        Box(
+                            // Keep the five stars at a fixed compact width. A weighted slot can
+                            // become narrower on small screens and clip the last star.
+                            modifier = Modifier.width(154.dp).height(34.dp),
+                            contentAlignment = Alignment.CenterStart,
+                        ) {
+                            Crossfade(
+                                targetState = working.ratingEnabled,
+                                animationSpec = tween(180),
+                                label = "ratingControlsFade",
+                            ) { enabled ->
+                                if (!enabled) {
+                                    Row(
+                                        modifier = Modifier.height(34.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        val rangeOptions = listOf(1, 3, 5, 0)
+                                        val rangeLabels = mapOf(
+                                            0 to stringResource(R.string.filter_rating_range_all),
+                                            1 to stringResource(R.string.filter_rating_range_days, 1),
+                                            3 to stringResource(R.string.filter_rating_range_days, 3),
+                                            5 to stringResource(R.string.filter_rating_range_days, 5),
+                                        )
+                                        ReleaseCommitWheel(
+                                            options = rangeOptions,
+                                            selected = working.ratingDays.takeIf { it in rangeOptions } ?: 3,
+                                            optionLabel = { days -> rangeLabels[days] ?: rangeLabels.getValue(3) },
+                                            onValueCommitted = { days -> commit(working.copy(ratingDays = days)) },
+                                            onDetent = haptics::tick,
+                                            label = stringResource(R.string.filter_rating_range_label),
+                                            wheelHeight = 34.dp,
+                                            optionFontSize = 12.sp,
+                                            optionFontWeight = FontWeight.Medium,
+                                            cornerRadius = 10.dp,
+                                            showDragHint = false,
+                                            // Match the compact status-chip width; the remaining
+                                            // slot is reserved for the help button and star row.
+                                            modifier = Modifier.width(81.dp),
+                                        )
+                                        TipLightbulbButton(
+                                            onClick = { showRatingTip = true },
+                                            contentDescription = stringResource(R.string.filter_rating_help_title),
+                                            modifier = Modifier
+                                                .size(34.dp)
+                                                .onGloballyPositioned { ratingTipAnchor = it.boundsInRoot() },
+                                        )
+                                    }
+                                } else {
+                                    val feedback = com.ztransfer.ui.util.rememberHaptics(hapticsEnabled)
+                                    Row(
+                                        modifier = Modifier
+                                            .width(154.dp)
+                                            .height(34.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(1.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        for (star in 1..5) {
+                                            FavoriteToggleButton(
+                                                favorite = star <= (working.rating ?: 0),
+                                                enabled = true,
+                                                compact = true,
+                                                compactSize = 30.dp,
+                                                description = stringResource(R.string.filter_rating_stars, star),
+                                                onClick = {
+                                                    feedback.tick()
+                                                    commit(working.copy(
+                                                        ratingEnabled = true,
+                                                        rating = if (working.rating == star) null else star,
+                                                    ))
+                                                },
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    FilterSectionDivider()
 
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         FilterChip(
@@ -4586,6 +4798,27 @@ private fun FilterOverlay(
                     }
                 }
             }
+        }
+    }
+    if (showRatingTip) {
+        val ratingTipTop = ratingTipAnchor?.let {
+            with(density) { it.bottom.toDp() } + 8.dp
+        } ?: 64.dp
+        AnchorPopup(
+            anchorBounds = ratingTipAnchor,
+            onDismiss = { showRatingTip = false },
+            panelModifier = Modifier
+                .padding(start = 18.dp, end = 18.dp, top = ratingTipTop, bottom = 18.dp)
+                .widthIn(min = 220.dp, max = 260.dp),
+            panelAlignment = Alignment.TopEnd,
+            shape = RoundedCornerShape(16.dp),
+            dim = false,
+        ) { _ ->
+            TipBubbleContent(
+                title = stringResource(R.string.filter_rating_help_title),
+                items = listOf(TipBubbleItem(stringResource(R.string.filter_rating_help_description))),
+                bulleted = true,
+            )
         }
     }
 }
@@ -4821,6 +5054,8 @@ internal fun FilterChip(
     icon: ImageVector? = null,
     leading: (@Composable (Color) -> Unit)? = null,
     accentColor: Color? = null,
+    cornerLabel: String? = null,
+    onLongClick: (() -> Unit)? = null,
 ) {
     val colors = AppTheme.colors
     val activeColor = accentColor ?: colors.accentBlue
@@ -4835,7 +5070,9 @@ internal fun FilterChip(
         optionLabel = { it },
         onValueCommitted = {},
         onActivated = onClick,
+        onLongClick = onLongClick,
         wheelHeight = 34.dp,
+        label = cornerLabel,
         cornerRadius = 10.dp,
         optionFontSize = 12.sp,
         optionFontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,

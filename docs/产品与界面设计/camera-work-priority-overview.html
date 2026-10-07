@@ -111,6 +111,7 @@
     @media (max-width: 760px) {
       main { padding: 18px 12px 28px; }
       header { align-items: start; flex-direction: column; gap: 8px; }
+      .scheduler-overview { grid-template-columns: 1fr !important; }
       .matrix-wrap { border-radius: 14px; }
       th, td { padding: 11px 12px; }
     }
@@ -120,8 +121,37 @@
 <main>
   <header>
     <h1>所有相互影响逻辑一览</h1>
-    <p>每个格子表示左侧任务遇到上方场景时会怎样。相机同一时间只能处理一项 App 指令，表中简称“相机通道”；因此“继续”不代表立即执行，仍要等当前相机操作结束。只使用缓存、CPU 或手机存储的工作不受影响。</p>
+    <p>每个格子表示左侧任务遇到上方场景时会怎样。相机同一时间只能处理一项 App 指令，表中简称“相机通道”；因此“继续”不代表立即执行，仍要等当前相机操作结束。只使用缓存、CPU 或手机存储的工作不受影响。STA 评级筛选一行按当前工作区代码记录，未把方案目标当成已实现行为。</p>
   </header>
+
+  <section class="scheduler-overview" style="margin:18px 0 14px;display:grid;gap:12px;grid-template-columns:minmax(0,1.15fr) minmax(0,.85fr);">
+    <article style="border:1px solid var(--line);border-radius:14px;padding:16px;background:rgba(13,25,36,.8);">
+      <h2 style="margin:0 0 8px;font-size:17px;">调度器当前如何运行</h2>
+      <ol style="margin:0;padding-left:21px;font-size:13px;line-height:1.65;">
+        <li>已建立会话后的每条相机命令先声明一个请求类型和 owner，放入同一个优先级队列。</li>
+        <li>调度器从可执行请求中选优先级最高者；同级按进入顺序执行。已经开始的 PTP 命令或数据阶段不会被打断。</li>
+        <li>事务完成、异常或取消后释放通道，再唤醒下一项。等待中的取消只移除自己的排队项；正在执行的数据取消仍由原操作完成 Cancel、排空和关闭。</li>
+        <li>手机本地缓存、解码、绘制、文件复制和效果图生成不进入相机队列。连接握手按原顺序完成，事件线程只投递事件。</li>
+      </ol>
+      <p class="neutral" style="margin:9px 0 0;">调度器控制的是相机命令通道，不是线程池。评级和缩略图可以在手机端并行准备，但相机端仍按事务边界有序切换。</p>
+    </article>
+    <article style="border:1px solid var(--line);border-radius:14px;padding:16px;background:rgba(13,25,36,.8);">
+      <h2 style="margin:0 0 8px;font-size:17px;">优先级与让路</h2>
+      <table style="min-width:0;margin:-1px 0 0;">
+        <thead><tr><th style="position:static;">级别</th><th style="position:static;">请求类型</th><th style="position:static;">主要行为</th></tr></thead>
+        <tbody>
+          <tr><td class="yes">P0</td><td><code>INTERACTIVE</code></td><td>监看、遥控、拍摄、录像、对焦、关闭会话</td></tr>
+          <tr><td class="yes">P1</td><td><code>PREVIEW</code></td><td>当前高清图、FHD、当前 EXIF</td></tr>
+          <tr><td class="maybe">P2</td><td><code>TRANSFER</code></td><td>原片的一个完整分块</td></tr>
+          <tr><td class="maybe">P3</td><td><code>RATING</code></td><td>有效日期范围内评级的一个文件头/结构区</td></tr>
+          <tr><td class="neutral">P4–P6</td><td><code>VISIBLE_THUMBNAIL</code>、<code>BACKGROUND_THUMBNAIL</code>、<code>IDLE</code></td><td>可见缩略图、后台目录/缩略图与心跳</td></tr>
+          <tr><td class="neutral">动态</td><td><code>EVENT_POLL</code></td><td>评级关闭时按 P2；评级阶段被后台准入屏障挡住，等价于 P6</td></tr>
+        </tbody>
+      </table>
+        <p class="neutral" style="margin:9px 0 0;">请求不会在执行中改级；传输固定高于远程缩略图，已经开始的缩略图事务自然收尾后就会让出通道；评级阶段事件检查与远程缩略图排到 P3 之后，低优先级请求也不会在两张评级照片之间的空档抢先入场，评级结束立即恢复。缓存命中不进队列，完整下载只禁止 P6 空闲检查。</p>
+      <p class="neutral" style="margin:7px 0 0;"><code>NikonCamera</code> 负责缩略图、预览、EXIF、传输和评级的事务边界；<code>RemoteLab</code> 负责监看与遥控；<code>MonitorStorage</code> 和心跳走 P6。<code>PhotoRatingScan</code>、<code>CameraViewModel</code> 只决定范围和生命周期，不直接持有相机锁。</p>
+    </article>
+  </section>
 
   <div class="matrix-wrap">
     <table>
@@ -130,7 +160,8 @@
       </thead>
       <tbody>
         <tr><td><strong>整卡照片信息加载</strong><br><span class="neutral">读取整张卡的照片信息；每批最多 20 张</span></td><td class="maybe">不会停止。若传输正在处理一个分块，就等该块完成；普通文件每块 2MB，超过 512MB 的文件每块 32MB。若本批照片信息已经开始，传输也可能要等这一批结束；兼容整传路径仍要等当前文件传完。</td><td class="no">立即暂停。已经开始读取的当前一张会先收尾；关闭大图后，若相机没有重连，就沿用最初取得的照片编号继续，不重复读取整卡编号。</td><td class="no">立即暂停。已经开始读取的当前一张会先收尾；退出监看后重新取得整卡照片编号，以包含监看期间新拍的照片，再跳过已经加载的部分。</td><td class="yes">正在执行。单卡直接反转相机返回的自然顺序，不再按照片编号数值排序；双卡分别保留各自的新到旧顺序，再按已经读取到的真实拍摄时间流式合并。每批最多读取 20 条并逐批更新列表。</td><td class="yes">继续运行。这项工作属于相机连接，不依赖照片页是否正在显示。</td><td class="no">本轮停止。重新连接后从头取得存储卡和照片编号，绝不沿用旧连接的数据。</td></tr>
-        <tr><td><strong>当前可见照片的缩略图</strong><br><span class="neutral">先查内存和磁盘，缺失时才向相机获取</span></td><td class="maybe">仍允许加载。已有缓存立即显示；需要向相机获取时，通常等正在传的当前分块完成，再在块间争取相机通道。普通文件每块 2MB，超过 512MB 的文件每块 32MB；兼容整传路径仍要等当前文件传完。</td><td class="no">暂停所有向相机获取缩略图的请求，把相机通道让给当前高清图和 EXIF；内存或磁盘里已有的缩略图仍可显示。只有当前高清图确认不可用且 EXIF 已结束时，才为当前照片远程取一张缩略图兜底。关闭大图后，底层网格自动恢复。</td><td class="no">照片页已经离开屏幕，不再产生可见格子的加载请求；没有任何其他界面需要同一张图时，尚未完成的共享请求会取消。</td><td class="yes">可以在每批照片信息读取结束、相机通道释放时穿插加载。</td><td class="no">照片格子的加载工作随页面结束；同一张图已无其他调用者等待时，取消尚未完成的请求。已经完成的内存和磁盘缓存保留。</td><td class="yes">内存或磁盘里已有的缩略图仍可显示；缺失的缩略图要等重新连接后才能向相机获取。</td></tr>
+        <tr><td><strong>当前可见照片的缩略图</strong><br><span class="neutral">先查内存和磁盘，缺失时才向相机获取</span></td><td class="maybe">仍允许加载。已有缓存立即显示；需要向相机获取时，通常等正在传的当前分块完成，再在块间争取相机通道。普通文件每块 2MB，超过 512MB 的文件每块 32MB；兼容整传路径仍要等当前文件传完。</td><td class="no">暂停所有向相机获取缩略图的请求，把相机通道让给当前高清图和 EXIF；内存或磁盘里已有的缩略图仍可显示。只有当前高清图确认不可用且 EXIF 已结束时，才为当前照片远程取一张缩略图兜底。关闭大图后，底层网格自动恢复。</td><td class="no">照片页已经离开屏幕，不再产生可见格子的加载请求；没有任何其他界面需要同一张图时，尚未完成的共享请求会取消。</td><td class="yes">评级启动前可以在每批照片信息读取结束、相机通道释放时穿插加载；评级启动后新的远程缩略图请求排在评级事务之后，缓存命中不进入相机通道。</td><td class="no">照片格子的加载工作随页面结束；同一张图已无其他调用者等待时，取消尚未完成的请求。已经完成的内存和磁盘缓存保留。</td><td class="yes">内存或磁盘里已有的缩略图仍可显示；缺失的缩略图要等重新连接后才能向相机获取。</td></tr>
+        <tr><td><strong>STA 评级筛选</strong><br><span class="neutral">仅开启“评级筛选”后读取有效日期范围的评级</span></td><td class="maybe">本地评级结果直接使用，不访问相机；未命中的文件逐个提交独立 <code>RATING</code> 事务，走统一优先级队列，不再用整场扫描预约占住通道。传输/预览等已开始的完整事务仍先收尾。</td><td class="no">照片列表评级扫描不在大图页面运行；已经开始的扫描不因页面切换重启，而是在每个评级事务之间让更高优先级请求先执行。</td><td class="maybe">监看本身不读取评级，也不持有评级锁；统一调度器只在相机命令需要时让高优先级监看事务先执行。</td><td class="maybe">STA 评级在照片加载范围与评级范围的交集就绪后启动；例如照片范围为 1 日、评级范围为 3 日时，只等待并读取最近 1 日。少于有效范围时以权威列表最后一批完成为边界。内存/磁盘缩略图命中不进入相机调度器；远程缩略图在评级事务完成后再取得远程缩略图通道。</td><td class="no">评级扫描属于照片列表 Compose 生命周期；扫描尚未开始时离开页面会阻止它，已经开始的扫描按事务边界自然收尾。相机连接对象中的评级结果只保留在内存，断开或重连会建立新扫描代次。</td><td class="no">当前扫描取消，旧连接评级不会沿用；重新连接或重新开启评级后按新的有效范围读取。</td></tr>
         <tr><td><strong>后台缩略图预加载</strong><br><span class="neutral">提前把整卡缩略图存入手机磁盘</span></td><td class="no">暂停，把相机通道让给传输；传输队列清空后自动继续。</td><td class="no">暂停，把相机通道让给高清大图和 EXIF；关闭大图后自动继续。</td><td class="no">暂停，避免拖慢实时画面、参数和拍摄命令；退出监看后自动继续。</td><td class="maybe">照片列表每新增一批，就按最新列表重新安排顺序；已经存到磁盘的会快速跳过，并可在批次之间继续下载缩略图。</td><td class="yes">继续运行。这是连接级后台任务，不依赖照片页是否打开。</td><td class="no">停止向相机获取；重新连接并重新建立照片列表后再继续。</td></tr>
         <tr><td><strong>高清大图预览</strong><br><span class="neutral">当前照片优先；无传输时再预取前一张和后一张</span></td><td class="yes">当前传输块收完整后，正在查看照片的高清图优先取得相机通道；普通文件最多等待当前 2MB，超过 512MB 的文件最多等待当前 32MB。传输期间不预取邻页，传输结束后若仍停在大图会自动补预取；兼容整传路径仍需等待当前文件完成。</td><td class="yes">这是当前主要任务：展开动画结束后先加载当前高清图，再读取当前 EXIF；没有传输时，最后再预取前后相邻照片的高清图。</td><td class="no">大图预览属于照片页，监看属于另一个页面，正常界面不会让两者同时存在。</td><td class="yes">打开大图会先暂停整卡照片信息加载；最多只需等待已经开始读取的当前一张照片信息完成。</td><td class="no">退出照片页时预览层一并关闭；未完成的高清图加载取消，本次预览使用的高清位图释放。</td><td class="no">正在进行的远程读取会失败；如果预览层仍然打开，重新连接后会自动重试当前照片的高清图。</td></tr>
         <tr><td><strong>当前照片的 EXIF 信息</strong><br><span class="neutral">光圈、快门、ISO、焦距等；JPEG 读取 128KB，RAW 最多读取 2MB</span></td><td class="yes">排在当前高清图之后，同样优先于传输的下一块；通常只需等当前分块收完整，不必等整份原片。普通文件每块 2MB，超过 512MB 的文件每块 32MB；兼容整传路径仍需等待当前文件完成。</td><td class="yes">当前高清图加载之后读取，只读取正在看的照片，不提前读取前后相邻照片的 EXIF。</td><td class="no">EXIF 只由照片页的大图预览使用，正常情况下不会与监看同时发生。</td><td class="yes">打开大图已经先暂停整卡照片信息加载；当前照片的 EXIF 排在当前高清图之后读取。</td><td class="no">退出照片页时预览层一并关闭，未完成的读取取消；已经成功读取的结果保留在应用缓存中，重新打开可直接使用。</td><td class="neutral">已有缓存仍可显示；尚未读到的 EXIF 在本次预览中会失败，不会像高清图一样在原地自动重试。</td></tr>
@@ -141,10 +172,22 @@
         <tr><td><strong>设置页的效果演示图</strong><br><span class="neutral">用最新照片生成一张高清示例，供边框和滤镜设置预览</span></td><td class="no">取消或不启动，把相机通道让给原片传输；队列清空后可重新尝试。</td><td class="no">取消或不启动，把相机通道让给用户正在查看的高清大图。</td><td class="no">取消或不启动，避免影响实时画面和遥控操作。</td><td class="maybe">照片列表每次增加都会重新等待 900ms；如果连续 900ms 没有变化才尝试加载，因此通常让前面的列表和缩略图先工作。</td><td class="yes">成功取得的示例图保存在应用状态中，离开照片页后设置页仍可直接使用。</td><td class="no">断线时不请求；重新连接并重新建立照片列表后，可以重新选择最新照片尝试。</td></tr>
         <tr><td><strong>连接心跳</strong><br><span class="neutral">空闲时约每 10 秒检查一次相机连接</span></td><td class="no">实际文件下载从开始到结束都跳过主动检查，不会插进两个分块之间；传输命令和数据本身已经证明连接有效，PTP/IP 必需的 PING/PONG 仍会正常响应。下载结束后恢复空闲检查。</td><td class="maybe">没有文件下载时继续检查，但需要等待当前高清图或 EXIF 操作结束；若后台仍有文件下载，则随下载一起跳过。</td><td class="maybe">继续检查；实时画面本身也在持续证明连接仍然有效。</td><td class="maybe">继续检查，需要等待当前照片信息批次释放相机通道。</td><td class="yes">继续运行，与照片页是否显示无关。</td><td class="no">空闲检查发现连接失效后，结束旧会话并启动重连流程；传输中的断线由下载事务自身直接失败。</td></tr>
         <tr><td><strong>边框和滤镜成图</strong><br><span class="neutral">只使用手机 CPU 和存储，不访问相机</span></td><td class="yes">可以与下一张原片传输并行处理。</td><td class="yes">可以继续，不会占用高清图所需的相机通道。</td><td class="yes">可以继续，也不会让 App 把监看视为“传输忙”。</td><td class="yes">可以继续，不与照片信息加载争抢相机。</td><td class="yes">继续在后台完成。</td><td class="yes">只要原片已经保存到手机，断开相机也不影响后续处理。</td></tr>
-        <tr><td><strong>日期筛选</strong><br><span class="neutral">本地筛选列表，并决定后台优先预加载哪个日期范围</span></td><td class="neutral">列表筛选仍然有效；后台缩略图预加载已因传输暂停，传输结束后按所选日期优先继续。</td><td class="neutral">正在查看的大图使用打开时的照片顺序，不会因底层筛选或列表变化突然换页。</td><td class="neutral">筛选状态保留；监看期间后台缩略图预加载暂停。</td><td class="yes">不会改变整卡照片信息的读取范围，只会让后台缩略图优先处理所选日期。</td><td class="yes">所选日期仍会作为后台缩略图预加载的优先范围。</td><td class="neutral">筛选本身只处理本地列表，不访问相机。</td></tr>
+        <tr><td><strong>照片加载范围</strong><br><span class="neutral">限制照片列表和远程缩略图读取的最近 1/3/5 日或全部</span></td><td class="neutral">已发布范围保持不变；传输结束后按当前范围继续补充。</td><td class="neutral">正在查看的大图使用打开时的照片顺序，不会因范围变化突然换页。</td><td class="neutral">范围状态保留；监看期间后台缩略图预加载暂停。</td><td class="yes">句柄目录可先取得完整顺序，但照片信息和远程缩略图只继续到所选实际拍摄日边界；范围外旧照片不进入当前列表。扩大范围时从当前会话快照继续，缩小范围只隐藏已发布的范围外照片。</td><td class="yes">所选范围仍作为后台缩略图的读取边界。</td><td class="neutral">范围本身是本地持久化设置；断线重连后按新会话重新建立列表。</td></tr>
       </tbody>
     </table>
   </div>
+
+  <section style="margin-top:18px;display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));">
+    <article style="border:1px solid var(--line);border-radius:14px;padding:16px;background:rgba(13,25,36,.8);">
+      <h2 style="margin:0 0 8px;font-size:17px;">STA 评级的当前代码链路</h2>
+      <p><code>FileListScreen</code> 只有在评级开关打开时调用 <code>rememberPhotoRatings</code>；STA 连接先等待 <code>CameraViewModel.recentThumbnailReady</code>。照片列表范围与评级范围各有 1/3/5/全部档位，STA 的有效范围取两个档位的交集；照片范围负责列表/缩略图边界，评级范围负责本轮评级边界。JPG 与唯一同名 NEF 使用同一筛选投影。照片读取受限文件头；MOV/MP4 使用 <code>VideoRating.kt</code> 的 <code>moov/udta/NCDT/NCTG</code> 结构定位器。每个文件或结构区域通过统一调度器提交一个 <code>RATING</code> 事务；结果只存在当前 <code>NikonCamera</code> 内存代次，连接重建时清空。</p>
+      <p class="neutral" style="margin-top:8px;">代码核对：<code>PhotoRatingScan.kt</code>、<code>CameraViewModel.kt</code>、<code>NikonCamera.kt</code>、<code>PhotoRatingPairs.kt</code>、<code>VideoRating.kt</code>。</p>
+    </article>
+    <article style="border:1px solid var(--amber);border-radius:14px;padding:16px;background:rgba(13,25,36,.8);">
+      <h2 style="margin:0 0 8px;font-size:17px;color:var(--amber);">当前实现与方案文档的已知差异</h2>
+      <p>STA 评级范围由照片加载范围与评级范围的交集确定；达到有效日期边界后以该边界作为锚点，少于有效范围则以权威列表最后一批缩略图完成为边界。评级开关关闭时不创建评级请求；开关开启后，已经开始的扫描不会因页面切换重启，只在独立事务边界让监看、预览和传输先执行。改变照片加载范围会关闭评级并清除已选星级，重新开启后按新范围读取。统一调度器本身已接入：评级按单个 <code>RATING</code> 事务排队，目录、缩略图、传输和遥控不再通过业务层直接持有原始 <code>ioMutex</code>。本轮 Kotlin 编译与调度器针对性单元测试已通过；全量构建、协议回归和真机验证仍未完成，不能把静态迁移当成运行时证明。</p>
+    </article>
+  </section>
 </main>
 </body>
 </html>

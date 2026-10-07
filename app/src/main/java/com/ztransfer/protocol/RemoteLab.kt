@@ -14,7 +14,7 @@ import kotlinx.coroutines.withContext
  * 无线遥控协议层：Live View、曝光参数读写、触摸对焦、遥控拍摄、事件轮询，
  * 外加开发者面板用的完整能力探测（runLabProbe）。语义与 libgphoto2 ptp.h/library.c 对照，
  * 已在 Z 30 (fw1.20) 真机全项验证。
- * 所有命令经 [NikonCamera.ioMutex] 串行，与传输/缩略图/心跳互斥，不碰下载热路径。
+ * 所有命令经 NikonCamera 的统一事务调度器串行，与传输/缩略图/心跳互斥，不碰下载热路径。
  *
  * 探测/诊断日志固定英文 + 十六进制（用于与 libgphoto2 语义比对），不做 i18n。
  */
@@ -238,7 +238,7 @@ private suspend fun logProbeCodes(
 /** 单条无 data-out 事务：发命令、收响应码+数据载荷。与正式操作共用互斥锁。 */
 suspend fun NikonCamera.labCommand(code: Int, vararg params: Int): Pair<Int, ByteArray?> =
     focusMutex.withLock {
-        ioMutex.withLock {
+        withCameraTransaction(CameraRequestKind.INTERACTIVE, "LAB_COMMAND") {
             withContext(Dispatchers.IO) {
                 sendCmd(code, *params)
                 recvRespWithPayload()
@@ -249,7 +249,7 @@ suspend fun NikonCamera.labCommand(code: Int, vararg params: Int): Pair<Int, Byt
 /** SetDevicePropValue：把 [raw]（属性的原始小端编码）写给相机，返回响应码。 */
 suspend fun NikonCamera.labSetProp(prop: Int, raw: ByteArray): Int =
     focusMutex.withLock {
-        ioMutex.withLock {
+        withCameraTransaction(CameraRequestKind.INTERACTIVE, "LAB_SET_PROP") {
             withContext(Dispatchers.IO) {
                 sendCmdWithData(Lab.SET_DEVICE_PROP_VALUE, raw, prop)
                 recvRespWithPayload().first
@@ -407,24 +407,8 @@ private fun fmtVal(prop: Int, raw: Long): String = when (prop) {
         0x8010L -> "AUTO"
         else -> "0x${raw.toString(16)}"
     }
-    Lab.PROP_FOCUS_MODE -> when (raw) {
-        1L -> "MF"
-        2L -> "AF"
-        3L -> "AF Macro"
-        0x8010L -> "AF-S"
-        0x8011L -> "AF-C"
-        0x8012L -> "AF-A"
-        0x8013L -> "AF-F"
-        else -> "0x${raw.toString(16)}"
-    }
-    Lab.PROP_NK_AF_MODE -> when (raw) {
-        0L -> "AF-S"
-        1L -> "AF-C"
-        2L -> "AF-A"
-        // 3/4 会在部分机型 AF 失败后出现，并不代表用户切到了 MF。
-        // 语义未确认前保留为未知值，由上层隐藏标签。
-        else -> "0x${raw.toString(16)}"
-    }
+    Lab.PROP_FOCUS_MODE, Lab.PROP_NK_STILL_FOCUS_MODE, Lab.PROP_NK_AF_MODE ->
+        rcFocusModeLabel(prop, raw) ?: "0x${raw.toString(16)}"
     else -> "$raw"
 }
 
@@ -838,7 +822,7 @@ suspend fun NikonCamera.rcGetAngleLevel(): RcParam? =
     rcGetParam(Lab.PROP_NK_ANGLE_LEVEL)?.takeIf { rcAngleLevelRoll(it) != null }
 
 suspend fun NikonCamera.rcGetFocusMode(): RcFocusMode? {
-    val candidates = intArrayOf(Lab.PROP_FOCUS_MODE, Lab.PROP_NK_AF_MODE)
+    val candidates = focusModeProperties
     for (prop in candidates) {
         // 对焦模式标签宁缺毋滥：只接受 GetDevicePropValue 成功直读到的当前值。
         // PropDesc 兼容回退在部分机型的失败响应里会带无效默认值 1，曾被误显示成 MF。
@@ -856,11 +840,7 @@ suspend fun NikonCamera.rcGetFocusMode(): RcFocusMode? {
         if (label.startsWith("0x")) continue
         val result = RcFocusMode(
             label = label,
-            manual = when (prop) {
-                Lab.PROP_FOCUS_MODE -> raw == 1L
-                Lab.PROP_NK_AF_MODE -> false
-                else -> false
-            },
+            manual = rcFocusModeManual(prop, raw),
             prop = prop,
             raw = raw
         )
@@ -998,12 +978,12 @@ private suspend fun NikonCamera.focusCommand(
     deadlineMs: Long,
     vararg params: Int
 ): Pair<Int, ByteArray?>? = withContext(Dispatchers.IO) {
-    ioMutex.withLock {
+    withCameraTransaction(CameraRequestKind.INTERACTIVE, "FOCUS_COMMAND") {
         focusCommandLocked(code, deadlineMs, *params)
     }
 }
 
-/** 调用方必须在 I/O 调度器持有 [NikonCamera.ioMutex]，用于组成严格时序的 AF 原子段。 */
+/** 调用方必须在 I/O 调度器事务内调用，用于组成严格时序的 AF 原子段。 */
 private fun NikonCamera.focusCommandLocked(
     code: Int,
     deadlineMs: Long,
@@ -1025,10 +1005,12 @@ internal suspend fun runTapFocusStart(
     focusX: Int,
     focusY: Int,
     tryTracking: Boolean,
+    tapPath: RcTapFocusPath? = null,
     command: suspend (code: Int, params: IntArray) -> Int?,
     pause: suspend (Long) -> Unit
 ): RcTapFocusStartResult {
-    if (tryTracking) {
+    val useTracking = tapPath?.let { it == RcTapFocusPath.TRACKING } ?: tryTracking
+    if (useTracking) {
         // Z 30 实机探测确认坐标属于 StartTracking 本身：无参调用返回 0x2006，
         // StartTracking(x,y) 返回 OK，并使增强帧开始携带选中 AF 框。
         val trackingRc = command(Lab.NK_START_TRACKING, intArrayOf(trackingX, trackingY))
@@ -1050,7 +1032,7 @@ internal suspend fun runTapFocusStart(
         // 状态错误直接上报，避免擅自改变用户预期。
     }
 
-    val trackingUnsupported = if (tryTracking) {
+    val trackingUnsupported = if (useTracking) {
         PtpConstants.OPERATION_NOT_SUPPORTED
     } else {
         null
@@ -1070,7 +1052,7 @@ internal suspend fun runTapFocusStart(
     )
 }
 
-/** 调用方必须持有 focusMutex -> ioMutex；没有活动追踪时不发送冗余命令。 */
+/** 调用方必须持有 focusMutex -> 相机事务；没有活动追踪时不发送冗余命令。 */
 private fun NikonCamera.endSubjectTrackingLocked(deadlineMs: Long): Int? {
     if (!subjectTrackingActive) return null
     sendCmd(Lab.NK_END_TRACKING)
@@ -1160,7 +1142,7 @@ private suspend fun NikonCamera.afDriveAndWait(
  * 2. 轮询 DeviceReady(0x90C8)；
  * 3. 0x2019 继续等待，0x2001 为合焦成功，0xA002 为未合焦。
  *
- * [NikonCamera.focusMutex] 防止两套 AF 流程互相穿插；[NikonCamera.ioMutex] 只保护
+ * [NikonCamera.focusMutex] 防止两套 AF 流程互相穿插；统一事务调度器只保护
  * 每条完整 PTP 事务，使 Live View 能在 DeviceReady 的轮询间隔内继续取帧。
  */
 suspend fun NikonCamera.rcAfDriveAndWait(timeoutMs: Long = 6_000L): RcAfResult =
@@ -1168,7 +1150,9 @@ suspend fun NikonCamera.rcAfDriveAndWait(timeoutMs: Long = 6_000L): RcAfResult =
         val startedAt = SystemClock.elapsedRealtime()
         val deadlineMs = startedAt + timeoutMs
         val endRc = withContext(Dispatchers.IO) {
-            ioMutex.withLock { endSubjectTrackingLocked(deadlineMs) }
+            withCameraTransaction(CameraRequestKind.INTERACTIVE, "FOCUS_END_TRACKING") {
+                endSubjectTrackingLocked(deadlineMs)
+            }
         }
         if (endRc != null && subjectTrackingActive) {
             RcAfResult(endRc, 0, SystemClock.elapsedRealtime() - startedAt, false)
@@ -1182,7 +1166,9 @@ suspend fun NikonCamera.rcEndSubjectTracking(timeoutMs: Long = 6_000L): Int? =
     focusMutex.withLock {
         val deadlineMs = SystemClock.elapsedRealtime() + timeoutMs
         withContext(Dispatchers.IO) {
-            ioMutex.withLock { endSubjectTrackingLocked(deadlineMs) }
+            withCameraTransaction(CameraRequestKind.INTERACTIVE, "FOCUS_END_TRACKING") {
+                endSubjectTrackingLocked(deadlineMs)
+            }
         }
     }
 
@@ -1195,12 +1181,13 @@ suspend fun NikonCamera.rcFocusAt(
     trackingY: Int,
     focusX: Int,
     focusY: Int,
+    tapPath: RcTapFocusPath? = null,
     timeoutMs: Long = 6_000L
 ): RcTapFocusResult = focusMutex.withLock {
     val startedAt = SystemClock.elapsedRealtime()
     val deadlineMs = startedAt + timeoutMs
     val (endTrackingRc, start) = withContext(Dispatchers.IO) {
-        ioMutex.withLock {
+        withCameraTransaction(CameraRequestKind.INTERACTIVE, "FOCUS_START") {
             val endRc = endSubjectTrackingLocked(deadlineMs)
             val startResult = if (subjectTrackingActive) {
                 null
@@ -1211,6 +1198,7 @@ suspend fun NikonCamera.rcFocusAt(
                     focusX = focusX,
                     focusY = focusY,
                     tryTracking = subjectTrackingSupported != false,
+                    tapPath = tapPath,
                     command = { code, params ->
                         focusCommandLocked(code, deadlineMs, *params)?.first
                     },
@@ -1291,22 +1279,34 @@ suspend fun NikonCamera.rcFocusAt(
     }
 }
 
-suspend fun NikonCamera.rcPollEvents(): List<Pair<Int, Long>> {
-    // STA 初始化已经实际验证过 GetEventEx；只在该会话使用新格式。AP/USB 继续保持
-    // 原来的 GetEvent 路径，避免把一台相机的能力假设扩散到其它连接模式。
-    if (staAlbumAccessValidated) {
-        val (extendedResponse, extendedData) = labCommand(Lab.NK_GET_EVENT_EX)
-        if (extendedResponse == Lab.OK) {
-            return extendedData?.let { data ->
-                runCatching { parseNikonExtendedEvents(data) }.getOrDefault(emptyList())
-            }.orEmpty()
-        }
-        if (extendedResponse != PtpConstants.OPERATION_NOT_SUPPORTED) return emptyList()
-    }
+/** Only the photo-list fallback poll yields for the whole rating phase. */
+internal fun eventPollRequestKind(background: Boolean): CameraRequestKind =
+    if (background) CameraRequestKind.EVENT_POLL else CameraRequestKind.INTERACTIVE
 
-    val (response, data) = labCommand(Lab.NK_GET_EVENT)
-    if (response != Lab.OK || data == null) return emptyList()
-    return runCatching { parseNikonEvents(data) }.getOrDefault(emptyList())
+suspend fun NikonCamera.rcPollEvents(background: Boolean = false): List<Pair<Int, Long>> {
+    val read: suspend () -> List<Pair<Int, Long>> = {
+        withCameraTransaction(eventPollRequestKind(background), "EVENT_POLL") {
+            withContext(Dispatchers.IO) {
+                if (staAlbumAccessValidated) {
+                    sendCmd(Lab.NK_GET_EVENT_EX)
+                    val (response, data) = recvRespWithPayload()
+                    if (response == Lab.OK) {
+                        return@withContext data?.let {
+                            runCatching { parseNikonExtendedEvents(it) }.getOrDefault(emptyList())
+                        }.orEmpty()
+                    }
+                    if (response != PtpConstants.OPERATION_NOT_SUPPORTED) return@withContext emptyList()
+                }
+                sendCmd(Lab.NK_GET_EVENT)
+                val (response, data) = recvRespWithPayload()
+                if (response != Lab.OK || data == null) return@withContext emptyList()
+                runCatching { parseNikonEvents(data) }.getOrDefault(emptyList())
+            }
+        }
+    }
+    // Background polling must not hold the focus lock while awaiting rating completion.
+    // Monitor events retain their original coordination with focus and recording operations.
+    return if (background) read() else focusMutex.withLock { read() }
 }
 
 /** 发单条命令，DEVICE_BUSY 时退避重试（200ms × 5）。拍摄/录像触发类命令共用。 */
@@ -1426,7 +1426,7 @@ internal suspend fun NikonCamera.rcStartMovieDetailed(
     return RcMovieStartResult(rc, prohibitCondition)
 }
 
-/** 执行 USB 开录序列；调用方必须已持有 ioMutex 并处于 I/O 调度器。 */
+/** 执行 USB 开录序列；调用方必须处于相机事务 并处于 I/O 调度器。 */
 private fun NikonCamera.prepareAndStartMovieLocked(): RcMovieStartResult {
     fun command(code: Int, vararg params: Int): Pair<Int, ByteArray?> {
         sendCmd(code, *params)
@@ -1508,14 +1508,14 @@ private fun NikonCamera.prepareAndStartMovieLocked(): RcMovieStartResult {
 
 /**
  * USB 远控会话内的开录原子序列。禁止条件读取、应用模式和 0x920A 共用一次
- * [NikonCamera.ioMutex]，事件轮询与取帧不能插入中途看到半切换状态或把应用模式清回去。
+ * 统一事务调度器，事件轮询与取帧不能插入中途看到半切换状态或把应用模式清回去。
  * Live View 与 PTP 会话始终保持，不在这里发送 EndLiveView。
  */
 internal suspend fun NikonCamera.rcPrepareAndStartMovieDetailed(
     log: (String) -> Unit = {}
 ): RcMovieStartResult {
     val result = focusMutex.withLock {
-        ioMutex.withLock {
+        withCameraTransaction(CameraRequestKind.INTERACTIVE, "MOVIE_START") {
             withContext(Dispatchers.IO) { prepareAndStartMovieLocked() }
         }
     }
@@ -1625,7 +1625,7 @@ suspend fun NikonCamera.labStartLiveView(log: suspend (String) -> Unit): Boolean
 
 suspend fun NikonCamera.labEndLiveView(): Int {
     val rc = focusMutex.withLock {
-        ioMutex.withLock {
+        withCameraTransaction(CameraRequestKind.INTERACTIVE, "LIVE_VIEW_END") {
             withContext(Dispatchers.IO) {
                 // EndLiveView 会隐式终止画面，但不能依赖它替我们闭合追踪会话；否则下次
                 // 开 LV 时机身仍可能保留旧目标。错误响应不阻止继续关 LV；但若一次事务
@@ -1656,7 +1656,7 @@ suspend fun NikonCamera.labEndLiveView(): Int {
  * 相机忙返回 null（调用方稍后重试）；其它失败抛响应码异常。
  */
 suspend fun NikonCamera.labGrabFrame(): LiveViewPacket? =
-    ioMutex.withLock {
+    withCameraTransaction(CameraRequestKind.INTERACTIVE, "LIVE_VIEW_FRAME") {
         withContext(Dispatchers.IO) {
             if (liveViewImageOperation == null) {
                 // 正常路径已在 labStartLiveView 前解析；仅为直接调用 labGrabFrame 的
@@ -1789,8 +1789,9 @@ private suspend fun NikonCamera.logTrackingFocusProperties(
 
 /**
  * 完整探测中的主体追踪专检。这里故意尝试几种参数/顺序组合，但只使用机身自己
- * 广告的 StartTracking/EndTracking/ChangeAfArea/AfDrive。StartTracking 使用增强帧
- * +16/+18 的完整坐标系，ChangeAfArea 使用 +28/+30 的 AF 网格。仅在 StartTracking
+ * 广告的 StartTracking/EndTracking/ChangeAfArea/AfDrive。StartTracking 与 ChangeAfArea
+ * 都使用增强帧 +16/+18 的整幅 Live View 坐标系；+28/+30 只是 AF 框/显示网格，不能直接
+ * 作为 ChangeAfArea 的命令坐标范围。仅在 StartTracking
  * 明确成功后发送 EndTracking，避免无意义的状态命令；
  * finally 只清理已经开始的追踪状态。每条协议事务自行获取 focusMutex，外层不得重复持锁。
  *
@@ -2651,4 +2652,23 @@ suspend fun NikonCamera.runLabProbe(
     log("capture opcode: ${if (Lab.NK_CAPTURE_REC_IN_MEDIA in ops || Lab.NK_CAPTURE_REC_IN_SDRAM in ops) "advertised" else "MISSING"}")
     log("event polling:  ${if (Lab.NK_GET_EVENT in ops || Lab.NK_GET_EVENT_EX in ops) "advertised" else "MISSING"}")
     log("=== probe done in ${System.currentTimeMillis() - t0}ms ===")
+}
+
+/** Manual read-only probe. Property selection follows libgphoto2 Nikon moviequality/moviequality2. */
+internal suspend fun NikonCamera.probeMovieFormat(): String = buildString {
+    appendLine("Movie format v1; read only; D0A0=MovScreenSize, D0A7=MovQuality")
+    for ((prop, name) in listOf(0xD0A0 to "size/rate", 0xD0A7 to "quality")) {
+        val (rc, data) = labCommand(Lab.GET_DEVICE_PROP_DESC, prop)
+        appendLine("$name prop=${hex4(prop)} desc=${hex4(rc)} bytes=${data?.size ?: 0}")
+        if (rc == Lab.OK && data != null) {
+            val desc = runCatching { parseProbePropDescData(prop, data) }.getOrNull()
+            if (desc != null) {
+                appendLine("type=${hex4(desc.dataType)} current=${desc.current} writable=${desc.writable} form=${desc.formFlag} values=${desc.enumValues.take(64)}")
+            }
+            appendLine("descHex=${probeHex(data)}")
+        }
+        val (valueRc, value) = labCommand(Lab.GET_DEVICE_PROP_VALUE, prop)
+        appendLine("value=${hex4(valueRc)} hex=${value?.let { probeHex(it) } ?: "none"}")
+    }
+    append("Compare with camera frame size/frame rate; numeric mappings vary by model.")
 }

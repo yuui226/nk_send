@@ -269,4 +269,89 @@ class LiveViewMetadataTest {
         assertNotNull(metadata?.selectedFocusFrame)
         assertNull(metadata?.soundLevels)
     }
+
+    @Test
+    fun unknownJudgementDoesNotDiscardGeometryOrAudio() {
+        val data = z30Packet(judgement = 99)
+        data[390] = 7
+        val result = parseLiveViewMetadata(data, 512, Lab.NK_GET_LIVE_VIEW_IMG_EX)!!
+        assertEquals(LiveViewFocusJudgement.UNKNOWN, result.focusJudgement)
+        assertNotNull(result.selectedFocusFrame)
+        assertEquals(7, result.soundLevels?.currentLeft)
+    }
+
+    @Test
+    fun frameTableMustNotOverlapRecordingAndAudioFields() {
+        val result = parseLiveViewMetadata(z30Packet(frameCount = 43), 512, Lab.NK_GET_LIVE_VIEW_IMG_EX)!!
+        assertEquals("invalid-table", result.focusFrameStatus)
+        assertNull(result.selectedFocusFrame)
+        assertNotNull(result.soundLevels)
+    }
+
+    @Test
+    fun mapsCameraVisibleCropWithoutMovingOffscreenFocusIntoView() {
+        val area = LiveViewDisplayArea(.25f, .25f, .5f, .5f)
+        val centered = mapLiveViewFocusFrame(LiveViewFocusFrame(.5f, .5f, .1f, .1f), area)!!
+        assertEquals(.5f, centered.centerX, .0001f)
+        assertEquals(.2f, centered.width, .0001f)
+        assertNull(mapLiveViewFocusFrame(LiveViewFocusFrame(.1f, .1f, .1f, .1f), area))
+        val edge = mapLiveViewFocusFrame(LiveViewFocusFrame(.25f, .5f, .1f, .1f), area)!!
+        assertEquals(.05f, edge.centerX, .0001f)
+        assertEquals(.1f, edge.width, .0001f)
+    }
+
+    @Test
+    fun nonzeroInvalidVisibleRegionDoesNotFallbackToFullFrame() {
+        val data = z30Packet()
+        putBe16(data, 20, 6000)
+        val result = parseLiveViewMetadata(data, 512, Lab.NK_GET_LIVE_VIEW_IMG_EX)!!
+        assertEquals("invalid-area", result.focusFrameStatus)
+        assertNull(result.selectedFocusFrame)
+        assertNotNull(result.soundLevels)
+    }
+
+    @Test
+    fun usesDeclaredVisibleRegionForVideoCrop() {
+        val data = z30Packet()
+        putBe16(data, 20, 5568)
+        putBe16(data, 22, 3132)
+        putBe16(data, 24, 2784)
+        putBe16(data, 26, 1856)
+        val result = parseLiveViewMetadata(data, 512, Lab.NK_GET_LIVE_VIEW_IMG_EX)!!
+        assertEquals("display-area", result.focusFrameStatus)
+        assertEquals((878f - 290f) / 3132f, result.selectedFocusFrame!!.centerY, .0001f)
+    }
+    @Test fun parsesEveryValidAreaInsteadOfOnlySelectedIndex() {
+        val data = z30Packet(frameCount = 36, selectedIndex = 20)
+        repeat(36) { index ->
+            val offset = 48 + index * 8
+            putBe16(data, offset, 100)
+            putBe16(data, offset + 2, 80)
+            putBe16(data, offset + 4, 300 + index * 100)
+            putBe16(data, offset + 6, 1000)
+        }
+        val result = parseLiveViewMetadata(data, 512, Lab.NK_GET_LIVE_VIEW_IMG_EX)!!
+        assertEquals(36, result.focusFrames.size)
+        assertEquals(result.focusFrames[20], result.selectedFocusFrame)
+    }
+
+    @Test fun invalidRecordsAndSelectionDoNotDiscardOtherValidAreas() {
+        val data = z30Packet(frameCount = 3, selectedIndex = 255)
+        // Record 1 is zero-filled and invalid; record 2 is distinct and valid.
+        putBe16(data, 64, 100)
+        putBe16(data, 66, 80)
+        putBe16(data, 68, 1000)
+        putBe16(data, 70, 1000)
+        val result = parseLiveViewMetadata(data, 512, Lab.NK_GET_LIVE_VIEW_IMG_EX)!!
+        assertEquals(2, result.focusFrames.size)
+        assertNull(result.selectedFocusFrame)
+    }
+
+    @Test fun duplicateAreasDoNotAccumulateDarkerStrokes() {
+        val data = z30Packet(frameCount = 2)
+        data.copyInto(data, 56, 48, 56)
+        val result = parseLiveViewMetadata(data, 512, Lab.NK_GET_LIVE_VIEW_IMG_EX)!!
+        assertEquals(1, result.focusFrames.size)
+    }
+
 }

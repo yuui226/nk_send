@@ -1,5 +1,7 @@
 package com.ztransfer.ui.screen
 
+import com.ztransfer.protocol.probeMovieFormat
+import com.ztransfer.protocol.probeLegacyVideoTime
 import com.ztransfer.util.HistogramMode
 import com.ztransfer.lut.LutFolderRepository
 import com.ztransfer.lut.LutMonitorState
@@ -135,6 +137,7 @@ import com.ztransfer.protocol.LiveViewSoundLevels
 import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.protocol.PtpConstants
 import com.ztransfer.protocol.RcParam
+import com.ztransfer.protocol.RcTapFocusPath
 import com.ztransfer.protocol.RemoteCameraTool
 import com.ztransfer.protocol.labEndLiveView
 import com.ztransfer.protocol.labGrabFrame
@@ -150,6 +153,9 @@ import com.ztransfer.protocol.rcReadExposureMeter
 import com.ztransfer.protocol.rcBatteryPercentage
 import com.ztransfer.protocol.rcCapture
 import com.ztransfer.protocol.rcFocusAt
+import com.ztransfer.protocol.rcNormalizedToFocusCoordinate
+import com.ztransfer.protocol.rcGetCameraTool
+import com.ztransfer.protocol.rcTapFocusPath
 import com.ztransfer.protocol.rcChangeApplicationMode
 import com.ztransfer.protocol.rcCanonicalExposureProp
 import com.ztransfer.protocol.rcEndMovie
@@ -157,6 +163,7 @@ import com.ztransfer.protocol.rcEndSubjectTracking
 import com.ztransfer.protocol.rcFormat
 import com.ztransfer.protocol.rcGetAngleLevel
 import com.ztransfer.protocol.rcGetCompatibleParam
+import com.ztransfer.protocol.focusModeProperties
 import com.ztransfer.protocol.rcGetFocusMode
 import com.ztransfer.protocol.rcGetMovieMode
 import com.ztransfer.protocol.rcGetParam
@@ -169,7 +176,6 @@ import com.ztransfer.protocol.rcSetControlMode
 import com.ztransfer.protocol.rcSetLvSize
 import com.ztransfer.protocol.rcSetValueVerified
 import com.ztransfer.protocol.rcStartMovieDetailed
-import com.ztransfer.protocol.runLabProbe
 import com.ztransfer.protocol.movieStartNeedsLiveViewRestart
 import com.ztransfer.protocol.movieProhibitIndicatesRecording
 import com.ztransfer.protocol.diagnosticSummary
@@ -196,6 +202,8 @@ import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -328,8 +336,6 @@ private data class ConfirmedFocusMarker(
     val subjectTracking: Boolean = false
 )
 
-/** 绘制侧最近一次相机 AF 框；不是 UI 状态，更新它不应额外触发一轮重组。 */
-private class FocusFrameCache(var frame: LiveViewFocusFrame? = null)
 
 private class HistogramThrottle {
     var lastCalculatedAtMs: Long = 0L
@@ -620,6 +626,8 @@ private fun RemoteContent(
     var capturing by remember { mutableStateOf(false) }
     var modeText by remember { mutableStateOf<String?>(null) }
     var movieMode by remember { mutableStateOf(false) }
+    var computerControlBusy by remember { mutableStateOf(false) }
+    var computerControlEnabled by remember { mutableStateOf(false) }
     var focusModeText by remember { mutableStateOf<String?>(null) }
     var focusModeProp by remember { mutableStateOf<Int?>(null) }
     var focusModeManual by remember { mutableStateOf(false) }
@@ -638,7 +646,7 @@ private fun RemoteContent(
     var autoIsoBusy by remember { mutableStateOf(false) }
     var autoIsoProbeLogKey by remember { mutableStateOf<String?>(null) }
     // 初始参数是否已加载完：用于把事件轮询推迟到之后开始，避免进页时 GetEvent 与
-    // 曝光参数与模式读取抢 ioMutex、拖慢参数首次显示。
+    // 曝光参数与模式读取抢 相机事务调度器、拖慢参数首次显示。
     var initialLoaded by remember { mutableStateOf(false) }
     // 只控制后台相机命令何时放行；取帧本身不设任何 FPS 上限。
     var liveViewStable by remember { mutableStateOf(false) }
@@ -657,21 +665,41 @@ private fun RemoteContent(
     val diagnosticPreferences = remember(services.context) {
         services.context.getSharedPreferences("remote_diagnostics", Context.MODE_PRIVATE)
     }
-    val logLines = remember {
-        mutableStateListOf<String>().apply {
-            diagnosticPreferences.getString("last_report", null)?.lineSequence()
-                ?.filter { it.isNotBlank() && "] meter " !in it }?.forEach { appendRemoteDiagnosticLine(this, it) }
+    var focusModeReport by remember {
+        mutableStateOf(diagnosticPreferences.getString("focus_mode_report_v1", "").orEmpty())
+    }
+    var tapFocusReport by remember {
+        mutableStateOf(diagnosticPreferences.getString("tap_focus_report_v2", "").orEmpty())
+    }
+    var devPanel by remember { mutableStateOf(false) }
+    fun focusModeLog(line: String) {
+        focusModeReport = (focusModeReport.lines() + line).takeLast(80).joinToString("\n")
+    }
+    fun startFocusModeReport() {
+        val cam = cameraViewModel.getCamera()
+        focusModeReport = "Focus mode v1 ${java.time.OffsetDateTime.now()} app=${BuildConfig.VERSION_NAME}(${BuildConfig.VERSION_CODE})\n" +
+            "camera=${cam?.deviceModel} firmware=${cam?.cachedDeviceInfo?.deviceVersion} " +
+            "transport=${cam?.connectionType} mode=${if (cam?.connectionType == CameraConnectionType.USB) "USB" else if (camState.isStaConnection) "STA" else "AP"}\n" +
+            "movie=$movieMode current=$focusModeText"
+    }
+    fun tapFocusLog(line: String) {
+        tapFocusReport = (tapFocusReport.lines() + line).filter { it.isNotBlank() }.takeLast(80).joinToString("\n")
+    }
+    DisposableEffect(Unit) {
+        onDispose {
+            diagnosticPreferences.edit()
+                .putString("focus_mode_report_v1", focusModeReport)
+                .putString("tap_focus_report_v2", tapFocusReport)
+                .apply()
         }
     }
-    var diagnosticReportStarted by remember { mutableStateOf(false) }
-    var diagnosticCapture by remember { mutableStateOf(false) }
-    var devPanel by remember { mutableStateOf(false) }
-    var diagnosticControlEnabled by remember { mutableStateOf(false) }
-    var diagnosticControlBusy by remember { mutableStateOf(false) }
-    var diagnosticControlJob by remember { mutableStateOf<Job?>(null) }
-    var diagnosticControlStatus by remember { mutableStateOf<String?>(null) }
-    // 切换后关掉调试窗仍记录快门写入和回读，方便实际调节后复制整份反馈。
-    var diagnosticControlLogging by remember { mutableStateOf(false) }
+
+    LaunchedEffect(connected) {
+        if (!connected) {
+            computerControlEnabled = false
+            computerControlBusy = false
+        }
+    }
     // 开发者入口默认隐藏：1.5s 内连按 4 次 FPS 键才现身（FPS 连按 4 次开关状态
     // 恰好复原，不留副作用）。仅本次进页有效，退页复位——这是诊断后门不是常驻功能。
     var devUnlocked by remember { mutableStateOf(false) }
@@ -685,6 +713,9 @@ private fun RemoteContent(
     var exposureAssist by tools.exposure
     val showZebra = exposureAssist == ExposureAssist.ZEBRA
     var showLevel by tools.level
+    var showFocusFrame by tools.focusFrame
+    var focusValidAfter by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
+    LaunchedEffect(movieMode, connected, focusModeText) { focusValidAfter = SystemClock.elapsedRealtime() }
     var showMeter by tools.meter
     var meterSample by remember { mutableStateOf<Pair<Float, Long>?>(null) }
     val meterGeneration = remember { longArrayOf(0L) }
@@ -701,13 +732,15 @@ private fun RemoteContent(
     var cameraToolCloseRequested by remember { mutableStateOf(false) }
     var toolOverlayCoordinates by remember { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
     var whiteBalanceAnchor by remember { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
+    var focusModeAnchor by remember { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
+    var cameraToolWriting by remember { mutableStateOf(false) }
     var focusAreaAnchor by remember { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
     fun setDesqueezeMultiplier(value: Float) { desqueezeMultiplier = value }
     fun toggleAudioLevels() { showAudioLevels = !showAudioLevels }
     // 相机机身的滚转角（0xD067），null=还没读到/机身不支持，此时水平仪一笔都不画
     var levelRoll by remember { mutableStateOf<Float?>(null) }
     var levelPitch by remember { mutableStateOf<Float?>(null) }
-    var probing by remember { mutableStateOf(false) }
+
     val landscapeLayout = rotation != 0
     LaunchedEffect(rotation, editingTools) {
         gridPanelOpen = false
@@ -725,29 +758,9 @@ private fun RemoteContent(
     // 暂停态用 Compose 状态镜像：recorder.isPaused 是普通 @Volatile 字段，
     // 直接读它不会触发重组，暂停/继续按钮图标会卡住不切换。
     var recPaused by remember { mutableStateOf(false) }
-    fun appendDiagnostic(line: String) {
-        val stamp = java.time.LocalTime.now().toString().take(12)
-        appendRemoteDiagnosticLine(logLines, "[$stamp] $line")
-        // apply 在内存立即更新并异步落盘；退出清理也走此路径，重进页仍能复制失败报告。
-        diagnosticPreferences.edit().putString("last_report", logLines.joinToString("\n")).apply()
-    }
     fun devLog(line: String) {
-        if (!diagnosticCapture && !diagnosticControlLogging) return
-        if (!isRemoteDiagnosticLine(line)) return
-        appendDiagnostic(line)
-    }
-
-    fun beginDiagnosticReport(cam: NikonCamera) {
-        diagnosticControlLogging = true
-        if (diagnosticReportStarted) return
-        diagnosticReportStarted = true
-        logLines.clear()
-        devLog("diagnostic report v2 date=${java.time.OffsetDateTime.now()} " +
-            "app=${BuildConfig.VERSION_NAME}(${BuildConfig.VERSION_CODE}) " +
-            "android=${android.os.Build.VERSION.RELEASE}")
-        devLog("diagnostic camera=${cam.deviceModel ?: "unknown"} " +
-            "firmware=${cam.cachedDeviceInfo?.deviceVersion ?: "unknown"} " +
-            "transport=${cam.connectionType} wifiMode=${if (cam.connectionType == CameraConnectionType.USB) "n/a" else if (camState.isStaConnection) "STA" else "AP"}")
+        // General camera diagnostics stay out of the focus report.
+        if (BuildConfig.DEBUG) android.util.Log.d("RemoteControl", line)
     }
 
     // 事件总线：单一轮询协程独占 GetEvent（事件是取走即消费的，多处轮询会互相偷事件），
@@ -814,37 +827,14 @@ private fun RemoteContent(
 
     suspend fun refreshParam(prop: Int) {
         val cam = cameraViewModel.getCamera() ?: return
-        val exposureDiagnostic = prop in setOf(
-            Lab.PROP_NK_SHUTTER, Lab.PROP_F_NUMBER,
-            Lab.PROP_EXP_COMPENSATION, Lab.PROP_ISO,
-            Lab.PROP_NK_MOVIE_SHUTTER, Lab.PROP_NK_MOVIE_F_NUMBER,
-            Lab.PROP_NK_MOVIE_EXP_COMP, Lab.PROP_NK_MOVIE_ISO
-        )
-        if ((diagnosticCapture || diagnosticControlLogging) && exposureDiagnostic && prop != Lab.PROP_NK_SHUTTER) {
-            devLog("exposure capability logical=0x%04X: querying".format(prop))
-        }
         val shutterLogical = prop == Lab.PROP_NK_SHUTTER || prop == Lab.PROP_NK_MOVIE_SHUTTER
         val selected = try {
-            cam.rcGetCompatibleParam(prop, if (diagnosticCapture || diagnosticControlLogging) ::devLog else null)
+            cam.rcGetCompatibleParam(prop, null)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             devLog("!! capability logical=0x%04X error=%s: %s".format(prop, e.javaClass.simpleName, e.message))
             null
-        }
-        if ((diagnosticCapture || diagnosticControlLogging) && exposureDiagnostic && prop != Lab.PROP_NK_SHUTTER) {
-            devLog(
-                "exposure selected logical=0x%04X %s".format(
-                    prop,
-                    selected?.let {
-                        "prop=0x%04X writable=%s current=%d values=%d first=%s last=%s".format(
-                            it.prop, it.writable, it.current, it.values.size,
-                            it.values.firstOrNull()?.toString() ?: "-",
-                            it.values.lastOrNull()?.toString() ?: "-"
-                        )
-                    } ?: "none"
-                )
-            )
         }
         if (shutterLogical) {
             devLog(
@@ -935,7 +925,9 @@ private fun RemoteContent(
 
     suspend fun refreshFocusMode() {
         val cam = cameraViewModel.getCamera() ?: return
+        val modeAtRead = movieMode
         val focus = runCatching { cam.rcGetFocusMode() }.getOrNull()
+        if (cameraViewModel.getCamera() !== cam || movieMode != modeAtRead) return
         val changed = !focusModeQueried ||
             focusModeText != focus?.label || focusModeProp != focus?.prop
         focusModeQueried = true
@@ -945,7 +937,7 @@ private fun RemoteContent(
         if (focus != null && changed) {
             devLog("focus mode ${focus.label} prop=0x%04X raw=0x%X".format(focus.prop, focus.raw))
         } else if (focus == null && changed) {
-            devLog("!! focus mode unavailable (0x500A/0xD161)")
+            devLog("!! focus mode unavailable (0x500A/0xD061/0xD161)")
         }
     }
 
@@ -955,6 +947,10 @@ private fun RemoteContent(
     // recording 以事件为准（0xC10A 开始 / 0xC108 完成 / 0xC105 中断），发命令成功时
     // 乐观置位让 UI 立即响应；lastStopCmdAt 用于滤掉停止后才轮询到的迟到"已开始"回声。
     var recording by remember { mutableStateOf(false) }
+    var movieFormatReport by remember { mutableStateOf("") }
+    var legacyVideoReport by remember { mutableStateOf("") }
+    var legacyVideoBusy by remember { mutableStateOf(false) }
+    val videoProbeScope = rememberCoroutineScope()
     var recBusy by remember { mutableStateOf(false) }
     var lastStopCmdAt by remember { mutableLongStateOf(0L) }
     // Nikon Z 系远程开录前需要进入应用模式。USB 优先走已验证的 0x9435，
@@ -1017,12 +1013,17 @@ private fun RemoteContent(
     fun startSession(
         hd: Boolean,
         adoptActiveLiveView: NikonCamera? = null,
-        suppressStartupPropertyEvents: Boolean = false
+        suppressStartupPropertyEvents: Boolean = false,
+        preserveFrameUntilNext: Boolean = false,
     ) {
-        if (diagnosticControlBusy) return
         val prev = lvJob
         lvJob = services.scope.launch {
             prev?.cancelAndJoin()
+            // A recording compatibility restart should not blank the monitor while the
+            // camera establishes the replacement Live View session. Other session changes
+            // keep the old behavior and clear the stale frame immediately.
+            if (!preserveFrameUntilNext) frame = null
+            focusValidAfter = SystemClock.elapsedRealtime()
             subjectTrackingActive = false
             liveViewStable = false
             startupEventBaselinePending = suppressStartupPropertyEvents
@@ -1217,6 +1218,44 @@ private fun RemoteContent(
         }
     }
 
+    fun setComputerControl(enabled: Boolean) {
+        val cam = cameraViewModel.getCamera() ?: return
+        if (computerControlBusy || !connected) return
+        computerControlBusy = true
+        services.scope.launch {
+            val oldLvJob = lvJob
+            try {
+                // SetControlMode is not safe while the normal Live View command
+                // stream is active. Serialize the transition and restart LV after
+                // the camera has accepted the new mode.
+                oldLvJob?.cancelAndJoin()
+                if (lvJob === oldLvJob) lvJob = null
+                runCatching { cam.labEndLiveView() }
+                val rc = cam.rcSetControlMode(enabled)
+                if (rc == Lab.OK) {
+                    cam.remoteDiagnosticControlModeSet = enabled
+                    computerControlEnabled = enabled
+                    devLog("ComputerControl ${if (enabled) "enabled" else "disabled"}")
+                } else {
+                    devLog("!! ComputerControl ${if (enabled) "enable" else "disable"} resp=0x%04X".format(rc and 0xFFFF))
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                devLog("!! ComputerControl ${if (enabled) "enable" else "disable"} failed=${e.javaClass.simpleName}: ${e.message}")
+            } finally {
+                if (currentCoroutineContext().isActive &&
+                    cameraViewModel.state.value.isConnectedToCamera &&
+                    cameraViewModel.getCamera() === cam
+                ) {
+                    startSession(hdLiveView, preserveFrameUntilNext = true)
+                }
+                computerControlBusy = false
+            }
+        }
+    }
+
+
     suspend fun prepareUsbMovieSession(cam: NikonCamera): NikonCamera? {
         val oldLvJob = lvJob
         oldLvJob?.cancelAndJoin()
@@ -1295,7 +1334,7 @@ private fun RemoteContent(
 
     suspend fun returnUsbMovieSessionToStandby(cam: NikonCamera) {
         // 恢复分支可能已在 delay 中，必须在真正执行前再检查调试模式的所有权。
-        if (diagnosticControlBusy || cam.remoteDiagnosticControlModeSet) return
+        if (cam.remoteDiagnosticControlModeSet) return
         initialLoaded = false
         val rebuildLiveView = releaseUsbMovieSession(cam)
         if (cameraViewModel.getCamera() === cam) {
@@ -1307,12 +1346,11 @@ private fun RemoteContent(
     }
 
     suspend fun refreshMovieMode(refreshExposureOnChange: Boolean = true) {
-        if (diagnosticControlBusy) return
         val cam = cameraViewModel.getCamera() ?: return
         val mv = runCatching { cam.rcGetMovieMode() }.getOrNull() ?: return
-        if (diagnosticControlBusy) return
         val was = movieMode
         movieMode = mv
+        if (mv != was && refreshExposureOnChange) refreshFocusMode()
         if (refreshExposureOnChange && mv && !was) {
             // 切入录像位：拉取录像侧独立参数组（照片/录像两套属性互不相通）
             MOVIE_EXPOSURE_PROPS.forEach { refreshParam(it) }
@@ -1331,7 +1369,7 @@ private fun RemoteContent(
         }
     }
 
-    // 在页期间暂停后台缩略图填充：把 ioMutex 完全让给取帧与参数加载，
+    // 在页期间暂停后台缩略图填充：把相机通道完全让给取帧与参数加载，
     // 否则每条启动命令都排在 GetThumb 后面，进页要等好几秒。退出自动恢复。
     DisposableEffect(Unit) {
         cameraViewModel.setRemoteActive(true)
@@ -1351,28 +1389,28 @@ private fun RemoteContent(
             return@LaunchedEffect
         }
         val sessionCamera = cameraViewModel.getCamera() ?: return@LaunchedEffect
+        computerControlEnabled = sessionCamera.remoteControlModeSet &&
+            sessionCamera.remoteDiagnosticControlModeSet
         try {
             // 新连接不继承上一条连接的拨杆状态。首次读取失败时按照片模式处理，优先
             // 保证机身画面与快门不被错误锁进电脑控制模式。
             movieMode = false
             batteryParam = null
-            // 先确定照片/视频拨杆，再只读取对应的一组参数。旧流程先读照片组、随后切到
-            // 视频组，会表现为参数出现、清空、再加载一遍。
-            refreshMovieMode(refreshExposureOnChange = false)
             // USB 待机始终使用普通 PTP Live View，让机身拨杆保持可读；电脑远控只在
-            // 用户真正开始录像时临时进入，停止后立即退出。
+            // 用户真正开始录像时临时进入，停止后立即退出。先清理遗留会话，避免
+            // 先读取一次旧状态、清理后又重复读取一次。
             val hadStaleUsbMovieSession = shouldReturnUsbMovieSessionToStandby(
                     sessionCamera.connectionType,
                     sessionCamera.remoteControlModeSet
                 )
-            if (hadStaleUsbMovieSession && releaseUsbMovieSession(sessionCamera)) {
+            if (hadStaleUsbMovieSession) {
+                releaseUsbMovieSession(sessionCamera)
                 // 电脑控制中的 D1A6 可能仍是进入控制前的录像值；归还机身后立即重读，
-                // 避免重进页面时先按错误模式加载整套参数。
-                refreshMovieMode(refreshExposureOnChange = false)
+                // 再读取一次即可得到当前真实拨杆状态。
             }
-            diagnosticControlEnabled = sessionCamera.remoteDiagnosticControlModeSet &&
-                sessionCamera.remoteControlModeSet
-            if (diagnosticControlEnabled) diagnosticControlLogging = true
+            // 先确定照片/视频拨杆，再只读取对应的一组参数。旧流程先读照片组、随后切到
+            // 视频组，会表现为参数出现、清空、再加载一遍。
+            refreshMovieMode(refreshExposureOnChange = false)
             val initialExposureProps =
                 if (movieMode) MOVIE_EXPOSURE_PROPS else EXPOSURE_PROPS
             initialExposureProps.forEach { refreshParam(it) }
@@ -1387,7 +1425,6 @@ private fun RemoteContent(
         } finally {
             withContext(NonCancellable) {
                 // 先等调试切换完成记账，防止退页清理后才迟到地开启 PC 控制。
-                diagnosticControlJob?.cancelAndJoin()
                 initialLoaded = false
                 if ((sessionCamera.connectionType == CameraConnectionType.USB ||
                         sessionCamera.remoteDiagnosticControlModeSet) &&
@@ -1416,14 +1453,13 @@ private fun RemoteContent(
                     }
                 }
                 devLog("diagnostic monitor session ended connected=$connected")
-                diagnosticControlEnabled = false
             }
         }
     }
 
     // 部分机身不发 BatteryLevel 变更事件：每 120s 兜底刷新。首读失败时
     // 也会重新拉取属性描述，避免进页瞬间相机忙导致整次会话一直显示未知。
-    // 拍摄/录像命令期间等忙状态结束再读，不抢占实时取景的共用 ioMutex。
+    // 拍摄/录像命令期间等忙状态结束再读，不抢占实时取景的共用相机事务调度器。
     LaunchedEffect(connected, initialLoaded) {
         if (!connected || !initialLoaded) return@LaunchedEffect
         while (isActive) {
@@ -1474,7 +1510,7 @@ private fun RemoteContent(
     // ---------- 电子水平仪（AngleLevel 0xD067）----------
     // 角度取自【相机机身】而非手机传感器：相机在架子上、手机在手里，只有相机自身姿态
     // 对构图有意义。只在水平仪打开时轮询，关掉就一条命令都不发——本页所有相机 I/O
-    // 共用 ioMutex，多一个常驻轮询就是白占取帧通道。250ms 对水平指示足够跟手。
+    // 共用相机事务调度器，多一个常驻轮询就是白占取帧通道。250ms 对水平指示足够跟手。
     // 机身不支持时停止轮询、不显示假角度，保留用户偏好供下次连接使用。
     LaunchedEffect(showLevel, connected) {
         levelRoll = null
@@ -1532,7 +1568,7 @@ private fun RemoteContent(
         var pollTick = 0
         while (isActive) {
             // 让初始参数先加载完再开始轮询，避免抢锁拖慢进页
-            if (!initialLoaded || diagnosticControlBusy) { delay(150); continue }
+            if (!initialLoaded) { delay(150); continue }
             val cam = cameraViewModel.getCamera()
             if (cam == null) { delay(1500); continue }
             if (!liveViewStable) {
@@ -1563,7 +1599,6 @@ private fun RemoteContent(
             }
             val polledEvents = runCatching { cam.rcPollEvents() }
             // 切换开始前已发出的事件读取也不能在模式转换中触发 USB 自动恢复。
-            if (diagnosticControlBusy) continue
             if (polledEvents.isFailure) {
                 // GetEvent 异常不能连带禁用拨杆兜底；否则部分 USB 会话虽然仍能读取
                 // D1A6，却会因为事件通道暂时失败而永远停留在旧模式界面。
@@ -1582,7 +1617,6 @@ private fun RemoteContent(
             )
             var movieModeRefreshRequested = false
             for (e in events) {
-                if (diagnosticControlBusy) break
                 eventFlow.emit(e)
                 when (e.first) {
                     // 录像状态以相机事件为准（卡满/过热等相机自行停录也能收到）。
@@ -1611,6 +1645,9 @@ private fun RemoteContent(
                     }
                     Lab.EVT_DEVICE_PROP_CHANGED -> {
                         val reportedProp = e.second.toInt()
+                        if (reportedProp in listOf(0x501C, 0xD05D, 0xD1F8)) {
+                            focusValidAfter = SystemClock.elapsedRealtime()
+                        }
                         val prop = rcCanonicalExposureProp(reportedProp)
                         if (reportedProp == Lab.PROP_BATTERY_LEVEL) refreshBattery()
                         if (reportedProp in ALL_AUTO_ISO_PROPS) refreshAutoIso()
@@ -1631,7 +1668,7 @@ private fun RemoteContent(
                             }
                             refreshAutoIso()
                         }
-                        if (prop == Lab.PROP_FOCUS_MODE || prop == Lab.PROP_NK_AF_MODE ||
+                        if (prop in focusModeProperties ||
                             prop == focusModeProp
                         ) {
                             refreshFocusMode()
@@ -1661,9 +1698,8 @@ private fun RemoteContent(
 
     // ---------- 调参 ----------
     // 步进采用"乐观更新 + 尾值合并"：本地值立即跟手（长按连调不卡），停手 160ms 后
-    // 只把最终值发给相机——逐档发送会在 ioMutex 上排队，连调十几档要追几秒。
+    // 只把最终值发给相机——逐档发送会在相机事务调度器上排队，连调十几档要追几秒。
     fun sendValue(prop: Int, value: Long, immediate: Boolean) {
-        if (diagnosticControlBusy) return
         val p = params[prop] ?: return
         params[prop] = p.copy(current = value)
         services.haptics.tick()
@@ -1720,7 +1756,7 @@ private fun RemoteContent(
     // 拍摄：capturing 从触发一直保持到收到 ObjectAdded（相机确认新照片已生成）——
     // 快门键转圈即"正在等待拍摄确认"，收到确认/超时/失败即停。不读取也不展示缩略图。
     fun shoot(waitForFocus: Job? = null) {
-        if (capturing || probing) return
+        if (capturing || cameraToolWriting) return
         val expectedCamera = cameraViewModel.getCamera() ?: return
         // 在 launch 前同步置位，消除两次快速点按同时通过 capturing=false
         // 而启动两个拍摄事务的小窗口。
@@ -1774,12 +1810,13 @@ private fun RemoteContent(
     var tapFocusBusy by remember { mutableStateOf(false) }
     var tapFocusJob by remember { mutableStateOf<Job?>(null) }
     var tapFocusHideJob by remember { mutableStateOf<Job?>(null) }
-    // 与瞬时蓝/绿反馈分离：AF 成功后保留细红框，并在合焦完成 3 秒后自动隐藏。
+    // 没有有效相机框时，短暂保留 AF 成功的操作反馈。
     // 相机帧头没有可信 AF 框时使用这里保存的应用请求点作为安全回退。
     var confirmedFocusMarker by remember { mutableStateOf<ConfirmedFocusMarker?>(null) }
     fun startFocus() {
-        if (afHeld || tapFocusBusy || probing || focusModeManual || afJob?.isActive == true) return
+        if (cameraToolWriting || afHeld || tapFocusBusy || focusModeManual || afJob?.isActive == true) return
         tapFocusHideJob?.cancel()
+        tapFocusNonce++ // A fresh half-press must not inherit the previous tap's result colour/handoff.
         tapFocusFeedback = TapFocusFeedback.IDLE
         confirmedFocusMarker = null
         subjectTrackingActive = false
@@ -1854,163 +1891,29 @@ private fun RemoteContent(
         }
     }
 
-    fun setDiagnosticControlMode(enabled: Boolean) {
-        val cam = cameraViewModel.getCamera() ?: return
-        if (!connected || !initialLoaded || probing || diagnosticControlBusy ||
-            capturing || recording || recBusy || autoIsoBusy || afHeld || tapFocusBusy ||
-            afJob?.isActive == true || pendingSets.values.any { it.isActive }
-        ) return
-        // 不能用调试开关接管录像流程已持有的控制模式。
-        if (enabled && cam.remoteControlModeSet && !cam.remoteDiagnosticControlModeSet) return
-        diagnosticControlBusy = true
-        probing = true
-        initialLoaded = false
-        beginDiagnosticReport(cam)
-        devLog("control mode request enabled=$enabled")
-        diagnosticControlStatus = services.context.getString(R.string.remote_pc_control_switching)
-        diagnosticControlJob = services.scope.launch {
-            var adoptedCamera: NikonCamera? = null
-            suspend fun snapshot(stage: String) {
-                if (cameraViewModel.getCamera() !== cam) return
-                modeText = "?"
-                refreshMode()
-                devLog(
-                    "control mode $stage model=${cam.deviceModel ?: "unknown"} " +
-                        "connection=${cam.connectionType} exposure=$modeText " +
-                        "movie=$movieMode enabled=${cam.remoteControlModeSet} " +
-                        "applicationProp=${cam.remoteMovieApplicationPropSet} " +
-                        "applicationOp=${cam.remoteMovieApplicationOpSet}"
-                )
-                val activeProps = if (movieMode) MOVIE_EXPOSURE_PROPS else EXPOSURE_PROPS
-                activeProps.forEach {
-                    // 查询失败时不能沿用切换前的可写状态和值域。
-                    params.remove(it)
-                    refreshParam(it)
-                }
-            }
-            try {
-                snapshot("before")
-                if (!isActive || cameraViewModel.getCamera() !== cam) return@launch
-                val oldLvJob = lvJob
-                oldLvJob?.cancelAndJoin()
-                if (lvJob === oldLvJob) lvJob = null
-                if (oldLvJob == null) {
-                    val endRc = cam.labEndLiveView()
-                    devLog("control mode EndLiveView resp=0x%04X".format(endRc and 0xFFFF))
-                }
-                if (cameraViewModel.getCamera() !== cam) return@launch
-
-                // 命令和所有权记账不可被退页取消拆开；退出清理先 join 本任务。
-                val rc = withContext(NonCancellable) {
-                    // 调试开关本身不启用 ApplicationMode；若期间录过视频，关闭时
-                    // 先成对清理录像流程持有的应用模式，避免留下半套远控状态。
-                    if (!enabled &&
-                        (cam.remoteMovieApplicationPropSet || cam.remoteMovieApplicationOpSet)
-                    ) {
-                        devLog("control mode releasing movie application mode before disable")
-                        clearAppMode(cam, force = true)
-                        check(!cam.remoteMovieApplicationPropSet && !cam.remoteMovieApplicationOpSet) {
-                            "Movie application mode release failed"
-                        }
-                    }
-                    cam.rcSetControlMode(enabled).also { response ->
-                        if (response == Lab.OK) cam.remoteDiagnosticControlModeSet = enabled
-                    }
-                }
-                diagnosticControlEnabled = cam.remoteDiagnosticControlModeSet && cam.remoteControlModeSet
-                devLog(
-                    "control mode SetControlMode(${if (enabled) 1 else 0}) " +
-                        "resp=0x%04X enabled=%s; no ApplicationMode enable requested".format(
-                            rc and 0xFFFF, cam.remoteControlModeSet
-                        )
-                )
-                diagnosticControlStatus = if (rc == Lab.OK) {
-                    services.context.getString(
-                        if (enabled) R.string.remote_pc_control_on else R.string.remote_pc_control_off
-                    )
-                } else {
-                    services.context.getString(R.string.remote_pc_control_failed, "0x%04X".format(rc and 0xFFFF))
-                }
-                if (!isActive || cameraViewModel.getCamera() !== cam) return@launch
-                snapshot("after-command")
-                val sizeRc = cam.rcSetLvSize(if (hdLiveView) 3 else 2)
-                devLog("control mode SetLiveViewSize resp=0x%04X".format(sizeRc and 0xFFFF))
-                // 完成启动后才查询最终能力，随后让常规取帧任务接管同一个 LV。
-                withContext(NonCancellable) {
-                    if (cam.labStartLiveView { devLog(it) }) adoptedCamera = cam
-                }
-                if (adoptedCamera == null) {
-                    diagnosticControlStatus = services.context.getString(R.string.remote_pc_control_failed, "LiveView")
-                }
-                if (!isActive || cameraViewModel.getCamera() !== cam) return@launch
-                snapshot("after-liveview")
-                refreshAutoIso()
-                refreshFocusMode()
-                val shutter = params[if (movieMode) Lab.PROP_NK_MOVIE_SHUTTER else Lab.PROP_NK_SHUTTER]
-                val canTry = canTryRemoteShutter(shutter)
-                devLog("probe complete: control mode=$diagnosticControlEnabled " +
-                    "shutterCanTry=$canTry writable=${shutter?.writable} values=${shutter?.values?.size} " +
-                    "liveViewStarted=${adoptedCamera != null}; copy log even if still locked")
-                if (rc == Lab.OK && enabled && adoptedCamera != null && !canTry) {
-                    diagnosticControlStatus = services.context.getString(R.string.remote_pc_control_locked)
-                }
-            } catch (e: CancellationException) {
-                devLog("!! control mode switch cancelled; lastConfirmed=${cam.remoteControlModeSet}")
-                throw e
-            } catch (e: Exception) {
-                diagnosticControlStatus = services.context.getString(
-                    R.string.remote_pc_control_failed, e.javaClass.simpleName
-                )
-                devLog("!! control mode error=${e.javaClass.simpleName}: ${e.message} enabled=${cam.remoteControlModeSet}")
-                if (e is SocketTimeoutException) cameraViewModel.onCameraTransportLost(cam)
-            } finally {
-                diagnosticControlEnabled = cameraViewModel.getCamera() === cam &&
-                    cam.remoteDiagnosticControlModeSet && cam.remoteControlModeSet
-                diagnosticControlBusy = false
-                probing = false
-                if (isActive && cameraViewModel.getCamera() === cam) {
-                    initialLoaded = true
-                    startSession(hdLiveView, adoptActiveLiveView = adoptedCamera)
-                } else if (adoptedCamera != null) {
-                    withContext(NonCancellable) { runCatching { cam.labEndLiveView() } }
-                }
-            }
-        }
-    }
-
-    fun runProbe() {
-        if (probing || diagnosticControlBusy) return
-        val cam = cameraViewModel.getCamera() ?: return
-        probing = true
-        beginDiagnosticReport(cam)
-        services.scope.launch {
-            diagnosticCapture = true
-            try {
-                modeText = "?"
-                refreshMode()
-                devLog("diagnostic probe exposure=$modeText movie=$movieMode controlMode=${cam.remoteControlModeSet}")
-                // 只读取当前模式下的曝光能力，不停止监看、不执行全量协议探测。
-                val props = if (movieMode) MOVIE_EXPOSURE_PROPS else EXPOSURE_PROPS
-                props.forEach { refreshParam(it) }
-                devLog("probe complete: 请点击复制按钮反馈以上日志")
-            } catch (e: CancellationException) {
-                devLog("!! diagnostic probe cancelled")
-                throw e
-            } catch (e: Exception) {
-                devLog("probe capability error: $e")
-            } finally {
-                probing = false
-                diagnosticCapture = false
-            }
-        }
-    }
-
     // ---------- 提示条（首次进页的一次性机身锁定提示 + 录像失败等瞬时提示）----------
     // 传输中已在照片列表侧禁止进入本页，故不再需要"传输卡顿"提示。
     // nonce 方案（与照片列表页同款）：唯一的隐藏计时器跟着 nonce 重启，连续触发时
     // 后一条重新计满时长，不会被前一条的旧计时器提前掐掉。
     var hintText by remember { mutableStateOf("") }
     var hintVisible by remember { mutableStateOf(false) }
+    var hintAnchor by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
+    val hintDensity = LocalDensity.current
+    var hintHostActive by remember { mutableStateOf(true) }
+    DisposableEffect(Unit) {
+        hintHostActive = true
+        onDispose { hintHostActive = false }
+    }
+    var recordingErrorReport by remember { mutableStateOf("") }
+    fun recordHintDiagnostic(text: String) {
+        recordingErrorReport = (recordingErrorReport + "\n" + text).lines().takeLast(24).joinToString("\n")
+    }
+    fun updateHintAnchor(coordinates: androidx.compose.ui.layout.LayoutCoordinates) {
+        val root = toolOverlayCoordinates ?: return
+        if (root.isAttached && coordinates.isAttached) {
+            hintAnchor = root.localBoundingBoxOf(coordinates, clipBounds = false)
+        }
+    }
     var hintNonce by remember { mutableIntStateOf(0) }
     var hintDurationMs by remember { mutableLongStateOf(2500L) }
     fun showHint(text: String, durationMs: Long = 2500L) {
@@ -2057,6 +1960,14 @@ private fun RemoteContent(
         lutPickedFolder = uri
         lutPickerActive = false
     }
+    // Preserve the exact gate in diagnostics instead of collapsing four causes into "disabled".
+    val focusDisplayBlock = when {
+        !showFocusFrame -> "tool-off"
+        !tools.layout(movieMode).visible(RemoteTool.FOCUS_FRAME) -> "tool-hidden"
+        !connected -> "disconnected"
+        !lutResumed -> "lifecycle-${lutLifecycle.lifecycle.currentState}"
+        else -> null
+    }
     val lutFrameReady = connected && initialLoaded && frame != null && lutResumed && !lutPickerActive
     val lutVisible = tools.layout(movieMode).visible(RemoteTool.LUT)
     LaunchedEffect(movieMode, lutFrameReady, lutVisible, lutResumed, lutPickedFolder) {
@@ -2075,7 +1986,7 @@ private fun RemoteContent(
         meterSample = null
         if (!meterEnabled || !connected || !initialLoaded || !liveViewStable || !lutResumed) return@LaunchedEffect
         val cam = cameraViewModel.getCamera() ?: return@LaunchedEffect
-        fun busy() = capturing || recBusy || diagnosticControlBusy || probing || autoIsoBusy ||
+        fun busy() = capturing || recBusy || autoIsoBusy ||
             afHeld || tapFocusBusy || afJob?.isActive == true || pendingSets.values.any { it.isActive }
         var capability: RcParam? = null
         try {
@@ -2138,12 +2049,13 @@ private fun RemoteContent(
     val recStopFailHint = stringResource(R.string.remote_rec_stop_failed)
     val manualFocusHint = stringResource(R.string.remote_tap_focus_manual)
     val trackingAreaModeHint = stringResource(R.string.remote_tap_focus_area_retry)
+    val unsupportedFocusAreaHint = stringResource(R.string.remote_tap_focus_area_unsupported)
     val tapFocusFailedHint = stringResource(R.string.remote_tap_focus_retry)
     val rotationStoppedHint = stringResource(R.string.remote_rotation_stopped)
     val rotationResumedHint = stringResource(R.string.remote_rotation_resumed)
 
     fun focusAt(tap: ViewfinderTap) {
-        if (!connected || capturing || tapFocusBusy || afHeld || probing || afJob?.isActive == true) return
+        if (cameraToolWriting || !connected || capturing || tapFocusBusy || afHeld || afJob?.isActive == true) return
         if (focusModeManual) {
             devLog("!! tap AF ignored: camera focus mode is MF")
             showHint(manualFocusHint)
@@ -2200,16 +2112,48 @@ private fun RemoteContent(
         devLog(
             "tap tracking=(${tap.trackingX},${tap.trackingY})/" +
                 "${tap.trackingCoordinateWidth}x${tap.trackingCoordinateHeight} " +
-                "focus=(${tap.focusX},${tap.focusY})/" +
+                "focusCommand=(${tap.focusX},${tap.focusY})/" +
                 "${tap.focusCoordinateWidth}x${tap.focusCoordinateHeight}"
         )
         tapFocusJob = services.scope.launch {
             try {
+                // 机身上的 AF-area 可能在应用外被拨轮或触屏改变；每次点按只读一次
+                // 当前描述，避免用过期的 UI 值选择错误的 PTP 路径。
+                val area = runCatching {
+                    cam.rcGetCameraTool(RemoteCameraTool.FOCUS_AREA, movieMode)
+                }.getOrNull()
+                val path = rcTapFocusPath(area, cam.deviceModel)
+                tapFocusLog(
+                    "tap area prop=${area?.prop?.let { "0x%04X".format(it) } ?: "none"} " +
+                        "value=${area?.current ?: "none"} path=$path movie=$movieMode"
+                )
+                if (path == RcTapFocusPath.UNSUPPORTED) {
+                    tapFocusFeedback = TapFocusFeedback.FAILED
+                    confirmedFocusMarker = null
+                    tapFocusLog("tap result=unsupported-area")
+                    showHint(unsupportedFocusAreaHint)
+                    val completedNonce = tapFocusNonce
+                    tapFocusHideJob = services.scope.launch {
+                        delay(1_300L)
+                        if (tapFocusNonce == completedNonce) tapFocusFeedback = TapFocusFeedback.IDLE
+                    }
+                    return@launch
+                }
                 val result = cam.rcFocusAt(
                     trackingX = tap.trackingX,
                     trackingY = tap.trackingY,
                     focusX = tap.focusX,
-                    focusY = tap.focusY
+                    focusY = tap.focusY,
+                    tapPath = path.takeUnless { it == RcTapFocusPath.UNKNOWN }
+                )
+                tapFocusLog(
+                    "tap commands path=${path.name} " +
+                        "normalized=(%.3f,%.3f) ".format(tap.normalized.x, tap.normalized.y) +
+                        "trackingParams=(${tap.trackingX},${tap.trackingY}) " +
+                        "moveParams=(${tap.focusX},${tap.focusY}) " +
+                        "tracking=${result.trackingResponseCode?.let { "0x%04X".format(it and 0xFFFF) } ?: "none"} " +
+                        "move=${result.moveResponseCode?.let { "0x%04X".format(it and 0xFFFF) } ?: "none"} " +
+                        "af=${result.afResult?.responseCode?.let { "0x%04X".format(it and 0xFFFF) } ?: "none"}"
                 )
                 val af = result.afResult
                 if (result.trackingStarted || result.moveResponseCode == Lab.OK) {
@@ -2338,7 +2282,6 @@ private fun RemoteContent(
     }
 
     fun setAutoIso(enabled: Boolean) {
-        if (diagnosticControlBusy) return
         val p = autoIsoProp?.let { params[it] } ?: return
         if (!p.writable || autoIsoBusy) return
         val target = if (enabled) {
@@ -2422,7 +2365,7 @@ private fun RemoteContent(
     }
 
     fun toggleRecord(waitForFocus: Job? = null) {
-        if (recBusy || probing) return
+        if (recBusy || cameraToolWriting) return
         val expectedCamera = cameraViewModel.getCamera() ?: return
         recBusy = true
         services.scope.launch {
@@ -2441,7 +2384,6 @@ private fun RemoteContent(
                     if (preparedUsbSession) {
                         // 录像待机保持普通会话以放行机身拨杆；只在用户真正按下录像时
                         // 临时进入已验证的 Nikon USB 电脑远控序列。
-                        initialLoaded = false
                         adoptedLiveView = prepareUsbMovieSession(cam)
                         restartedLiveView = true
                     }
@@ -2487,7 +2429,11 @@ private fun RemoteContent(
                     }
 
                     if (restartedLiveView) {
-                        startSession(hdLiveView, adoptedLiveView)
+                        startSession(
+                            hdLiveView,
+                            adoptedLiveView,
+                            preserveFrameUntilNext = true,
+                        )
                     }
                     if (preparedUsbSession) initialLoaded = true
 
@@ -2518,11 +2464,8 @@ private fun RemoteContent(
                             result?.diagnosticSummary(),
                             movieUsbSessionDiagnostic
                         ).joinToString("\n").ifEmpty { null }
-                        showHint(
-                            if (diagnostic == null) recFailHint
-                            else "$recFailHint\n$diagnostic",
-                            durationMs = 12_000L
-                        )
+                        recordHintDiagnostic("$recFailHint\n${diagnostic.orEmpty()}")
+                        showHint(recFailHint, durationMs = 12_000L)
                     }
                 } else {
                     lastStopCmdAt = System.currentTimeMillis()   // 之后 2s 内的"已开始"事件按迟到回声忽略
@@ -2571,10 +2514,8 @@ private fun RemoteContent(
                         devLog("!! movie end resp=0x%04X".format(rc and 0xFFFF))
                         // 命令失败时不能假装已经停止，也不能清应用模式；相机若其实已
                         // 自行停止，随后到达的完成/中断事件会纠正 recording 并清理。
-                        showHint(
-                            "$recStopFailHint\nstop=0x%04X".format(rc and 0xFFFF),
-                            durationMs = 6000L
-                        )
+                        recordHintDiagnostic("$recStopFailHint\nstop=0x%04X".format(rc and 0xFFFF))
+                        showHint(recStopFailHint, durationMs = 6000L)
                     }
                 }
             } finally {
@@ -2641,11 +2582,10 @@ private fun RemoteContent(
             } else {
                 recSaveFeedbackJob?.cancel()
                 recSaveSuccess = false
-                android.widget.Toast.makeText(
-                    services.context,
-                    services.context.getString(R.string.cd_remote_rec_toast_failed),
-                    android.widget.Toast.LENGTH_SHORT
-                ).show()
+                val message = services.context.getString(R.string.cd_remote_rec_toast_failed)
+                if (hintHostActive) showHint(message, durationMs = 3000L)
+                else Toast.makeText(services.context, message, Toast.LENGTH_SHORT).show()
+                // 保存可能在退出监看后完成；此时仍需把失败告知用户。
             }
         }
     }
@@ -2819,9 +2759,11 @@ private fun RemoteContent(
                     startSession(false)
                 }
                 RemoteTool.LOCK -> onLockRotation(false)
+                RemoteTool.COMPUTER_CONTROL -> if (computerControlEnabled) setComputerControl(false)
                 RemoteTool.LUT -> { lutState.off(); lutState.dismissMenu() }
                 RemoteTool.GRID -> gridPanelOpen = false
                 RemoteTool.WHITE_BALANCE -> if (cameraToolPanel == RemoteCameraTool.WHITE_BALANCE) cameraToolPanel = null
+                RemoteTool.FOCUS_MODE -> if (cameraToolPanel == RemoteCameraTool.FOCUS_MODE) cameraToolPanel = null
                 RemoteTool.FOCUS_AREA -> if (cameraToolPanel == RemoteCameraTool.FOCUS_AREA) cameraToolPanel = null
                 else -> Unit
             }
@@ -2831,7 +2773,7 @@ private fun RemoteContent(
     var dispMode by tools.disp
     val changeToolVisibility: (RemoteTool, Boolean) -> Unit = ::setToolVisible
     ApplyRemoteToolLayout(tools.layout(movieMode), changeToolVisibility, fixedRecorder = landscapeLayout)
-    val renderTool: @Composable (RemoteTool?) -> Unit = { tool ->
+    val renderTool: @Composable (RemoteTool?, Int) -> Unit = { tool, labelLines ->
         if (tool == RemoteTool.RECORD) {
             RecControlBar(viewfinderRecorder != null, recPaused, recElapsed,
                 { startRecorder() }, { togglePauseRecorder() }, { stopRecorder() },
@@ -2847,15 +2789,19 @@ private fun RemoteContent(
                 RemoteTool.GRID -> framingGrid != ViewfinderGrid.OFF
                 RemoteTool.EXPOSURE -> exposureAssist != ExposureAssist.OFF
                 RemoteTool.DESQUEEZE -> desqueezeMultiplier > 1.001f
+                RemoteTool.FOCUS_FRAME -> showFocusFrame
                 RemoteTool.METER -> showMeter
                 RemoteTool.LEVEL -> showLevel
                 RemoteTool.WAVEFORM -> showWaveform
                 RemoteTool.LOCK -> tools.locked.value
+                RemoteTool.COMPUTER_CONTROL -> computerControlEnabled
                 else -> false
             }
             val disabled = (tool?.fixed == true && editingTools) ||
-                (tool == RemoteTool.ROTATE && tools.locked.value)
-            TopIconToggle(active, stringResource(tool?.title ?: if (editingTools) R.string.remote_tool_done else R.string.remote_tool_manage), {
+                (tool == RemoteTool.ROTATE && tools.locked.value) ||
+                (tool == RemoteTool.COMPUTER_CONTROL &&
+                    (computerControlBusy || capturing || recording || recBusy))
+            val toolClick: () -> Unit = {
                 when (tool) {
                     RemoteTool.HD -> { hdLiveView = !hdLiveView; startSession(hdLiveView) }
                     RemoteTool.FPS -> toggleFpsControl()
@@ -2880,6 +2826,7 @@ private fun RemoteContent(
                         val i = REMOTE_DESQUEEZE_OPTIONS.indices.minByOrNull { abs(REMOTE_DESQUEEZE_OPTIONS[it] - desqueezeMultiplier) } ?: 0
                         setDesqueezeMultiplier(REMOTE_DESQUEEZE_OPTIONS[(i + 1) % REMOTE_DESQUEEZE_OPTIONS.size])
                     }
+                    RemoteTool.FOCUS_FRAME -> showFocusFrame = !showFocusFrame
                     RemoteTool.METER -> showMeter = !showMeter
                     RemoteTool.LEVEL -> showLevel = !showLevel
                     RemoteTool.WAVEFORM -> waveformMode = waveformMode.next()
@@ -2888,8 +2835,12 @@ private fun RemoteContent(
                         onLockRotation(locked)
                         showHint(if (locked) rotationStoppedHint else rotationResumedHint)
                     }
+                    RemoteTool.COMPUTER_CONTROL -> if (!disabled) {
+                        setComputerControl(!computerControlEnabled)
+                    }
                     RemoteTool.ROTATE -> if (!disabled) onCycleRotation()
                     RemoteTool.WHITE_BALANCE -> { lutState.dismissMenu(); gridPanelOpen = false; listProp = null; devPanel = false; if (cameraToolPanel == RemoteCameraTool.WHITE_BALANCE) cameraToolCloseRequested = true else { cameraToolCloseRequested = false; cameraToolPanel = RemoteCameraTool.WHITE_BALANCE } }
+                    RemoteTool.FOCUS_MODE -> { lutState.dismissMenu(); gridPanelOpen = false; listProp = null; devPanel = false; if (cameraToolPanel == RemoteCameraTool.FOCUS_MODE) cameraToolCloseRequested = true else { startFocusModeReport(); cameraToolCloseRequested = false; cameraToolPanel = RemoteCameraTool.FOCUS_MODE } }
                     RemoteTool.FOCUS_AREA -> { lutState.dismissMenu(); gridPanelOpen = false; listProp = null; devPanel = false; if (cameraToolPanel == RemoteCameraTool.FOCUS_AREA) cameraToolCloseRequested = true else { cameraToolCloseRequested = false; cameraToolPanel = RemoteCameraTool.FOCUS_AREA } }
                     else -> {
                         listProp = null
@@ -2898,10 +2849,21 @@ private fun RemoteContent(
                         onEditingTools(!editingTools)
                     }
                 }
-            }, modifier = if (tool == RemoteTool.WHITE_BALANCE) Modifier.onGloballyPositioned {
+            }
+            Column(
+                modifier = if (labelLines > 0) Modifier.clickable(
+                    enabled = !disabled, indication = null,
+                    interactionSource = remember { MutableInteractionSource() }, onClick = toolClick,
+                ) else Modifier,
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+            TopIconToggle(active, stringResource(tool?.title ?: if (editingTools) R.string.remote_tool_done else R.string.remote_tool_manage), toolClick,
+            modifier = if (tool == RemoteTool.WHITE_BALANCE) Modifier.onGloballyPositioned {
                 whiteBalanceAnchor = it
             } else if (tool == RemoteTool.FOCUS_AREA) Modifier.onGloballyPositioned {
                 focusAreaAnchor = it
+            } else if (tool == RemoteTool.FOCUS_MODE) Modifier.size(36.dp).onGloballyPositioned {
+                focusModeAnchor = it
             } else if (tool == RemoteTool.LUT) Modifier.onGloballyPositioned {
                 lutAnchor = it
             } else if (tool == RemoteTool.GRID) Modifier.onGloballyPositioned {
@@ -2910,10 +2872,24 @@ private fun RemoteContent(
                 if (tool == null) Icon(if (editingTools) Icons.Default.Check else Icons.Default.Settings, null, Modifier.size(19.dp))
                 else if (cameraToolLoading && (
                     (tool == RemoteTool.WHITE_BALANCE && cameraToolPanel == RemoteCameraTool.WHITE_BALANCE) ||
-                    (tool == RemoteTool.FOCUS_AREA && cameraToolPanel == RemoteCameraTool.FOCUS_AREA))) {
+                    (tool == RemoteTool.FOCUS_AREA && cameraToolPanel == RemoteCameraTool.FOCUS_AREA) ||
+                    (tool == RemoteTool.FOCUS_MODE && cameraToolPanel == RemoteCameraTool.FOCUS_MODE))) {
                     androidx.compose.material3.CircularProgressIndicator(
                         modifier=Modifier.size(18.dp),strokeWidth=1.5.dp,color=colors.accentBlue)
+                } else if (tool == RemoteTool.FOCUS_MODE) {
+                    Text(if (focusModeManual) "MF" else if (focusModeText == "AF Macro") "AF-M" else focusModeText ?: "MODE", fontSize = 8.sp, maxLines = 1, softWrap = false, fontWeight = FontWeight.Bold)
                 } else RemoteToolMark(tool, tools)
+            }
+            if (labelLines > 0 && tool != null) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    stringResource(tool.title), style = MonitorToolLabelStyle,
+                    color = if (active) colors.accentBlue else colors.onSurfaceVariant,
+                    minLines = labelLines, maxLines = labelLines,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
             }
         }
     }
@@ -2926,12 +2902,15 @@ private fun RemoteContent(
                 if (devUnlocked && !editingTools) TopIconToggle(false, stringResource(R.string.cd_dev_panel), { devPanel = true }) {
                     Icon(Icons.Default.BugReport, null, Modifier.size(18.dp))
                 }
-            }, button = renderTool)
+            }, button = { renderTool(it, 0) })
     }
 
     // ---------- 布局 ----------
     Box(modifier = Modifier.fillMaxSize().background(rememberAppBackgroundBrush())
         .onGloballyPositioned { toolOverlayCoordinates = it }) {
+        // The mode is resolved before initialLoaded is published. Keep the shell visible while
+        // the first frame is requested so entering from the file list never shows a blank page;
+        // mode-dependent controls are already gated by initialLoaded below.
         AnimatedContent(
             targetState = rotation,
             transitionSpec = {
@@ -2967,7 +2946,8 @@ private fun RemoteContent(
                     )
                     BatteryPill(percent = rcBatteryPercentage(batteryParam))
                 }
-                Spacer(Modifier.weight(1f))
+                Box(Modifier.weight(1f).height(40.dp).padding(horizontal = 6.dp)
+                    .onGloballyPositioned { updateHintAnchor(it) })
                 GlassBackButton(
                     onClick = onNavigateBack,
                     forward = true,
@@ -2993,7 +2973,9 @@ private fun RemoteContent(
                 tapFocusPoint = tapFocusPoint,
                 tapFocusNonce = tapFocusNonce,
                 confirmedFocusMarker = confirmedFocusMarker,
-                subjectTrackingActive = subjectTrackingActive,
+                focusDisplayBlock = focusDisplayBlock,
+                focusValidAfter = focusValidAfter,
+                onFocusDisplay = null,
                 onTapFocus = { focusAt(it) },
                 showFps = showFps,
                 fps = fps,
@@ -3060,7 +3042,7 @@ private fun RemoteContent(
                 ShutterButton(
                     capturing = capturing,
                     focusing = afHeld,
-                    enabled = connected && !probing,
+                    enabled = connected && !cameraToolWriting,
                     movie = movieMode,
                     recording = recording,
                     onFocusStart = { startFocus() },
@@ -3103,8 +3085,10 @@ private fun RemoteContent(
                     tapFocusPoint = tapFocusPoint,
                     tapFocusNonce = tapFocusNonce,
                     confirmedFocusMarker = confirmedFocusMarker,
-                    subjectTrackingActive = subjectTrackingActive,
-                    onTapFocus = { focusAt(it) },
+                focusDisplayBlock = focusDisplayBlock,
+                focusValidAfter = focusValidAfter,
+                onFocusDisplay = null,
+                        onTapFocus = { focusAt(it) },
                     showFps = showFps,
                     fps = fps,
                     connected = connected,
@@ -3139,16 +3123,27 @@ private fun RemoteContent(
                 )
 
 
+                Box(
+                    Modifier.offset(x = imageX, y = imageY + imageHeight * .20f)
+                        .width(imageWidth).height(40.dp).padding(horizontal = 12.dp)
+                        .onGloballyPositioned { updateHintAnchor(it) },
+                )
+
                 val cameraDisp = dispMode == MonitorDispMode.CAMERA
                 val detailValues = rememberMonitorDetails(
                     cameraViewModel.getCamera(), movieMode,
                     enabled = connected && initialLoaded && cameraDisp,
-                    pollingAllowed = !probing && !diagnosticControlBusy && !recBusy && !capturing && !recording,
+                    pollingAllowed = !recBusy && !capturing && !recording,
                 )
                 val storageValues = rememberMonitorStorage(
                     cameraViewModel.getCamera(), camState.storageIds,
                     enabled = connected && initialLoaded && cameraDisp,
-                    pollingAllowed = !probing && !diagnosticControlBusy && !recBusy && !capturing && !recording,
+                    pollingAllowed = !recBusy && !capturing && !recording,
+                )
+                val movieFormat = rememberMonitorMovieFormat(
+                    cameraViewModel.getCamera(),
+                    enabled = connected && initialLoaded && cameraDisp && movieMode,
+                    pollingAllowed = lutResumed && !recBusy && !capturing && !recording,
                 )
                 if (cameraDisp && connected) {
                     val cells = listOfNotNull(modeText?.let { "MODE" to it }) + listOfNotNull(
@@ -3157,7 +3152,8 @@ private fun RemoteContent(
                     CameraMonitorDisp(cells, storageValues, movieMode,
                         rcBatteryPercentage(batteryParam), recording,
                         Modifier.offset(x = imageX, y = imageY).size(imageWidth, imageHeight),
-                        storageSlotCount = camState.storageIds.filter { it != 0 && it != -1 }.distinct().size)
+                        storageSlotCount = camState.storageIds.filter { it != 0 && it != -1 }.distinct().size,
+                        remainingVideoMs = { frame?.metadata?.remainingVideoTimeMs }, movieFormat = movieFormat)
                 }
                 MonitorDispSummary(
                     if (cameraDisp && connected) MonitorDispMode.CLEAN else dispMode, listOfNotNull(modeText), connected,
@@ -3179,7 +3175,7 @@ private fun RemoteContent(
                             DockToolMark()
                         }
                     },
-                    rotateButton = { renderTool(RemoteTool.ROTATE) },
+                    rotateButton = { renderTool(RemoteTool.ROTATE, 0) },
                     backButton = {
                         GlassBackButton(onClick = onNavigateBack, forward = true)
                     },
@@ -3190,12 +3186,12 @@ private fun RemoteContent(
                     },
                     shutter = {
                         ShutterButton(capturing = capturing, focusing = afHeld,
-                            enabled = connected && !probing, movie = movieMode, recording = recording,
+                            enabled = connected && !cameraToolWriting, movie = movieMode, recording = recording,
                             onFocusStart = { startFocus() }, onRelease = ::finishShutterGesture,
                             onQuickTap = { if (movieMode) toggleRecord() else shoot() },
                             diameter = landscapeShutterSize)
                     },
-                    localRecorder = { renderTool(RemoteTool.RECORD) },
+                    localRecorder = { renderTool(RemoteTool.RECORD, 0) },
                     parameter = { index, modifier ->
                         val prop = (if (movieMode) MOVIE_EXPOSURE_PROPS else EXPOSURE_PROPS)[index]
                         val isoProp = if (movieMode) Lab.PROP_NK_MOVIE_ISO else Lab.PROP_ISO
@@ -3209,7 +3205,7 @@ private fun RemoteContent(
                             onStep = { stepParam(prop, it) },
                             onOpenList = { if (params[prop]?.values?.isNotEmpty() == true) listProp = prop })
                     },
-                    tool = { renderTool(it) },
+                    tool = { entry, lines -> renderTool(entry, lines) },
                     modifier = Modifier.offset(monitorLayout.interactionBounds.x.dp, monitorLayout.interactionBounds.y.dp)
                         .size(monitorLayout.interactionBounds.width.dp, monitorLayout.interactionBounds.height.dp),
                 )
@@ -3233,32 +3229,6 @@ private fun RemoteContent(
                         bottom = if (landscapeLayout) 4.dp else 12.dp,
                     )
             )
-        }
-
-        // 顶部提示条：视觉与照片列表页的底部玻璃提示条同款（22dp 玻璃 Surface + 投影 +
-        // labelLarge）；位置留在顶部——本页底部是快门键，提示不能压它。
-        AnimatedVisibility(
-            visible = hintVisible,
-            enter = fadeIn(tween(200)) + slideInVertically(tween(200)) { -it / 2 },
-            exit = fadeOut(tween(300)),
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .statusBarsPadding()
-                .padding(top = 60.dp)
-        ) {
-            Surface(
-                shape = RoundedCornerShape(22.dp),
-                color = colors.glassSurfaceHeavy,
-                shadowElevation = 6.dp,
-                border = BorderStroke(1.dp, colors.glassPanelBorder)
-            ) {
-                Text(
-                    hintText,
-                    style = MaterialTheme.typography.labelLarge,
-                    color = colors.onBackground,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
-                )
-            }
         }
 
         listProp?.let { prop ->
@@ -3326,8 +3296,8 @@ private fun RemoteContent(
                         Spacer(Modifier.weight(1f))
                         GlassButton(
                             onClick = {
-                                services.clipboard.setText(AnnotatedString(logLines.joinToString("\n")))
-                                Toast.makeText(services.context, R.string.code_copied, Toast.LENGTH_SHORT).show()
+                                services.clipboard.setText(AnnotatedString(recordingErrorReport + "\n\n" + movieFormatReport + "\n\n" + legacyVideoReport + "\n\n" + focusModeReport + "\n\n" + tapFocusReport))
+                                showHint(services.context.getString(R.string.code_copied))
                             },
                             contentPadding = PaddingValues(8.dp)
                         ) {
@@ -3349,56 +3319,52 @@ private fun RemoteContent(
                             )
                         }
                     }
+                    GlassButton(
+                        enabled = connected && !legacyVideoBusy,
+                        onClick = {
+                            val cam = cameraViewModel.getCamera() ?: return@GlassButton
+                            legacyVideoBusy = true
+                            val context = "${java.time.OffsetDateTime.now()} movie=$movieMode recording=$recording"
+                            videoProbeScope.launch {
+                                try {
+                                    val result = cam.probeLegacyVideoTime()
+                                    legacyVideoReport = (legacyVideoReport.split("\n\n").filter { it.isNotBlank() } +
+                                        "$context\n$result").takeLast(4).joinToString("\n\n")
+                                } catch (e: CancellationException) {
+                                    throw e
+                                } catch (e: Exception) {
+                                    legacyVideoReport = "$context\nlegacy read failed: ${e.javaClass.simpleName}: ${e.message}"
+                                } finally { legacyVideoBusy = false }
+                            }
+                        },
+                        contentPadding = PaddingValues(8.dp)
+                    ) {
+                        Text(stringResource(R.string.probe_video_remaining))
+                    }
+                    GlassButton(
+                        enabled = connected && !legacyVideoBusy,
+                        onClick = {
+                            val cam = cameraViewModel.getCamera() ?: return@GlassButton
+                            legacyVideoBusy = true
+                            val context = "${java.time.OffsetDateTime.now()} movie=$movieMode recording=$recording"
+                            movieFormatReport = "Movie format: reading…"
+                            videoProbeScope.launch {
+                                try {
+                                    movieFormatReport = "$context\n${cam.probeMovieFormat()}"
+                                } catch (e: CancellationException) {
+                                    throw e
+                                } catch (e: Exception) {
+                                    movieFormatReport = "$context\nformat read failed: ${e.javaClass.simpleName}: ${e.message}"
+                                } finally { legacyVideoBusy = false }
+                            }
+                        },
+                        contentPadding = PaddingValues(8.dp)
+                    ) {
+                        Text(stringResource(R.string.probe_movie_format))
+                    }
                     Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
                         Spacer(Modifier.height(8.dp))
-                        Text(stringResource(R.string.remote_diagnostic_saved_hint), style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant)
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f).padding(end = 12.dp)) {
-                                Text(
-                                    stringResource(R.string.remote_pc_control_title),
-                                    style = MaterialTheme.typography.labelLarge,
-                                    color = colors.onBackground
-                                )
-                                Text(
-                                    stringResource(R.string.remote_pc_control_hint),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = colors.onSurfaceVariant
-                                )
-                            }
-                            Switch(
-                                checked = diagnosticControlEnabled,
-                                onCheckedChange = ::setDiagnosticControlMode,
-                                enabled = connected && initialLoaded && !probing && !diagnosticControlBusy &&
-                                    !capturing && !recording && !recBusy && !autoIsoBusy &&
-                                    !afHeld && !tapFocusBusy && afJob?.isActive != true &&
-                                    pendingSets.values.none { it.isActive } &&
-                                    (diagnosticControlEnabled || cameraViewModel.getCamera()?.remoteControlModeSet != true),
-                                modifier = Modifier.semantics {
-                                    contentDescription = services.context.getString(R.string.remote_pc_control_title)
-                                }
-                            )
-                        }
-                        diagnosticControlStatus?.let { status ->
-                            Text(
-                                status,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = colors.onSurfaceVariant,
-                                modifier = Modifier.padding(bottom = 8.dp)
-                            )
-                        }
-                        GlassButton(onClick = ::runProbe, enabled = connected && !probing) {
-                            Text(
-                                stringResource(R.string.lab_run_probe),
-                                style = MaterialTheme.typography.labelMedium,
-                                color = colors.onBackground
-                            )
-                        }
-                        Text(
-                            text = stringResource(R.string.remote_shutter_probe_hint),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = colors.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 6.dp, bottom = 8.dp)
-                        )
+                        val logLines = (recordingErrorReport + "\n\n" + movieFormatReport + "\n\n" + legacyVideoReport + "\n\n" + focusModeReport + "\n\n" + tapFocusReport).lines()
                         // 日志跟尾：面板刚打开（尚无布局信息）直接跳到底；此后新行到来时，
                         // 停在底部附近才跟到底，用户上翻查看时不打扰。
                         val logState = rememberLazyListState()
@@ -3462,20 +3428,29 @@ private fun RemoteContent(
     }
     cameraToolPanel?.let { selectedTool ->
         val panelCamera = cameraViewModel.getCamera()
-        val buttonCoordinates = if (selectedTool == RemoteCameraTool.WHITE_BALANCE) whiteBalanceAnchor else focusAreaAnchor
+        val panelMovie = movieMode
+        val buttonCoordinates = when (selectedTool) {
+            RemoteCameraTool.WHITE_BALANCE -> whiteBalanceAnchor
+            RemoteCameraTool.FOCUS_AREA -> focusAreaAnchor
+            RemoteCameraTool.FOCUS_MODE -> focusModeAnchor
+        }
         val localAnchor = toolOverlayCoordinates?.takeIf { it.isAttached }?.let { root ->
             buttonCoordinates?.takeIf { it.isAttached }?.let { root.localBoundingBoxOf(it, clipBounds = false) }
         }
-        key(selectedTool) { RemoteCameraToolPanel(panelCamera, movieMode, selectedTool,
+        key(panelCamera, movieMode, selectedTool) { RemoteCameraToolPanel(panelCamera, movieMode, selectedTool,
             closeRequested = cameraToolCloseRequested,
             onLoadingChanged = { cameraToolLoading = it },
+            onWriteBusyChanged = { busy ->
+                if (busy && cameraToolWriting) false
+                else { cameraToolWriting = busy; true }
+            },
             onUnavailable = { showHint(cameraToolUnavailableHint) },
             landscape = rotation != 0,
             anchor = localAnchor,
-            canWrite = connected && initialLoaded && !probing && !diagnosticControlBusy && !capturing && !recBusy && !afHeld && !tapFocusBusy && afJob?.isActive != true,
-            isCurrentCamera = { panelCamera != null && cameraViewModel.getCamera() === panelCamera },
+            canWrite = connected && initialLoaded && !capturing && !recBusy && !afHeld && !tapFocusBusy && afJob?.isActive != true,
+            isCurrentCamera = { panelCamera != null && cameraViewModel.getCamera() === panelCamera && movieMode == panelMovie },
             beforeWrite = {
-                if (selectedTool == RemoteCameraTool.FOCUS_AREA && subjectTrackingActive && panelCamera != null) {
+                if (selectedTool != RemoteCameraTool.WHITE_BALANCE && subjectTrackingActive && panelCamera != null) {
                     val rc = panelCamera.rcEndSubjectTracking()
                     devLog("focus area EndTracking resp=${rc?.let { "0x%04X".format(it and 0xFFFF) } ?: "unavailable"}")
                     if (rc != null && rc != Lab.OK && rc != PtpConstants.OPERATION_NOT_SUPPORTED && rc != Lab.NK_INVALID_STATUS) false else {
@@ -3486,14 +3461,28 @@ private fun RemoteContent(
                 } else true
             },
             onApplied = {
-                if (selectedTool == RemoteCameraTool.FOCUS_AREA) {
+                if (selectedTool != RemoteCameraTool.WHITE_BALANCE) {
+                    tapFocusHideJob?.cancel()
+                    focusValidAfter = SystemClock.elapsedRealtime()
                     confirmedFocusMarker = null
                     tapFocusFeedback = TapFocusFeedback.IDLE
                     afLocked = false
                     refreshFocusMode()
                 }
-            }, log = { devLog(it) }, onDismiss = { cameraToolPanel = null; cameraToolCloseRequested = false }) }
+            }, log = { if (selectedTool == RemoteCameraTool.FOCUS_MODE) focusModeLog(it); devLog(it) }, onDismiss = { cameraToolPanel = null; cameraToolCloseRequested = false }) }
     }
+        // 独立于所有菜单开关：点按对焦失败等提示在菜单关闭时也必须显示。
+        // 单一提示层位于页内菜单和日志之上；锚点只在布局变化时更新，不参与取帧。
+        hintAnchor?.let { anchor ->
+            Box(
+                Modifier.offset { androidx.compose.ui.unit.IntOffset(anchor.left.roundToInt(), anchor.top.roundToInt()) }
+                    .width(with(hintDensity) { anchor.width.toDp() })
+                    .height(with(hintDensity) { anchor.height.toDp() }),
+                contentAlignment = Alignment.Center,
+            ) {
+                MonitorHintBubble(hintVisible, hintText, compact = rotation == 0)
+            }
+        }
     BackHandler(enabled = editingTools) { onEditingTools(false) }
         }
     }
@@ -3684,7 +3673,9 @@ private fun RemoteViewfinderPanel(
     tapFocusPoint: Offset,
     tapFocusNonce: Int,
     confirmedFocusMarker: ConfirmedFocusMarker?,
-    subjectTrackingActive: Boolean,
+    focusDisplayBlock: String?,
+    focusValidAfter: Long,
+    onFocusDisplay: ((String) -> Unit)?,
     onTapFocus: (ViewfinderTap) -> Unit,
     showFps: Boolean,
     fps: Float,
@@ -3731,7 +3722,9 @@ private fun RemoteViewfinderPanel(
             afLocked = afLocked,
             afFocusPoint = afFocusPoint,
             confirmedFocusMarker = confirmedFocusMarker,
-            subjectTrackingActive = subjectTrackingActive,
+            focusDisplayBlock = focusDisplayBlock ?: if (!connected) "disconnected" else null,
+            focusValidAfter = focusValidAfter,
+            onFocusDisplay = onFocusDisplay,
             onTapFocus = onTapFocus,
             showZebra = showZebra,
             showFalseColor = showFalseColor,
@@ -4014,7 +4007,9 @@ private fun ViewfinderImage(
     afLocked: Boolean,
     afFocusPoint: Offset,
     confirmedFocusMarker: ConfirmedFocusMarker?,
-    subjectTrackingActive: Boolean,
+    focusDisplayBlock: String?,
+    focusValidAfter: Long,
+    onFocusDisplay: ((String) -> Unit)?,
     onTapFocus: (ViewfinderTap) -> Unit,
     showZebra: Boolean,
     showFalseColor: Boolean,
@@ -4031,16 +4026,15 @@ private fun ViewfinderImage(
             val imageWidth = liveFrame.image.width
             val imageHeight = liveFrame.image.height
             val displayAspectRatio = imageWidth.toFloat() / imageHeight * desqueezeMultiplier
-            // StartTracking 使用增强帧头 +16/+18 的完整画面坐标；普通 ChangeAfArea
-            // 使用 +28/+30 的显示 AF 网格。两套坐标纵横比接近但量级完全不同，不能混用。
+            // StartTracking 与 ChangeAfArea 都使用整幅 Live View 的命令坐标。
+            // +28/+30 是帧头中的 AF 框/显示网格，不能作为 ChangeAfArea 的坐标范围；
+            // 用它会把所有点击压缩到画面左上角（例如 Z30 的 640x424）。
             val trackingCoordinateWidth =
                 liveFrame.metadata?.trackingCoordinateWidth ?: imageWidth
             val trackingCoordinateHeight =
                 liveFrame.metadata?.trackingCoordinateHeight ?: imageHeight
-            val focusCoordinateWidth =
-                liveFrame.metadata?.focusCoordinateWidth ?: imageWidth
-            val focusCoordinateHeight =
-                liveFrame.metadata?.focusCoordinateHeight ?: imageHeight
+            val focusCoordinateWidth = trackingCoordinateWidth
+            val focusCoordinateHeight = trackingCoordinateHeight
             val currentTapHandler by rememberUpdatedState(onTapFocus)
             ZoomableViewfinder(viewport, displayAspectRatio, Modifier.matchParentSize()) {
             Box(
@@ -4073,19 +4067,19 @@ private fun ViewfinderImage(
                                 currentTapHandler(
                                     ViewfinderTap(
                                         trackingX = (
-                                            normalizedX * (trackingCoordinateWidth - 1)
-                                            ).roundToInt(),
+                                            rcNormalizedToFocusCoordinate(normalizedX, trackingCoordinateWidth)
+                                        ),
                                         trackingY = (
-                                            normalizedY * (trackingCoordinateHeight - 1)
-                                            ).roundToInt(),
+                                            rcNormalizedToFocusCoordinate(normalizedY, trackingCoordinateHeight)
+                                        ),
                                         trackingCoordinateWidth = trackingCoordinateWidth,
                                         trackingCoordinateHeight = trackingCoordinateHeight,
                                         focusX = (
-                                            normalizedX * (focusCoordinateWidth - 1)
-                                            ).roundToInt(),
+                                            rcNormalizedToFocusCoordinate(normalizedX, focusCoordinateWidth)
+                                        ),
                                         focusY = (
-                                            normalizedY * (focusCoordinateHeight - 1)
-                                            ).roundToInt(),
+                                            rcNormalizedToFocusCoordinate(normalizedY, focusCoordinateHeight)
+                                        ),
                                         focusCoordinateWidth = focusCoordinateWidth,
                                         focusCoordinateHeight = focusCoordinateHeight,
                                         normalized = Offset(normalizedX, normalizedY)
@@ -4143,50 +4137,51 @@ private fun ViewfinderImage(
                     modifier = Modifier.matchParentSize()
                 )
             }
-            if (tapFocusFeedback != TapFocusFeedback.IDLE) {
-                TapFocusReticleOverlay(
-                    feedback = tapFocusFeedback,
-                    point = tapFocusPoint,
-                    nonce = tapFocusNonce,
-                    imageAspectRatio = displayAspectRatio,
-                    modifier = Modifier.matchParentSize()
-                )
-            } else if (afHeld) {
-                TapFocusReticleOverlay(
-                    feedback = if (afLocked) {
-                        TapFocusFeedback.LOCKED
-                    } else {
-                        TapFocusFeedback.FOCUSING
-                    },
-                    point = afFocusPoint,
-                    nonce = tapFocusNonce,
-                    imageAspectRatio = displayAspectRatio,
-                    modifier = Modifier.matchParentSize()
-                )
+            val currentFrameState = rememberUpdatedState(liveFrame)
+            var expiredFrameAt by remember { mutableLongStateOf(Long.MIN_VALUE) }
+            LaunchedEffect(focusDisplayBlock) {
+                if (focusDisplayBlock != null) return@LaunchedEffect
+                while (isActive) {
+                    val latest = currentFrameState.value.receivedAtElapsedMs
+                    val age = SystemClock.elapsedRealtime() - latest
+                    if (age >= 500L) expiredFrameAt = latest
+                    delay(if (age < 500L) (500L - age).coerceAtLeast(16L) else 500L)
+                }
             }
-            val retainedFocusMarker = confirmedFocusMarker
-            retainedFocusMarker?.let { marker ->
-                val markerVisible =
-                    tapFocusFeedback == TapFocusFeedback.IDLE &&
-                        !afHeld &&
-                        (!marker.subjectTracking || subjectTrackingActive)
-                val cameraFrame = liveFrame.metadata
-                    ?.takeIf {
-                        liveFrame.receivedAtElapsedMs >= marker.confirmedAtElapsedMs &&
-                            (
-                                marker.subjectTracking ||
-                                    it.focusJudgement == LiveViewFocusJudgement.FOCUSED
-                                )
-                    }
-                    ?.selectedFocusFrame
-                ConfirmedFocusReticleOverlay(
-                    fallbackPoint = marker.fallbackPoint,
-                    cameraFrame = cameraFrame,
-                    nonce = marker.confirmedAtElapsedMs,
-                    visible = markerVisible,
-                    imageAspectRatio = displayAspectRatio,
-                    modifier = Modifier.matchParentSize()
-                )
+            val focusBlock = when {
+                focusDisplayBlock != null -> focusDisplayBlock
+                liveFrame.receivedAtElapsedMs <= focusValidAfter -> "before-mode-change"
+                liveFrame.receivedAtElapsedMs <= expiredFrameAt ||
+                    SystemClock.elapsedRealtime() - liveFrame.receivedAtElapsedMs >= 500L -> "stale-frame"
+                liveFrame.metadata?.focusFrames.isNullOrEmpty() -> "no-box ${liveFrame.metadata?.focusFrameStatus}"
+                else -> null
+            }
+            val cameraFocus = liveFrame.metadata?.focusFrames.takeIf { focusBlock == null }
+            val marker = confirmedFocusMarker
+            val fallback = marker?.takeIf {
+                !it.subjectTracking && SystemClock.elapsedRealtime() - it.confirmedAtElapsedMs < TAP_FOCUS_MARKER_VISIBLE_MS
+            }
+            val feedback = when {
+                tapFocusFeedback != TapFocusFeedback.IDLE -> tapFocusFeedback
+                afHeld -> if (afLocked) TapFocusFeedback.LOCKED else TapFocusFeedback.FOCUSING
+                fallback != null -> TapFocusFeedback.LOCKED
+                else -> TapFocusFeedback.IDLE
+            }
+            FocusReticleOverlay(
+                cameraFrames = cameraFocus,
+                cameraFocused = liveFrame.metadata?.focusJudgement == LiveViewFocusJudgement.FOCUSED,
+                allowHandoff = marker != null && liveFrame.receivedAtElapsedMs >= marker.confirmedAtElapsedMs,
+                feedback = feedback,
+                point = if (tapFocusFeedback != TapFocusFeedback.IDLE) tapFocusPoint
+                    else if (afHeld) afFocusPoint else fallback?.fallbackPoint ?: tapFocusPoint,
+                nonce = tapFocusNonce,
+                imageAspectRatio = displayAspectRatio,
+                zoom = viewport.scale,
+                modifier = Modifier.matchParentSize(),
+            )
+            androidx.compose.runtime.SideEffect {
+                if (focusBlock != null) onFocusDisplay?.invoke("blocked=$focusBlock age=${SystemClock.elapsedRealtime() - liveFrame.receivedAtElapsedMs}ms")
+                else onFocusDisplay?.invoke("drawn boxes=${cameraFocus?.size ?: 0}")
             }
             } // Only image-space layers zoom; scopes remain anchored to the panel.
             // Stable composition keeps the outgoing scope alive for its exit animation and
@@ -4493,7 +4488,14 @@ private fun ParamTile(
         if (writable && wheelDragEnabled(values.size)) {
             WheelDragHint(
                 color = colors.onSurfaceVariant.copy(alpha = 0.42f),
-                modifier = Modifier.align(Alignment.CenterEnd).padding(end = 8.dp),
+                // ISO also owns the AUTO corner control. Keep its drag chevrons
+                // in the lower-right area so the upper chevron cannot overlap
+                // the AUTO badge; other parameter wheels retain the centered hint.
+                modifier = if (hasAutoIsoControl) {
+                    Modifier.align(Alignment.BottomEnd).padding(end = 8.dp, bottom = 5.dp)
+                } else {
+                    Modifier.align(Alignment.CenterEnd).padding(end = 8.dp)
+                },
             )
         }
         if (autoIsoOn) {
@@ -4698,135 +4700,137 @@ private fun ShutterButton(
     }
 }
 
+/** Focus hints stay outside the portrait image and use a translucent plate over landscape video. */
 @Composable
-private fun TapFocusReticleOverlay(
+private fun MonitorHintBubble(visible: Boolean, text: String, compact: Boolean) {
+    val colors = AppTheme.colors
+    AnimatedVisibility(visible, enter = fadeIn(tween(160)), exit = fadeOut(tween(200))) {
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = if (compact) colors.glassSurfaceHeavy.copy(alpha = .60f) else Color.Black.copy(alpha = .42f),
+            border = BorderStroke(.5.dp, if (compact) colors.glassPanelBorder else Color.White.copy(alpha = .15f)),
+            modifier = Modifier.widthIn(max = 280.dp),
+        ) {
+            Text(text,
+                color = if (compact) colors.onBackground else Color.White.copy(alpha = .95f),
+                style = MaterialTheme.typography.labelMedium,
+                fontSize = if (compact) 11.sp else 12.sp,
+                lineHeight = if (compact) 13.sp else 16.sp,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                maxLines = 2,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                modifier = Modifier.padding(horizontal = if (compact) 8.dp else 12.dp, vertical = 5.dp),
+            )
+        }
+    }
+}
+
+/** Stable layers: packet gaps never recreate the tap animation or turn failure back into focusing. */
+@Composable
+private fun FocusReticleOverlay(
+    cameraFrames: List<LiveViewFocusFrame>?,
+    cameraFocused: Boolean,
+    allowHandoff: Boolean,
     feedback: TapFocusFeedback,
     point: Offset,
     nonce: Int,
     imageAspectRatio: Float,
-    modifier: Modifier = Modifier
+    zoom: Float,
+    modifier: Modifier,
 ) {
-    val colors = AppTheme.colors
-    val appearScale = remember { Animatable(1.45f) }
-    LaunchedEffect(nonce) {
-        appearScale.snapTo(1.45f)
-        appearScale.animateTo(1f, tween(180))
+    var handedOff by remember(nonce, feedback == TapFocusFeedback.FOCUSING) { mutableStateOf(false) }
+    val handoff = feedback == TapFocusFeedback.LOCKED && allowHandoff && !cameraFrames.isNullOrEmpty()
+    LaunchedEffect(handoff, nonce) {
+        if (handoff) {
+            delay(120) // Let the success colour settle before yielding to fresh camera geometry.
+            handedOff = true
+        }
     }
-    val resultScale by animateFloatAsState(
-        targetValue = if (feedback == TapFocusFeedback.FOCUSING) 1f else 0.9f,
-        animationSpec = Motion.bouncy(),
-        label = "tapAfResult"
-    )
-    val reticleColor = when (feedback) {
-        TapFocusFeedback.LOCKED -> colors.statusConnected
-        TapFocusFeedback.FAILED -> colors.statusError
-        else -> colors.accentBlue
-    }.copy(alpha = 0.95f)
-
+    val suppressCamera = feedback == TapFocusFeedback.FOCUSING || feedback == TapFocusFeedback.FAILED ||
+        (feedback == TapFocusFeedback.LOCKED && !handedOff)
+    val cameraVisible = !suppressCamera && !cameraFrames.isNullOrEmpty()
+    val tapVisible = feedback != TapFocusFeedback.IDLE && !handedOff
+    var lastFrames by remember { mutableStateOf(emptyList<LiveViewFocusFrame>()) }
+    var lastFocused by remember { mutableStateOf(false) }
+    SideEffect {
+        if (!cameraFrames.isNullOrEmpty()) {
+            lastFrames = cameraFrames
+            lastFocused = cameraFocused
+        }
+    }
+    val cameraAlpha = animateFloatAsState(if (cameraVisible) 1f else 0f, tween(160), label = "cameraAfAlpha")
+    val tapAlpha = animateFloatAsState(if (tapVisible) 1f else 0f, tween(160), label = "tapAfAlpha")
+    val appearScale = remember { Animatable(1f) }
+    LaunchedEffect(nonce, feedback == TapFocusFeedback.FOCUSING) {
+        if (feedback == TapFocusFeedback.FOCUSING) {
+            appearScale.snapTo(1.12f)
+        }
+        appearScale.animateTo(1f, tween(180, easing = FastOutSlowInEasing))
+    }
+    // Keep the outgoing result's colour while fading; IDLE must not flash white.
+    var lastFeedback by remember { mutableStateOf(TapFocusFeedback.FOCUSING) }
+    var lastPoint by remember { mutableStateOf(point) }
+    SideEffect {
+        if (feedback != TapFocusFeedback.IDLE) {
+            lastFeedback = feedback
+            lastPoint = point
+        }
+    }
+    val displayPoint = if (feedback == TapFocusFeedback.IDLE) lastPoint else point
+    val effectiveFeedback = if (feedback == TapFocusFeedback.IDLE) lastFeedback else feedback
+    val tapColor = key(nonce) {
+        // New requests start neutral rather than briefly inheriting the previous red/green.
+        animateColorAsState(when (effectiveFeedback) {
+            TapFocusFeedback.LOCKED -> Color(0xFF67E58B)
+            TapFocusFeedback.FAILED -> Color(0xFFFF7777)
+            else -> Color.White
+        }, tween(150), label = "tapAfColor")
+    }
+    val cameraColor = animateColorAsState(
+        if (lastFrames.size > 1) Color(0xFFFFDEA0) else if (lastFocused) Color(0xFF67E58B) else Color.White,
+        tween(150), label = "cameraAfColor")
+    val outline = remember { androidx.compose.ui.graphics.Path() }
     Canvas(modifier) {
-        val imageRect = fitCenterRect(size.width, size.height, imageAspectRatio)
-        val scale = appearScale.value * resultScale
-        val half = 32.dp.toPx() * scale
-        val len = 12.dp.toPx() * scale
-        val stroke = 2.dp.toPx()
-        val requestedCenter = Offset(
-            imageRect.left + imageRect.width * point.x.coerceIn(0f, 1f),
-            imageRect.top + imageRect.height * point.y.coerceIn(0f, 1f)
-        )
-        // 只约束反馈框的绘制位置，发给相机的坐标仍是用户真实点位。
-        // 这样点画面边缘时框不会被圆角取景器裁掉一半。
-        val center = Offset(
-            if (imageRect.width >= half * 2f) {
-                requestedCenter.x.coerceIn(imageRect.left + half, imageRect.right - half)
-            } else imageRect.center.x,
-            if (imageRect.height >= half * 2f) {
-                requestedCenter.y.coerceIn(imageRect.top + half, imageRect.bottom - half)
-            } else imageRect.center.y
-        )
-        drawFocusCornerReticle(
-            center = center,
-            halfSize = half,
-            cornerLength = len,
-            color = reticleColor,
-            strokeWidth = stroke
-        )
-    }
-}
-
-/** AF 完成后的常驻红框；优先保留相机报告的尺寸与位置，未知头型退回应用请求点。 */
-@Composable
-private fun ConfirmedFocusReticleOverlay(
-    fallbackPoint: Offset,
-    cameraFrame: LiveViewFocusFrame?,
-    nonce: Long,
-    visible: Boolean,
-    imageAspectRatio: Float,
-    modifier: Modifier = Modifier
-) {
-    val colors = AppTheme.colors
-    val appearScale = remember { Animatable(1.12f) }
-    // 增强取景头可能偶发一帧不带 AF 框。追踪期间保留最近一次相机确认的位置，避免
-    // 框瞬间跳回最初点击点；一旦新框到达仍在当前帧立即采用，不增加跟随延迟。
-    val cameraFrameCache = remember(nonce) { FocusFrameCache() }
-    cameraFrame?.let { cameraFrameCache.frame = it }
-    val displayedCameraFrame = cameraFrame ?: cameraFrameCache.frame
-    LaunchedEffect(nonce) {
-        appearScale.snapTo(1.12f)
-        appearScale.animateTo(1f, tween(160))
-    }
-    val visibility by animateFloatAsState(
-        targetValue = if (visible) 1f else 0f,
-        animationSpec = tween(200, easing = FastOutSlowInEasing),
-        label = "confirmedFocusVisibility"
-    )
-
-    Canvas(modifier) {
-        val imageRect = fitCenterRect(size.width, size.height, imageAspectRatio)
-        if (imageRect.width <= 0f || imageRect.height <= 0f) return@Canvas
-        val point = displayedCameraFrame?.let { Offset(it.centerX, it.centerY) } ?: fallbackPoint
-        val fallbackHalf = 25.dp.toPx()
-        val minHalf = 13.dp.toPx()
-        val exitScale = 0.82f + 0.18f * visibility
-        // 动画缩放后再封顶，确保全画幅/边缘 AF 框也不会产生反向 coerceIn 区间。
-        val halfWidth = (
-            (displayedCameraFrame?.let { imageRect.width * it.width / 2f } ?: fallbackHalf) *
-                appearScale.value * exitScale
-            ).coerceIn(minOf(minHalf, imageRect.width / 2f), imageRect.width / 2f)
-        val halfHeight = (
-            (displayedCameraFrame?.let { imageRect.height * it.height / 2f } ?: fallbackHalf) *
-                appearScale.value * exitScale
-            ).coerceIn(minOf(minHalf, imageRect.height / 2f), imageRect.height / 2f)
-        val requestedCenter = Offset(
-            imageRect.left + imageRect.width * point.x.coerceIn(0f, 1f),
-            imageRect.top + imageRect.height * point.y.coerceIn(0f, 1f)
-        )
-        val center = Offset(
-            if (imageRect.width >= halfWidth * 2f) {
-                requestedCenter.x.coerceIn(
-                    imageRect.left + halfWidth,
-                    imageRect.right - halfWidth
-                )
-            } else {
-                imageRect.center.x
-            },
-            if (imageRect.height >= halfHeight * 2f) {
-                requestedCenter.y.coerceIn(
-                    imageRect.top + halfHeight,
-                    imageRect.bottom - halfHeight
-                )
-            } else {
-                imageRect.center.y
+        val image = fitCenterRect(size.width, size.height, imageAspectRatio)
+        if (image.width <= 0f || image.height <= 0f) return@Canvas
+        val scale = zoom.coerceAtLeast(1f)
+        fun corners(center: Offset, halfWidth: Float, halfHeight: Float) {
+            val arm = minOf(5.dp.toPx() / scale, halfWidth * .65f, halfHeight * .65f)
+            val radius = minOf(1.4.dp.toPx() / scale, arm * .45f)
+            for (xSign in -1..1 step 2) for (ySign in -1..1 step 2) {
+                val x = center.x + xSign * halfWidth
+                val y = center.y + ySign * halfHeight
+                outline.moveTo(x - xSign * arm, y)
+                outline.lineTo(x - xSign * radius, y)
+                outline.quadraticBezierTo(x, y, x, y - ySign * radius)
+                outline.lineTo(x, y - ySign * arm)
             }
-        )
-        val cornerLength = minOf(10.dp.toPx(), halfWidth, halfHeight)
-        drawFocusCornerReticle(
-            center = center,
-            halfWidth = halfWidth,
-            halfHeight = halfHeight,
-            cornerLength = cornerLength,
-            color = colors.statusConnected.copy(alpha = 0.85f * visibility),
-            strokeWidth = 1.8.dp.toPx()
-        )
+        }
+        fun paint(color: Color, alpha: Float) {
+            drawPath(outline, Color.Black.copy(alpha = .24f * alpha),
+                style = androidx.compose.ui.graphics.drawscope.Stroke(2.1.dp.toPx() / scale, cap = StrokeCap.Round))
+            drawPath(outline, color.copy(alpha = .94f * alpha),
+                style = androidx.compose.ui.graphics.drawscope.Stroke(1.15.dp.toPx() / scale, cap = StrokeCap.Round))
+        }
+        if (cameraAlpha.value > 0f) {
+            outline.reset()
+            for (frame in cameraFrames ?: lastFrames) {
+                corners(Offset(image.left + image.width * frame.centerX, image.top + image.height * frame.centerY),
+                    image.width * frame.width / 2f, image.height * frame.height / 2f)
+            }
+            paint(cameraColor.value, cameraAlpha.value)
+        }
+        if (tapAlpha.value > 0f) {
+            outline.reset()
+            val half = minOf(22.dp.toPx() / scale * appearScale.value, image.width / 2f, image.height / 2f)
+            // Reserve the largest entrance footprint: shrinking must not slide edge taps sideways.
+            val inset = minOf(22.dp.toPx() / scale * 1.12f, image.width / 2f, image.height / 2f)
+            val center = Offset(
+                (image.left + image.width * displayPoint.x).coerceIn(image.left + inset, image.right - inset),
+                (image.top + image.height * displayPoint.y).coerceIn(image.top + inset, image.bottom - inset))
+            corners(center, half, half)
+            paint(tapColor.value, tapAlpha.value)
+        }
     }
 }
 
@@ -5025,8 +5029,29 @@ internal fun RemoteToolMark(tool: RemoteTool, preferences: RemoteToolPreferences
         RemoteTool.RECORD -> Icon(Icons.Default.Videocam, null, mark)
         RemoteTool.ROTATE -> RotateMark(mark)
         RemoteTool.LOCK -> Icon(if (preferences.locked.value) Icons.Default.Lock else Icons.Default.LockOpen, null, mark)
+        RemoteTool.COMPUTER_CONTROL -> Text("PC", fontSize = 9.sp, fontWeight = FontWeight.Bold)
         RemoteTool.WHITE_BALANCE -> Text("WB", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        RemoteTool.FOCUS_MODE -> Text("MODE", fontSize = 9.sp, fontWeight = FontWeight.Bold)
+        RemoteTool.FOCUS_FRAME -> FocusFrameMark()
         RemoteTool.FOCUS_AREA -> Icon(Icons.Default.CenterFocusStrong, null, mark)
         RemoteTool.WAVEFORM -> WaveformMark(mark, rgb = preferences.waveform.value == WaveformMode.RGB)
+    }
+}
+
+/** AF inside a focus rectangle, shared by the toolbar and edit mode. */
+@Composable
+private fun FocusFrameMark() {
+    Box(
+        modifier = Modifier.size(width = 20.dp, height = 18.dp)
+            .border(1.4.dp, LocalContentColor.current, RoundedCornerShape(3.dp)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            "AF", fontSize = 8.sp, lineHeight = 10.sp, fontWeight = FontWeight.Bold,
+            maxLines = 1, softWrap = false,
+            style = androidx.compose.ui.text.TextStyle(
+                platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false)
+            ),
+        )
     }
 }

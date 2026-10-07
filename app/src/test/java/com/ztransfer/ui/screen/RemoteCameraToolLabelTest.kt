@@ -32,6 +32,15 @@ class RemoteCameraToolLabelTest {
         assertNull(cameraToolLabelResource(RemoteCameraTool.FOCUS_AREA, 0x501C, 99999L))
     }
 
+    @Test fun z30PhotoFocusAreaShortDynamicValuesAreNamed() {
+        assertEquals(R.string.remote_af_dynamic_s,
+            cameraToolLabelResource(RemoteCameraTool.FOCUS_AREA, 0xD05D, 2L, "Z 30", 0x0002))
+        assertEquals(R.string.remote_af_dynamic_m,
+            cameraToolLabelResource(RemoteCameraTool.FOCUS_AREA, 0xD05D, 0x8013L, "Z 30", 0x0002))
+        assertEquals(R.string.remote_af_dynamic_l,
+            cameraToolLabelResource(RemoteCameraTool.FOCUS_AREA, 0xD05D, 0x8014L, "Z 30", 0x0002))
+    }
+
     @Test fun modelSpecificPointCountsDoNotLeakToOtherBodies() {
         fun label(model: String?, value: Long) =
             cameraToolLabelResource(RemoteCameraTool.FOCUS_AREA, 0x501C, value, model)
