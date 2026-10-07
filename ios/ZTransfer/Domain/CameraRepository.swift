@@ -426,37 +426,51 @@ actor CameraRepository {
     /// commands may run between subsequent DeviceReady polls.
     func focusAt(trackingX: UInt32, trackingY: UInt32,
                  focusX: UInt32, focusY: UInt32) async throws -> RemoteFocusResult {
+        try await focusAt(trackingX: trackingX, trackingY: trackingY,
+                          focusX: focusX, focusY: focusY, tapPath: nil)
+    }
+
+    func focusAt(trackingX: UInt32, trackingY: UInt32,
+                 focusX: UInt32, focusY: UInt32,
+                 tapPath: RcTapFocusPath?) async throws -> RemoteFocusResult {
         try await focusGate.withCommand { [self] in
             try await tapFocusLocked(trackingX: trackingX, trackingY: trackingY,
-                                     focusX: focusX, focusY: focusY)
+                                     focusX: focusX, focusY: focusY, tapPath: tapPath)
         }
     }
 
     private func tapFocusLocked(trackingX: UInt32, trackingY: UInt32,
-                                focusX: UInt32, focusY: UInt32) async throws -> RemoteFocusResult {
+                                focusX: UInt32, focusY: UInt32,
+                                tapPath: RcTapFocusPath?) async throws -> RemoteFocusResult {
         let deadline = ContinuousClock.now + .seconds(6)
         let initial = try await ioGate.withInteractive {
             try await session.withCommandSequence { [self] commands in
                 try await beginTapFocus(commands, deadline: deadline, trackingX: trackingX, trackingY: trackingY,
-                                        focusX: focusX, focusY: focusY)
+                                        focusX: focusX, focusY: focusY, tapPath: tapPath)
             }
         }
         guard initial.responseCode == PTPConstants.responseOK, !initial.timedOut else { return initial }
         var result = try await waitForAutofocus(deadline: deadline, tracking: initial.trackingStarted)
+        result.endTrackingResponseCode = initial.endTrackingResponseCode
         result.trackingResponseCode = initial.trackingResponseCode
+        result.moveResponseCode = initial.moveResponseCode
+        result.afStartResponseCode = initial.afStartResponseCode
         return result
     }
 
     private func beginTapFocus(_ commands: PTPCommandSequence, deadline: ContinuousClock.Instant,
                                 trackingX: UInt32, trackingY: UInt32,
-                                focusX: UInt32, focusY: UInt32) async throws -> RemoteFocusResult {
+                                focusX: UInt32, focusY: UInt32,
+                                tapPath: RcTapFocusPath?) async throws -> RemoteFocusResult {
         let end = try await endTrackingLocked(commands, deadline: deadline)
         if subjectTrackingActive {
             return .init(trackingStarted: false, polls: 0, timedOut: false,
-                         responseCode: end ?? PTPConstants.deviceBusy)
+                         responseCode: end ?? PTPConstants.deviceBusy,
+                         endTrackingResponseCode: end)
         }
+        let useTracking = tapPath.map { $0 == .tracking } ?? (subjectTrackingSupported != false)
         var trackingCode: UInt16?
-        if subjectTrackingSupported != false {
+        if useTracking {
             trackingCode = try await focusCommand(commands, operation: PTPConstants.startTracking,
                 parameters: [trackingX, trackingY], deadline: deadline)?.code
             if trackingCode == PTPConstants.responseOK {
@@ -469,18 +483,23 @@ actor CameraRepository {
                              responseCode: trackingCode ?? PTPConstants.deviceBusy, trackingResponseCode: trackingCode)
             }
         }
+        let trackingResponse = useTracking ? trackingCode : nil
+        var moveCode: UInt16?
         if !subjectTrackingActive {
             let moved = try await focusCommand(commands, operation: PTPConstants.changeAFArea,
                 parameters: [focusX, focusY], deadline: deadline)?.code
+            moveCode = moved
             if moved != PTPConstants.responseOK {
                 return .init(trackingStarted: false, polls: 0, timedOut: moved == nil,
-                             responseCode: moved ?? PTPConstants.deviceBusy, trackingResponseCode: trackingCode)
+                             responseCode: moved ?? PTPConstants.deviceBusy, trackingResponseCode: trackingResponse,
+                             moveResponseCode: moved)
             }
         }
         try await Task.sleep(for: .milliseconds(80))
         let af = try await focusCommand(commands, operation: PTPConstants.afDrive, deadline: deadline)?.code
         return .init(trackingStarted: subjectTrackingActive, polls: 0, timedOut: af == nil,
-                     responseCode: af ?? PTPConstants.deviceBusy, trackingResponseCode: trackingCode)
+                     responseCode: af ?? PTPConstants.deviceBusy, trackingResponseCode: trackingResponse,
+                     moveResponseCode: moveCode, afStartResponseCode: af)
     }
 
     func halfPressFocus() async throws -> RemoteFocusResult {
@@ -598,16 +617,16 @@ actor CameraRepository {
     }
 
     func remoteFocusMode() async throws -> RemotePropertyDescriptor? {
-        for property in [RemoteProperty.focusMode, .nikonAFMode] {
+        for property in RemoteFocusMode.properties {
             let response = try await ioGate.withInteractive {
                 try await session.executeResponse(operation: PTPConstants.getDevicePropValue,
                                                   parameters: [property.rawValue])
             }
             guard response.code == PTPConstants.responseOK, [1, 2, 4, 8].contains(response.data.count) else { continue }
             let value = response.data.enumerated().reduce(UInt64(0)) { $0 | UInt64($1.element) << ($1.offset * 8) }
-            let known = property == .focusMode ? [1, 2, 3, 0x8010, 0x8011, 0x8012, 0x8013].contains(value)
-                : [0, 1, 2].contains(value)
-            if known { return .init(property: property, writable: false, current: value, values: []) }
+            guard RemoteFocusMode.label(property: property, value: value) != nil else { continue }
+            let dataType: UInt16 = property == .focusMode ? 0x0004 : 0x0002
+            return .init(property: property, dataType: dataType, writable: false, current: value, values: [])
         }
         return nil
     }

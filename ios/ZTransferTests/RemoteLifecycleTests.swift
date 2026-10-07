@@ -247,6 +247,48 @@ final class RemoteLifecycleTests: XCTestCase {
         XCTAssertEqual(fallback, readOnly)
     }
 
+    func testFocusModeQueriesStandardThenVendorWithTypeValidation() async throws {
+        let camera = RemoteLifecycleCamera()
+        let locked = RemotePropertyDescriptor(property: .focusMode, dataType: 2, writable: false,
+                                               current: 1, values: [1])
+        let vendor = RemotePropertyDescriptor(property: .stillFocusMode, dataType: 2, writable: true,
+                                              current: 0, values: [0, 1, 3, 4])
+        await camera.setProperty(locked)
+        await camera.setProperty(vendor)
+        let chosen = try await camera.remoteCameraTool(.focusMode, movie: false)
+        XCTAssertEqual(chosen, vendor)
+        let calls = await camera.log
+        XCTAssertEqual(calls, ["property:focusMode", "property:stillFocusMode"])
+    }
+
+    func testFocusModeWriteRefreshesManualStateAndFixedVendorModeBlocksTapFocus() async throws {
+        let camera = RemoteLifecycleCamera()
+        await camera.setProperty(.init(property: .focusMode, dataType: 4, writable: true,
+                                       current: 2, values: [1, 2]))
+        await camera.acceptWrites(.focusMode)
+        let model = RemoteViewModel(camera: camera)
+        addTeardownBlock { await model.stopAndWait() }
+        model.start()
+        try await waitFor { model.state.session == .ready }
+        XCTAssertFalse(model.state.focus.manual)
+        model.openCameraTool(.focusMode)
+        let panel = try XCTUnwrap(model.cameraToolPanel)
+        try await waitFor { !panel.loading }
+        panel.select(1)
+        try await waitFor { !panel.busy }
+        XCTAssertEqual(panel.descriptor?.current, 1)
+        XCTAssertTrue(model.state.focus.manual)
+
+        await camera.setProperty(.init(property: .stillFocusMode, dataType: 2, writable: false,
+                                       current: 3, values: [3]))
+        await camera.setProperty(.init(property: .focusMode, dataType: 4, writable: false,
+                                       current: 99, values: []))
+        await camera.queueEvents([.init(code: 0x4006, handle: RemoteProperty.focusMode.rawValue)])
+        try await waitFor { model.state.focus.manual }
+        model.focus(at: .init(x: 0.5, y: 0.5))
+        XCTAssertEqual(model.interactionHint, AppLocalized.resource("remote_tap_focus_manual"))
+    }
+
     func testMovieCameraToolNeverFallsBackToPhotoProperty() async throws {
         let camera = RemoteLifecycleCamera()
         await camera.markUnsupported(.movieWhiteBalance)
@@ -673,9 +715,49 @@ final class RemoteLifecycleTests: XCTestCase {
         model.focus(at: .init(x: 0.5, y: 0.5))
 
         try await waitFor {
-            model.interactionHint == AppLocalized.resource("remote_tracking_area_mode_required")
+            model.interactionHint == AppLocalized.resource("remote_tap_focus_area_retry")
         }
         XCTAssertEqual(model.state.focus.phase, .failed)
+    }
+
+    func testMoveAreaFailureShowsAndroidAreaRetryHint() async throws {
+        let camera = RemoteLifecycleCamera()
+        await camera.queueFocusResults([
+            .init(trackingStarted: false, polls: 0, timedOut: false,
+                  responseCode: 0x2019, moveResponseCode: 0x2019)
+        ])
+        let model = RemoteViewModel(camera: camera)
+        addTeardownBlock { await model.stopAndWait() }
+        model.start()
+        try await waitFor { model.state.session == .ready }
+        model.focus(at: .init(x: 0.5, y: 0.5))
+        try await waitFor {
+            model.interactionHint == AppLocalized.resource("remote_tap_focus_area_retry")
+        }
+        XCTAssertEqual(model.state.focus.phase, .failed)
+    }
+
+    func testZSeriesUnsupportedFocusAreaShowsAndroidGuidanceWithoutSendingAF() async throws {
+        let camera = RemoteLifecycleCamera(model: "Z 30")
+        await camera.setProperty(.init(property: .focusArea, dataType: 2, writable: true,
+                                       current: 0x801C, values: [0x801C]))
+        let area = try await camera.remoteCameraTool(.focusArea, movie: false)
+        let modelName = await camera.remoteDeviceModel()
+        XCTAssertEqual(modelName, "Z 30")
+        XCTAssertEqual(area?.property, .focusArea)
+        XCTAssertEqual(area?.current, 0x801C)
+        XCTAssertEqual(rcTapFocusPath(area, model: modelName), .unsupported)
+        let model = RemoteViewModel(camera: camera)
+        addTeardownBlock { await model.stopAndWait() }
+        model.start()
+        try await waitFor { model.state.session == .ready }
+        model.focus(at: .init(x: 0.5, y: 0.5))
+        try await waitFor {
+            model.interactionHint == AppLocalized.resource("remote_tap_focus_area_unsupported")
+        }
+        XCTAssertEqual(model.state.focus.phase, .failed)
+        let calls = await camera.log
+        XCTAssertFalse(calls.contains("tapfocus:start"))
     }
 
     func testTapFocusSeparatesTransientFeedbackFromThreeSecondConfirmedMarker() async throws {
@@ -1137,6 +1219,7 @@ private actor RemoteLifecycleCamera: RemoteCameraControlling {
     nonisolated let isUSB: Bool
     private(set) var log: [String] = []
     private let movie: Bool
+    private let model: String?
     private var failingFrames: Int
     private var transportFailure: Bool
     private var batteryEvent = false
@@ -1159,8 +1242,10 @@ private actor RemoteLifecycleCamera: RemoteCameraControlling {
     private var applicationMode = false
     private let frame: Data
     init(movie: Bool = false, failingFrames: Int = 0, isUSB: Bool = false,
+         model: String? = nil,
          transportFailure: Bool = false, frameSize: CGSize = CGSize(width: 8, height: 8)) {
         self.movie = movie
+        self.model = model
         self.failingFrames = failingFrames
         self.isUSB = isUSB
         self.transportFailure = transportFailure
@@ -1203,6 +1288,7 @@ private actor RemoteLifecycleCamera: RemoteCameraControlling {
         enhancedFrame = Data(bytes) + frame
         frameAge = age
     }
+    func remoteDeviceModel() async -> String? { model }
     func remoteMovieMode() -> Bool? {
         log.append("selector")
         return overrides[.liveViewSelector].map { $0.current != 0 } ?? movie
@@ -1226,7 +1312,19 @@ private actor RemoteLifecycleCamera: RemoteCameraControlling {
     }
     func remoteFocusMode() -> RemotePropertyDescriptor? {
         log.append("focus")
-        return overrides[.focusMode] ?? overrides[.nikonAFMode]
+        if let standard = overrides[.focusMode],
+           RemoteFocusMode.label(property: .focusMode, value: standard.current) != nil {
+            return standard
+        }
+        if let still = overrides[.stillFocusMode],
+           RemoteFocusMode.label(property: .stillFocusMode, value: still.current) != nil {
+            return still
+        }
+        if let vendor = overrides[.nikonAFMode],
+           RemoteFocusMode.label(property: .nikonAFMode, value: vendor.current) != nil {
+            return vendor
+        }
+        return nil
     }
     func emitBatteryEvent() { batteryEvent = true }
     func setProperty(_ descriptor: RemotePropertyDescriptor) { overrides[descriptor.property] = descriptor }
@@ -1459,6 +1557,41 @@ final class RemoteFrameProtocolTests: XCTestCase {
         XCTAssertEqual(result.responseCode, 0x2019)
         let operations = await wire.operations
         XCTAssertEqual(operations, [0x9424])
+    }
+
+    func testExplicitMoveAreaPathSkipsTrackingProbeAndUsesFullFocusCoordinates() async throws {
+        let wire = RemoteWireReplay([
+            .init(0x9205, parameters: [901, 601]), .init(0x90C1), .init(0x90C8)
+        ])
+        let result = try await repository(wire).focusAt(trackingX: 100, trackingY: 200,
+                                                         focusX: 901, focusY: 601,
+                                                         tapPath: .moveArea)
+        XCTAssertFalse(result.trackingStarted)
+        XCTAssertEqual(result.moveResponseCode, PTPConstants.responseOK)
+        XCTAssertEqual(result.afStartResponseCode, PTPConstants.responseOK)
+        let operations = await wire.operations
+        XCTAssertEqual(operations, [0x9205, 0x90C1, 0x90C8])
+    }
+
+    func testExplicitTrackingPathUsesTrackingCoordinatesAndDoesNotFallbackOnBusy() async throws {
+        let wire = RemoteWireReplay([
+            .init(0x9424, parameters: [901, 601]), .init(0x90C1), .init(0x90C8)
+        ])
+        let result = try await repository(wire).focusAt(trackingX: 901, trackingY: 601,
+                                                         focusX: 31, focusY: 21,
+                                                         tapPath: .tracking)
+        XCTAssertTrue(result.trackingStarted)
+        XCTAssertEqual(result.trackingResponseCode, PTPConstants.responseOK)
+        let operations = await wire.operations
+        XCTAssertEqual(operations, [0x9424, 0x90C1, 0x90C8])
+
+        let busy = RemoteWireReplay([.init(0x9424, parameters: [1, 2], code: 0x2019)])
+        let failure = try await repository(busy).focusAt(trackingX: 1, trackingY: 2,
+                                                          focusX: 3, focusY: 4,
+                                                          tapPath: .tracking)
+        XCTAssertEqual(failure.responseCode, 0x2019)
+        let busyOperations = await busy.operations
+        XCTAssertEqual(busyOperations, [0x9424])
     }
 
     func testFailedEndTrackingPreventsNewTargetButEndLiveViewStillCloses() async throws {

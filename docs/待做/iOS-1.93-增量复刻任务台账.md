@@ -4,7 +4,7 @@
 
 2026-10-07 用户要求：拉取安卓新功能合入 ios，先形成变动文档，深入阅读通用调度器专门文档，再按原规则逐项完整复刻。首轮已从 `origin/android` 拉取并将 `2b2bf0c2802cacc909e9373562d912bce2d21175` 合入 `ios`，合并提交 `5d583d60`。旧安卓基准 `617082c3`，合并前 iOS `27fba4bf`；增量 **62 个提交、79 个净变化文件**，安卓 versionName **1.93**、versionCode **66**。本轮追加同步已确认 `origin/android=8138e2dec22aa8c8b998a7a9a7b2fa0b9f3a1ec5`，相对 `5d583d60` 新增 `f40f6bbf`、`8138e2de` 两个提交，并以 `77fde8d9` 无冲突合入；详细核对见 [追加同步核对](iOS-1.93-追加同步核对.md)。本次同步与按类型存放复刻将在本轮用户明确要求后提交并推送。
 
-新轮原始进度 **8/15**（N01–N07、N11 已完成开发侧复刻，待用户真机验收）；追加诊断任务后按 **8/16** 播报。N16 诊断取证仍待调查。状态采用待调查→调查中→实现中→复刻完成，待用户真机验收；不能沿用上一轮 26/26 证明本轮完成。共享文件按差异块分别归属，任务之间允许先处理依赖，但不扩大单项边界或遗漏总范围。[来源索引](iOS-1.93-增量来源索引.json)保留首轮全部提交；追加提交与调度器核对见 [追加同步来源索引](iOS-1.93-追加同步来源索引.json)。
+新轮原始进度 **8/15**（N01–N07、N11 已完成开发侧复刻，待用户真机验收）；追加诊断任务后按 **8/16** 播报。N08 实现中，提交前发现的接线缺口见本节末尾记录。N16 诊断取证仍待调查。状态采用待调查→调查中→实现中→复刻完成，待用户真机验收；不能沿用上一轮 26/26 证明本轮完成。共享文件按差异块分别归属，任务之间允许先处理依赖，但不扩大单项边界或遗漏总范围。[来源索引](iOS-1.93-增量来源索引.json)保留首轮全部提交；追加提交与调度器核对见 [追加同步来源索引](iOS-1.93-追加同步来源索引.json)。
 
 先读对应安卓提交、最终源码、上下游及测试，写明状态、文本、布局、动画、取消/错误/重试和保存范围，然后实施。迁移安卓测试，同时补足已识别但安卓未测的边界。每完成一大块才集中构建和必要自动化测试；真机测试与验收由用户负责。本轮功能实现不自动提交、推送或安装。
 
@@ -21,7 +21,7 @@
 | N05 | 评级扫描生命周期：开关刷新代次、范围交集/锚点、来源快照、逐文件/区域 P3、进度、取消屏障、8192 值缓存和来源、重连隔离 | PhotoRatingScan、RatingDiagnostics、CameraViewModel；调度/评级测试 | 复刻完成，待用户验收 |
 | N06 | 评级筛选 UI：开关、0–5 星条件、日期拨轮、等待/进度/完成、角标/帮助、触感、固定布局、独立 UI 状态避免重播网格 | FileListScreen、TransferViewModel、三语资源；相关方案仅用于解释最终代码 | 复刻完成，待用户验收 |
 | N07 | 实时多对焦框：帧头多框/坐标/颜色/显隐/有效期、照片录像差异、60 秒被动诊断/步骤标记及工具入口 | LiveViewMetadata、LiveViewFocusDiagnostic、RemoteScreen；帧头/诊断测试及专门方案 | 复刻完成，待用户验收 |
-| N08 | 对焦模式与点按路径：AF/MF 固定状态、模式切换回读、坐标修正、单点/动态/宽区域路径、机型名称及不支持提示 | RemoteCameraTools、RemoteLab、RemoteCameraToolPanel；RemoteFocusModeTest、RemoteFocusTest、标签测试 | 待调查 |
+| N08 | 对焦模式与点按路径：AF/MF 固定状态、模式切换回读、坐标修正、单点/动态/宽区域路径、机型名称及不支持提示 | RemoteCameraTools、RemoteLab、RemoteCameraToolPanel；RemoteFocusModeTest、RemoteFocusTest、标签测试 | 实现中 |
 | N09 | 监看完全控制、工具排列与启动/模式切换：持久化/独立模式、横竖稳定槽位、启动壳保留、提示和工具名称、旧诊断删除范围 | RemoteToolPreferences、RemoteToolBar、LandscapeMonitorControls、RemoteScreen；相关标签/交互测试 | 待调查 |
 | N10 | 录像规格、剩余时长和 DISP：读取来源、解码、无效值/回退、排列/统一提示、被动及开发诊断入口 | MonitorMovieFormat、MonitorStorage、LiveViewVideoDiagnostic、RemoteDispOverlay；MonitorMovieFormatTest、MonitorRemainingTest | 待调查 |
 | N11 | 存放方式与传输交互：统一/按天/按类、旧布尔迁移、目录/重名/已传识别/重试快照、效果图独立目录、队列飞行动画边界；追加同步必须使用 `ZT-` 大写类型目录和通用安全校验 | TransferViewModel、SettingsScreen、FileListScreen、TransferScreen、PhotoPreview；`NewMediaTransferPolicyTest` 最终前缀测试 | 复刻完成，待用户验收 |
@@ -115,3 +115,12 @@
 - `RemoteView` 增加安卓同语义的 `focus_frame` 工具与立即持久化；多框按数量/合焦状态使用白/绿/黄颜色，黑色阴影加前景描边，取景器门控覆盖工具隐藏、断连、模式切换旧帧、500ms 过期和无框；点按/半按反馈保持独立，合焦后等待 120ms 才交给新鲜相机框，淡入淡出 160ms。
 - 开发者面板新增 `Focus diagnostic v2` 被动诊断：仅采样已收到帧，每 200ms 限频，60 秒自动结束，状态变化才记行，UI 状态和最多 8 个步骤标记保留，报告有界 6000 字节并按 `focus_report_v1` 持久化；新增英文、简体中文、繁体中文逐字文案。
 - 自动化新增 5 项安卓契约覆盖：未知状态/多框、坏表保留音频、显示区域裁剪、60 秒限频有界报告。`/tmp/ztransfer-ios193-n07-tests3.log`：DomainModelTests **127/127**，`** TEST SUCCEEDED **`；Debug 模拟器构建 `/tmp/ztransfer-ios193-n07-build3.log`：`** BUILD SUCCEEDED **`。尚未进行真机验收，N07 标记“复刻完成，待用户验收”。
+
+### 2026-10-08 N08 对焦模式与点按路径阶段记录
+
+- 已逐提交核对安卓 `d87ee9fa`、`6767d052`、`c6227c6d` 的最终实现、`RemoteFocusModeTest`、`RemoteFocusTest` 和标签测试。iOS 新增标准 `0x500A`、静态厂商 `0xD061`、尼康 `0xD161` 三候选，严格按安卓数据类型和可写值域筛选；模式标签、AF Macro、MF（固定）、手动门控、写入后回读和工具入口均使用对应安卓语义与三语文案。
+- 点按前每次重新读取 AF 区域描述并按机型和值域选择路径：主体追踪使用 `StartTracking`，单点/动态/宽区域使用 `ChangeAfArea`，仅在明确 `OPERATION_NOT_SUPPORTED` 时回退；未知机型保留旧探测回退，Z 系列不支持值显示安卓原文提示并不发送 AF。两条命令都使用增强 Live View 的完整坐标域，保留 80ms 间隔、AF 驱动一次、错误/取消/跟踪状态以及确认框更新规则。
+- 生产接线位于 `RemoteCameraTool`、`CameraRepository`、`CameraSession`、`RemoteViewModel`、`RemoteView` 和相机工具菜单/布局/本地化；相关测试补在 `RemoteCameraToolTests`、`RemoteLifecycleTests` 和 PTP wire replay，覆盖模式候选与数据类型、标签/手动规则、坐标边界、所有路径映射、显式路径命令顺序、非 OP 错误不回退、模式回读门控及 Z 系列不支持提示。
+- 定向回归 `/tmp/ztransfer-ios193-n08-final-tests2.log`：`RemoteCameraToolTests` **9/9**、`RemoteFrameProtocolTests` **20/20**、`RemoteLifecycleTests` **50 项通过、3 项跳过**，合计 **82 项：79 项通过、3 项既有麦克风权限跳过、0 失败**，`** TEST SUCCEEDED **`。覆盖了显式路径响应透传、非 OP 错误不回退、区域拒绝/通用失败提示、Z30 动态区域 S/M/L 名称和全部支持 AF 路径点按标记。首次路径结果透传遗漏已由 wire 用例发现并修复后重跑通过。Debug 模拟器最终构建 `/tmp/ztransfer-ios193-n08-debug-build-final.log` 为 `** BUILD SUCCEEDED **`；已重新安装并启动 `com.ztransfer.ios` 于 iPhone 17（PID 5230）。尚未进行真机测试。本次提交前复核发现闭环缺口，纠正此前“复刻完成”记录，N08 改回“实现中”。
+
+- 提交前待补项：`0xD061` 属性事件尚未触发模式刷新，照片/录像切换后未刷新并隔离迟到的模式回读；模式写入仅在确认成功后刷新，缺安卓失败/异常后的刷新；工具写入期间的拍摄/AF/录像互斥仍需接线；模式按钮加载状态、移动区域成功但 AF 失败后的焦点记忆仍需对齐。现有通过测试不能证明这些分支已完成。本次按用户“提交推送一次”保存阶段成果，后续继续 N08 闭环。

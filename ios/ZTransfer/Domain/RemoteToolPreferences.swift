@@ -98,7 +98,7 @@ final class RemoteToolPreferences: ObservableObject {
         case .meter: meter = false
         case .waveform: waveform = .off
         case .lock: locked = false
-        case .record, .whiteBalance, .focusArea, .lut, .rotate: break
+        case .record, .whiteBalance, .focusArea, .focusMode, .lut, .rotate: break
         }
     }
 }

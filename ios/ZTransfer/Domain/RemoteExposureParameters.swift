@@ -11,6 +11,7 @@ enum RemoteProperty: UInt32, CaseIterable, Sendable {
     case liveViewFocusArea = 0xD05D
     case movieFocusArea = 0xD1F8
     case focusMode = 0x500A
+    case stillFocusMode = 0xD061
     case nikonAFMode = 0xD161
     case angleLevel = 0xD067
     case fNumber = 0x5007
@@ -179,6 +180,9 @@ enum RemoteExposureParameters {
                 ?? String(format: "0x%llx", raw)
         case .nikonAFMode:
             return [0: "AF-S", 1: "AF-C", 2: "AF-A"][raw] ?? String(format: "0x%llx", raw)
+        case .stillFocusMode:
+            return [0: "AF-S", 1: "AF-C", 2: "AF-F", 3: "MF (fixed)", 4: "MF", 5: "AF-A"][raw]
+                ?? String(format: "0x%llx", raw)
         case .angleLevel: return String(format: "%.1f°", Double(Int64(bitPattern: raw)) / 65536)
         case .liveViewImageSize, .applicationMode, .nikonLightMeter, .nikonExposureIndicate, .whiteBalance, .movieWhiteBalance,
              .movieWhiteBalanceAlternate, .focusArea, .liveViewFocusArea, .movieFocusArea: return String(raw)

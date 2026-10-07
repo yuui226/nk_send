@@ -418,6 +418,13 @@ actor CameraSession {
                                       focusX: focusX, focusY: focusY)
     }
 
+    func focusAt(trackingX: UInt32, trackingY: UInt32,
+                 focusX: UInt32, focusY: UInt32,
+                 tapPath: RcTapFocusPath?) async throws -> RemoteFocusResult {
+        try await repository.focusAt(trackingX: trackingX, trackingY: trackingY,
+                                     focusX: focusX, focusY: focusY, tapPath: tapPath)
+    }
+
     func halfPressFocus() async throws -> RemoteFocusResult {
         try await repository.halfPressFocus()
     }
@@ -457,6 +464,9 @@ protocol RemoteCameraControlling: Sendable {
     func setRemoteProperty(_ descriptor: RemotePropertyDescriptor, value: UInt64) async throws
     func focusAt(trackingX: UInt32, trackingY: UInt32,
                  focusX: UInt32, focusY: UInt32) async throws -> RemoteFocusResult
+    func focusAt(trackingX: UInt32, trackingY: UInt32,
+                 focusX: UInt32, focusY: UInt32,
+                 tapPath: RcTapFocusPath?) async throws -> RemoteFocusResult
     func halfPressFocus() async throws -> RemoteFocusResult
     func endSubjectTracking() async throws
     func endSubjectTrackingForTool() async throws -> UInt16?
@@ -472,6 +482,11 @@ protocol RemoteCameraControlling: Sendable {
 }
 
 extension RemoteCameraControlling {
+    func focusAt(trackingX: UInt32, trackingY: UInt32,
+                 focusX: UInt32, focusY: UInt32,
+                 tapPath: RcTapFocusPath?) async throws -> RemoteFocusResult {
+        try await focusAt(trackingX: trackingX, trackingY: trackingY, focusX: focusX, focusY: focusY)
+    }
     func remoteDeviceModel() async -> String? { nil }
     func endSubjectTrackingForTool() async throws -> UInt16? {
         try await endSubjectTracking()

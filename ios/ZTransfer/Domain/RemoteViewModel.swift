@@ -374,7 +374,9 @@ final class RemoteViewModel: ObservableObject {
 
     private func refreshFocusMode() async {
         focusModeDescriptor = try? await camera.remoteFocusMode()
-        state.focus.manual = focusModeDescriptor?.property == .focusMode && focusModeDescriptor?.current == 1
+        state.focus.manual = focusModeDescriptor.map {
+            RemoteFocusMode.manual(property: $0.property, value: $0.current)
+        } ?? false
     }
 
     func setHDLiveView(_ enabled: Bool) {
@@ -825,7 +827,7 @@ final class RemoteViewModel: ObservableObject {
             canWrite: { [weak self] in self?.cameraToolWritesAllowed ?? false },
             beforeWrite: { [weak self] in
                 guard let self else { return false }
-                if tool == .focusArea && state.focus.tracking {
+                if tool != .whiteBalance && state.focus.tracking {
                     do {
                         let response = try await camera.endSubjectTrackingForTool()
                         if let response, ![PTPConstants.responseOK, PTPConstants.operationNotSupported, 0xA004].contains(response) {
@@ -837,7 +839,7 @@ final class RemoteViewModel: ObservableObject {
                 }
                 return true
             }, onApplied: { [weak self] in
-                guard let self, tool == .focusArea else { return }
+                guard let self, tool != .whiteBalance else { return }
                 confirmedFocusMarker = nil
                 state.focus.phase = .idle
                 await refreshFocusMode()
@@ -1294,28 +1296,40 @@ final class RemoteViewModel: ObservableObject {
         state = state.applying(.focusRequested(point))
         haptics.tick()
         focusHideTask?.cancel()
-        // Android uses two coordinate spaces from the enhanced frame header:
-        // the full image space for StartTracking and the AF grid for
-        // ChangeAfArea. Never reuse the JPEG dimensions for both commands.
+        // Android's final implementation uses the full enhanced-frame Live
+        // View domain for both StartTracking and ChangeAfArea. The smaller
+        // AF-frame grid is display metadata only.
         let trackingWidth = frameMetadata?.trackingCoordinateWidth ?? Int(coordinateSize.width)
         let trackingHeight = frameMetadata?.trackingCoordinateHeight ?? Int(coordinateSize.height)
-        let focusWidth = frameMetadata?.focusCoordinateWidth ?? Int(coordinateSize.width)
-        let focusHeight = frameMetadata?.focusCoordinateHeight ?? Int(coordinateSize.height)
-        let trackingX = UInt32((point.x * Double(max(0, trackingWidth - 1))).rounded())
-        let trackingY = UInt32((point.y * Double(max(0, trackingHeight - 1))).rounded())
-        let focusX = UInt32((point.x * Double(max(0, focusWidth - 1))).rounded())
-        let focusY = UInt32((point.y * Double(max(0, focusHeight - 1))).rounded())
+        let focusWidth = trackingWidth
+        let focusHeight = trackingHeight
+        let trackingX = UInt32(rcNormalizedToFocusCoordinate(Float(point.x), size: trackingWidth))
+        let trackingY = UInt32(rcNormalizedToFocusCoordinate(Float(point.y), size: trackingHeight))
+        let focusX = UInt32(rcNormalizedToFocusCoordinate(Float(point.x), size: focusWidth))
+        let focusY = UInt32(rcNormalizedToFocusCoordinate(Float(point.y), size: focusHeight))
         tapFocusTask = Task { [weak self] in
             guard let self else { return }
             defer { tapFocusTask = nil }
             guard !stopRequested else { return }
             do {
+                let area = try? await camera.remoteCameraTool(.focusArea, movie: movieMode)
+                let path = rcTapFocusPath(area, model: await camera.remoteDeviceModel())
+                if path == .unsupported {
+                    showInteractionHint(AppLocalized.resource("remote_tap_focus_area_unsupported"))
+                    state = state.applying(.focusFailed)
+                    confirmedFocusMarker = nil
+                    scheduleFocusHide(after: 1.3)
+                    return
+                }
                 let result = try await camera.focusAt(trackingX: trackingX, trackingY: trackingY,
-                                                      focusX: focusX, focusY: focusY)
+                                                      focusX: focusX, focusY: focusY,
+                                                      tapPath: path == .unknown ? nil : path)
                 guard !Task.isCancelled, !stopRequested else { return }
                 if result.timedOut || result.responseCode != PTPConstants.responseOK {
-                    if result.trackingResponseCode == 0xA004 {
-                        showInteractionHint(AppLocalized.resource("remote_tracking_area_mode_required"))
+                    if !result.trackingStarted && result.moveResponseCode != PTPConstants.responseOK {
+                        showInteractionHint(AppLocalized.resource("remote_tap_focus_area_retry"))
+                    } else {
+                        showInteractionHint(AppLocalized.resource("remote_tap_focus_retry"))
                     }
                     state = state.applying(.focusFailed)
                     state.focus.tracking = result.trackingStarted
@@ -1325,7 +1339,9 @@ final class RemoteViewModel: ObservableObject {
                 }
                 else {
                     haptics.tick()
-                    focusAreaPoint = point
+                    if result.trackingStarted || result.moveResponseCode == PTPConstants.responseOK {
+                        focusAreaPoint = point
+                    }
                     state.focus.tracking = result.trackingStarted
                     state = state.applying(.focusLocked)
                     setConfirmedFocusMarker(at: point, subjectTracking: result.trackingStarted)
@@ -1346,6 +1362,7 @@ final class RemoteViewModel: ObservableObject {
             } catch {
                 guard !stopRequested else { return }
                 if Self.isTransportFailure(error) { notifyTransportLost() }
+                showInteractionHint(AppLocalized.resource("remote_tap_focus_retry"))
                 state = state.applying(.focusFailed)
                 confirmedFocusMarker = nil
                 scheduleFocusHide(after: 1.3)

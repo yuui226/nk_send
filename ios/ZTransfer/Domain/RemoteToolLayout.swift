@@ -7,7 +7,7 @@ enum RemoteTool: String, CaseIterable, Identifiable, Sendable {
     case hd, fps, audio, histogram, grid, exposure, desqueeze, level, record
     case whiteBalance = "white_balance"
     case focusArea = "focus_area"
-    case waveform, focusFrame = "focus_frame", lut, meter, lock, rotate
+    case waveform, focusMode = "focus_mode", focusFrame = "focus_frame", lut, meter, lock, rotate
 
     var id: String { rawValue }
     var fixed: Bool { self == .rotate }

@@ -660,6 +660,7 @@ struct RemoteView: View {
             }),
             .whiteBalance: AnyView(cameraToolButton(.whiteBalance, movie: movie)),
             .focusArea: AnyView(cameraToolButton(.focusArea, movie: movie)),
+            .focusMode: AnyView(cameraToolButton(.focusMode, movie: movie)),
             .lock: AnyView(configuredRemoteToolButton(.lock, movie: movie, active: tools.locked,
                 accessibilityLabel: AppLocalized.resource("remote_tool_lock"), label: {
                     RemoteEditorIcon(kind: tools.locked ? .lock : .lockOpen).frame(width: 19, height: 19)
@@ -683,7 +684,11 @@ struct RemoteView: View {
                         dismiss: { gridMenuPresented = false })
                 }
                 if let panel = model.cameraToolPanel {
-                    let trigger: GeniePopupTrigger = panel.tool == .whiteBalance ? .remoteWhiteBalance : .remoteFocusArea
+                    let trigger: GeniePopupTrigger = switch panel.tool {
+                    case .whiteBalance: .remoteWhiteBalance
+                    case .focusArea: .remoteFocusArea
+                    case .focusMode: .remoteFocusMode
+                    }
                     RemoteCameraToolMenuHost(panel: panel, anchor: anchors[trigger].map { proxy[$0] },
                         hostSize: proxy.size, landscape: landscape, canWrite: model.cameraToolWritesAllowed)
                         .id(panel.id)
@@ -693,10 +698,31 @@ struct RemoteView: View {
     }
 
     private func cameraToolButton(_ tool: RemoteCameraTool, movie: Bool) -> some View {
-        let layoutTool: RemoteTool = tool == .whiteBalance ? .whiteBalance : .focusArea
+        let layoutTool: RemoteTool = switch tool {
+        case .whiteBalance: .whiteBalance
+        case .focusArea: .focusArea
+        case .focusMode: .focusMode
+        }
+        let popupTrigger: GeniePopupTrigger
+        switch tool {
+        case .whiteBalance: popupTrigger = .remoteWhiteBalance
+        case .focusArea: popupTrigger = .remoteFocusArea
+        case .focusMode: popupTrigger = .remoteFocusMode
+        }
         return configuredRemoteToolButton(layoutTool, movie: movie, active: false,
             accessibilityLabel: AppLocalized.resource(layoutTool.titleKey), label: {
-                if let panel = model.cameraToolPanel, !editingTools {
+                if tool == .focusMode, !editingTools {
+                    let text = model.focusModeDescriptor.map { descriptor in
+                        if RemoteFocusMode.manual(property: descriptor.property, value: descriptor.current) {
+                            return "MF"
+                        }
+                        return RemoteFocusMode.label(property: descriptor.property, value: descriptor.current) ?? "MODE"
+                    } ?? "MODE"
+                    Text(text == "AF Macro" ? "AF-M" : text)
+                        .font(.system(size: 8, weight: .bold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.55)
+                } else if let panel = model.cameraToolPanel, !editingTools {
                     RemoteCameraToolMark(panel: panel, tool: tool)
                 } else { RemoteCameraToolStaticMark(tool: tool) }
             }) {
@@ -705,7 +731,7 @@ struct RemoteView: View {
                 gridMenuPresented = false
                 model.openCameraTool(tool)
             }
-            .geniePopupAnchor(tool == .whiteBalance ? .remoteWhiteBalance : .remoteFocusArea)
+            .geniePopupAnchor(popupTrigger)
     }
 
     private func setEditingTools(_ editing: Bool) {
@@ -772,6 +798,7 @@ struct RemoteView: View {
             switch tool {
             case .whiteBalance: if model.cameraToolPanel?.tool == .whiteBalance { model.dismissCameraTool() }
             case .focusArea: if model.cameraToolPanel?.tool == .focusArea { model.dismissCameraTool() }
+            case .focusMode: if model.cameraToolPanel?.tool == .focusMode { model.dismissCameraTool() }
             case .record: model.setLocalRecordingToolVisible(false, fixedRecorder: false)
             case .hd: model.setHDLiveView(false)
             case .lock: setRotationLocked(false, showHint: false)

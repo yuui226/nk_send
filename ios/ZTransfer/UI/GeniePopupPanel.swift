@@ -282,7 +282,7 @@ final class GeniePopupHostView: UIView {
 /// synthetic fallback is involved. Bounds are outside the button's press
 /// effect, so feedback does not move the attachment edge.
 enum GeniePopupTrigger: String, Hashable {
-    case filter, settings, gps, remoteWhiteBalance, remoteFocusArea, remoteGrid
+    case filter, settings, gps, remoteWhiteBalance, remoteFocusArea, remoteFocusMode, remoteGrid
 }
 
 struct GeniePopupAnchorPreferenceKey: PreferenceKey {

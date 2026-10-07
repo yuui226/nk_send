@@ -36,6 +36,18 @@ final class RemoteCameraToolTests: XCTestCase {
         XCTAssertEqual(label(" nikon z 8 ", 2), "remote_af_dynamic")
     }
 
+    func testZ30PhotoFocusAreaShortDynamicValuesAreNamed() {
+        XCTAssertEqual(RemoteCameraTool.focusArea.labelResource(property: 0xD05D, value: 2,
+                                                                model: "Z 30", dataType: 2),
+                       "remote_af_dynamic_s")
+        XCTAssertEqual(RemoteCameraTool.focusArea.labelResource(property: 0xD05D, value: 0x8013,
+                                                                model: "Z 30", dataType: 2),
+                       "remote_af_dynamic_m")
+        XCTAssertEqual(RemoteCameraTool.focusArea.labelResource(property: 0xD05D, value: 0x8014,
+                                                                model: "Z 30", dataType: 2),
+                       "remote_af_dynamic_l")
+    }
+
     func testLegacyLiveViewRequiresCorrectPropertyAndByteType() {
         func label(_ prop: UInt32, _ type: UInt16) -> String? {
             RemoteCameraTool.focusArea.labelResource(property: prop, value: 2, model: "D850", dataType: type)
@@ -65,7 +77,63 @@ final class RemoteCameraToolTests: XCTestCase {
         XCTAssertEqual(RemoteCameraTool.focusArea.orderedValues(descriptor, model: "Z 8"),
                        [0x8017, 0x8010, 2, 0x8019, 0x8011, 80000, 90000])
         XCTAssertTrue(RemoteCameraTool.focusArea.hasTapMarker(descriptor, value: 0x8011))
-        XCTAssertFalse(RemoteCameraTool.focusArea.hasTapMarker(descriptor, value: 0x8010))
+        XCTAssertTrue(RemoteCameraTool.focusArea.hasTapMarker(descriptor, value: 0x8010, model: "Z 8"))
         XCTAssertFalse(RemoteCameraTool.whiteBalance.hasTapMarker(descriptor, value: 0x8011))
+    }
+
+    func testFocusModeLabelsManualRulesAndDescriptorTypesMatchAndroid() {
+        XCTAssertEqual(RemoteFocusMode.label(property: .focusMode, value: 1), "MF")
+        XCTAssertEqual(RemoteFocusMode.label(property: .focusMode, value: 2), "AF")
+        XCTAssertEqual(RemoteFocusMode.label(property: .focusMode, value: 3), "AF Macro")
+        XCTAssertEqual(RemoteFocusMode.label(property: .focusMode, value: 0x8010), "AF-S")
+        XCTAssertEqual(RemoteFocusMode.label(property: .focusMode, value: 0x8011), "AF-C")
+        XCTAssertEqual(RemoteFocusMode.label(property: .focusMode, value: 0x8012), "AF-A")
+        XCTAssertEqual(RemoteFocusMode.label(property: .focusMode, value: 0x8013), "AF-F")
+        XCTAssertEqual(RemoteFocusMode.label(property: .stillFocusMode, value: 3), "MF (fixed)")
+        XCTAssertEqual(RemoteFocusMode.label(property: .stillFocusMode, value: 4), "MF")
+        XCTAssertEqual(RemoteFocusMode.label(property: .nikonAFMode, value: 2), "AF-A")
+        XCTAssertNil(RemoteFocusMode.label(property: .nikonAFMode, value: 3))
+        XCTAssertTrue(RemoteFocusMode.manual(property: .focusMode, value: 1))
+        XCTAssertTrue(RemoteFocusMode.manual(property: .stillFocusMode, value: 3))
+        XCTAssertTrue(RemoteFocusMode.manual(property: .stillFocusMode, value: 4))
+        XCTAssertFalse(RemoteFocusMode.manual(property: .nikonAFMode, value: 2))
+
+        XCTAssertTrue(RemoteFocusMode.validDescriptor(.init(property: .focusMode, dataType: 4,
+                                                            writable: true, current: 2, values: [1, 2])))
+        XCTAssertTrue(RemoteFocusMode.validDescriptor(.init(property: .stillFocusMode, dataType: 2,
+                                                            writable: true, current: 1, values: [0, 1])))
+        XCTAssertTrue(RemoteFocusMode.validDescriptor(.init(property: .nikonAFMode, dataType: 2,
+                                                            writable: true, current: 1, values: [0, 1])))
+        XCTAssertFalse(RemoteFocusMode.validDescriptor(.init(property: .focusMode, dataType: 2,
+                                                             writable: true, current: 2, values: [1, 2])))
+        XCTAssertFalse(RemoteFocusMode.validDescriptor(.init(property: .stillFocusMode, dataType: 4,
+                                                             writable: true, current: 1, values: [0, 1])))
+    }
+
+    func testFocusCoordinateAndTapPathMappingMatchAndroid() {
+        XCTAssertEqual(rcNormalizedToFocusCoordinate(-1, size: 1000), 0)
+        XCTAssertEqual(rcNormalizedToFocusCoordinate(0, size: 1000), 0)
+        XCTAssertEqual(rcNormalizedToFocusCoordinate(0.5, size: 1000), 500)
+        XCTAssertEqual(rcNormalizedToFocusCoordinate(1, size: 1000), 999)
+        XCTAssertEqual(rcNormalizedToFocusCoordinate(2, size: 1000), 999)
+        XCTAssertEqual(rcNormalizedToFocusCoordinate(0.5, size: 1), 0)
+
+        func descriptor(_ property: RemoteProperty, _ current: UInt64) -> RemotePropertyDescriptor {
+            .init(property: property, writable: true, current: current, values: [current])
+        }
+        for value: UInt64 in [0x8011, 0x8012, 0x8020, 0x8021] {
+            XCTAssertEqual(rcTapFocusPath(descriptor(.focusArea, value), model: "Z 8"), .tracking)
+        }
+        for value: UInt64 in [0x8010, 0x8015, 0x8017, 0x8018, 0x8019, 0x801A, 0x801B,
+                              0x801E, 0x801F, 2, 0x8013, 0x8014] {
+            XCTAssertEqual(rcTapFocusPath(descriptor(.focusArea, value), model: "D850"), .moveArea)
+        }
+        XCTAssertEqual(rcTapFocusPath(descriptor(.focusArea, 0x801C), model: "Z 8"), .unsupported)
+        XCTAssertEqual(rcTapFocusPath(descriptor(.focusArea, 0x801C), model: "D850"), .unknown)
+        XCTAssertEqual(rcTapFocusPath(descriptor(.liveViewFocusArea, 0), model: "D750"), .tracking)
+        XCTAssertEqual(rcTapFocusPath(descriptor(.liveViewFocusArea, 1), model: "D750"), .moveArea)
+        XCTAssertEqual(rcTapFocusPath(descriptor(.liveViewFocusArea, 9), model: "D750"), .unknown)
+        XCTAssertEqual(rcTapFocusPath(nil, model: "Z 8"), .unknown)
+        XCTAssertEqual(rcTapFocusPath(descriptor(.focusMode, 1), model: "Z 8"), .unknown)
     }
 }

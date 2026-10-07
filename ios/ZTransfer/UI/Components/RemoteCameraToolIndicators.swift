@@ -87,6 +87,7 @@ struct RemoteCameraToolStaticMark: View {
     let tool: RemoteCameraTool
     var body: some View {
         if tool == .whiteBalance { Text("WB").font(.system(size: 11, weight: .bold)) }
+        else if tool == .focusMode { Text("MODE").font(.system(size: 8, weight: .bold)) }
         else { RemoteEditorIcon(kind: .focusArea).frame(width: 19, height: 19) }
     }
 }

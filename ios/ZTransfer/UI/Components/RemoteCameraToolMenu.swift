@@ -34,9 +34,26 @@ struct RemoteCameraToolMenu: View {
     private var isWB: Bool { panel.tool == .whiteBalance }
     private var fontSize: CGFloat { isWB ? 13 : 14 }
     private var values: [UInt64] { panel.descriptor.map { panel.tool.orderedValues($0, model: panel.deviceModel) } ?? [] }
-    private var trigger: GeniePopupTrigger { isWB ? .remoteWhiteBalance : .remoteFocusArea }
+    private var trigger: GeniePopupTrigger {
+        switch panel.tool {
+        case .whiteBalance: .remoteWhiteBalance
+        case .focusArea: .remoteFocusArea
+        case .focusMode: .remoteFocusMode
+        }
+    }
 
     private func label(_ value: UInt64) -> String {
+        if let p = panel.descriptor,
+           panel.tool == .focusMode,
+           p.property == .stillFocusMode,
+           value == 3 {
+            return AppLocalized.resource("remote_focus_manual_fixed")
+        }
+        if let p = panel.descriptor,
+           panel.tool == .focusMode,
+           let label = RemoteFocusMode.label(property: p.property, value: value) {
+            return label
+        }
         if let p = panel.descriptor,
            let key = panel.tool.labelResource(property: p.property.rawValue, value: value,
                                                model: panel.deviceModel, dataType: p.dataType) {
@@ -46,7 +63,7 @@ struct RemoteCameraToolMenu: View {
     }
 
     private func hasTap(_ value: UInt64) -> Bool {
-        panel.descriptor.map { panel.tool.hasTapMarker($0, value: value) } ?? false
+        panel.descriptor.map { panel.tool.hasTapMarker($0, value: value, model: panel.deviceModel) } ?? false
     }
 
     private var preferredWidth: CGFloat {
