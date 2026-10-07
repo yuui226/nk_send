@@ -245,7 +245,7 @@ internal class CameraIoGate(
     /** Once shutdown starts, no new business request may enter this camera session. */
     private var shuttingDown = false
     private var shutdownReason = "camera session closed"
-    /** Compatibility mode: before a rating scan, transfer and thumbnail work shared one FIFO. */
+    /** Number of active rating phases; low-priority work is screened while this is nonzero. */
     private var ratingPhaseCount = 0
     private val ratingPhaseActive: Boolean get() = ratingPhaseCount > 0
     @Volatile private var activeOwner: String = "none"
@@ -422,10 +422,6 @@ internal class CameraIoGate(
         ratingPhaseActive && ticket.kind == CameraRequestKind.EVENT_POLL ->
             CameraRequestKind.IDLE.priority
         !ratingPhaseActive && ticket.kind == CameraRequestKind.EVENT_POLL ->
-            CameraRequestKind.TRANSFER.priority
-        !ratingPhaseActive && ticket.kind == CameraRequestKind.VISIBLE_THUMBNAIL ->
-            CameraRequestKind.TRANSFER.priority
-        !ratingPhaseActive && ticket.kind == CameraRequestKind.BACKGROUND_THUMBNAIL ->
             CameraRequestKind.TRANSFER.priority
         else -> ticket.kind.priority
     }

@@ -2141,10 +2141,20 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     /** Starts every existing WAITING task. This explicit action also releases a manual pause. */
     fun startPendingTransfers(cameraProvider: () -> NikonCamera?) {
         val snapshot = _state.value
-        if (snapshot.isTransferring) return
-        val dirUri = snapshot.transferDirUri ?: return
-        val waiting = snapshot.tasks.filter { it.status == TransferStatus.WAITING }
-        if (waiting.isEmpty()) return
+        if (snapshot.isTransferring) {
+            log { "QUEUE_START_SKIP reason=state-transferring" }
+            return
+        }
+        val dirUri = snapshot.transferDirUri ?: run {
+            log { "QUEUE_START_SKIP reason=no-directory" }
+            return
+        }
+        val waiting = snapshot.tasks.count { it.status == TransferStatus.WAITING }
+        if (waiting == 0) {
+            log { "QUEUE_START_SKIP reason=no-waiting" }
+            return
+        }
+        log { "QUEUE_START waiting=$waiting" }
         _state.update { it.copy(pauseAfterCurrent = false) }
         processQueue(dirUri, cameraProvider)
     }
@@ -2157,15 +2167,27 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     }
 
     private fun processQueue(dirUri: String, cameraProvider: () -> NikonCamera?) {
+        log {
+            "QUEUE_REQUEST waiting=${_state.value.tasks.count { it.status == TransferStatus.WAITING }} " +
+                "transferring=${_state.value.isTransferring} activeJob=${transferJob?.isActive == true}"
+        }
         // 手动暂停是队列总闸门：除“开始”会先显式解除外，重试等任何旁路都不能偷偷恢复队列。
-        if (_state.value.pauseAfterCurrent) return
-        if (transferJob?.isActive == true) return
+        if (_state.value.pauseAfterCurrent) {
+            log { "QUEUE_SKIP reason=paused" }
+            return
+        }
+        if (transferJob?.isActive == true) {
+            log { "QUEUE_SKIP reason=active-job" }
+            return
+        }
         val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
                 val self = coroutineContext[Job]
                 var serviceStarted = false
                 var stoppedAfterCurrent = false
 
                 try {
+                    val prepareStartedAt = android.os.SystemClock.elapsedRealtime()
+                    log { "QUEUE_PREP start" }
                     val uri = Uri.parse(dirUri)
                     val rootDirectoryUri = rootDocumentUri(uri)
 
@@ -2183,6 +2205,10 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     } catch (_: Exception) {
                         false
                     }
+                }
+                log {
+                    "QUEUE_PREP directory=${if (dirValid) "ok" else "invalid"} " +
+                        "elapsed=${android.os.SystemClock.elapsedRealtime() - prepareStartedAt}ms"
                 }
                 if (!dirValid) {
                     pendingTransferQueue.clear()
@@ -2207,6 +2233,9 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 // 启动/选目录时已建立索引；这里复用同一单飞结果。正常连续队列不再重复
                 // query SAF，后续成功文件和断点文件会增量写回该索引。
                 val rootDirectoryIndex = getDirectoryIndex(uri, deleteParts = false)
+                log {
+                    "QUEUE_READY elapsed=${android.os.SystemClock.elapsedRealtime() - prepareStartedAt}ms"
+                }
                 var taskToRecheck: TransferTask? = null
                 while (true) {
                     // Pause is deliberately checked only at task boundaries. The current PTP
@@ -2332,6 +2361,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     // 而不是队列启动时捕获的旧实例（旧实例 socket 已死，只会全部快速失败）。
                     val camera = cameraProvider()
                     if (camera == null) {
+                        log { "QUEUE_CAMERA_NULL file=${task.file.fileName}" }
                         updateTask(taskId) {
                             it.copy(status = TransferStatus.FAILED, error = str(R.string.camera_not_connected), speed = 0)
                         }

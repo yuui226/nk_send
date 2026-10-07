@@ -128,7 +128,7 @@ class CameraIoGateTest {
     }
 
     @Test
-    fun transferAndThumbnailKeepTheirLegacyFifoOutsideRatingPhase() = runBlocking {
+    fun transferPreemptsQueuedThumbnailsOutsideRatingPhase() = runBlocking {
         val gate = CameraIoGate()
         val entered = CompletableDeferred<Unit>()
         val release = CompletableDeferred<Unit>()
@@ -146,7 +146,33 @@ class CameraIoGateTest {
         yield()
         release.complete(Unit)
         joinAll(first, thumbnail, second)
-        assertEquals(listOf("transfer-1", "thumbnail", "transfer-2"), order)
+        assertEquals(listOf("transfer-1", "transfer-2", "thumbnail"), order)
+    }
+
+    @Test
+    fun firstTransferPreemptsBothVisibleAndBackgroundThumbnailBacklog() = runBlocking {
+        val gate = CameraIoGate()
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val order = mutableListOf<String>()
+        val activeThumbnail = launch {
+            gate.withBackgroundThumbnail {
+                order += "active-thumbnail"
+                entered.complete(Unit)
+                release.await()
+            }
+        }
+        entered.await()
+        val visible = launch { gate.withVisibleThumbnail { order += "visible-thumbnail" } }
+        val background = launch { gate.withBackgroundThumbnail { order += "background-thumbnail" } }
+        val firstTransfer = launch { gate.withTransferSlice { order += "first-transfer" } }
+        yield()
+        release.complete(Unit)
+        joinAll(activeThumbnail, visible, background, firstTransfer)
+        assertEquals(
+            listOf("active-thumbnail", "first-transfer", "visible-thumbnail", "background-thumbnail"),
+            order,
+        )
     }
 
     @Test

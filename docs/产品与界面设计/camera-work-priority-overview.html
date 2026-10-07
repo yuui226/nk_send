@@ -144,10 +144,11 @@
           <tr><td class="yes">P1</td><td><code>PREVIEW</code></td><td>当前高清图、FHD、当前 EXIF</td></tr>
           <tr><td class="maybe">P2</td><td><code>TRANSFER</code></td><td>原片的一个完整分块</td></tr>
           <tr><td class="maybe">P3</td><td><code>RATING</code></td><td>有效日期范围内评级的一个文件头/结构区</td></tr>
-          <tr><td class="neutral">P4–P6</td><td><code>VISIBLE_THUMBNAIL</code>、<code>BACKGROUND_THUMBNAIL</code>、<code>IDLE</code>、<code>EVENT_POLL</code></td><td>可见缩略图、后台目录/缩略图、心跳与普通事件检查</td></tr>
+          <tr><td class="neutral">P4–P6</td><td><code>VISIBLE_THUMBNAIL</code>、<code>BACKGROUND_THUMBNAIL</code>、<code>IDLE</code></td><td>可见缩略图、后台目录/缩略图与心跳</td></tr>
+          <tr><td class="neutral">动态</td><td><code>EVENT_POLL</code></td><td>评级关闭时按 P2；评级阶段被后台准入屏障挡住，等价于 P6</td></tr>
         </tbody>
       </table>
-        <p class="neutral" style="margin:9px 0 0;">请求不会在执行中改级；评级未运行时，传输、缩略图和普通事件检查保持旧版同级 FIFO；评级阶段事件检查与远程缩略图排到 P3 之后，低优先级请求也不会在两张评级照片之间的空档抢先入场，评级结束立即恢复。缓存命中不进队列，完整下载只禁止 P6 空闲检查。</p>
+        <p class="neutral" style="margin:9px 0 0;">请求不会在执行中改级；传输固定高于远程缩略图，已经开始的缩略图事务自然收尾后就会让出通道；评级阶段事件检查与远程缩略图排到 P3 之后，低优先级请求也不会在两张评级照片之间的空档抢先入场，评级结束立即恢复。缓存命中不进队列，完整下载只禁止 P6 空闲检查。</p>
       <p class="neutral" style="margin:7px 0 0;"><code>NikonCamera</code> 负责缩略图、预览、EXIF、传输和评级的事务边界；<code>RemoteLab</code> 负责监看与遥控；<code>MonitorStorage</code> 和心跳走 P6。<code>PhotoRatingScan</code>、<code>CameraViewModel</code> 只决定范围和生命周期，不直接持有相机锁。</p>
     </article>
   </section>

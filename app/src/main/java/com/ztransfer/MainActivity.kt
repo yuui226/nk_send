@@ -495,7 +495,11 @@ private fun SharedQueueControls(
                 }
                 .padding(bottom = 16.dp)
                 .statusBarsPadding()
-                .padding(horizontal = 12.dp, vertical = 6.dp),
+                // Reserve a left-side spill area for the catch animation.  The
+                // container is TopEnd-aligned, so the extra start padding keeps
+                // the row's resting bounds unchanged while preventing the
+                // 1.18x scale from being clipped by the overlay boundary.
+                .padding(start = 48.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
         ) {
             Row(
                 modifier = Modifier
