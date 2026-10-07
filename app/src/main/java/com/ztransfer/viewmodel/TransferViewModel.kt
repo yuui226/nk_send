@@ -211,7 +211,7 @@ data class TransferTask(
     val frameWatermarkRequested: PhotoFrameWatermark = PhotoFrameWatermark(),
     /** 入队时锁定的滤镜；与边框互相独立，null 表示原片不做颜色处理。 */
     val photoFilterRequested: PhotoFilterSelection? = null,
-    /** 非空时原图写入传输根目录下的该日期文件夹，效果图再写入其 ZTFrames 子目录。 */
+    /** 非空时原图写入传输根目录下的目标分类文件夹，效果图再写入其 ZTFrames 子目录。 */
     val destinationFolderName: String? = null,
     val status: TransferStatus = TransferStatus.WAITING,
     val progress: Float = 0f,
@@ -500,7 +500,7 @@ data class TransferState(
     val autoTransferMode: AutoTransferMode = AutoTransferMode.OFF,
     // 待传模式：空闲时入队只保留 WAITING，由传输页的开始按钮显式放行；默认关闭。
     val deferTransferStart: Boolean = false,
-    // 原图按拍摄日写入 ZTyyyy-MM-dd 子目录，派生效果图位于该目录的 ZTFrames 中；默认开启。
+    // 原图可按拍摄日或文件类型写入子目录，派生效果图位于对应目录的 ZTFrames 中。
     val storageMode: TransferStorageMode = TransferStorageMode.UNIFIED,
     // 主题模式：默认跟随系统深浅色，可在设置里固定深色/浅色。
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
@@ -732,6 +732,13 @@ internal fun shouldGeneratePhotoFrame(enabled: Boolean, extension: String): Bool
 private val TRANSFER_CAPTURE_DATE_FORMATTER =
     DateTimeFormatter.BASIC_ISO_DATE.withResolverStyle(ResolverStyle.STRICT)
 private val DATED_TRANSFER_FOLDER_REGEX = Regex("""ZT\d{4}-\d{2}-\d{2}""")
+// Destination names are generated from either the date policy (ZTyyyy-MM-dd) or the file
+// extension policy (ZT-JPG/ZT-NEF/ZT-MP4...). Keep the provider-facing guard, but accept both policies
+// instead of applying the old date-only assertion to BY_TYPE folders.
+private val TRANSFER_FOLDER_NAME_REGEX = Regex("""[A-Za-z0-9][A-Za-z0-9._-]{0,63}""")
+
+internal fun isValidTransferFolderName(name: String): Boolean =
+    TRANSFER_FOLDER_NAME_REGEX.matches(name)
 
 /** PTP 拍摄时间通常为 yyyyMMdd'T'HHmmss；异常或缺失时固定回退到入队当天。 */
 internal fun transferDateFolderName(
@@ -760,7 +767,8 @@ internal fun transferDestinationFolderName(
 
 internal fun storageTypeFolderName(fileName: String, mode: TransferStorageMode): String? =
     if (mode == TransferStorageMode.BY_TYPE) {
-        fileName.substringAfterLast('.', "UNKNOWN").trim().uppercase(Locale.ROOT).ifBlank { "UNKNOWN" }
+        "ZT-" + fileName.substringAfterLast('.', "UNKNOWN").trim().uppercase(Locale.ROOT)
+            .ifBlank { "UNKNOWN" }
     } else null
 
 /** 相机文件是否已在当前保存目录中落盘；列表对号、筛选和任务模式必须共用该判定。 */
@@ -862,7 +870,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     private val directoryIndexLock = Any()
     private val directoryIndexes = HashMap<String, ExistingDirectoryIndex>()
     private val directoryIndexScans = HashMap<String, Deferred<ExistingDirectoryIndex>>()
-    private val datedTransferDirectories = ConcurrentHashMap<String, Uri>()
+    private val transferDirectories = ConcurrentHashMap<String, Uri>()
 
     private var transferJob: Job? = null
     @Volatile
@@ -1908,11 +1916,11 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         rootDirectoryUri: Uri,
         name: String,
     ): Uri {
-        require(DATED_TRANSFER_FOLDER_REGEX.matches(name))
+        require(isValidTransferFolderName(name)) { "Invalid transfer folder name: $name" }
         val key = "${treeUri}|$name"
-        datedTransferDirectories[key]?.let { return it }
-        return synchronized(datedTransferDirectories) {
-            datedTransferDirectories[key] ?: run {
+        transferDirectories[key]?.let { return it }
+        return synchronized(transferDirectories) {
+            transferDirectories[key] ?: run {
                 val existing = childDirectories(treeUri, rootDirectoryUri)
                     .firstOrNull { it.first.equals(name, ignoreCase = true) }
                     ?.second
@@ -1925,7 +1933,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     .firstOrNull { it.first.equals(name, ignoreCase = true) }
                     ?.second
                 ?: throw java.io.IOException("Cannot create dated transfer directory")
-                datedTransferDirectories[key] = directory
+                transferDirectories[key] = directory
                 directory
             }
         }
@@ -1990,7 +1998,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     private fun invalidateDirectoryIndexes() = synchronized(directoryIndexLock) {
         directoryIndexes.clear()
         directoryIndexScans.clear()
-        datedTransferDirectories.clear()
+        transferDirectories.clear()
         photoFrameDestinations.clear()
     }
 
@@ -1998,7 +2006,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         val prefix = "${uri}|"
         directoryIndexes.keys.removeAll { it.startsWith(prefix) }
         directoryIndexScans.keys.removeAll { it.startsWith(prefix) }
-        datedTransferDirectories.keys.removeAll { it.startsWith(prefix) }
+        transferDirectories.keys.removeAll { it.startsWith(prefix) }
         photoFrameDestinations.keys.removeAll { it.startsWith(prefix) }
     }
 

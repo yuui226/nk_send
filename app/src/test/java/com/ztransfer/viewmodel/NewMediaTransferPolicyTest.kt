@@ -110,6 +110,32 @@ class NewMediaTransferPolicyTest {
     }
 
     @Test
+    fun `type folder names pass the same provider-safe guard as dated folders`() {
+        assertTrue(isValidTransferFolderName("ZT2026-08-17"))
+        assertTrue(isValidTransferFolderName("ZT-JPG"))
+        assertTrue(isValidTransferFolderName("ZT-NEF"))
+        assertTrue(isValidTransferFolderName("ZT-MP4"))
+        assertFalse(isValidTransferFolderName("../JPG"))
+        assertFalse(isValidTransferFolderName(""))
+    }
+
+    @Test
+    fun `type folder uses explicit zt prefix and normalized extension`() {
+        assertEquals("ZT-JPG", storageTypeFolderName("DSC_0001.jpg", TransferStorageMode.BY_TYPE))
+        assertEquals("ZT-NEF", storageTypeFolderName("DSC_0001.NEF", TransferStorageMode.BY_TYPE))
+        assertEquals("ZT-UNKNOWN", storageTypeFolderName("DSC_0001", TransferStorageMode.BY_TYPE))
+
+        val task = createQueueTasks(
+            files = listOf(NikonCamera.FileInfo(8, 1L, "DSC_0008.JPG", "20261007T120000")),
+            photoFrameEnabled = false,
+            photoFramePreset = PhotoFramePreset.MIST,
+            photoFrameWatermark = PhotoFrameWatermark(),
+            storageMode = TransferStorageMode.BY_TYPE,
+        ).single()
+        assertEquals("ZT-JPG", task.destinationFolderName)
+    }
+
+    @Test
     fun `automatic transfer accepts known photos and videos but not unknown objects`() {
         fun file(name: String) = NikonCamera.FileInfo(1, 1L, name, null)
 
