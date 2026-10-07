@@ -56,6 +56,90 @@ private actor FrameworkManagedPTPReplay: PTPCommandTransport {
 }
 
 final class CameraIOGateTests: XCTestCase {
+    func testRatingPhaseBlocksLowPriorityAdmissionButAllowsForegroundTransactions() async throws {
+        let gate = CameraIOGate()
+        let backgroundStarted = GateTestLatch()
+        let order = GateTestOrder()
+        await gate.beginRatingPhase()
+        let background = Task {
+            try await gate.withBackgroundThumbnail {
+                await backgroundStarted.signal()
+                await order.append("background")
+            }
+        }
+        try await Task.sleep(for: .milliseconds(30))
+        let didStartBackground = await backgroundStarted.isSignalled()
+        XCTAssertFalse(didStartBackground)
+
+        try await gate.withInteractive { await order.append("interactive") }
+        try await gate.withPreviewTransaction { await order.append("preview") }
+        try await gate.withTransferSlice { await order.append("transfer") }
+        try await gate.withRatingTransaction { await order.append("rating") }
+        let foregroundOrder = await order.snapshot()
+        XCTAssertEqual(foregroundOrder, ["interactive", "preview", "transfer", "rating"])
+
+        await gate.endRatingPhase()
+        _ = try await background.value
+        let finalOrder = await order.snapshot()
+        XCTAssertEqual(finalOrder, ["interactive", "preview", "transfer", "rating", "background"])
+    }
+
+    func testSchedulerChoosesPriorityThenFIFOAtTransactionBoundaries() async throws {
+        let gate = CameraIOGate()
+        let entered = GateTestLatch()
+        let release = GateTestLatch()
+        let order = GateTestOrder()
+        let active = Task {
+            try await gate.withBackgroundThumbnail {
+                await entered.signal()
+                await release.wait()
+                await order.append("active")
+            }
+        }
+        await entered.wait()
+        let rating = Task { try await gate.withRatingTransaction { await order.append("rating") } }
+        let transfer = Task { try await gate.withTransferSlice { await order.append("transfer") } }
+        let preview = Task { try await gate.withPreviewTransaction { await order.append("preview") } }
+        let interactive = Task { try await gate.withInteractive { await order.append("interactive") } }
+        await release.signal()
+        _ = await (try? active.value)
+        _ = await (try? interactive.value)
+        _ = await (try? preview.value)
+        _ = await (try? transfer.value)
+        _ = await (try? rating.value)
+        let orderValues = await order.snapshot()
+        XCTAssertEqual(orderValues, ["active", "interactive", "preview", "transfer", "rating"])
+    }
+
+    func testShutdownCancelsQueuedWorkAndLeavesActiveTransactionForCleanup() async throws {
+        let gate = CameraIOGate()
+        let entered = GateTestLatch()
+        let release = GateTestLatch()
+        let active = Task {
+            try await gate.withVisibleThumbnail {
+                await entered.signal()
+                await release.wait()
+            }
+        }
+        await entered.wait()
+        let queued = Task {
+            do {
+                try await gate.withBackgroundThumbnail { XCTFail("queued work ran after shutdown") }
+            } catch is CancellationError { return true }
+            return false
+        }
+        try await Task.sleep(for: .milliseconds(20))
+        await gate.beginShutdown("test shutdown")
+        let queuedCancelled = try await queued.value
+        XCTAssertTrue(queuedCancelled)
+        let snapshot = await gate.snapshot()
+        XCTAssertTrue(snapshot.shuttingDown)
+        XCTAssertEqual(snapshot.queued, 0)
+        await release.signal()
+        _ = await (try? active.value)
+        try await gate.withCameraTransaction(.interactive, owner: "CLOSE", allowDuringShutdown: true) { }
+    }
+
     func testCancellingFrameworkManagedCommandDrainsWithoutDisconnecting() async throws {
         let started = GateTestLatch()
         let transport = FrameworkManagedPTPReplay(started: started)
@@ -109,16 +193,32 @@ final class CameraIOGateTests: XCTestCase {
         XCTAssertTrue(fillAllowed)
     }
 
-    func testReservationDoesNotBlockOrdinaryOrIdleCommandsBetweenFHDAndExif() async throws {
+    func testReservationBlocksBackgroundAndIdleUntilForegroundPairReleases() async throws {
         let gate = CameraIOGate()
-        let values = try await AsyncDeadline.run(nanoseconds: 1_000_000_000, timeoutError: PTPSessionError.timeout) {
+        let registered = GateTestLatch()
+        let release = GateTestLatch()
+        let ordinaryStarted = GateTestLatch()
+        let idleStarted = GateTestLatch()
+        let reservation = Task {
             try await gate.withInteractivePriority {
-                let ordinary = try await gate.withCommand { "thumbnail" }
-                let idle = try await gate.withIdleCommand(skippedValue: "skipped") { "idle" }
-                return [ordinary, idle]
+                await registered.signal()
+                await release.wait()
             }
         }
-        XCTAssertEqual(values, ["thumbnail", "idle"])
+        await registered.wait()
+        let ordinary = Task { try await gate.withCommand { await ordinaryStarted.signal(); return "thumbnail" } }
+        let idle = Task { try await gate.withIdleCommand(skippedValue: "skipped") { await idleStarted.signal(); return "idle" } }
+        try await Task.sleep(for: .milliseconds(40))
+        let didStartOrdinary = await ordinaryStarted.isSignalled()
+        let didStartIdle = await idleStarted.isSignalled()
+        XCTAssertFalse(didStartOrdinary)
+        XCTAssertFalse(didStartIdle)
+        await release.signal()
+        let ordinaryValue = try await ordinary.value
+        let idleValue = try await idle.value
+        XCTAssertEqual(ordinaryValue, "thumbnail")
+        XCTAssertEqual(idleValue, "idle")
+        try await reservation.value
     }
 
     func testAlreadyCancelledCallerDoesNotRunOnAnUnlockedGate() async throws {

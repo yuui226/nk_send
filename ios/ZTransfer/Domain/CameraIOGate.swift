@@ -1,175 +1,233 @@
 import Foundation
 
-/// Scheduling boundary equivalent to Android's `CameraIoGate`.
-///
-/// PTPSession serializes commands, but FIFO alone is insufficient for the
-/// camera workflow: a foreground FHD/EXIF request registered between two
-/// download chunks must get the next transaction, while an idle probe must be
-/// skipped during the whole download. This gate owns those two policies and
-/// deliberately leaves the PTP transaction itself owned by PTPSession.
+/// Request classes used by the Android 1.93 camera scheduler contract.
+/// A ticket owns one complete PTP transaction and is never interrupted after admission.
+enum CameraRequestKind: Sendable, Equatable {
+    case interactive
+    case preview
+    case transfer
+    case rating
+    case visibleThumbnail
+    case backgroundThumbnail
+    case idle
+    case eventPoll(background: Bool)
+
+    var priority: Int {
+        switch self {
+        case .interactive: return 0
+        case .preview: return 1
+        case .transfer: return 2
+        case .rating: return 3
+        case .visibleThumbnail: return 4
+        case .backgroundThumbnail: return 5
+        case .idle: return 6
+        case .eventPoll: return 0
+        }
+    }
+}
+
+struct CameraSchedulerSnapshot: Sendable, Equatable {
+    let queued: Int
+    let activeKind: CameraRequestKind?
+    let activeOwner: String
+    let interactiveReservations: Int
+    let activeDownloads: Int
+    let ratingPhaseCount: Int
+    let shuttingDown: Bool
+}
+
+/// One priority queue for the camera command channel.  The queue controls
+/// admission; PTPSession still owns the actual protocol transport.
 actor CameraIOGate {
-    private enum Kind: Sendable {
-        case ordinary
-        case transfer
+    private final class Ticket: @unchecked Sendable {
+        let id = UUID()
+        let sequence: UInt64
+        let kind: CameraRequestKind
+        let owner: String
+        let allowDuringShutdown: Bool
+        var continuation: CheckedContinuation<Void, any Error>?
+        init(sequence: UInt64, kind: CameraRequestKind, owner: String, allowDuringShutdown: Bool) {
+            self.sequence = sequence; self.kind = kind; self.owner = owner
+            self.allowDuringShutdown = allowDuringShutdown
+        }
     }
 
-    private struct Waiter {
-        let id: UUID
-        let kind: Kind
-        let continuation: CheckedContinuation<Void, any Error>
-    }
-
-    private var locked = false
-    private var waiters: [Waiter] = []
-    /// Reservations remain held across the FHD/EXIF pair. A transfer slice
-    /// may therefore finish, but the next slice cannot begin until the whole
-    /// foreground operation has released its reservation.
+    private var sequence: UInt64 = 0
+    private var pending: [Ticket] = []
+    private var active: Ticket?
     private var interactiveReservations = 0
     private var activeDownloads = 0
+    private var ratingPhaseCount = 0
+    private var shuttingDown = false
+    private var shutdownReason = "camera session closed"
 
     #if STA_GATE_HANDOFF_TESTING
-    // Host regression barrier only; this flag is never enabled in the app.
-    // Pause after a grant to reproduce another actor job registering priority
-    // before the granted transfer resumes. No timing sleeps are required.
     private var transferHandoffProbe: (@Sendable () async -> Void)?
     func setTransferHandoffProbe(_ probe: @escaping @Sendable () async -> Void) {
         transferHandoffProbe = probe
     }
     #endif
 
+    func snapshot() -> CameraSchedulerSnapshot {
+        CameraSchedulerSnapshot(queued: pending.count, activeKind: active?.kind,
+                                activeOwner: active?.owner ?? "none",
+                                interactiveReservations: interactiveReservations,
+                                activeDownloads: activeDownloads,
+                                ratingPhaseCount: ratingPhaseCount,
+                                shuttingDown: shuttingDown)
+    }
+
+    func beginRatingPhase() { ratingPhaseCount += 1; pump() }
+    func endRatingPhase() { ratingPhaseCount = max(0, ratingPhaseCount - 1); pump() }
+
+    /// Reject new business work and cancel only tickets that have not entered
+    /// the protocol. The active operation remains responsible for its cleanup.
+    func beginShutdown(_ reason: String = "camera session closed") {
+        shuttingDown = true; shutdownReason = reason
+        let queued = pending; pending.removeAll()
+        queued.forEach { $0.continuation?.resume(throwing: CancellationError()) }
+        pump()
+    }
+
+    func withCameraTransaction<T: Sendable>(
+        _ kind: CameraRequestKind, owner: String = "camera",
+        allowDuringShutdown: Bool = false,
+        _ operation: @Sendable () async throws -> T
+    ) async throws -> T {
+        try Task.checkCancellation()
+        if shuttingDown && !allowDuringShutdown { throw CancellationError() }
+        let ticket = Ticket(sequence: sequence, kind: kind, owner: owner,
+                            allowDuringShutdown: allowDuringShutdown)
+        sequence &+= 1
+        var admitted = false
+        defer {
+            if admitted { finish(ticket) } else { cancelWaiting(ticket) }
+        }
+        try await waitForAdmission(ticket)
+        admitted = true
+        try Task.checkCancellation()
+        #if STA_GATE_HANDOFF_TESTING
+        if kind == .transfer, let probe = transferHandoffProbe {
+            transferHandoffProbe = nil
+            await probe()
+        }
+        #endif
+        return try await operation()
+    }
+
+    /// Compatibility reservation used across an FHD → EXIF foreground pair.
+    /// It reserves priority without holding the protocol channel.
     func withInteractivePriority<T: Sendable>(
         _ operation: @Sendable () async throws -> T
     ) async throws -> T {
-        interactiveReservations += 1
-        defer {
-            interactiveReservations = max(0, interactiveReservations - 1)
-            serviceNextWaiter()
-        }
+        interactiveReservations += 1; pump()
+        defer { interactiveReservations = max(0, interactiveReservations - 1); pump() }
         return try await operation()
     }
 
-    func withInteractive<T: Sendable>(
-        _ operation: @Sendable () async throws -> T
-    ) async throws -> T {
-        try await withInteractivePriority {
-            try await self.withCommand(operation)
-        }
+    func withInteractive<T: Sendable>(_ operation: @Sendable () async throws -> T) async throws -> T {
+        try await withCameraTransaction(.interactive, owner: "INTERACTIVE", operation)
+    }
+    func withPreviewTransaction<T: Sendable>(owner: String = "PREVIEW",
+                                              _ operation: @Sendable () async throws -> T) async throws -> T {
+        try await withCameraTransaction(.preview, owner: owner, operation)
+    }
+    /// Legacy catalog/metadata path. New callers should choose an explicit kind.
+    func withCommand<T: Sendable>(_ operation: @Sendable () async throws -> T) async throws -> T {
+        try await withCameraTransaction(.backgroundThumbnail, owner: "BACKGROUND", operation)
+    }
+    func withVisibleThumbnail<T: Sendable>(_ operation: @Sendable () async throws -> T) async throws -> T {
+        try await withCameraTransaction(.visibleThumbnail, owner: "VISIBLE_THUMBNAIL", operation)
+    }
+    func withBackgroundThumbnail<T: Sendable>(_ operation: @Sendable () async throws -> T) async throws -> T {
+        try await withCameraTransaction(.backgroundThumbnail, owner: "BACKGROUND_THUMBNAIL", operation)
+    }
+    func withRatingTransaction<T: Sendable>(owner: String = "RATING",
+                                             _ operation: @Sendable () async throws -> T) async throws -> T {
+        try await withCameraTransaction(.rating, owner: owner, operation)
+    }
+    func withEventPoll<T: Sendable>(background: Bool,
+                                    _ operation: @Sendable () async throws -> T) async throws -> T {
+        try await withCameraTransaction(.eventPoll(background: background),
+                                        owner: background ? "EVENT_POLL_BACKGROUND" : "EVENT_POLL_INTERACTIVE",
+                                        operation)
+    }
+    func withTransferSlice<T: Sendable>(_ operation: @Sendable () async throws -> T) async throws -> T {
+        try await withCameraTransaction(.transfer, owner: "TRANSFER", operation)
     }
 
-    /// Android's ordinary ioMutex path: thumbnails and catalog reads share
-    /// FIFO lock ordering with FHD/EXIF; only download slices yield to a
-    /// registered interactive reservation.
-    func withCommand<T: Sendable>(
-        _ operation: @Sendable () async throws -> T
-    ) async throws -> T {
-        try await withLock(kind: .ordinary, operation)
-    }
-
-    func withTransferSlice<T: Sendable>(
-        _ operation: @Sendable () async throws -> T
-    ) async throws -> T {
-        try await withLock(kind: .transfer, operation)
-    }
-
-    func withDownloadActivity<T: Sendable>(
-        _ operation: @Sendable () async throws -> T
-    ) async throws -> T {
-        activeDownloads += 1
-        defer {
-            activeDownloads = max(0, activeDownloads - 1)
-            serviceNextWaiter()
-        }
+    func withDownloadActivity<T: Sendable>(_ operation: @Sendable () async throws -> T) async throws -> T {
+        activeDownloads += 1; pump()
+        defer { activeDownloads = max(0, activeDownloads - 1); pump() }
         return try await operation()
     }
 
-    /// Android's idle command checks the whole-download activity both before
-    /// queueing and after taking the mutex. The second check closes the race
-    /// where a download starts while the idle probe is waiting for a slice.
-    func withIdleCommand<T: Sendable>(
-        skippedValue: T,
-        _ operation: @Sendable () async throws -> T
-    ) async throws -> T {
+    func withIdleCommand<T: Sendable>(skippedValue: T,
+                                      _ operation: @Sendable () async throws -> T) async throws -> T {
         guard activeDownloads == 0 else { return skippedValue }
-        try await acquire(kind: .ordinary)
-        defer { release() }
-        try Task.checkCancellation()
-        guard activeDownloads == 0 else { return skippedValue }
-        return try await operation()
-    }
-
-    private func withLock<T: Sendable>(
-        kind: Kind,
-        _ operation: @Sendable () async throws -> T
-    ) async throws -> T {
-        while true {
-            try await acquire(kind: kind)
-            defer { release() }
-            #if STA_GATE_HANDOFF_TESTING
-            if kind == .transfer, let probe = transferHandoffProbe {
-                transferHandoffProbe = nil
-                await probe()
-            }
-            #endif
-            try Task.checkCancellation()
-            // NikonCamera.CameraIoGate checks priority again AFTER mutex.lock.
-            // acquire may suspend: a reservation can arrive after the grant
-            // but before this actor continuation resumes. Return the grant
-            // and wait for that reservation rather than starting a new slice.
-            if kind == .transfer && interactiveReservations > 0 { continue }
+        return try await withCameraTransaction(.idle, owner: "IDLE") {
+            guard await !self.downloadIsActive() else { return skippedValue }
             return try await operation()
         }
     }
 
-    private func acquire(kind: Kind) async throws {
-        try Task.checkCancellation()
-        let id = UUID()
-        if canStart(kind: kind) {
-            locked = true
-            return
-        }
+    private func downloadIsActive() -> Bool { activeDownloads > 0 }
 
+    private func waitForAdmission(_ ticket: Ticket) async throws {
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
-                if Task.isCancelled {
-                    continuation.resume(throwing: CancellationError())
-                } else {
-                    waiters.append(Waiter(id: id, kind: kind, continuation: continuation))
-                }
+                ticket.continuation = continuation
+                pending.append(ticket); pump()
             }
+            try Task.checkCancellation()
         } onCancel: {
-            Task { await self.cancelWaiter(id) }
+            Task { await self.cancelWaiting(ticket) }
         }
     }
 
-    private func canStart(kind: Kind) -> Bool {
-        guard !locked else { return false }
-        switch kind {
-        case .transfer:
-            return interactiveReservations == 0
-        case .ordinary:
-            return true
+    private func cancelWaiting(_ ticket: Ticket) {
+        guard let index = pending.firstIndex(where: { $0.id == ticket.id }) else { return }
+        pending.remove(at: index)
+        ticket.continuation?.resume(throwing: CancellationError()); ticket.continuation = nil
+        pump()
+    }
+
+    private func finish(_ ticket: Ticket) {
+        if active?.id == ticket.id { active = nil; pump() }
+        else { cancelWaiting(ticket) }
+    }
+
+    private func eligible(_ ticket: Ticket) -> Bool {
+        // `withIdleCommand` performs the first activity check before creating
+        // this ticket and a second check after admission. Do not screen the
+        // ticket here: if a download starts while the idle request is queued,
+        // it must be admitted and return its skipped value instead of waiting
+        // forever for the download to finish.
+        if interactiveReservations > 0, ticket.kind.priority > CameraRequestKind.preview.priority { return false }
+        if ratingPhaseCount > 0 {
+            switch ticket.kind {
+            case .visibleThumbnail, .backgroundThumbnail, .idle: return false
+            case .eventPoll(background: true): return false
+            default: break
+            }
         }
+        return !shuttingDown || ticket.allowDuringShutdown
     }
 
-    private func serviceNextWaiter() {
-        guard !locked else { return }
-        let index = waiters.firstIndex { canStart(kind: $0.kind) }
-        guard let index else { return }
-        let waiter = waiters.remove(at: index)
-        locked = true
-        waiter.continuation.resume()
+    private func effectivePriority(_ kind: CameraRequestKind) -> Int {
+        if case .eventPoll(background: true) = kind {
+            return ratingPhaseCount > 0 ? CameraRequestKind.idle.priority : CameraRequestKind.transfer.priority
+        }
+        return kind.priority
     }
 
-    private func release() {
-        guard locked else { return }
-        locked = false
-        serviceNextWaiter()
-    }
-
-    private func cancelWaiter(_ id: UUID) {
-        guard let index = waiters.firstIndex(where: { $0.id == id }) else { return }
-        let waiter = waiters.remove(at: index)
-        waiter.continuation.resume(throwing: CancellationError())
-        serviceNextWaiter()
+    private func pump() {
+        guard active == nil,
+              let selected = pending.filter(eligible).min(by: {
+                  let left = effectivePriority($0.kind), right = effectivePriority($1.kind)
+                  return left == right ? $0.sequence < $1.sequence : left < right
+              }) else { return }
+        pending.removeAll { $0.id == selected.id }; active = selected
+        selected.continuation?.resume(); selected.continuation = nil
     }
 }

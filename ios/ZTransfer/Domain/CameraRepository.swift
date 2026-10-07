@@ -354,6 +354,23 @@ actor CameraRepository {
 
     deinit { eventResolveTask?.cancel() }
 
+    /// Closes the runtime scheduler boundary before the owning connection is
+    /// discarded. Transport teardown may follow asynchronously, but no new
+    /// business request is allowed to enter this session after this point.
+    func beginShutdown(reason: String = "camera session closed") async {
+        eventResolveTask?.cancel(); eventResolveTask = nil
+        await ioGate.beginShutdown(reason)
+        catalogContinuations.values.forEach { $0.finish() }
+        catalogContinuations.removeAll()
+    }
+
+    func cameraSchedulerSnapshot() async -> CameraSchedulerSnapshot {
+        await ioGate.snapshot()
+    }
+
+    func beginRatingPhase() async { await ioGate.beginRatingPhase() }
+    func endRatingPhase() async { await ioGate.endRatingPhase() }
+
     func keepalive() async -> Bool {
         if activeForegroundReads > 0 { return true }
         return (try? await ioGate.withIdleCommand(skippedValue: true) {
@@ -367,16 +384,19 @@ actor CameraRepository {
     func focusAt(trackingX: UInt32, trackingY: UInt32,
                  focusX: UInt32, focusY: UInt32) async throws -> RemoteFocusResult {
         try await focusGate.withCommand { [self] in
-            try await tapFocusLocked(trackingX: trackingX, trackingY: trackingY, focusX: focusX, focusY: focusY)
+            try await tapFocusLocked(trackingX: trackingX, trackingY: trackingY,
+                                     focusX: focusX, focusY: focusY)
         }
     }
 
     private func tapFocusLocked(trackingX: UInt32, trackingY: UInt32,
                                 focusX: UInt32, focusY: UInt32) async throws -> RemoteFocusResult {
         let deadline = ContinuousClock.now + .seconds(6)
-        let initial = try await session.withCommandSequence { [self] commands in
-            try await beginTapFocus(commands, deadline: deadline, trackingX: trackingX, trackingY: trackingY,
-                                    focusX: focusX, focusY: focusY)
+        let initial = try await ioGate.withInteractive {
+            try await session.withCommandSequence { [self] commands in
+                try await beginTapFocus(commands, deadline: deadline, trackingX: trackingX, trackingY: trackingY,
+                                        focusX: focusX, focusY: focusY)
+            }
         }
         guard initial.responseCode == PTPConstants.responseOK, !initial.timedOut else { return initial }
         var result = try await waitForAutofocus(deadline: deadline, tracking: initial.trackingStarted)
@@ -421,20 +441,26 @@ actor CameraRepository {
     }
 
     func halfPressFocus() async throws -> RemoteFocusResult {
-        try await focusGate.withCommand { [self] in try await halfPressFocusLocked() }
+        try await focusGate.withCommand { [self] in
+            try await halfPressFocusLocked()
+        }
     }
 
     private func halfPressFocusLocked() async throws -> RemoteFocusResult {
         let deadline = ContinuousClock.now + .seconds(6)
-        let end = try await session.withCommandSequence { [self] commands in
-            try await endTrackingLocked(commands, deadline: deadline)
+        let end = try await ioGate.withInteractive {
+            try await session.withCommandSequence { [self] commands in
+                try await endTrackingLocked(commands, deadline: deadline)
+            }
         }
         if subjectTrackingActive {
             return .init(trackingStarted: false, polls: 0, timedOut: false,
                          responseCode: end ?? PTPConstants.deviceBusy)
         }
-        let af = try await session.withCommandSequence { [self] commands in
-            try await focusCommand(commands, operation: PTPConstants.afDrive, deadline: deadline)?.code
+        let af = try await ioGate.withInteractive {
+            try await session.withCommandSequence { [self] commands in
+                try await focusCommand(commands, operation: PTPConstants.afDrive, deadline: deadline)?.code
+            }
         }
         guard af == PTPConstants.responseOK else {
             return .init(trackingStarted: false, polls: 0, timedOut: af == nil,
@@ -449,9 +475,11 @@ actor CameraRepository {
 
     func endSubjectTrackingForTool() async throws -> UInt16? {
         try await focusGate.withCommand { [self] in
-            let deadline = ContinuousClock.now + .seconds(6)
-            return try await session.withCommandSequence { [self] commands in
-                try await endTrackingLocked(commands, deadline: deadline)
+            try await ioGate.withInteractive {
+                let deadline = ContinuousClock.now + .seconds(6)
+                return try await session.withCommandSequence { [self] commands in
+                    try await endTrackingLocked(commands, deadline: deadline)
+                }
             }
         }
     }
@@ -478,8 +506,10 @@ actor CameraRepository {
     private func waitForAutofocus(deadline: ContinuousClock.Instant, tracking: Bool) async throws -> RemoteFocusResult {
         var polls = 0
         while ContinuousClock.now < deadline {
-            let ready = try await session.withCommandSequence { [self] commands in
-                try await focusCommand(commands, operation: PTPConstants.deviceReady, deadline: deadline)?.code
+            let ready = try await ioGate.withInteractive {
+                try await session.withCommandSequence { [self] commands in
+                    try await focusCommand(commands, operation: PTPConstants.deviceReady, deadline: deadline)?.code
+                }
             }
             guard let ready else { break }
             polls += 1
@@ -492,8 +522,10 @@ actor CameraRepository {
     }
 
     func remoteProperty(_ property: RemoteProperty) async throws -> RemotePropertyDescriptor? {
-        let response = try await session.execute(operation: PTPConstants.getDevicePropDesc,
-                                                 parameters: [property.rawValue])
+        let response = try await ioGate.withInteractive {
+            try await session.execute(operation: PTPConstants.getDevicePropDesc,
+                                      parameters: [property.rawValue])
+        }
         guard let parsed = RemotePropertyCodec.parseDescription(response.data) else { return nil }
         return RemotePropertyDescriptor(property: property, dataType: parsed.dataType,
                                         writable: parsed.writable,
@@ -505,13 +537,17 @@ actor CameraRepository {
         guard let encoded = RemotePropertyCodec.encode(Int64(bitPattern: value), dataType: descriptor.dataType) else {
             throw CameraRepositoryError.invalidDataset
         }
-        _ = try await session.execute(operation: PTPConstants.setDevicePropValue,
+        _ = try await ioGate.withInteractive {
+            try await session.execute(operation: PTPConstants.setDevicePropValue,
                                       parameters: [descriptor.property.rawValue], data: encoded)
+        }
     }
 
     func refreshRemoteProperty(_ descriptor: RemotePropertyDescriptor) async throws -> RemotePropertyDescriptor? {
-        let response = try await session.execute(operation: PTPConstants.getDevicePropValue,
-                                                 parameters: [descriptor.property.rawValue])
+        let response = try await ioGate.withInteractive {
+            try await session.execute(operation: PTPConstants.getDevicePropValue,
+                                      parameters: [descriptor.property.rawValue])
+        }
         guard let value = RemotePropertyCodec.parseValue(response.data, dataType: descriptor.dataType) else { return nil }
         var updated = descriptor
         updated.current = UInt64(bitPattern: value)
@@ -520,8 +556,10 @@ actor CameraRepository {
 
     func remoteFocusMode() async throws -> RemotePropertyDescriptor? {
         for property in [RemoteProperty.focusMode, .nikonAFMode] {
-            let response = try await session.executeResponse(operation: PTPConstants.getDevicePropValue,
-                                                             parameters: [property.rawValue])
+            let response = try await ioGate.withInteractive {
+                try await session.executeResponse(operation: PTPConstants.getDevicePropValue,
+                                                  parameters: [property.rawValue])
+            }
             guard response.code == PTPConstants.responseOK, [1, 2, 4, 8].contains(response.data.count) else { continue }
             let value = response.data.enumerated().reduce(UInt64(0)) { $0 | UInt64($1.element) << ($1.offset * 8) }
             let known = property == .focusMode ? [1, 2, 3, 0x8010, 0x8011, 0x8012, 0x8013].contains(value)
@@ -532,19 +570,25 @@ actor CameraRepository {
     }
 
     func remoteMovieMode() async throws -> Bool? {
-        let response = try await session.executeResponse(operation: PTPConstants.getDevicePropValue,
-                                                         parameters: [RemoteProperty.liveViewSelector.rawValue])
+        let response = try await ioGate.withInteractive {
+            try await session.executeResponse(operation: PTPConstants.getDevicePropValue,
+                                              parameters: [RemoteProperty.liveViewSelector.rawValue])
+        }
         guard response.code == PTPConstants.responseOK, let value = response.data.first else { return nil }
         return value != 0
     }
 
     func remoteEvents() async throws -> [STAEvent] {
         if staAlbum != nil {
-            let response = try await session.executeResponse(operation: PTPConstants.nikonCompatibilityInit)
+            let response = try await ioGate.withEventPoll(background: false) {
+                try await session.executeResponse(operation: PTPConstants.nikonCompatibilityInit)
+            }
             if response.code == PTPConstants.responseOK { return STAEvent.polled(response.data, extended: true) ?? [] }
             if response.code != PTPConstants.operationNotSupported { return [] }
         }
-        let response = try await session.executeResponse(operation: 0x90C7)
+        let response = try await ioGate.withEventPoll(background: false) {
+            try await session.executeResponse(operation: 0x90C7)
+        }
         return response.code == PTPConstants.responseOK ? STAEvent.polled(response.data, extended: false) ?? [] : []
     }
 
@@ -559,7 +603,9 @@ actor CameraRepository {
         var attempts = 0
         while true {
             do {
-                _ = try await session.execute(operation: PTPConstants.startLiveView)
+                _ = try await ioGate.withInteractive {
+                    try await session.execute(operation: PTPConstants.startLiveView)
+                }
                 break
             } catch PTPSessionError.responseCode(let code)
                 where (code == PTPConstants.deviceBusy || code == 0xA004) && attempts < 5 {
@@ -570,8 +616,10 @@ actor CameraRepository {
         let deadline = ContinuousClock.now + .seconds(4)
         while ContinuousClock.now < deadline {
             do {
-                _ = try await session.execute(operation: PTPConstants.deviceReady,
+                _ = try await ioGate.withInteractive {
+                    try await session.execute(operation: PTPConstants.deviceReady,
                                               timeoutNanoseconds: 1_000_000_000)
+                }
                 return
             } catch PTPSessionError.responseCode(let code) {
                 if code != PTPConstants.deviceBusy { return }
@@ -589,10 +637,12 @@ actor CameraRepository {
     private func endLiveViewLocked() async {
         let deadline = ContinuousClock.now + .seconds(6)
         do {
-            try await session.withCommandSequence { [self] commands in
-                _ = try await endTrackingLocked(commands, deadline: deadline)
-                await clearSubjectTrackingState()
-                _ = try await focusCommand(commands, operation: PTPConstants.endLiveView, deadline: deadline)
+            try await ioGate.withInteractive {
+                try await session.withCommandSequence { [self] commands in
+                    _ = try await endTrackingLocked(commands, deadline: deadline)
+                    await clearSubjectTrackingState()
+                    _ = try await focusCommand(commands, operation: PTPConstants.endLiveView, deadline: deadline)
+                }
             }
         } catch { subjectTrackingActive = false }
     }
@@ -602,8 +652,10 @@ actor CameraRepository {
     /// RemoteLab.labGrabFrame: advertised operation, sticky downgrade, and SOI
     /// validation. Busy/not-in-LV do not count as enhanced capability failures.
     func liveViewFrame() async throws -> RemoteLiveViewPacket {
-        try await session.withCommandSequence { [self] commands in
-            try await receiveLiveViewFrame(commands)
+        try await ioGate.withInteractive {
+            try await session.withCommandSequence { [self] commands in
+                try await receiveLiveViewFrame(commands)
+            }
         }
     }
 
@@ -635,9 +687,11 @@ actor CameraRepository {
 
     func capturePhoto() async throws {
         let session = self.session
-        let response = try await RemoteMovieCommandRetry.execute {
-            try await session.executeResponse(operation: PTPConstants.captureInMedia,
-                                               parameters: [.max, 0]).code
+        let response = try await ioGate.withInteractive {
+            return try await RemoteMovieCommandRetry.execute {
+                try await session.executeResponse(operation: PTPConstants.captureInMedia,
+                                                   parameters: [.max, 0]).code
+            }
         }
         guard response == PTPConstants.responseOK else { throw PTPSessionError.responseCode(response) }
     }
@@ -649,7 +703,9 @@ actor CameraRepository {
     /// accepted wired connection.
     func refreshUSBRemoteSession() async throws -> String {
         guard isUSBConnection else { throw CameraRepositoryError.invalidDataset }
-        let drain = try await session.executeResponse(operation: PTPConstants.nikonCompatibilityInit)
+        let drain = try await ioGate.withInteractive {
+            try await session.executeResponse(operation: PTPConstants.nikonCompatibilityInit)
+        }
         subjectTrackingActive = false
         remoteControlModeSet = false
         movieApplicationPropertySet = false
@@ -675,14 +731,18 @@ actor CameraRepository {
 
     func ensureMovieApplicationMode() async throws {
         if !movieApplicationPropertySet {
-            let response = try await session.executeResponse(operation: PTPConstants.setDevicePropValue,
-                                                             parameters: [RemoteProperty.applicationMode.rawValue],
-                                                             data: Data([1])).code
+            let response = try await ioGate.withInteractive {
+                try await session.executeResponse(operation: PTPConstants.setDevicePropValue,
+                                                  parameters: [RemoteProperty.applicationMode.rawValue],
+                                                  data: Data([1])).code
+            }
             if response == PTPConstants.responseOK { movieApplicationPropertySet = true }
         }
         if !movieApplicationOperationSet {
-            let response = try await session.executeResponse(operation: PTPConstants.nikonChangeApplicationMode,
-                                                             parameters: [1]).code
+            let response = try await ioGate.withInteractive {
+                try await session.executeResponse(operation: PTPConstants.nikonChangeApplicationMode,
+                                                  parameters: [1]).code
+            }
             if response == PTPConstants.responseOK { movieApplicationOperationSet = true }
         }
     }
@@ -690,14 +750,18 @@ actor CameraRepository {
     func clearMovieApplicationMode(force: Bool = false) async {
         if isUSBConnection && remoteControlModeSet && !force { return }
         if movieApplicationOperationSet {
-            let response = try? await session.executeResponse(operation: PTPConstants.nikonChangeApplicationMode,
-                                                              parameters: [0]).code
+            let response = try? await ioGate.withInteractive {
+                try await session.executeResponse(operation: PTPConstants.nikonChangeApplicationMode,
+                                                  parameters: [0]).code
+            }
             if response == PTPConstants.responseOK { movieApplicationOperationSet = false }
         }
         if movieApplicationPropertySet {
-            let response = try? await session.executeResponse(operation: PTPConstants.setDevicePropValue,
-                                                              parameters: [RemoteProperty.applicationMode.rawValue],
-                                                              data: Data([0])).code
+            let response = try? await ioGate.withInteractive {
+                try await session.executeResponse(operation: PTPConstants.setDevicePropValue,
+                                                  parameters: [RemoteProperty.applicationMode.rawValue],
+                                                  data: Data([0])).code
+            }
             if response == PTPConstants.responseOK { movieApplicationPropertySet = false }
         }
     }
@@ -706,7 +770,8 @@ actor CameraRepository {
     func startPreparedUSBMovieRecording() async throws -> RemoteMovieStartResult {
         let operationWasSet = movieApplicationOperationSet
         let propertyWasSet = movieApplicationPropertySet
-        let completed = try await session.withCommandSequence { commands in
+        let completed = try await ioGate.withInteractive {
+            try await session.withCommandSequence { commands in
             var operationSet = operationWasSet
             var propertySet = propertyWasSet
             let extended = try await commands.executeResponse(operation: PTPConstants.getDevicePropValueEx,
@@ -748,6 +813,7 @@ actor CameraRepository {
                                            applicationModePropertyResponse: appProperty,
                                            startCommandResponse: ready ? start : nil),
                     operationSet, propertySet)
+            }
         }
         movieApplicationOperationSet = completed.1
         movieApplicationPropertySet = completed.2
@@ -761,8 +827,10 @@ actor CameraRepository {
             do {
                 // RemoteLab.PROP_NK_MOV_PROHIBIT: read only after a failed start,
                 // including bit 10 when the camera is already recording.
-                let data = try await session.execute(operation: PTPConstants.getDevicePropValue,
-                                                     parameters: [0xD0A4]).data
+                let data = try await ioGate.withInteractive {
+                    try await session.execute(operation: PTPConstants.getDevicePropValue,
+                                              parameters: [0xD0A4]).data
+                }
                 if data.count >= 4 {
                     prohibitCondition = data.withUnsafeBytes { $0.loadUnaligned(as: UInt32.self).littleEndian }
                 }
@@ -782,7 +850,11 @@ actor CameraRepository {
     private func movieCommandWithBusyRetry(_ operation: UInt16, parameters: [UInt32] = []) async throws -> UInt16 {
         let session = self.session
         return try await RemoteMovieCommandRetry.execute {
-            do { return try await session.execute(operation: operation, parameters: parameters).code }
+            do {
+                return try await self.ioGate.withInteractive {
+                    try await session.execute(operation: operation, parameters: parameters).code
+                }
+            }
             catch PTPSessionError.responseCode(let response) { return response }
         }
     }
@@ -791,7 +863,9 @@ actor CameraRepository {
 
     func loadDeviceInfo() async throws -> PTPDeviceInfo {
         if let info = cachedDeviceInfo { return info }
-        let result = try await session.execute(operation: PTPConstants.getDeviceInfo)
+        let result = try await ioGate.withInteractive {
+            try await session.execute(operation: PTPConstants.getDeviceInfo)
+        }
         guard let info = PTPDatasetParser.parseDeviceInfo(result.data) else { throw CameraRepositoryError.invalidDataset }
         cachedDeviceInfo = info
         return info
@@ -1061,12 +1135,12 @@ actor CameraRepository {
         await directReader?.discardThumbnail(handle: handle)
     }
 
-    func thumbnail(handle: UInt32) async throws -> Data {
+    func thumbnail(handle: UInt32, priority: CameraRequestKind = .visibleThumbnail) async throws -> Data {
         #if DEBUG
         if let debugData { return debugData.thumbnailData }
         #endif
         activeForegroundReads += 1; defer { activeForegroundReads -= 1; scheduleObjectResolver() }
-        return try await ioGate.withCommand {
+        return try await ioGate.withCameraTransaction(priority, owner: priority == .visibleThumbnail ? "VISIBLE_THUMBNAIL" : "BACKGROUND_THUMBNAIL") {
             if let directReader { return try await directReader.thumbnail(handle: handle) }
             return try await session.execute(operation: PTPConstants.getThumb, parameters: [handle]).data
         }
@@ -1079,7 +1153,7 @@ actor CameraRepository {
         if let debugData { return debugData.previewData }
         #endif
         activeForegroundReads += 1; defer { activeForegroundReads -= 1; scheduleObjectResolver() }
-        return try await ioGate.withInteractive {
+        return try await ioGate.withPreviewTransaction(owner: "PREVIEW") {
             if let directReader { return try await directReader.preview(handle: handle) }
             var lastError: Error?
             for operation in [PTPConstants.getFHDPicture, PTPConstants.getLargeThumb, PTPConstants.getThumb] {
@@ -1096,7 +1170,7 @@ actor CameraRepository {
 
     func readPrefix(handle: UInt32, length: Int64) async throws -> Data {
         activeForegroundReads += 1; defer { activeForegroundReads -= 1; scheduleObjectResolver() }
-        return try await ioGate.withInteractive {
+        return try await ioGate.withPreviewTransaction(owner: "PREVIEW_EXIF") {
             let count = max(0, min(length, Int64(UInt32.max)))
             if let directReader {
                 return try await directReader.exifHeader(handle: handle, length: Int(count))
@@ -1750,13 +1824,13 @@ actor CameraRepository {
         }
         guard backgroundReadsAllowed, !Task.isCancelled else { return }
         do {
-            var result = try await ioGate.withCommand {
+            var result = try await ioGate.withEventPoll(background: true) {
                 try await session.executeResponse(operation: PTPConstants.nikonCompatibilityInit, timeoutNanoseconds: 60_000_000_000)
             }
             var extended = true
             if result.code == PTPConstants.operationNotSupported {
                 extended = false
-                result = try await ioGate.withCommand {
+                result = try await ioGate.withEventPoll(background: true) {
                     try await session.executeResponse(operation: 0x90C7, timeoutNanoseconds: 60_000_000_000)
                 }
             }

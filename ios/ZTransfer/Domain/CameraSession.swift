@@ -104,8 +104,8 @@ actor CameraSession {
                                           onBatch: onBatch)
     }
 
-    func thumbnail(handle: UInt32) async throws -> Data {
-        return try await repository.thumbnail(handle: handle)
+    func thumbnail(handle: UInt32, priority: CameraRequestKind = .visibleThumbnail) async throws -> Data {
+        return try await repository.thumbnail(handle: handle, priority: priority)
     }
 
     /// Metadata-aware path used by the photo grid. It follows Android's
@@ -122,7 +122,7 @@ actor CameraSession {
                 self.processAndCacheThumbnail(data, file: file)
             },
             validate: { !$0.isEmpty },
-            fetch: { try await self.thumbnail(handle: file.id) }
+            fetch: { try await self.thumbnail(handle: file.id, priority: .visibleThumbnail) }
         )
     }
 
@@ -184,7 +184,7 @@ actor CameraSession {
             identity: identity,
             directSTA: direct,
             validate: validator,
-            fetch: { try await self.thumbnail(handle: file.id) }
+            fetch: { try await self.thumbnail(handle: file.id, priority: .backgroundThumbnail) }
         )
         if outcome.isSettled { await thumbnailStore.publish(handle: file.id) }
         else if sequential { await repository.discardRejectedThumbnail(handle: file.id) }
@@ -237,6 +237,20 @@ actor CameraSession {
     func remoteFocusMode() async throws -> RemotePropertyDescriptor? { try await repository.remoteFocusMode() }
     func remoteEvents() async throws -> [STAEvent] { try await repository.remoteEvents() }
     func setTransfersBusy(_ busy: Bool) async { await repository.setTransfersBusy(busy) }
+
+    /// Starts scheduler shutdown before the connection owner releases this
+    /// session. Active PTP work may finish its own protocol cleanup; queued
+    /// work receives cancellation and cannot leak into a replacement session.
+    func beginShutdown(reason: String = "camera session closed") async {
+        await repository.beginShutdown(reason: reason)
+    }
+
+    func cameraSchedulerSnapshot() async -> CameraSchedulerSnapshot {
+        await repository.cameraSchedulerSnapshot()
+    }
+
+    func beginRatingPhase() async { await repository.beginRatingPhase() }
+    func endRatingPhase() async { await repository.endRatingPhase() }
 
     /// The active transport is probed only when the command channel is idle.
     /// Both USB and Wi-Fi use the same Nikon GetStorageIDs liveness rule.

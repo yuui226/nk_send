@@ -378,6 +378,9 @@ final class ConnectionViewModel: ObservableObject {
 
     private func wifiTransportLost(generation: Int, mode: WirelessMode) async {
         guard wifiGeneration == generation, state.wifiPhase == .connected else { return }
+        if let previousSession = cameraSession {
+            await previousSession.beginShutdown(reason: "wireless transport lost")
+        }
         cameraSession = nil; cameraRepository = nil
         state.wifiPhase = .reconnecting
         state.wifiFailureKind = nil
@@ -585,6 +588,7 @@ final class ConnectionViewModel: ObservableObject {
         usbKeepaliveTask = nil
         usbCatalogTask?.cancel()
         usbCatalogTask = nil
+        await failedSession.beginShutdown(reason: "USB transport lost")
         cameraSession = nil
         cameraRepository = nil
         state.usbPhase = .waitingForCamera
@@ -778,6 +782,9 @@ final class ConnectionViewModel: ObservableObject {
                 // A removed camera invalidates the PTP channel. Tear down the
                 // session immediately; the queue remains owned by RootView and
                 // can resume waiting work after the next successful connection.
+                if let previousSession = cameraSession {
+                    Task { await previousSession.beginShutdown(reason: "USB camera removed") }
+                }
                 cameraRepository = nil
                 cameraSession = nil
                 Task { [weak self] in

@@ -1,0 +1,2068 @@
+{
+  "baseline": "617082c3511e2532a321128b2f39c57217e74fc2",
+  "target": "2b2bf0c2802cacc909e9373562d912bce2d21175",
+  "ios_before_merge": "27fba4bfa060fa76bd7db77bbc430511d51bc620",
+  "merge": "5d583d603afaebefd3ea361261c71467f80fac4a",
+  "commits": [
+    {
+      "sha": "f46b4eed3d33db07be458e861f89199ecc45923c",
+      "subject": "新增监看实时多对焦框与专用诊断",
+      "files": [
+        "app/src/main/java/com/ztransfer/protocol/LiveViewFocusDiagnostic.kt",
+        "app/src/main/java/com/ztransfer/protocol/LiveViewMetadata.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteDiagnosticReport.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteToolPreferences.kt",
+        "app/src/main/res/values-b+zh+Hant/strings.xml",
+        "app/src/main/res/values-zh/strings.xml",
+        "app/src/main/res/values/strings.xml",
+        "app/src/test/java/com/ztransfer/protocol/LiveViewFocusDiagnosticTest.kt",
+        "app/src/test/java/com/ztransfer/protocol/LiveViewMetadataTest.kt",
+        "app/src/test/java/com/ztransfer/ui/screen/RemoteDiagnosticReportTest.kt",
+        "\"docs/\\345\\276\\205\\345\\201\\232/\\347\\233\\221\\347\\234\\213\\345\\256\\236\\346\\227\\266\\345\\257\\271\\347\\204\\246\\346\\241\\206\\346\\230\\276\\347\\244\\272\\345\\215\\207\\347\\272\\247\\346\\226\\271\\346\\241\\210.md\""
+      ]
+    },
+    {
+      "sha": "d87ee9fafdb5cb61f0862de329bb555c96e8e2ef",
+      "subject": "完善监看对焦模式切换、横屏工具名称及录像剩余时长",
+      "files": [
+        "app/src/main/java/com/ztransfer/protocol/LiveViewMetadata.kt",
+        "app/src/main/java/com/ztransfer/protocol/RemoteCameraTools.kt",
+        "app/src/main/java/com/ztransfer/protocol/RemoteLab.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/LandscapeMonitorControls.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteCameraToolPanel.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteDispOverlay.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteToolPreferences.kt",
+        "app/src/main/res/values-b+zh+Hant/strings.xml",
+        "app/src/main/res/values-zh/strings.xml",
+        "app/src/main/res/values/strings.xml",
+        "app/src/test/java/com/ztransfer/protocol/MonitorRemainingTest.kt",
+        "app/src/test/java/com/ztransfer/protocol/RemoteFocusModeTest.kt",
+        "\"docs/\\345\\276\\205\\345\\201\\232/\\347\\233\\221\\347\\234\\213\\345\\257\\271\\347\\204\\246\\346\\250\\241\\345\\274\\217\\345\\210\\207\\346\\215\\242.md\""
+      ]
+    },
+    {
+      "sha": "e72e47f4ca4361a0aa43d5585275414d8d5a7999",
+      "subject": "修正录像剩余时长读取并调整 DISP 信息排列",
+      "files": [
+        "app/src/main/java/com/ztransfer/protocol/LiveViewMetadata.kt",
+        "app/src/main/java/com/ztransfer/protocol/LiveViewVideoDiagnostic.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteDispOverlay.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteScreen.kt",
+        "app/src/main/res/values-b+zh+Hant/strings.xml",
+        "app/src/main/res/values-zh/strings.xml",
+        "app/src/main/res/values/strings.xml",
+        "app/src/test/java/com/ztransfer/protocol/MonitorRemainingTest.kt"
+      ]
+    },
+    {
+      "sha": "b90932dd4dc7e6f0836a033c3847004de87ed0e7",
+      "subject": "显示相机录像规格并统一 DISP 剩余时长样式",
+      "files": [
+        "app/src/main/java/com/ztransfer/protocol/MonitorMovieFormat.kt",
+        "app/src/main/java/com/ztransfer/protocol/RemoteLab.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteDispOverlay.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteScreen.kt",
+        "app/src/main/res/values-b+zh+Hant/strings.xml",
+        "app/src/main/res/values-zh/strings.xml",
+        "app/src/main/res/values/strings.xml",
+        "app/src/test/java/com/ztransfer/protocol/MonitorMovieFormatTest.kt"
+      ]
+    },
+    {
+      "sha": "df819aaf078acf30262d24a2fe4f7d66b7a16280",
+      "subject": "feat: add transfer storage modes and unify monitor hints",
+      "files": [
+        "app/build.gradle.kts",
+        "app/src/main/java/com/ztransfer/protocol/LiveViewMetadata.kt",
+        "app/src/main/java/com/ztransfer/protocol/LiveViewVideoDiagnostic.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteViewfinderFeatures.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/SettingsScreen.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/TransferViewModel.kt",
+        "app/src/main/res/values-b+zh+Hant/strings.xml",
+        "app/src/main/res/values-zh/strings.xml",
+        "app/src/main/res/values/strings.xml"
+      ]
+    },
+    {
+      "sha": "32be58fab2fc87a2fe5df830259d9a84fa45c20a",
+      "subject": "feat: add LUT photo adjustment controls",
+      "files": [
+        "app/src/main/java/com/ztransfer/filter/LutColorPipeline.kt",
+        "app/src/main/java/com/ztransfer/filter/PhotoFilterPreset.kt",
+        "app/src/main/java/com/ztransfer/filter/PhotoFilterRenderer.kt",
+        "app/src/main/java/com/ztransfer/frame/PhotoFrameExporter.kt",
+        "app/src/main/java/com/ztransfer/lut/PhotoLutEditorState.kt",
+        "app/src/main/java/com/ztransfer/lut/PhotoLutStore.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/PhotoLutEditor.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/SettingsScreen.kt",
+        "app/src/main/res/values-b+zh+Hant/strings.xml",
+        "app/src/main/res/values-zh/strings.xml",
+        "app/src/main/res/values/strings.xml",
+        "app/src/test/java/com/ztransfer/filter/LutColorPipelineTest.kt",
+        "app/src/test/java/com/ztransfer/frame/PhotoFilterOutputTest.kt",
+        "\"docs/\\345\\276\\205\\345\\201\\232/\\347\\205\\247\\347\\211\\207\\346\\225\\210\\346\\236\\234LUT\\345\\276\\256\\350\\260\\203\\345\\217\\202\\346\\225\\260.md\""
+      ]
+    },
+    {
+      "sha": "00f78187dc86ebf96b0b98205411c843212ce3a9",
+      "subject": "feat: restore rating filter with freshness invalidation",
+      "files": [
+        "app/src/main/java/com/ztransfer/protocol/NikonCamera.kt",
+        "app/src/main/java/com/ztransfer/protocol/PhotoRating.kt",
+        "app/src/main/java/com/ztransfer/protocol/PhotoRatingPairs.kt",
+        "app/src/main/java/com/ztransfer/protocol/PtpConstants.kt",
+        "app/src/main/java/com/ztransfer/protocol/VideoRating.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/PhotoRatingScan.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/SettingsScreen.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/CameraViewModel.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/TransferViewModel.kt",
+        "app/src/main/res/values-b+zh+Hant/strings.xml",
+        "app/src/main/res/values-zh/strings.xml",
+        "app/src/main/res/values/strings.xml",
+        "app/src/test/java/com/ztransfer/protocol/PhotoRatingPairsTest.kt",
+        "app/src/test/java/com/ztransfer/protocol/PhotoRatingTest.kt",
+        "app/src/test/java/com/ztransfer/protocol/VideoRatingTest.kt",
+        "\"docs/\\345\\276\\205\\345\\201\\232/STA\\347\\205\\247\\347\\211\\207\\344\\277\\235\\346\\212\\244\\347\\212\\266\\346\\200\\201\\350\\257\\273\\345\\217\\226\\344\\270\\216\\344\\270\\212\\344\\274\\240\\346\\240\\207\\350\\256\\260\\350\\247\\243\\351\\224\\201\\350\\260\\203\\346\\237\\245.md\"",
+        "\"docs/\\345\\276\\205\\345\\201\\232/\\346\\230\\237\\347\\272\\247\\347\\255\\233\\351\\200\\211\\351\\207\\215\\346\\226\\260\\345\\274\\200\\346\\224\\276.md\""
+      ]
+    },
+    {
+      "sha": "daf07c9dde834f6ecabc9d33d76c0276a1b703a4",
+      "subject": "chore: add concise rating diagnostics",
+      "files": [
+        "app/src/main/java/com/ztransfer/ui/screen/PhotoRatingScan.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/CameraViewModel.kt"
+      ]
+    },
+    {
+      "sha": "5e9ce7b9b53782aea6925fe0c7938e440c842b66",
+      "subject": "feat: gate STA star filter behind fresh scan",
+      "files": [
+        "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/PhotoRatingScan.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/TransferViewModel.kt",
+        "app/src/main/res/values-b+zh+Hant/strings.xml",
+        "app/src/main/res/values-zh/strings.xml",
+        "app/src/main/res/values/strings.xml",
+        "\"docs/\\345\\276\\205\\345\\201\\232/STA\\346\\230\\237\\347\\272\\247\\347\\255\\233\\351\\200\\211\\345\\256\\214\\346\\225\\264\\346\\226\\271\\346\\241\\210.md\""
+      ]
+    },
+    {
+      "sha": "b7c2f593af4f8cecb3d7769d334fbf9e5b288278",
+      "subject": "feat: prioritize recent thumbnails before rating scan",
+      "files": [
+        "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/PhotoRatingScan.kt",
+        "\"docs/\\345\\276\\205\\345\\201\\232/STA\\346\\230\\237\\347\\272\\247\\347\\255\\233\\351\\200\\211\\345\\256\\214\\346\\225\\264\\346\\226\\271\\346\\241\\210.md\""
+      ]
+    },
+    {
+      "sha": "69ca1be5098fc8c9c65eb87fbedbae3e245e1327",
+      "subject": "fix: complete rating progress and fresh snapshot reads",
+      "files": [
+        "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/PhotoRatingScan.kt"
+      ]
+    },
+    {
+      "sha": "7232e4857e0964c629c66be19315aa112772617c",
+      "subject": "fix: keep rating toggle out of photo filtering",
+      "files": [
+        "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt"
+      ]
+    },
+    {
+      "sha": "98186e5ffc65fa6f01b5abc60931e1be89a5a13d",
+      "subject": "fix: keep rating toggle from replaying photo grid",
+      "files": [
+        "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/SettingsScreen.kt"
+      ]
+    },
+    {
+      "sha": "33785f8d42ad120c104d9f0ed2e69b3d02f270ad",
+      "subject": "fix: refine rating filter interaction and help",
+      "files": [
+        "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt",
+        "app/src/main/res/values-b+zh+Hant/strings.xml",
+        "app/src/main/res/values-zh/strings.xml",
+        "app/src/main/res/values/strings.xml"
+      ]
+    },
+    {
+      "sha": "81fb57d3b6a02270afa1b4c28562b163028174f1",
+      "subject": "fix: start rating after recent thumbnail range",
+      "files": [
+        "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/PhotoRatingScan.kt"
+      ]
+    },
+    {
+      "sha": "bef6bdef191c04d206de0ad9d5cc1ddaf10ffb04",
+      "subject": "fix: align rating switch states and badge",
+      "files": [
+        "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt",
+        "app/src/main/res/values-b+zh+Hant/strings.xml",
+        "app/src/main/res/values-zh/strings.xml",
+        "app/src/main/res/values/strings.xml"
+      ]
+    },
+    {
+      "sha": "6c0c41f6c25eb7475b27c224311ccc6b937026b5",
+      "subject": "fix rating scan start and diagnostics gesture",
+      "files": [
+        "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/PhotoRatingScan.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RatingDiagnostics.kt"
+      ]
+    },
+    {
+      "sha": "cece7836c5519870fac5da14eb3f8bf2714b0789",
+      "subject": "avoid restarting rating scan on thumbnail updates",
+      "files": [
+        "app/src/main/java/com/ztransfer/ui/screen/PhotoRatingScan.kt"
+      ]
+    },
+    {
+      "sha": "e5850aac7f0c177fa512f8b1fa379fe5fa5beb55",
+      "subject": "trim rating diagnostics to progress and timing",
+      "files": [
+        "app/src/main/java/com/ztransfer/ui/screen/PhotoRatingScan.kt"
+      ]
+    },
+    {
+      "sha": "dee0fa1e76b6f4d4f9c8bfc515ea1612b7ec4dca",
+      "subject": "wait for STA rating date boundary",
+      "files": [
+        "app/src/main/java/com/ztransfer/ui/screen/PhotoRatingScan.kt"
+      ]
+    },
+    {
+      "sha": "eab3a45ab98c09c80ef27cc7c29d944ae8c2955b",
+      "subject": "trace rating cache origins",
+      "files": [
+        "app/src/main/java/com/ztransfer/protocol/NikonCamera.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/PhotoRatingScan.kt"
+      ]
+    },
+    {
+      "sha": "554e6f3f9f17258c9cc2b1bc06513fd30e654706",
+      "subject": "use compact rating header probe",
+      "files": [
+        "app/src/main/java/com/ztransfer/protocol/NikonCamera.kt"
+      ]
+    },
+    {
+      "sha": "c41a2aaaa8e1e6386a044ae724fd4e4ee9a7f385",
+      "subject": "add rating channel timing diagnostics",
+      "files": [
+        "app/src/main/java/com/ztransfer/diagnostics/RatingDiagnostics.kt",
+        "app/src/main/java/com/ztransfer/protocol/NikonCamera.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/PhotoRatingScan.kt"
+      ]
+    },
+    {
+      "sha": "37b74dd22cfce96a2c388d1b4d0ec9628559c35f",
+      "subject": "clean rating timing diagnostics",
+      "files": [
+        "app/src/main/java/com/ztransfer/protocol/NikonCamera.kt"
+      ]
+    },
+    {
+      "sha": "4ec1b7dc3659807c0d82a19ef6fd9d7399ffa142",
+      "subject": "prioritize active rating reads over old thumbnails",
+      "files": [
+        "app/src/main/java/com/ztransfer/protocol/NikonCamera.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RatingDiagnostics.kt"
+      ]
+    },
+    {
+      "sha": "4d0157a6cd287ced3de8071b283f2cadfa91e978",
+      "subject": "hold rating priority across header chunks",
+      "files": [
+        "app/src/main/java/com/ztransfer/protocol/NikonCamera.kt"
+      ]
+    },
+    {
+      "sha": "a8137e2999393709e548832e05f0d616d60a9553",
+      "subject": "keep rating header probe contiguous",
+      "files": [
+        "app/src/main/java/com/ztransfer/protocol/NikonCamera.kt"
+      ]
+    },
+    {
+      "sha": "a77b0d177022671ec739a12941bba9f0054f4154",
+      "subject": "probe rating with 80KiB prefix",
+      "files": [
+        "app/src/main/java/com/ztransfer/protocol/NikonCamera.kt"
+      ]
+    },
+    {
+      "sha": "7b6df479aa436518aa4b23ebdddc6268d65ff2e8",
+      "subject": "fix reliable rating scan scheduling",
+      "files": [
+        "app/src/main/java/com/ztransfer/diagnostics/RatingDiagnostics.kt",
+        "app/src/main/java/com/ztransfer/protocol/NikonCamera.kt",
+        "app/src/main/java/com/ztransfer/protocol/PhotoRating.kt",
+        "app/src/main/java/com/ztransfer/protocol/PhotoRatingPairs.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/PhotoRatingScan.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/CameraViewModel.kt"
+      ]
+    },
+    {
+      "sha": "4e1a0516c21a072478449dbdbb96cd7bdfff8b3c",
+      "subject": "docs: clarify camera scheduler and rating baseline",
+      "files": [
+        "\"docs/\\344\\272\\247\\345\\223\\201\\344\\270\\216\\347\\225\\214\\351\\235\\242\\350\\256\\276\\350\\256\\241/camera-work-priority-overview.html\"",
+        "\"docs/\\345\\276\\205\\345\\201\\232/\\345\\205\\250\\345\\261\\200\\347\\233\\270\\346\\234\\272\\350\\257\\267\\346\\261\\202\\350\\260\\203\\345\\272\\246\\345\\231\\250\\351\\207\\215\\346\\236\\204\\346\\226\\271\\346\\241\\210.md\""
+      ]
+    },
+    {
+      "sha": "aa55bd0c0899ad8d8b2faf3d09bfd81710322572",
+      "subject": "refactor: unify camera request scheduling",
+      "files": [
+        "app/src/main/java/com/ztransfer/protocol/MonitorStorage.kt",
+        "app/src/main/java/com/ztransfer/protocol/NikonCamera.kt",
+        "app/src/main/java/com/ztransfer/protocol/RemoteLab.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/PhotoPreview.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/PhotoRatingScan.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteScreen.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/CameraViewModel.kt",
+        "app/src/test/java/com/ztransfer/protocol/CameraIoGateTest.kt",
+        "\"docs/\\344\\272\\247\\345\\223\\201\\344\\270\\216\\347\\225\\214\\351\\235\\242\\350\\256\\276\\350\\256\\241/camera-work-priority-overview.html\"",
+        "\"docs/\\345\\276\\205\\345\\201\\232/\\345\\205\\250\\345\\261\\200\\347\\233\\270\\346\\234\\272\\350\\257\\267\\346\\261\\202\\350\\260\\203\\345\\272\\246\\345\\231\\250\\351\\207\\215\\346\\236\\204\\346\\226\\271\\346\\241\\210.md\""
+      ]
+    },
+    {
+      "sha": "200d333ce50c9b522a37d5838d693fd6bb3647b6",
+      "subject": "fix: enforce rating phase scheduling and preserve request ordering",
+      "files": [
+        "app/src/main/java/com/ztransfer/protocol/NikonCamera.kt",
+        "app/src/main/java/com/ztransfer/protocol/PhotoRatingPairs.kt",
+        "app/src/main/java/com/ztransfer/protocol/RemoteLab.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/PhotoRatingScan.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/CameraViewModel.kt",
+        "app/src/test/java/com/ztransfer/protocol/CameraIoGateTest.kt",
+        "app/src/test/java/com/ztransfer/protocol/PhotoRatingPairsTest.kt",
+        "\"docs/\\344\\272\\247\\345\\223\\201\\344\\270\\216\\347\\225\\214\\351\\235\\242\\350\\256\\276\\350\\256\\241/camera-work-priority-overview.html\"",
+        "\"docs/\\345\\276\\205\\345\\201\\232/\\345\\205\\250\\345\\261\\200\\347\\233\\270\\346\\234\\272\\350\\257\\267\\346\\261\\202\\350\\260\\203\\345\\272\\246\\345\\231\\250\\351\\207\\215\\346\\236\\204\\346\\226\\271\\346\\241\\210.md\""
+      ]
+    },
+    {
+      "sha": "e54fa9aa9d861eaa7fb81277e451c0d2855e2872",
+      "subject": "fix: isolate background event polling from rating phase",
+      "files": [
+        "app/src/main/java/com/ztransfer/protocol/NikonCamera.kt",
+        "app/src/main/java/com/ztransfer/protocol/RemoteLab.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/CameraViewModel.kt",
+        "app/src/test/java/com/ztransfer/protocol/CameraIoGateTest.kt"
+      ]
+    },
+    {
+      "sha": "639ec8d7037523a48c7911b47617105877ab0252",
+      "subject": "feat: configure rating scan date range",
+      "files": [
+        "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/PhotoRatingScan.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/CameraViewModel.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/TransferViewModel.kt",
+        "app/src/main/res/values-b+zh+Hant/strings.xml",
+        "app/src/main/res/values-zh/strings.xml",
+        "app/src/main/res/values/strings.xml"
+      ]
+    },
+    {
+      "sha": "ea73d5595073dd27f0168a71fbc6eba934007ee8",
+      "subject": "fix: stabilize monitor mode transition",
+      "files": [
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteCameraToolPanel.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteScreen.kt",
+        "app/src/main/res/values-b+zh+Hant/remote_tools.xml",
+        "app/src/main/res/values-zh/remote_tools.xml",
+        "app/src/main/res/values/remote_tools.xml"
+      ]
+    },
+    {
+      "sha": "bcbfed9caeb672fe8844604c2b9771fa0d1bec8d",
+      "subject": "fix: compile rating scan state flow",
+      "files": [
+        "app/src/main/java/com/ztransfer/ui/screen/PhotoRatingScan.kt"
+      ]
+    },
+    {
+      "sha": "8f56ac6ef442721bf900efa503e33937b191770a",
+      "subject": "fix: keep monitor shell visible during startup",
+      "files": [
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteScreen.kt"
+      ]
+    },
+    {
+      "sha": "e9013a7cd9669869f384a4d7a1b023f0bc8545ef",
+      "subject": "fix: isolate rating range updates from photo grid",
+      "files": [
+        "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt"
+      ]
+    },
+    {
+      "sha": "81370873e0533d6e0a73252e93bd7d76da40269f",
+      "subject": "fix: add haptics to rating range wheel",
+      "files": [
+        "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt"
+      ]
+    },
+    {
+      "sha": "0d262fab1c287f183813a4289eff1ebc94678d3a",
+      "subject": "feat: refine rating filter feedback",
+      "files": [
+        "app/src/main/java/com/ztransfer/protocol/NikonCamera.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/PhotoRatingScan.kt",
+        "app/src/main/res/values-b+zh+Hant/strings.xml",
+        "app/src/main/res/values-zh/strings.xml",
+        "app/src/main/res/values/strings.xml"
+      ]
+    },
+    {
+      "sha": "1cc66e953dcd36ad9167261854c06de882c0f7c1",
+      "subject": "fix: refine rating filter progress feedback",
+      "files": [
+        "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt"
+      ]
+    },
+    {
+      "sha": "2ec42297fcd285b6cfff22a758690372bf4d9185",
+      "subject": "fix: use object rating interface for AP and USB",
+      "files": [
+        "app/src/main/java/com/ztransfer/protocol/NikonCamera.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/PhotoRatingScan.kt"
+      ]
+    },
+    {
+      "sha": "1e1035c90670a242f65afaeb1bb78522c9088c5a",
+      "subject": "refine: polish rating filter layout",
+      "files": [
+        "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/SettingsScreen.kt"
+      ]
+    },
+    {
+      "sha": "3edb730b7d204ddfbd6dceaf57f517fd703dd18e",
+      "subject": "fix: refine rating filter layout",
+      "files": [
+        "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt",
+        "app/src/main/res/values-b+zh+Hant/strings.xml",
+        "app/src/main/res/values-zh/strings.xml",
+        "app/src/main/res/values/strings.xml"
+      ]
+    },
+    {
+      "sha": "2bfd98efa4c7105d725f56f8173efa5e60189327",
+      "subject": "feat: add monitor computer control tool",
+      "files": [
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteToolPreferences.kt",
+        "app/src/main/res/values-b+zh+Hant/remote_tools.xml",
+        "app/src/main/res/values-zh/remote_tools.xml",
+        "app/src/main/res/values/remote_tools.xml"
+      ]
+    },
+    {
+      "sha": "424c85147e484f1bf8fc50b81423afaef3626780",
+      "subject": "fix: stabilize portrait monitor tool layout",
+      "files": [
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteCameraToolPanel.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteToolBar.kt"
+      ]
+    },
+    {
+      "sha": "6767d0523b6212e96de4ee4d1c4829b6d8682a36",
+      "subject": "fix: 修正点击对焦坐标并适配对焦区域路径",
+      "files": [
+        "app/src/main/java/com/ztransfer/protocol/LiveViewMetadata.kt",
+        "app/src/main/java/com/ztransfer/protocol/RemoteCameraTools.kt",
+        "app/src/main/java/com/ztransfer/protocol/RemoteLab.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteCameraToolPanel.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteScreen.kt",
+        "app/src/main/res/values-b+zh+Hant/remote_tools.xml",
+        "app/src/main/res/values-zh/remote_tools.xml",
+        "app/src/main/res/values/remote_tools.xml",
+        "app/src/test/java/com/ztransfer/protocol/RemoteFocusTest.kt",
+        "\"docs/\\345\\276\\205\\345\\201\\232/\\347\\233\\221\\347\\234\\213\\345\\256\\236\\346\\227\\266\\345\\257\\271\\347\\204\\246\\346\\241\\206\\346\\230\\276\\347\\244\\272\\345\\215\\207\\347\\272\\247\\346\\226\\271\\346\\241\\210.md\"",
+        "\"docs/\\346\\212\\200\\346\\234\\257\\350\\260\\203\\347\\240\\224/Nikon PTP\\346\\223\\215\\344\\275\\234\\347\\240\\201\\346\\270\\205\\345\\215\\225.md\"",
+        "\"docs/\\346\\212\\200\\346\\234\\257\\350\\260\\203\\347\\240\\224/\\346\\227\\240\\347\\272\\277\\351\\201\\245\\346\\216\\247\\347\\233\\270\\346\\234\\272\\350\\260\\203\\347\\240\\224.md\""
+      ]
+    },
+    {
+      "sha": "5bbd2593132a1ea66000879b9da0c006e22bedcc",
+      "subject": "耗好使了",
+      "files": [
+        "app/src/main/java/com/ztransfer/protocol/RemoteCameraTools.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteCameraToolPanel.kt",
+        "app/src/test/java/com/ztransfer/protocol/RemoteFocusTest.kt",
+        "app/src/test/java/com/ztransfer/ui/screen/RemoteCameraToolLabelTest.kt"
+      ]
+    },
+    {
+      "sha": "c6227c6d63c558f197528bfc5d8bb712feaac617",
+      "subject": "fix: 完善宽区域对焦路径和名称映射",
+      "files": [
+        "app/src/main/java/com/ztransfer/protocol/RemoteCameraTools.kt"
+      ]
+    },
+    {
+      "sha": "9ede01a2485e543d954fb2ced07250644008f9af",
+      "subject": "feat: add film negative photo frame",
+      "files": [
+        "app/src/main/java/com/ztransfer/frame/FrameBrandLogo.kt",
+        "app/src/main/java/com/ztransfer/frame/PhotoFrameExporter.kt",
+        "app/src/main/java/com/ztransfer/frame/PhotoFrameMetadataSettings.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/SettingsScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/TransferScreen.kt",
+        "app/src/main/res/values-b+zh+Hant/strings.xml",
+        "app/src/main/res/values-zh/strings.xml",
+        "app/src/main/res/values/strings.xml",
+        "app/src/test/java/com/ztransfer/frame/PhotoFrameExporterTest.kt",
+        "app/src/test/java/com/ztransfer/frame/PhotoFrameMetadataSettingsTest.kt"
+      ]
+    },
+    {
+      "sha": "18af3c33514facd5f6da58aa386752f626fdfa94",
+      "subject": "fix: refine film frame numbering and rating stars",
+      "files": [
+        "app/src/main/java/com/ztransfer/frame/PhotoFrameExporter.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt"
+      ]
+    },
+    {
+      "sha": "eae2e8367d022f16d6c7bf0f75dfb3447bbb3346",
+      "subject": "feat: add configurable photo loading range",
+      "files": [
+        "app/src/main/java/com/ztransfer/MainActivity.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/PhotoRatingScan.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/SettingsScreen.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/CameraViewModel.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/PhotoDateRange.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/ThumbnailFillQueue.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/TransferViewModel.kt"
+      ]
+    },
+    {
+      "sha": "2bd59ede3356c1e416f87d43663721681b37395b",
+      "subject": "fix: bound photo loading by shooting date range",
+      "files": [
+        "app/src/debug/java/com/ztransfer/ui/screen/DebugPhotoGenerationProbePanel.kt",
+        "app/src/main/java/com/ztransfer/diagnostics/RatingDiagnostics.kt",
+        "app/src/main/java/com/ztransfer/protocol/NikonCamera.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/PhotoRatingScan.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/CameraViewModel.kt",
+        "app/src/release/java/com/ztransfer/ui/screen/DebugPhotoGenerationProbePanel.kt"
+      ]
+    },
+    {
+      "sha": "92eee2a4686d177f647c6b96e2c9c9c1313ac82c",
+      "subject": "fix: fall back to RAW header ratings",
+      "files": [
+        "app/src/main/java/com/ztransfer/protocol/NikonCamera.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/PhotoRatingScan.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/CameraViewModel.kt"
+      ]
+    },
+    {
+      "sha": "d6e18999620968c4d708d9caf67c577493cd2a96",
+      "subject": "fix: keep STA catalog through transient reconnects",
+      "files": [
+        "app/src/main/java/com/ztransfer/viewmodel/CameraViewModel.kt"
+      ]
+    },
+    {
+      "sha": "72cdec943259a6421616a6efb30b0f77811afac6",
+      "subject": "chore: trim diagnostics and bump version",
+      "files": [
+        "app/build.gradle.kts",
+        "app/src/main/java/com/ztransfer/diagnostics/RatingDiagnostics.kt",
+        "app/src/main/java/com/ztransfer/protocol/NikonCamera.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/PhotoRatingScan.kt"
+      ]
+    },
+    {
+      "sha": "2084defc2c6bc0d43fdc4225fa985d845ece7087",
+      "subject": "docs: add scheduler authority guide",
+      "files": [
+        "\"docs/\\346\\212\\200\\346\\234\\257\\350\\260\\203\\347\\240\\224/\\345\\205\\250\\345\\261\\200\\344\\273\\273\\345\\212\\241\\350\\260\\203\\345\\272\\246\\345\\231\\250\\346\\235\\203\\345\\250\\201\\351\\200\\273\\350\\276\\221.html\"",
+        "\"docs/\\346\\212\\200\\346\\234\\257\\350\\260\\203\\347\\240\\224/\\345\\205\\250\\345\\261\\200\\344\\273\\273\\345\\212\\241\\350\\260\\203\\345\\272\\246\\345\\231\\250\\346\\235\\203\\345\\250\\201\\351\\200\\273\\350\\276\\221.md\""
+      ]
+    },
+    {
+      "sha": "ee823e19a57a771cd2d62577580d30cbe0025527",
+      "subject": "fix: stabilize rating filter layout",
+      "files": [
+        "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt"
+      ]
+    },
+    {
+      "sha": "c85c8b3714e1e983152633e47313b8cf8d0dce36",
+      "subject": "fix: refine film frame and monitor tool layout",
+      "files": [
+        "app/src/main/java/com/ztransfer/frame/PhotoFrameExporter.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/RemoteToolBar.kt",
+        "app/src/main/res/values-b+zh+Hant/strings.xml",
+        "app/src/main/res/values-zh/strings.xml",
+        "app/src/main/res/values/strings.xml"
+      ]
+    },
+    {
+      "sha": "c85b8c1615e7d66411100e58947cef825b45bf88",
+      "subject": "docs: sync scheduler range semantics",
+      "files": [
+        "\"docs/\\344\\272\\247\\345\\223\\201\\344\\270\\216\\347\\225\\214\\351\\235\\242\\350\\256\\276\\350\\256\\241/camera-work-priority-overview.html\"",
+        "\"docs/\\345\\276\\205\\345\\201\\232/\\345\\205\\250\\345\\261\\200\\347\\233\\270\\346\\234\\272\\350\\257\\267\\346\\261\\202\\350\\260\\203\\345\\272\\246\\345\\231\\250\\351\\207\\215\\346\\236\\204\\346\\226\\271\\346\\241\\210.md\"",
+        "\"docs/\\346\\212\\200\\346\\234\\257\\350\\260\\203\\347\\240\\224/\\345\\205\\250\\345\\261\\200\\344\\273\\273\\345\\212\\241\\350\\260\\203\\345\\272\\246\\345\\231\\250\\346\\235\\203\\345\\250\\201\\351\\200\\273\\350\\276\\221.html\"",
+        "\"docs/\\346\\212\\200\\346\\234\\257\\350\\260\\203\\347\\240\\224/\\345\\205\\250\\345\\261\\200\\344\\273\\273\\345\\212\\241\\350\\260\\203\\345\\272\\246\\345\\231\\250\\346\\235\\203\\345\\250\\201\\351\\200\\273\\350\\276\\221.md\""
+      ]
+    },
+    {
+      "sha": "165b62b45d91e1532f616cde6551babc529a9ddc",
+      "subject": "fix queue animation bounds and transfer scheduling",
+      "files": [
+        "app/src/main/java/com/ztransfer/MainActivity.kt",
+        "app/src/main/java/com/ztransfer/protocol/NikonCamera.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/TransferViewModel.kt",
+        "app/src/test/java/com/ztransfer/protocol/CameraIoGateTest.kt",
+        "\"docs/\\344\\272\\247\\345\\223\\201\\344\\270\\216\\347\\225\\214\\351\\235\\242\\350\\256\\276\\350\\256\\241/camera-work-priority-overview.html\"",
+        "\"docs/\\346\\212\\200\\346\\234\\257\\350\\260\\203\\347\\240\\224/\\345\\205\\250\\345\\261\\200\\344\\273\\273\\345\\212\\241\\350\\260\\203\\345\\272\\246\\345\\231\\250\\346\\235\\203\\345\\250\\201\\351\\200\\273\\350\\276\\221.html\"",
+        "\"docs/\\346\\212\\200\\346\\234\\257\\350\\260\\203\\347\\240\\224/\\345\\205\\250\\345\\261\\200\\344\\273\\273\\345\\212\\241\\350\\260\\203\\345\\272\\246\\345\\231\\250\\346\\235\\203\\345\\250\\201\\351\\200\\273\\350\\276\\221.md\""
+      ]
+    },
+    {
+      "sha": "2b2bf0c2802cacc909e9373562d912bce2d21175",
+      "subject": "fix: verify STA pairing before confirming connection",
+      "files": [
+        "app/src/main/java/com/ztransfer/protocol/NikonCamera.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/CameraViewModel.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/StaCameraProfileStore.kt",
+        "app/src/test/java/com/ztransfer/protocol/StaPairingStateTest.kt"
+      ]
+    }
+  ],
+  "files": [
+    {
+      "path": "app/build.gradle.kts",
+      "status": "M",
+      "tasks": [
+        "N15"
+      ],
+      "hunks": [
+        "@@ -45,2 +45,2 @@ android {"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/debug/java/com/ztransfer/ui/screen/DebugPhotoGenerationProbePanel.kt",
+      "status": "M",
+      "tasks": [
+        "N13"
+      ],
+      "hunks": [
+        "@@ -40,0 +41 @@ import androidx.compose.runtime.setValue",
+        "@@ -51,0 +53 @@ import com.ztransfer.diagnostics.PhotoGenerationProbe",
+        "@@ -56 +58,4 @@ import com.ztransfer.ui.theme.AppTheme",
+        "@@ -60,0 +66,3 @@ internal fun DebugPhotoGenerationProbePanel(modifier: Modifier = Modifier) {",
+        "@@ -149,0 +158,20 @@ internal fun DebugPhotoGenerationProbePanel(modifier: Modifier = Modifier) {",
+        "@@ -175,0 +204,14 @@ internal fun DebugPhotoGenerationProbePanel(modifier: Modifier = Modifier) {"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/MainActivity.kt",
+      "status": "M",
+      "tasks": [
+        "N15"
+      ],
+      "hunks": [
+        "@@ -335,0 +336 @@ private data class MainTransferUiState(",
+        "@@ -341,0 +343 @@ private fun TransferState.toMainTransferUiState(): MainTransferUiState = MainTra",
+        "@@ -496 +498,5 @@ private fun SharedQueueControls(",
+        "@@ -750,0 +757,3 @@ fun MainScreen(transferViewModel: TransferViewModel) {"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/diagnostics/RatingDiagnostics.kt",
+      "status": "A",
+      "tasks": [
+        "N05"
+      ],
+      "hunks": [
+        "@@ -0,0 +1,67 @@"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/filter/LutColorPipeline.kt",
+      "status": "A",
+      "tasks": [
+        "N12"
+      ],
+      "hunks": [
+        "@@ -0,0 +1,47 @@"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/filter/PhotoFilterPreset.kt",
+      "status": "M",
+      "tasks": [
+        "N12"
+      ],
+      "hunks": [
+        "@@ -68,0 +69,2 @@ data class PhotoFilterSelection(",
+        "@@ -73,0 +76,27 @@ data class PhotoFilterSelection("
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/filter/PhotoFilterRenderer.kt",
+      "status": "M",
+      "tasks": [
+        "N12"
+      ],
+      "hunks": [
+        "@@ -74,0 +75 @@ object PhotoFilterRenderer {",
+        "@@ -104 +105,5 @@ object PhotoFilterRenderer {",
+        "@@ -278 +283,2 @@ object PhotoFilterRenderer {",
+        "@@ -300,0 +307 @@ object PhotoFilterRenderer {",
+        "@@ -402 +409,5 @@ object PhotoFilterRenderer {",
+        "@@ -507,0 +519,21 @@ object PhotoFilterRenderer {"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/frame/FrameBrandLogo.kt",
+      "status": "M",
+      "tasks": [
+        "N13"
+      ],
+      "hunks": [
+        "@@ -93 +93,2 @@ internal fun PhotoFramePreset.brandLogoScale(): Float = when (this) {"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/frame/PhotoFrameExporter.kt",
+      "status": "M",
+      "tasks": [
+        "N13"
+      ],
+      "hunks": [
+        "@@ -76,0 +77,5 @@ private const val FILM_EDGE_BOTTOM_TO_PHOTO_WIDTH = 0.085f",
+        "@@ -116,0 +122 @@ enum class PhotoFramePreset(internal val fileSuffix: String) {",
+        "@@ -1695,0 +1702 @@ object PhotoFrameExporter {",
+        "@@ -1767 +1774,2 @@ object PhotoFrameExporter {",
+        "@@ -1972,0 +1981 @@ object PhotoFrameExporter {",
+        "@@ -1983 +1992,2 @@ object PhotoFrameExporter {",
+        "@@ -2198,2 +2208,7 @@ object PhotoFrameExporter {",
+        "@@ -2205 +2220,4 @@ object PhotoFrameExporter {",
+        "@@ -2257,0 +2276,5 @@ object PhotoFrameExporter {",
+        "@@ -2345,0 +2369,15 @@ object PhotoFrameExporter {",
+        "@@ -2636,0 +2675 @@ object PhotoFrameExporter {",
+        "@@ -3462,0 +3502 @@ object PhotoFrameExporter {",
+        "@@ -3843,0 +3884 @@ object PhotoFrameExporter {",
+        "@@ -3872 +3913 @@ object PhotoFrameExporter {",
+        "@@ -3923 +3964,2 @@ object PhotoFrameExporter {",
+        "@@ -3932,0 +3975 @@ object PhotoFrameExporter {",
+        "@@ -3940 +3983,2 @@ object PhotoFrameExporter {",
+        "@@ -4012,0 +4057 @@ object PhotoFrameExporter {",
+        "@@ -4032 +4077,6 @@ object PhotoFrameExporter {",
+        "@@ -4036,0 +4087,81 @@ object PhotoFrameExporter {",
+        "@@ -5110,0 +5242,14 @@ internal fun calculateOriginalQualityEditorialFrameLayout(",
+        "@@ -5123,0 +5269 @@ internal fun PhotoFramePreset.isEditorialFrame(): Boolean = when (this) {",
+        "@@ -5241 +5387,2 @@ private fun PhotoFrameWatermark.forEditorialPhoto(",
+        "@@ -5258 +5405,2 @@ private fun PhotoFrameWatermark.bandWatermarkFor(",
+        "@@ -5646 +5794,2 @@ private const val FILM_GALLERY_RENDER_VERSION = 1",
+        "@@ -5689 +5838,9 @@ internal fun photoFilterRenderFingerprint(filter: PhotoFilterSelection): String",
+        "@@ -5710,0 +5868,3 @@ internal fun photoFrameWatermarkFingerprint(",
+        "@@ -5736,0 +5897,3 @@ internal fun photoFrameWatermarkFingerprint(",
+        "@@ -5804 +5967,2 @@ private fun resolvedWatermarkPosition("
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/frame/PhotoFrameMetadataSettings.kt",
+      "status": "M",
+      "tasks": [
+        "N13"
+      ],
+      "hunks": [
+        "@@ -102,0 +103,9 @@ internal fun defaultPhotoFrameMetadataSettings("
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/lut/PhotoLutEditorState.kt",
+      "status": "M",
+      "tasks": [
+        "N12"
+      ],
+      "hunks": [
+        "@@ -6,0 +7 @@ import com.ztransfer.filter.PhotoFilterSelection",
+        "@@ -44 +45,10 @@ internal class PhotoLutEditorState("
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/lut/PhotoLutStore.kt",
+      "status": "M",
+      "tasks": [
+        "N12"
+      ],
+      "hunks": [
+        "@@ -7,0 +8 @@ import com.ztransfer.filter.PhotoFilterSelection",
+        "@@ -25,0 +27,7 @@ internal class PhotoLutStore(context: Context) {",
+        "@@ -28,0 +37,27 @@ internal class PhotoLutStore(context: Context) {",
+        "@@ -43 +78,3 @@ internal class PhotoLutStore(context: Context) {",
+        "@@ -49,0 +87,3 @@ internal class PhotoLutStore(context: Context) {",
+        "@@ -55,0 +96,4 @@ internal class PhotoLutStore(context: Context) {",
+        "@@ -81 +125,9 @@ internal class PhotoLutStore(context: Context) {"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/protocol/LiveViewFocusDiagnostic.kt",
+      "status": "A",
+      "tasks": [
+        "N07"
+      ],
+      "hunks": [
+        "@@ -0,0 +1,121 @@"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/protocol/LiveViewMetadata.kt",
+      "status": "M",
+      "tasks": [
+        "N07"
+      ],
+      "hunks": [
+        "@@ -10 +10,2 @@ enum class LiveViewFocusJudgement {",
+        "@@ -14 +15 @@ enum class LiveViewFocusJudgement {",
+        "@@ -25,0 +27,17 @@ data class LiveViewFocusFrame(",
+        "@@ -51 +69 @@ data class LiveViewMetadata(",
+        "@@ -56 +74,5 @@ data class LiveViewMetadata(",
+        "@@ -88 +110 @@ private const val EXTENDED_SOUND_LEVELS_OFFSET = 824",
+        "@@ -95 +117 @@ private const val EXTENDED_SOUND_LEVELS_OFFSET = 824",
+        "@@ -97 +119 @@ private const val EXTENDED_SOUND_LEVELS_OFFSET = 824",
+        "@@ -145 +167 @@ internal fun parseLiveViewMetadata(",
+        "@@ -152,3 +174,5 @@ internal fun parseLiveViewMetadata(",
+        "@@ -157,4 +181,3 @@ internal fun parseLiveViewMetadata(",
+        "@@ -176 +199 @@ internal fun parseLiveViewMetadata(",
+        "@@ -186,2 +209,36 @@ internal fun parseLiveViewMetadata(",
+        "@@ -194 +251 @@ internal fun parseLiveViewMetadata(",
+        "@@ -200 +257,5 @@ internal fun parseLiveViewMetadata(",
+        "@@ -270,0 +332,16 @@ internal fun parseCompactLiveViewAttitude(payload: ByteArray, headerSize: Int):"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/protocol/LiveViewVideoDiagnostic.kt",
+      "status": "A",
+      "tasks": [
+        "N10"
+      ],
+      "hunks": [
+        "@@ -0,0 +1,16 @@"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/protocol/MonitorMovieFormat.kt",
+      "status": "A",
+      "tasks": [
+        "N10"
+      ],
+      "hunks": [
+        "@@ -0,0 +1,20 @@"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/protocol/MonitorStorage.kt",
+      "status": "M",
+      "tasks": [
+        "N02",
+        "N10"
+      ],
+      "hunks": [
+        "@@ -7 +6,0 @@ import kotlinx.coroutines.withContext",
+        "@@ -20,10 +19,12 @@ internal data class MonitorStorageRead(val freeBytes: Long? = null, val unsuppor",
+        "@@ -31 +31,0 @@ internal suspend fun NikonCamera.monitorFreeBytes(storageId: Int, allowed: () ->"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/protocol/NikonCamera.kt",
+      "status": "M",
+      "tasks": [
+        "N02",
+        "N04",
+        "N05",
+        "N14"
+      ],
+      "hunks": [
+        "@@ -15,0 +16 @@ import com.ztransfer.diagnostics.PhotoGenerationProbe",
+        "@@ -24 +24,0 @@ import kotlinx.coroutines.flow.MutableStateFlow",
+        "@@ -26 +25,0 @@ import kotlinx.coroutines.flow.receiveAsFlow",
+        "@@ -29,0 +29,4 @@ import kotlinx.coroutines.withContext",
+        "@@ -189,0 +193,23 @@ internal fun updateFhdSupport(",
+        "@@ -191,2 +217,4 @@ internal fun updateFhdSupport(",
+        "@@ -197,2 +225,13 @@ internal class CameraIoGate(",
+        "@@ -199,0 +239,99 @@ internal class CameraIoGate(",
+        "@@ -201 +339 @@ internal class CameraIoGate(",
+        "@@ -205 +343,6 @@ internal class CameraIoGate(",
+        "@@ -210 +353 @@ internal class CameraIoGate(",
+        "@@ -212,14 +355,17 @@ internal class CameraIoGate(",
+        "@@ -227,4 +372,0 @@ internal class CameraIoGate(",
+        "@@ -232 +374,4 @@ internal class CameraIoGate(",
+        "@@ -236 +381,6 @@ internal class CameraIoGate(",
+        "@@ -240,4 +389,0 @@ internal class CameraIoGate(",
+        "@@ -245,3 +391,103 @@ internal class CameraIoGate(",
+        "@@ -297 +543,6 @@ internal fun transferredBytesThisAttempt(downloaded: Long, resumeOffset: Long):",
+        "@@ -303,0 +555,12 @@ internal const val STA_PAIRING_MARKER_PREFIX = \"sta_paired_\"",
+        "@@ -1328,2 +1591,239 @@ class NikonCamera(private val context: Context) {",
+        "@@ -1339,2 +1839,2 @@ class NikonCamera(private val context: Context) {",
+        "@@ -1342,4 +1842,21 @@ class NikonCamera(private val context: Context) {",
+        "@@ -1357 +1874 @@ class NikonCamera(private val context: Context) {",
+        "@@ -1383 +1900 @@ class NikonCamera(private val context: Context) {",
+        "@@ -1387 +1904 @@ class NikonCamera(private val context: Context) {",
+        "@@ -1412 +1929 @@ class NikonCamera(private val context: Context) {",
+        "@@ -1414 +1931,5 @@ class NikonCamera(private val context: Context) {",
+        "@@ -1487 +2008 @@ class NikonCamera(private val context: Context) {",
+        "@@ -1586,0 +2108 @@ class NikonCamera(private val context: Context) {",
+        "@@ -1636,0 +2159 @@ class NikonCamera(private val context: Context) {",
+        "@@ -1641,0 +2165 @@ class NikonCamera(private val context: Context) {",
+        "@@ -1710,0 +2235,7 @@ class NikonCamera(private val context: Context) {",
+        "@@ -1749,0 +2281 @@ class NikonCamera(private val context: Context) {",
+        "@@ -1753,0 +2286 @@ class NikonCamera(private val context: Context) {",
+        "@@ -1800,0 +2334 @@ class NikonCamera(private val context: Context) {",
+        "@@ -1857 +2391 @@ class NikonCamera(private val context: Context) {",
+        "@@ -1904,0 +2439 @@ class NikonCamera(private val context: Context) {",
+        "@@ -1972 +2507,4 @@ class NikonCamera(private val context: Context) {",
+        "@@ -2001 +2539,4 @@ class NikonCamera(private val context: Context) {",
+        "@@ -2079 +2620,4 @@ class NikonCamera(private val context: Context) {",
+        "@@ -2154 +2698 @@ class NikonCamera(private val context: Context) {",
+        "@@ -2156,2 +2700,3 @@ class NikonCamera(private val context: Context) {",
+        "@@ -2197,0 +2743 @@ class NikonCamera(private val context: Context) {",
+        "@@ -2198,0 +2745,2 @@ class NikonCamera(private val context: Context) {",
+        "@@ -2202 +2750 @@ class NikonCamera(private val context: Context) {",
+        "@@ -2209 +2757 @@ class NikonCamera(private val context: Context) {",
+        "@@ -2280 +2828 @@ class NikonCamera(private val context: Context) {",
+        "@@ -2401,2 +2949 @@ class NikonCamera(private val context: Context) {",
+        "@@ -2447,2 +2994,7 @@ class NikonCamera(private val context: Context) {",
+        "@@ -2452 +3004 @@ class NikonCamera(private val context: Context) {",
+        "@@ -2463 +3015,2 @@ class NikonCamera(private val context: Context) {",
+        "@@ -2477,4 +3030,2 @@ class NikonCamera(private val context: Context) {",
+        "@@ -2484 +3035 @@ class NikonCamera(private val context: Context) {",
+        "@@ -2501,0 +3053 @@ class NikonCamera(private val context: Context) {",
+        "@@ -2524 +3076 @@ class NikonCamera(private val context: Context) {",
+        "@@ -2543 +3095 @@ class NikonCamera(private val context: Context) {",
+        "@@ -2573,0 +3126 @@ class NikonCamera(private val context: Context) {",
+        "@@ -2581 +3134 @@ class NikonCamera(private val context: Context) {",
+        "@@ -2584 +3137,3 @@ class NikonCamera(private val context: Context) {",
+        "@@ -2602,2 +3157 @@ class NikonCamera(private val context: Context) {",
+        "@@ -2637,2 +3191 @@ class NikonCamera(private val context: Context) {",
+        "@@ -2640,0 +3194 @@ class NikonCamera(private val context: Context) {",
+        "@@ -2648 +3202 @@ class NikonCamera(private val context: Context) {",
+        "@@ -2690 +3244 @@ class NikonCamera(private val context: Context) {",
+        "@@ -2826 +3380 @@ class NikonCamera(private val context: Context) {",
+        "@@ -2867 +3421 @@ class NikonCamera(private val context: Context) {",
+        "@@ -2908 +3462 @@ class NikonCamera(private val context: Context) {",
+        "@@ -3181 +3735 @@ class NikonCamera(private val context: Context) {",
+        "@@ -3200 +3754 @@ class NikonCamera(private val context: Context) {",
+        "@@ -3312 +3866 @@ class NikonCamera(private val context: Context) {",
+        "@@ -3520 +4074 @@ class NikonCamera(private val context: Context) {",
+        "@@ -3688 +4242 @@ class NikonCamera(private val context: Context) {",
+        "@@ -3744,2 +4298,2 @@ class NikonCamera(private val context: Context) {",
+        "@@ -3752,0 +4307 @@ class NikonCamera(private val context: Context) {",
+        "@@ -3776,23 +4331,21 @@ class NikonCamera(private val context: Context) {",
+        "@@ -3800,0 +4354 @@ class NikonCamera(private val context: Context) {",
+        "@@ -3802,12 +4356,5 @@ class NikonCamera(private val context: Context) {",
+        "@@ -3814,0 +4362,6 @@ class NikonCamera(private val context: Context) {",
+        "@@ -3816 +4369 @@ class NikonCamera(private val context: Context) {",
+        "@@ -3826,0 +4380 @@ class NikonCamera(private val context: Context) {",
+        "@@ -4234 +4788 @@ class NikonCamera(private val context: Context) {",
+        "@@ -4240 +4794,9 @@ class NikonCamera(private val context: Context) {",
+        "@@ -4268 +4830 @@ class NikonCamera(private val context: Context) {",
+        "@@ -4294 +4856 @@ class NikonCamera(private val context: Context) {",
+        "@@ -4308,0 +4871 @@ class NikonCamera(private val context: Context) {",
+        "@@ -4326,0 +4890,5 @@ class NikonCamera(private val context: Context) {",
+        "@@ -4331,2 +4899,2 @@ class NikonCamera(private val context: Context) {",
+        "@@ -4342,0 +4911,11 @@ class NikonCamera(private val context: Context) {",
+        "@@ -4367,2 +4946,6 @@ class NikonCamera(private val context: Context) {",
+        "@@ -4370,2 +4953,15 @@ class NikonCamera(private val context: Context) {",
+        "@@ -4385,0 +4982 @@ class NikonCamera(private val context: Context) {",
+        "@@ -4414,0 +5012 @@ class NikonCamera(private val context: Context) {",
+        "@@ -4538,6 +5136,3 @@ class NikonCamera(private val context: Context) {",
+        "@@ -4545,0 +5141 @@ class NikonCamera(private val context: Context) {",
+        "@@ -4563 +5159,4 @@ class NikonCamera(private val context: Context) {",
+        "@@ -4569,0 +5169,2 @@ class NikonCamera(private val context: Context) {",
+        "@@ -4577,0 +5179,25 @@ class NikonCamera(private val context: Context) {",
+        "@@ -4593,0 +5220,9 @@ class NikonCamera(private val context: Context) {",
+        "@@ -4597 +5232 @@ class NikonCamera(private val context: Context) {",
+        "@@ -4607,0 +5243 @@ class NikonCamera(private val context: Context) {"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/protocol/PhotoRating.kt",
+      "status": "A",
+      "tasks": [
+        "N04"
+      ],
+      "hunks": [
+        "@@ -0,0 +1,108 @@"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/protocol/PhotoRatingPairs.kt",
+      "status": "A",
+      "tasks": [
+        "N04"
+      ],
+      "hunks": [
+        "@@ -0,0 +1,19 @@"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/protocol/PtpConstants.kt",
+      "status": "M",
+      "tasks": [
+        "N15"
+      ],
+      "hunks": [
+        "@@ -59,0 +60,2 @@ object PtpConstants {"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/protocol/RemoteCameraTools.kt",
+      "status": "M",
+      "tasks": [
+        "N08"
+      ],
+      "hunks": [
+        "@@ -2,0 +3,2 @@ package com.ztransfer.protocol",
+        "@@ -4 +6,51 @@ package com.ztransfer.protocol",
+        "@@ -5,0 +58 @@ internal fun remoteToolPropertyCandidates(tool: RemoteCameraTool, movie: Boolean",
+        "@@ -14,0 +68,3 @@ internal suspend fun NikonCamera.rcGetCameraTool(",
+        "@@ -22,0 +79,53 @@ internal suspend fun NikonCamera.rcGetCameraTool("
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/protocol/RemoteLab.kt",
+      "status": "M",
+      "tasks": [
+        "N02",
+        "N08"
+      ],
+      "hunks": [
+        "@@ -17 +17 @@ import kotlinx.coroutines.withContext",
+        "@@ -241 +241 @@ suspend fun NikonCamera.labCommand(code: Int, vararg params: Int): Pair<Int, Byt",
+        "@@ -252 +252 @@ suspend fun NikonCamera.labSetProp(prop: Int, raw: ByteArray): Int =",
+        "@@ -410,18 +410,2 @@ private fun fmtVal(prop: Int, raw: Long): String = when (prop) {",
+        "@@ -841 +825 @@ suspend fun NikonCamera.rcGetFocusMode(): RcFocusMode? {",
+        "@@ -859,5 +843 @@ suspend fun NikonCamera.rcGetFocusMode(): RcFocusMode? {",
+        "@@ -1001 +981 @@ private suspend fun NikonCamera.focusCommand(",
+        "@@ -1006 +986 @@ private suspend fun NikonCamera.focusCommand(",
+        "@@ -1027,0 +1008 @@ internal suspend fun runTapFocusStart(",
+        "@@ -1031 +1012,2 @@ internal suspend fun runTapFocusStart(",
+        "@@ -1053 +1035 @@ internal suspend fun runTapFocusStart(",
+        "@@ -1073 +1055 @@ internal suspend fun runTapFocusStart(",
+        "@@ -1163 +1145 @@ private suspend fun NikonCamera.afDriveAndWait(",
+        "@@ -1171 +1153,3 @@ suspend fun NikonCamera.rcAfDriveAndWait(timeoutMs: Long = 6_000L): RcAfResult =",
+        "@@ -1185 +1169,3 @@ suspend fun NikonCamera.rcEndSubjectTracking(timeoutMs: Long = 6_000L): Int? =",
+        "@@ -1197,0 +1184 @@ suspend fun NikonCamera.rcFocusAt(",
+        "@@ -1203 +1190 @@ suspend fun NikonCamera.rcFocusAt(",
+        "@@ -1213,0 +1201 @@ suspend fun NikonCamera.rcFocusAt(",
+        "@@ -1294,9 +1282,23 @@ suspend fun NikonCamera.rcFocusAt(",
+        "@@ -1304 +1305,0 @@ suspend fun NikonCamera.rcPollEvents(): List<Pair<Int, Long>> {",
+        "@@ -1306,4 +1307,3 @@ suspend fun NikonCamera.rcPollEvents(): List<Pair<Int, Long>> {",
+        "@@ -1429 +1429 @@ internal suspend fun NikonCamera.rcStartMovieDetailed(",
+        "@@ -1511 +1511 @@ private fun NikonCamera.prepareAndStartMovieLocked(): RcMovieStartResult {",
+        "@@ -1518 +1518 @@ internal suspend fun NikonCamera.rcPrepareAndStartMovieDetailed(",
+        "@@ -1628 +1628 @@ suspend fun NikonCamera.labEndLiveView(): Int {",
+        "@@ -1659 +1659 @@ suspend fun NikonCamera.labGrabFrame(): LiveViewPacket? =",
+        "@@ -1792,2 +1792,3 @@ private suspend fun NikonCamera.logTrackingFocusProperties(",
+        "@@ -2654,0 +2656,19 @@ suspend fun NikonCamera.runLabProbe("
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/protocol/VideoRating.kt",
+      "status": "A",
+      "tasks": [
+        "N04"
+      ],
+      "hunks": [
+        "@@ -0,0 +1,98 @@"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt",
+      "status": "M",
+      "tasks": [
+        "N06",
+        "N11"
+      ],
+      "hunks": [
+        "@@ -2,0 +3,3 @@ package com.ztransfer.ui.screen",
+        "@@ -108,0 +112 @@ import androidx.compose.ui.platform.LocalDensity",
+        "@@ -114,0 +119 @@ import androidx.compose.ui.text.font.FontWeight",
+        "@@ -122,0 +128 @@ import com.ztransfer.gps.NikonGpsService",
+        "@@ -138,0 +145 @@ import com.ztransfer.viewmodel.PhotoDateRange",
+        "@@ -141,0 +149 @@ import com.ztransfer.viewmodel.TransferTask",
+        "@@ -234 +242 @@ internal data class FileListTransferUiState(",
+        "@@ -236,0 +245,4 @@ internal data class FileListTransferUiState(",
+        "@@ -257 +269 @@ internal fun TransferState.toFileListTransferUiState(): FileListTransferUiState",
+        "@@ -259,0 +272,4 @@ internal fun TransferState.toFileListTransferUiState(): FileListTransferUiState",
+        "@@ -322,0 +339,11 @@ internal fun exportedHandlesForUntransferredFilter(",
+        "@@ -326 +353 @@ internal fun exportedHandlesForUntransferredFilter(",
+        "@@ -446 +473,5 @@ private val TOP_BAR_COMPACT_BUTTON_MIN_WIDTH = 40.dp",
+        "@@ -562,0 +594 @@ fun FileListScreen(",
+        "@@ -617,0 +650,10 @@ fun FileListScreen(",
+        "@@ -804 +846 @@ fun FileListScreen(",
+        "@@ -809,0 +852,14 @@ fun FileListScreen(",
+        "@@ -821,0 +878,3 @@ fun FileListScreen(",
+        "@@ -830,0 +890,3 @@ fun FileListScreen(",
+        "@@ -837 +899,3 @@ fun FileListScreen(",
+        "@@ -841,2 +905,2 @@ fun FileListScreen(",
+        "@@ -875,2 +939,2 @@ fun FileListScreen(",
+        "@@ -880,2 +944,2 @@ fun FileListScreen(",
+        "@@ -898 +962 @@ fun FileListScreen(",
+        "@@ -904 +968 @@ fun FileListScreen(",
+        "@@ -970,0 +1035 @@ fun FileListScreen(",
+        "@@ -972 +1037,2 @@ fun FileListScreen(",
+        "@@ -976 +1042 @@ fun FileListScreen(",
+        "@@ -977,0 +1044 @@ fun FileListScreen(",
+        "@@ -1052 +1118,0 @@ fun FileListScreen(",
+        "@@ -1201 +1267 @@ fun FileListScreen(",
+        "@@ -1539 +1605,5 @@ fun FileListScreen(",
+        "@@ -1567 +1637 @@ fun FileListScreen(",
+        "@@ -2016,0 +2087 @@ fun FileListScreen(",
+        "@@ -2020 +2091 @@ fun FileListScreen(",
+        "@@ -2024,2 +2095,4 @@ fun FileListScreen(",
+        "@@ -2177 +2250,20 @@ fun FileListScreen(",
+        "@@ -3260 +3352 @@ private fun ThumbnailGrid(",
+        "@@ -3589 +3681 @@ private fun ThumbnailGrid(",
+        "@@ -3594 +3686 @@ private fun ThumbnailGrid(",
+        "@@ -4374,0 +4467 @@ private fun FilterOverlay(",
+        "@@ -4378 +4471 @@ private fun FilterOverlay(",
+        "@@ -4381,0 +4475 @@ private fun FilterOverlay(",
+        "@@ -4382,0 +4477,3 @@ private fun FilterOverlay(",
+        "@@ -4389,2 +4486 @@ private fun FilterOverlay(",
+        "@@ -4392,2 +4488 @@ private fun FilterOverlay(",
+        "@@ -4402,0 +4498,9 @@ private fun FilterOverlay(",
+        "@@ -4404 +4508 @@ private fun FilterOverlay(",
+        "@@ -4446 +4550,4 @@ private fun FilterOverlay(",
+        "@@ -4448,23 +4554,0 @@ private fun FilterOverlay(",
+        "@@ -4487 +4571,10 @@ private fun FilterOverlay(",
+        "@@ -4498,5 +4590,0 @@ private fun FilterOverlay(",
+        "@@ -4567,4 +4655,128 @@ private fun FilterOverlay(",
+        "@@ -4590,0 +4803,21 @@ private fun FilterOverlay(",
+        "@@ -4823,0 +5057,2 @@ internal fun FilterChip(",
+        "@@ -4837,0 +5073 @@ internal fun FilterChip(",
+        "@@ -4838,0 +5075 @@ internal fun FilterChip("
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/LandscapeMonitorControls.kt",
+      "status": "M",
+      "tasks": [
+        "N09"
+      ],
+      "hunks": [
+        "@@ -18,0 +19,12 @@ import androidx.compose.ui.unit.dp",
+        "@@ -33 +45 @@ internal fun LandscapeMonitorControls(",
+        "@@ -81,3 +92,0 @@ internal fun LandscapeMonitorControls(",
+        "@@ -88,9 +97,44 @@ internal fun LandscapeMonitorControls("
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/PhotoLutEditor.kt",
+      "status": "M",
+      "tasks": [
+        "N12"
+      ],
+      "hunks": [
+        "@@ -59,0 +60 @@ internal fun PhotoLutEditor(state: PhotoLutEditorState, hapticsEnabled: Boolean)",
+        "@@ -101,0 +103 @@ internal fun PhotoLutEditor(state: PhotoLutEditorState, hapticsEnabled: Boolean)",
+        "@@ -115,4 +117,10 @@ internal fun PhotoLutEditor(state: PhotoLutEditorState, hapticsEnabled: Boolean)",
+        "@@ -121,0 +130,55 @@ internal fun PhotoLutEditor(state: PhotoLutEditorState, hapticsEnabled: Boolean)"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/PhotoPreview.kt",
+      "status": "M",
+      "tasks": [
+        "N11"
+      ],
+      "hunks": [
+        "@@ -857 +857 @@ internal fun PhotoPreviewOverlay("
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/PhotoRatingScan.kt",
+      "status": "A",
+      "tasks": [
+        "N03",
+        "N05"
+      ],
+      "hunks": [
+        "@@ -0,0 +1,290 @@"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/RemoteCameraToolPanel.kt",
+      "status": "M",
+      "tasks": [
+        "N08"
+      ],
+      "hunks": [
+        "@@ -28,0 +29,3 @@ import kotlinx.coroutines.launch",
+        "@@ -50,0 +54 @@ internal fun cameraToolLabelResource(tool: RemoteCameraTool, prop: Int, value: L",
+        "@@ -57,0 +62,11 @@ private fun focusAreaLabelResource(prop: Int, value: Long, model: String?, dataT",
+        "@@ -102 +117,2 @@ private val focusAreaNameOrder = listOf(",
+        "@@ -124,0 +141 @@ internal fun RemoteCameraToolPanel(",
+        "@@ -140 +157,7 @@ internal fun RemoteCameraToolPanel(",
+        "@@ -158,0 +182,3 @@ internal fun RemoteCameraToolPanel(",
+        "@@ -186,2 +212,3 @@ internal fun RemoteCameraToolPanel(",
+        "@@ -212,0 +240 @@ internal fun RemoteCameraToolPanel(",
+        "@@ -216 +244 @@ internal fun RemoteCameraToolPanel(",
+        "@@ -217,0 +246 @@ internal fun RemoteCameraToolPanel(",
+        "@@ -244,0 +274,5 @@ internal fun RemoteCameraToolPanel(",
+        "@@ -245,0 +280 @@ internal fun RemoteCameraToolPanel(",
+        "@@ -248 +283 @@ internal fun RemoteCameraToolPanel(",
+        "@@ -249,0 +285 @@ internal fun RemoteCameraToolPanel(",
+        "@@ -251 +286,0 @@ internal fun RemoteCameraToolPanel(",
+        "@@ -261,0 +297,6 @@ internal fun RemoteCameraToolPanel(",
+        "@@ -263,0 +305 @@ internal fun RemoteCameraToolPanel("
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/RemoteDiagnosticReport.kt",
+      "status": "D",
+      "tasks": [
+        "N09"
+      ],
+      "hunks": [
+        "@@ -1,28 +0,0 @@"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/RemoteDispOverlay.kt",
+      "status": "M",
+      "tasks": [
+        "N10"
+      ],
+      "hunks": [
+        "@@ -125,0 +126,32 @@ internal fun rememberMonitorStorage(camera: NikonCamera?, storageIds: List<Int>,",
+        "@@ -130 +162,6 @@ internal fun CameraMonitorDisp(cells: List<Pair<String, String>>, storage: List<",
+        "@@ -138 +175,3 @@ internal fun CameraMonitorDisp(cells: List<Pair<String, String>>, storage: List<",
+        "@@ -140,2 +179,3 @@ internal fun CameraMonitorDisp(cells: List<Pair<String, String>>, storage: List<"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/RemoteScreen.kt",
+      "status": "M",
+      "tasks": [
+        "N07",
+        "N09",
+        "N10"
+      ],
+      "hunks": [
+        "@@ -2,0 +3,2 @@ package com.ztransfer.ui.screen",
+        "@@ -137,0 +140 @@ import com.ztransfer.protocol.RcParam",
+        "@@ -152,0 +156,3 @@ import com.ztransfer.protocol.rcFocusAt",
+        "@@ -159,0 +166 @@ import com.ztransfer.protocol.rcGetCompatibleParam",
+        "@@ -172 +178,0 @@ import com.ztransfer.protocol.rcStartMovieDetailed",
+        "@@ -198,0 +205,2 @@ import kotlinx.coroutines.delay",
+        "@@ -331,2 +338,0 @@ private data class ConfirmedFocusMarker(",
+        "@@ -622,0 +629,2 @@ private fun RemoteContent(",
+        "@@ -641 +649 @@ private fun RemoteContent(",
+        "@@ -660,5 +668,5 @@ private fun RemoteContent(",
+        "@@ -666,2 +673,0 @@ private fun RemoteContent(",
+        "@@ -669,6 +675,28 @@ private fun RemoteContent(",
+        "@@ -687,0 +716,3 @@ private fun RemoteContent(",
+        "@@ -703,0 +735,2 @@ private fun RemoteContent(",
+        "@@ -710 +743 @@ private fun RemoteContent(",
+        "@@ -728,6 +760,0 @@ private fun RemoteContent(",
+        "@@ -735,16 +762,2 @@ private fun RemoteContent(",
+        "@@ -817,9 +829,0 @@ private fun RemoteContent(",
+        "@@ -828 +832 @@ private fun RemoteContent(",
+        "@@ -835,14 +838,0 @@ private fun RemoteContent(",
+        "@@ -937,0 +928 @@ private fun RemoteContent(",
+        "@@ -938,0 +930 @@ private fun RemoteContent(",
+        "@@ -948 +940 @@ private fun RemoteContent(",
+        "@@ -957,0 +950,4 @@ private fun RemoteContent(",
+        "@@ -1020 +1016,2 @@ private fun RemoteContent(",
+        "@@ -1022 +1018,0 @@ private fun RemoteContent(",
+        "@@ -1025,0 +1022,5 @@ private fun RemoteContent(",
+        "@@ -1219,0 +1221,38 @@ private fun RemoteContent(",
+        "@@ -1298 +1337 @@ private fun RemoteContent(",
+        "@@ -1310 +1348,0 @@ private fun RemoteContent(",
+        "@@ -1313 +1350,0 @@ private fun RemoteContent(",
+        "@@ -1315,0 +1353 @@ private fun RemoteContent(",
+        "@@ -1334 +1372 @@ private fun RemoteContent(",
+        "@@ -1353,0 +1392,2 @@ private fun RemoteContent(",
+        "@@ -1359,3 +1398,0 @@ private fun RemoteContent(",
+        "@@ -1363 +1400,2 @@ private fun RemoteContent(",
+        "@@ -1368 +1406,2 @@ private fun RemoteContent(",
+        "@@ -1370,2 +1409 @@ private fun RemoteContent(",
+        "@@ -1373,3 +1411,3 @@ private fun RemoteContent(",
+        "@@ -1390 +1427,0 @@ private fun RemoteContent(",
+        "@@ -1419 +1455,0 @@ private fun RemoteContent(",
+        "@@ -1426 +1462 @@ private fun RemoteContent(",
+        "@@ -1477 +1513 @@ private fun RemoteContent(",
+        "@@ -1535 +1571 @@ private fun RemoteContent(",
+        "@@ -1566 +1601,0 @@ private fun RemoteContent(",
+        "@@ -1585 +1619,0 @@ private fun RemoteContent(",
+        "@@ -1613,0 +1648,3 @@ private fun RemoteContent(",
+        "@@ -1634 +1671 @@ private fun RemoteContent(",
+        "@@ -1664 +1701 @@ private fun RemoteContent(",
+        "@@ -1666 +1702,0 @@ private fun RemoteContent(",
+        "@@ -1723 +1759 @@ private fun RemoteContent(",
+        "@@ -1777 +1813 @@ private fun RemoteContent(",
+        "@@ -1781 +1817 @@ private fun RemoteContent(",
+        "@@ -1782,0 +1819 @@ private fun RemoteContent(",
+        "@@ -1857,151 +1893,0 @@ private fun RemoteContent(",
+        "@@ -2013,0 +1900,17 @@ private fun RemoteContent(",
+        "@@ -2059,0 +1963,8 @@ private fun RemoteContent(",
+        "@@ -2078 +1989 @@ private fun RemoteContent(",
+        "@@ -2140,0 +2052 @@ private fun RemoteContent(",
+        "@@ -2146 +2058 @@ private fun RemoteContent(",
+        "@@ -2203 +2115 @@ private fun RemoteContent(",
+        "@@ -2207,0 +2120,22 @@ private fun RemoteContent(",
+        "@@ -2212 +2146,11 @@ private fun RemoteContent(",
+        "@@ -2341 +2284,0 @@ private fun RemoteContent(",
+        "@@ -2425 +2368 @@ private fun RemoteContent(",
+        "@@ -2444 +2386,0 @@ private fun RemoteContent(",
+        "@@ -2490 +2432,5 @@ private fun RemoteContent(",
+        "@@ -2521,5 +2467,2 @@ private fun RemoteContent(",
+        "@@ -2574,4 +2517,2 @@ private fun RemoteContent(",
+        "@@ -2644,5 +2585,4 @@ private fun RemoteContent(",
+        "@@ -2821,0 +2762 @@ private fun RemoteContent(",
+        "@@ -2824,0 +2766 @@ private fun RemoteContent(",
+        "@@ -2834 +2776 @@ private fun RemoteContent(",
+        "@@ -2849,0 +2792 @@ private fun RemoteContent(",
+        "@@ -2853,0 +2797 @@ private fun RemoteContent(",
+        "@@ -2857,2 +2801,4 @@ private fun RemoteContent(",
+        "@@ -2882,0 +2829 @@ private fun RemoteContent(",
+        "@@ -2890,0 +2838,3 @@ private fun RemoteContent(",
+        "@@ -2892,0 +2843 @@ private fun RemoteContent(",
+        "@@ -2901 +2852,10 @@ private fun RemoteContent(",
+        "@@ -2904,0 +2865,2 @@ private fun RemoteContent(",
+        "@@ -2913 +2875,2 @@ private fun RemoteContent(",
+        "@@ -2915,0 +2879,2 @@ private fun RemoteContent(",
+        "@@ -2917,0 +2883,11 @@ private fun RemoteContent(",
+        "@@ -2929 +2905 @@ private fun RemoteContent(",
+        "@@ -2934,0 +2911,3 @@ private fun RemoteContent(",
+        "@@ -2970 +2949,2 @@ private fun RemoteContent(",
+        "@@ -2996 +2976,3 @@ private fun RemoteContent(",
+        "@@ -3063 +3045 @@ private fun RemoteContent(",
+        "@@ -3106,2 +3088,4 @@ private fun RemoteContent(",
+        "@@ -3141,0 +3126,6 @@ private fun RemoteContent(",
+        "@@ -3146 +3136 @@ private fun RemoteContent(",
+        "@@ -3151 +3141,6 @@ private fun RemoteContent(",
+        "@@ -3160 +3155,2 @@ private fun RemoteContent(",
+        "@@ -3182 +3178 @@ private fun RemoteContent(",
+        "@@ -3193 +3189 @@ private fun RemoteContent(",
+        "@@ -3198 +3194 @@ private fun RemoteContent(",
+        "@@ -3212 +3208 @@ private fun RemoteContent(",
+        "@@ -3238,26 +3233,0 @@ private fun RemoteContent(",
+        "@@ -3329,2 +3299,2 @@ private fun RemoteContent(",
+        "@@ -3351,0 +3322,43 @@ private fun RemoteContent(",
+        "@@ -3354,48 +3367 @@ private fun RemoteContent(",
+        "@@ -3465 +3431,6 @@ private fun RemoteContent(",
+        "@@ -3469 +3440 @@ private fun RemoteContent(",
+        "@@ -3471,0 +3443,4 @@ private fun RemoteContent(",
+        "@@ -3475,2 +3450,2 @@ private fun RemoteContent(",
+        "@@ -3478 +3453 @@ private fun RemoteContent(",
+        "@@ -3489 +3464,3 @@ private fun RemoteContent(",
+        "@@ -3495 +3472 @@ private fun RemoteContent(",
+        "@@ -3496,0 +3474,12 @@ private fun RemoteContent(",
+        "@@ -3687 +3676,3 @@ private fun RemoteViewfinderPanel(",
+        "@@ -3734 +3725,3 @@ private fun RemoteViewfinderPanel(",
+        "@@ -4017 +4010,3 @@ private fun ViewfinderImage(",
+        "@@ -4034,2 +4029,3 @@ private fun ViewfinderImage(",
+        "@@ -4040,4 +4036,2 @@ private fun ViewfinderImage(",
+        "@@ -4076,2 +4070,2 @@ private fun ViewfinderImage(",
+        "@@ -4079,2 +4073,2 @@ private fun ViewfinderImage(",
+        "@@ -4084,2 +4078,2 @@ private fun ViewfinderImage(",
+        "@@ -4087,2 +4081,2 @@ private fun ViewfinderImage(",
+        "@@ -4146,20 +4140,10 @@ private fun ViewfinderImage(",
+        "@@ -4167,23 +4151,34 @@ private fun ViewfinderImage(",
+        "@@ -4496 +4491,8 @@ private fun ParamTile(",
+        "@@ -4700,0 +4703 @@ private fun ShutterButton(",
+        "@@ -4702,7 +4705 @@ private fun ShutterButton(",
+        "@@ -4710,43 +4707,18 @@ private fun TapFocusReticleOverlay(",
+        "@@ -4756 +4728 @@ private fun TapFocusReticleOverlay(",
+        "@@ -4758,5 +4730,7 @@ private fun TapFocusReticleOverlay(",
+        "@@ -4764 +4738,2 @@ private fun ConfirmedFocusReticleOverlay(",
+        "@@ -4766,10 +4741,7 @@ private fun ConfirmedFocusReticleOverlay(",
+        "@@ -4777,6 +4749,44 @@ private fun ConfirmedFocusReticleOverlay(",
+        "@@ -4784,35 +4794,13 @@ private fun ConfirmedFocusReticleOverlay(",
+        "@@ -4820,10 +4808,26 @@ private fun ConfirmedFocusReticleOverlay(",
+        "@@ -5027,0 +5032 @@ internal fun RemoteToolMark(tool: RemoteTool, preferences: RemoteToolPreferences",
+        "@@ -5028,0 +5034,2 @@ internal fun RemoteToolMark(tool: RemoteTool, preferences: RemoteToolPreferences",
+        "@@ -5032,0 +5040,18 @@ internal fun RemoteToolMark(tool: RemoteTool, preferences: RemoteToolPreferences"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/RemoteToolBar.kt",
+      "status": "M",
+      "tasks": [
+        "N09"
+      ],
+      "hunks": [
+        "@@ -150 +150,4 @@ private fun RemoteToolBarContent(",
+        "@@ -169 +172,9 @@ private fun RemoteToolBarContent(",
+        "@@ -191,0 +203,3 @@ private fun AnimatedToolSlot(",
+        "@@ -194 +208,5 @@ private fun AnimatedToolSlot(",
+        "@@ -214,2 +232,2 @@ private fun AnimatedToolSlot("
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/RemoteToolPreferences.kt",
+      "status": "M",
+      "tasks": [
+        "N09"
+      ],
+      "hunks": [
+        "@@ -19,0 +20,2 @@ internal enum class RemoteTool(val id: String, val title: Int, val fixed: Boolea",
+        "@@ -22,0 +25 @@ internal enum class RemoteTool(val id: String, val title: Int, val fixed: Boolea",
+        "@@ -53,0 +57,14 @@ internal class RemoteToolPreferences(private val prefs: SharedPreferences) {",
+        "@@ -67,0 +85 @@ internal class RemoteToolPreferences(private val prefs: SharedPreferences) {",
+        "@@ -91,0 +110 @@ internal class RemoteToolPreferences(private val prefs: SharedPreferences) {"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/RemoteViewfinderFeatures.kt",
+      "status": "M",
+      "tasks": [
+        "N09"
+      ],
+      "hunks": [
+        "@@ -27 +26,0 @@ import androidx.compose.ui.graphics.drawscope.Stroke",
+        "@@ -129,39 +127,0 @@ internal fun fitCenterRect("
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/SettingsScreen.kt",
+      "status": "M",
+      "tasks": [
+        "N11",
+        "N12",
+        "N13"
+      ],
+      "hunks": [
+        "@@ -10,0 +11,2 @@ import com.ztransfer.viewmodel.AutoTransferMode",
+        "@@ -1037,4 +1039,3 @@ fun SettingsOverlay(",
+        "@@ -1097,14 +1098,4 @@ fun SettingsOverlay(",
+        "@@ -1112 +1103,23 @@ fun SettingsOverlay(",
+        "@@ -1142,0 +1156,2 @@ fun SettingsOverlay(",
+        "@@ -1528,2 +1543,2 @@ private fun MainSettingsInfoBubble(",
+        "@@ -1853,0 +1869,3 @@ internal fun FavoriteToggleButton(",
+        "@@ -1870 +1888 @@ internal fun FavoriteToggleButton(",
+        "@@ -1872 +1890 @@ internal fun FavoriteToggleButton(",
+        "@@ -1884 +1902 @@ internal fun FavoriteToggleButton(",
+        "@@ -1889 +1907 @@ internal fun FavoriteToggleButton(",
+        "@@ -2010,0 +2029 @@ internal fun PhotoFrameWatermarkEditor(",
+        "@@ -3419,0 +3439,4 @@ private data class PhotoEffectsPreviewCacheKey(",
+        "@@ -3426,0 +3450,4 @@ private data class PhotoEffectsPreviewCacheKey(",
+        "@@ -3428 +3455 @@ private data class PhotoEffectsPreviewCacheKey(",
+        "@@ -3625,0 +3653,26 @@ private fun BooleanSettingsWheel("
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/TransferScreen.kt",
+      "status": "M",
+      "tasks": [
+        "N11"
+      ],
+      "hunks": [
+        "@@ -1112,0 +1113 @@ private fun photoFramePresetLabel(preset: PhotoFramePreset): String = stringReso"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/viewmodel/CameraViewModel.kt",
+      "status": "M",
+      "tasks": [
+        "N03",
+        "N05",
+        "N14"
+      ],
+      "hunks": [
+        "@@ -36,0 +37 @@ import com.ztransfer.protocol.PairingCompletedException",
+        "@@ -489,0 +491,5 @@ class CameraViewModel(application: Application) : AndroidViewModel(application)",
+        "@@ -500,0 +507,3 @@ class CameraViewModel(application: Application) : AndroidViewModel(application)",
+        "@@ -517 +526 @@ class CameraViewModel(application: Application) : AndroidViewModel(application)",
+        "@@ -570 +579 @@ class CameraViewModel(application: Application) : AndroidViewModel(application)",
+        "@@ -883,0 +893 @@ class CameraViewModel(application: Application) : AndroidViewModel(application)",
+        "@@ -1070,0 +1081 @@ class CameraViewModel(application: Application) : AndroidViewModel(application)",
+        "@@ -1114,0 +1126,3 @@ class CameraViewModel(application: Application) : AndroidViewModel(application)",
+        "@@ -1123,0 +1138,27 @@ class CameraViewModel(application: Application) : AndroidViewModel(application)",
+        "@@ -1125 +1166 @@ class CameraViewModel(application: Application) : AndroidViewModel(application)",
+        "@@ -1150 +1191 @@ class CameraViewModel(application: Application) : AndroidViewModel(application)",
+        "@@ -1276 +1317,5 @@ class CameraViewModel(application: Application) : AndroidViewModel(application)",
+        "@@ -1629,0 +1675 @@ class CameraViewModel(application: Application) : AndroidViewModel(application)",
+        "@@ -1699,0 +1746 @@ class CameraViewModel(application: Application) : AndroidViewModel(application)",
+        "@@ -1727,0 +1775 @@ class CameraViewModel(application: Application) : AndroidViewModel(application)",
+        "@@ -2002,0 +2051 @@ class CameraViewModel(application: Application) : AndroidViewModel(application)",
+        "@@ -2024,0 +2074,2 @@ class CameraViewModel(application: Application) : AndroidViewModel(application)",
+        "@@ -2095,0 +2147,17 @@ class CameraViewModel(application: Application) : AndroidViewModel(application)",
+        "@@ -2132,0 +2201,2 @@ class CameraViewModel(application: Application) : AndroidViewModel(application)",
+        "@@ -2288,0 +2359,2 @@ class CameraViewModel(application: Application) : AndroidViewModel(application)",
+        "@@ -2312,5 +2384,5 @@ class CameraViewModel(application: Application) : AndroidViewModel(application)",
+        "@@ -2330 +2402,4 @@ class CameraViewModel(application: Application) : AndroidViewModel(application)",
+        "@@ -2572,0 +2648 @@ class CameraViewModel(application: Application) : AndroidViewModel(application)",
+        "@@ -2576 +2652,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application)",
+        "@@ -2581,0 +2667,4 @@ class CameraViewModel(application: Application) : AndroidViewModel(application)",
+        "@@ -2633 +2722 @@ class CameraViewModel(application: Application) : AndroidViewModel(application)",
+        "@@ -2645,0 +2735,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application)",
+        "@@ -2908,3 +3004,5 @@ class CameraViewModel(application: Application) : AndroidViewModel(application)",
+        "@@ -2978,0 +3077,3 @@ class CameraViewModel(application: Application) : AndroidViewModel(application)",
+        "@@ -2979,0 +3081 @@ class CameraViewModel(application: Application) : AndroidViewModel(application)",
+        "@@ -3016 +3118 @@ class CameraViewModel(application: Application) : AndroidViewModel(application)",
+        "@@ -3298,0 +3401,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application)",
+        "@@ -3329,0 +3443 @@ class CameraViewModel(application: Application) : AndroidViewModel(application)",
+        "@@ -3352 +3466,19 @@ class CameraViewModel(application: Application) : AndroidViewModel(application)",
+        "@@ -3354 +3486 @@ class CameraViewModel(application: Application) : AndroidViewModel(application)",
+        "@@ -3390,2 +3522,2 @@ class CameraViewModel(application: Application) : AndroidViewModel(application)",
+        "@@ -3400 +3532 @@ class CameraViewModel(application: Application) : AndroidViewModel(application)",
+        "@@ -3415,0 +3548,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application)",
+        "@@ -3419 +3564 @@ class CameraViewModel(application: Application) : AndroidViewModel(application)",
+        "@@ -3422,0 +3568,4 @@ class CameraViewModel(application: Application) : AndroidViewModel(application)",
+        "@@ -3423,0 +3573 @@ class CameraViewModel(application: Application) : AndroidViewModel(application)",
+        "@@ -3444,0 +3595 @@ class CameraViewModel(application: Application) : AndroidViewModel(application)",
+        "@@ -3452,0 +3604 @@ class CameraViewModel(application: Application) : AndroidViewModel(application)",
+        "@@ -3462,0 +3615 @@ class CameraViewModel(application: Application) : AndroidViewModel(application)",
+        "@@ -3484,0 +3638,19 @@ class CameraViewModel(application: Application) : AndroidViewModel(application)",
+        "@@ -3540,0 +3713,32 @@ class CameraViewModel(application: Application) : AndroidViewModel(application)",
+        "@@ -3548,0 +3753,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application)",
+        "@@ -3701,0 +3915,4 @@ class CameraViewModel(application: Application) : AndroidViewModel(application)",
+        "@@ -3702,0 +3920,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application)",
+        "@@ -3744 +3968 @@ class CameraViewModel(application: Application) : AndroidViewModel(application)",
+        "@@ -3782 +4006 @@ class CameraViewModel(application: Application) : AndroidViewModel(application)",
+        "@@ -3948 +4172 @@ class CameraViewModel(application: Application) : AndroidViewModel(application)",
+        "@@ -4473,0 +4698,2 @@ class CameraViewModel(application: Application) : AndroidViewModel(application)"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/viewmodel/PhotoDateRange.kt",
+      "status": "M",
+      "tasks": [
+        "N03"
+      ],
+      "hunks": [
+        "@@ -2,0 +3 @@ package com.ztransfer.viewmodel",
+        "@@ -42,0 +44,16 @@ internal fun latestCaptureLocalDate(captureDates: Sequence<String?>): LocalDate?"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/viewmodel/StaCameraProfileStore.kt",
+      "status": "M",
+      "tasks": [
+        "N14"
+      ],
+      "hunks": [
+        "@@ -49,2 +49,3 @@ internal class StaCameraProfileStore("
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/viewmodel/ThumbnailFillQueue.kt",
+      "status": "M",
+      "tasks": [
+        "N02",
+        "N03"
+      ],
+      "hunks": [
+        "@@ -18,0 +19 @@ internal class ThumbnailFillQueue {",
+        "@@ -33,0 +35 @@ internal class ThumbnailFillQueue {",
+        "@@ -67 +69 @@ internal class ThumbnailFillQueue {",
+        "@@ -69,0 +72 @@ internal class ThumbnailFillQueue {",
+        "@@ -73 +76 @@ internal class ThumbnailFillQueue {",
+        "@@ -76,0 +80,18 @@ internal class ThumbnailFillQueue {",
+        "@@ -122,0 +144 @@ internal class ThumbnailFillQueue {"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/viewmodel/TransferViewModel.kt",
+      "status": "M",
+      "tasks": [
+        "N06",
+        "N11"
+      ],
+      "hunks": [
+        "@@ -462,0 +463,5 @@ private fun NikonCamera.FileInfo.autoTransferIdentity(): String =",
+        "@@ -497 +502 @@ data class TransferState(",
+        "@@ -506,0 +512,6 @@ data class TransferState(",
+        "@@ -582,0 +594,3 @@ data class PhotoFilterCriteria(",
+        "@@ -634,0 +649,4 @@ internal fun restoredPhotoFrameWatermarkOpacityPercent(persisted: Any?): Int {",
+        "@@ -730 +748 @@ internal fun transferDestinationFolderName(",
+        "@@ -733,2 +751,5 @@ internal fun transferDestinationFolderName(",
+        "@@ -736,0 +758,6 @@ internal fun transferDestinationFolderName(",
+        "@@ -741 +768 @@ internal fun isTransferredOriginal(",
+        "@@ -746,2 +773,2 @@ internal fun isTransferredOriginal(",
+        "@@ -756,0 +784,27 @@ internal fun isTransferredOriginal(",
+        "@@ -766 +820 @@ internal fun createQueueTasks(",
+        "@@ -785 +839 @@ internal fun createQueueTasks(",
+        "@@ -787 +841 @@ internal fun createQueueTasks(",
+        "@@ -1199 +1253 @@ class TransferViewModel(application: Application) : AndroidViewModel(application",
+        "@@ -1206,0 +1261,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application",
+        "@@ -1306,0 +1369,17 @@ class TransferViewModel(application: Application) : AndroidViewModel(application",
+        "@@ -1385,3 +1464,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application",
+        "@@ -1678 +1762 @@ class TransferViewModel(application: Application) : AndroidViewModel(application",
+        "@@ -1683,0 +1768,5 @@ class TransferViewModel(application: Application) : AndroidViewModel(application",
+        "@@ -1701,0 +1791,3 @@ class TransferViewModel(application: Application) : AndroidViewModel(application",
+        "@@ -1921 +2013,5 @@ class TransferViewModel(application: Application) : AndroidViewModel(application",
+        "@@ -2006 +2102 @@ class TransferViewModel(application: Application) : AndroidViewModel(application",
+        "@@ -2048,4 +2144,14 @@ class TransferViewModel(application: Application) : AndroidViewModel(application",
+        "@@ -2063,0 +2170,4 @@ class TransferViewModel(application: Application) : AndroidViewModel(application",
+        "@@ -2065,2 +2175,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application",
+        "@@ -2072,0 +2189,2 @@ class TransferViewModel(application: Application) : AndroidViewModel(application",
+        "@@ -2090,0 +2209,4 @@ class TransferViewModel(application: Application) : AndroidViewModel(application",
+        "@@ -2113,0 +2236,3 @@ class TransferViewModel(application: Application) : AndroidViewModel(application",
+        "@@ -2238,0 +2364 @@ class TransferViewModel(application: Application) : AndroidViewModel(application"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/main/res/values-b+zh+Hant/remote_tools.xml",
+      "status": "M",
+      "tasks": [
+        "N15"
+      ],
+      "hunks": [
+        "@@ -14,0 +15 @@",
+        "@@ -39,0 +41,3 @@",
+        "@@ -55,0 +60 @@"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/main/res/values-b+zh+Hant/strings.xml",
+      "status": "M",
+      "tasks": [
+        "N15"
+      ],
+      "hunks": [
+        "@@ -146,0 +147,5 @@",
+        "@@ -195,0 +201 @@",
+        "@@ -425 +431 @@",
+        "@@ -516,2 +522,2 @@",
+        "@@ -669,0 +676,26 @@"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/main/res/values-zh/remote_tools.xml",
+      "status": "M",
+      "tasks": [
+        "N15"
+      ],
+      "hunks": [
+        "@@ -14,0 +15 @@",
+        "@@ -39,0 +41,3 @@",
+        "@@ -55,0 +60 @@"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/main/res/values-zh/strings.xml",
+      "status": "M",
+      "tasks": [
+        "N15"
+      ],
+      "hunks": [
+        "@@ -146,0 +147,5 @@",
+        "@@ -199,0 +205 @@",
+        "@@ -429 +435 @@",
+        "@@ -520,2 +526,2 @@",
+        "@@ -673,0 +680,26 @@"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/main/res/values/remote_tools.xml",
+      "status": "M",
+      "tasks": [
+        "N15"
+      ],
+      "hunks": [
+        "@@ -14,0 +15 @@",
+        "@@ -39,0 +41,3 @@",
+        "@@ -55,0 +60 @@"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/main/res/values/strings.xml",
+      "status": "M",
+      "tasks": [
+        "N15"
+      ],
+      "hunks": [
+        "@@ -146,0 +147,5 @@",
+        "@@ -199,0 +205 @@",
+        "@@ -429 +435 @@",
+        "@@ -522,2 +528,2 @@",
+        "@@ -675,0 +682,26 @@"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/release/java/com/ztransfer/ui/screen/DebugPhotoGenerationProbePanel.kt",
+      "status": "M",
+      "tasks": [
+        "N13"
+      ],
+      "hunks": [
+        "@@ -9 +9,4 @@ import androidx.compose.ui.Modifier"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/filter/LutColorPipelineTest.kt",
+      "status": "A",
+      "tasks": [
+        "N12"
+      ],
+      "hunks": [
+        "@@ -0,0 +1,33 @@"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/frame/PhotoFilterOutputTest.kt",
+      "status": "M",
+      "tasks": [
+        "N12"
+      ],
+      "hunks": [
+        "@@ -22 +22 @@ class PhotoFilterOutputTest {"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/frame/PhotoFrameExporterTest.kt",
+      "status": "M",
+      "tasks": [
+        "N13"
+      ],
+      "hunks": [
+        "@@ -85,0 +86 @@ class PhotoFrameExporterTest {",
+        "@@ -95,0 +97 @@ class PhotoFrameExporterTest {"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/frame/PhotoFrameMetadataSettingsTest.kt",
+      "status": "M",
+      "tasks": [
+        "N13"
+      ],
+      "hunks": [
+        "@@ -159,0 +160,9 @@ class PhotoFrameMetadataSettingsTest {"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/protocol/CameraIoGateTest.kt",
+      "status": "M",
+      "tasks": [
+        "N01",
+        "N02"
+      ],
+      "hunks": [
+        "@@ -3,0 +4,2 @@ import kotlinx.coroutines.CompletableDeferred",
+        "@@ -14,0 +17 @@ import org.junit.Assert.assertTrue",
+        "@@ -73,0 +77,339 @@ class CameraIoGateTest {",
+        "@@ -185,0 +528,103 @@ class CameraIoGateTest {"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/protocol/LiveViewFocusDiagnosticTest.kt",
+      "status": "A",
+      "tasks": [
+        "N07"
+      ],
+      "hunks": [
+        "@@ -0,0 +1,88 @@"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/protocol/LiveViewMetadataTest.kt",
+      "status": "M",
+      "tasks": [
+        "N07"
+      ],
+      "hunks": [
+        "@@ -271,0 +272,85 @@ class LiveViewMetadataTest {"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/protocol/MonitorMovieFormatTest.kt",
+      "status": "A",
+      "tasks": [
+        "N10"
+      ],
+      "hunks": [
+        "@@ -0,0 +1,18 @@"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/protocol/MonitorRemainingTest.kt",
+      "status": "A",
+      "tasks": [
+        "N10"
+      ],
+      "hunks": [
+        "@@ -0,0 +1,38 @@"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/protocol/PhotoRatingPairsTest.kt",
+      "status": "A",
+      "tasks": [
+        "N04"
+      ],
+      "hunks": [
+        "@@ -0,0 +1,40 @@"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/protocol/PhotoRatingTest.kt",
+      "status": "A",
+      "tasks": [
+        "N04"
+      ],
+      "hunks": [
+        "@@ -0,0 +1,67 @@"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/protocol/RemoteFocusModeTest.kt",
+      "status": "A",
+      "tasks": [
+        "N08"
+      ],
+      "hunks": [
+        "@@ -0,0 +1,60 @@"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/protocol/RemoteFocusTest.kt",
+      "status": "M",
+      "tasks": [
+        "N08"
+      ],
+      "hunks": [
+        "@@ -10,0 +11,9 @@ class RemoteFocusTest {",
+        "@@ -185,0 +195,47 @@ class RemoteFocusTest {"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/protocol/StaPairingStateTest.kt",
+      "status": "M",
+      "tasks": [
+        "N14"
+      ],
+      "hunks": [
+        "@@ -64,0 +65,15 @@ class StaPairingStateTest {"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/protocol/VideoRatingTest.kt",
+      "status": "A",
+      "tasks": [
+        "N04"
+      ],
+      "hunks": [
+        "@@ -0,0 +1,76 @@"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/ui/screen/RemoteCameraToolLabelTest.kt",
+      "status": "M",
+      "tasks": [
+        "N08"
+      ],
+      "hunks": [
+        "@@ -34,0 +35,9 @@ class RemoteCameraToolLabelTest {"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/ui/screen/RemoteDiagnosticReportTest.kt",
+      "status": "D",
+      "tasks": [
+        "N09"
+      ],
+      "hunks": [
+        "@@ -1,59 +0,0 @@"
+      ],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "\"docs/\\344\\272\\247\\345\\223\\201\\344\\270\\216\\347\\225\\214\\351\\235\\242\\350\\256\\276\\350\\256\\241/camera-work-priority-overview.html\"",
+      "status": "M",
+      "tasks": [
+        "N01"
+      ],
+      "hunks": [],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "\"docs/\\345\\276\\205\\345\\201\\232/STA\\346\\230\\237\\347\\272\\247\\347\\255\\233\\351\\200\\211\\345\\256\\214\\346\\225\\264\\346\\226\\271\\346\\241\\210.md\"",
+      "status": "A",
+      "tasks": [
+        "N15"
+      ],
+      "hunks": [],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "\"docs/\\345\\276\\205\\345\\201\\232/STA\\347\\205\\247\\347\\211\\207\\344\\277\\235\\346\\212\\244\\347\\212\\266\\346\\200\\201\\350\\257\\273\\345\\217\\226\\344\\270\\216\\344\\270\\212\\344\\274\\240\\346\\240\\207\\350\\256\\260\\350\\247\\243\\351\\224\\201\\350\\260\\203\\346\\237\\245.md\"",
+      "status": "M",
+      "tasks": [
+        "N15"
+      ],
+      "hunks": [],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "\"docs/\\345\\276\\205\\345\\201\\232/\\345\\205\\250\\345\\261\\200\\347\\233\\270\\346\\234\\272\\350\\257\\267\\346\\261\\202\\350\\260\\203\\345\\272\\246\\345\\231\\250\\351\\207\\215\\346\\236\\204\\346\\226\\271\\346\\241\\210.md\"",
+      "status": "A",
+      "tasks": [
+        "N15"
+      ],
+      "hunks": [],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "\"docs/\\345\\276\\205\\345\\201\\232/\\346\\230\\237\\347\\272\\247\\347\\255\\233\\351\\200\\211\\351\\207\\215\\346\\226\\260\\345\\274\\200\\346\\224\\276.md\"",
+      "status": "M",
+      "tasks": [
+        "N15"
+      ],
+      "hunks": [],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "\"docs/\\345\\276\\205\\345\\201\\232/\\347\\205\\247\\347\\211\\207\\346\\225\\210\\346\\236\\234LUT\\345\\276\\256\\350\\260\\203\\345\\217\\202\\346\\225\\260.md\"",
+      "status": "A",
+      "tasks": [
+        "N15"
+      ],
+      "hunks": [],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "\"docs/\\345\\276\\205\\345\\201\\232/\\347\\233\\221\\347\\234\\213\\345\\256\\236\\346\\227\\266\\345\\257\\271\\347\\204\\246\\346\\241\\206\\346\\230\\276\\347\\244\\272\\345\\215\\207\\347\\272\\247\\346\\226\\271\\346\\241\\210.md\"",
+      "status": "A",
+      "tasks": [
+        "N15"
+      ],
+      "hunks": [],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "\"docs/\\345\\276\\205\\345\\201\\232/\\347\\233\\221\\347\\234\\213\\345\\257\\271\\347\\204\\246\\346\\250\\241\\345\\274\\217\\345\\210\\207\\346\\215\\242.md\"",
+      "status": "A",
+      "tasks": [
+        "N15"
+      ],
+      "hunks": [],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "\"docs/\\346\\212\\200\\346\\234\\257\\350\\260\\203\\347\\240\\224/Nikon PTP\\346\\223\\215\\344\\275\\234\\347\\240\\201\\346\\270\\205\\345\\215\\225.md\"",
+      "status": "M",
+      "tasks": [
+        "N15"
+      ],
+      "hunks": [],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "\"docs/\\346\\212\\200\\346\\234\\257\\350\\260\\203\\347\\240\\224/\\345\\205\\250\\345\\261\\200\\344\\273\\273\\345\\212\\241\\350\\260\\203\\345\\272\\246\\345\\231\\250\\346\\235\\203\\345\\250\\201\\351\\200\\273\\350\\276\\221.html\"",
+      "status": "A",
+      "tasks": [
+        "N15"
+      ],
+      "hunks": [],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "\"docs/\\346\\212\\200\\346\\234\\257\\350\\260\\203\\347\\240\\224/\\345\\205\\250\\345\\261\\200\\344\\273\\273\\345\\212\\241\\350\\260\\203\\345\\272\\246\\345\\231\\250\\346\\235\\203\\345\\250\\201\\351\\200\\273\\350\\276\\221.md\"",
+      "status": "A",
+      "tasks": [
+        "N15"
+      ],
+      "hunks": [],
+      "audit": "待逐差异块核对"
+    },
+    {
+      "path": "\"docs/\\346\\212\\200\\346\\234\\257\\350\\260\\203\\347\\240\\224/\\346\\227\\240\\347\\272\\277\\351\\201\\245\\346\\216\\247\\347\\233\\270\\346\\234\\272\\350\\260\\203\\347\\240\\224.md\"",
+      "status": "M",
+      "tasks": [
+        "N15"
+      ],
+      "hunks": [],
+      "audit": "待逐差异块核对"
+    }
+  ]
+}
