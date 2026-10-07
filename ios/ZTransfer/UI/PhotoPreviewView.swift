@@ -147,7 +147,7 @@ struct PhotoPreviewView: View {
     let transferredFileIDs: Set<UInt32>
     let queueTarget: CGRect?
     let directory: URL?
-    let organizeByDate: Bool
+    let storageMode: TransferStorageMode
     @Binding var selectedFile: CameraFile?
     /// Returns false when the Android preflight (directory/connection gate)
     /// rejects the task. The queue flight must not play without a real task.
@@ -221,7 +221,7 @@ struct PhotoPreviewView: View {
          isSessionConnected: Bool = true,
          burstIDByFile: [UInt32: String] = [:], transferredFileIDs: Set<UInt32> = [],
          selectedFile: Binding<CameraFile?>,
-         directory: URL? = nil, organizeByDate: Bool = false,
+         directory: URL? = nil, storageMode: TransferStorageMode = .unified,
          queueTarget: CGRect? = nil,
          initialAnchor: CGRect? = nil,
          initialExpandedBurstIDs: Set<String> = [],
@@ -243,7 +243,7 @@ struct PhotoPreviewView: View {
         self.transferredFileIDs = transferredFileIDs
         self.queueTarget = queueTarget
         self.initialAnchor = initialAnchor
-        self.organizeByDate = organizeByDate; _selectedFile = selectedFile
+        self.storageMode = storageMode; _selectedFile = selectedFile
         self.onEnqueue = onEnqueue; self.onEnqueueBurst = onEnqueueBurst
         self.onQueueFlightStarted = onQueueFlightStarted
         self.onQueueFlightFinished = onQueueFlightFinished
@@ -279,7 +279,7 @@ struct PhotoPreviewView: View {
             for file in files {
                 let destination = transferDestinationDirectory(
                     root: directory,
-                    folderName: organizeByDate ? transferDateFolderName(file.captureDate) : nil
+                    folderName: transferStorageFolderName(file: file, mode: storageMode)
                 )
                 if let original = existingTransferDestination(for: file, in: destination) {
                     sources[file.id] = original

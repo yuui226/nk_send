@@ -220,6 +220,12 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
     private var remoteEntryAtTop: Bool {
         PhotoListScrollActivity.isAtTop(offset: -photoListScrollOffset, scale: displayScale)
     }
+    private var storageMode: TransferStorageMode {
+        TransferStorageMode.restored(
+            from: storageModeRaw.isEmpty ? nil : storageModeRaw,
+            legacyByDate: UserDefaults.standard.bool(forKey: TransferStorageMode.legacyByDateKey)
+        )
+    }
     @State private var photoListScrollProxy: ScrollViewProxy?
     @State private var previewReturnFileID: UInt32?
     @State private var previewReturnNonce = 0
@@ -228,7 +234,7 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
     @State private var queueTopControlsVisible = false
     @State private var queueWorkspaceTransitionNonce = 0
     @AppStorage("defer_transfer_start") private var deferTransferStart = false
-    @AppStorage("organize_transfers_by_date") private var organizeByDate = false
+    @AppStorage(TransferStorageMode.persistenceKey) private var storageModeRaw = ""
     @AppStorage("collapse_burst_photos") private var collapseBurstPhotos = true
     @AppStorage("thumbnail_columns") private var thumbnailColumns = 3
     @AppStorage("skin_preset") private var skinPreset = ZTransferButtonSkin.frostedGlass.rawValue
@@ -636,7 +642,7 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
                 let mode = AutoTransferMode.load()
                 let deferStart = UserDefaults.standard.bool(forKey: "defer_transfer_start")
                 queueModel.enqueueAutomatic(files, mode: mode, session: transferSession, directory: directory,
-                                            autoStart: !deferStart, organizeByDate: organizeByDate,
+                                            autoStart: !deferStart, storageMode: storageMode,
                                             effects: effectsStore.settings)
             }
             model.load()
@@ -712,14 +718,14 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
             // Android retains this demand when Settings opens before the
             // first metadata batch and retries when a candidate appears.
             if effectPreviewRequested { requestEffectPreview() }
-            model.refreshTransferredIDs(directory: directoryStore.directoryURL, organizeByDate: organizeByDate)
+            model.refreshTransferredIDs(directory: directoryStore.directoryURL, storageMode: storageMode)
         }
         .onChange(of: directoryStore.directoryURL) { directory in
             queueModel.attach(session: transferSession, directory: directory)
-            model.refreshTransferredIDs(directory: directory, organizeByDate: organizeByDate)
+            model.refreshTransferredIDs(directory: directory, storageMode: storageMode)
         }
-        .onChange(of: organizeByDate) { _ in
-            model.refreshTransferredIDs(directory: directoryStore.directoryURL, organizeByDate: organizeByDate)
+        .onChange(of: storageModeRaw) { _ in
+            model.refreshTransferredIDs(directory: directoryStore.directoryURL, storageMode: storageMode)
         }
         .onChange(of: queueModel.snapshot.items) { items in
             model.recordTransferredOriginals(items)
@@ -820,7 +826,7 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
                          burstIDByFile: model.burstIDByFile,
                          transferredFileIDs: model.transferredFileIDs, selectedFile: $selectedFile,
                          directory: directoryStore.directoryURL,
-                         organizeByDate: organizeByDate,
+                         storageMode: storageMode,
                          queueTarget: queueTargetBounds == .zero ? nil : queueTargetBounds,
                          initialAnchor: previewAnchor,
                          initialExpandedBurstIDs: expandedBurstIDs,
@@ -835,9 +841,9 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
                 return false
             }
             if !deferTransferStart {
-                queueModel.enqueue(file, autoStart: transferSession, directory: directoryStore.directoryURL, organizeByDate: organizeByDate, effects: effectsStore.settings)
+                queueModel.enqueue(file, autoStart: transferSession, directory: directoryStore.directoryURL, storageMode: storageMode, effects: effectsStore.settings)
             } else {
-                queueModel.enqueue(file, organizeByDate: organizeByDate, effects: effectsStore.settings)
+                queueModel.enqueue(file, storageMode: storageMode, effects: effectsStore.settings)
             }
             return true
         } onEnqueueBurst: { burstFiles in
@@ -848,9 +854,9 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
             }
             if !deferTransferStart, let directory = directoryStore.directoryURL {
                 queueModel.enqueue(burstFiles, autoStart: transferSession, directory: directory,
-                                   organizeByDate: organizeByDate, effects: effectsStore.settings)
+                                   storageMode: storageMode, effects: effectsStore.settings)
             } else {
-                queueModel.enqueue(burstFiles, organizeByDate: organizeByDate, effects: effectsStore.settings)
+                queueModel.enqueue(burstFiles, storageMode: storageMode, effects: effectsStore.settings)
             }
             return true
         } onQueueFlightStarted: { count in
@@ -875,7 +881,7 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
         } onCropConfirmed: { file, selection in
             guard let directory = directoryStore.directoryURL,
                   let task = LosslessCropTaskStore().load().first(where: { $0.fileID == file.id }) else { return }
-            queueModel.enqueueCrop(file, task: task, organizeByDate: organizeByDate,
+            queueModel.enqueueCrop(file, task: task, storageMode: storageMode,
                                    session: deferTransferStart ? nil : transferSession,
                                    directory: deferTransferStart ? nil : directory,
                                    effects: effectsStore.settings)
@@ -1502,10 +1508,10 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
         beginQueueFlightHold(files.count)
         startListQueueFlight(for: first, count: files.count, from: source, packFiles: files)
         if deferTransferStart {
-            queueModel.enqueue(files, organizeByDate: organizeByDate, effects: effectsStore.settings)
+            queueModel.enqueue(files, storageMode: storageMode, effects: effectsStore.settings)
         } else {
             queueModel.enqueue(files, autoStart: transferSession, directory: directoryStore.directoryURL,
-                               organizeByDate: organizeByDate, effects: effectsStore.settings)
+                               storageMode: storageMode, effects: effectsStore.settings)
         }
     }
 
@@ -1548,12 +1554,12 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
             beginQueueFlightHold(1)
             startListQueueFlight(for: file)
             queueModel.enqueue(file, autoStart: transferSession, directory: directoryStore.directoryURL,
-                               organizeByDate: organizeByDate, effects: effectsStore.settings)
+                               storageMode: storageMode, effects: effectsStore.settings)
         } else {
             ZTransferHaptics.shared.tick()
             beginQueueFlightHold(1)
             startListQueueFlight(for: file)
-            queueModel.enqueue(file, organizeByDate: organizeByDate, effects: effectsStore.settings)
+            queueModel.enqueue(file, storageMode: storageMode, effects: effectsStore.settings)
         }
     }
 

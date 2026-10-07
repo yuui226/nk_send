@@ -1,6 +1,38 @@
 import Foundation
 import UIKit
 
+/// Android's three-way storage preference. The raw values intentionally match
+/// TransferStorageMode.name at the persistence boundary.
+enum TransferStorageMode: String, CaseIterable, Codable, Sendable {
+    case unified = "UNIFIED"
+    case byDay = "BY_DAY"
+    case byType = "BY_TYPE"
+
+    static let persistenceKey = "storage_storage_mode"
+    static let legacyByDateKey = "organize_transfers_by_date"
+
+    static func restored(from rawValue: String?, legacyByDate: Bool) -> TransferStorageMode {
+        if let rawValue, let mode = TransferStorageMode(rawValue: rawValue) { return mode }
+        return legacyByDate ? .byDay : .unified
+    }
+
+    static func load(from defaults: UserDefaults = .standard) -> TransferStorageMode {
+        let mode = restored(
+            from: defaults.string(forKey: persistenceKey),
+            legacyByDate: defaults.bool(forKey: legacyByDateKey)
+        )
+        if defaults.string(forKey: persistenceKey) == nil {
+            defaults.set(mode.rawValue, forKey: persistenceKey)
+        }
+        return mode
+    }
+
+    func save(to defaults: UserDefaults = .standard) {
+        defaults.set(rawValue, forKey: Self.persistenceKey)
+        defaults.set(self == .byDay, forKey: Self.legacyByDateKey)
+    }
+}
+
 func exportedOriginalBaseName(_ name: String) -> String {
     name.replacingOccurrences(of: " \\(\\d+\\)(?=\\.[^.]*$|$)", with: "", options: .regularExpression)
 }
@@ -25,6 +57,39 @@ func transferDateFolderName(_ captureDate: String?, fallback: Date = Date()) -> 
     }
     return String(format: "ZT%04d-%02d-%02d", year, month, day)
 }
+
+/// Android's BY_TYPE destination uses an explicit ZT prefix so ordinary user
+/// folders and the app's derived-output folder remain distinct.
+func storageTypeFolderName(_ fileName: String, mode: TransferStorageMode) -> String? {
+    guard mode == .byType else { return nil }
+    let rawName = fileName.trimmingCharacters(in: .whitespacesAndNewlines)
+    let rawExtension: String
+    if let dot = rawName.lastIndex(of: ".") {
+        rawExtension = String(rawName[rawName.index(after: dot)...])
+    } else {
+        rawExtension = "UNKNOWN"
+    }
+    let extensionName = rawExtension.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+    return "ZT-" + (extensionName.isEmpty ? "UNKNOWN" : extensionName)
+}
+
+func transferStorageFolderName(
+    file: CameraFile,
+    mode: TransferStorageMode,
+    fallback: Date = Date()
+) -> String? {
+    switch mode {
+    case .unified: return nil
+    case .byDay: return transferDateFolderName(file.captureDate, fallback: fallback)
+    case .byType: return storageTypeFolderName(file.fileName, mode: mode)
+    }
+}
+
+func isValidTransferFolderName(_ name: String) -> Bool {
+    name.range(of: #"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"#, options: .regularExpression) != nil
+}
+
+let transferFrameOutputDirectoryName = "ZTFrames"
 
 /// Android's SAF providers are not assumed to have one filesystem's case
 /// rules. Derived output names therefore compare case-insensitively and use
@@ -359,29 +424,42 @@ actor TransferQueue {
     private func removeProgressObserver(_ id: UUID) { progressContinuations[id] = nil }
 
     @discardableResult
-    func enqueue(_ file: CameraFile, organizeByDate: Bool = false,
+    func enqueue(_ file: CameraFile, storageMode: TransferStorageMode,
                  effects: PhotoEffectsSettings? = nil) -> UUID? {
         let effects = effects.map { effectivePhotoEffectsSettings($0, isPro: premiumAccess.isPro) }
         let item = TransferQueueItem(
             id: UUID(), file: file,
-            destinationFolderName: organizeByDate ? transferDateFolderName(file.captureDate) : nil,
+            destinationFolderName: transferStorageFolderName(file: file, mode: storageMode),
             effects: effects
         )
         items.append(item); pending.append(item.id); publish(); return item.id
     }
 
     @discardableResult
+    func enqueue(_ file: CameraFile, organizeByDate: Bool = false,
+                 effects: PhotoEffectsSettings? = nil) -> UUID? {
+        enqueue(file, storageMode: organizeByDate ? .byDay : .unified, effects: effects)
+    }
+
+    @discardableResult
     func enqueueCrop(_ file: CameraFile, task: LosslessCropTask,
-                     organizeByDate: Bool = false, effects: PhotoEffectsSettings? = nil) -> UUID? {
+                     storageMode: TransferStorageMode,
+                     effects: PhotoEffectsSettings? = nil) -> UUID? {
         let effects = effects.map { effectivePhotoEffectsSettings($0, isPro: premiumAccess.isPro) }
         let item = TransferQueueItem(id: UUID(), file: file,
-                                     destinationFolderName: organizeByDate ? transferDateFolderName(file.captureDate) : nil,
+                                     destinationFolderName: transferStorageFolderName(file: file, mode: storageMode),
                                      effects: effects, cropTask: task)
         items.append(item); pending.append(item.id); publish(); return item.id
     }
 
     @discardableResult
-    func enqueue(_ files: [CameraFile], organizeByDate: Bool = false,
+    func enqueueCrop(_ file: CameraFile, task: LosslessCropTask,
+                     organizeByDate: Bool = false, effects: PhotoEffectsSettings? = nil) -> UUID? {
+        enqueueCrop(file, task: task, storageMode: organizeByDate ? .byDay : .unified, effects: effects)
+    }
+
+    @discardableResult
+    func enqueue(_ files: [CameraFile], storageMode: TransferStorageMode,
                  effects: PhotoEffectsSettings? = nil) -> [UUID] {
         // User-confirmed P05: all files in this enqueue share the effective
         // watermark captured now. Derived jobs and retries use this value.
@@ -390,8 +468,9 @@ actor TransferQueue {
         let queuedAt = Date()
         let additions = files.filter { seen.insert($0.id).inserted }.map { file in
             TransferQueueItem(id: UUID(), file: file,
-                              destinationFolderName: organizeByDate
-                                ? transferDateFolderName(file.captureDate, fallback: queuedAt) : nil,
+                              destinationFolderName: transferStorageFolderName(
+                                file: file, mode: storageMode, fallback: queuedAt
+                              ),
                               effects: effects)
         }
         guard !additions.isEmpty else { return [] }
@@ -402,19 +481,39 @@ actor TransferQueue {
     }
 
     @discardableResult
-    func enqueueAutomatic(_ file: CameraFile, mode: AutoTransferMode = .all, organizeByDate: Bool = false,
-                          effects: PhotoEffectsSettings? = nil) -> UUID? {
-        enqueueAutomatic([file], mode: mode, organizeByDate: organizeByDate, effects: effects).first
+    func enqueue(_ files: [CameraFile], organizeByDate: Bool = false,
+                 effects: PhotoEffectsSettings? = nil) -> [UUID] {
+        enqueue(files, storageMode: organizeByDate ? .byDay : .unified, effects: effects)
     }
 
     @discardableResult
-    func enqueueAutomatic(_ files: [CameraFile], mode: AutoTransferMode = .all, organizeByDate: Bool = false,
+    func enqueueAutomatic(_ file: CameraFile, mode: AutoTransferMode = .all,
+                          storageMode: TransferStorageMode,
+                          effects: PhotoEffectsSettings? = nil) -> UUID? {
+        enqueueAutomatic([file], mode: mode, storageMode: storageMode, effects: effects).first
+    }
+
+    @discardableResult
+    func enqueueAutomatic(_ file: CameraFile, mode: AutoTransferMode = .all, organizeByDate: Bool = false,
+                          effects: PhotoEffectsSettings? = nil) -> UUID? {
+        enqueueAutomatic(file, mode: mode, storageMode: organizeByDate ? .byDay : .unified, effects: effects)
+    }
+
+    @discardableResult
+    func enqueueAutomatic(_ files: [CameraFile], mode: AutoTransferMode = .all,
+                          storageMode: TransferStorageMode,
                           effects: PhotoEffectsSettings? = nil) -> [UUID] {
         var identities = Set(items.map { automaticIdentity(for: $0.file) })
         let candidates = files.filter {
             mode.accepts($0.fileName) && identities.insert(automaticIdentity(for: $0)).inserted
         }
-        return enqueue(candidates, organizeByDate: organizeByDate, effects: effects)
+        return enqueue(candidates, storageMode: storageMode, effects: effects)
+    }
+
+    @discardableResult
+    func enqueueAutomatic(_ files: [CameraFile], mode: AutoTransferMode = .all, organizeByDate: Bool = false,
+                          effects: PhotoEffectsSettings? = nil) -> [UUID] {
+        enqueueAutomatic(files, mode: mode, storageMode: organizeByDate ? .byDay : .unified, effects: effects)
     }
 
     func start(session: (any TransferDownloading)?, directory: URL) {

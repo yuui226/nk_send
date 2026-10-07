@@ -1186,6 +1186,50 @@ final class DomainModelTests: XCTestCase {
         XCTAssertEqual(transferDestinationDirectory(root: root, folderName: nil), root)
     }
 
+    func testStorageModeUsesAndroidTypePrefixAndProviderSafeNames() {
+        let jpg = CameraFile(id: 1, storageID: 1, format: 0x3801, size: 10,
+                             fileName: " DSC_0001.jpg ", captureDate: nil, isProtected: false)
+        let noExtension = CameraFile(id: 2, storageID: 1, format: 0x3801, size: 10,
+                                     fileName: "DSC_0002", captureDate: nil, isProtected: false)
+        XCTAssertEqual(storageTypeFolderName(jpg.fileName, mode: .byType), "ZT-JPG")
+        XCTAssertEqual(transferStorageFolderName(file: noExtension, mode: .byType), "ZT-UNKNOWN")
+        XCTAssertTrue(isValidTransferFolderName("ZT-JPG"))
+        XCTAssertTrue(isValidTransferFolderName("ZT2026-08-17"))
+        XCTAssertFalse(isValidTransferFolderName("../JPG"))
+        XCTAssertFalse(isValidTransferFolderName(""))
+    }
+
+    func testStorageModeMigrationPreservesLegacyDateChoiceAndSavesThreeWayValue() {
+        let suite = "StorageModeTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(true, forKey: TransferStorageMode.legacyByDateKey)
+        XCTAssertEqual(TransferStorageMode.load(from: defaults), .byDay)
+        XCTAssertEqual(defaults.string(forKey: TransferStorageMode.persistenceKey), "BY_DAY")
+        TransferStorageMode.byType.save(to: defaults)
+        XCTAssertEqual(TransferStorageMode.load(from: defaults), .byType)
+        XCTAssertFalse(defaults.bool(forKey: TransferStorageMode.legacyByDateKey))
+    }
+
+    func testStorageModeDestinationSnapshotSeparatesQueuedTypeFolders() async {
+        let queue = TransferQueue(defaults: UserDefaults(suiteName: "StorageQueueTests.\(UUID())")!)
+        let jpg = CameraFile(id: 11, storageID: 1, format: 0x3801, size: 10,
+                             fileName: "DSC_0011.JPG", captureDate: "20260817T142530", isProtected: false)
+        let nef = CameraFile(id: 12, storageID: 1, format: 0x3801, size: 10,
+                             fileName: "DSC_0012.NEF", captureDate: "20260817T142530", isProtected: false)
+        await queue.enqueue([jpg, nef], storageMode: .byType)
+        let snapshot = await queue.snapshot()
+        XCTAssertEqual(snapshot.items.map(\.destinationFolderName), ["ZT-JPG", "ZT-NEF"])
+    }
+
+    func testStorageChildDirectoryExcludesDerivedFramesAndHonorsMode() {
+        XCTAssertFalse(transferStorageChildDirectory("ZTFrames", mode: .byType))
+        XCTAssertTrue(transferStorageChildDirectory("ZT-JPG", mode: .byType))
+        XCTAssertTrue(transferStorageChildDirectory("ZT2026-08-17", mode: .byDay))
+        XCTAssertFalse(transferStorageChildDirectory("ZT-JPG", mode: .byDay))
+        XCTAssertFalse(transferStorageChildDirectory("root", mode: .unified))
+    }
+
     func testQueueLocksDestinationFolderWhenEnqueued() async {
         let queue = TransferQueue(defaults: UserDefaults(suiteName: "TransferDestinationTests.\(UUID())")!)
         let file = CameraFile(id: 3, storageID: 1, format: 0x3801, size: 10,

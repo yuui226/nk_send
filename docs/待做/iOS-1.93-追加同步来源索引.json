@@ -1,0 +1,40 @@
+{
+  "previous_android_merge": "5d583d603afaebefd3ea361261c71467f80fac4a",
+  "previous_android_target": "2b2bf0c2802cacc909e9373562d912bce2d21175",
+  "target": "8138e2dec22aa8c8b998a7a9a7b2fa0b9f3a1ec5",
+  "merge": "77fde8d9",
+  "commits": [
+    {
+      "sha": "f40f6bbf9732ebbd52307b3699f33af99dd3e4ee",
+      "subject": "diagnostic: capture transfer corruption evidence",
+      "task": "N16",
+      "files": [
+        "app/build.gradle.kts",
+        "app/src/main/java/com/ztransfer/diagnostics/TransferCorruptionDiagnostic.kt",
+        "app/src/main/java/com/ztransfer/diagnostics/TransferFingerprint.kt",
+        "app/src/main/java/com/ztransfer/protocol/DownloadTrace.kt",
+        "app/src/main/java/com/ztransfer/protocol/NikonCamera.kt",
+        "app/src/main/java/com/ztransfer/protocol/UsbPtpConnection.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/TransferViewModel.kt",
+        "app/src/test/java/com/ztransfer/diagnostics/TransferFingerprintTest.kt",
+        "app/src/test/java/com/ztransfer/viewmodel/NewMediaTransferPolicyTest.kt"
+      ],
+      "audit": "已读最终源码、上下游接线和测试；iOS 生命周期调查未完成"
+    },
+    {
+      "sha": "8138e2dec22aa8c8b998a7a9a7b2fa0b9f3a1ec5",
+      "subject": "fix: organize transfers by prefixed file type",
+      "task": "N11-追加",
+      "files": [
+        "app/src/main/java/com/ztransfer/viewmodel/TransferViewModel.kt",
+        "app/src/test/java/com/ztransfer/viewmodel/NewMediaTransferPolicyTest.kt"
+      ],
+      "audit": "已核对类型目录命名、提供方安全校验、任务快照和目录索引；iOS 设置闭环未完成"
+    }
+  ],
+  "scheduler": {
+    "authority": "docs/技术调研/全局任务调度器权威逻辑.md",
+    "new_scheduler_hunks": false,
+    "existing_ios_tasks": ["N01", "N02"]
+  }
+}

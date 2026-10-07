@@ -46,48 +46,70 @@ final class TransferQueueViewModel: ObservableObject {
             ?? tasks.last
     }
 
-    func enqueue(_ file: CameraFile, organizeByDate: Bool = false, effects: PhotoEffectsSettings? = nil) { Task { _ = await queue.enqueue(file, organizeByDate: organizeByDate, effects: effects) } }
-    func enqueueCrop(_ file: CameraFile, task: LosslessCropTask, organizeByDate: Bool = false,
+    func enqueue(_ file: CameraFile, storageMode: TransferStorageMode, effects: PhotoEffectsSettings? = nil) { Task { _ = await queue.enqueue(file, storageMode: storageMode, effects: effects) } }
+    func enqueue(_ file: CameraFile, organizeByDate: Bool = false, effects: PhotoEffectsSettings? = nil) {
+        enqueue(file, storageMode: organizeByDate ? .byDay : .unified, effects: effects)
+    }
+    func enqueueCrop(_ file: CameraFile, task: LosslessCropTask, storageMode: TransferStorageMode,
                      session: CameraSession? = nil, directory: URL? = nil,
                      effects: PhotoEffectsSettings? = nil) {
         Task {
-            _ = await queue.enqueueCrop(file, task: task, organizeByDate: organizeByDate, effects: effects)
+            _ = await queue.enqueueCrop(file, task: task, storageMode: storageMode, effects: effects)
             if let session, let directory { await queue.start(session: session, directory: directory) }
         }
+    }
+    func enqueueCrop(_ file: CameraFile, task: LosslessCropTask, organizeByDate: Bool = false,
+                     session: CameraSession? = nil, directory: URL? = nil,
+                     effects: PhotoEffectsSettings? = nil) {
+        enqueueCrop(file, task: task, storageMode: organizeByDate ? .byDay : .unified,
+                    session: session, directory: directory, effects: effects)
     }
     /// Batch entry point used by Android's collapsed burst preview. Tasks are
     /// appended in source order and the worker is started once, so a burst
     /// cannot interleave with another enqueue between members.
-    func enqueue(_ files: [CameraFile], autoStart session: CameraSession?, directory: URL?, organizeByDate: Bool = false, effects: PhotoEffectsSettings? = nil) {
+    func enqueue(_ files: [CameraFile], autoStart session: CameraSession?, directory: URL?, storageMode: TransferStorageMode, effects: PhotoEffectsSettings? = nil) {
         guard !files.isEmpty else { return }
         Task {
-            await queue.enqueue(files, organizeByDate: organizeByDate, effects: effects)
+            await queue.enqueue(files, storageMode: storageMode, effects: effects)
             if let session, let directory { await queue.start(session: session, directory: directory) }
         }
     }
-    func enqueue(_ files: [CameraFile], organizeByDate: Bool = false, effects: PhotoEffectsSettings? = nil) {
+    func enqueue(_ files: [CameraFile], autoStart session: CameraSession?, directory: URL?, organizeByDate: Bool = false, effects: PhotoEffectsSettings? = nil) {
+        enqueue(files, autoStart: session, directory: directory, storageMode: organizeByDate ? .byDay : .unified, effects: effects)
+    }
+    func enqueue(_ files: [CameraFile], storageMode: TransferStorageMode, effects: PhotoEffectsSettings? = nil) {
         guard !files.isEmpty else { return }
         Task {
-            await queue.enqueue(files, organizeByDate: organizeByDate, effects: effects)
+            await queue.enqueue(files, storageMode: storageMode, effects: effects)
         }
+    }
+    func enqueue(_ files: [CameraFile], organizeByDate: Bool = false, effects: PhotoEffectsSettings? = nil) {
+        enqueue(files, storageMode: organizeByDate ? .byDay : .unified, effects: effects)
     }
     /// Android's automatic-new-media entry point deduplicates by logical
     /// identity before adding and starts the worker only when the user has not
     /// deferred transfer start.
-    func enqueueAutomatic(_ files: [CameraFile], mode: AutoTransferMode, session: CameraSession?, directory: URL?, autoStart: Bool, organizeByDate: Bool = false, effects: PhotoEffectsSettings? = nil) {
+    func enqueueAutomatic(_ files: [CameraFile], mode: AutoTransferMode, session: CameraSession?, directory: URL?, autoStart: Bool, storageMode: TransferStorageMode, effects: PhotoEffectsSettings? = nil) {
         guard mode != .off, !files.isEmpty, let session, let directory else { return }
         Task {
-            let accepted = await queue.enqueueAutomatic(files, mode: mode, organizeByDate: organizeByDate, effects: effects)
+            let accepted = await queue.enqueueAutomatic(files, mode: mode, storageMode: storageMode, effects: effects)
             if !accepted.isEmpty, autoStart {
                 await queue.start(session: session, directory: directory)
             }
         }
     }
-    func enqueue(_ file: CameraFile, autoStart session: CameraSession?, directory: URL?, organizeByDate: Bool = false, effects: PhotoEffectsSettings? = nil) {
+    func enqueueAutomatic(_ files: [CameraFile], mode: AutoTransferMode, session: CameraSession?, directory: URL?, autoStart: Bool, organizeByDate: Bool = false, effects: PhotoEffectsSettings? = nil) {
+        enqueueAutomatic(files, mode: mode, session: session, directory: directory, autoStart: autoStart,
+                         storageMode: organizeByDate ? .byDay : .unified, effects: effects)
+    }
+    func enqueue(_ file: CameraFile, autoStart session: CameraSession?, directory: URL?, storageMode: TransferStorageMode, effects: PhotoEffectsSettings? = nil) {
         Task {
-            _ = await queue.enqueue(file, organizeByDate: organizeByDate, effects: effects)
+            _ = await queue.enqueue(file, storageMode: storageMode, effects: effects)
             if let session, let directory { await queue.start(session: session, directory: directory) }
         }
+    }
+    func enqueue(_ file: CameraFile, autoStart session: CameraSession?, directory: URL?, organizeByDate: Bool = false, effects: PhotoEffectsSettings? = nil) {
+        enqueue(file, autoStart: session, directory: directory, storageMode: organizeByDate ? .byDay : .unified, effects: effects)
     }
     func attach(session: CameraSession?, directory: URL?) { Task { await queue.attach(session: session, directory: directory) } }
     func detach() { Task { await queue.detach() } }

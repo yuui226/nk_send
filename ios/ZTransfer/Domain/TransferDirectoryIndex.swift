@@ -45,16 +45,17 @@ struct TransferDirectoryIndex: Sendable {
     @discardableResult
     static func removeStaleTemporaryFiles(in directory: URL) -> Int {
         let fileManager = FileManager.default
-        let datedDirectories = ((try? fileManager.contentsOfDirectory(
+        let storageDirectories = ((try? fileManager.contentsOfDirectory(
             at: directory,
             includingPropertiesForKeys: [.isDirectoryKey],
             options: []
         )) ?? []).filter {
-            transferDatedFolderName($0.lastPathComponent) &&
+            (transferDatedFolderName($0.lastPathComponent) || $0.lastPathComponent.hasPrefix("ZT-")) &&
+            $0.lastPathComponent.caseInsensitiveCompare(transferFrameOutputDirectoryName) != .orderedSame &&
             (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
         }
         var removed = 0
-        for target in [directory] + datedDirectories {
+        for target in [directory] + storageDirectories {
             guard let entries = try? fileManager.contentsOfDirectory(
                 at: target,
                 includingPropertiesForKeys: [.isDirectoryKey, .isRegularFileKey],
@@ -148,4 +149,18 @@ struct ExportedOriginalIndex: Sendable {
 
 func transferDatedFolderName(_ name: String) -> Bool {
     name.range(of: #"^ZT\d{4}-\d{2}-\d{2}$"#, options: .regularExpression) != nil
+}
+
+/// Android scans only the destination buckets selected by the current mode;
+/// derived effects live in their own child and must never count as originals.
+func transferStorageChildDirectory(_ name: String, mode: TransferStorageMode) -> Bool {
+    guard name.caseInsensitiveCompare(transferFrameOutputDirectoryName) != .orderedSame else { return false }
+    switch mode {
+    case .unified:
+        return false
+    case .byDay:
+        return transferDatedFolderName(name)
+    case .byType:
+        return isValidTransferFolderName(name)
+    }
 }

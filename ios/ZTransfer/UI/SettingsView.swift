@@ -37,7 +37,7 @@ struct SettingsView: View {
     @State private var showingEffectsHelp = false
     @State private var settingsTransitionDirection: CGFloat = 1
     @State private var directoryAttentionProgress: CGFloat = 0
-    @AppStorage("organize_transfers_by_date") private var organizeByDate = false
+    @AppStorage(TransferStorageMode.persistenceKey) private var storageModeRaw = ""
     @AppStorage("auto_transfer_new_media") private var autoTransfer = false
     @AppStorage("auto_transfer_mode") private var autoTransferModeRaw = ""
     @AppStorage("defer_transfer_start") private var deferStart = false
@@ -80,6 +80,13 @@ struct SettingsView: View {
 
     private var visibleSkinPreset: String {
         buttonSkinOptions.contains(skinPreset) ? skinPreset : "FROSTED_GLASS"
+    }
+
+    private var storageMode: TransferStorageMode {
+        TransferStorageMode.restored(
+            from: storageModeRaw.isEmpty ? nil : storageModeRaw,
+            legacyByDate: UserDefaults.standard.bool(forKey: TransferStorageMode.legacyByDateKey)
+        )
     }
 
     init(showPhotoEffectsEntry: Bool, effectsStore: PhotoEffectsStore, directory: DirectoryAccessStore,
@@ -406,7 +413,7 @@ struct SettingsView: View {
             }
             SettingsDivider()
             HStack(spacing: 8) {
-                ToggleWheel(label: AppLocalized.resource("organize_transfers_by_date"), isOn: $organizeByDate, disabled: directory.directoryURL == nil)
+                storageModeWheel
                 autoTransferWheel
                 ToggleWheel(label: AppLocalized.resource("defer_transfer_start"), isOn: $deferStart, disabled: directory.directoryURL == nil)
             }
@@ -416,6 +423,34 @@ struct SettingsView: View {
 
     private var directoryAttentionActive: Bool {
         requestTransferDirectoryAttention && directory.directoryURL == nil
+    }
+
+    /// Android's StorageModeWheel: unified, by day, and by type are one
+    /// persisted three-detent choice, not a pair of unrelated booleans.
+    private var storageModeWheel: some View {
+        DetentWheel(
+            label: AppLocalized.resource("storage_mode"),
+            options: TransferStorageMode.allCases,
+            selected: storageMode,
+            optionLabel: { mode in
+                switch mode {
+                case .unified: return AppLocalized.resource("storage_mode_unified")
+                case .byDay: return AppLocalized.resource("storage_mode_by_day")
+                case .byType: return AppLocalized.resource("storage_mode_by_type")
+                }
+            },
+            onCommit: { mode in
+                mode.save()
+                storageModeRaw = mode.rawValue
+            },
+            rowHeight: 18,
+            wheelHeight: 50,
+            enabled: directory.directoryURL != nil,
+            accentColor: storageMode == .unified ? ZTransferColors.statusWaiting : ZTransferColors.accentBlue,
+            emphasized: storageMode != .unified,
+            onDetent: { ZTransferHaptics.shared.tick() }
+        )
+        .frame(maxWidth: .infinity)
     }
 
     /// Android AutoTransferSettingsWheel: same five detents, 50/18/14 metrics,
@@ -610,7 +645,7 @@ private struct PhotoEffectsSummaryTile: View {
 /// introduced here.
 private struct SettingsHelpBubble: View {
     private let items = [
-        ("organize_transfers_by_date", "organize_transfers_by_date_summary"),
+        ("storage_mode", "storage_mode_summary"),
         ("auto_transfer_new_media", "auto_transfer_new_media_summary"),
         ("defer_transfer_start", "defer_transfer_start_summary"),
         ("collapse_burst_photos", "collapse_burst_photos_summary"),

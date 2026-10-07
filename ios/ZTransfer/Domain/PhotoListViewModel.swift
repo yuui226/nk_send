@@ -86,7 +86,7 @@ final class PhotoListViewModel: ObservableObject {
     private var newMediaHandler: (([CameraFile]) -> Void)?
     private var transferIndexGeneration = 0
     private var transferIndexDirectory: URL?
-    private var transferIndexOrganizeByDate = false
+    private var transferIndexStorageMode: TransferStorageMode = .unified
     private var diskOriginals = ExportedOriginalIndex()
     private var queueOriginals = ExportedOriginalIndex()
     /// A cancelled/old scan must never publish over a newer camera session.
@@ -796,7 +796,7 @@ final class PhotoListViewModel: ObservableObject {
 
     private var indexedTransferredIDs: Set<UInt32> {
         Set(allFiles.compactMap { file -> UInt32? in
-            let folder = transferIndexOrganizeByDate ? transferDateFolderName(file.captureDate) : nil
+            let folder = transferStorageFolderName(file: file, mode: transferIndexStorageMode)
             return diskOriginals.original(for: file, folderName: folder) != nil ||
                 queueOriginals.original(for: file, folderName: folder) != nil ? file.id : nil
         })
@@ -805,7 +805,7 @@ final class PhotoListViewModel: ObservableObject {
     /// Android refreshes the exported-original index independently of the
     /// queue. This keeps the list's "untransferred" filter correct even when
     /// the app is reopened with an empty in-memory queue.
-    func refreshTransferredIDs(directory: URL?, organizeByDate: Bool) {
+    func refreshTransferredIDs(directory: URL?, storageMode: TransferStorageMode) {
         transferIndexGeneration &+= 1
         let generation = transferIndexGeneration
         if transferIndexDirectory != directory {
@@ -813,7 +813,7 @@ final class PhotoListViewModel: ObservableObject {
             queueOriginals = ExportedOriginalIndex()
         }
         transferIndexDirectory = directory
-        transferIndexOrganizeByDate = organizeByDate
+        transferIndexStorageMode = storageMode
         publishTransferredOriginals()
         guard let directory else {
             return
@@ -823,7 +823,7 @@ final class PhotoListViewModel: ObservableObject {
             guard FileManager.default.fileExists(atPath: directory.path) else { return result }
             result.merge(TransferDirectoryIndex.scan(directory: directory), folderName: nil)
             if let children = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isDirectoryKey]) {
-                for child in children where transferDatedFolderName(child.lastPathComponent) {
+                for child in children where transferStorageChildDirectory(child.lastPathComponent, mode: storageMode) {
                     guard (try? child.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { continue }
                     result.merge(TransferDirectoryIndex.scan(directory: child), folderName: child.lastPathComponent)
                 }
@@ -836,6 +836,12 @@ final class PhotoListViewModel: ObservableObject {
             self.diskOriginals = index
             self.publishTransferredOriginals()
         }
+    }
+
+    /// Compatibility entry point for older callers/tests that only know the
+    /// former boolean setting.
+    func refreshTransferredIDs(directory: URL?, organizeByDate: Bool) {
+        refreshTransferredIDs(directory: directory, storageMode: organizeByDate ? .byDay : .unified)
     }
 
     func clearFilter() { setFilter(PhotoFilterState()) }
