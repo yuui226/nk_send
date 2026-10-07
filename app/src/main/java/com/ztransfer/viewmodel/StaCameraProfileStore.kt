@@ -46,8 +46,9 @@ internal class StaCameraProfileStore(
                 preferences.getString(profileKey(guid, FIELD_IDENTITY), null),
             ),
             // Route discovery can succeed while the camera is still waiting for pairing. Only the
-            // marker written after NK_PAIRING_RESULT succeeds is authoritative; the profile field
-            // is legacy data and may contain a false positive from an older connection.
+            // The marker is retained for profile discovery, but only the current connection flow
+            // can upgrade a legacy marker to the verified v2 state after album validation. The
+            // profile field is legacy data and may contain a false positive from an older build.
             pairingConfirmed = pairingMarkerExists(guid),
             lastSeenAtMs = preferences.getLong(profileKey(guid, FIELD_LAST_SEEN), 0L),
             deviceModel = preferences.getString(profileKey(guid, FIELD_DEVICE_MODEL), null)

@@ -34,6 +34,7 @@ import com.ztransfer.protocol.CameraRefusedException
 import com.ztransfer.protocol.Lab
 import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.protocol.PairingCompletedException
+import com.ztransfer.protocol.PairingNotConfirmedException
 import com.ztransfer.protocol.PTPIP_IDENTITY_PREFERENCES
 import com.ztransfer.protocol.PtpConstants
 import com.ztransfer.protocol.PtpIpCandidate
@@ -2047,6 +2048,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         var candidateKnown = staProfileStore.isKnownCandidate(ip)
         var pairedReachedStorageProbe = false
         var pairingReconnectUsed = false
+        var pairingRecoveryUsed = false
         var readinessRetryUsed = false
         while (true) {
             if (generation != staDiscoveryGeneration || purchaseHold ||
@@ -2069,6 +2071,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 allowPairing = preferredIdentity == StaInitiatorIdentity.PAIRED_COMPUTER,
                 exploreAlbumAccess = true,
                 forceProfilePairing = preferredIdentity == StaInitiatorIdentity.PAIRED_COMPUTER,
+                verifyPairingCompletion = pairingReconnectUsed &&
+                    preferredIdentity == StaInitiatorIdentity.PAIRED_COMPUTER,
                 onConnectingStarted = {
                     publishStaConnectingStarted(generation, ip)
                 },
@@ -2140,6 +2144,23 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     staLastFailureMessage = null
                     delay(STA_PAIRING_RECONNECT_DELAY_MS)
                 }
+                error is PairingNotConfirmedException -> {
+                    // Do not turn a camera that is still waiting on its pairing screen into a
+                    // successful session. One bounded recovery clears the stale marker and lets
+                    // the next pass run the normal pairing handshake instead of requiring the
+                    // user to disconnect and reconnect manually.
+                    if (!pairingRecoveryUsed) {
+                        pairingRecoveryUsed = true
+                        pairingReconnectUsed = false
+                        staLastFailureMessage = null
+                        delay(STA_PAIRING_RECONNECT_DELAY_MS)
+                    } else {
+                        staLastFailureMessage = localizedContext.getString(
+                            com.ztransfer.R.string.sta_camera_refused_repair,
+                        )
+                        break
+                    }
+                }
                 isTransientStaServiceReadinessFailure(error) && !readinessRetryUsed -> {
                     // The camera may expose its saved-profile address before port 15740 is ready.
                     // Retry this STA-only probe once so album validation is not skipped merely due
@@ -2177,6 +2198,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 allowPairing = alternateIdentity == StaInitiatorIdentity.PAIRED_COMPUTER,
                 exploreAlbumAccess = true,
                 forceProfilePairing = alternateIdentity == StaInitiatorIdentity.PAIRED_COMPUTER,
+                verifyPairingCompletion = pairingReconnectUsed &&
+                    alternateIdentity == StaInitiatorIdentity.PAIRED_COMPUTER,
                 onConnectingStarted = {
                     publishStaConnectingStarted(generation, ip)
                 },

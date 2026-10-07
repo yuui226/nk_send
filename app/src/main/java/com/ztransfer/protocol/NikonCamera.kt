@@ -540,13 +540,30 @@ internal fun endToEndBytesPerSecond(
 internal fun transferredBytesThisAttempt(downloaded: Long, resumeOffset: Long): Long =
     (downloaded - resumeOffset).coerceAtLeast(0L)
 
-internal class PairingCompletedException : Exception("Nikon pairing completed; reconnect required")
+internal class PairingCompletedException :
+    Exception("Nikon pairing result acknowledged; reconnect required")
+
+/** The camera accepted the pairing command, but the following session still reports pairing-only. */
+internal class PairingNotConfirmedException :
+    Exception("Nikon pairing was not confirmed by the camera")
 
 internal class UnexpectedStaResponderException(actualResponderGuid: String?) :
     Exception("Unexpected Nikon STA responder: $actualResponderGuid")
 
 internal const val PTPIP_IDENTITY_PREFERENCES = "ptpip_identity"
 internal const val STA_PAIRING_MARKER_PREFIX = "sta_paired_"
+/** Marker written only after a post-pairing reconnect has passed the album capability probe. */
+internal const val STA_PAIRING_VERIFIED_MARKER_PREFIX = "sta_pairing_verified_v2_"
+
+/**
+ * Old releases wrote the pairing marker as soon as the camera acknowledged the pairing command.
+ * Such a marker is useful as a route hint, but it must be revalidated once before it becomes
+ * trusted by the current connection flow.
+ */
+internal fun shouldVerifyStaPairingMarker(
+    hasAnyMarker: Boolean,
+    hasTrustedMarker: Boolean,
+): Boolean = hasAnyMarker && !hasTrustedMarker
 
 internal fun isStaPairingOnlyOperationSet(operations: Set<Int>): Boolean = operations == setOf(
     PtpConstants.GET_DEVICE_INFO,
@@ -1909,9 +1926,13 @@ class NikonCamera(private val context: Context) {
     /** Stable PTP/IP body identity returned by InitCommandAck; available before DeviceInfo. */
     internal val staResponderGuid: String?
         get() = responderGuid
-    /** True only after this installation has received an OK Nikon pairing result for this body. */
+    /** True only after this installation has confirmed the body is usable after pairing. */
     internal val staPairingConfirmed: Boolean
-        get() = hasCompletedStaPairing()
+        get() = pairingVerifiedForSession || hasCompletedStaPairing()
+    // A pairing result response only acknowledges the command. This session flag is set after
+    // the reconnect has passed the normal browsing capability checks; it is intentionally reset
+    // for every new NikonCamera instance.
+    @Volatile private var pairingVerifiedForSession = false
     /**
      * 跨连接稳定的机身身份，用于隔离缩略图磁盘缓存。有效的 PTP DeviceInfo 序列号
      * 可统一同一机身的 Wi-Fi/USB 缓存；缺失或为占位值时再用当前链路的物理标识兜底。
@@ -2135,11 +2156,13 @@ class NikonCamera(private val context: Context) {
         allowPairing: Boolean = true,
         exploreAlbumAccess: Boolean = false,
         forceProfilePairing: Boolean = false,
+        verifyPairingCompletion: Boolean = false,
         onConnectingStarted: (() -> Unit)? = null,
         onPairingStarted: (() -> Unit)? = null,
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             staAlbumAccessValidated = false
+            pairingVerifiedForSession = false
             staStorageProbeReached = false
             staEmptyObjectListObserved = false
             staObjectHandlesObserved = false
@@ -2209,6 +2232,13 @@ class NikonCamera(private val context: Context) {
                     "responder=UNEXPECTED expected=$expectedResponderGuid actual=$responderGuid"
                 throw UnexpectedStaResponderException(responderGuid)
             }
+            val effectiveVerifyPairingCompletion = verifyPairingCompletion ||
+                shouldVerifyStaPairingMarker(
+                    hasAnyMarker = hasCompletedStaPairing(),
+                    hasTrustedMarker = hasTrustedStaPairing(),
+                )
+            staDiagnosticLines +=
+                "pairing verifyRequested=$verifyPairingCompletion verify=$effectiveVerifyPairingCompletion"
             evtSocket = newSocket().apply {
                 soTimeout = STA_HANDSHAKE_TIMEOUT_MS
                 connect(InetSocketAddress(ip, PtpConstants.PTP_PORT), CONNECT_TIMEOUT_MS)
@@ -2253,6 +2283,7 @@ class NikonCamera(private val context: Context) {
                 allowPairing = allowPairing,
                 exploreAlbumAccess = exploreAlbumAccess,
                 forceProfilePairing = forceProfilePairing,
+                verifyPairingCompletion = effectiveVerifyPairingCompletion,
                 onConnectingStarted = onConnectingStarted,
                 onPairingStarted = onPairingStarted,
             )
@@ -4837,6 +4868,7 @@ class NikonCamera(private val context: Context) {
         allowPairing: Boolean,
         exploreAlbumAccess: Boolean,
         forceProfilePairing: Boolean,
+        verifyPairingCompletion: Boolean,
         onConnectingStarted: (() -> Unit)?,
         onPairingStarted: (() -> Unit)?,
     ) {
@@ -4855,12 +4887,17 @@ class NikonCamera(private val context: Context) {
         val initialStorageIds = parseUInt32Array(storageData)
         staDiagnosticLines +=
             "GetStorageIDs=${hexResponse(storageResponse)} ids=${formatStorageIds(initialStorageIds)}"
+        val pairingMarker = hasCompletedStaPairing()
+        val trustedPairingMarker = hasTrustedStaPairing()
+        staDiagnosticLines +=
+            "pairing marker=$pairingMarker trusted=$trustedPairingMarker " +
+                "force=$forceProfilePairing verify=$verifyPairingCompletion"
         if (shouldForceStaProfilePairing(
                 storageResponse = storageResponse,
                 forceProfilePairing = forceProfilePairing,
                 allowPairing = allowPairing,
-                protocolPairingMarkerExists = hasCompletedStaPairing(),
-            )
+                protocolPairingMarkerExists = pairingMarker,
+            ) && !verifyPairingCompletion
         ) {
             // Z30 exposes full storage temporarily while the computer profile wizard is still
             // waiting for host pairing. Finish that one-time pairing first; otherwise the camera
@@ -4870,6 +4907,17 @@ class NikonCamera(private val context: Context) {
             onPairingStarted?.invoke()
             completeInitialPairing()
             throw PairingCompletedException()
+        }
+        // A pairing reconnect must not take the StorageIDs shortcut. DeviceInfo is already part
+        // of the normal STA exploration below, and its exact pairing-only operation set is the
+        // strongest available indication that the camera has not accepted the profile yet.
+        if (verifyPairingCompletion &&
+            hasUsableStaAlbumStorage(storageResponse, initialStorageIds) &&
+            !exploreAlbumAccess
+        ) {
+            invalidateStaPairingMarkers()
+            staDiagnosticLines += "state=PAIRING_VERIFICATION_REQUIRES_ALBUM_PROBE"
+            throw PairingNotConfirmedException()
         }
         // A paired WTU session may expose a real StorageID while GetObjectHandles still contains
         // only the upload queue. During exploration, StorageIDs alone are therefore not proof of
@@ -4895,11 +4943,28 @@ class NikonCamera(private val context: Context) {
         }
         staDiagnosticLines +=
             "GetDeviceInfo=${hexResponse(deviceInfoResponse)} operations=${operations.size}"
-        if (isStaPairingOnlyOperationSet(operations) && allowPairing) {
-            staDiagnosticLines += "state=PAIRING_REQUIRED"
+        if (verifyPairingCompletion &&
+            (deviceInfoResponse != PtpConstants.RESPONSE_OK ||
+                deviceInfoData == null || operations.isEmpty())
+        ) {
+            invalidateStaPairingMarkers()
+            staDiagnosticLines += "state=PAIRING_NOT_CONFIRMED reason=device-info-unavailable"
             onPairingStarted?.invoke()
-            completeInitialPairing()
-            throw PairingCompletedException()
+            throw PairingNotConfirmedException()
+        }
+        if (isStaPairingOnlyOperationSet(operations)) {
+            if (verifyPairingCompletion) {
+                invalidateStaPairingMarkers()
+                staDiagnosticLines += "state=PAIRING_NOT_CONFIRMED"
+                onPairingStarted?.invoke()
+                throw PairingNotConfirmedException()
+            }
+            if (allowPairing) {
+                staDiagnosticLines += "state=PAIRING_REQUIRED"
+                onPairingStarted?.invoke()
+                completeInitialPairing()
+                throw PairingCompletedException()
+            }
         }
         // Only now has the camera proved that this session does not require pairing. Publishing
         // CONNECTING earlier makes a stale app-side profile flash CONNECTING before PAIRING.
@@ -4914,6 +4979,7 @@ class NikonCamera(private val context: Context) {
             ) {
                 prefetchedStorageIds = initialStorageIds
                 staAlbumAccessValidated = true
+                confirmPairingIfNeeded(verifyPairingCompletion)
                 staDiagnosticLines += if (staDirectObjectReadValidated) {
                     "result=FULL_ALBUM_DIRECT_OBJECT_READ"
                 } else {
@@ -4943,6 +5009,7 @@ class NikonCamera(private val context: Context) {
                 ) {
                     prefetchedStorageIds = modeStorageIds
                     staAlbumAccessValidated = true
+                    confirmPairingIfNeeded(verifyPairingCompletion)
                     staDiagnosticLines += "result=FULL_ALBUM_APPLICATION_MODE"
                     return
                 }
@@ -5066,14 +5133,12 @@ class NikonCamera(private val context: Context) {
                 "Nikon pairing result failed: 0x${resultResponse.toString(16)}",
             )
         }
-        // Persist at the authoritative OK response, before waiting for the optional pacing event.
-        // This closes the process-death window without changing the camera-side protocol sequence.
-        markStaPairingCompleted()
-
-        // The OK response is authoritative. The following DeviceInfoChanged event is useful for
-        // pacing but is missing on some firmware, so timeout only affects the reconnect delay.
+        // The response only acknowledges the command. The camera may still be showing its
+        // pairing confirmation screen, so persistence is deliberately deferred until the fresh
+        // reconnect passes the browsing capability checks.
         val previousTimeout = evtSocket?.soTimeout ?: SO_TIMEOUT_MS
         val deadlineNanos = System.nanoTime() + PAIRING_EVENT_TIMEOUT_MS * 1_000_000L
+        var confirmationEventReceived = false
         try {
             while (System.nanoTime() < deadlineNanos) {
                 val remainingMs = ((deadlineNanos - System.nanoTime()) / 1_000_000L)
@@ -5091,19 +5156,49 @@ class NikonCamera(private val context: Context) {
                 } else {
                     0
                 }
-                if (eventCode == PtpConstants.EVENT_DEVICE_INFO_CHANGED) break
+                if (eventCode == PtpConstants.EVENT_DEVICE_INFO_CHANGED) {
+                    confirmationEventReceived = true
+                    break
+                }
             }
         } catch (_: Exception) {
             // Pairing was already acknowledged; reconnect below even without the optional event.
         } finally {
             evtSocket?.soTimeout = previousTimeout
         }
+        staDiagnosticLines +=
+            "pairing response acknowledged confirmationEvent=$confirmationEventReceived"
 
         runCatching {
             sendCmd(PtpConstants.CLOSE_SESSION)
             recvResp()
             sessionOpen = false
         }
+    }
+
+    private fun confirmPairingIfNeeded(verifyPairingCompletion: Boolean) {
+        if (!verifyPairingCompletion) return
+        pairingVerifiedForSession = true
+        markStaPairingCompleted()
+        staDiagnosticLines += "pairing=CONFIRMED_AFTER_RECONNECT"
+    }
+
+    /**
+     * A stale marker must not keep a camera permanently on the shortcut path after a failed
+     * verification. Clearing both generations makes the next explicit connection run the normal
+     * pairing handshake again instead of repeatedly reporting a false paired state.
+     */
+    private fun invalidateStaPairingMarkers() {
+        val cameraGuid = responderGuid ?: return
+        context.applicationContext.getSharedPreferences(
+            PTPIP_IDENTITY_PREFERENCES,
+            Context.MODE_PRIVATE,
+        )
+            .edit()
+            .remove("$STA_PAIRING_MARKER_PREFIX$cameraGuid")
+            .remove("$STA_PAIRING_VERIFIED_MARKER_PREFIX$cameraGuid")
+            .commit()
+        staDiagnosticLines += "pairing markers invalidated"
     }
 
     private fun persistentInitiatorId(preferenceKey: String = "initiator_id"): ByteArray {
@@ -5122,10 +5217,19 @@ class NikonCamera(private val context: Context) {
     }
 
     private fun hasCompletedStaPairing(): Boolean = responderGuid?.let { cameraGuid ->
+        val preferences = context.applicationContext.getSharedPreferences(
+            PTPIP_IDENTITY_PREFERENCES,
+            Context.MODE_PRIVATE,
+        )
+        preferences.getBoolean("$STA_PAIRING_MARKER_PREFIX$cameraGuid", false) ||
+            preferences.getBoolean("$STA_PAIRING_VERIFIED_MARKER_PREFIX$cameraGuid", false)
+    } ?: false
+
+    private fun hasTrustedStaPairing(): Boolean = responderGuid?.let { cameraGuid ->
         context.applicationContext.getSharedPreferences(
             PTPIP_IDENTITY_PREFERENCES,
             Context.MODE_PRIVATE,
-        ).getBoolean("$STA_PAIRING_MARKER_PREFIX$cameraGuid", false)
+        ).getBoolean("$STA_PAIRING_VERIFIED_MARKER_PREFIX$cameraGuid", false)
     } ?: false
 
     private fun markStaPairingCompleted() {
@@ -5136,6 +5240,7 @@ class NikonCamera(private val context: Context) {
         )
             .edit()
             .putBoolean("$STA_PAIRING_MARKER_PREFIX$cameraGuid", true)
+            .putBoolean("$STA_PAIRING_VERIFIED_MARKER_PREFIX$cameraGuid", true)
             .commit()
     }
 

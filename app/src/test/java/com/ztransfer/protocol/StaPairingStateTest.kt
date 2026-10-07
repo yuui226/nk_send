@@ -63,6 +63,21 @@ class StaPairingStateTest {
     }
 
     @Test
+    fun legacyPairingMarkerMustBeRevalidatedBeforeTrust() {
+        assertTrue(shouldVerifyStaPairingMarker(hasAnyMarker = true, hasTrustedMarker = false))
+    }
+
+    @Test
+    fun verifiedPairingMarkerDoesNotNeedAnotherVerification() {
+        assertFalse(shouldVerifyStaPairingMarker(hasAnyMarker = true, hasTrustedMarker = true))
+    }
+
+    @Test
+    fun noPairingMarkerStillUsesNormalFirstPairingPath() {
+        assertFalse(shouldVerifyStaPairingMarker(hasAnyMarker = false, hasTrustedMarker = false))
+    }
+
+    @Test
     fun responderGuidCheckDefersWrongOrMissingDhcpCandidate() {
         val expected = "11111111111111111111111111111111"
         assertTrue(isExpectedStaResponder(expected, expected))
