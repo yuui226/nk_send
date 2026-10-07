@@ -65,6 +65,8 @@ struct RemoteView: View {
     @State private var lastFpsTapAt: TimeInterval = 0
     @State private var developerPanelPresented = false
     @State private var developerLogLines: [String] = []
+    @State private var persistedFocusDiagnosticReport = ""
+    @State private var focusValidAfterUptime = 0.0
     @State private var signalExpanded = false
     @State private var exposureMode: RemoteExposureAssist = .off
     @State private var batteryExpanded = false
@@ -96,6 +98,7 @@ struct RemoteView: View {
         _dispMode = State(initialValue: preferences.disp)
         _histogramMode = State(initialValue: preferences.histogram)
         _exposureMode = State(initialValue: preferences.exposure)
+        _persistedFocusDiagnosticReport = State(initialValue: toolDefaults.string(forKey: "focus_report_v1") ?? "")
         _layoutOrientation = State(initialValue: preferences.locked
                                   ? (RemoteLayoutOrientation(rawValue: preferences.lockedRotation) ?? .portrait) : .portrait)
         self.onStopped = onStopped
@@ -231,6 +234,12 @@ struct RemoteView: View {
             model.start()
             model.setLevelVisible(tools.level)
         }
+        .task(id: model.focusDiagnosticRunning) {
+            guard model.focusDiagnosticRunning else { return }
+            try? await Task.sleep(nanoseconds: 60_000_000_000)
+            guard !Task.isCancelled, model.focusDiagnosticRunning else { return }
+            model.stopFocusDiagnostic(reason: "60s")
+        }
         // Orientation is intentionally scoped to the monitor page. The rest
         // of the app stays portrait; this page rotates its own canvas to match
         // the device instead of changing the application's interface size.
@@ -264,6 +273,13 @@ struct RemoteView: View {
         .onChange(of: model.movieMode) { _ in
             gridMenuPresented = false
             model.setLocalRecordingToolVisible(tools.layout(movie: model.movieMode).visible(.record), fixedRecorder: layoutOrientation.isLandscape)
+        }
+        .onChange(of: model.movieMode) { _ in focusValidAfterUptime = ProcessInfo.processInfo.systemUptime }
+        .onChange(of: model.focusModeDescriptor?.current) { _ in focusValidAfterUptime = ProcessInfo.processInfo.systemUptime }
+        .onChange(of: model.focusDiagnosticReport) { report in
+            guard !report.isEmpty else { return }
+            persistedFocusDiagnosticReport = report
+            toolDefaults.set(report, forKey: "focus_report_v1")
         }
         .onChange(of: layoutOrientation) { _ in
             gridMenuPresented = false
@@ -634,6 +650,11 @@ struct RemoteView: View {
                     tools.level.toggle()
                 }
             }),
+            .focusFrame: AnyView(configuredRemoteToolButton(.focusFrame, movie: movie, active: tools.focusFrame, accessibilityLabel: AppLocalized.resource("remote_tool_focus_frame"), label: {
+                RemoteFocusFrameMark().frame(width: 19, height: 19)
+            }) {
+                withAnimation(ZTransferMotion.standard) { tools.focusFrame.toggle() }
+            }),
             .audio: AnyView(configuredRemoteToolButton(.audio, movie: movie, active: tools.audio, accessibilityLabel: AppLocalized.resource("cd_remote_audio_levels"), label: { RemoteAudioIcon().frame(width: 18, height: 18) }) {
                 withAnimation(ZTransferMotion.standard) { tools.audio.toggle() }
             }),
@@ -761,6 +782,7 @@ struct RemoteView: View {
             case .exposure:
                 exposureMode = .off
                 tools.exposure = .off
+            case .focusFrame: tools.focusFrame = false
             default: break
             }
         }
@@ -776,6 +798,16 @@ struct RemoteView: View {
         fpsTapCount = now - lastFpsTapAt < 1.5 ? fpsTapCount + 1 : 1
         lastFpsTapAt = now
         if fpsTapCount >= 4 { developerUnlocked = true }
+    }
+
+    private func startFocusDiagnostic() {
+        let mode = model.movieMode ? "movie" : "photo"
+        let transport = isUSBSession ? "USB" : (wirelessMode == .sta ? "STA" : "AP")
+        model.startFocusDiagnostic(description: "transport=\(transport) mode=\(mode)")
+    }
+
+    private func stopFocusDiagnostic() {
+        model.stopFocusDiagnostic()
     }
 
     /// The Android panel also hosts an experimental full camera-capability
@@ -799,7 +831,8 @@ struct RemoteView: View {
                         Spacer()
                         developerPanelButton(systemName: "doc.on.doc",
                                              accessibilityLabel: AppLocalized.resource("lab_copy_log")) {
-                            UIPasteboard.general.string = developerLogLines.joined(separator: "\n")
+                            let report = model.focusDiagnosticReport.isEmpty ? persistedFocusDiagnosticReport : model.focusDiagnosticReport
+                            UIPasteboard.general.string = (developerLogLines + [report]).filter { !$0.isEmpty }.joined(separator: "\n")
                         }
                         developerPanelButton(systemName: "xmark",
                                              accessibilityLabel: AppLocalized.resource("cd_close")) {
@@ -807,10 +840,29 @@ struct RemoteView: View {
                         }
                     }
 
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(AppLocalized.resource("remote_focus_diagnostic_hint"))
+                            .font(.system(size: 11))
+                            .foregroundStyle(ZTransferColors.secondaryText)
+                        HStack(spacing: 8) {
+                            Button(AppLocalized.resource(model.focusDiagnosticRunning ? "remote_focus_diagnostic_stop" : "remote_focus_diagnostic_start")) {
+                                if model.focusDiagnosticRunning { stopFocusDiagnostic() } else { startFocusDiagnostic() }
+                            }
+                            .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 16))
+                            Button(AppLocalized.resource("remote_focus_diagnostic_mark")) {
+                                model.markFocusDiagnostic("movie=\(model.movieMode) recording=\(String(describing: model.state.capture)) focus=\(model.focusModeDescriptor.map { String($0.current) } ?? "unknown")")
+                            }
+                            .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 16))
+                            .disabled(!model.focusDiagnosticRunning)
+                        }
+                    }
+
                     ScrollViewReader { reader in
                         ScrollView {
                             LazyVStack(alignment: .leading, spacing: 2) {
-                                ForEach(Array(developerLogLines.enumerated()), id: \.offset) { index, line in
+                                let report = model.focusDiagnosticReport.isEmpty ? persistedFocusDiagnosticReport : model.focusDiagnosticReport
+                                let lines = developerLogLines + report.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+                                ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
                                     Text(line)
                                         .font(.system(size: 10, design: .monospaced))
                                         .foregroundStyle(line.hasPrefix("!!")
@@ -825,7 +877,7 @@ struct RemoteView: View {
                         }
                         .frame(height: 170)
                         .background(Color.black.opacity(0.35), in: RoundedRectangle(cornerRadius: 10))
-                        .onChange(of: developerLogLines.count) { count in
+                        .onChange(of: developerLogLines.count + model.focusDiagnosticReport.count) { count in
                             guard count > 0 else { return }
                             reader.scrollTo(count - 1, anchor: .bottom)
                         }
@@ -978,6 +1030,9 @@ struct RemoteView: View {
                         endRadius: 420
                     ))
                 if let image {
+                    let metadata = model.frameMetadata
+                    let focusBlock = focusDisplayState(now: ProcessInfo.processInfo.systemUptime, metadata: metadata)
+                    let cameraFrames = focusBlock == nil ? metadata?.focusFrames ?? [] : []
                     RemoteZoomableViewfinder(aspect: aspect, imageSize: image.size, metadata: model.frameMetadata, onFocus: {
                         model.focus(at: $0, coordinateSize: image.size)
                     }) {
@@ -1007,15 +1062,22 @@ struct RemoteView: View {
                                 RemoteFocusReticle(phase: model.state.focus.phase, point: point,
                                     nonce: model.state.focus.nonce, aspect: aspect)
                             }
+                            IOSLiveViewFocusFramesOverlay(
+                                frames: cameraFrames,
+                                focused: metadata?.focusJudgement == .focused,
+                                phase: model.state.focus.phase,
+                                handoffEligible: model.confirmedFocusMarker != nil &&
+                                    model.frameReceivedAtUptime >= (model.confirmedFocusMarker?.confirmedAtUptime ?? .greatestFiniteMagnitude),
+                                aspect: aspect
+                            )
                             if let marker = model.confirmedFocusMarker {
-                                let metadata = model.frameMetadata
                                 let cameraFrame = model.frameReceivedAtUptime >= marker.confirmedAtUptime &&
                                     (marker.subjectTracking || metadata?.focusJudgement == .focused)
                                     ? metadata?.selectedFocusFrame : nil
                                 IOSConfirmedFocusReticle(
                                     marker: marker,
                                     cameraFrame: cameraFrame,
-                                    visible: model.state.focus.phase == .idle &&
+                                    visible: cameraFrames.isEmpty && model.state.focus.phase == .idle &&
                                         !model.halfPressVisualActive &&
                                         (!marker.subjectTracking || model.state.focus.tracking),
                                     aspect: aspect
@@ -1024,6 +1086,10 @@ struct RemoteView: View {
                                     .allowsHitTesting(false)
                             }
                         }
+                    }
+                    .onChange(of: model.frameMetadata) { metadata in
+                        model.displayFocusDiagnostic(focusDisplayState(now: ProcessInfo.processInfo.systemUptime, metadata: metadata)
+                            ?? "drawn boxes=\(metadata?.focusFrames.count ?? 0)")
                     }
                     if exposureMode == .falseColor {
                         RemoteFalseColorLegend()
@@ -1169,6 +1235,20 @@ struct RemoteView: View {
         }
     }
 
+    private func focusDisplayState(now: TimeInterval, metadata: RemoteLiveViewMetadata?) -> String? {
+        let layout = tools.layout(movie: model.movieMode)
+        if !tools.focusFrame { return "blocked=tool-off" }
+        if !layout.visible(.focusFrame) { return "blocked=tool-hidden" }
+        if !isSessionConnected { return "blocked=disconnected" }
+        if model.frameReceivedAtUptime <= focusValidAfterUptime { return "blocked=before-mode-change" }
+        let age = max(0, now - model.frameReceivedAtUptime)
+        if age >= 0.5 { return "blocked=stale-frame" }
+        if metadata?.focusFrames.isEmpty != false {
+            return "blocked=no-box \(metadata?.focusFrameStatus ?? "unsupported-header")"
+        }
+        return nil
+    }
+
     private struct RemoteHistogramIcon: View {
         @Environment(\.remoteToolTint) private var tint
 
@@ -1227,6 +1307,33 @@ struct RemoteView: View {
                     var path = Path()
                     path.move(to: CGPoint(x: x - d, y: size.height * 0.5 - d))
                     path.addLine(to: CGPoint(x: x + d, y: size.height * 0.5 + d))
+                    context.stroke(path, with: .color(tint), style: stroke)
+                }
+            }
+        }
+    }
+
+    private struct RemoteFocusFrameMark: View {
+        @Environment(\.remoteToolTint) private var tint
+
+        var body: some View {
+            Canvas { context, size in
+                let inset = min(size.width, size.height) * 0.16
+                let arm = min(size.width, size.height) * 0.25
+                let left = inset, right = size.width - inset, top = inset, bottom = size.height - inset
+                let segments: [(CGPoint, CGPoint)] = [
+                    (CGPoint(x: left, y: top + arm), CGPoint(x: left, y: top)),
+                    (CGPoint(x: left, y: top), CGPoint(x: left + arm, y: top)),
+                    (CGPoint(x: right - arm, y: top), CGPoint(x: right, y: top)),
+                    (CGPoint(x: right, y: top), CGPoint(x: right, y: top + arm)),
+                    (CGPoint(x: left, y: bottom - arm), CGPoint(x: left, y: bottom)),
+                    (CGPoint(x: left, y: bottom), CGPoint(x: left + arm, y: bottom)),
+                    (CGPoint(x: right - arm, y: bottom), CGPoint(x: right, y: bottom)),
+                    (CGPoint(x: right, y: bottom), CGPoint(x: right, y: bottom - arm)),
+                ]
+                let stroke = StrokeStyle(lineWidth: 1.5, lineCap: .round)
+                for (start, end) in segments {
+                    var path = Path(); path.move(to: start); path.addLine(to: end)
                     context.stroke(path, with: .color(tint), style: stroke)
                 }
             }
@@ -1621,6 +1728,71 @@ private func focusCornerPath(center: CGPoint, halfWidth: CGFloat, halfHeight: CG
         path.move(to: CGPoint(x: right - horizontal, y: bottom))
         path.addLine(to: CGPoint(x: right, y: bottom))
         path.addLine(to: CGPoint(x: right, y: bottom - vertical))
+    }
+}
+
+/// Camera supplied AF rectangles. The tap feedback remains a separate layer;
+/// this view preserves the Android handoff delay and fades the last camera
+/// geometry instead of flashing a new white marker between packets.
+private struct IOSLiveViewFocusFramesOverlay: View {
+    let frames: [RemoteLiveViewFocusFrame]
+    let focused: Bool
+    let phase: RemoteFocusPhase
+    let handoffEligible: Bool
+    let aspect: CGFloat
+    @State private var handedOff = false
+    @State private var lastFrames: [RemoteLiveViewFocusFrame] = []
+    @State private var lastFocused = false
+
+    var body: some View {
+        GeometryReader { proxy in
+            let fitted = min(proxy.size.width / max(aspect, 0.01), proxy.size.height)
+            let imageWidth = fitted * aspect
+            let imageRect = CGRect(x: (proxy.size.width - imageWidth) / 2,
+                                   y: (proxy.size.height - fitted) / 2,
+                                   width: imageWidth, height: fitted)
+            let handoff = phase == .locked && handoffEligible && !frames.isEmpty
+            let suppress = phase == .focusing || phase == .failed ||
+                (phase == .locked && handoffEligible && !handedOff)
+            let visible = !suppress && !frames.isEmpty
+            let drawFrames = frames.isEmpty ? lastFrames : frames
+            let color: Color = drawFrames.count > 1
+                ? Color(red: 1, green: 222.0 / 255, blue: 160.0 / 255)
+                : (lastFocused ? Color(red: 103.0 / 255, green: 229.0 / 255, blue: 139.0 / 255) : .white)
+            Canvas { context, _ in
+                guard imageRect.width > 0, imageRect.height > 0 else { return }
+                for frame in drawFrames {
+                    let center = CGPoint(x: imageRect.minX + imageRect.width * CGFloat(frame.centerX),
+                                         y: imageRect.minY + imageRect.height * CGFloat(frame.centerY))
+                    let halfWidth = min(imageRect.width * CGFloat(frame.width) / 2, imageRect.width / 2)
+                    let halfHeight = min(imageRect.height * CGFloat(frame.height) / 2, imageRect.height / 2)
+                    let path = focusCornerPath(center: center, halfWidth: halfWidth,
+                                               halfHeight: halfHeight,
+                                               cornerLength: min(10, min(halfWidth, halfHeight)))
+                    context.stroke(path, with: .color(.black.opacity(0.24)),
+                                   style: StrokeStyle(lineWidth: 2.1, lineCap: .round, lineJoin: .round))
+                    context.stroke(path, with: .color(color.opacity(0.94)),
+                                   style: StrokeStyle(lineWidth: 1.15, lineCap: .round, lineJoin: .round))
+                }
+            }
+            .opacity(visible ? 1 : 0)
+            .animation(.easeInOut(duration: 0.16), value: visible)
+            .animation(.easeInOut(duration: 0.15), value: color)
+            .task(id: handoff) {
+                handedOff = false
+                guard handoff else { return }
+                try? await Task.sleep(nanoseconds: 120_000_000)
+                guard !Task.isCancelled else { return }
+                handedOff = true
+            }
+            .onChange(of: frames) { next in
+                if !next.isEmpty { lastFrames = next; lastFocused = focused }
+            }
+            .onAppear {
+                if !frames.isEmpty { lastFrames = frames; lastFocused = focused }
+            }
+        }
+        .allowsHitTesting(false)
     }
 }
 

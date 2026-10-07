@@ -8,6 +8,8 @@ final class RemoteViewModel: ObservableObject {
     @Published private(set) var frameImage: UIImage?
     @Published private(set) var frameData: Data?
     @Published private(set) var frameMetadata: RemoteLiveViewMetadata?
+    @Published private(set) var focusDiagnosticReport = ""
+    @Published private(set) var focusDiagnosticRunning = false
     @Published private(set) var frameHistogram: [Int]?
     @Published private(set) var frameHistogramRGB: [[Int]]?
     @Published private(set) var frameWaveform: [[Int]]?
@@ -104,6 +106,7 @@ final class RemoteViewModel: ObservableObject {
     private var cleanupComplete = false
     private var lastFrameAt: ContinuousClock.Instant?
     private var frameDecodeGeneration: UInt64 = 0
+    private let focusDiagnostic = RemoteLiveViewFocusDiagnostic()
     private var histogramEnabled = false
     private var zebraEnabled = false
     private lazy var frameDecoder = RemoteFrameDecodePipeline { [weak self] decoded in
@@ -447,6 +450,15 @@ final class RemoteViewModel: ObservableObject {
         frameFalseColorPixels = decoded.falseColorPixels
         frameFalseColorSize = CGSize(width: decoded.falseColorWidth, height: decoded.falseColorHeight)
         frameZebraMask = decoded.zebraMask
+        if focusDiagnostic.running {
+            let packet = RemoteLiveViewPacket(bytes: decoded.rawBytes, jpegOffset: decoded.jpegOffset,
+                                               operation: decoded.operation,
+                                               receivedAtUptime: decoded.receivedAtUptime)
+            let context = "movie=\(movieMode) rec=\(String(describing: state.capture)) af=\(focusModeDescriptor.map { String($0.current) } ?? "unknown")"
+            focusDiagnostic.sample(packet: packet, metadata: decoded.metadata, context: context)
+            focusDiagnosticReport = focusDiagnostic.report()
+            if !focusDiagnostic.running { focusDiagnosticRunning = false }
+        }
         state = state.applying(.frameReceived(fps: decoded.fps))
         if initialLoaded { usageMeter.markReady() }
         if localRecordingPhase == .recording {
@@ -898,6 +910,7 @@ final class RemoteViewModel: ObservableObject {
     }
 
     func stop() {
+        stopFocusDiagnostic(reason: "left-monitor")
         usageMeter.stop()
         disposed = true
         stopRequested = true
@@ -939,6 +952,31 @@ final class RemoteViewModel: ObservableObject {
         state.focus = .init()
         confirmedFocusMarker = nil
         focusAreaPoint = RemoteFocusPoint(x: 0.5, y: 0.5)
+    }
+
+    func startFocusDiagnostic(description: String) {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown"
+        focusDiagnostic.start(nowMs: Int64((ProcessInfo.processInfo.systemUptime * 1000).rounded()),
+                              description: "date=\(ISO8601DateFormatter().string(from: Date())) app=\(version)(\(build)) \(description)")
+        focusDiagnosticRunning = true
+        focusDiagnosticReport = focusDiagnostic.report()
+    }
+
+    func stopFocusDiagnostic(reason: String = "stopped") {
+        focusDiagnostic.stop(reason: reason)
+        focusDiagnosticRunning = false
+        focusDiagnosticReport = focusDiagnostic.report()
+    }
+
+    func markFocusDiagnostic(_ text: String) {
+        focusDiagnostic.mark(nowMs: Int64((ProcessInfo.processInfo.systemUptime * 1000).rounded()), text: text)
+        focusDiagnosticReport = focusDiagnostic.report()
+    }
+
+    func displayFocusDiagnostic(_ state: String) {
+        focusDiagnostic.display(state)
+        focusDiagnosticReport = focusDiagnostic.report()
     }
 
     /// Waits for any active PTP operations to finish their normal protocol

@@ -81,24 +81,25 @@ enum RemoteFrameParser {
         case 0: judgement = .none
         case 1: judgement = .notFocused
         case 2: judgement = .focused
-        default: return nil
+        default: judgement = .unknown
         }
 
         let frameCount = Int(bytes[44])
         let selectedIndex = Int(bytes[45])
         let frameOffset = 48
         let frameStride = 8
-        let maxFrameCount = (jpegOffset - frameOffset) / frameStride
+        let frameTableEnd = jpegOffset == 512 ? 380 : 816
+        let maxFrameCount = (frameTableEnd - frameOffset) / frameStride
         let completeFrameTable = frameCount >= 1 && frameCount <= maxFrameCount &&
-            selectedIndex < frameCount && frameOffset + frameCount * frameStride <= jpegOffset
+            frameOffset + frameCount * frameStride <= frameTableEnd
 
-        var selectedFrame: RemoteLiveViewFocusFrame?
-        if completeFrameTable {
-            let offset = frameOffset + selectedIndex * frameStride
-            let width = be16(bytes, offset)
-            let height = be16(bytes, offset + 2)
-            let centerX = be16(bytes, offset + 4)
-            let centerY = be16(bytes, offset + 6)
+        func readFrame(_ index: Int) -> RemoteLiveViewFocusFrame? {
+            guard index >= 0, index < frameCount else { return nil }
+            let actualOffset = frameOffset + index * frameStride
+            let width = be16(bytes, actualOffset)
+            let height = be16(bytes, actualOffset + 2)
+            let centerX = be16(bytes, actualOffset + 4)
+            let centerY = be16(bytes, actualOffset + 6)
             let valid = width >= 1 && width <= coordinateWidth &&
                 height >= 1 && height <= coordinateHeight &&
                 centerX <= coordinateWidth && centerY <= coordinateHeight &&
@@ -106,14 +107,51 @@ enum RemoteFrameParser {
                 (coordinateWidth - centerX) * 2 >= width &&
                 (coordinateHeight - centerY) * 2 >= height
             if valid {
-                selectedFrame = RemoteLiveViewFocusFrame(
+                return RemoteLiveViewFocusFrame(
                     centerX: Float(centerX) / Float(coordinateWidth),
                     centerY: Float(centerY) / Float(coordinateHeight),
                     width: Float(width) / Float(coordinateWidth),
                     height: Float(height) / Float(coordinateHeight)
                 )
             }
+            return nil
         }
+
+        let areaWidth = be16(bytes, 20)
+        let areaHeight = be16(bytes, 22)
+        let areaCenterX = be16(bytes, 24)
+        let areaCenterY = be16(bytes, 26)
+        let areaValid = areaWidth >= 1 && areaWidth <= coordinateWidth &&
+            areaHeight >= 1 && areaHeight <= coordinateHeight &&
+            areaCenterX * 2 >= areaWidth && areaCenterY * 2 >= areaHeight &&
+            (coordinateWidth - areaCenterX) * 2 >= areaWidth &&
+            (coordinateHeight - areaCenterY) * 2 >= areaHeight
+        let areaAbsent = areaWidth == 0 && areaHeight == 0 && areaCenterX == 0 && areaCenterY == 0
+        let displayArea = areaValid ? RemoteLiveViewDisplayArea(
+            left: (Float(areaCenterX) - Float(areaWidth) / 2) / Float(coordinateWidth),
+            top: (Float(areaCenterY) - Float(areaHeight) / 2) / Float(coordinateHeight),
+            width: Float(areaWidth) / Float(coordinateWidth),
+            height: Float(areaHeight) / Float(coordinateHeight)
+        ) : nil
+        let mappedRecords: [RemoteLiveViewFocusFrame?] = completeFrameTable
+            ? (0..<frameCount).map { index in
+                guard let frame = readFrame(index) else { return nil }
+                if let displayArea { return Self.mapLiveViewFocusFrame(frame, area: displayArea) }
+                return areaAbsent ? frame : nil
+            }
+            : []
+        let selectedFrame = mappedRecords.indices.contains(selectedIndex) ? mappedRecords[selectedIndex] : nil
+        var visibleFrames: [RemoteLiveViewFocusFrame] = []
+        for frame in mappedRecords.compactMap({ $0 }) where !visibleFrames.contains(frame) {
+            visibleFrames.append(frame)
+        }
+        let frameStatus: String
+        if frameCount == 0 { frameStatus = "none" }
+        else if !completeFrameTable { frameStatus = "invalid-table" }
+        else if !areaValid && !areaAbsent { frameStatus = "invalid-area" }
+        else if visibleFrames.isEmpty { frameStatus = "no-valid-visible-frame" }
+        else if areaAbsent { frameStatus = "full-frame" }
+        else { frameStatus = "display-area" }
 
         return RemoteLiveViewMetadata(
             focusJudgement: judgement,
@@ -123,8 +161,29 @@ enum RemoteFrameParser {
             focusCoordinateWidth: validFocusGrid ? focusWidth : nil,
             focusCoordinateHeight: validFocusGrid ? focusHeight : nil,
             soundLevels: soundLevels(in: bytes, headerSize: jpegOffset),
-            attitude: compactAttitude(in: bytes, headerSize: jpegOffset)
+            attitude: compactAttitude(in: bytes, headerSize: jpegOffset),
+            focusFrameStatus: frameStatus,
+            focusDisplayArea: displayArea,
+            focusFrames: visibleFrames,
+            remainingVideoTimeMs: remainingVideoTime(in: bytes, headerSize: jpegOffset)
         )
+    }
+
+    /// Clip an AF region to the camera-declared visible image without moving
+    /// an off-centre region into view. This is the same normalized coordinate
+    /// transform used by Android's LiveViewMetadata parser.
+    static func mapLiveViewFocusFrame(_ frame: RemoteLiveViewFocusFrame,
+                                      area: RemoteLiveViewDisplayArea) -> RemoteLiveViewFocusFrame? {
+        guard area.width > 0, area.height > 0 else { return nil }
+        let left = max(0, (frame.centerX - frame.width / 2 - area.left) / area.width)
+        let top = max(0, (frame.centerY - frame.height / 2 - area.top) / area.height)
+        let right = min(1, (frame.centerX + frame.width / 2 - area.left) / area.width)
+        let bottom = min(1, (frame.centerY + frame.height / 2 - area.top) / area.height)
+        guard right > left, bottom > top else { return nil }
+        return RemoteLiveViewFocusFrame(centerX: (left + right) / 2,
+                                        centerY: (top + bottom) / 2,
+                                        width: right - left,
+                                        height: bottom - top)
     }
 
     /// LiveViewMetadata.kt: only the verified 0x9428 compact-v1 layout.
@@ -175,13 +234,40 @@ enum RemoteFrameParser {
         return RemoteLiveViewSoundLevels(peakLeft: Int(values[0]), peakRight: Int(values[1]),
                                          currentLeft: Int(values[2]), currentRight: Int(values[3]))
     }
+
+    /// Remaining movie time is a separate versioned video block in the
+    /// Display Information Data header. Zero in standby is reserved and does
+    /// not mean that the card is full.
+    static func remainingVideoTime(in bytes: [UInt8], headerSize: Int) -> Int64? {
+        let offset: Int
+        let recordingOffset: Int
+        switch headerSize {
+        case 512: offset = 384; recordingOffset = 392
+        case 1024: offset = 816; recordingOffset = 828
+        default: return nil
+        }
+        guard bytes.count >= headerSize, be16(bytes, 0) == 1, be16(bytes, 2) == 0,
+              be32(bytes, 8) == UInt32(headerSize), recordingOffset < bytes.count else { return nil }
+        let recording = Int(bytes[recordingOffset])
+        guard recording == 0 || recording == 1 else { return nil }
+        let millis = UInt64(be32(bytes, offset))
+        guard millis <= 86_400_000, millis > 0 || recording == 1 else { return nil }
+        return Int64(millis)
+    }
 }
 
-enum RemoteLiveViewFocusJudgement: Equatable, Sendable { case none, notFocused, focused }
+enum RemoteLiveViewFocusJudgement: Equatable, Sendable { case none, notFocused, focused, unknown }
 
 struct RemoteLiveViewFocusFrame: Equatable, Sendable {
     let centerX: Float
     let centerY: Float
+    let width: Float
+    let height: Float
+}
+
+struct RemoteLiveViewDisplayArea: Equatable, Sendable {
+    let left: Float
+    let top: Float
     let width: Float
     let height: Float
 }
@@ -208,11 +294,19 @@ struct RemoteLiveViewMetadata: Equatable, Sendable {
     let focusCoordinateHeight: Int?
     let soundLevels: RemoteLiveViewSoundLevels?
     let attitude: RemoteLiveViewAttitude?
+    let focusFrameStatus: String
+    let focusDisplayArea: RemoteLiveViewDisplayArea?
+    let focusFrames: [RemoteLiveViewFocusFrame]
+    let remainingVideoTimeMs: Int64?
 
     init(focusJudgement: RemoteLiveViewFocusJudgement, selectedFocusFrame: RemoteLiveViewFocusFrame?,
          trackingCoordinateWidth: Int, trackingCoordinateHeight: Int,
          focusCoordinateWidth: Int?, focusCoordinateHeight: Int?, soundLevels: RemoteLiveViewSoundLevels?,
-         attitude: RemoteLiveViewAttitude? = nil) {
+         attitude: RemoteLiveViewAttitude? = nil,
+         focusFrameStatus: String = "legacy",
+         focusDisplayArea: RemoteLiveViewDisplayArea? = nil,
+         focusFrames: [RemoteLiveViewFocusFrame]? = nil,
+         remainingVideoTimeMs: Int64? = nil) {
         self.focusJudgement = focusJudgement
         self.selectedFocusFrame = selectedFocusFrame
         self.trackingCoordinateWidth = trackingCoordinateWidth
@@ -221,6 +315,132 @@ struct RemoteLiveViewMetadata: Equatable, Sendable {
         self.focusCoordinateHeight = focusCoordinateHeight
         self.soundLevels = soundLevels
         self.attitude = attitude
+        self.focusFrameStatus = focusFrameStatus
+        self.focusDisplayArea = focusDisplayArea
+        self.focusFrames = focusFrames ?? selectedFocusFrame.map { [$0] } ?? []
+        self.remainingVideoTimeMs = remainingVideoTimeMs
+    }
+}
+
+/// Passive, bounded sampling of frames already fetched by Live View. It never
+/// sends a camera command and keeps only compact header/state strings.
+final class RemoteLiveViewFocusDiagnostic {
+    private var lines: [String] = []
+    private var startMs: Int64 = 0
+    private var lastSampleMs: Int64?
+    private var count = 0
+    private var lastState: String?
+    private var changes = 0
+    private var displayState = "UI not observed"
+    private var markedSamples: [String] = []
+    private var baseline: String?
+    var running = false
+
+    func start(nowMs: Int64, description: String) {
+        lines = ["Focus diagnostic v2 \(String(description.prefix(320)))",
+                 "60s; changes only; ms; rawWHXY=width,height,centerX,centerY."]
+        markedSamples.removeAll()
+        baseline = nil
+        lastSampleMs = nil
+        count = 0
+        lastState = nil
+        changes = 0
+        displayState = "UI not observed"
+        startMs = nowMs
+        running = true
+    }
+
+    func stop(reason: String = "stopped") {
+        if running { append("end=\(reason) samples=\(count) changes=\(changes)") }
+        running = false
+    }
+
+    func display(_ state: String) {
+        guard running else { return }
+        func kind(_ value: String) -> String {
+            [" age=", " boxPx="].compactMap { value.range(of: $0).map { String(value[..<$0.lowerBound]) } }.first ?? value
+        }
+        let previousKind = kind(displayState)
+        let next = String(state.prefix(180))
+        let nextKind = kind(next)
+        displayState = next
+        if previousKind != nextKind { append("UI \(next)") }
+    }
+
+    func mark(nowMs: Int64, text: String) {
+        guard running else { return }
+        let state = lastState.flatMap { value in
+            value.range(of: "af=").map { String(value[$0.upperBound...]) }
+        } ?? "no frame"
+        let value = "mark +\(nowMs - startMs) \(String(text.prefix(48))) UI=\(displayState) state=\(state)"
+        if markedSamples.count >= 8 { markedSamples.removeFirst() }
+        markedSamples.append(value)
+    }
+
+    func sample(packet: RemoteLiveViewPacket, metadata: RemoteLiveViewMetadata?, context: String) {
+        guard running else { return }
+        let now = Int64((packet.receivedAtUptime * 1000).rounded())
+        guard now >= startMs else { return }
+        if now - startMs >= 60_000 { stop(reason: "60s"); return }
+        if let lastSampleMs, now - lastSampleMs < 200 { return }
+        lastSampleMs = now
+        count += 1
+        let bytes = [UInt8](packet.bytes)
+        let header = packet.jpegOffset
+        func u8(_ index: Int) -> Int {
+            guard index >= 0, index < header, index < bytes.count else { return -1 }
+            return Int(bytes[index])
+        }
+        func u16(_ index: Int) -> Int {
+            let high = u8(index), low = u8(index + 1)
+            return high < 0 || low < 0 ? -1 : (high << 8) | low
+        }
+        let selectedIndex = u8(45)
+        let tableEnd = header == 512 ? 380 : (header == 1024 ? 816 : 0)
+        let selectedOffset = 48 + max(0, selectedIndex) * 8
+        let raw: String
+        if selectedIndex >= 0, selectedIndex < u8(44), selectedOffset + 8 <= tableEnd,
+           selectedOffset + 8 <= bytes.count {
+            raw = stride(from: selectedOffset, to: selectedOffset + 8, by: 2)
+                .map { String(u16($0)) }.joined(separator: ",")
+        } else { raw = "none" }
+        let op = String(packet.operation, radix: 16)
+        let state = "\(String(context.prefix(48))) op=\(op) h=\(header) " +
+            "v=\(u16(0)).\(u16(2)) whole=\(u16(16))x\(u16(18)) " +
+            "area=\(u16(20))x\(u16(22))@\(u16(24)),\(u16(26)) " +
+            "af=\(u8(42)) n=\(u8(44)) valid=\(metadata?.focusFrames.count ?? 0) idx=\(selectedIndex) " +
+            "\(metadata?.focusFrameStatus ?? "unsupported-header") rawWHXY=\(raw)"
+        guard state != lastState else { return }
+        lastState = state
+        changes += 1
+        let sample = "+\(now - startMs) \(state)"
+        if baseline == nil { baseline = sample } else { append(sample) }
+    }
+
+    func report() -> String {
+        guard !lines.isEmpty else { return "" }
+        let heading = lines.prefix(2).joined(separator: "\n") + "\n" +
+            (baseline.map { "baseline \($0)" } ?? "") + "\n" +
+            markedSamples.joined(separator: "\n") + "\nUI=\(displayState)\n"
+        let samples = lines.dropFirst(2)
+        let report = heading + samples.joined(separator: "\n")
+        guard report.utf8.count > 6000 else { return report }
+        let prefix = heading + "[older changes omitted]\n"
+        var tail: [String] = []
+        var length = prefix.utf8.count
+        for line in samples.reversed() {
+            let lineLength = line.utf8.count + 1
+            if length + lineLength > 6000 { break }
+            tail.insert(line, at: 0); length += lineLength
+        }
+        return prefix + tail.joined(separator: "\n")
+    }
+
+    private func append(_ line: String) {
+        if lines.count >= 80, lines.count >= 3 {
+            lines.remove(at: 2)
+        }
+        lines.append(line)
     }
 }
 
@@ -233,6 +453,9 @@ struct RemoteZebraMask: Equatable, Sendable {
 struct RemoteDecodedFrame: @unchecked Sendable {
     let image: UIImage
     let jpeg: Data
+    let rawBytes: Data
+    let jpegOffset: Int
+    let operation: UInt16
     let metadata: RemoteLiveViewMetadata?
     let histogram: [Int]?
     let histogramRGB: [[Int]]?
@@ -350,6 +573,9 @@ actor RemoteFrameDecodePipeline {
             let result = RemoteDecodedFrame(
                 image: decoded.image,
                 jpeg: decoded.jpeg,
+                rawBytes: request.packet.bytes,
+                jpegOffset: request.packet.jpegOffset,
+                operation: request.packet.operation,
                 metadata: decoded.metadata,
                 histogram: histogramEnabled ? (calculateHistogram ? decoded.histogram : cachedHistogram) : nil,
                 histogramRGB: histogramEnabled ? decoded.histogramRGB : nil,
@@ -385,6 +611,9 @@ actor RemoteFrameDecodePipeline {
         return RemoteDecodedFrame(
             image: image,
             jpeg: jpeg,
+            rawBytes: payload,
+            jpegOffset: request.packet.jpegOffset,
+            operation: request.packet.operation,
             metadata: RemoteFrameParser.metadata(from: payload,
                                                  jpegOffset: request.packet.jpegOffset,
                                                  operation: request.packet.operation),

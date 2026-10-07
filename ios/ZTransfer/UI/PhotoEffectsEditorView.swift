@@ -1383,9 +1383,12 @@ private struct PhotoEffectControlRow: Layout {
     }
 }
 
-private struct PhotoEffectFavoriteButton: View {
+struct PhotoEffectFavoriteButton: View {
     let favorite: Bool
     let enabled: Bool
+    var compact = false
+    var compactSize: CGFloat = 28
+    var description: String? = nil
     let action: () -> Void
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage("skin_preset") private var skin = "FROSTED_GLASS"
@@ -1401,13 +1404,14 @@ private struct PhotoEffectFavoriteButton: View {
     }
 
     var body: some View {
+        let size = compact ? compactSize : PhotoEffectControlMetrics.height
         Button {
             ZTransferHaptics.shared.tick()
             action()
         } label: {
             ZStack {
                 Image(systemName: favorite ? "star.fill" : "star")
-                    .font(.system(size: 22))
+                    .font(.system(size: compact ? max(16, compactSize - 10) : 22))
                     .id(favorite)
                     .transition(.asymmetric(
                         insertion: .scale(scale: 0.55).animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.19))
@@ -1416,18 +1420,18 @@ private struct PhotoEffectFavoriteButton: View {
                             .combined(with: .opacity.animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.11)))))
             }
             .foregroundStyle(markColor)
-            .frame(width: PhotoEffectControlMetrics.height, height: PhotoEffectControlMetrics.height)
+            .frame(width: size, height: size)
         }
         .buttonStyle(ZTransferGlassButtonStyle(
             tint: markColor,
-            cornerRadius: 13,
+            cornerRadius: compact ? 10 : 13,
             active: favorite,
             activeColor: ZTransferColors.accentOrange,
             activeOutline: true,
             materialContentColor: markColor
         ))
         .disabled(!enabled).opacity(enabled ? 1 : 0.48)
-        .accessibilityLabel(AppLocalized.resource(favorite ? "photo_effect_favorite_remove" : "photo_effect_favorite_add"))
+        .accessibilityLabel(description ?? AppLocalized.resource(favorite ? "photo_effect_favorite_remove" : "photo_effect_favorite_add"))
         .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.18), value: favorite)
     }
 

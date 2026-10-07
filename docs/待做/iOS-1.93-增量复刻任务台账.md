@@ -4,7 +4,7 @@
 
 2026-10-07 用户要求：拉取安卓新功能合入 ios，先形成变动文档，深入阅读通用调度器专门文档，再按原规则逐项完整复刻。首轮已从 `origin/android` 拉取并将 `2b2bf0c2802cacc909e9373562d912bce2d21175` 合入 `ios`，合并提交 `5d583d60`。旧安卓基准 `617082c3`，合并前 iOS `27fba4bf`；增量 **62 个提交、79 个净变化文件**，安卓 versionName **1.93**、versionCode **66**。本轮追加同步已确认 `origin/android=8138e2dec22aa8c8b998a7a9a7b2fa0b9f3a1ec5`，相对 `5d583d60` 新增 `f40f6bbf`、`8138e2de` 两个提交，并以 `77fde8d9` 无冲突合入；详细核对见 [追加同步核对](iOS-1.93-追加同步核对.md)。本次同步与按类型存放复刻将在本轮用户明确要求后提交并推送。
 
-新轮原始进度 **5/15**（N01–N05 已完成开发侧复刻，待用户真机验收）；追加诊断任务后按 **5/16** 播报。N06 已有实现代码但尚缺专项自动化与集中构建，因此状态改为“实现中”；N11 的按类型存放最终前缀修正尚未迁移。状态采用待调查→调查中→实现中→复刻完成，待用户真机验收；不能沿用上一轮 26/26 证明本轮完成。共享文件按差异块分别归属，任务之间允许先处理依赖，但不扩大单项边界或遗漏总范围。[来源索引](iOS-1.93-增量来源索引.json)保留首轮全部提交；追加提交与调度器核对见 [追加同步来源索引](iOS-1.93-追加同步来源索引.json)。
+新轮原始进度 **8/15**（N01–N07、N11 已完成开发侧复刻，待用户真机验收）；追加诊断任务后按 **8/16** 播报。N16 诊断取证仍待调查。状态采用待调查→调查中→实现中→复刻完成，待用户真机验收；不能沿用上一轮 26/26 证明本轮完成。共享文件按差异块分别归属，任务之间允许先处理依赖，但不扩大单项边界或遗漏总范围。[来源索引](iOS-1.93-增量来源索引.json)保留首轮全部提交；追加提交与调度器核对见 [追加同步来源索引](iOS-1.93-追加同步来源索引.json)。
 
 先读对应安卓提交、最终源码、上下游及测试，写明状态、文本、布局、动画、取消/错误/重试和保存范围，然后实施。迁移安卓测试，同时补足已识别但安卓未测的边界。每完成一大块才集中构建和必要自动化测试；真机测试与验收由用户负责。本轮功能实现不自动提交、推送或安装。
 
@@ -19,8 +19,8 @@
 | N03 | 照片加载 1/3/5/全部拍摄日范围：持久化、旧尾部快照、扩大续扫、缩小隐藏、删除后重枚举、新事件、批次就绪信号 | PhotoDateRange、CameraViewModel、NikonCamera、TransferViewModel；安卓暂无专项范围测试，iOS 需补 | 复刻完成，待用户验收 |
 | N04 | 评级协议：STA JPG/RAW 100 KiB+8 KiB≤256 KiB 连续探测、视频结构区、AP/USB 对象属性、能力短路、JPG/NEF 唯一配对及未知值 | PhotoRating、PhotoRatingPairs、VideoRating、NikonCamera；对应三个解析/配对测试 | 复刻完成，待用户验收 |
 | N05 | 评级扫描生命周期：开关刷新代次、范围交集/锚点、来源快照、逐文件/区域 P3、进度、取消屏障、8192 值缓存和来源、重连隔离 | PhotoRatingScan、RatingDiagnostics、CameraViewModel；调度/评级测试 | 复刻完成，待用户验收 |
-| N06 | 评级筛选 UI：开关、0–5 星条件、日期拨轮、等待/进度/完成、角标/帮助、触感、固定布局、独立 UI 状态避免重播网格 | FileListScreen、TransferViewModel、三语资源；相关方案仅用于解释最终代码 | 实现中，待专项测试/集中构建 |
-| N07 | 实时多对焦框：帧头多框/坐标/颜色/显隐/有效期、照片录像差异、60 秒被动诊断/步骤标记及工具入口 | LiveViewMetadata、LiveViewFocusDiagnostic、RemoteScreen；帧头/诊断测试及专门方案 | 待调查 |
+| N06 | 评级筛选 UI：开关、0–5 星条件、日期拨轮、等待/进度/完成、角标/帮助、触感、固定布局、独立 UI 状态避免重播网格 | FileListScreen、TransferViewModel、三语资源；相关方案仅用于解释最终代码 | 复刻完成，待用户验收 |
+| N07 | 实时多对焦框：帧头多框/坐标/颜色/显隐/有效期、照片录像差异、60 秒被动诊断/步骤标记及工具入口 | LiveViewMetadata、LiveViewFocusDiagnostic、RemoteScreen；帧头/诊断测试及专门方案 | 复刻完成，待用户验收 |
 | N08 | 对焦模式与点按路径：AF/MF 固定状态、模式切换回读、坐标修正、单点/动态/宽区域路径、机型名称及不支持提示 | RemoteCameraTools、RemoteLab、RemoteCameraToolPanel；RemoteFocusModeTest、RemoteFocusTest、标签测试 | 待调查 |
 | N09 | 监看完全控制、工具排列与启动/模式切换：持久化/独立模式、横竖稳定槽位、启动壳保留、提示和工具名称、旧诊断删除范围 | RemoteToolPreferences、RemoteToolBar、LandscapeMonitorControls、RemoteScreen；相关标签/交互测试 | 待调查 |
 | N10 | 录像规格、剩余时长和 DISP：读取来源、解码、无效值/回退、排列/统一提示、被动及开发诊断入口 | MonitorMovieFormat、MonitorStorage、LiveViewVideoDiagnostic、RemoteDispOverlay；MonitorMovieFormatTest、MonitorRemainingTest | 待调查 |
@@ -101,3 +101,17 @@
 - 入队时锁定目标目录；旧 `organize_transfers_by_date` 布尔值只作为迁移/兼容投影，不会覆盖新三态值。已传识别、目录扫描、重试/批量/自动入队和预览原图查找共用目标目录解析，避免切换设置后改变已入队任务。
 - 新增 `DomainModelTests` 覆盖类型前缀/未知扩展名、旧值迁移与三态持久化、排队目标目录快照和 `ZTFrames` 排除。相关回归共 **180/180** 通过，日志 `/tmp/ztransfer-ios193-n11-relevant-tests.log`；专项领域测试 **121/121** 通过，日志 `/tmp/ztransfer-ios193-n11-storage-tests3.log`。
 - Release 模拟器生产构建通过，日志 `/tmp/ztransfer-ios193-n11-build-simulator.log`（`** BUILD SUCCEEDED **`）。尚未进行真机测试，N11 标记“复刻完成，待用户验收”。
+
+### 2026-10-07 N06 评级筛选 UI 复刻收尾
+
+- 已按安卓最终 `FileListScreen.FilterOverlay` 逐项修正 iOS：固定 271pt 居中面板与顶部间距、内容滚动上限、类型/标记/卡槽/星级/日期的顺序和间距、`DetentWheel` 拨轮及材质筛选胶囊、评级开关角标与等待/进度/完成文案、0–5 星紧凑材质按钮、范围帮助气泡、日期端点摘要、动态年份边界和开始/结束联动约束。评级加载开关仍独立于具体星级筛选，切换范围不会触发网格揭示动画。
+- 修正了之前 iOS 与安卓的实质差异：移除安卓没有的标题和文件类型/状态/日期分组标题；过滤面板水平居中；保留未知扩展名选项；外部清除同步面板草稿；已传日期清除使用独立 38pt 玻璃按钮；帮助气泡使用右上锚定和项目符号；筛选按钮颜色、长按诊断和星级动画复用安卓对应材质路径。
+- 新增自动化覆盖评级开关未选择具体星级时不改变网格、已知星级精确匹配、未知评级不匹配、关闭状态和评级范围持久化归一化。评级/筛选集中回归 **160/160** 通过，日志 `/tmp/ztransfer-ios193-n06-rating-regression.log`；领域测试单独 **123/123** 通过，日志 `/tmp/ztransfer-ios193-n06-ui-parity5.log`。
+- Debug 模拟器构建成功，日志 `/tmp/ztransfer-ios193-n06-debug-build.log`；已安装并启动 `com.ztransfer.ios` 于 iPhone 17（iOS 26.5，UDID `7BE9C1A2-4BC0-43E1-9329-E540F9C9DF9F`），`simctl launch` 返回 PID 97905。尚未进行真机测试，N06 标记“复刻完成，待用户验收”。
+
+### 2026-10-07 N07 实时多对焦框与被动诊断复刻收尾
+
+- 按安卓最终 `LiveViewMetadata.kt` 迁移 0x9428 帧头：未知对焦判断保留为 `.unknown`，AF 表以 512/1024 头型的 380/816 边界校验，逐框验证并去重；保留其它有效框和无效选中索引，显示区域按裁剪映射，不把画外框平移回屏幕；状态值覆盖 `none`、`invalid-table`、`invalid-area`、`no-valid-visible-frame`、`full-frame`、`display-area`。声音、姿态和录像剩余时间解析继续独立失败回退。
+- `RemoteView` 增加安卓同语义的 `focus_frame` 工具与立即持久化；多框按数量/合焦状态使用白/绿/黄颜色，黑色阴影加前景描边，取景器门控覆盖工具隐藏、断连、模式切换旧帧、500ms 过期和无框；点按/半按反馈保持独立，合焦后等待 120ms 才交给新鲜相机框，淡入淡出 160ms。
+- 开发者面板新增 `Focus diagnostic v2` 被动诊断：仅采样已收到帧，每 200ms 限频，60 秒自动结束，状态变化才记行，UI 状态和最多 8 个步骤标记保留，报告有界 6000 字节并按 `focus_report_v1` 持久化；新增英文、简体中文、繁体中文逐字文案。
+- 自动化新增 5 项安卓契约覆盖：未知状态/多框、坏表保留音频、显示区域裁剪、60 秒限频有界报告。`/tmp/ztransfer-ios193-n07-tests3.log`：DomainModelTests **127/127**，`** TEST SUCCEEDED **`；Debug 模拟器构建 `/tmp/ztransfer-ios193-n07-build3.log`：`** BUILD SUCCEEDED **`。尚未进行真机验收，N07 标记“复刻完成，待用户验收”。

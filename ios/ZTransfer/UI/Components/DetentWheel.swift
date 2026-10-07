@@ -18,6 +18,7 @@ struct DetentWheel<Option: Hashable>: View {
     var optionMaxLines = 1
     var optionFontSize: CGFloat = 14
     var optionFontWeight: Font.Weight? = nil
+    var optionTextColor: Color? = nil
     var accentColor: Color? = nil
     var emphasized = false
     var showEmphasisBorder = true
@@ -49,6 +50,7 @@ struct DetentWheel<Option: Hashable>: View {
          enabled: Bool = true, readOnly: Bool = false,
          cornerRadius: CGFloat = 13, optionMaxLines: Int = 1,
          optionFontSize: CGFloat = 14, optionFontWeight: Font.Weight? = nil,
+         optionTextColor: Color? = nil,
          accentColor: Color? = nil, emphasized: Bool = false,
          showEmphasisBorder: Bool = true, showDragHint: Bool = true,
          onDetent: (() -> Void)? = nil, onActivated: (() -> Void)? = nil,
@@ -67,7 +69,7 @@ struct DetentWheel<Option: Hashable>: View {
         self.rowHeight = rowHeight; self.wheelHeight = wheelHeight
         self.enabled = enabled; self.readOnly = readOnly; self.cornerRadius = cornerRadius
         self.optionMaxLines = optionMaxLines; self.optionFontSize = optionFontSize
-        self.optionFontWeight = optionFontWeight; self.accentColor = accentColor
+        self.optionFontWeight = optionFontWeight; self.optionTextColor = optionTextColor; self.accentColor = accentColor
         self.emphasized = emphasized; self.showEmphasisBorder = showEmphasisBorder
         self.showDragHint = showDragHint; self.onDetent = onDetent
         self.onActivated = onActivated; self.onLongClick = onLongClick
@@ -200,7 +202,8 @@ struct DetentWheel<Option: Hashable>: View {
         let indices = dragging ? Array(max(0, Int(floor(position)) - 1)...min(options.count - 1, Int(ceil(position)) + 1)) : [centerIndex]
         ForEach(indices, id: \.self) { index in
             let distance = abs(CGFloat(index) - position); let active = distance < 0.5
-            let color = (emphasized && active ? accent : ZTransferColors.primaryText)
+            let baseColor = emphasized && active ? accent : (optionTextColor ?? ZTransferColors.primaryText)
+            let color = baseColor
                 .opacity(active ? 1 : (dark ? 0.50 : 0.38))
             HStack(spacing: 4) {
                 if favoriteOption(options[index]) { Image(systemName: "star.fill").font(.system(size: 11)).foregroundStyle((favoriteIconColor ?? accent).opacity(active ? 1 : 0.38)) }

@@ -18,6 +18,7 @@ struct PhotoFilterPopupOverlay: View {
     @State private var editingDate = false
     @State private var showRatingTip = false
     @State private var ratingTipFrame: CGRect = .zero
+    @State private var ratingTipSize: CGSize = .zero
     @State private var ratingPulse: CGFloat = 1
     @AppStorage("haptics_enabled") private var hapticsEnabled = true
 
@@ -43,11 +44,11 @@ struct PhotoFilterPopupOverlay: View {
             // Android's final rating row fixes the panel at 14 + 81 + 8 +
             // 154 + 14 dp. Keep that width stable while controls crossfade.
             let width = min(271, max(1, proxy.size.width - 24))
-            // Android FilterOverlay: final panel is 8pt below the actual
-            // trigger, with only its horizontal placement clamped on screen.
-            let left = min(max(localAnchor.minX, 12),
-                           max(12, proxy.size.width - width - 12))
+            // Android FilterOverlay centers the fixed-width panel. The trigger
+            // only supplies the genie origin and the vertical attachment.
+            let left = max(12, (proxy.size.width - width) / 2)
             let top = localAnchor.maxY + 8
+            let maxPanelHeight = max(100, proxy.size.height - top - 20)
             let sourceAnchor = GeniePopupMotion.attachmentAnchor(
                 for: localAnchor, cornerRadius: 22
             )
@@ -62,7 +63,7 @@ struct PhotoFilterPopupOverlay: View {
                 // drives only visual progress, so a late close completion can
                 // never destroy a panel that has already been reopened.
                 GeniePopupPanel(
-                    content: panelContent(width: width),
+                    content: panelContent(width: width, maxHeight: maxPanelHeight),
                     trigger: .filter,
                     targetProgress: isPresented ? 1 : 0,
                     anchorX: unitAnchorX,
@@ -78,6 +79,8 @@ struct PhotoFilterPopupOverlay: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .coordinateSpace(name: "filter-root")
+            .onPreferenceChange(RatingTipSizePreferenceKey.self) { ratingTipSize = $0 }
             .allowsHitTesting(isPresented)
         }
         .ignoresSafeArea()
@@ -87,6 +90,11 @@ struct PhotoFilterPopupOverlay: View {
         }
         .onChange(of: isPresented) { presented in
             if presented { resetDraft(); showRatingTip = false }
+        }
+        .onChange(of: initial) { value in
+            // Android's remember(current) follows an external clear while the
+            // popup is still mounted; keep the draft from resurrecting it.
+            working = value
         }
         .task(id: ratingProgress.loading) {
             guard ratingProgress.loading else {
@@ -101,18 +109,19 @@ struct PhotoFilterPopupOverlay: View {
     }
 
     @ViewBuilder
-    private func panelContent(width: CGFloat) -> some View {
+    private func panelContent(width: CGFloat, maxHeight: CGFloat) -> some View {
         Group {
             if editingDate {
                 dateEditor
-                    .transition(.opacity.combined(with: .offset(x: 12)))
+                    .transition(.opacity)
             } else {
-                filterForm
-                    .transition(.opacity.combined(with: .offset(x: -12)))
+                ScrollView(.vertical, showsIndicators: false) {
+                    filterForm.transition(.opacity)
+                }
+                .frame(maxHeight: maxHeight)
             }
         }
         .frame(width: max(1, width - 28))
-        .fixedSize(horizontal: false, vertical: true)
         .padding(14)
         // Shadow the panel surface once. Applying a shadow to the entire
         // content makes the synchronous Genie capture blur every child.
@@ -125,20 +134,7 @@ struct PhotoFilterPopupOverlay: View {
     }
 
     private var filterForm: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 8) {
-                // Android reuses FilterMark in both the toolbar and popup.
-                // Keep one iOS vector too; the system circled glyph had a
-                // different silhouette and visual center.
-                PhotoListFilterIcon(active: false, color: ZTransferColors.accentBlue)
-                    .frame(width: 18, height: 18)
-                Text(AppLocalized.resource("filter_title"))
-                    .zTransferTypography(.titleMedium, weight: .semibold)
-                    .foregroundStyle(ZTransferColors.primaryText)
-            }
-            .padding(.bottom, 14)
-
-            section(AppLocalized.resource("filter_section_file_type"))
+            VStack(alignment: .leading, spacing: 0) {
             VStack(spacing: 8) {
                 ForEach(fileTypeRows.indices, id: \.self) { rowIndex in
                     let row = fileTypeRows[rowIndex]
@@ -157,7 +153,6 @@ struct PhotoFilterPopupOverlay: View {
                 }
             }
             divider
-            section(AppLocalized.resource("filter_section_status"))
             HStack(spacing: 8) {
                 FilterChip(label: AppLocalized.resource("filter_protected"), selected: working.protectedOnly, systemImage: "key.fill") { commit(working.togglingProtected()) }
                 FilterChip(label: AppLocalized.resource("burst_label"), selected: working.burstOnly, burstIcon: true) { commit(working.togglingBurst()) }
@@ -175,21 +170,22 @@ struct PhotoFilterPopupOverlay: View {
                                 toggled: slot,
                                 available: availableStorageSlots
                             )))
-                        }
+                            }
+                    }
+                    if availableStorageSlots.count == 1 {
+                        Color.clear.frame(maxWidth: .infinity)
                     }
                 }
             }
             divider
             ratingFilterRow
             divider
-            section(AppLocalized.resource("filter_section_date"))
             HStack(spacing: 8) {
                 FilterChip(label: working.dateRange.map(formatRange) ?? AppLocalized.resource("filter_date"), selected: working.dateRange != nil) {
                     editingDate = true
                 }
                 if working.dateRange != nil {
-                    FilterChip(label: nil, selected: false, systemImage: "xmark") { commit(working.withDateRange(nil)) }
-                        .frame(width: 38)
+                    FilterClearButton { commit(working.withDateRange(nil)) }
                 }
             }
         }
@@ -230,6 +226,7 @@ struct PhotoFilterPopupOverlay: View {
                 selected: working.ratingEnabled,
                 accentColor: accent,
                 minHeight: 34,
+                cornerLabel: AppLocalized.resource("filter_rating_enabled"),
                 onLongPress: working.ratingEnabled ? {
                     UIPasteboard.general.string = PhotoRatingDiagnostics.snapshot()
                 } : nil
@@ -277,34 +274,29 @@ struct PhotoFilterPopupOverlay: View {
                             GeometryReader { geometry in
                                 Color.clear.preference(
                                     key: RatingTipFramePreferenceKey.self,
-                                    value: geometry.frame(in: .named("rating-panel"))
+                                    value: geometry.frame(in: .named("filter-root"))
                                 )
                             }
                         )
                     }
                     .transition(.opacity)
                 } else {
-                    HStack(spacing: 1) {
-                        ForEach(1...5, id: \.self) { star in
-                            Button {
-                                ZTransferHaptics.shared.tick()
-                                commit(working.withRating(
-                                    enabled: true,
-                                    rating: working.rating == star ? nil : star
-                                ))
-                            } label: {
-                                Image(systemName: star <= (working.rating ?? 0) ? "star.fill" : "star")
-                                    .font(.system(size: 18, weight: .semibold))
-                                    .foregroundStyle(star <= (working.rating ?? 0)
-                                        ? ZTransferColors.accentYellow
-                                        : ZTransferColors.secondaryText.opacity(0.55))
-                                    .frame(width: 30, height: 34)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel(AppLocalized.formattedResource("filter_rating_stars", ["%1$d": String(star)]))
+                HStack(spacing: 1) {
+                    ForEach(1...5, id: \.self) { star in
+                        PhotoEffectFavoriteButton(
+                            favorite: star <= (working.rating ?? 0),
+                            enabled: true,
+                            compact: true,
+                            compactSize: 30,
+                            description: AppLocalized.formattedResource("filter_rating_stars", ["%1$d": String(star)])
+                        ) {
+                            commit(working.withRating(
+                                enabled: true,
+                                rating: working.rating == star ? nil : star
+                            ))
                         }
                     }
+                }
                     .frame(width: 154, height: 34, alignment: .leading)
                     .transition(.opacity)
                 }
@@ -313,7 +305,6 @@ struct PhotoFilterPopupOverlay: View {
             .animation(.linear(duration: 0.18), value: working.ratingEnabled)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .coordinateSpace(name: "rating-panel")
         .onPreferenceChange(RatingTipFramePreferenceKey.self) { ratingTipFrame = $0 }
     }
 
@@ -323,20 +314,28 @@ struct PhotoFilterPopupOverlay: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(AppLocalized.resource("filter_rating_help_title"))
                 .zTransferTypography(.titleMedium, weight: .semibold)
-            Text(AppLocalized.resource("filter_rating_help_description"))
-                .zTransferText(size: ZTransferMetrics.caption)
-                .foregroundStyle(ZTransferColors.primaryText)
+            HStack(alignment: .top, spacing: 6) {
+                Text("•")
+                Text(AppLocalized.resource("filter_rating_help_description"))
+                    .zTransferText(size: ZTransferMetrics.caption)
+                    .foregroundStyle(ZTransferColors.primaryText)
+            }
         }
         .padding(16)
         .frame(width: width, alignment: .leading)
+        .background(
+            GeometryReader { geometry in
+                Color.clear.preference(key: RatingTipSizePreferenceKey.self, value: geometry.size)
+            }
+        )
         .background {
             ZTransferGlassSurface(cornerRadius: 16, kind: .panel)
                 .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(ZTransferColors.primaryText.opacity(0.12), lineWidth: 1))
                 .shadow(color: .black.opacity(0.16), radius: 14, y: 7)
         }
         .position(
-            x: min(max(18 + width / 2, anchor.midX), proxy.size.width - 18 - width / 2),
-            y: anchor.maxY + 8 + 48
+            x: proxy.size.width - 18 - width / 2,
+            y: anchor.maxY + 8 + (ratingTipSize.height > 0 ? ratingTipSize.height / 2 : 48)
         )
         .transition(.opacity)
         .zIndex(2)
@@ -354,12 +353,16 @@ struct PhotoFilterPopupOverlay: View {
         Rectangle().fill(ZTransferColors.secondaryText.opacity(0.16)).frame(height: 1).padding(.vertical, 13)
     }
 
+    private var allExtensions: [String] {
+        Set(availableExtensions + (working.extensions ?? [])).sorted()
+    }
+
     private var fileTypeColumnCount: Int {
-        min(5, max(1, availableExtensions.count + 1))
+        min(5, max(1, allExtensions.count + 1))
     }
 
     private var fileTypeRows: [[String?]] {
-        let choices: [String?] = [nil] + availableExtensions.map(Optional.some)
+        let choices: [String?] = [nil] + allExtensions.map(Optional.some)
         return stride(from: 0, to: choices.count, by: fileTypeColumnCount).map {
             Array(choices[$0..<min($0 + fileTypeColumnCount, choices.count)])
         }
@@ -369,13 +372,13 @@ struct PhotoFilterPopupOverlay: View {
     private func fileTypeChip(_ extensionValue: String?) -> some View {
         if let ext = extensionValue {
             FilterChip(
-                label: ext.dropFirst().uppercased(),
+                label: ext.hasPrefix(".") ? String(ext.dropFirst()).uppercased() : ext.uppercased(),
                 selected: working.extensions?.contains(ext) ?? true
             ) {
-                var selected = working.extensions ?? Set(availableExtensions)
+                var selected = working.extensions ?? Set(allExtensions)
                 if selected.contains(ext) { selected.remove(ext) } else { selected.insert(ext) }
                 commit(working.withExtensions(
-                    selected.count == availableExtensions.count || selected.isEmpty ? nil : selected
+                    selected.count == allExtensions.count || selected.isEmpty ? nil : selected
                 ))
             }
         } else {
@@ -418,6 +421,20 @@ struct PhotoFilterPopupOverlay: View {
     }
 }
 
+private struct FilterClearButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "xmark")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(ZTransferColors.secondaryText)
+                .frame(width: 38, height: 38)
+        }
+        .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 9, panel: true))
+    }
+}
+
 /// Android DateRangeEditor owns these two values only while its page exists.
 /// Opening the filter popup itself must not parse or initialize date drafts.
 @MainActor
@@ -440,7 +457,9 @@ private struct PhotoFilterDateEditor: View {
 
     var body: some View {
         let calendar = Calendar.current
-        let years = Array(1990...max(1990, calendar.component(.year, from: Date()) + 1))
+        let startYear = calendar.component(.year, from: startDate)
+        let endYear = calendar.component(.year, from: endDate)
+        let years = Array(min(1990, startYear, endYear)...max(1990, calendar.component(.year, from: Date()) + 1, startYear, endYear))
         return VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 Button { onBack() } label: {
@@ -474,6 +493,12 @@ private struct PhotoFilterDateEditor: View {
                 ))
                 .frame(maxWidth: .infinity, minHeight: 40)
             }
+        }
+        .onChange(of: startDate) { value in
+            if value > endDate { endDate = value }
+        }
+        .onChange(of: endDate) { value in
+            if value < startDate { startDate = value }
         }
     }
 
@@ -512,6 +537,14 @@ private extension PhotoFilterState {
 private struct RatingTipFramePreferenceKey: PreferenceKey {
     static let defaultValue: CGRect = .zero
     static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        let next = nextValue()
+        if next != .zero { value = next }
+    }
+}
+
+private struct RatingTipSizePreferenceKey: PreferenceKey {
+    static let defaultValue: CGSize = .zero
+    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
         let next = nextValue()
         if next != .zero { value = next }
     }

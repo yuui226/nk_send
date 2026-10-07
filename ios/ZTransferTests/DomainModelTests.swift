@@ -609,6 +609,47 @@ final class DomainModelTests: XCTestCase {
         XCTAssertNil(PhotoFilterPersistence.load(from: defaults).dateRange)
     }
 
+    func testRatingLoaderAloneKeepsGridUnfilteredAndConcreteStarMatchesKnownValuesOnly() {
+        let files = [
+            CameraFile(id: 1, storageID: 1, format: 0x3801, size: 1,
+                       fileName: "one.JPG", captureDate: nil, isProtected: false),
+            CameraFile(id: 2, storageID: 1, format: 0x3801, size: 1,
+                       fileName: "two.JPG", captureDate: nil, isProtected: false),
+            CameraFile(id: 3, storageID: 1, format: 0x3801, size: 1,
+                       fileName: "unknown.JPG", captureDate: nil, isProtected: false),
+        ]
+        var loaderOnly = PhotoFilterState()
+        loaderOnly.ratingEnabled = true
+        XCTAssertEqual(PhotoFilter.apply(files, state: loaderOnly,
+                                         ratingValues: [1: .known(5), 2: .known(2), 3: .unknown]).map(\.id), [1, 2, 3])
+
+        var concrete = loaderOnly
+        concrete.rating = 5
+        XCTAssertEqual(PhotoFilter.apply(files, state: concrete,
+                                         ratingValues: [1: .known(5), 2: .known(2), 3: .unknown]).map(\.id), [1])
+
+        concrete.ratingEnabled = false
+        XCTAssertTrue(PhotoFilter.apply(files, state: concrete,
+                                        ratingValues: [1: .known(5), 2: .known(2)]).isEmpty)
+    }
+
+    func testRatingRangePersistenceNormalizesOnlyAndroidChoicesAndDoesNotRestoreLoader() throws {
+        let suite = "photo-rating-range-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(5, forKey: PhotoFilterPersistence.ratingDaysKey)
+        var restored = PhotoFilterPersistence.load(from: defaults)
+        XCTAssertEqual(restored.ratingDays, 5)
+        XCTAssertFalse(restored.ratingEnabled)
+        XCTAssertNil(restored.rating)
+
+        defaults.set(2, forKey: PhotoFilterPersistence.ratingDaysKey)
+        restored = PhotoFilterPersistence.load(from: defaults)
+        XCTAssertEqual(restored.ratingDays, 3)
+        defaults.set(0, forKey: PhotoFilterPersistence.ratingDaysKey)
+        XCTAssertEqual(PhotoFilterPersistence.load(from: defaults).ratingDays, 0)
+    }
+
     func testSTADirectStorageLayoutRejectsCrossSlotAggregateMembership() {
         let reliable = analyzeSTADirectStorageLayout([
             (0x0001_0001, [1, 2]),
@@ -2471,6 +2512,76 @@ extension DomainModelTests {
         XCTAssertEqual(result.favoriteFilterIDs, draft.favoriteFilterIDs)
         XCTAssertEqual(result.metadataByPreset, draft.metadataByPreset)
         XCTAssertEqual(result.filterIntensities, draft.filterIntensities)
+    }
+}
+
+extension DomainModelTests {
+    private func putBE16(_ data: inout Data, _ offset: Int, _ value: Int) {
+        data[offset] = UInt8((value >> 8) & 0xFF)
+        data[offset + 1] = UInt8(value & 0xFF)
+    }
+
+    private func livePacket(judgement: Int = 2, frameCount: Int = 1,
+                           selected: Int = 0, headerSize: Int = 512) -> Data {
+        var data = Data(repeating: 0, count: headerSize + 32)
+        putBE16(&data, 0, 1); putBE16(&data, 2, 0)
+        putBE16(&data, 8, 0); data[8] = 0; data[9] = 0; data[10] = UInt8((headerSize >> 8) & 0xFF); data[11] = UInt8(headerSize & 0xFF)
+        data[12] = 0; data[13] = 0; data[14] = 0; data[15] = 32
+        putBE16(&data, 16, 5568); putBE16(&data, 18, 3712)
+        putBE16(&data, 28, 1024); putBE16(&data, 30, 680)
+        data[42] = UInt8(judgement); data[44] = UInt8(frameCount); data[45] = UInt8(selected)
+        putBE16(&data, 48, 484); putBE16(&data, 50, 314); putBE16(&data, 52, 2784); putBE16(&data, 54, 878)
+        data[headerSize] = 0xFF; data[headerSize + 1] = 0xD8; data[headerSize + 2] = 0xFF
+        return data
+    }
+
+    func testAndroidLiveViewMetadataKeepsUnknownStateAndAllVisibleFrames() {
+        var data = livePacket(judgement: 99, frameCount: 2, selected: 1)
+        putBE16(&data, 48, 120); putBE16(&data, 50, 80); putBE16(&data, 52, 200); putBE16(&data, 54, 160)
+        putBE16(&data, 56, 300); putBE16(&data, 58, 180); putBE16(&data, 60, 700); putBE16(&data, 62, 420)
+        let result = RemoteFrameParser.metadata(from: data, jpegOffset: 512, operation: PTPConstants.getLiveViewImageEx)
+        XCTAssertEqual(result?.focusJudgement, .unknown)
+        XCTAssertEqual(result?.focusFrames.count, 2)
+        XCTAssertEqual(result?.selectedFocusFrame, result?.focusFrames[1])
+        XCTAssertEqual(result?.focusFrameStatus, "full-frame")
+    }
+
+    func testAndroidLiveViewMetadataRejectsInvalidTableWithoutDiscardingAudio() {
+        var data = livePacket(frameCount: 43)
+        data[388] = 11; data[389] = 9; data[390] = 7; data[391] = 4
+        let result = RemoteFrameParser.metadata(from: data, jpegOffset: 512, operation: PTPConstants.getLiveViewImageEx)
+        XCTAssertEqual(result?.focusFrameStatus, "invalid-table")
+        XCTAssertTrue(result?.focusFrames.isEmpty == true)
+        XCTAssertEqual(result?.soundLevels?.currentLeft, 7)
+    }
+
+    func testAndroidLiveViewMetadataClipsVisibleAreaAndDoesNotShiftOffscreenBox() {
+        let area = RemoteLiveViewDisplayArea(left: 0.25, top: 0.25, width: 0.5, height: 0.5)
+        let centered = RemoteFrameParser.mapLiveViewFocusFrame(
+            RemoteLiveViewFocusFrame(centerX: 0.5, centerY: 0.5, width: 0.1, height: 0.1), area: area)
+        XCTAssertEqual(Double(centered?.centerX ?? -1), 0.5, accuracy: 0.0001)
+        XCTAssertEqual(Double(centered?.width ?? -1), 0.2, accuracy: 0.0001)
+        XCTAssertNil(RemoteFrameParser.mapLiveViewFocusFrame(
+            RemoteLiveViewFocusFrame(centerX: 0.1, centerY: 0.1, width: 0.1, height: 0.1), area: area))
+    }
+
+    func testAndroidLiveViewFocusDiagnosticIsPassiveBoundedAndChangeOnly() {
+        let diagnostic = RemoteLiveViewFocusDiagnostic()
+        let bytes = livePacket()
+        diagnostic.start(nowMs: 0, description: "Z30")
+        for index in 0...300 {
+            diagnostic.sample(packet: RemoteLiveViewPacket(bytes: bytes, jpegOffset: 512,
+                                                           operation: PTPConstants.getLiveViewImageEx,
+                                                           receivedAtUptime: Double(index) * 0.2),
+                             metadata: nil, context: "photo")
+        }
+        XCTAssertFalse(diagnostic.running)
+        XCTAssertLessThanOrEqual(diagnostic.report().utf8.count, 6000)
+        XCTAssertTrue(diagnostic.report().hasPrefix("Focus diagnostic v2 Z30"))
+        XCTAssertTrue(diagnostic.report().contains("end=60s samples=300"))
+        diagnostic.start(nowMs: 70_000, description: "new")
+        diagnostic.stop()
+        XCTAssertFalse(diagnostic.report().contains("Z30"))
     }
 }
 

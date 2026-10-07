@@ -29,6 +29,7 @@ final class RemoteToolPreferences: ObservableObject {
     @Published var hd: Bool { didSet { save(hd, oldValue, "remote_hd") } }
     @Published var audio: Bool { didSet { save(audio, oldValue, "remote_audio_levels_visible") } }
     @Published var level: Bool { didSet { save(level, oldValue, "remote_level") } }
+    @Published var focusFrame: Bool { didSet { save(focusFrame, oldValue, "remote_focus_frame") } }
     @Published var meter: Bool { didSet { save(meter, oldValue, "remote_exposure_meter") } }
     @Published var locked: Bool { didSet { save(locked, oldValue, "remote_layout_locked") } }
     @Published var lockedRotation: Int { didSet { save(lockedRotation, oldValue, "remote_locked_rotation") } }
@@ -45,6 +46,18 @@ final class RemoteToolPreferences: ObservableObject {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        // Android's one-time introduction makes the new focus-frame tool
+        // visible even when a pre-release build had stored it as hidden.
+        if !defaults.bool(forKey: "remote_focus_frame_introduced_v1") {
+            defaults.set(true, forKey: "remote_focus_frame")
+            defaults.set(true, forKey: "remote_focus_frame_introduced_v1")
+            for mode in ["photo", "movie"] {
+                let key = "remote_hidden_tools_\(mode)"
+                var hidden = Set(defaults.stringArray(forKey: key) ?? [])
+                hidden.remove(RemoteTool.focusFrame.id)
+                defaults.set(Array(hidden), forKey: key)
+            }
+        }
         func bool(_ key: String, _ fallback: Bool = false) -> Bool {
             defaults.object(forKey: key) == nil ? fallback : defaults.bool(forKey: key)
         }
@@ -55,6 +68,7 @@ final class RemoteToolPreferences: ObservableObject {
         hd = bool("remote_hd")
         audio = bool("remote_audio_levels_visible", true)
         level = bool("remote_level")
+        focusFrame = bool("remote_focus_frame", true)
         meter = bool("remote_exposure_meter")
         locked = bool("remote_layout_locked")
         lockedRotation = min(2, max(0, defaults.integer(forKey: "remote_locked_rotation")))
@@ -80,6 +94,7 @@ final class RemoteToolPreferences: ObservableObject {
         case .exposure: exposure = .off
         case .desqueeze: desqueeze = 1
         case .level: level = false
+        case .focusFrame: focusFrame = false
         case .meter: meter = false
         case .waveform: waveform = .off
         case .lock: locked = false
