@@ -20,6 +20,8 @@ import com.ztransfer.AppLocale
 import com.ztransfer.BuildConfig
 import com.ztransfer.R
 import com.ztransfer.diagnostics.PhotoGenerationProbe
+import com.ztransfer.diagnostics.TransferCorruptionDiagnostic
+import com.ztransfer.diagnostics.TransferFingerprint
 import com.ztransfer.effects.FAVORITE_FRAME_EFFECTS_PREFERENCE_KEY
 import com.ztransfer.effects.FAVORITE_PHOTO_FILTERS_PREFERENCE_KEY
 import com.ztransfer.effects.PHOTO_FILTER_INTENSITIES_PREFERENCE_KEY
@@ -2184,6 +2186,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 val self = coroutineContext[Job]
                 var serviceStarted = false
                 var stoppedAfterCurrent = false
+                var corruptionDiagnostic: TransferCorruptionDiagnostic? = null
 
                 try {
                     val prepareStartedAt = android.os.SystemClock.elapsedRealtime()
@@ -2233,6 +2236,15 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 // 启动/选目录时已建立索引；这里复用同一单飞结果。正常连续队列不再重复
                 // query SAF，后续成功文件和断点文件会增量写回该索引。
                 val rootDirectoryIndex = getDirectoryIndex(uri, deleteParts = false)
+                // The corruption-investigation build writes one bounded report for this queue.
+                // The normal build returns null and therefore does not add a read, hash, or
+                // provider write to the transfer path.
+                corruptionDiagnostic = TransferCorruptionDiagnostic.start(
+                    resolver = contentResolver,
+                    parent = uri,
+                    camera = cameraProvider(),
+                    filesDir = getApplication<Application>().filesDir,
+                )
                 log {
                     "QUEUE_READY elapsed=${android.os.SystemClock.elapsedRealtime() - prepareStartedAt}ms"
                 }
@@ -2372,6 +2384,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     // 断点续传：检查是否存在上次传输留下的、【身份令牌匹配】的半成品文件。
                     var resumeOffset = 0L
                     var fileDocUri: Uri? = null
+                    val diagnosticReceived = corruptionDiagnostic?.let { TransferFingerprint() }
                     if (!videoTransfer) {
                         directoryIndex.partFor(task.file.fileName)?.let { deleteQuietly(it.uri) }
                         directoryIndex.removePart(task.file.fileName)
@@ -2435,6 +2448,28 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     // 断点改名/清理会切到 IO 线程；任务在这期间仍显示 WAITING，用户可以撤回。
                     // 所有这类预处理结束后统一消费撤回标记，绝不能把 CANCELLED 再改回传输中。
                     if (pendingTransferQueue.consumeWithdrawal(taskId)) continue
+
+                    corruptionDiagnostic?.noteFileStart(
+                        name = task.file.fileName,
+                        handle = handle,
+                        expectedBytes = task.file.size,
+                        resumeOffset = resumeOffset,
+                        video = videoTransfer,
+                        transport = camera.connectionType.name,
+                    )
+                    if (resumeOffset > 0L && fileDocUri != null && diagnosticReceived != null) {
+                        // Complete the R fingerprint with the already-present prefix before the
+                        // new suffix is observed. This makes R/T/F comparable for video resume;
+                        // the prefix is explicitly read from the provider, not from the camera.
+                        try {
+                            corruptionDiagnostic?.readPrefix(fileDocUri!!, resumeOffset, diagnosticReceived)
+                        } catch (failure: Exception) {
+                            corruptionDiagnostic?.append(
+                                "R prefix name=${task.file.fileName} bytes=$resumeOffset " +
+                                    "error=${failure.javaClass.simpleName}: ${failure.message}",
+                            )
+                        }
+                    }
 
                     // 完成所有“无需下载即可结束”的检查后，才进入传输态并发布高频进度，
                     // 避免完整断点文件仅改名时出现假进度或前台通知闪动。
@@ -2531,6 +2566,13 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                     totalSize = task.file.size,
                                     // 协议层在首个数据命令前读取一次，随后整张文件固定该策略。
                                     preferHighThroughputAtStart = { preferHighThroughputTransfers },
+                                    trace = corruptionDiagnostic?.let { diagnostic ->
+                                        { message -> diagnostic.appendProtocol(message) }
+                                    },
+                                    diagnosticReferenceRead = false,
+                                    onBytesReceived = diagnosticReceived?.let { fingerprint ->
+                                        { bytes, offset, count -> fingerprint.update(bytes, offset, count) }
+                                    },
                                     captureHeader = task.framePreset != null &&
                                         task.frameBorderRequested &&
                                         (task.frameMetadataSettings ?: defaultPhotoFrameMetadataSettings(task.framePreset))
@@ -2543,6 +2585,12 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         }
                         // withContext 正常返回则 fileDocUri 必已赋值。
                         val createdUri = checkNotNull(fileDocUri)
+                        val diagnosticReceivedResult = diagnosticReceived?.finish()
+                        val diagnosticTemporary = if (corruptionDiagnostic != null) {
+                            corruptionDiagnostic.readUri(createdUri)
+                        } else {
+                            null
+                        }
 
                         result.fold(
                             onSuccess = { stats ->
@@ -2584,6 +2632,11 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                         // published original, never a deletable download partial.
                                         fileDocUri = null
                                         if (originalSaveMode == "rename") savedName = displayNameOf(renamedUri) ?: savedName
+                                        val diagnosticFinal = if (corruptionDiagnostic != null) {
+                                            corruptionDiagnostic.readUri(renamedUri)
+                                        } else {
+                                            null
+                                        }
                                         PhotoGenerationProbe.note(
                                             category = "FRAME-META",
                                             message = "original saved mode=$originalSaveMode " +
@@ -2606,6 +2659,19 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                         // 让路的块间时间）；这里仍是正式文件已落盘并完成改名/复制后的完成点。
                                         val elapsed = android.os.SystemClock.elapsedRealtime() -
                                             stats.startedAtElapsedMs
+                                        corruptionDiagnostic?.noteFileResult(
+                                            name = task.file.fileName,
+                                            handle = handle,
+                                            expectedBytes = task.file.size,
+                                            resumeOffset = resumeOffset,
+                                            video = videoTransfer,
+                                            saveMode = originalSaveMode,
+                                            received = diagnosticReceivedResult,
+                                            temporary = diagnosticTemporary,
+                                            final = diagnosticFinal,
+                                            finalUri = renamedUri,
+                                            elapsedMs = elapsed,
+                                        )
                                         val endToEndMBps = endToEndBytesPerSecond(
                                             transferredBytes = stats.transferredBytes,
                                             elapsedMs = elapsed,
@@ -2657,6 +2723,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                                     savedCropOutput = task.savedCropOutput,
                                                 )
                                             }
+                                        } else {
+                                            Unit
                                         }
                                     } else {
                                         // 改名与复制均失败：删掉临时文件并标记失败——
@@ -2672,10 +2740,15 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                         updateTask(taskId) {
                                             it.copy(status = TransferStatus.FAILED, error = str(R.string.error_save_failed, reason), speed = 0)
                                         }
+                                        corruptionDiagnostic?.noteFileFailure(
+                                            task.file.fileName,
+                                            saveError ?: IllegalStateException("rename and copy failed"),
+                                        )
                                     }
                                 } finally { directoryIndex.releaseDisplayName(finalName) }
                             },
                             onFailure = { e ->
+                                corruptionDiagnostic?.noteFileFailure(task.file.fileName, e)
                                 if (!videoTransfer || e is ResumeUnavailableException) {
                                     // 照片一律删除半成品；视频无法续传时也从头重试。
                                     deleteQuietly(fileDocUri)
@@ -2712,6 +2785,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         if (BuildConfig.DEBUG) {
                             android.util.Log.e(TAG, "DL_FAIL: ${task.file.fileName} - ${e.javaClass.simpleName}: ${e.message}", e)
                         }
+                        corruptionDiagnostic?.noteFileFailure(task.file.fileName, e)
                         if (videoTransfer) {
                             refreshPartIndexForRetry(
                                 directoryIndex = directoryIndex,
@@ -2760,6 +2834,40 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         })
                     }
                 } finally {
+                    if (corruptionDiagnostic != null) {
+                        // C is confined to this one investigation release. It is skipped when
+                        // the queue was paused/cancelled, so ordinary controls do not trigger a
+                        // second camera pass unexpectedly.
+                        if (!stoppedAfterCurrent && currentCoroutineContext().isActive) {
+                            try {
+                                corruptionDiagnostic.rereadPublished()
+                            } catch (cancelled: CancellationException) {
+                                corruptionDiagnostic.append("L phase=cancelled")
+                            } catch (failure: Exception) {
+                                corruptionDiagnostic.append(
+                                    "L phase=error type=${failure.javaClass.simpleName} " +
+                                        "message=${failure.message.orEmpty()}",
+                                )
+                            }
+                            try {
+                                corruptionDiagnostic.rereadSources(cameraProvider())
+                            } catch (cancelled: CancellationException) {
+                                corruptionDiagnostic.append("C phase=cancelled")
+                            } catch (failure: Exception) {
+                                corruptionDiagnostic.append(
+                                    "C phase=error type=${failure.javaClass.simpleName} " +
+                                        "message=${failure.message.orEmpty()}",
+                                )
+                            }
+                        } else {
+                            corruptionDiagnostic.append(
+                                "C phase=skipped reason=${if (stoppedAfterCurrent) "queue-paused" else "job-cancelled"}",
+                            )
+                        }
+                        corruptionDiagnostic.finish(
+                            if (stoppedAfterCurrent) "paused" else "queue-finished",
+                        )
+                    }
                     // 仅当本协程仍是当前传输 job 时才收尾，避免误停新队列的前台服务/误清传输
                     // 状态（旧队列收尾期间新队列可能已启动并接管 transferJob）。
                     if (transferJob === self) {

@@ -15,6 +15,13 @@ val hasReleaseKeystore = keystorePropsFile.exists()
 val keystoreProps = Properties().apply {
     if (hasReleaseKeystore) FileInputStream(keystorePropsFile).use { load(it) }
 }
+// One-off field for the Harmony transfer-corruption investigation release. Normal builds keep
+// the full readback/hash/re-reference pass completely disabled; the release diagnostic APK is
+// produced with -PtransferCorruptionDiagnostic=true and is sent only to the affected user.
+val transferCorruptionDiagnostic = providers.gradleProperty("transferCorruptionDiagnostic")
+    .map { it.equals("true", ignoreCase = true) }
+    .orElse(false)
+    .get()
 
 android {
     namespace = "com.ztransfer"
@@ -47,6 +54,10 @@ android {
         // Keep the default explicit: AGP otherwise rewrites the first manifest entry when several
         // standalone instrumentation suites are registered.
         testInstrumentationRunner = "com.ztransfer.frame.FramePlaceLayoutInstrumentation"
+        buildConfigField("boolean", "TRANSFER_CORRUPTION_DIAGNOSTIC", transferCorruptionDiagnostic.toString())
+        // Shared by the passive protocol trace; keep the alias identical so the one-off release
+        // cannot accidentally collect trace data without the file-integrity report (or vice versa).
+        buildConfigField("boolean", "TRANSFER_DIAGNOSTICS", transferCorruptionDiagnostic.toString())
 
         // The app exposes exactly English, Simplified Chinese and Traditional
         // Chinese. Do not package translations contributed by AndroidX for
