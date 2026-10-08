@@ -712,16 +712,20 @@ struct RemoteView: View {
         return configuredRemoteToolButton(layoutTool, movie: movie, active: false,
             accessibilityLabel: AppLocalized.resource(layoutTool.titleKey), label: {
                 if tool == .focusMode, !editingTools {
-                    let text = model.focusModeDescriptor.map { descriptor in
-                        if RemoteFocusMode.manual(property: descriptor.property, value: descriptor.current) {
-                            return "MF"
-                        }
-                        return RemoteFocusMode.label(property: descriptor.property, value: descriptor.current) ?? "MODE"
-                    } ?? "MODE"
-                    Text(text == "AF Macro" ? "AF-M" : text)
-                        .font(.system(size: 8, weight: .bold))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.55)
+                    if let panel = model.cameraToolPanel, panel.tool == .focusMode, panel.loading {
+                        RemoteCameraToolLoading()
+                    } else {
+                        let text = model.focusModeDescriptor.map { descriptor in
+                            if RemoteFocusMode.manual(property: descriptor.property, value: descriptor.current) {
+                                return "MF"
+                            }
+                            return RemoteFocusMode.label(property: descriptor.property, value: descriptor.current) ?? "MODE"
+                        } ?? "MODE"
+                        Text(text == "AF Macro" ? "AF-M" : text)
+                            .font(.system(size: 8, weight: .bold))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.55)
+                    }
                 } else if let panel = model.cameraToolPanel, !editingTools {
                     RemoteCameraToolMark(panel: panel, tool: tool)
                 } else { RemoteCameraToolStaticMark(tool: tool) }
@@ -1037,7 +1041,7 @@ struct RemoteView: View {
         RemoteShutterButton(
             capture: model.state.capture,
             movieMode: model.movieMode,
-            enabled: model.state.session == .ready && !model.recordingBusy,
+            enabled: model.state.session == .ready && !model.recordingBusy && !model.cameraToolWriting,
             onQuickTap: { if model.movieMode { model.toggleRecording() } else { model.capture() } },
             onFocusStart: { model.beginHalfPress() },
             onRelease: { model.endHalfPress(fire: $0) }

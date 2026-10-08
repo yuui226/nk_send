@@ -23,6 +23,7 @@ final class RemoteViewModel: ObservableObject {
     private var exposureDescriptorCache: [Bool: [RemoteExposureField: RemotePropertyDescriptor]] = [:]
     @Published private(set) var movieMode = false
     @Published private(set) var cameraToolPanel: RemoteCameraToolController?
+    @Published private(set) var cameraToolWriting = false
     private var retiringCameraTools: [UUID: Task<Void, Never>] = [:]
     // Android HD changes VGA/XGA size independently of enhanced-frame support.
     @Published private(set) var hdLiveView = false
@@ -77,6 +78,7 @@ final class RemoteViewModel: ObservableObject {
     private var batteryDescriptor: RemotePropertyDescriptor?
     @Published private(set) var exposureProgram: RemotePropertyDescriptor?
     private var focusHideTask: Task<Void, Never>?
+    private var focusModeRefreshGeneration: UInt64 = 0
     private var halfPressTask: Task<Void, Never>?
     private var tapFocusTask: Task<Void, Never>?
     private var halfPressHeld = false
@@ -314,7 +316,7 @@ final class RemoteViewModel: ObservableObject {
             await loadExposure(movie: movieMode, preservingPending: true)
             return
         }
-        if raw == RemoteProperty.focusMode.rawValue || raw == RemoteProperty.nikonAFMode.rawValue {
+        if [RemoteProperty.focusMode, .stillFocusMode, .nikonAFMode].contains(where: { $0.rawValue == raw }) {
             await refreshFocusMode()
             return
         }
@@ -358,6 +360,7 @@ final class RemoteViewModel: ObservableObject {
             dismissCameraTool()
             movieMode = nextMovie
             state.movieMode = nextMovie
+            await refreshFocusMode()
             await loadExposure(movie: nextMovie)
         }
     }
@@ -373,8 +376,13 @@ final class RemoteViewModel: ObservableObject {
     }
 
     private func refreshFocusMode() async {
-        focusModeDescriptor = try? await camera.remoteFocusMode()
-        state.focus.manual = focusModeDescriptor.map {
+        focusModeRefreshGeneration &+= 1
+        let generation = focusModeRefreshGeneration
+        let modeAtRead = movieMode
+        let descriptor = try? await camera.remoteFocusMode()
+        guard generation == focusModeRefreshGeneration, modeAtRead == movieMode, !stopRequested else { return }
+        focusModeDescriptor = descriptor
+        state.focus.manual = descriptor.map {
             RemoteFocusMode.manual(property: $0.property, value: $0.current)
         } ?? false
     }
@@ -811,7 +819,7 @@ final class RemoteViewModel: ObservableObject {
     }
 
     func openCameraTool(_ tool: RemoteCameraTool) {
-        guard !stopRequested else {
+        guard !stopRequested, !cameraToolWriting else {
             showInteractionHint(AppLocalized.resource("remote_camera_tool_unavailable"))
             return
         }
@@ -842,10 +850,18 @@ final class RemoteViewModel: ObservableObject {
                 guard let self, tool != .whiteBalance else { return }
                 confirmedFocusMarker = nil
                 state.focus.phase = .idle
+                state.focus.point = nil
+                state.focus.tracking = false
                 await refreshFocusMode()
             }, onUnavailable: { [weak self] in
                 self?.showInteractionHint(AppLocalized.resource("remote_camera_tool_unavailable"))
-            }, onDismiss: { [weak self] in self?.retireCameraTool(id) })
+            }, onDismiss: { [weak self] in self?.retireCameraTool(id) },
+            onWriteBusyChanged: { [weak self] busy in
+                guard let self else { return false }
+                if busy && self.cameraToolWriting { return false }
+                self.cameraToolWriting = busy
+                return true
+            })
         cameraToolPanel = panel
         panel.start()
     }
@@ -1037,7 +1053,7 @@ final class RemoteViewModel: ObservableObject {
     func beginHalfPress() {
         guard state.session == .ready, state.capture == .idle,
               !state.focus.manual, !halfPressHeld, halfPressTask == nil, tapFocusTask == nil,
-              !stopRequested else { return }
+              !stopRequested, !cameraToolWriting else { return }
         halfPressHeld = true
         halfPressVisualActive = true
         focusHideTask?.cancel()
@@ -1079,7 +1095,8 @@ final class RemoteViewModel: ObservableObject {
     }
 
     func capture() {
-        guard state.session == .ready, state.capture == .idle, !movieMode, !stopRequested else { return }
+        guard state.session == .ready, state.capture == .idle, !movieMode, !stopRequested,
+              !cameraToolWriting else { return }
         state = state.applying(.captureRequested)
         captureTask = Task { [weak self] in
             guard let self else { return }
@@ -1108,7 +1125,7 @@ final class RemoteViewModel: ObservableObject {
     }
 
     func toggleRecording() {
-        guard movieMode, state.session == .ready else { return }
+        guard movieMode, state.session == .ready, !cameraToolWriting else { return }
         let command: RemoteRecordingCommand
         if state.capture == .recording || state.capture == .stopping { command = .stop }
         else if state.capture == .idle { command = .start }
@@ -1282,7 +1299,7 @@ final class RemoteViewModel: ObservableObject {
 
     func focus(at point: RemoteFocusPoint, coordinateSize: CGSize = CGSize(width: 1000, height: 1000)) {
         guard state.session == .ready, state.capture != .capturing,
-              !stopRequested, tapFocusTask == nil, halfPressTask == nil, !halfPressHeld else { return }
+              !stopRequested, !cameraToolWriting, tapFocusTask == nil, halfPressTask == nil, !halfPressHeld else { return }
         if state.focus.manual {
             showInteractionHint(AppLocalized.resource("remote_tap_focus_manual"))
             return

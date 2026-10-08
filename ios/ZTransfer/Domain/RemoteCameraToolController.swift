@@ -22,6 +22,7 @@ final class RemoteCameraToolController: ObservableObject, Identifiable {
     private let canWrite: () -> Bool
     private let beforeWrite: () async -> Bool
     private let onApplied: () async -> Void
+    private let onWriteBusyChanged: (Bool) -> Bool
     private let onUnavailable: () -> Void
     private let onDismiss: () -> Void
     private let log: (String) -> Void
@@ -35,12 +36,14 @@ final class RemoteCameraToolController: ObservableObject, Identifiable {
          isCurrent: @escaping () -> Bool, currentMovie: @escaping () -> Bool,
          canWrite: @escaping () -> Bool, beforeWrite: @escaping () async -> Bool,
          onApplied: @escaping () async -> Void, onUnavailable: @escaping () -> Void,
-         onDismiss: @escaping () -> Void, log: @escaping (String) -> Void = { _ in },
+         onDismiss: @escaping () -> Void, onWriteBusyChanged: @escaping (Bool) -> Bool = { _ in true },
+         log: @escaping (String) -> Void = { _ in },
          readTimeout: Duration = .seconds(5), pollInterval: Duration = .milliseconds(1200)) {
         self.id = id
         self.camera = camera; self.tool = tool; self.movie = movie
         self.isCurrent = isCurrent; self.currentMovie = currentMovie; self.canWrite = canWrite
         self.beforeWrite = beforeWrite; self.onApplied = onApplied
+        self.onWriteBusyChanged = onWriteBusyChanged
         self.onUnavailable = onUnavailable; self.onDismiss = onDismiss; self.log = log
         self.readTimeout = readTimeout; self.pollInterval = pollInterval
     }
@@ -58,6 +61,7 @@ final class RemoteCameraToolController: ObservableObject, Identifiable {
                         let fresh = try await operation.value(timeout: readTimeout)
                         guard active else { return }
                         guard isCurrent() else { dismiss(); return }
+                        guard currentMovie() == movie else { dismiss(); return }
                         if loading && (fresh == nil || fresh?.writable != true || fresh?.values.isEmpty == true) {
                             onUnavailable(); dismiss(); return
                         }
@@ -96,9 +100,15 @@ final class RemoteCameraToolController: ObservableObject, Identifiable {
         guard active, !loading, !closeRequested, !busy, canWrite(),
               let previous = descriptor, previous.writable, previous.values.contains(value) else { return }
         if value == previous.current { requestClose(); return }
+        guard onWriteBusyChanged(true) else { return }
         busy = true; pendingValue = value; errorResource = nil
         writeTask = Task { [self] in
-            defer { busy = false; pendingValue = nil }
+            var writeAttempted = false
+            defer {
+                busy = false
+                pendingValue = nil
+                _ = onWriteBusyChanged(false)
+            }
             // Same mutex boundary as Android: finish any poll before checking
             // the physical selector and the current descriptor for this write.
             await read?.drain()
@@ -116,19 +126,26 @@ final class RemoteCameraToolController: ObservableObject, Identifiable {
                 guard await beforeWrite() else { failed(); return }
                 // This unstructured task is deliberately never cancelled by
                 // dismissal. Write, finite retries and readback finish together.
+                writeAttempted = true
                 let result = try await camera.setRemotePropertyVerified(fresh, value: value)
                 log(String(format: "camera tool write %@ prop=0x%04X target=%lld confirmed=%@ response=0x%04X",
                            tool.rawValue, fresh.property.rawValue, Int64(bitPattern: value),
                            String(result.confirmed), result.responseCode))
-                guard isCurrent(), currentMovie() == movie else { return }
-                if let actual = result.actual { descriptor = actual }
-                else { descriptor = try await camera.remoteCameraTool(tool, movie: movie) }
-                if result.confirmed { await onApplied(); requestClose() }
-                else { failed() }
+                if isCurrent(), currentMovie() == movie {
+                    if let actual = result.actual { descriptor = actual }
+                    else { descriptor = try await camera.remoteCameraTool(tool, movie: movie) }
+                    if result.confirmed {
+                        if tool != .focusMode { await onApplied() }
+                        requestClose()
+                    } else { failed() }
+                }
             } catch is CancellationError { }
             catch {
                 failed()
                 log("!! camera tool write \(tool.rawValue): \(error)")
+            }
+            if writeAttempted && tool == .focusMode && isCurrent() && currentMovie() == movie {
+                await onApplied()
             }
         }
     }

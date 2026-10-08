@@ -289,6 +289,69 @@ final class RemoteLifecycleTests: XCTestCase {
         XCTAssertEqual(model.interactionHint, AppLocalized.resource("remote_tap_focus_manual"))
     }
 
+    func testStillFocusModeEventRefreshesManualState() async throws {
+        let camera = RemoteLifecycleCamera()
+        await camera.setProperty(.init(property: .stillFocusMode, dataType: 2, writable: true,
+                                       current: 0, values: [0, 1, 3, 4]))
+        let model = RemoteViewModel(camera: camera)
+        addTeardownBlock { await model.stopAndWait() }
+        model.start()
+        try await waitFor { model.state.session == .ready }
+        XCTAssertEqual(model.focusModeDescriptor?.property, .stillFocusMode)
+        XCTAssertFalse(model.state.focus.manual)
+
+        await camera.setProperty(.init(property: .stillFocusMode, dataType: 2, writable: true,
+                                       current: 4, values: [0, 1, 3, 4]))
+        await camera.queueEvents([.init(code: 0x4006, handle: RemoteProperty.stillFocusMode.rawValue)])
+        try await waitFor { model.focusModeDescriptor?.current == 4 && model.state.focus.manual }
+        XCTAssertTrue(model.state.focus.manual)
+    }
+
+    func testFocusModeWriteFailureStillRefreshesMode() async throws {
+        let camera = RemoteLifecycleCamera()
+        await camera.setProperty(.init(property: .focusMode, dataType: 4, writable: true,
+                                       current: 2, values: [1, 2]))
+        await camera.setWriteResponses(.focusMode, [0x2019, 0x2019, 0x2019])
+        let model = RemoteViewModel(camera: camera)
+        addTeardownBlock { await model.stopAndWait() }
+        model.start()
+        try await waitFor { model.state.session == .ready }
+        model.openCameraTool(.focusMode)
+        let panel = try XCTUnwrap(model.cameraToolPanel)
+        try await waitFor { !panel.loading }
+        let beforeRefresh = await camera.log.filter { $0 == "focus" }.count
+        panel.select(1)
+        try await waitFor { !panel.busy }
+        XCTAssertEqual(panel.errorResource, "remote_camera_tool_failed")
+        try await waitFor { await camera.log.filter { $0 == "focus" }.count > beforeRefresh }
+        XCTAssertFalse(model.state.focus.manual)
+    }
+
+    func testCameraToolWriteBlocksFocusAndShutterCommands() async throws {
+        let camera = RemoteLifecycleCamera()
+        await camera.setProperty(.init(property: .whiteBalance, writable: true, current: 2, values: [2, 4]))
+        await camera.acceptWrites(.whiteBalance)
+        await camera.delayWrites(milliseconds: 300)
+        let model = RemoteViewModel(camera: camera)
+        addTeardownBlock { await model.stopAndWait() }
+        model.start()
+        try await waitFor { model.state.session == .ready }
+        model.openCameraTool(.whiteBalance)
+        let panel = try XCTUnwrap(model.cameraToolPanel)
+        try await waitFor { !panel.loading }
+        panel.select(4)
+        try await waitFor { model.cameraToolWriting }
+        model.focus(at: .init(x: 0.5, y: 0.5))
+        model.beginHalfPress()
+        model.capture()
+        XCTAssertEqual(model.state.capture, .idle)
+        let duringWrite = await camera.log
+        XCTAssertFalse(duringWrite.contains("tapfocus:start"))
+        XCTAssertFalse(duringWrite.contains("halfpress:start"))
+        XCTAssertFalse(duringWrite.contains("capture"))
+        try await waitFor { !panel.busy }
+    }
+
     func testMovieCameraToolNeverFallsBackToPhotoProperty() async throws {
         let camera = RemoteLifecycleCamera()
         await camera.markUnsupported(.movieWhiteBalance)
