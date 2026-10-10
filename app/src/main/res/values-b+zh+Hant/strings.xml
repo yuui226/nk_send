@@ -340,6 +340,7 @@
     <string name="error_rename_copy_refused">系統拒絕重新命名與複製</string>
     <string name="error_save_failed">儲存失敗：%1$s</string>
     <string name="error_copy_incomplete">複製不完整 %1$d/%2$d</string>
+    <string name="transfer_temp_source_error">臨時來源錯誤，失敗請重試</string>
 
     <!-- 協定錯誤（冒號統一全形，與「儲存失敗：」一致） -->
     <string name="error_write_file">寫入檔案失敗：%1$s</string>

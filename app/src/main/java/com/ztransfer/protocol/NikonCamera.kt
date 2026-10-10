@@ -4491,7 +4491,8 @@ class NikonCamera(private val context: Context) {
      * [preferHighThroughputAtStart] 在首个文件数据命令前仅取值一次，之后页面切换不会改变当前文件。
      * [captureHeader] 在新文件传输时保留有限的文件头，供效果图导出复用；不会额外发起相机请求。
      * [trace] 在显式诊断构建中接收有界协议摘要；回调异常不会改变传输结果。
-     * [onBytesReceived] 在每段数据写入 [output] 前同步观察收到的字节；回调异常会被忽略。
+     * [onBytesReceived] 在每段数据写入 [output] 前同步观察收到的字节；默认回调异常会被忽略。
+     * [strictBytesObserver] 为兼容性校验开启时让观察器异常终止本文件，普通路径保持忽略。
      * [diagnosticReferenceRead] 仅在显式诊断构建中把视频分块限制为 4 MiB。
      *
      * 照片不续传：AP/USB 用 GetObject，STA 用一次 GetPartialObjectEx 请求整个范围；
@@ -4511,6 +4512,7 @@ class NikonCamera(private val context: Context) {
         trace: ((String) -> Unit)? = null,
         diagnosticReferenceRead: Boolean = false,
         onBytesReceived: ((ByteArray, Int, Int) -> Unit)? = null,
+        strictBytesObserver: Boolean = false,
     ): Result<DownloadStats> = ioGate.withDownloadActivity {
         withContext(Dispatchers.IO) {
             val scope = this
@@ -4557,10 +4559,14 @@ class NikonCamera(private val context: Context) {
             }
             fun writeChunk(bytes: ByteArray, offset: Int, count: Int) {
                 if (onBytesReceived != null) {
-                    try {
+                    if (strictBytesObserver) {
                         onBytesReceived.invoke(bytes, offset, count)
-                    } catch (_: Throwable) {
-                        // A receive observer is diagnostic-only and cannot change transfer state.
+                    } else {
+                        try {
+                            onBytesReceived.invoke(bytes, offset, count)
+                        } catch (_: Throwable) {
+                            // A receive observer is diagnostic-only and cannot change transfer state.
+                        }
                     }
                 }
                 try {

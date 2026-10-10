@@ -107,6 +107,19 @@ internal class TransferCorruptionDiagnostic private constructor(
         append("FILE_FAIL name=$name type=${error.javaClass.simpleName} message=${error.message.orEmpty()}")
     }
 
+    fun noteVerificationFailure(
+        name: String,
+        reason: String,
+        received: FingerprintResult?,
+        temporary: UriFingerprint?,
+        final: FingerprintResult?,
+    ) {
+        append("VERIFY_FAIL name=$name reason=${reason.replace(' ', '_')}")
+        append("R received=${received.asText()}")
+        append("T temporary=${temporary.asText()}")
+        append("F final=${final.asText()}")
+    }
+
     fun noteFileResult(
         name: String,
         handle: Int,
@@ -184,6 +197,28 @@ internal class TransferCorruptionDiagnostic private constructor(
                 actualSize = querySize(uri),
                 fingerprint = fingerprint.finish(),
             )
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            UriFingerprint(null, null, "${failure.javaClass.simpleName}: ${failure.message}")
+        }
+    }
+
+    /** Read a private staging file using the same bounded fingerprint format as SAF reads. */
+    suspend fun readFile(file: File): UriFingerprint = withContext(Dispatchers.IO) {
+        try {
+            val fingerprint = TransferFingerprint()
+            file.inputStream().buffered(256 * 1024).use { input ->
+                val buffer = ByteArray(256 * 1024)
+                while (true) {
+                    currentCoroutineContext().ensureActive()
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    check(count > 0) { "staging file returned an empty read" }
+                    fingerprint.update(buffer, 0, count)
+                }
+            }
+            UriFingerprint(file.length(), fingerprint.finish())
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (failure: Exception) {
@@ -290,8 +325,13 @@ internal class TransferCorruptionDiagnostic private constructor(
         val report = reportUri ?: return
         val body = synchronized(lock) { text.toString() }
         try {
-            val output = try { resolver.openOutputStream(report, "wt") }
-                catch (_: java.io.FileNotFoundException) { resolver.openOutputStream(report, "w") }
+            // Some DocumentsProviders reject truncating "wt" even though they support normal
+            // writable streams. Retry all provider exceptions with the portable "w" mode.
+            val output = try {
+                resolver.openOutputStream(report, "wt")
+            } catch (_: Exception) {
+                resolver.openOutputStream(report, "w")
+            }
             output?.bufferedWriter(Charsets.UTF_8)?.use { it.write(body) }
         } catch (failure: Exception) {
             android.util.Log.w("ZTransferDiagnostic", "SAF report mirror failed", failure)
