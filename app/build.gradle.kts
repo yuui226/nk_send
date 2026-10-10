@@ -15,13 +15,18 @@ val hasReleaseKeystore = keystorePropsFile.exists()
 val keystoreProps = Properties().apply {
     if (hasReleaseKeystore) FileInputStream(keystorePropsFile).use { load(it) }
 }
-// One-off field for the Harmony transfer-corruption investigation release. Normal builds keep
-// the full readback/hash/re-reference pass completely disabled; the release diagnostic APK is
-// produced with -PtransferCorruptionDiagnostic=true and is sent only to the affected user.
+// Temporary transfer-corruption diagnostics for both Android and Harmony, in either build type.
+// gradle.properties enables the current field test; removing that line restores the false default.
+// -PtransferCorruptionDiagnostic=false overrides it for a normal build. This switch never selects
+// the Harmony storage workaround; that decision remains device-specific.
 val transferCorruptionDiagnostic = providers.gradleProperty("transferCorruptionDiagnostic")
     .map { it.equals("true", ignoreCase = true) }
     .orElse(false)
     .get()
+
+if (transferCorruptionDiagnostic) {
+    logger.lifecycle("Transfer corruption diagnostics ON (Android + Harmony): hashes, local readbacks and queue-end camera reread enabled.")
+}
 
 android {
     namespace = "com.ztransfer"

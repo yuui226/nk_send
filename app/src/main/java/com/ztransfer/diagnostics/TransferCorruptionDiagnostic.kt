@@ -20,13 +20,15 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 
 /**
- * One-shot diagnostic for a reported corrupted original. It is compiled into the
- * special investigation release only. The normal build keeps this completely off.
+ * Temporary original-file diagnostic, shared by Android and Harmony in Debug/Release.
+ * Only TRANSFER_CORRUPTION_DIAGNOSTIC enables it; a normal build keeps it off.
+ * This class observes and reports bytes, never selects the storage compatibility path.
  *
- * The report deliberately separates four observations:
+ * The report deliberately separates five observations:
  * R = bytes delivered by the camera protocol before the destination write;
- * T = the temporary provider document read back after the stream is closed;
+ * T = the temporary document/private staging file read back after its stream is closed;
  * F = the published document read back after rename/copy;
+ * L = the published document read back again when the queue drains;
  * C = a later camera reread, when the diagnostic release can keep the connection.
  *
  * The private append log is authoritative while transferring. The SAF report is
@@ -56,6 +58,7 @@ internal class TransferCorruptionDiagnostic private constructor(
     data class PublishedTarget(
         val name: String,
         val uri: Uri,
+        val expected: FingerprintResult?,
     )
 
     data class UriFingerprint(
@@ -99,16 +102,27 @@ internal class TransferCorruptionDiagnostic private constructor(
     ) {
         append(
             "FILE_START name=$name handle=0x${handle.toUInt().toString(16)} " +
-                "expected=$expectedBytes resume=$resumeOffset video=$video transport=$transport",
+                "expected=$expectedBytes resume=$resumeOffset video=$video transport=$transport " +
+                "receivedOrigin=${if (resumeOffset > 0L) "local-prefix+camera-suffix" else "camera"}",
         )
     }
 
+    fun noteExistingFile(name: String) {
+        append("FILE_SKIP name=$name reason=existing-original coverage=not-checked")
+    }
+
     fun noteFileFailure(name: String, error: Throwable) {
-        append("FILE_FAIL name=$name type=${error.javaClass.simpleName} message=${error.message.orEmpty()}")
+        append(
+            "FILE_FAIL name=$name type=${error.javaClass.simpleName} " +
+                "message=${error.message.orEmpty().replace(Regex("[\\r\\n]+"), " ")}",
+        )
     }
 
     fun noteVerificationFailure(
         name: String,
+        handle: Int,
+        expectedBytes: Long,
+        video: Boolean,
         reason: String,
         received: FingerprintResult?,
         temporary: UriFingerprint?,
@@ -118,6 +132,10 @@ internal class TransferCorruptionDiagnostic private constructor(
         append("R received=${received.asText()}")
         append("T temporary=${temporary.asText()}")
         append("F final=${final.asText()}")
+        if (received != null) {
+            receivedByTarget[targetKey(name, handle)] = received
+            rereadTargets += SourceRereadTarget(name, handle, expectedBytes, video)
+        }
     }
 
     fun noteFileResult(
@@ -157,7 +175,7 @@ internal class TransferCorruptionDiagnostic private constructor(
             mirrorBestEffort()
         }
         rereadTargets += SourceRereadTarget(name, handle, expectedBytes, video)
-        finalUri?.let { publishedTargets += PublishedTarget(name, it) }
+        finalUri?.let { publishedTargets += PublishedTarget(name, it, final?.fingerprint) }
     }
 
     /** Re-reads the published files after the queue has drained, catching delayed provider writes. */
@@ -174,7 +192,10 @@ internal class TransferCorruptionDiagnostic private constructor(
             val result = readUri(target.uri)
             append(
                 "L final name=${target.name} elapsedMs=${android.os.SystemClock.elapsedRealtime() - started} " +
-                    result.asText(),
+                    result.asText() +
+                    " L_vs_F=${target.expected?.let { expected ->
+                        result.fingerprint?.let { actual -> fingerprintDifference(expected, actual) } ?: "READ_FAILED"
+                    } ?: "unavailable"}",
             )
         }
         append("L phase=end")
@@ -245,13 +266,14 @@ internal class TransferCorruptionDiagnostic private constructor(
         }
 
     /**
-     * Re-read each successful source in the diagnostic release. This is intentionally
+     * Re-read each completed download (including verification failures) in diagnostic builds.
+     * This is intentionally
      * outside the normal build: it costs another camera read, but gives a single
      * investigation run a useful C comparison instead of guessing from R/T/F alone.
      */
     suspend fun rereadSources(camera: NikonCamera?) {
         if (camera == null || rereadTargets.isEmpty()) {
-            append("C phase=skipped reason=${if (camera == null) "camera-unavailable" else "no-successful-files"}")
+            append("C phase=skipped reason=${if (camera == null) "camera-unavailable" else "no-downloaded-samples"}")
             return
         }
         append("C phase=start files=${rereadTargets.size}")
@@ -279,9 +301,12 @@ internal class TransferCorruptionDiagnostic private constructor(
                     "C source name=${target.name} handle=0x${target.handle.toUInt().toString(16)} " +
                         "ok=${result.isSuccess} elapsedMs=${android.os.SystemClock.elapsedRealtime() - started} " +
                         "${source.asText()} " +
-                        "C_vs_R=${receivedByTarget[targetKey(target.name, target.handle)]?.let {
+                        "C_vs_R=${if (result.isFailure) "READ_FAILED" else receivedByTarget[targetKey(target.name, target.handle)]?.let {
                             fingerprintDifference(it, source)
-                        } ?: "unavailable"}",
+                        } ?: "unavailable"}" +
+                        (result.exceptionOrNull()?.let {
+                            " error=${it.javaClass.simpleName}:${it.message.orEmpty().replace('\n', ' ').replace('\r', ' ')}"
+                        } ?: ""),
                 )
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -296,11 +321,11 @@ internal class TransferCorruptionDiagnostic private constructor(
     }
 
     suspend fun finish(outcome: String) = withContext(NonCancellable + Dispatchers.IO) {
+        append("END outcome=$outcome files=$fileCount time=${Instant.now()}")
         synchronized(lock) {
             try { writer?.flush(); writer?.close() } catch (_: Exception) {}
             writer = null
         }
-        append("END outcome=$outcome files=$fileCount time=${Instant.now()}")
         mirrorBestEffort()
     }
 
@@ -367,8 +392,9 @@ internal class TransferCorruptionDiagnostic private constructor(
             } catch (_: Exception) {}
             val text = StringBuilder()
             val diagnostic = TransferCorruptionDiagnostic(resolver, reportUri, privateFile, text)
-            diagnostic.append("ZTransfer corruption diagnostic v3")
+            diagnostic.append("ZTransfer corruption diagnostic v4")
             diagnostic.append("app=${BuildConfig.VERSION_NAME}(${BuildConfig.VERSION_CODE}) release=${!BuildConfig.DEBUG}")
+            diagnostic.append("diagnostics=enabled scope=android+harmony androidPolicy=observe-only")
             diagnostic.append("phone=${Build.MANUFACTURER} ${Build.MODEL} android=${Build.VERSION.RELEASE} sdk=${Build.VERSION.SDK_INT}")
             diagnostic.append("build=${Build.DISPLAY}")
             diagnostic.append("camera=${camera?.transferDiagnosticDescription() ?: "unavailable"}")

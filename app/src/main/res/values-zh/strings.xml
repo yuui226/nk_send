@@ -345,6 +345,7 @@
     <string name="error_save_failed">保存失败：%1$s</string>
     <string name="error_copy_incomplete">复制不完整 %1$d/%2$d</string>
     <string name="transfer_temp_source_error">临时源错误，失败请重试</string>
+    <string name="transfer_final_verification_error">保存文件校验失败，请重试</string>
 
     <!-- 协议错误（冒号统一全角，与"保存失败："一致） -->
     <string name="error_write_file">写入文件失败：%1$s</string>
