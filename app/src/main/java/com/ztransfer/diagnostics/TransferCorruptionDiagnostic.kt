@@ -1,9 +1,12 @@
 package com.ztransfer.diagnostics
 
 import android.content.ContentResolver
+import android.content.ContentValues
 import android.net.Uri
 import android.os.Build
+import android.os.Environment
 import android.provider.DocumentsContract
+import android.provider.MediaStore
 import com.ztransfer.BuildConfig
 import com.ztransfer.protocol.NikonCamera
 import java.io.BufferedWriter
@@ -46,6 +49,7 @@ internal class TransferCorruptionDiagnostic private constructor(
     private var writer: BufferedWriter? = null
     private var reportUri: Uri? = null
     private var reportCreateError: String? = null
+    private var reportLocation = "transfer-directory"
     private var fileCount = 0
     private val rereadTargets = ArrayList<SourceRereadTarget>()
     private val publishedTargets = ArrayList<PublishedTarget>()
@@ -412,6 +416,7 @@ internal class TransferCorruptionDiagnostic private constructor(
                         if (writable) {
                             reportUri = created
                             reportCreateError = null
+                            reportLocation = "transfer-directory"
                             return created
                         }
                         try {
@@ -429,6 +434,53 @@ internal class TransferCorruptionDiagnostic private constructor(
                     lastError = "create:$mime:${failure.javaClass.simpleName}:${failure.message.orEmpty()}"
                 }
             }
+            // The selected tree can reject diagnostic documents even though it accepts media
+            // files. Keep the report user-visible by publishing a second copy in the public
+            // Downloads/ZTransfer folder; do not make an app-private file the only fallback.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                try {
+                    val values = ContentValues().apply {
+                        put(MediaStore.MediaColumns.DISPLAY_NAME, reportName)
+                        put(MediaStore.MediaColumns.MIME_TYPE, "text/plain")
+                        put(
+                            MediaStore.MediaColumns.RELATIVE_PATH,
+                            Environment.DIRECTORY_DOWNLOADS + "/ZTransfer/",
+                        )
+                    }
+                    val publicUri = resolver.insert(
+                        MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY),
+                        values,
+                    )
+                    if (publicUri != null) {
+                        var writable = false
+                        var probeError: Throwable? = null
+                        for (mode in arrayOf("wt", "w", "rwt")) {
+                            try {
+                                resolver.openOutputStream(publicUri, mode)?.use { writable = true }
+                                if (writable) break
+                            } catch (failure: Throwable) {
+                                probeError = probeError ?: failure
+                            }
+                        }
+                        if (writable) {
+                            reportUri = publicUri
+                            reportLocation = "public-downloads"
+                            reportCreateError = null
+                            return publicUri
+                        }
+                        try {
+                            resolver.delete(publicUri, null, null)
+                        } catch (_: Exception) {}
+                        lastError = "open:public-downloads:" +
+                            (probeError?.javaClass?.simpleName ?: "null")
+                    } else {
+                        lastError = "create:public-downloads:null"
+                    }
+                } catch (failure: Throwable) {
+                    lastError = "create:public-downloads:" +
+                        failure.javaClass.simpleName + ":" + failure.message.orEmpty()
+                }
+            }
             reportCreateError = lastError
             android.util.Log.w("ZTransferDiagnostic", "SAF report create failed: $lastError")
             return null
@@ -436,7 +488,9 @@ internal class TransferCorruptionDiagnostic private constructor(
     }
 
     private fun reportStatus(): String = synchronized(lock) {
-        "reportUri=${reportUri ?: "private-only"} reportError=${reportCreateError ?: "none"}"
+        "reportUri=" + (reportUri ?: "none") +
+            " location=" + reportLocation +
+            " reportError=" + (reportCreateError ?: "none")
     }
 
     companion object {
