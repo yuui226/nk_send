@@ -37,12 +37,15 @@ import kotlinx.coroutines.withContext
  */
 internal class TransferCorruptionDiagnostic private constructor(
     private val resolver: ContentResolver,
-    private val reportUri: Uri?,
+    private val reportParent: Uri,
+    private val reportName: String,
     private val privateFile: File,
     private val text: StringBuilder,
 ) {
     private val lock = Any()
     private var writer: BufferedWriter? = null
+    private var reportUri: Uri? = null
+    private var reportCreateError: String? = null
     private var fileCount = 0
     private val rereadTargets = ArrayList<SourceRereadTarget>()
     private val publishedTargets = ArrayList<PublishedTarget>()
@@ -347,20 +350,93 @@ internal class TransferCorruptionDiagnostic private constructor(
     private fun targetKey(name: String, handle: Int): String = "$handle\u0000$name"
 
     private fun mirrorBestEffort() {
-        val report = reportUri ?: return
+        val report = ensureReportUri() ?: return
         val body = synchronized(lock) { text.toString() }
         try {
-            // Some DocumentsProviders reject truncating "wt" even though they support normal
-            // writable streams. Retry all provider exceptions with the portable "w" mode.
-            val output = try {
-                resolver.openOutputStream(report, "wt")
-            } catch (_: Exception) {
-                resolver.openOutputStream(report, "w")
+            // Some DocumentsProviders return null instead of throwing for "wt". Treat null as
+            // a failed attempt and retry the portable "w" mode instead of silently dropping the
+            // user-visible report.
+            var output: OutputStream? = null
+            var firstError: Throwable? = null
+            for (mode in arrayOf("wt", "w", "rwt")) {
+                try {
+                    output = resolver.openOutputStream(report, mode)
+                    if (output != null) break
+                } catch (failure: Throwable) {
+                    firstError = firstError ?: failure
+                }
             }
-            output?.bufferedWriter(Charsets.UTF_8)?.use { it.write(body) }
+            if (output == null) {
+                throw firstError ?: IllegalStateException("provider returned null output stream")
+            }
+            output.bufferedWriter(Charsets.UTF_8).use { it.write(body) }
         } catch (failure: Exception) {
             android.util.Log.w("ZTransferDiagnostic", "SAF report mirror failed", failure)
+            synchronized(lock) {
+                reportCreateError = "write:${failure.javaClass.simpleName}:${failure.message.orEmpty()}"
+            }
         }
+    }
+
+    /**
+     * A few DocumentsProviders reject text/plain or return null rather than throwing. Keep the
+     * URI creation lazy and retry at every checkpoint/end so a transient provider failure does not
+     * strand the only user-readable copy in app-private storage.
+     */
+    private fun ensureReportUri(): Uri? {
+        synchronized(lock) {
+            reportUri?.let { return it }
+            var lastError: String? = null
+            for (mime in arrayOf("text/plain", "application/octet-stream")) {
+                try {
+                    val created = DocumentsContract.createDocument(
+                        resolver,
+                        reportParent,
+                        mime,
+                        reportName,
+                    )
+                    if (created != null) {
+                        // Do not cache a URI merely because createDocument returned one. Some
+                        // providers create a zero-byte document but return null for every write
+                        // mode; probing it here lets us try the alternate MIME instead.
+                        var writable = false
+                        var probeError: Throwable? = null
+                        for (mode in arrayOf("wt", "w", "rwt")) {
+                            try {
+                                resolver.openOutputStream(created, mode)?.use { writable = true }
+                                if (writable) break
+                            } catch (failure: Throwable) {
+                                probeError = probeError ?: failure
+                            }
+                        }
+                        if (writable) {
+                            reportUri = created
+                            reportCreateError = null
+                            return created
+                        }
+                        try {
+                            DocumentsContract.deleteDocument(resolver, created)
+                        } catch (_: Exception) {
+                            // A provider may not allow cleanup; the next MIME/name attempt is
+                            // still preferable to silently caching an unusable URI.
+                        }
+                        lastError = "open:" + mime + ":" +
+                            (probeError?.javaClass?.simpleName ?: "null")
+                        continue
+                    }
+                    lastError = "create:$mime:null"
+                } catch (failure: Throwable) {
+                    lastError = "create:$mime:${failure.javaClass.simpleName}:${failure.message.orEmpty()}"
+                }
+            }
+            reportCreateError = lastError
+            android.util.Log.w("ZTransferDiagnostic", "SAF report create failed: $lastError")
+            return null
+        }
+    }
+
+    private fun reportStatus(): String = synchronized(lock) {
+        "reportUri=${reportUri ?: "private-only"} reportError=${reportCreateError ?: "none"}"
     }
 
     companion object {
@@ -381,27 +457,26 @@ internal class TransferCorruptionDiagnostic private constructor(
                 .format(java.time.LocalDateTime.now())
             val privateDir = File(filesDir, "transfer-diagnostics").apply { mkdirs() }
             val privateFile = File(privateDir, "ZTransfer_corruption_$stamp.txt")
-            var reportUri: Uri? = null
-            try {
-                reportUri = DocumentsContract.createDocument(
-                    resolver,
-                    parent,
-                    "text/plain",
-                    "ZTransfer_corruption_$stamp.txt",
-                )
-            } catch (_: Exception) {}
             val text = StringBuilder()
-            val diagnostic = TransferCorruptionDiagnostic(resolver, reportUri, privateFile, text)
-            diagnostic.append("ZTransfer corruption diagnostic v4")
+            val diagnostic = TransferCorruptionDiagnostic(
+                resolver = resolver,
+                reportParent = parent,
+                reportName = "ZTransfer_corruption_$stamp.txt",
+                privateFile = privateFile,
+                text = text,
+            )
+            diagnostic.append("ZTransfer corruption diagnostic v5")
             diagnostic.append("app=${BuildConfig.VERSION_NAME}(${BuildConfig.VERSION_CODE}) release=${!BuildConfig.DEBUG}")
             diagnostic.append("diagnostics=enabled scope=android+harmony androidPolicy=observe-only")
             diagnostic.append("phone=${Build.MANUFACTURER} ${Build.MODEL} android=${Build.VERSION.RELEASE} sdk=${Build.VERSION.SDK_INT}")
             diagnostic.append("build=${Build.DISPLAY}")
             diagnostic.append("camera=${camera?.transferDiagnosticDescription() ?: "unavailable"}")
             diagnostic.append("targetAuthority=${parent.authority.orEmpty()} targetScheme=${parent.scheme.orEmpty()}")
-            diagnostic.append("reportUri=${reportUri ?: "private-only"}")
+            diagnostic.append("privateReport=$privateFile")
             diagnostic.append("stages=R(received) T(temp-readback) F(final-readback) L(queue-end-readback) C(camera-reread)")
             diagnostic.append("hash=SHA-256 whole-file plus fixed 4MiB segment hashes; no media bytes retained")
+            diagnostic.mirrorBestEffort()
+            diagnostic.append(diagnostic.reportStatus())
             diagnostic.mirrorBestEffort()
             diagnostic
         }
