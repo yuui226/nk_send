@@ -988,12 +988,6 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    // 鸿蒙适配：部分华为/荣耀设备的 DocumentsProvider renameDocument 损坏（无论目标名
-    // 是否空闲都失败），下载完好的临时文件改不了正式名 → 每张都"保存失败"。
-    // 首次确认损坏后置位，本会话后续文件跳过改名直接走"复制为正式文件"回退路径，
-    // 不再每个文件白试上百次改名。安卓正常设备永远不会置位，行为零变化。
-    private var renameBroken = false
-
     private companion object {
         const val TAG = "ZTransfer"
         // 未完成文件的临时名前缀（带前导点，在相册中隐藏）。真正文件名只在下载完整后才出现。
@@ -2208,6 +2202,10 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 try {
                     val prepareStartedAt = android.os.SystemClock.elapsedRealtime()
                     log { "QUEUE_PREP start" }
+                    // Keep the rename fallback decision local to this queue. A failed rename in
+                    // an earlier queue must not force every later queue through the riskier SAF
+                    // copy path forever.
+                    var renameBroken = false
                     val uri = Uri.parse(dirUri)
                     val rootDirectoryUri = rootDocumentUri(uri)
                 // Huawei Harmony's SAF provider has exhibited intermittent content
@@ -2259,18 +2257,22 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 // 启动/选目录时已建立索引；这里复用同一单飞结果。正常连续队列不再重复
                 // query SAF，后续成功文件和断点文件会增量写回该索引。
                 val rootDirectoryIndex = getDirectoryIndex(uri, deleteParts = false)
-                // The corruption-investigation build writes one bounded report for this queue.
-                // The normal build returns null and therefore does not add a read, hash, or
-                // provider write to the transfer path.
-                corruptionDiagnostic = TransferCorruptionDiagnostic.start(
-                    resolver = contentResolver,
-                    // DocumentsContract.createDocument expects a document URI. The persisted
-                    // transfer directory is a tree URI, so use its root document counterpart;
-                    // this is also the parent used for original-file creation below.
-                    parent = rootDirectoryUri,
-                    camera = cameraProvider(),
-                    filesDir = getApplication<Application>().filesDir,
-                )
+                // The temporary corruption report is only for the Harmony compatibility path.
+                // Ordinary Android keeps the original SAF transfer flow without diagnostic
+                // hashes, local readbacks, queue-end rereads, or a TXT file.
+                corruptionDiagnostic = if (harmonyStorage) {
+                    TransferCorruptionDiagnostic.start(
+                        resolver = contentResolver,
+                        // DocumentsContract.createDocument expects a document URI. The persisted
+                        // transfer directory is a tree URI, so use its root document counterpart;
+                        // this is also the parent used for original-file creation below.
+                        parent = rootDirectoryUri,
+                        camera = cameraProvider(),
+                        filesDir = getApplication<Application>().filesDir,
+                    )
+                } else {
+                    null
+                }
                 corruptionDiagnostic?.append(
                     "storageCompatibility harmony=$harmonyStorage " +
                         "staging=${if (harmonyStorage) "private" else "saf"} " +
@@ -3500,13 +3502,28 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         try {
             created = DocumentsContract.createDocument(contentResolver, parentDocUri, mime, name)
                 ?: return@withContext Result.failure(Exception(str(R.string.error_create_file)))
-            val copiedBytes = contentResolver.openInputStream(tempUri)!!.use { input ->
-                java.io.BufferedOutputStream(
-                    contentResolver.openOutputStream(created)!!, 1024 * 1024
-                ).use { output ->
-                    input.copyTo(output, 1024 * 1024)
-                }
-            }
+            val copiedBytes = contentResolver.openInputStream(tempUri)?.use { input ->
+                contentResolver.openOutputStream(created)?.use { output ->
+                    // Do not pass InputStream.copyTo's reusable buffer directly to a
+                    // DocumentsProvider.  Some Huawei providers retain the byte-array
+                    // reference while the Binder write is still asynchronous; the next
+                    // read then overwrites an earlier chunk and produces same-sized,
+                    // reordered/corrupted files.  A fresh array per write keeps the
+                    // provider-owned bytes immutable until that write has completed.
+                    val reusableReadBuffer = ByteArray(256 * 1024)
+                    var total = 0L
+                    while (true) {
+                        currentCoroutineContext().ensureActive()
+                        val count = input.read(reusableReadBuffer)
+                        if (count < 0) break
+                        check(count > 0) { "provider returned an empty read" }
+                        output.write(reusableReadBuffer.copyOf(count))
+                        total += count.toLong()
+                    }
+                    output.flush()
+                    total
+                } ?: throw Exception(str(R.string.error_open_file))
+            } ?: throw Exception(str(R.string.error_open_file))
             if (copiedBytes != expectedBytes) throw Exception(str(R.string.error_copy_incomplete, copiedBytes, expectedBytes))
             Result.success(created)
         } catch (e: CancellationException) {
