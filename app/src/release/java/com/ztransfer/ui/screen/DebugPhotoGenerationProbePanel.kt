@@ -9,4 +9,6 @@ import androidx.compose.ui.Modifier
 internal fun DebugPhotoGenerationProbePanel(
     modifier: Modifier = Modifier,
     onProbeRawRating: (suspend () -> String?)? = null,
+    onProbeProtectionHeader: (suspend () -> String?)? = null,
+    onProbeProtectionProperty: (suspend () -> String?)? = null,
 ) = Unit
