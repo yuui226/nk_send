@@ -159,7 +159,7 @@
     <string name="columns">每行数量</string>
     <string name="collapse_burst_photos">连拍成组</string>
     <string name="collapse_burst_photos_summary">连拍会显示成合集状态，防止刷屏。</string>
-    <string name="photo_interaction">照片列表操作</string>
+    <string name="photo_interaction">照片操作</string>
     <string name="tap_transfer_hold_preview">点击：传输\n长按：预览</string>
     <string name="tap_preview_hold_transfer">点击：预览\n长按：传输</string>
     <string name="appearance">外观</string>
@@ -344,6 +344,8 @@
     <string name="error_rename_copy_refused">系统拒绝改名与复制</string>
     <string name="error_save_failed">保存失败：%1$s</string>
     <string name="error_copy_incomplete">复制不完整 %1$d/%2$d</string>
+    <string name="transfer_temp_source_error">临时源错误，失败请重试</string>
+    <string name="transfer_final_verification_error">保存文件校验失败，请重试</string>
 
     <!-- 协议错误（冒号统一全角，与"保存失败："一致） -->
     <string name="error_write_file">写入文件失败：%1$s</string>

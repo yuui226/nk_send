@@ -34,6 +34,7 @@ object PtpConstants {
     const val GET_OBJECT_PROP_VALUE = 0x9803
     const val GET_OBJECT_PROP_LIST = 0x9805
     const val OBJECT_PROP_OBJECT_FILE_NAME = 0xDC07
+    const val OBJECT_PROP_PROTECTION_STATUS = 0xDC03
     // Nikon 专有分块读取 (libgphoto2: PTP_OC_NIKON_GetPartialObjectEx)
     // 标准 PTP 0x101B 在 Nikon 机身上不被识别（返回 0x2004），须用此操作码。
     // 参数: handle, offset_low, offset_high, maxsize_low, maxsize_high (均为 u32)

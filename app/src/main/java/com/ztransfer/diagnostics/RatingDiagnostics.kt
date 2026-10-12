@@ -25,19 +25,19 @@ object RatingDiagnostics {
     }
 
     /** Starts a bounded detailed capture for an explicit debug probe. */
-    fun beginProbe(): CaptureState = synchronized(lock) {
+    fun beginProbe(keepExisting: Boolean = false): CaptureState = synchronized(lock) {
         val previous = CaptureState(enabled, verbose)
         enabled = true
         verbose = true
-        entries.clear()
+        if (!keepExisting) entries.clear()
         previous
     }
 
     /** Restores the rating scan's previous capture state after a debug probe. */
-    fun restore(state: CaptureState) = synchronized(lock) {
+    fun restore(state: CaptureState, preserveEntries: Boolean = false) = synchronized(lock) {
         enabled = state.enabled
         verbose = state.verbose
-        if (!enabled) entries.clear()
+        if (!enabled && !preserveEntries) entries.clear()
     }
 
     fun note(message: String) = synchronized(lock) {

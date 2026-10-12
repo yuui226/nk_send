@@ -159,7 +159,7 @@
     <string name="columns">Items per row</string>
     <string name="collapse_burst_photos">Group bursts</string>
     <string name="collapse_burst_photos_summary">Burst photos appear as a collection so they do not flood the list.</string>
-    <string name="photo_interaction">Photo list actions</string>
+    <string name="photo_interaction">Photo actions</string>
     <string name="tap_transfer_hold_preview">Tap: transfer\nHold: preview</string>
     <string name="tap_preview_hold_transfer">Tap: preview\nHold: transfer</string>
     <string name="appearance">Appearance</string>
@@ -344,6 +344,8 @@
     <string name="error_rename_copy_refused">System refused to rename or copy the file</string>
     <string name="error_save_failed">Save failed: %1$s</string>
     <string name="error_copy_incomplete">Copy incomplete %1$d/%2$d</string>
+    <string name="transfer_temp_source_error">Temporary source is corrupted. Please retry.</string>
+    <string name="transfer_final_verification_error">Saved file verification failed. Please retry.</string>
 
     <!-- Protocol errors -->
     <string name="error_write_file">Failed to write file: %1$s</string>

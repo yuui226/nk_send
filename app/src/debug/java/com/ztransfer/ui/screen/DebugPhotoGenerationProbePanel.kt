@@ -32,7 +32,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -49,22 +48,24 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.ztransfer.diagnostics.PhotoGenerationProbe
+import com.ztransfer.diagnostics.RatingDiagnostics
 import kotlinx.coroutines.launch
 import com.ztransfer.ui.theme.AppTheme
 
-/** Debug 照片页的生成耗时窗口；Release 有同名空实现。 */
+/** Debug 照片页的评级与保护探测窗口；Release 有同名空实现。 */
 @Composable
 internal fun DebugPhotoGenerationProbePanel(
     modifier: Modifier = Modifier,
     onProbeRawRating: (suspend () -> String?)? = null,
+    onProbeProtectionHeader: (suspend () -> String?)? = null,
+    onProbeProtectionProperty: (suspend () -> String?)? = null,
 ) {
     val colors = AppTheme.colors
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     var open by remember { mutableStateOf(false) }
     var rawProbeRunning by remember { mutableStateOf(false) }
-    var rawProbeReport by remember { mutableStateOf<String?>(null) }
+    var logVersion by remember { mutableStateOf(0) }
     val scope = rememberCoroutineScope()
 
     Box(modifier = modifier) {
@@ -90,15 +91,16 @@ internal fun DebugPhotoGenerationProbePanel(
                 )
                 Spacer(Modifier.width(5.dp))
                 Text(
-                    "耗时日志",
+                    "诊断日志",
                     color = colors.onBackground,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.SemiBold,
                 )
             }
         } else {
-            val version by PhotoGenerationProbe.version.collectAsState()
-            val lines = remember(version) { PhotoGenerationProbe.displayLines() }
+            val lines = remember(logVersion) {
+                RatingDiagnostics.snapshot().split('\n')
+            }
             BackHandler { open = false }
             Box(
                 modifier = Modifier
@@ -130,21 +132,21 @@ internal fun DebugPhotoGenerationProbePanel(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                "Debug 生成性能",
+                                "评级与保护诊断",
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.SemiBold,
                                 color = colors.onBackground,
                             )
                             Text(
-                                "仅保留关键耗时；建议清空后测 2–3 张",
+                                "可连续探测两次后复制完整结果",
                                 fontSize = 11.sp,
                                 color = colors.onSurfaceVariant,
                             )
                         }
                         GlassButton(
                             onClick = {
-                                clipboard.setText(AnnotatedString(PhotoGenerationProbe.report()))
-                                Toast.makeText(context, "Debug 日志已复制", Toast.LENGTH_SHORT).show()
+                                clipboard.setText(AnnotatedString(RatingDiagnostics.snapshot()))
+                                Toast.makeText(context, "诊断日志已复制", Toast.LENGTH_SHORT).show()
                             },
                             contentPadding = PaddingValues(8.dp),
                         ) {
@@ -155,30 +157,11 @@ internal fun DebugPhotoGenerationProbePanel(
                                 modifier = Modifier.size(16.dp),
                             )
                         }
-                        if (onProbeRawRating != null) {
-                            GlassButton(
-                                enabled = !rawProbeRunning,
-                                onClick = {
-                                    rawProbeRunning = true
-                                    rawProbeReport = null
-                                    scope.launch {
-                                        rawProbeReport = onProbeRawRating()
-                                        rawProbeRunning = false
-                                    }
-                                },
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
-                            ) {
-                                Text(
-                                    if (rawProbeRunning) "RAW 探测中…" else "探测 RAW 评级",
-                                    color = colors.accentBlue,
-                                    fontSize = 11.sp,
-                                )
-                            }
-                        }
                         GlassButton(
                             onClick = {
-                                PhotoGenerationProbe.clear()
-                                        },
+                                RatingDiagnostics.clear()
+                                logVersion++
+                            },
                             contentPadding = PaddingValues(8.dp),
                         ) {
                             Icon(
@@ -200,21 +183,84 @@ internal fun DebugPhotoGenerationProbePanel(
                             )
                         }
                     }
-                    Spacer(Modifier.height(10.dp))
-                    rawProbeReport?.let { report ->
-                        Text(
-                            report,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(Color.Black.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
-                                .padding(8.dp),
-                            color = colors.onSurfaceVariant,
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 10.sp,
-                            lineHeight = 13.sp,
-                        )
+                    if (onProbeRawRating != null || onProbeProtectionHeader != null || onProbeProtectionProperty != null) {
                         Spacer(Modifier.height(8.dp))
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            if (onProbeRawRating != null) {
+                                GlassButton(
+                                    enabled = !rawProbeRunning,
+                                    onClick = {
+                                        rawProbeRunning = true
+                                        scope.launch {
+                                            try {
+                                                onProbeRawRating()
+                                            } finally {
+                                                logVersion++
+                                                rawProbeRunning = false
+                                            }
+                                        }
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                                ) {
+                                    Text(
+                                        if (rawProbeRunning) "RAW 探测中…" else "探测 RAW 评级",
+                                        color = colors.accentBlue,
+                                        fontSize = 11.sp,
+                                    )
+                                }
+                            }
+                            if (onProbeProtectionHeader != null) {
+                                GlassButton(
+                                    enabled = !rawProbeRunning,
+                                    onClick = {
+                                        rawProbeRunning = true
+                                        scope.launch {
+                                            try {
+                                                onProbeProtectionHeader()
+                                            } finally {
+                                                logVersion++
+                                                rawProbeRunning = false
+                                            }
+                                        }
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                                ) {
+                                    Text(
+                                        if (rawProbeRunning) "保护头探测中…" else "探测保护头",
+                                        color = colors.accentOrange,
+                                        fontSize = 11.sp,
+                                    )
+                                }
+                            }
+                            if (onProbeProtectionProperty != null) {
+                                GlassButton(
+                                    enabled = !rawProbeRunning,
+                                    onClick = {
+                                        rawProbeRunning = true
+                                        scope.launch {
+                                            try {
+                                                onProbeProtectionProperty()
+                                            } finally {
+                                                logVersion++
+                                                rawProbeRunning = false
+                                            }
+                                        }
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                                ) {
+                                    Text(
+                                        if (rawProbeRunning) "属性探测中…" else "探测保护属性",
+                                        color = colors.accentOrange,
+                                        fontSize = 11.sp,
+                                    )
+                                }
+                            }
+                        }
                     }
+                    Spacer(Modifier.height(10.dp))
                     LazyColumn(
                         modifier = Modifier
                             .weight(1f)

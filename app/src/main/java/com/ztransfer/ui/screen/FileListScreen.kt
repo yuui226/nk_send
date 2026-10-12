@@ -863,7 +863,10 @@ fun FileListScreen(
         recentThumbnailReadyDays = recentThumbnailReadyDays,
         ratingDays = filterRatingDays,
         photoLoadingDays = photoLoadingDays)
-    val filterProtected = transferState.filterProtectedOnly
+    // Nikon STA does not expose a reliable protection value. Keep the existing AP/USB
+    // protection filter intact, but do not apply a stale persisted value while in STA.
+    val showProtectionFilter = !state.isStaConnection
+    val filterProtected = showProtectionFilter && transferState.filterProtectedOnly
     val filterBurst = transferState.filterBurstOnly
     val filterUntransferred = transferState.filterUntransferredOnly
     val filterStorageSlot = transferState.filterStorageSlot
@@ -896,6 +899,14 @@ fun FileListScreen(
             dateRange = filterDateRange,
         )
     }
+    // Protection filtering is unavailable in STA, but its AP/USB preference must survive a
+    // temporary STA session so switching modes does not silently erase the user's setting.
+    fun criteriaForPersistence(criteria: PhotoFilterCriteria): PhotoFilterCriteria =
+        if (state.isStaConnection) {
+            criteria.copy(protectedOnly = transferState.filterProtectedOnly)
+        } else {
+            criteria
+        }
     // Turning on the rating loader alone must not filter or re-layout the photo grid.
     // Only a concrete star value is a visible list filter.
     val filterActive = filterRating != null || filterExts != null || filterProtected || filterBurst ||
@@ -920,10 +931,10 @@ fun FileListScreen(
                 )
         }
         if (normalized != filterStorageSlot || normalizedExts != filterExts) {
-            transferViewModel.setFilters(filterCriteria.copy(
+            transferViewModel.setFilters(criteriaForPersistence(filterCriteria.copy(
                 storageSlot = normalized,
                 extensions = normalizedExts,
-            ))
+            )))
         }
     }
     // 筛选确定后的级联入场（复用分组展开的入场动画）：tick 每次确定递增（重播存量格子）,
@@ -2086,6 +2097,7 @@ fun FileListScreen(
                 current = filterCriteria,
                 ratingProgress = ratingScan,
                 storageSlots = visibleStorageSlots,
+                showProtectionFilter = showProtectionFilter,
                 suggestedDate = latestKnownDate,
                 hapticsEnabled = transferState.hapticsEnabled,
                 onChange = { criteria, animateList ->
@@ -2097,13 +2109,13 @@ fun FileListScreen(
                         filterRevealWindow = true
                     }
                     transferViewModel.setFilters(
-                        criteria.copy(
+                        criteriaForPersistence(criteria.copy(
                             storageSlot = normalizeStorageSlotFilter(
                                 selectedSlot = criteria.storageSlot,
                                 availableSlots = visibleStorageSlots,
                                 hasCompletedFileScan = true,
                             )
-                        )
+                        ))
                     )
                 },
                 onDismiss = {
@@ -2261,7 +2273,47 @@ fun FileListScreen(
                                 .onFailure { RatingDiagnostics.note("probe error=${it.javaClass.simpleName}") }
                             RatingDiagnostics.snapshot()
                         } finally {
-                            RatingDiagnostics.restore(previousCapture)
+                            RatingDiagnostics.restore(previousCapture, preserveEntries = true)
+                        }
+                    }
+                }
+            } else null,
+            onProbeProtectionHeader = if (state.isStaConnection) {
+                {
+                    val candidates = displayedCameraFiles
+                        .asSequence()
+                        .filter { it.extension in setOf(".jpg", ".jpeg", ".nef", ".nrw", ".mov", ".mp4") }
+                        .distinctBy { it.handle }
+                        .take(4)
+                        .toList()
+                    if (candidates.isEmpty()) null else {
+                        val previousCapture = RatingDiagnostics.beginProbe(keepExisting = true)
+                        try {
+                            runCatching { cameraViewModel.getCamera()?.probeProtectionHeaders(candidates) }
+                                .onFailure { RatingDiagnostics.note("protection probe error=${it.javaClass.simpleName}") }
+                            RatingDiagnostics.snapshot()
+                        } finally {
+                            RatingDiagnostics.restore(previousCapture, preserveEntries = true)
+                        }
+                    }
+                }
+            } else null,
+            onProbeProtectionProperty = if (state.isStaConnection) {
+                {
+                    val candidates = displayedCameraFiles
+                        .asSequence()
+                        .filter { it.extension in setOf(".jpg", ".jpeg", ".nef", ".nrw", ".mov", ".mp4") }
+                        .distinctBy { it.handle }
+                        .take(4)
+                        .toList()
+                    if (candidates.isEmpty()) null else {
+                        val previousCapture = RatingDiagnostics.beginProbe(keepExisting = true)
+                        try {
+                            runCatching { cameraViewModel.getCamera()?.probeProtectionProperties(candidates) }
+                                .onFailure { RatingDiagnostics.note("protection property probe error=${it.javaClass.simpleName}") }
+                            RatingDiagnostics.snapshot()
+                        } finally {
+                            RatingDiagnostics.restore(previousCapture, preserveEntries = true)
                         }
                     }
                 }
@@ -4466,6 +4518,7 @@ private fun FilterOverlay(
     current: PhotoFilterCriteria,
     ratingProgress: PhotoRatingScan,
     storageSlots: List<Int>,
+    showProtectionFilter: Boolean,
     suggestedDate: LocalDate?,
     hapticsEnabled: Boolean,
     onChange: (PhotoFilterCriteria, Boolean) -> Unit,
@@ -4590,15 +4643,17 @@ private fun FilterOverlay(
 
                     // ---- 标记：保护 / 连拍 / 未传输（独立开关，与日期和类型叠加）----
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilterChip(
-                            label = stringResource(R.string.filter_protected),
-                            selected = working.protectedOnly,
-                            onClick = {
-                                commit(working.copy(protectedOnly = !working.protectedOnly))
-                            },
-                            modifier = Modifier.weight(1f),
-                            icon = Icons.Default.Key
-                        )
+                        if (showProtectionFilter) {
+                            FilterChip(
+                                label = stringResource(R.string.filter_protected),
+                                selected = working.protectedOnly,
+                                onClick = {
+                                    commit(working.copy(protectedOnly = !working.protectedOnly))
+                                },
+                                modifier = Modifier.weight(1f),
+                                icon = Icons.Default.Key
+                            )
+                        }
                         FilterChip(
                             label = stringResource(R.string.burst_label),
                             selected = working.burstOnly,

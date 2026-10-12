@@ -1,9 +1,12 @@
 package com.ztransfer.diagnostics
 
 import android.content.ContentResolver
+import android.content.ContentValues
 import android.net.Uri
 import android.os.Build
+import android.os.Environment
 import android.provider.DocumentsContract
+import android.provider.MediaStore
 import com.ztransfer.BuildConfig
 import com.ztransfer.protocol.NikonCamera
 import java.io.BufferedWriter
@@ -20,13 +23,16 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 
 /**
- * One-shot diagnostic for a reported corrupted original. It is compiled into the
- * special investigation release only. The normal build keeps this completely off.
+ * Temporary original-file diagnostic for Harmony in Debug/Release.
+ * Only TRANSFER_CORRUPTION_DIAGNOSTIC enables it; a normal build keeps it off.
+ * The caller activates it only after HarmonyStorageCompatibility positively identifies Harmony.
+ * This class observes and reports bytes, never selects the storage compatibility path.
  *
- * The report deliberately separates four observations:
+ * The report deliberately separates five observations:
  * R = bytes delivered by the camera protocol before the destination write;
- * T = the temporary provider document read back after the stream is closed;
+ * T = the temporary document/private staging file read back after its stream is closed;
  * F = the published document read back after rename/copy;
+ * L = the published document read back again when the queue drains;
  * C = a later camera reread, when the diagnostic release can keep the connection.
  *
  * The private append log is authoritative while transferring. The SAF report is
@@ -35,12 +41,16 @@ import kotlinx.coroutines.withContext
  */
 internal class TransferCorruptionDiagnostic private constructor(
     private val resolver: ContentResolver,
-    private val reportUri: Uri?,
+    private val reportParent: Uri,
+    private val reportName: String,
     private val privateFile: File,
     private val text: StringBuilder,
 ) {
     private val lock = Any()
     private var writer: BufferedWriter? = null
+    private var reportUri: Uri? = null
+    private var reportCreateError: String? = null
+    private var reportLocation = "transfer-directory"
     private var fileCount = 0
     private val rereadTargets = ArrayList<SourceRereadTarget>()
     private val publishedTargets = ArrayList<PublishedTarget>()
@@ -56,6 +66,7 @@ internal class TransferCorruptionDiagnostic private constructor(
     data class PublishedTarget(
         val name: String,
         val uri: Uri,
+        val expected: FingerprintResult?,
     )
 
     data class UriFingerprint(
@@ -99,12 +110,40 @@ internal class TransferCorruptionDiagnostic private constructor(
     ) {
         append(
             "FILE_START name=$name handle=0x${handle.toUInt().toString(16)} " +
-                "expected=$expectedBytes resume=$resumeOffset video=$video transport=$transport",
+                "expected=$expectedBytes resume=$resumeOffset video=$video transport=$transport " +
+                "receivedOrigin=${if (resumeOffset > 0L) "local-prefix+camera-suffix" else "camera"}",
         )
     }
 
+    fun noteExistingFile(name: String) {
+        append("FILE_SKIP name=$name reason=existing-original coverage=not-checked")
+    }
+
     fun noteFileFailure(name: String, error: Throwable) {
-        append("FILE_FAIL name=$name type=${error.javaClass.simpleName} message=${error.message.orEmpty()}")
+        append(
+            "FILE_FAIL name=$name type=${error.javaClass.simpleName} " +
+                "message=${error.message.orEmpty().replace(Regex("[\\r\\n]+"), " ")}",
+        )
+    }
+
+    fun noteVerificationFailure(
+        name: String,
+        handle: Int,
+        expectedBytes: Long,
+        video: Boolean,
+        reason: String,
+        received: FingerprintResult?,
+        temporary: UriFingerprint?,
+        final: FingerprintResult?,
+    ) {
+        append("VERIFY_FAIL name=$name reason=${reason.replace(' ', '_')}")
+        append("R received=${received.asText()}")
+        append("T temporary=${temporary.asText()}")
+        append("F final=${final.asText()}")
+        if (received != null) {
+            receivedByTarget[targetKey(name, handle)] = received
+            rereadTargets += SourceRereadTarget(name, handle, expectedBytes, video)
+        }
     }
 
     fun noteFileResult(
@@ -144,7 +183,7 @@ internal class TransferCorruptionDiagnostic private constructor(
             mirrorBestEffort()
         }
         rereadTargets += SourceRereadTarget(name, handle, expectedBytes, video)
-        finalUri?.let { publishedTargets += PublishedTarget(name, it) }
+        finalUri?.let { publishedTargets += PublishedTarget(name, it, final?.fingerprint) }
     }
 
     /** Re-reads the published files after the queue has drained, catching delayed provider writes. */
@@ -161,7 +200,10 @@ internal class TransferCorruptionDiagnostic private constructor(
             val result = readUri(target.uri)
             append(
                 "L final name=${target.name} elapsedMs=${android.os.SystemClock.elapsedRealtime() - started} " +
-                    result.asText(),
+                    result.asText() +
+                    " L_vs_F=${target.expected?.let { expected ->
+                        result.fingerprint?.let { actual -> fingerprintDifference(expected, actual) } ?: "READ_FAILED"
+                    } ?: "unavailable"}",
             )
         }
         append("L phase=end")
@@ -191,6 +233,28 @@ internal class TransferCorruptionDiagnostic private constructor(
         }
     }
 
+    /** Read a private staging file using the same bounded fingerprint format as SAF reads. */
+    suspend fun readFile(file: File): UriFingerprint = withContext(Dispatchers.IO) {
+        try {
+            val fingerprint = TransferFingerprint()
+            file.inputStream().buffered(256 * 1024).use { input ->
+                val buffer = ByteArray(256 * 1024)
+                while (true) {
+                    currentCoroutineContext().ensureActive()
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    check(count > 0) { "staging file returned an empty read" }
+                    fingerprint.update(buffer, 0, count)
+                }
+            }
+            UriFingerprint(file.length(), fingerprint.finish())
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            UriFingerprint(null, null, "${failure.javaClass.simpleName}: ${failure.message}")
+        }
+    }
+
     /** Read an existing resume prefix into the same whole-file fingerprint. */
     suspend fun readPrefix(uri: Uri, count: Long, fingerprint: TransferFingerprint) =
         withContext(Dispatchers.IO) {
@@ -210,13 +274,14 @@ internal class TransferCorruptionDiagnostic private constructor(
         }
 
     /**
-     * Re-read each successful source in the diagnostic release. This is intentionally
+     * Re-read each completed download (including verification failures) in diagnostic builds.
+     * This is intentionally
      * outside the normal build: it costs another camera read, but gives a single
      * investigation run a useful C comparison instead of guessing from R/T/F alone.
      */
     suspend fun rereadSources(camera: NikonCamera?) {
         if (camera == null || rereadTargets.isEmpty()) {
-            append("C phase=skipped reason=${if (camera == null) "camera-unavailable" else "no-successful-files"}")
+            append("C phase=skipped reason=${if (camera == null) "camera-unavailable" else "no-downloaded-samples"}")
             return
         }
         append("C phase=start files=${rereadTargets.size}")
@@ -244,9 +309,12 @@ internal class TransferCorruptionDiagnostic private constructor(
                     "C source name=${target.name} handle=0x${target.handle.toUInt().toString(16)} " +
                         "ok=${result.isSuccess} elapsedMs=${android.os.SystemClock.elapsedRealtime() - started} " +
                         "${source.asText()} " +
-                        "C_vs_R=${receivedByTarget[targetKey(target.name, target.handle)]?.let {
+                        "C_vs_R=${if (result.isFailure) "READ_FAILED" else receivedByTarget[targetKey(target.name, target.handle)]?.let {
                             fingerprintDifference(it, source)
-                        } ?: "unavailable"}",
+                        } ?: "unavailable"}" +
+                        (result.exceptionOrNull()?.let {
+                            " error=${it.javaClass.simpleName}:${it.message.orEmpty().replace('\n', ' ').replace('\r', ' ')}"
+                        } ?: ""),
                 )
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -261,11 +329,11 @@ internal class TransferCorruptionDiagnostic private constructor(
     }
 
     suspend fun finish(outcome: String) = withContext(NonCancellable + Dispatchers.IO) {
+        append("END outcome=$outcome files=$fileCount time=${Instant.now()}")
         synchronized(lock) {
             try { writer?.flush(); writer?.close() } catch (_: Exception) {}
             writer = null
         }
-        append("END outcome=$outcome files=$fileCount time=${Instant.now()}")
         mirrorBestEffort()
     }
 
@@ -287,15 +355,143 @@ internal class TransferCorruptionDiagnostic private constructor(
     private fun targetKey(name: String, handle: Int): String = "$handle\u0000$name"
 
     private fun mirrorBestEffort() {
-        val report = reportUri ?: return
+        val report = ensureReportUri() ?: return
         val body = synchronized(lock) { text.toString() }
         try {
-            val output = try { resolver.openOutputStream(report, "wt") }
-                catch (_: java.io.FileNotFoundException) { resolver.openOutputStream(report, "w") }
-            output?.bufferedWriter(Charsets.UTF_8)?.use { it.write(body) }
+            // Some DocumentsProviders return null instead of throwing for "wt". Treat null as
+            // a failed attempt and retry the portable "w" mode instead of silently dropping the
+            // user-visible report.
+            var output: OutputStream? = null
+            var firstError: Throwable? = null
+            for (mode in arrayOf("wt", "w", "rwt")) {
+                try {
+                    output = resolver.openOutputStream(report, mode)
+                    if (output != null) break
+                } catch (failure: Throwable) {
+                    firstError = firstError ?: failure
+                }
+            }
+            if (output == null) {
+                throw firstError ?: IllegalStateException("provider returned null output stream")
+            }
+            output.bufferedWriter(Charsets.UTF_8).use { it.write(body) }
         } catch (failure: Exception) {
             android.util.Log.w("ZTransferDiagnostic", "SAF report mirror failed", failure)
+            synchronized(lock) {
+                reportCreateError = "write:${failure.javaClass.simpleName}:${failure.message.orEmpty()}"
+            }
         }
+    }
+
+    /**
+     * A few DocumentsProviders reject text/plain or return null rather than throwing. Keep the
+     * URI creation lazy and retry at every checkpoint/end so a transient provider failure does not
+     * strand the only user-readable copy in app-private storage.
+     */
+    private fun ensureReportUri(): Uri? {
+        synchronized(lock) {
+            reportUri?.let { return it }
+            var lastError: String? = null
+            for (mime in arrayOf("text/plain", "application/octet-stream")) {
+                try {
+                    val created = DocumentsContract.createDocument(
+                        resolver,
+                        reportParent,
+                        mime,
+                        reportName,
+                    )
+                    if (created != null) {
+                        // Do not cache a URI merely because createDocument returned one. Some
+                        // providers create a zero-byte document but return null for every write
+                        // mode; probing it here lets us try the alternate MIME instead.
+                        var writable = false
+                        var probeError: Throwable? = null
+                        for (mode in arrayOf("wt", "w", "rwt")) {
+                            try {
+                                resolver.openOutputStream(created, mode)?.use { writable = true }
+                                if (writable) break
+                            } catch (failure: Throwable) {
+                                probeError = probeError ?: failure
+                            }
+                        }
+                        if (writable) {
+                            reportUri = created
+                            reportCreateError = null
+                            reportLocation = "transfer-directory"
+                            return created
+                        }
+                        try {
+                            DocumentsContract.deleteDocument(resolver, created)
+                        } catch (_: Exception) {
+                            // A provider may not allow cleanup; the next MIME/name attempt is
+                            // still preferable to silently caching an unusable URI.
+                        }
+                        lastError = "open:" + mime + ":" +
+                            (probeError?.javaClass?.simpleName ?: "null")
+                        continue
+                    }
+                    lastError = "create:$mime:null"
+                } catch (failure: Throwable) {
+                    lastError = "create:$mime:${failure.javaClass.simpleName}:${failure.message.orEmpty()}"
+                }
+            }
+            // The selected tree can reject diagnostic documents even though it accepts media
+            // files. Keep the report user-visible by publishing a second copy in the public
+            // Downloads/ZTransfer folder; do not make an app-private file the only fallback.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                try {
+                    val values = ContentValues().apply {
+                        put(MediaStore.MediaColumns.DISPLAY_NAME, reportName)
+                        put(MediaStore.MediaColumns.MIME_TYPE, "text/plain")
+                        put(
+                            MediaStore.MediaColumns.RELATIVE_PATH,
+                            Environment.DIRECTORY_DOWNLOADS + "/ZTransfer/",
+                        )
+                    }
+                    val publicUri = resolver.insert(
+                        MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY),
+                        values,
+                    )
+                    if (publicUri != null) {
+                        var writable = false
+                        var probeError: Throwable? = null
+                        for (mode in arrayOf("wt", "w", "rwt")) {
+                            try {
+                                resolver.openOutputStream(publicUri, mode)?.use { writable = true }
+                                if (writable) break
+                            } catch (failure: Throwable) {
+                                probeError = probeError ?: failure
+                            }
+                        }
+                        if (writable) {
+                            reportUri = publicUri
+                            reportLocation = "public-downloads"
+                            reportCreateError = null
+                            return publicUri
+                        }
+                        try {
+                            resolver.delete(publicUri, null, null)
+                        } catch (_: Exception) {}
+                        lastError = "open:public-downloads:" +
+                            (probeError?.javaClass?.simpleName ?: "null")
+                    } else {
+                        lastError = "create:public-downloads:null"
+                    }
+                } catch (failure: Throwable) {
+                    lastError = "create:public-downloads:" +
+                        failure.javaClass.simpleName + ":" + failure.message.orEmpty()
+                }
+            }
+            reportCreateError = lastError
+            android.util.Log.w("ZTransferDiagnostic", "SAF report create failed: $lastError")
+            return null
+        }
+    }
+
+    private fun reportStatus(): String = synchronized(lock) {
+        "reportUri=" + (reportUri ?: "none") +
+            " location=" + reportLocation +
+            " reportError=" + (reportCreateError ?: "none")
     }
 
     companion object {
@@ -316,26 +512,26 @@ internal class TransferCorruptionDiagnostic private constructor(
                 .format(java.time.LocalDateTime.now())
             val privateDir = File(filesDir, "transfer-diagnostics").apply { mkdirs() }
             val privateFile = File(privateDir, "ZTransfer_corruption_$stamp.txt")
-            var reportUri: Uri? = null
-            try {
-                reportUri = DocumentsContract.createDocument(
-                    resolver,
-                    parent,
-                    "text/plain",
-                    "ZTransfer_corruption_$stamp.txt",
-                )
-            } catch (_: Exception) {}
             val text = StringBuilder()
-            val diagnostic = TransferCorruptionDiagnostic(resolver, reportUri, privateFile, text)
-            diagnostic.append("ZTransfer corruption diagnostic v3")
+            val diagnostic = TransferCorruptionDiagnostic(
+                resolver = resolver,
+                reportParent = parent,
+                reportName = "ZTransfer_corruption_$stamp.txt",
+                privateFile = privateFile,
+                text = text,
+            )
+            diagnostic.append("ZTransfer corruption diagnostic v5")
             diagnostic.append("app=${BuildConfig.VERSION_NAME}(${BuildConfig.VERSION_CODE}) release=${!BuildConfig.DEBUG}")
+            diagnostic.append("diagnostics=enabled scope=harmony androidPolicy=observe-only")
             diagnostic.append("phone=${Build.MANUFACTURER} ${Build.MODEL} android=${Build.VERSION.RELEASE} sdk=${Build.VERSION.SDK_INT}")
             diagnostic.append("build=${Build.DISPLAY}")
             diagnostic.append("camera=${camera?.transferDiagnosticDescription() ?: "unavailable"}")
             diagnostic.append("targetAuthority=${parent.authority.orEmpty()} targetScheme=${parent.scheme.orEmpty()}")
-            diagnostic.append("reportUri=${reportUri ?: "private-only"}")
+            diagnostic.append("privateReport=$privateFile")
             diagnostic.append("stages=R(received) T(temp-readback) F(final-readback) L(queue-end-readback) C(camera-reread)")
             diagnostic.append("hash=SHA-256 whole-file plus fixed 4MiB segment hashes; no media bytes retained")
+            diagnostic.mirrorBestEffort()
+            diagnostic.append(diagnostic.reportStatus())
             diagnostic.mirrorBestEffort()
             diagnostic
         }

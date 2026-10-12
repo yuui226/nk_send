@@ -39,6 +39,7 @@ import java.net.InetSocketAddress
 import java.net.Socket
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.security.MessageDigest
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -1549,6 +1550,8 @@ class NikonCamera(private val context: Context) {
     private var usbPtp: UsbPtpConnection? = null
     private var connectedUsbManager: UsbManager? = null
     private var connectedUsbDevice: UsbDevice? = null
+    /** STA does not expose a reliable ProtectionStatus; keep the generic parser from consuming it. */
+    @Volatile private var staSession = false
     private var tid = 0
     private val cmdReader = PacketReader(context)
     private val evtReader = PacketReader(context)
@@ -1591,6 +1594,8 @@ class NikonCamera(private val context: Context) {
     // Only small decoded ratings are retained; encoded photo prefixes have their separate budget.
     private val photoRatings = java.util.Collections.synchronizedMap(LinkedHashMap<Int, Int>())
     private val photoRatingOrigins = java.util.Collections.synchronizedMap(LinkedHashMap<Int, String>())
+    /** Explicit STA protection-header probe baselines; never consumed by the real filter. */
+    private val protectionHeaderProbeBaselines = HashMap<Int, ByteArray>()
     internal val photoRatingGeneration = MutableStateFlow(0)
 
     internal fun cachedPhotoRating(handle: Int): Int? = photoRatings[handle]
@@ -1708,6 +1713,175 @@ class NikonCamera(private val context: Context) {
             .getOrNull()
         RatingDiagnostics.note("header result=${headerValue ?: "unknown"}")
         RatingDiagnostics.note("raw probe complete")
+    }
+
+    /**
+     * Explicit, read-only experiment for STA protection metadata.
+     *
+     * ProtectionStatus is normally an ObjectInfo field, not a photo metadata field.  The direct
+     * STA path cannot obtain ObjectInfo, so this probe only compares the actual bounded file
+     * prefix before/after the user changes protection on the camera.  It deliberately does not
+     * populate FileInfo.isProtected or the rating map: a byte difference is only a candidate
+     * until it is confirmed across repeated protect/unprotect changes.
+     */
+    internal suspend fun probeProtectionHeaders(files: List<FileInfo>) {
+        RatingDiagnostics.note(
+            "protection header probe mode=STA files=${files.size.coerceAtMost(4)} " +
+                "cap=${256 * 1024}B objectProtection=not-read",
+        )
+        if (!staDirectObjectReadValidated) {
+            RatingDiagnostics.note("protection header probe unavailable=sta-direct-not-validated")
+            return
+        }
+        val candidates = files.asSequence()
+            .filter { it.extension in setOf(".jpg", ".jpeg", ".nef", ".nrw", ".mov", ".mp4") }
+            .distinctBy { it.handle }
+            .take(4)
+            .toList()
+        if (candidates.isEmpty()) {
+            RatingDiagnostics.note("protection header probe no-supported-files")
+            return
+        }
+        ioGate.withRatingTransaction("RATING") {
+            withContext(Dispatchers.IO) {
+                candidates.forEach { file ->
+                    val requested = minOf(file.size.coerceAtLeast(1L), 256L * 1024L).toInt()
+                    val startedAt = SystemClock.elapsedRealtime()
+                    val bytes = runCatching {
+                        if (!sessionOpen) null else readStaDirectPartialInternal(file.handle, 0L, requested)
+                    }.getOrElse { error ->
+                        RatingDiagnostics.note(
+                            "protection file=${file.fileName} handle=0x%08X error=%s".format(
+                                file.handle,
+                                error.javaClass.simpleName,
+                            ),
+                        )
+                        null
+                    }
+                    if (bytes == null || bytes.isEmpty()) {
+                        RatingDiagnostics.note(
+                            "protection file=${file.fileName} handle=0x%08X bytes=0 result=read-failed "
+                                .format(file.handle) +
+                                "elapsed=${SystemClock.elapsedRealtime() - startedAt}ms",
+                        )
+                        return@forEach
+                    }
+                    val rating = parsePhotoRating(bytes) ?: parseNikonVideoRating(bytes, file.size)
+                    val digest = MessageDigest.getInstance("SHA-256")
+                        .digest(bytes)
+                        .joinToString("") { "%02x".format(it) }
+                    val previous = protectionHeaderProbeBaselines[file.handle]
+                    if (previous == null) {
+                        protectionHeaderProbeBaselines[file.handle] = bytes.copyOf()
+                        val linePrefix = "protection file=${file.fileName} handle=0x%08X bytes=${bytes.size} "
+                            .format(file.handle)
+                        RatingDiagnostics.note(
+                            linePrefix + "rating=${rating ?: "unknown"} sha256=$digest baseline=saved " +
+                                "elapsed=${SystemClock.elapsedRealtime() - startedAt}ms",
+                        )
+                    } else {
+                        val changed = minOf(previous.size, bytes.size).let { length ->
+                            buildList {
+                                for (index in 0 until length) {
+                                    if (previous[index] != bytes[index]) {
+                                        add("@$index:%02X->%02X".format(previous[index], bytes[index]))
+                                        if (size >= 12) break
+                                    }
+                                }
+                            }
+                        }
+                        val changedCount = minOf(previous.size, bytes.size).let { length ->
+                            var count = 0
+                            for (index in 0 until length) {
+                                if (previous[index] != bytes[index]) count++
+                            }
+                            count + if (previous.size != bytes.size) 1 else 0
+                        }
+                        val linePrefix = "protection file=${file.fileName} handle=0x%08X bytes=${bytes.size} "
+                            .format(file.handle)
+                        RatingDiagnostics.note(
+                            linePrefix + "rating=${rating ?: "unknown"} sha256=$digest " +
+                                if (changedCount == 0) {
+                                    "diff=none"
+                                } else {
+                                    "diffCount=$changedCount candidates=${changed.joinToString(",")} " +
+                                        "candidateOnly=true"
+                                } +
+                                " elapsed=${SystemClock.elapsedRealtime() - startedAt}ms",
+                        )
+                    }
+                }
+            }
+        }
+        RatingDiagnostics.note(
+            "protection header probe complete; differences are candidates only, " +
+                "repeat after changing the camera protection state",
+        )
+    }
+
+    /**
+     * One-shot STA probe for the standard MTP ProtectionStatus property (0xDC03).
+     *
+     * This is diagnostic only: it records the response and raw payload without changing
+     * FileInfo.isProtected or the normal filter state. Some Nikon STA sessions deny ObjectInfo
+     * but still expose individual object properties, so this path must be tested separately from
+     * the file-header experiment above.
+     */
+    internal suspend fun probeProtectionProperties(files: List<FileInfo>) {
+        val advertised = cachedDeviceInfo?.operations
+            ?.contains(PtpConstants.GET_OBJECT_PROP_VALUE) == true
+        RatingDiagnostics.note(
+            "protection property probe mode=STA prop=0xDC03 " +
+                "op=0x9803 advertised=$advertised files=${files.size.coerceAtMost(4)}",
+        )
+        if (!sessionOpen) {
+            RatingDiagnostics.note("protection property probe unavailable=session-closed")
+            return
+        }
+        val candidates = files.asSequence()
+            .filter { it.extension in setOf(".jpg", ".jpeg", ".nef", ".nrw", ".mov", ".mp4") }
+            .distinctBy { it.handle }
+            .take(4)
+            .toList()
+        if (candidates.isEmpty()) {
+            RatingDiagnostics.note("protection property probe no-supported-files")
+            return
+        }
+        ioGate.withRatingTransaction("RATING") {
+            withContext(Dispatchers.IO) {
+                candidates.forEach { file ->
+                    val (response, data) = runCatching {
+                        sendCmd(
+                            PtpConstants.GET_OBJECT_PROP_VALUE,
+                            file.handle,
+                            PtpConstants.OBJECT_PROP_PROTECTION_STATUS,
+                        )
+                        recvRespWithPayload()
+                    }.getOrElse { error ->
+                        RatingDiagnostics.note(
+                            "protection property file=${file.fileName} " +
+                                "handle=0x%08X error=%s".format(file.handle, error.javaClass.simpleName),
+                        )
+                        return@forEach
+                    }
+                    val payload = data ?: ByteArray(0)
+                    val raw = payload.take(32).joinToString(" ") { "%02X".format(it.toInt() and 0xFF) }
+                    val value = if (payload.size >= 2) {
+                        ((payload[0].toInt() and 0xFF) or
+                            ((payload[1].toInt() and 0xFF) shl 8)).toString()
+                    } else {
+                        "unknown"
+                    }
+                    RatingDiagnostics.note(
+                        "protection property file=${file.fileName} " +
+                            "handle=0x%08X resp=${hexResponse(response)} bytes=${data?.size ?: 0} "
+                                .format(file.handle) +
+                            "value=$value raw=${raw.ifEmpty { "none" }}",
+                    )
+                }
+            }
+        }
+        RatingDiagnostics.note("protection property probe complete")
     }
 
     private suspend fun readPhotoRatingHeaderInternal(file: FileInfo, gateWaitMs: Long): Int? {
@@ -2063,6 +2237,7 @@ class NikonCamera(private val context: Context) {
         network: Network? = null
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
+            staSession = false
             if (FileOrderProbe.enabled) FileOrderProbe.beginConnection("PTP/IP")
             // 经 Wi-Fi Network 的 socketFactory 建 socket：相机热点没有互联网，系统验证失败后
             // 常把【默认网络】切回蜂窝数据——普通 Socket() 走默认路由，连 192.168.1.1 的包进蜂窝
@@ -2186,6 +2361,7 @@ class NikonCamera(private val context: Context) {
         onPairingStarted: (() -> Unit)? = null,
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
+            staSession = true
             staAlbumAccessValidated = false
             pairingVerifiedForSession = false
             staStorageProbeReached = false
@@ -2330,6 +2506,7 @@ class NikonCamera(private val context: Context) {
         device: UsbDevice
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
+            staSession = false
             usbDeviceSerial = runCatching { device.serialNumber }
                 .getOrNull()
                 ?.trim()
@@ -4435,12 +4612,15 @@ class NikonCamera(private val context: Context) {
 
         val cacheIdentity = parseObjectCacheIdentity(handle, ext, data)
 
-        // ProtectionStatus(偏移 6,u16) 与文件同载荷,解析零额外流量。
+        // AP/USB 的 ProtectionStatus(偏移 6,u16) 与文件同载荷,解析零额外流量；STA 跳过。
         //（ObjectInfo 里还有两组刻意不用的字段:SequenceNumber(48)——机型可能恒填 0、
         // 语义不统一,连拍检测走"文件编号 + 秒级时间戳"的自有算法(computeBurstHandles);
         // ImagePixWidth/Height(26/30)——竖拍存的也是传感器原生横向像素,方向只在
         // EXIF Orientation 里且依赖机内"自动旋转图像"设置,判不出构图。）
-        val isProtected = data.getUShortLE(6) != 0
+        // Nikon STA does not provide a trustworthy protection field. The direct STA path
+        // normally avoids ObjectInfo entirely, but this guard also covers capability fallbacks
+        // and metadata validation without affecting AP/USB behavior.
+        val isProtected = !staSession && data.getUShortLE(6) != 0
 
         return ObjectInfoResult(
             file = FileInfo(
@@ -4491,7 +4671,8 @@ class NikonCamera(private val context: Context) {
      * [preferHighThroughputAtStart] 在首个文件数据命令前仅取值一次，之后页面切换不会改变当前文件。
      * [captureHeader] 在新文件传输时保留有限的文件头，供效果图导出复用；不会额外发起相机请求。
      * [trace] 在显式诊断构建中接收有界协议摘要；回调异常不会改变传输结果。
-     * [onBytesReceived] 在每段数据写入 [output] 前同步观察收到的字节；回调异常会被忽略。
+     * [onBytesReceived] 在每段数据写入 [output] 前同步观察收到的字节；默认回调异常会被忽略。
+     * [strictBytesObserver] 为兼容性校验开启时让观察器异常终止本文件，普通路径保持忽略。
      * [diagnosticReferenceRead] 仅在显式诊断构建中把视频分块限制为 4 MiB。
      *
      * 照片不续传：AP/USB 用 GetObject，STA 用一次 GetPartialObjectEx 请求整个范围；
@@ -4511,6 +4692,7 @@ class NikonCamera(private val context: Context) {
         trace: ((String) -> Unit)? = null,
         diagnosticReferenceRead: Boolean = false,
         onBytesReceived: ((ByteArray, Int, Int) -> Unit)? = null,
+        strictBytesObserver: Boolean = false,
     ): Result<DownloadStats> = ioGate.withDownloadActivity {
         withContext(Dispatchers.IO) {
             val scope = this
@@ -4557,10 +4739,14 @@ class NikonCamera(private val context: Context) {
             }
             fun writeChunk(bytes: ByteArray, offset: Int, count: Int) {
                 if (onBytesReceived != null) {
-                    try {
+                    if (strictBytesObserver) {
                         onBytesReceived.invoke(bytes, offset, count)
-                    } catch (_: Throwable) {
-                        // A receive observer is diagnostic-only and cannot change transfer state.
+                    } else {
+                        try {
+                            onBytesReceived.invoke(bytes, offset, count)
+                        } catch (_: Throwable) {
+                            // A receive observer is diagnostic-only and cannot change transfer state.
+                        }
                     }
                 }
                 try {
