@@ -254,7 +254,7 @@ object LicenseManager {
 
     /**
      * 通行证里的订阅到期时刻(Unix 秒);0 = 永久有效(手动发的码)或本地无有效通行证。
-     * 读 sub 不读 exp:exp 是 7 天滚动的通行证寿命,每次续签都往后挪,跟订阅到期日无关。
+     * 读 sub 不读 exp:exp 是 20 天滚动的通行证寿命,每次续签都往后挪,跟订阅到期日无关。
      * 用 verifySig 而非 verifyToken——到期当天通行证自身也过期了,仍要能把日期说给用户听。
      */
     fun subExpiresAtSec(): Long =
@@ -419,7 +419,7 @@ object LicenseManager {
             put("fp", fingerprint)
         })
         if (resp == null) {
-            // 联不上:未过期则继续用(离线不惩罚);已过期(满 7 天仍无网)则降级并提示连网续期
+            // 联不上:未过期则继续用(离线不惩罚);已过期(满 20 天仍无网)则降级并提示连网续期
             if (expired) {
                 _isPro.value = false
                 _quotaLeft.value = quotaRemaining()
@@ -429,7 +429,7 @@ object LicenseManager {
         }
         val token = resp.optString("token")
         if (resp.optBoolean("ok") && verifyToken(token) != null) {
-            saveToken(token, code)                        // 内部置 _isPro=true、清 renewalNeeded、滚动 7 天有效期
+            saveToken(token, code)                        // 内部置 _isPro=true、清 renewalNeeded、滚动 20 天有效期
         } else when (resp.optString("err")) {
             "CODE_REVOKED", "NOT_BOUND" -> revertToFree()  // 被吊销/顶替:降级并清 flag
             "CODE_EXPIRED" -> expireSubscription()         // 年费码到期即失效，清码后按新用户购买

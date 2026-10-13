@@ -25,7 +25,8 @@ import kotlinx.coroutines.withContext
 /**
  * Temporary original-file diagnostic for Harmony in Debug/Release.
  * Only TRANSFER_CORRUPTION_DIAGNOSTIC enables it; a normal build keeps it off.
- * The caller activates it only after HarmonyStorageCompatibility positively identifies Harmony.
+ * The caller activates it on Huawei devices, whether or not HarmonyStorageCompatibility
+ * identified Harmony.
  * This class observes and reports bytes, never selects the storage compatibility path.
  *
  * The report deliberately separates five observations:
@@ -522,7 +523,7 @@ internal class TransferCorruptionDiagnostic private constructor(
             )
             diagnostic.append("ZTransfer corruption diagnostic v5")
             diagnostic.append("app=${BuildConfig.VERSION_NAME}(${BuildConfig.VERSION_CODE}) release=${!BuildConfig.DEBUG}")
-            diagnostic.append("diagnostics=enabled scope=harmony androidPolicy=observe-only")
+            diagnostic.append("diagnostics=enabled scope=huawei androidPolicy=observe-only")
             diagnostic.append("phone=${Build.MANUFACTURER} ${Build.MODEL} android=${Build.VERSION.RELEASE} sdk=${Build.VERSION.SDK_INT}")
             diagnostic.append("build=${Build.DISPLAY}")
             diagnostic.append("camera=${camera?.transferDiagnosticDescription() ?: "unavailable"}")
