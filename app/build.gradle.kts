@@ -15,19 +15,6 @@ val hasReleaseKeystore = keystorePropsFile.exists()
 val keystoreProps = Properties().apply {
     if (hasReleaseKeystore) FileInputStream(keystorePropsFile).use { load(it) }
 }
-// Temporary transfer-corruption diagnostics for Harmony, in either build type.
-// gradle.properties enables the current field test; removing that line restores the false default.
-// -PtransferCorruptionDiagnostic=false overrides it. Runtime code only activates the report on
-// devices positively identified as Harmony; ordinary Android keeps the original transfer path.
-val transferCorruptionDiagnostic = providers.gradleProperty("transferCorruptionDiagnostic")
-    .map { it.equals("true", ignoreCase = true) }
-    .orElse(false)
-    .get()
-
-if (transferCorruptionDiagnostic) {
-    logger.lifecycle("Transfer corruption diagnostics ON for Harmony devices: hashes, local readbacks and queue-end camera reread enabled.")
-}
-
 android {
     namespace = "com.ztransfer"
     compileSdk = 35
@@ -59,10 +46,6 @@ android {
         // Keep the default explicit: AGP otherwise rewrites the first manifest entry when several
         // standalone instrumentation suites are registered.
         testInstrumentationRunner = "com.ztransfer.frame.FramePlaceLayoutInstrumentation"
-        buildConfigField("boolean", "TRANSFER_CORRUPTION_DIAGNOSTIC", transferCorruptionDiagnostic.toString())
-        // Shared by the passive protocol trace; keep the alias identical so the one-off release
-        // cannot accidentally collect trace data without the file-integrity report (or vice versa).
-        buildConfigField("boolean", "TRANSFER_DIAGNOSTICS", transferCorruptionDiagnostic.toString())
 
         // The app exposes exactly English, Simplified Chinese and Traditional
         // Chinese. Do not package translations contributed by AndroidX for
