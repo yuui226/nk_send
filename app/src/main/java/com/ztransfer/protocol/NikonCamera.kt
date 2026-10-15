@@ -2681,29 +2681,6 @@ class NikonCamera(private val context: Context) {
         }
     }
 
-    suspend fun getStorageIds(): List<Int> = withCameraTransaction(
-        CameraRequestKind.BACKGROUND_THUMBNAIL,
-        "GET_STORAGE_IDS",
-    ) {
-        withContext(Dispatchers.IO) {
-            try {
-                prefetchedStorageIds?.let { storageIds ->
-                    prefetchedStorageIds = null
-                    return@withContext storageIds
-                }
-                sendCmd(PtpConstants.GET_STORAGE_IDS)
-                val (respCode, data) = recvRespWithPayload()
-                if (respCode != PtpConstants.RESPONSE_OK || data == null || data.size < 4) {
-                    return@withContext emptyList()
-                }
-                val count = data.getIntLE(0)
-                (0 until count).map { data.getIntLE(4 + it * 4) }
-            } catch (_: Exception) {
-                emptyList()
-            }
-        }
-    }
-
     internal data class StorageIdsResult(
         val storageIds: List<Int>,
         val successful: Boolean,
@@ -2712,10 +2689,10 @@ class NikonCamera(private val context: Context) {
         val error: String? = null,
     )
 
-    /** STA-only status-preserving variant; an IO/response failure must not become an empty card. */
-    internal suspend fun getStaStorageIdsWithStatus(): StorageIdsResult = withCameraTransaction(
+    /** All transports preserve status; an IO/response failure must not become an empty card. */
+    internal suspend fun getStorageIdsWithStatus(): StorageIdsResult = withCameraTransaction(
         CameraRequestKind.BACKGROUND_THUMBNAIL,
-        "GET_STA_STORAGE_IDS",
+        "GET_STORAGE_IDS",
     ) {
         withContext(Dispatchers.IO) {
             prefetchedStorageIds?.let { storageIds ->
@@ -2730,30 +2707,7 @@ class NikonCamera(private val context: Context) {
             try {
                 sendCmd(PtpConstants.GET_STORAGE_IDS)
                 val (response, data) = recvRespWithPayload()
-                if (response != PtpConstants.RESPONSE_OK || data == null || data.size < 4) {
-                    return@withContext StorageIdsResult(
-                        storageIds = emptyList(),
-                        successful = false,
-                        responseCode = response,
-                        payloadBytes = data?.size ?: 0,
-                    )
-                }
-                val count = data.getIntLE(0)
-                if (count < 0 || count > (data.size - 4) / 4) {
-                    return@withContext StorageIdsResult(
-                        storageIds = emptyList(),
-                        successful = false,
-                        responseCode = response,
-                        payloadBytes = data.size,
-                        error = "malformed-count=$count",
-                    )
-                }
-                StorageIdsResult(
-                    storageIds = (0 until count).map { data.getIntLE(4 + it * 4) },
-                    successful = true,
-                    responseCode = response,
-                    payloadBytes = data.size,
-                )
+                parseCameraStorageIdsResponse(response, data)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {

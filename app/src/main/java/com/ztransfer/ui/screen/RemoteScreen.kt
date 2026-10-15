@@ -1376,10 +1376,10 @@ private fun RemoteContent(
     }
 
     // 在页期间暂停后台缩略图填充：把相机通道完全让给取帧与参数加载，
-    // 否则每条启动命令都排在 GetThumb 后面，进页要等好几秒。退出自动恢复。
+    // 退页只释放页面持有的暂停；相机会话清理完成后才真正恢复后台读取。
     DisposableEffect(Unit) {
-        cameraViewModel.setRemoteActive(true)
-        onDispose { cameraViewModel.setRemoteActive(false) }
+        val activity = cameraViewModel.acquireRemoteActivity()
+        onDispose { activity.close() }
     }
 
     // 进页/重连：先拉参数与模式（快速往返，胶囊和徽标立刻点亮）再启动监看——LV 首帧
@@ -1395,86 +1395,90 @@ private fun RemoteContent(
             return@LaunchedEffect
         }
         val sessionCamera = cameraViewModel.getCamera() ?: return@LaunchedEffect
-        RemoteComputerControlState.sessionMutex.withLock {
-            computerControl.enabled = false
-            try {
-                // 新连接不继承上一条连接的拨杆状态。首次读取失败时按照片模式处理，优先
-                // 保证机身画面与快门不被错误锁进电脑控制模式。
-                movieMode = false
-                batteryParam = null
-                // Clear an old USB recording session before reading the physical mode lever.
-                // Read that lever before restoring PC mode, then describe writable parameters.
-                val hadStaleUsbMovieSession = shouldReturnUsbMovieSessionToStandby(
-                        sessionCamera.connectionType,
-                        sessionCamera.remoteControlModeSet
-                    )
-                if (hadStaleUsbMovieSession) {
-                    releaseUsbMovieSession(sessionCamera)
-                    // 电脑控制中的 D1A6 可能仍是进入控制前的录像值；归还机身后立即重读，
-                    // 再读取一次即可得到当前真实拨杆状态。
-                }
-                // 先确定照片/视频拨杆，再只读取对应的一组参数。旧流程先读照片组、随后切到
-                // 视频组，会表现为参数出现、清空、再加载一遍。
-                refreshMovieMode(refreshExposureOnChange = false)
-                if (tools.computerControl.value &&
-                    cameraViewModel.getCamera() === sessionCamera &&
-                    cameraViewModel.state.value.isConnectedToCamera
-                ) {
-                    computerControl.busy = true
-                    try {
-                        val rc = sessionCamera.rcSetMonitorComputerControl(true)
-                        computerControl.enabled = rc == Lab.OK &&
-                            cameraViewModel.getCamera() === sessionCamera &&
-                            cameraViewModel.state.value.isConnectedToCamera
-                        devLog("ComputerControl restore resp=0x%04X".format(rc and 0xFFFF))
-                    } catch (cancelled: CancellationException) { throw cancelled }
-                    catch (error: Exception) {
-                        devLog("!! ComputerControl restore failed=${error.javaClass.simpleName}: ${error.message}")
-                    } finally { computerControl.busy = false }
-                }
-                val initialExposureProps =
-                    if (movieMode) MOVIE_EXPOSURE_PROPS else EXPOSURE_PROPS
-                initialExposureProps.forEach { refreshParam(it) }
-                refreshAutoIso()
-                refreshMode()
-                refreshFocusMode()
-                // 进页先读一次，电量能与曝光参数一起在首帧前显示。
-                refreshBattery(forceDescribe = true)
-                initialLoaded = true
-                startSession(hdLiveView)
-                awaitCancellation()
-            } finally {
-                withContext(NonCancellable) {
-                    // 先等调试切换完成记账，防止退页清理后才迟到地开启 PC 控制。
-                    initialLoaded = false
-                    computerControl.changeJob?.cancelAndJoin()
-                    computerControl.changeJob = null
-                    val releaseControl = (sessionCamera.connectionType == CameraConnectionType.USB ||
-                        sessionCamera.remoteDiagnosticControlModeSet) && sessionCamera.remoteControlModeSet
-                    if (releaseControl && recording) {
-                        runCatching { sessionCamera.rcEndMovie() }
-                        recording = false
+        // Hold through cancellation, EndLiveView and PC/application-mode release. Otherwise
+        // the album can interpret the temporary no-card response as deletion of every photo.
+        cameraViewModel.acquireRemoteActivity().use {
+            RemoteComputerControlState.sessionMutex.withLock {
+                computerControl.enabled = false
+                try {
+                    // 新连接不继承上一条连接的拨杆状态。首次读取失败时按照片模式处理，优先
+                    // 保证机身画面与快门不被错误锁进电脑控制模式。
+                    movieMode = false
+                    batteryParam = null
+                    // Clear an old USB recording session before reading the physical mode lever.
+                    // Read that lever before restoring PC mode, then describe writable parameters.
+                    val hadStaleUsbMovieSession = shouldReturnUsbMovieSessionToStandby(
+                            sessionCamera.connectionType,
+                            sessionCamera.remoteControlModeSet
+                        )
+                    if (hadStaleUsbMovieSession) {
+                        releaseUsbMovieSession(sessionCamera)
+                        // 电脑控制中的 D1A6 可能仍是进入控制前的录像值；归还机身后立即重读，
+                        // 再读取一次即可得到当前真实拨杆状态。
                     }
-                    val oldLvJob = lvJob
-                    oldLvJob?.cancelAndJoin()
-                    if (lvJob === oldLvJob) lvJob = null
-                    if (releaseControl) {
-                        // USB recording and the PC button both release camera control on exit.
-                        if (oldLvJob == null) runCatching { sessionCamera.labEndLiveView() }
-                        clearAppMode(sessionCamera, force = true)
-                        for (attempt in 0 until 3) {
-                            val rc = runCatching {
-                                sessionCamera.rcSetControlMode(false)
-                            }.getOrDefault(-1)
-                            devLog("control mode exit SetControlMode(0) resp=0x%04X".format(rc and 0xFFFF))
-                            if (rc == Lab.OK) break
-                            if (attempt < 2) delay(300L)
-                        }
-                        if (sessionCamera.remoteControlModeSet) {
-                            devLog("!! control mode release unconfirmed; reconnect or restart camera if body remains locked")
-                        }
+                    // 先确定照片/视频拨杆，再只读取对应的一组参数。旧流程先读照片组、随后切到
+                    // 视频组，会表现为参数出现、清空、再加载一遍。
+                    refreshMovieMode(refreshExposureOnChange = false)
+                    if (tools.computerControl.value &&
+                        cameraViewModel.getCamera() === sessionCamera &&
+                        cameraViewModel.state.value.isConnectedToCamera
+                    ) {
+                        computerControl.busy = true
+                        try {
+                            val rc = sessionCamera.rcSetMonitorComputerControl(true)
+                            computerControl.enabled = rc == Lab.OK &&
+                                cameraViewModel.getCamera() === sessionCamera &&
+                                cameraViewModel.state.value.isConnectedToCamera
+                            devLog("ComputerControl restore resp=0x%04X".format(rc and 0xFFFF))
+                        } catch (cancelled: CancellationException) { throw cancelled }
+                        catch (error: Exception) {
+                            devLog("!! ComputerControl restore failed=${error.javaClass.simpleName}: ${error.message}")
+                        } finally { computerControl.busy = false }
                     }
-                    devLog("diagnostic monitor session ended connected=$connected")
+                    val initialExposureProps =
+                        if (movieMode) MOVIE_EXPOSURE_PROPS else EXPOSURE_PROPS
+                    initialExposureProps.forEach { refreshParam(it) }
+                    refreshAutoIso()
+                    refreshMode()
+                    refreshFocusMode()
+                    // 进页先读一次，电量能与曝光参数一起在首帧前显示。
+                    refreshBattery(forceDescribe = true)
+                    initialLoaded = true
+                    startSession(hdLiveView)
+                    awaitCancellation()
+                } finally {
+                    withContext(NonCancellable) {
+                        // 先等调试切换完成记账，防止退页清理后才迟到地开启 PC 控制。
+                        initialLoaded = false
+                        computerControl.changeJob?.cancelAndJoin()
+                        computerControl.changeJob = null
+                        val releaseControl = (sessionCamera.connectionType == CameraConnectionType.USB ||
+                            sessionCamera.remoteDiagnosticControlModeSet) && sessionCamera.remoteControlModeSet
+                        if (releaseControl && recording) {
+                            runCatching { sessionCamera.rcEndMovie() }
+                            recording = false
+                        }
+                        val oldLvJob = lvJob
+                        oldLvJob?.cancelAndJoin()
+                        if (lvJob === oldLvJob) lvJob = null
+                        if (releaseControl) {
+                            // USB recording and the PC button both release camera control on exit.
+                            if (oldLvJob == null) runCatching { sessionCamera.labEndLiveView() }
+                            clearAppMode(sessionCamera, force = true)
+                            for (attempt in 0 until 3) {
+                                val rc = runCatching {
+                                    sessionCamera.rcSetControlMode(false)
+                                }.getOrDefault(-1)
+                                devLog("control mode exit SetControlMode(0) resp=0x%04X".format(rc and 0xFFFF))
+                                if (rc == Lab.OK) break
+                                if (attempt < 2) delay(300L)
+                            }
+                            if (sessionCamera.remoteControlModeSet) {
+                                devLog("!! control mode release unconfirmed; reconnect or restart camera if body remains locked")
+                            }
+                        }
+                        devLog("diagnostic monitor session ended connected=$connected")
+                    }
                 }
             }
         }
