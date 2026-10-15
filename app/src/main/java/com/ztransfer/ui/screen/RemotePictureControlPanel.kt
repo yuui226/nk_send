@@ -15,7 +15,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -27,6 +26,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.ztransfer.BuildConfig
 import com.ztransfer.R
@@ -69,7 +69,6 @@ internal fun RemotePictureControlPanel(
     var pending by remember { mutableStateOf<SlotAction?>(null) }
     var confirmClear by remember(editingSlot) { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
-    var saveFailed by remember { mutableStateOf(false) }
     val currentCamera by rememberUpdatedState(isCurrentCamera)
     val updateReport by rememberUpdatedState(onReport)
     val allowed by rememberUpdatedState(canWrite)
@@ -104,11 +103,11 @@ internal fun RemotePictureControlPanel(
         onFeedback()
         pending = action
         message = null
-        saveFailed = false
         confirmClear = false
         scope.launch(start = CoroutineStart.UNDISPATCHED) {
             val text = StringBuilder()
             var journal: File? = null
+            var saveFailed = false
             fun log(line: String) {
                 if (!BuildConfig.DEBUG) return
                 text.appendLine(line)
@@ -168,6 +167,9 @@ internal fun RemotePictureControlPanel(
                 updateReport(text.toString())
                 pending = null
                 busyChange(false)
+                if (BuildConfig.DEBUG && saveFailed) {
+                    Toast.makeText(context, R.string.picture_control_report_save_failed, Toast.LENGTH_LONG).show()
+                }
             }
         }
     }
@@ -178,11 +180,11 @@ internal fun RemotePictureControlPanel(
     }
     val editor = overview?.slots?.singleOrNull { it.slot == editingSlot }
     val goBack: (() -> Unit)? = if (editingSlot != null) ({ back() }) else null
-    RemoteChoicePopup(anchor, landscape, 320.dp, closeRequested, onDismiss, onBack = goBack) { _, closing ->
+    RemoteChoicePopup(anchor, landscape, 260.dp, closeRequested, onDismiss, onBack = goBack) { _, closing ->
         val idle = !closing && pending == null && !loading
         val enabled = idle && canWrite && !loadFailed
         Column(Modifier.weight(1f, fill = false).fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp)) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().heightIn(min = 32.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (editingSlot != null) IconButton(onClick = { onFeedback(); back() }, enabled = idle,
                     modifier = Modifier.size(32.dp)) {
                     Icon(Icons.Default.ArrowBack, stringResource(R.string.picture_control_back),
@@ -192,18 +194,16 @@ internal fun RemotePictureControlPanel(
                     else stringResource(R.string.picture_control_edit_slot, editingSlot - 200),
                     color = colors.onBackground, style = MaterialTheme.typography.labelLarge,
                     modifier = Modifier.weight(1f).padding(horizontal = 8.dp))
-                IconButton(onClick = { onFeedback(); scope.launch(start = CoroutineStart.UNDISPATCHED) { refresh() } },
-                    enabled = idle && camera != null, modifier = Modifier.size(32.dp)) {
-                    Icon(Icons.Default.Refresh, stringResource(R.string.picture_control_refresh),
-                        tint = colors.onSurfaceVariant, modifier = Modifier.size(18.dp))
+                if (BuildConfig.DEBUG) {
+                    PictureControlTestLogButton(report, pending == null && !closing, onFeedback)
                 }
             }
             val guidance = when {
-                pending != null -> context.getString(R.string.picture_control_slot_busy, pending!!.slot - 200)
+                pending != null -> context.getString(R.string.picture_control_slot_busy)
                 loading -> context.getString(R.string.picture_control_loading)
                 loadFailed -> context.getString(R.string.picture_control_slots_read_failed)
                 message != null -> message
-                !canWrite -> context.getString(R.string.picture_control_connect_hint)
+                !canWrite -> context.getString(R.string.picture_control_busy_hint)
                 else -> null
             }
             if (guidance != null) Text(guidance, color = colors.onSurfaceVariant,
@@ -262,29 +262,36 @@ internal fun RemotePictureControlPanel(
                     }
                 }
             }
-            if (BuildConfig.DEBUG && saveFailed) Text(stringResource(R.string.picture_control_report_save_failed),
-                color = colors.onSurfaceVariant, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(12.dp))
-            if (BuildConfig.DEBUG && report.isNotBlank()) Text(stringResource(R.string.picture_control_share_report),
-                color = colors.accentBlue, style = MaterialTheme.typography.labelLarge,
-                modifier = Modifier.fillMaxWidth().clickable(enabled = pending == null && !closing) {
-                    scope.launch {
-                        try {
-                            val file = withContext(Dispatchers.IO) { PictureControlReports.shareSnapshot(context.filesDir, report) }
-                            val uri = FileProvider.getUriForFile(context, "${context.packageName}.update-files", file)
-                            val intent = Intent(Intent.ACTION_SEND).apply {
-                                type = "text/plain"
-                                putExtra(Intent.EXTRA_STREAM, uri)
-                                clipData = ClipData.newRawUri("Picture Control", uri)
-                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                            }
-                            context.startActivity(Intent.createChooser(intent, context.getString(R.string.picture_control_share_report)))
-                            onFeedback()
-                        } catch (error: CancellationException) { throw error }
-                        catch (_: Exception) { Toast.makeText(context, R.string.picture_control_report_share_failed, Toast.LENGTH_LONG).show() }
-                    }
-                }.padding(12.dp))
         }
     }
+}
+
+@Composable
+private fun PictureControlTestLogButton(report: String, enabled: Boolean, onFeedback: () -> Unit) {
+    val context = LocalContext.current
+    val colors = AppTheme.colors
+    val scope = rememberCoroutineScope()
+    val canShare = enabled && report.isNotBlank()
+    Text(stringResource(R.string.picture_control_test_log), maxLines = 1,
+        color = if (canShare) colors.accentBlue else colors.onSurfaceVariant.copy(alpha = .35f),
+        style = MaterialTheme.typography.labelLarge,
+        modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(enabled = canShare, role = Role.Button) {
+            onFeedback()
+            scope.launch {
+                try {
+                    val file = withContext(Dispatchers.IO) { PictureControlReports.shareSnapshot(context.filesDir, report) }
+                    val uri = FileProvider.getUriForFile(context, "${context.packageName}.update-files", file)
+                    val intent = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_STREAM, uri)
+                        clipData = ClipData.newRawUri("Picture Control", uri)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    context.startActivity(Intent.createChooser(intent, context.getString(R.string.picture_control_test_log)))
+                } catch (error: CancellationException) { throw error }
+                catch (_: Exception) { Toast.makeText(context, R.string.picture_control_report_share_failed, Toast.LENGTH_LONG).show() }
+            }
+        }.padding(horizontal = 8.dp, vertical = 8.dp))
 }
 
 @Composable

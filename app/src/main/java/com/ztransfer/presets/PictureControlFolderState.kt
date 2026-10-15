@@ -34,8 +34,6 @@ internal class PictureControlFolderState(
     }
     var folder by mutableStateOf(preferences.folder)
         private set
-    var useFolder by mutableStateOf(preferences.useFolder)
-        private set
     var files by mutableStateOf<List<PresetFile>>(emptyList())
         private set
     var failure by mutableStateOf<PresetFolderFailure?>(null)
@@ -46,12 +44,7 @@ internal class PictureControlFolderState(
     private var ticket: PresetIoTicket? = null
     private var timeout: Job? = null
     private var closed = false
-    fun refresh() { if (useFolder && !scanning) folder?.let { scan(it, false) } }
-    fun showBuiltIns() {
-        cancelScan()
-        useFolder = false
-        preferences.showFolder(false)
-    }
+    fun refresh() { if (!scanning) folder?.let { scan(it, false) } }
     fun changeFolder(uri: Uri) { scan(uri, true) }
 
     private fun scan(uri: Uri, replacing: Boolean) {
@@ -77,7 +70,6 @@ internal class PictureControlFolderState(
                 if (replacing) {
                     preferences.replace(uri, snapshot.acquired || (previous == uri && owned))
                     folder = uri
-                    useFolder = true
                     if (previous != null && previous != uri && owned) {
                         PresetIoQueue.cleanup { repository.releaseGrant(previous) }
                     }
