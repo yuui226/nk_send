@@ -52,7 +52,7 @@ internal fun RemoteLutPanel(state: LutMonitorState, anchor: Rect?, landscape: Bo
         if (accessible && state.files.isNotEmpty()) {
             LutCategoryList(state.files, state.active?.file?.uri, !closing,
                 Modifier.weight(1f, fill = false).fillMaxWidth()) { file ->
-                LutChoice(file.label, state.active?.file?.uri == file.uri,
+                    RemotePresetChoice(file.label, state.active?.file?.uri == file.uri,
                     state.loading == file.uri, !closing) { onFeedback(); state.select(file) }
             }
         }
@@ -62,9 +62,9 @@ internal fun RemoteLutPanel(state: LutMonitorState, anchor: Rect?, landscape: Bo
 }
 
 @Composable
-private fun LutChoice(text: String, selected: Boolean, pending: Boolean, enabled: Boolean, onClick: () -> Unit) {
+internal fun RemotePresetChoice(text: String, selected: Boolean, pending: Boolean, enabled: Boolean, onClick: () -> Unit) {
     val colors = AppTheme.colors
-    val breathing = if (pending && enabled) {
+    val breathing = if (pending) {
         val transition = rememberInfiniteTransition(label = "lutPending")
         val alpha = transition.animateFloat(1f, .5f,
             infiniteRepeatable(tween(600, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "lutOpacity")

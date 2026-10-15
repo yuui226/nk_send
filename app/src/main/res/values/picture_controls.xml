@@ -1,0 +1,35 @@
+<resources>
+    <string name="remote_tool_picture_control">Picture Control</string>
+    <string name="picture_control_loading">Loading…</string>
+    <string name="picture_control_restore_original">Restore original C%1$d</string>
+    <string name="picture_control_write_failed">Operation failed. Check P/S/A/M mode and try again.</string>
+    <string name="picture_control_failed_restored">Operation failed. Previous settings restored.</string>
+    <string name="picture_control_restore_needed">Operation failed. Reconnect and restore original C%1$d.</string>
+    <string name="picture_control_files_failed">Built-in presets could not be loaded.</string>
+    <string name="picture_control_connect_hint">Connect the camera and stop shooting or recording.</string>
+    <string name="picture_control_share_report">Share test log</string>
+    <string name="picture_control_report_use_share">Log too large. Share the test log from Picture Control.</string>
+    <string name="picture_control_report_share_failed">Could not share the log. Try again.</string>
+    <string name="picture_control_report_save_failed">Could not save the log. Share it before closing.</string>
+    <string name="picture_control_built_in">Built-in presets</string>
+    <string name="picture_control_folder_empty">No .np3 files found</string>
+    <string name="picture_control_file_read_failed">Could not read the preset. Select it again.</string>
+    <string name="picture_control_file_invalid">The NP3 file is damaged or invalid.</string>
+    <string name="picture_control_file_unsupported">This NP3 preset is not supported yet.</string>
+    <string name="picture_control_read_timeout">Reading timed out. Try again.</string>
+    <string name="picture_control_slots_title">Camera presets</string>
+    <string name="picture_control_edit_slot">Replace C%1$d</string>
+    <string name="picture_control_slot_empty">Empty</string>
+    <string name="picture_control_slot_unreadable">Could not read</string>
+    <string name="picture_control_slot_unsupported">Unsupported</string>
+    <string name="picture_control_back">Back</string>
+    <string name="picture_control_refresh">Refresh slots</string>
+    <string name="picture_control_slots_read_failed">Could not read slots. Connect the camera and refresh.</string>
+    <string name="picture_control_slot_applied">C%1$d activated</string>
+    <string name="picture_control_slot_cleared">C%1$d cleared</string>
+    <string name="picture_control_slot_restored">C%1$d restored</string>
+    <string name="picture_control_slot_busy">Updating C%1$d…</string>
+    <string name="picture_control_clear_slot">Clear C%1$d</string>
+    <string name="picture_control_clear_confirm">Clear the preset in C%1$d? If active, Picture Control will switch to Standard.</string>
+    <string name="picture_control_cancel">Cancel</string>
+</resources>

@@ -1,6 +1,8 @@
 package com.ztransfer.lut
 
 import android.net.Uri
+import com.ztransfer.presets.PresetIoQueue
+import com.ztransfer.presets.PresetIoTicket
 import androidx.compose.runtime.*
 import com.ztransfer.R
 import com.ztransfer.filter.PhotoFilterSelection
@@ -30,7 +32,7 @@ internal class PhotoLutEditorState(
     var loading by mutableStateOf(false); private set
     var loadingSelection by mutableStateOf(false); private set
     var favorites by mutableStateOf(store.favorites()); private set
-    private var ticket: LutIoQueue.Ticket? = null
+    private var ticket: PresetIoTicket? = null
     private var timer: Job? = null
     private var generation = 0L
     private var disposed = false
@@ -68,7 +70,7 @@ internal class PhotoLutEditorState(
         val id = begin()
         loadingSelection = true
         pendingUri = uri
-        ticket = LutIoQueue.submit({ signal ->
+        ticket = PresetIoQueue.submit({ signal ->
             val table = source.read(file, signal)
             signal.throwIfCanceled()
             store.snapshot(file, table)
@@ -78,7 +80,7 @@ internal class PhotoLutEditorState(
             result.fold(onSuccess = {
                 selection = it; selectedUri = uri
                 onSelected()
-                LutIoQueue.cleanup { store.prune() }
+                PresetIoQueue.cleanup { store.prune() }
             }, onFailure = { error ->
                 notice(when ((error as? LutException)?.reason) {
                     LutFailure.INVALID -> R.string.lut_invalid
@@ -93,7 +95,7 @@ internal class PhotoLutEditorState(
         val id = begin {
             if (!replacing) failure = LutFolderFailure.READ
         }
-        ticket = LutIoQueue.submit({ source.scan(uri, replacing, it) },
+        ticket = PresetIoQueue.submit({ source.scan(uri, replacing, it) },
             discard = { if (it.getOrNull()?.acquired == true) source.releaseGrant(uri) }) { result ->
             if (!valid(id)) return@submit
             finish()
@@ -104,7 +106,7 @@ internal class PhotoLutEditorState(
                     store.folders.replaceFolder(uri, snapshot.acquired)
                     folder = uri
                     off()
-                    if (previous != null && previousOwned) LutIoQueue.cleanup { source.releaseGrant(previous) }
+                    if (previous != null && previousOwned) PresetIoQueue.cleanup { source.releaseGrant(previous) }
                 } else if (snapshot.acquired) store.folders.markFolderGrantOwned()
                 files = snapshot.files
                 failure = null

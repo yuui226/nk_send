@@ -6,6 +6,8 @@ import com.ztransfer.util.HistogramMode
 import com.ztransfer.lut.LutFolderRepository
 import com.ztransfer.lut.LutMonitorState
 import com.ztransfer.lut.LutPreferences
+import com.ztransfer.presets.PresetFolderOwner
+import com.ztransfer.presets.retainSharedPresetFolderGrant
 
 import android.Manifest
 import android.content.Context
@@ -67,6 +69,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Lock
@@ -1928,11 +1931,20 @@ private fun RemoteContent(
             hintVisible = false
         }
     }
+    val pictureControl = rememberPictureControlToolState(services) {
+        showHint(services.context.getString(it))
+    }
+    LaunchedEffect(connected, movieMode, rotation, editingTools) {
+        pictureControl.panel = false
+        pictureControl.closeRequested = false
+    }
+    LaunchedEffect(listProp, devPanel, cameraToolPanel, gridPanelOpen) {
+        if (listProp != null || devPanel || cameraToolPanel != null || gridPanelOpen) pictureControl.panel = false
+    }
     val lutState = remember {
         LutMonitorState(
             repository = LutFolderRepository(services.context.applicationContext.contentResolver) { uri ->
-                val photoFolders = com.ztransfer.lut.PhotoLutStore(services.context).folders
-                (photoFolders.folder == uri).also { shared -> if (shared) photoFolders.markFolderGrantOwned() }
+                retainSharedPresetFolderGrant(services.context, PresetFolderOwner.MONITOR_LUT, uri)
             },
             preferences = LutPreferences(services.context.getSharedPreferences("monitor_lut", Context.MODE_PRIVATE)),
             scope = services.scope,
@@ -1960,6 +1972,8 @@ private fun RemoteContent(
         lutPickedFolder = uri
         lutPickerActive = false
     }
+    PictureControlFolderReturnEffect(pictureControl, lutResumed,
+        tools.layout(movieMode).visible(RemoteTool.PICTURE_CONTROL))
     // Preserve the exact gate in diagnostics instead of collapsing four causes into "disabled".
     val focusDisplayBlock = when {
         !showFocusFrame -> "tool-off"
@@ -2762,6 +2776,7 @@ private fun RemoteContent(
                 RemoteTool.COMPUTER_CONTROL -> if (computerControlEnabled) setComputerControl(false)
                 RemoteTool.LUT -> { lutState.off(); lutState.dismissMenu() }
                 RemoteTool.GRID -> gridPanelOpen = false
+                RemoteTool.PICTURE_CONTROL -> pictureControl.panel = false
                 RemoteTool.WHITE_BALANCE -> if (cameraToolPanel == RemoteCameraTool.WHITE_BALANCE) cameraToolPanel = null
                 RemoteTool.FOCUS_MODE -> if (cameraToolPanel == RemoteCameraTool.FOCUS_MODE) cameraToolPanel = null
                 RemoteTool.FOCUS_AREA -> if (cameraToolPanel == RemoteCameraTool.FOCUS_AREA) cameraToolPanel = null
@@ -2786,6 +2801,7 @@ private fun RemoteContent(
                 RemoteTool.AUDIO -> showAudioLevels
                 RemoteTool.HISTOGRAM -> showHistogram
                 RemoteTool.LUT -> lutState.active != null
+                RemoteTool.PICTURE_CONTROL -> pictureControl.panel
                 RemoteTool.GRID -> framingGrid != ViewfinderGrid.OFF
                 RemoteTool.EXPOSURE -> exposureAssist != ExposureAssist.OFF
                 RemoteTool.DESQUEEZE -> desqueezeMultiplier > 1.001f
@@ -2808,8 +2824,15 @@ private fun RemoteContent(
                     RemoteTool.AUDIO -> toggleAudioLevels()
                     RemoteTool.HISTOGRAM -> histogramMode = histogramMode.next()
                     RemoteTool.LUT -> {
+                        pictureControl.panel = false
                         listProp = null; devPanel = false; cameraToolPanel = null; gridPanelOpen = false
                         lutState.openMenu()
+                    }
+                    RemoteTool.PICTURE_CONTROL -> {
+                        lutState.dismissMenu()
+                        listProp = null; devPanel = false; cameraToolPanel = null; gridPanelOpen = false
+                        if (pictureControl.panel) pictureControl.closeRequested = true
+                        else { pictureControl.editingSlot = null; pictureControl.closeRequested = false; pictureControl.panel = true }
                     }
                     RemoteTool.GRID -> {
                         lutState.dismissMenu()
@@ -2864,6 +2887,8 @@ private fun RemoteContent(
                 focusAreaAnchor = it
             } else if (tool == RemoteTool.FOCUS_MODE) Modifier.size(36.dp).onGloballyPositioned {
                 focusModeAnchor = it
+            } else if (tool == RemoteTool.PICTURE_CONTROL) Modifier.onGloballyPositioned {
+                pictureControl.anchor = it
             } else if (tool == RemoteTool.LUT) Modifier.onGloballyPositioned {
                 lutAnchor = it
             } else if (tool == RemoteTool.GRID) Modifier.onGloballyPositioned {
@@ -3296,8 +3321,15 @@ private fun RemoteContent(
                         Spacer(Modifier.weight(1f))
                         GlassButton(
                             onClick = {
-                                services.clipboard.setText(AnnotatedString(recordingErrorReport + "\n\n" + movieFormatReport + "\n\n" + legacyVideoReport + "\n\n" + focusModeReport + "\n\n" + tapFocusReport))
-                                showHint(services.context.getString(R.string.code_copied))
+                                val fullReport = recordingErrorReport + "\n\n" + movieFormatReport + "\n\n" + legacyVideoReport + "\n\n" + focusModeReport + "\n\n" + tapFocusReport + "\n\n" + pictureControl.report
+                                if (fullReport.toByteArray(Charsets.UTF_8).size > 180_000) {
+                                    showHint(services.context.getString(R.string.picture_control_report_use_share))
+                                } else try {
+                                    services.clipboard.setText(AnnotatedString(fullReport))
+                                    showHint(services.context.getString(R.string.code_copied))
+                                } catch (_: RuntimeException) {
+                                    showHint(services.context.getString(R.string.picture_control_report_use_share))
+                                }
                             },
                             contentPadding = PaddingValues(8.dp)
                         ) {
@@ -3364,7 +3396,7 @@ private fun RemoteContent(
                     }
                     Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
                         Spacer(Modifier.height(8.dp))
-                        val logLines = (recordingErrorReport + "\n\n" + movieFormatReport + "\n\n" + legacyVideoReport + "\n\n" + focusModeReport + "\n\n" + tapFocusReport).lines()
+                        val logLines = (recordingErrorReport + "\n\n" + movieFormatReport + "\n\n" + legacyVideoReport + "\n\n" + focusModeReport + "\n\n" + tapFocusReport + "\n\n" + pictureControl.report).lines()
                         // 日志跟尾：面板刚打开（尚无布局信息）直接跳到底；此后新行到来时，
                         // 停在底部附近才跟到底，用户上翻查看时不打扰。
                         val logState = rememberLazyListState()
@@ -3425,6 +3457,32 @@ private fun RemoteContent(
         }
         RemoteGridPanel(framingGrid,localAnchor,rotation!=0,gridPanelCloseRequested,
             onSelect={ framingGrid=it },onDismiss={gridPanelOpen=false;gridPanelCloseRequested=false})
+    }
+    if (pictureControl.panel) {
+        val panelCamera = cameraViewModel.getCamera()
+        val panelMovie = movieMode
+        val localAnchor = toolOverlayCoordinates?.takeIf { it.isAttached }?.let { root ->
+            pictureControl.anchor?.takeIf { it.isAttached }?.let { root.localBoundingBoxOf(it, clipBounds = false) }
+        }
+        key(panelCamera, panelMovie) {
+            RemotePictureControlPanel(panelCamera, localAnchor, rotation != 0, pictureControl.closeRequested,
+                canWrite = connected && initialLoaded && !capturing && !recording && !recBusy &&
+                    !cameraToolWriting && !afHeld && !tapFocusBusy && afJob?.isActive != true && !computerControlBusy &&
+                    lutResumed && !pictureControl.pickerActive,
+                movie = panelMovie, report = pictureControl.report,
+                folders = pictureControl.folders,
+                editingSlot = pictureControl.editingSlot,
+                onEditingSlot = { pictureControl.editingSlot = it },
+                onFolder = pictureControl.chooseFolder,
+                isCurrentCamera = { connected && panelCamera != null && cameraViewModel.getCamera() === panelCamera && movieMode == panelMovie },
+                onReport = { pictureControl.report = it },
+                onDismiss = { pictureControl.panel = false; pictureControl.closeRequested = false; pictureControl.editingSlot = null },
+                onFeedback = { services.haptics.tick() },
+                onWriteBusyChanged = { busy ->
+                    if (busy && cameraToolWriting) false
+                    else { cameraToolWriting = busy; true }
+                })
+        }
     }
     cameraToolPanel?.let { selectedTool ->
         val panelCamera = cameraViewModel.getCamera()
@@ -5014,6 +5072,7 @@ private fun DockToolMark() {
 internal fun RemoteToolMark(tool: RemoteTool, preferences: RemoteToolPreferences) {
     val mark = Modifier.size(19.dp)
     when (tool) {
+        RemoteTool.PICTURE_CONTROL -> Icon(Icons.Default.Palette, null, mark)
         RemoteTool.LUT -> Text("LUT", fontSize = 10.sp, fontWeight = FontWeight.Bold)
         RemoteTool.HD -> HdMark()
         RemoteTool.FPS -> FpsMark()

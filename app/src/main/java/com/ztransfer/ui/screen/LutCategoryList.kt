@@ -21,14 +21,22 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.ztransfer.R
 import com.ztransfer.lut.LutFile
+import com.ztransfer.presets.PresetFile
 import com.ztransfer.ui.theme.AppTheme
 
-/** Caller supplies bounded height; both columns scroll independently and retain their width. */
 @Composable
 internal fun LutCategoryList(
     files: List<LutFile>, selected: Uri?, enabled: Boolean = true,
     modifier: Modifier = Modifier,
     content: @Composable (LutFile) -> Unit,
+) = PresetCategoryList(files, selected, enabled, modifier, content)
+
+/** Caller supplies bounded height; both columns scroll independently and retain their width. */
+@Composable
+internal fun PresetCategoryList(
+    files: List<PresetFile>, selected: Uri?, enabled: Boolean = true,
+    modifier: Modifier = Modifier,
+    content: @Composable (PresetFile) -> Unit,
 ) {
     val categories = remember(files) { files.map { it.category }.distinct().sortedWith(
         compareBy<String?> { it != null }.thenBy(String.CASE_INSENSITIVE_ORDER) { it.orEmpty() }) }

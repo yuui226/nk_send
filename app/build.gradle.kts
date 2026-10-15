@@ -141,7 +141,7 @@ dependencies {
 // 不会被 QQ、网盘或文件管理器的同名缓存误认为旧安装包。
 val copyTimestampedDebugApk = tasks.register("copyTimestampedDebugApk") {
     group = "build"
-    description = "Copy the debug APK to dist with a unique build timestamp"
+    description = "Copy the debug APK to dist-debug with a unique build timestamp"
     outputs.upToDateWhen { false }
     doLast {
         val source = layout.buildDirectory.file("outputs/apk/debug/app-debug.apk").get().asFile
@@ -150,7 +150,7 @@ val copyTimestampedDebugApk = tasks.register("copyTimestampedDebugApk") {
         val version = android.defaultConfig.versionName ?: "unknown"
         val destinationDirectory = rootProject.file("dist-debug").apply { mkdirs() }
         val destination = destinationDirectory.resolve(
-            "Zdebug-$version-$stamp.apk"
+            "ZTransfer-debug-$version-$stamp.apk"
         )
         source.copyTo(destination, overwrite = false)
         println("Timestamped debug APK: ${destination.absolutePath}")

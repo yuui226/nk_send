@@ -33,6 +33,7 @@ internal fun RemoteChoicePopup(
     anchor: Rect?, landscape: Boolean, width: Dp, closeRequested: Boolean,
     onDismiss: () -> Unit,
     besideAnchor: Boolean = false,
+    onBack: (() -> Unit)? = null,
     content: @Composable ColumnScope.(close: () -> Unit, closing: Boolean) -> Unit,
 ) {
     val progress=remember { Animatable(0f) }
@@ -55,7 +56,7 @@ internal fun RemoteChoicePopup(
         if(!closing) progress.animateTo(1f,tween(GENIE_EXPAND_DURATION_MS,easing=GenieExpandEasing))
     }
     LaunchedEffect(closeRequested) { if(closeRequested) close() }
-    BackHandler { close() }
+    BackHandler { if (onBack != null) onBack() else close() }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val density=LocalDensity.current
         val gap=6.dp

@@ -20,6 +20,7 @@ internal enum class RemoteTool(val id: String, val title: Int, val fixed: Boolea
     FOCUS_MODE("focus_mode", R.string.remote_tool_focus_mode),
     FOCUS_FRAME("focus_frame", R.string.remote_tool_focus_frame),
     LUT("lut", R.string.remote_tool_lut),
+    PICTURE_CONTROL("picture_control", R.string.remote_tool_picture_control),
     METER("meter", R.string.remote_tool_meter),
     LOCK("lock", R.string.remote_tool_lock),
     COMPUTER_CONTROL("computer_control", R.string.remote_tool_computer_control),
