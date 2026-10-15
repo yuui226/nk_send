@@ -462,7 +462,7 @@ fun SettingsOverlay(
     }
     LaunchedEffect(footerHintNonce) {
         if (footerHintVisible) {
-            delay(1800)
+            delay(if (footerHintText.contains('\n')) 3600 else 1800)
             footerHintVisible = false
         }
     }
@@ -1389,7 +1389,7 @@ fun SettingsOverlay(
             var checkingUpdate by remember { mutableStateOf(false) }
             val updateScope = rememberCoroutineScope()
             val latestHint = stringResource(R.string.update_latest)
-            val checkFailedHint = stringResource(R.string.update_check_failed)
+            val disconnectCameraHint = stringResource(R.string.update_disconnect_camera_wifi)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 VersionPlaque(
                     text = stringResource(R.string.version_label, BuildConfig.VERSION_NAME),
@@ -1410,12 +1410,19 @@ fun SettingsOverlay(
                         if (!checkingUpdate) {
                             checkingUpdate = true
                             updateScope.launch {
-                                when (AppUpdateManager.check(force = true)) {
-                                    is LicenseManager.UpdateResult.Available -> Unit
-                                    LicenseManager.UpdateResult.UpToDate -> showFooterHint(latestHint)
-                                    LicenseManager.UpdateResult.Unreachable -> showFooterHint(checkFailedHint)
+                                try {
+                                    when (AppUpdateManager.check(force = true)) {
+                                        is LicenseManager.UpdateResult.Available -> Unit
+                                        LicenseManager.UpdateResult.UpToDate -> showFooterHint(latestHint)
+                                        LicenseManager.UpdateResult.Unreachable -> {
+                                            if (AppUpdateManager.cameraApConnected) {
+                                                showFooterHint(disconnectCameraHint)
+                                            }
+                                        }
+                                    }
+                                } finally {
+                                    checkingUpdate = false
                                 }
-                                checkingUpdate = false
                             }
                         }
                     },

@@ -29,7 +29,7 @@ if ($AdminIsMac) { $OutputEncoding = [System.Text.UTF8Encoding]::new($false) }
 # curl 输出是 UTF-8(备注可能含中文),让 PowerShell 按 UTF-8 解码
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
-$Server = if ($env:ZT_SERVER) { $env:ZT_SERVER } else { "https://106.15.239.203:8443" }
+$Server = if ($env:ZT_SERVER) { $env:ZT_SERVER } else { "https://www.au9999.net" }
 $TokenFile = Join-Path $PSScriptRoot "admin-token.txt"
 $MaxPriceFen = 10000000
 $OssBucket = "ztransfer-hk"
@@ -46,17 +46,15 @@ $OssCredentialDir = if ($AdminIsMac) { Join-Path $HOME "Library/Application Supp
 $OssKeychainService = "com.ztransfer.admin.oss-upload"
 $OssCredentialFile = Join-Path $OssCredentialDir "oss-upload-credential.json"
 
-# 与 Android App 的 CERT_PIN_B64 相同：curl -k 仅跳过自签名证书链/主机名校验，
-# --pinnedpubkey 仍会核对服务端 SPKI SHA-256，不能把管理员令牌交给冒充服务器的人。
-# ZT_SERVER_PIN 可在证书轮换或测试环境覆盖；接受 base64 摘要或 curl 的 sha256//... 形式。
-$DefaultServerPin = "sha256//9SNNH7dEGfIVJ0bMGIKxEYTjHUAMDy3+t/+dVZzJfzA="
+# 正式证书走系统证书库和主机名校验。只有连回旧的自签地址时才设置 ZT_SERVER_PIN，
+# 此时 curl -k 跳过证书链，并由 --pinnedpubkey 核对 SPKI SHA-256。
 function Normalize-ServerPin($value) {
     $pin = ([string]$value).Trim()
     if ($pin -match '^sha256//[A-Za-z0-9+/]{43}=$') { return $pin }
     if ($pin -match '^[A-Za-z0-9+/]{43}=$') { return "sha256//$pin" }
     throw "ZT_SERVER_PIN 格式无效：应为 44 位 base64 SPKI SHA-256，或 sha256//<base64>"
 }
-$ServerPin = Normalize-ServerPin $(if ($env:ZT_SERVER_PIN) { $env:ZT_SERVER_PIN } else { $DefaultServerPin })
+$ServerPin = if ($env:ZT_SERVER_PIN) { Normalize-ServerPin $env:ZT_SERVER_PIN } else { $null }
 
 function Get-SavedToken {
     if ($env:ZT_ADMIN_TOKEN) { return $env:ZT_ADMIN_TOKEN }
@@ -78,7 +76,6 @@ function Request-Token {
     return $t
 }
 
-# 自签名证书用 -k 跳过系统证书链/主机名校验，但必须由 --pinnedpubkey 验明服务端身份。
 # 仅 /admin/* 请求携带管理员令牌；公开查询绝不发送令牌。
 # 请求体走临时文件,避免 PowerShell 5.1 按 GBK 传中文参数导致乱码。
 function Call($method, $path, $bodyObj) {
@@ -87,10 +84,8 @@ function Call($method, $path, $bodyObj) {
         Write-Host "缺少管理员令牌，已拒绝管理请求" -ForegroundColor Red
         return $null
     }
-    $curlArgs = @(
-        "-k", "--pinnedpubkey", $ServerPin,
-        "-sS", "-X", $method
-    )
+    $curlArgs = @("-sS", "-X", $method)
+    if ($ServerPin) { $curlArgs += @("-k", "--pinnedpubkey", $ServerPin) }
     # 图形管理器可设置有限等待时间，避免服务器离线时窗口长期等待；
     # 命令行模式不设置这两个变量，因此保持原有行为。
     if ($script:AdminCurlConnectTimeoutSeconds) {
@@ -1175,19 +1170,79 @@ function Get-OssVerificationNetworkArgs {
     return @('--noproxy', '*', '--connect-timeout', '10')
 }
 
+function Format-NativeArgument([string]$Value) {
+    if ([string]::IsNullOrEmpty($Value)) { return '""' }
+    if ($Value -notmatch '[\s"]') { return $Value }
+    $escaped = $Value -replace '(\\*)"', '$1$1\"' -replace '(\\+)$', '$1$1'
+    return '"' + $escaped + '"'
+}
+
+# curl 写到 stderr 的内容不能进入函数输出。否则 if (-not (Test-PublicOssApk))
+# 会收到字符串数组；PowerShell 把多元素数组当成真，发布就会在校验失败后继续。
+# 用进程重定向吃掉 stderr，函数只返回退出码。-q 放在最前，避免用户的 curlrc 自己重试并刷屏。
+function Start-PublicOssCurlProcess([string[]]$ArgumentList) {
+    $curlPath = $CurlExecutable
+    if (-not [IO.Path]::IsPathRooted($curlPath)) {
+        $found = Get-Command -Name $curlPath -CommandType Application -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+        if ($found) { $curlPath = $found.Source }
+    }
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $curlPath
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.CreateNoWindow = $true
+    if ($PSVersionTable.PSVersion.Major -ge 6) {
+        foreach ($arg in $ArgumentList) { [void]$psi.ArgumentList.Add([string]$arg) }
+    } else {
+        $quoted = @(foreach ($arg in $ArgumentList) { Format-NativeArgument ([string]$arg) })
+        $psi.Arguments = $quoted -join ' '
+    }
+    $proc = [System.Diagnostics.Process]::Start($psi)
+    if (-not $proc) { throw "无法启动 curl" }
+    try {
+        $stdoutTask = $proc.StandardOutput.ReadToEndAsync()
+        $stderrTask = $proc.StandardError.ReadToEndAsync()
+        $proc.WaitForExit()
+        $null = $stdoutTask.Result
+        $null = $stderrTask.Result
+        return [int]$proc.ExitCode
+    } finally {
+        $proc.Dispose()
+    }
+}
+
+function Invoke-PublicOssCurl([string[]]$ArgumentList) {
+    $networkArgs = @(Get-OssVerificationNetworkArgs)
+    $allArgs = @('-q') + @($networkArgs) + @($ArgumentList)
+    # 6/7/16/18/28/35/52/55/56 是解析、连接、传输中断。52（空响应）对 apk.ztransfer.top 会偶发误报。
+    # 22 是 HTTP 错误，对象不对或不可读，不重试。
+    $transient = @(6, 7, 16, 18, 28, 35, 52, 55, 56)
+    $maxAttempts = 4
+    $noted = $false
+    $curlExit = 1
+    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+        $curlExit = [int](Start-PublicOssCurlProcess -ArgumentList $allArgs)
+        if ($curlExit -eq 0) { return 0 }
+        if ($transient -notcontains $curlExit -or $attempt -ge $maxAttempts) { return $curlExit }
+        if (-not $noted) {
+            Write-Host "公网校验没有收到响应，正在重试..." -ForegroundColor DarkGray
+            $noted = $true
+        }
+        Start-Sleep -Seconds 1
+    }
+    return [int]$curlExit
+}
+
 function Test-PublicOssApkFull($url, $expectedMeta) {
     $tmp = Join-Path ([IO.Path]::GetTempPath()) ("ztransfer-oss-verify-{0}.apk" -f [guid]::NewGuid().ToString("N"))
     try {
         Write-Host "正在从公网完整下载一次并校验大小、SHA-256、包名和版本..." -ForegroundColor DarkGray
-        $previousErrorAction = $ErrorActionPreference
-        try {
-            $ErrorActionPreference = "Continue"
-            $networkArgs = @(Get-OssVerificationNetworkArgs)
-            & $CurlExecutable @networkArgs -f --progress-bar -S -L --max-time 300 -H "Cache-Control: no-cache" -o $tmp -- $url
-            $curlExit = $LASTEXITCODE
-        } finally {
-            $ErrorActionPreference = $previousErrorAction
-        }
+        $curlExit = Invoke-PublicOssCurl -ArgumentList @(
+            '-f', '-sS', '-L', '--max-time', '300',
+            '-H', 'Cache-Control: no-cache', '-o', $tmp, '--', $url
+        )
         if ($curlExit -ne 0 -or -not (Test-Path -LiteralPath $tmp)) {
             Write-Host "OSS 公网地址不能下载；未发布。" -ForegroundColor Red
             return $false
@@ -1217,16 +1272,10 @@ function Test-PublicOssApk($url, $expectedMeta) {
         ("ztransfer-oss-headers-{0}.txt" -f [guid]::NewGuid().ToString("N"))
     try {
         Write-Host "正在校验公网对象大小、MD5、SHA-256 元数据和响应头..." -ForegroundColor DarkGray
-        $previousErrorAction = $ErrorActionPreference
-        try {
-            $ErrorActionPreference = "Continue"
-            $networkArgs = @(Get-OssVerificationNetworkArgs)
-            & $CurlExecutable @networkArgs -f -sS -L --head --max-time 60 `
-                -H "Cache-Control: no-cache" -o $tmp -- $url
-            $curlExit = $LASTEXITCODE
-        } finally {
-            $ErrorActionPreference = $previousErrorAction
-        }
+        $curlExit = Invoke-PublicOssCurl -ArgumentList @(
+            '-f', '-sS', '-L', '--head', '--max-time', '60',
+            '-H', 'Cache-Control: no-cache', '-o', $tmp, '--', $url
+        )
         if ($curlExit -ne 0 -or -not (Test-Path -LiteralPath $tmp -PathType Leaf)) {
             Write-Host "OSS 公网地址不可访问；未发布。" -ForegroundColor Red
             return $false

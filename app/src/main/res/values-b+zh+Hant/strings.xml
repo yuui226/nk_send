@@ -533,7 +533,7 @@
     <string name="check_update">更新</string>
     <string name="checking_update">檢查中…</string>
     <string name="update_latest">已是最新版本</string>
-    <string name="update_check_failed">檢查失敗，請檢查網路</string>
+    <string name="update_check_failed">檢查更新失敗\n已複製下載地址\n請到瀏覽器下載</string>
     <string name="update_available_title">發現新版本</string>
     <string name="update_required_title">必須更新</string>
     <string name="update_version">版本 %1$s</string>

@@ -20,4 +20,19 @@ class AppUpdateValidationTest {
     fun acceptsWhenHarmonyCannotReadArchiveMetadata() {
         assertTrue(isDownloadedVersionAcceptable(actualVersion = null, expectedVersion = 20))
     }
+
+    @Test
+    fun fixedReleaseInstallsOnlyWhenNewerOrUnreadable() {
+        assertTrue(isFixedReleaseInstallable(actualVersion = null, installedVersion = 68))
+        assertTrue(isFixedReleaseInstallable(actualVersion = 69, installedVersion = 68))
+        assertFalse(isFixedReleaseInstallable(actualVersion = 68, installedVersion = 68))
+        assertFalse(isFixedReleaseInstallable(actualVersion = 67, installedVersion = 68))
+    }
+
+    @Test
+    fun fixedReleaseRejectsNonApkPayload() {
+        assertTrue(hasZipMagic(byteArrayOf(0x50, 0x4B, 0x03, 0x04, 0x00)))
+        assertFalse(hasZipMagic(byteArrayOf(0x3C, 0x68, 0x74, 0x6D)))
+        assertFalse(hasZipMagic(byteArrayOf(0x50, 0x4B)))
+    }
 }

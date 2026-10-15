@@ -66,6 +66,9 @@ fun AppUpdateHost(
     var inlineHint by remember(info.versionCode) { mutableStateOf<String?>(null) }
     val manualCopiedHint = stringResource(R.string.update_manual_copied)
     val disconnectCameraHint = stringResource(R.string.update_disconnect_camera_wifi)
+    LaunchedEffect(cameraUsesWifi) {
+        AppUpdateManager.setCameraApConnected(cameraUsesWifi)
+    }
 
     val unknownSourcesLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -138,8 +141,12 @@ fun AppUpdateHost(
 
     Dialog(
         onDismissRequest = {
-            if (!required && (state is AppUpdateManager.UiState.Available || state is AppUpdateManager.UiState.Failed)) {
-                AppUpdateManager.postpone(info)
+            if (required) return@Dialog
+            when (state) {
+                is AppUpdateManager.UiState.Downloading -> AppUpdateManager.cancelDownload(info)
+                is AppUpdateManager.UiState.Available,
+                is AppUpdateManager.UiState.Failed -> AppUpdateManager.postpone(info)
+                else -> Unit
             }
         },
         properties = DialogProperties(
@@ -173,11 +180,13 @@ fun AppUpdateHost(
                         color = colors.onBackground
                     )
                     Spacer(Modifier.height(14.dp))
-                    Text(
-                        stringResource(R.string.update_version, info.versionName),
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = colors.onBackground
-                    )
+                    if (info.versionName.isNotBlank()) {
+                        Text(
+                            stringResource(R.string.update_version, info.versionName),
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = colors.onBackground
+                        )
+                    }
                     if (info.sizeBytes > 0) {
                         Spacer(Modifier.height(2.dp))
                         Text(

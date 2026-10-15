@@ -24,20 +24,13 @@ import java.io.File
 import java.net.URLEncoder
 import java.net.URL
 import java.security.KeyFactory
-import java.security.MessageDigest
 import java.security.Signature
-import java.security.cert.CertificateException
-import java.security.cert.X509Certificate
 import java.security.spec.X509EncodedKeySpec
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
-import javax.net.ssl.HostnameVerifier
 import javax.net.ssl.HttpsURLConnection
-import javax.net.ssl.SSLContext
-import javax.net.ssl.SSLSocketFactory
-import javax.net.ssl.X509TrustManager
 
 /**
  * 授权管理:免费/付费状态、每日免费额度、激活与静默续签。
@@ -49,14 +42,12 @@ import javax.net.ssl.X509TrustManager
  */
 object LicenseManager {
 
-    // ==================== 部署产出的三个常量(见 server/部署指南.md)====================
-    // 服务器地址列表,按序尝试。将来换 IP/上域名:在新版本里更新此列表即可。
-    private val SERVERS = listOf("https://106.15.239.203:8443")
-    // setup-keys.js init 输出的"App 内置公钥"(ECDSA P-256 SPKI)
+    // ==================== 部署产出的常量(见 server/部署指南.md)====================
+    // 临时地址。ztransfer.top 备案通过后改回 https://api.ztransfer.top。
+    private val SERVERS = listOf("https://www.au9999.net")
+    // setup-keys.js init 输出的"App 内置公钥"(ECDSA P-256 SPKI)。这是通行证签名公钥，与 TLS 证书无关。
     private const val PUBLIC_KEY_B64 =
         "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEqiQGFyGSVfCF2d96gr9wEQcjhOzQ1Iyxbeml+4uEYLiWDSEmf0AstKOnvg2YNIKPg25bLaY+xg5hrvLPhBks3w=="
-    // setup-keys.js pin tls-cert.pem 输出的"App 内置证书指纹"(SPKI SHA-256)
-    private const val CERT_PIN_B64 = "9SNNH7dEGfIVJ0bMGIKxEYTjHUAMDy3+t/+dVZzJfzA="
     // =====================================================================================
 
     // 免费版限制(集中定义,调整数值只改这里)
@@ -953,7 +944,7 @@ object LicenseManager {
         readTimeoutMs: Int? = null,
     ): JSONObject? = request(path, null, connectTimeoutMs, readTimeoutMs)
 
-    /** [body] 非空走 POST(JSON),为空走 GET;证书 pin 与超时两者共用。 */
+    /** [body] 非空走 POST(JSON),为空走 GET。正式证书由系统证书库校验主机名。 */
     private fun request(
         path: String,
         body: JSONObject?,
@@ -963,9 +954,6 @@ object LicenseManager {
         for (base in SERVERS) {
             try {
                 val conn = URL(base + path).openConnection() as HttpsURLConnection
-                conn.sslSocketFactory = pinnedSocketFactory
-                // 证书本身已由 pin 唯一确认,无需再校验主机名(自签证书对裸 IP 签发)
-                conn.hostnameVerifier = HostnameVerifier { _, _ -> true }
                 conn.connectTimeout = connectTimeoutMs
                 // 兼容旧发布记录时可能仍需解析第三方地址；下载入口保留更完整的响应窗口。
                 conn.readTimeout = readTimeoutMs
@@ -986,24 +974,5 @@ object LicenseManager {
             }
         }
         return null
-    }
-
-    /** 只信任 pin 匹配的服务器证书(自签证书 + IP 直连场景的标准做法)。 */
-    private val pinnedSocketFactory: SSLSocketFactory by lazy {
-        val tm = object : X509TrustManager {
-            override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {
-                val spki = chain[0].publicKey.encoded
-                val pin = Base64.encodeToString(
-                    MessageDigest.getInstance("SHA-256").digest(spki), Base64.NO_WRAP
-                )
-                if (pin != CERT_PIN_B64) throw CertificateException("certificate pin mismatch")
-            }
-
-            override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) =
-                throw CertificateException("client certs not supported")
-
-            override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
-        }
-        SSLContext.getInstance("TLS").apply { init(null, arrayOf(tm), null) }.socketFactory
     }
 }
