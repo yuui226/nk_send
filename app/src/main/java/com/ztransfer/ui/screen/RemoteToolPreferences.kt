@@ -79,6 +79,7 @@ internal class RemoteToolPreferences(private val prefs: SharedPreferences) {
     val disp = enum("remote_disp_mode", MonitorDispMode.CAMERA)
     val fps = bool("remote_fps", true)
     val hd = bool("remote_hd")
+    val computerControl = bool("remote_computer_control")
     val histogram = enum("remote_histogram_mode", if (prefs.getBoolean("remote_histogram", false)) HistogramMode.LUMA else HistogramMode.OFF)
     val grid = enum("remote_grid", ViewfinderGrid.OFF)
     val exposure = enum("remote_exposure_assist", ExposureAssist.OFF)
@@ -101,6 +102,7 @@ internal class RemoteToolPreferences(private val prefs: SharedPreferences) {
     private fun disable(tool: RemoteTool) {
         when (tool) {
             RemoteTool.HD -> hd.value = false
+            RemoteTool.COMPUTER_CONTROL -> computerControl.value = false
             RemoteTool.FPS -> fps.value = false
             RemoteTool.AUDIO -> audio.value = false
             RemoteTool.HISTOGRAM -> histogram.value = HistogramMode.OFF

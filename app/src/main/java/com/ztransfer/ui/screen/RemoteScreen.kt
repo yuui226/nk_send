@@ -176,6 +176,7 @@ import com.ztransfer.protocol.rcRefreshParam
 import com.ztransfer.protocol.rcIsBinaryToggle
 import com.ztransfer.protocol.rcSetApplicationMode
 import com.ztransfer.protocol.rcSetControlMode
+import com.ztransfer.protocol.rcSetMonitorComputerControl
 import com.ztransfer.protocol.rcSetLvSize
 import com.ztransfer.protocol.rcSetValueVerified
 import com.ztransfer.protocol.rcStartMovieDetailed
@@ -215,6 +216,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import java.net.SocketTimeoutException
 import kotlin.math.hypot
@@ -629,8 +631,7 @@ private fun RemoteContent(
     var capturing by remember { mutableStateOf(false) }
     var modeText by remember { mutableStateOf<String?>(null) }
     var movieMode by remember { mutableStateOf(false) }
-    var computerControlBusy by remember { mutableStateOf(false) }
-    var computerControlEnabled by remember { mutableStateOf(false) }
+    val computerControl = remember { RemoteComputerControlState() }
     var focusModeText by remember { mutableStateOf<String?>(null) }
     var focusModeProp by remember { mutableStateOf<Int?>(null) }
     var focusModeManual by remember { mutableStateOf(false) }
@@ -699,8 +700,8 @@ private fun RemoteContent(
 
     LaunchedEffect(connected) {
         if (!connected) {
-            computerControlEnabled = false
-            computerControlBusy = false
+            computerControl.enabled = false
+            computerControl.busy = false
         }
     }
     // 开发者入口默认隐藏：1.5s 内连按 4 次 FPS 键才现身（FPS 连按 4 次开关状态
@@ -1223,9 +1224,11 @@ private fun RemoteContent(
 
     fun setComputerControl(enabled: Boolean) {
         val cam = cameraViewModel.getCamera() ?: return
-        if (computerControlBusy || !connected) return
-        computerControlBusy = true
-        services.scope.launch {
+        if (computerControl.busy || !connected || !initialLoaded) return
+        // Remember the user's choice, not temporary PC mode used by USB recording.
+        tools.computerControl.value = enabled
+        computerControl.busy = true
+        computerControl.changeJob = services.scope.launch {
             val oldLvJob = lvJob
             try {
                 // SetControlMode is not safe while the normal Live View command
@@ -1234,10 +1237,10 @@ private fun RemoteContent(
                 oldLvJob?.cancelAndJoin()
                 if (lvJob === oldLvJob) lvJob = null
                 runCatching { cam.labEndLiveView() }
-                val rc = cam.rcSetControlMode(enabled)
+                val rc = cam.rcSetMonitorComputerControl(enabled)
                 if (rc == Lab.OK) {
-                    cam.remoteDiagnosticControlModeSet = enabled
-                    computerControlEnabled = enabled
+                    computerControl.enabled = enabled && cameraViewModel.state.value.isConnectedToCamera &&
+                        cameraViewModel.getCamera() === cam
                     devLog("ComputerControl ${if (enabled) "enabled" else "disabled"}")
                 } else {
                     devLog("!! ComputerControl ${if (enabled) "enable" else "disable"} resp=0x%04X".format(rc and 0xFFFF))
@@ -1247,13 +1250,13 @@ private fun RemoteContent(
             } catch (e: Exception) {
                 devLog("!! ComputerControl ${if (enabled) "enable" else "disable"} failed=${e.javaClass.simpleName}: ${e.message}")
             } finally {
-                if (currentCoroutineContext().isActive &&
+                if (currentCoroutineContext().isActive && initialLoaded &&
                     cameraViewModel.state.value.isConnectedToCamera &&
                     cameraViewModel.getCamera() === cam
                 ) {
                     startSession(hdLiveView, preserveFrameUntilNext = true)
                 }
-                computerControlBusy = false
+                computerControl.busy = false
             }
         }
     }
@@ -1392,70 +1395,87 @@ private fun RemoteContent(
             return@LaunchedEffect
         }
         val sessionCamera = cameraViewModel.getCamera() ?: return@LaunchedEffect
-        computerControlEnabled = sessionCamera.remoteControlModeSet &&
-            sessionCamera.remoteDiagnosticControlModeSet
-        try {
-            // 新连接不继承上一条连接的拨杆状态。首次读取失败时按照片模式处理，优先
-            // 保证机身画面与快门不被错误锁进电脑控制模式。
-            movieMode = false
-            batteryParam = null
-            // USB 待机始终使用普通 PTP Live View，让机身拨杆保持可读；电脑远控只在
-            // 用户真正开始录像时临时进入，停止后立即退出。先清理遗留会话，避免
-            // 先读取一次旧状态、清理后又重复读取一次。
-            val hadStaleUsbMovieSession = shouldReturnUsbMovieSessionToStandby(
-                    sessionCamera.connectionType,
-                    sessionCamera.remoteControlModeSet
-                )
-            if (hadStaleUsbMovieSession) {
-                releaseUsbMovieSession(sessionCamera)
-                // 电脑控制中的 D1A6 可能仍是进入控制前的录像值；归还机身后立即重读，
-                // 再读取一次即可得到当前真实拨杆状态。
-            }
-            // 先确定照片/视频拨杆，再只读取对应的一组参数。旧流程先读照片组、随后切到
-            // 视频组，会表现为参数出现、清空、再加载一遍。
-            refreshMovieMode(refreshExposureOnChange = false)
-            val initialExposureProps =
-                if (movieMode) MOVIE_EXPOSURE_PROPS else EXPOSURE_PROPS
-            initialExposureProps.forEach { refreshParam(it) }
-            refreshAutoIso()
-            refreshMode()
-            refreshFocusMode()
-            // 进页先读一次，电量能与曝光参数一起在首帧前显示。
-            refreshBattery(forceDescribe = true)
-            initialLoaded = true
-            startSession(hdLiveView)
-            awaitCancellation()
-        } finally {
-            withContext(NonCancellable) {
-                // 先等调试切换完成记账，防止退页清理后才迟到地开启 PC 控制。
-                initialLoaded = false
-                if ((sessionCamera.connectionType == CameraConnectionType.USB ||
-                        sessionCamera.remoteDiagnosticControlModeSet) &&
-                    sessionCamera.remoteControlModeSet
+        RemoteComputerControlState.sessionMutex.withLock {
+            computerControl.enabled = false
+            try {
+                // 新连接不继承上一条连接的拨杆状态。首次读取失败时按照片模式处理，优先
+                // 保证机身画面与快门不被错误锁进电脑控制模式。
+                movieMode = false
+                batteryParam = null
+                // Clear an old USB recording session before reading the physical mode lever.
+                // Read that lever before restoring PC mode, then describe writable parameters.
+                val hadStaleUsbMovieSession = shouldReturnUsbMovieSessionToStandby(
+                        sessionCamera.connectionType,
+                        sessionCamera.remoteControlModeSet
+                    )
+                if (hadStaleUsbMovieSession) {
+                    releaseUsbMovieSession(sessionCamera)
+                    // 电脑控制中的 D1A6 可能仍是进入控制前的录像值；归还机身后立即重读，
+                    // 再读取一次即可得到当前真实拨杆状态。
+                }
+                // 先确定照片/视频拨杆，再只读取对应的一组参数。旧流程先读照片组、随后切到
+                // 视频组，会表现为参数出现、清空、再加载一遍。
+                refreshMovieMode(refreshExposureOnChange = false)
+                if (tools.computerControl.value &&
+                    cameraViewModel.getCamera() === sessionCamera &&
+                    cameraViewModel.state.value.isConnectedToCamera
                 ) {
-                    // USB 录像与手动调试（含 Wi-Fi）都必须成对归还机身控制。
-                    if (recording) {
+                    computerControl.busy = true
+                    try {
+                        val rc = sessionCamera.rcSetMonitorComputerControl(true)
+                        computerControl.enabled = rc == Lab.OK &&
+                            cameraViewModel.getCamera() === sessionCamera &&
+                            cameraViewModel.state.value.isConnectedToCamera
+                        devLog("ComputerControl restore resp=0x%04X".format(rc and 0xFFFF))
+                    } catch (cancelled: CancellationException) { throw cancelled }
+                    catch (error: Exception) {
+                        devLog("!! ComputerControl restore failed=${error.javaClass.simpleName}: ${error.message}")
+                    } finally { computerControl.busy = false }
+                }
+                val initialExposureProps =
+                    if (movieMode) MOVIE_EXPOSURE_PROPS else EXPOSURE_PROPS
+                initialExposureProps.forEach { refreshParam(it) }
+                refreshAutoIso()
+                refreshMode()
+                refreshFocusMode()
+                // 进页先读一次，电量能与曝光参数一起在首帧前显示。
+                refreshBattery(forceDescribe = true)
+                initialLoaded = true
+                startSession(hdLiveView)
+                awaitCancellation()
+            } finally {
+                withContext(NonCancellable) {
+                    // 先等调试切换完成记账，防止退页清理后才迟到地开启 PC 控制。
+                    initialLoaded = false
+                    computerControl.changeJob?.cancelAndJoin()
+                    computerControl.changeJob = null
+                    val releaseControl = (sessionCamera.connectionType == CameraConnectionType.USB ||
+                        sessionCamera.remoteDiagnosticControlModeSet) && sessionCamera.remoteControlModeSet
+                    if (releaseControl && recording) {
                         runCatching { sessionCamera.rcEndMovie() }
                         recording = false
                     }
                     val oldLvJob = lvJob
                     oldLvJob?.cancelAndJoin()
                     if (lvJob === oldLvJob) lvJob = null
-                    if (oldLvJob == null) runCatching { sessionCamera.labEndLiveView() }
-                    clearAppMode(sessionCamera, force = true)
-                    for (attempt in 0 until 3) {
-                        val rc = runCatching {
-                            sessionCamera.rcSetControlMode(false)
-                        }.getOrDefault(-1)
-                        devLog("control mode exit SetControlMode(0) resp=0x%04X".format(rc and 0xFFFF))
-                        if (rc == Lab.OK) break
-                        if (attempt < 2) delay(300L)
+                    if (releaseControl) {
+                        // USB recording and the PC button both release camera control on exit.
+                        if (oldLvJob == null) runCatching { sessionCamera.labEndLiveView() }
+                        clearAppMode(sessionCamera, force = true)
+                        for (attempt in 0 until 3) {
+                            val rc = runCatching {
+                                sessionCamera.rcSetControlMode(false)
+                            }.getOrDefault(-1)
+                            devLog("control mode exit SetControlMode(0) resp=0x%04X".format(rc and 0xFFFF))
+                            if (rc == Lab.OK) break
+                            if (attempt < 2) delay(300L)
+                        }
+                        if (sessionCamera.remoteControlModeSet) {
+                            devLog("!! control mode release unconfirmed; reconnect or restart camera if body remains locked")
+                        }
                     }
-                    if (sessionCamera.remoteControlModeSet) {
-                        devLog("!! control mode release unconfirmed; reconnect or restart camera if body remains locked")
-                    }
+                    devLog("diagnostic monitor session ended connected=$connected")
                 }
-                devLog("diagnostic monitor session ended connected=$connected")
             }
         }
     }
@@ -2773,7 +2793,7 @@ private fun RemoteContent(
                     startSession(false)
                 }
                 RemoteTool.LOCK -> onLockRotation(false)
-                RemoteTool.COMPUTER_CONTROL -> if (computerControlEnabled) setComputerControl(false)
+                RemoteTool.COMPUTER_CONTROL -> if (computerControl.enabled) setComputerControl(false)
                 RemoteTool.LUT -> { lutState.off(); lutState.dismissMenu() }
                 RemoteTool.GRID -> gridPanelOpen = false
                 RemoteTool.PICTURE_CONTROL -> pictureControl.panel = false
@@ -2810,13 +2830,13 @@ private fun RemoteContent(
                 RemoteTool.LEVEL -> showLevel
                 RemoteTool.WAVEFORM -> showWaveform
                 RemoteTool.LOCK -> tools.locked.value
-                RemoteTool.COMPUTER_CONTROL -> computerControlEnabled
+                RemoteTool.COMPUTER_CONTROL -> computerControl.enabled
                 else -> false
             }
             val disabled = (tool?.fixed == true && editingTools) ||
                 (tool == RemoteTool.ROTATE && tools.locked.value) ||
                 (tool == RemoteTool.COMPUTER_CONTROL &&
-                    (computerControlBusy || capturing || recording || recBusy))
+                    (!connected || !initialLoaded || computerControl.busy || capturing || recording || recBusy))
             val toolClick: () -> Unit = {
                 when (tool) {
                     RemoteTool.HD -> { hdLiveView = !hdLiveView; startSession(hdLiveView) }
@@ -2859,7 +2879,7 @@ private fun RemoteContent(
                         showHint(if (locked) rotationStoppedHint else rotationResumedHint)
                     }
                     RemoteTool.COMPUTER_CONTROL -> if (!disabled) {
-                        setComputerControl(!computerControlEnabled)
+                        setComputerControl(!computerControl.enabled)
                     }
                     RemoteTool.ROTATE -> if (!disabled) onCycleRotation()
                     RemoteTool.WHITE_BALANCE -> { lutState.dismissMenu(); gridPanelOpen = false; listProp = null; devPanel = false; if (cameraToolPanel == RemoteCameraTool.WHITE_BALANCE) cameraToolCloseRequested = true else { cameraToolCloseRequested = false; cameraToolPanel = RemoteCameraTool.WHITE_BALANCE } }
@@ -3467,7 +3487,7 @@ private fun RemoteContent(
         key(panelCamera, panelMovie) {
             RemotePictureControlPanel(panelCamera, localAnchor, rotation != 0, pictureControl.closeRequested,
                 canWrite = connected && initialLoaded && !capturing && !recording && !recBusy &&
-                    !cameraToolWriting && !afHeld && !tapFocusBusy && afJob?.isActive != true && !computerControlBusy &&
+                    !cameraToolWriting && !afHeld && !tapFocusBusy && afJob?.isActive != true && !computerControl.busy &&
                     lutResumed && !pictureControl.pickerActive,
                 movie = panelMovie, report = pictureControl.report,
                 folders = pictureControl.folders,

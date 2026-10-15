@@ -1542,6 +1542,13 @@ suspend fun NikonCamera.rcSetControlMode(enabled: Boolean): Int {
     return Lab.OK
 }
 
+/** Finish command accounting before monitor cancellation can run its matching release. */
+internal suspend fun NikonCamera.rcSetMonitorComputerControl(enabled: Boolean): Int = withContext(NonCancellable) {
+    rcSetControlMode(enabled).also { rc ->
+        if (rc == Lab.OK) remoteDiagnosticControlModeSet = enabled
+    }
+}
+
 /** 部分 Nikon 机型通过 0xD1F0 设/清应用模式；不支持该属性的机型改走 0x9435。 */
 suspend fun NikonCamera.rcSetApplicationMode(on: Boolean): Int =
     labSetProp(Lab.PROP_NK_APPLICATION_MODE, byteArrayOf(if (on) 1 else 0))
