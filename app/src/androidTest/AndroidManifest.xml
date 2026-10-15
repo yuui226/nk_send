@@ -33,4 +33,6 @@
         android:targetPackage="com.ztransfer.debug" />
     <instrumentation android:name="com.ztransfer.ui.screen.PresetCategoryInstrumentation"
         android:targetPackage="com.ztransfer.debug" />
+    <instrumentation android:name="com.ztransfer.presets.PictureControlFolderInstrumentation"
+        android:targetPackage="com.ztransfer.debug" />
 </manifest>
