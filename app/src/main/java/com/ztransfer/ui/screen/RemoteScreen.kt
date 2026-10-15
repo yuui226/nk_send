@@ -2183,6 +2183,7 @@ private fun RemoteContent(
                 tapFocusLog(
                     "tap commands path=${path.name} " +
                         "normalized=(%.3f,%.3f) ".format(tap.normalized.x, tap.normalized.y) +
+                        "whole=${tap.focusCoordinateWidth}x${tap.focusCoordinateHeight} " +
                         "trackingParams=(${tap.trackingX},${tap.trackingY}) " +
                         "moveParams=(${tap.focusX},${tap.focusY}) " +
                         "tracking=${result.trackingResponseCode?.let { "0x%04X".format(it and 0xFFFF) } ?: "none"} " +
@@ -4105,7 +4106,7 @@ private fun ViewfinderImage(
             val imageHeight = liveFrame.image.height
             val displayAspectRatio = imageWidth.toFloat() / imageHeight * desqueezeMultiplier
             // StartTracking 与 ChangeAfArea 都使用整幅 Live View 的命令坐标。
-            // +28/+30 是帧头中的 AF 框/显示网格，不能作为 ChangeAfArea 的坐标范围；
+            // +28/+30 是帧头中的预览图尺寸，不能作为 ChangeAfArea 的坐标范围；
             // 用它会把所有点击压缩到画面左上角（例如 Z30 的 640x424）。
             val trackingCoordinateWidth =
                 liveFrame.metadata?.trackingCoordinateWidth ?: imageWidth
