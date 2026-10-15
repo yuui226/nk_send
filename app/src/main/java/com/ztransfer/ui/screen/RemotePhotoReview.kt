@@ -51,6 +51,14 @@ internal class PhotoReviewOptions(
     val landscape: Boolean = false,
 )
 
+@Composable
+internal fun BoxScope.RemoteReviewCloseButton(landscape: Boolean, onClick: () -> Unit) {
+    // Portrait: 6dp header inset + (40dp row - 36dp button) / 2.
+    // Landscape: the monitor's control rail starts 8dp from top and ends 4dp from right.
+    GlassCloseButton(onClick, Modifier.align(Alignment.TopEnd)
+        .padding(top = 8.dp, end = if (landscape) 4.dp else 12.dp))
+}
+
 /** Full-screen backdrop; only content avoids system bars, mapped into the monitor's rotation. */
 @Composable
 internal fun RemoteReviewSurface(rotation: Int, content: @Composable BoxScope.() -> Unit) {
@@ -244,8 +252,7 @@ internal fun RemotePhotoReview(
                 )
             } else {
                 BackHandler { onClose() }
-                GlassBackButton(onClick = onClose, modifier = Modifier.align(Alignment.TopEnd)
-                    .statusBarsPadding().padding(top = 6.dp, end = 12.dp))
+                RemoteReviewCloseButton(landscape = rotation != 0, onClick = onClose)
                 if (loading) CircularProgressIndicator(Modifier.align(Alignment.Center).size(28.dp),
                     color = Color.White, strokeWidth = 2.dp)
                 else if (failed) TextButton(onClick = { retry++ }, modifier = Modifier.align(Alignment.Center)) {

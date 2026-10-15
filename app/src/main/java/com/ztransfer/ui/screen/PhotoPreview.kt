@@ -1482,8 +1482,7 @@ internal fun PhotoPreviewOverlay(
         }
 
         if (review != null) {
-            GlassBackButton(onClick = startClose, modifier = Modifier.align(Alignment.TopEnd)
-                .statusBarsPadding().padding(top = 6.dp, end = 12.dp))
+            RemoteReviewCloseButton(landscape = landscapeReview, onClick = startClose)
             val fhdFailed = currentHandle?.let { fhdUnavailable[it] == true } == true
             val moreFailed = pagerState.currentPage == previewItems.lastIndex && review.loadMoreFailed
             if (fhdFailed || !cameraState.isConnectedToCamera || moreFailed) {
