@@ -708,4 +708,8 @@
     <string name="filter_rating_help_description">Enable to load ratings in the selected range and filter photos by rating. Turn it off and on again to reload the latest ratings.</string>
     <string name="filter_rating_off">Off</string>
     <string name="filter_rating_on">On</string>
+    <string name="remote_review">Review</string>
+    <string name="remote_review_empty">No photos</string>
+    <string name="remote_review_retry">Load failed · Retry</string>
+    <string name="remote_review_disconnected">Camera disconnected</string>
 </resources>

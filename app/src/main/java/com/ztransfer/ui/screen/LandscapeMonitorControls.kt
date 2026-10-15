@@ -41,6 +41,7 @@ internal fun LandscapeMonitorControls(
     dispButton: @Composable () -> Unit,
     shutter: @Composable () -> Unit,
     localRecorder: @Composable () -> Unit,
+    reviewButton: @Composable () -> Unit = {},
     parameter: @Composable (Int, Modifier) -> Unit,
     tool: @Composable (RemoteTool, Int) -> Unit,
     modifier: Modifier = Modifier,
@@ -178,6 +179,10 @@ internal fun LandscapeMonitorControls(
             Box(Modifier.align(if (!layout.bottomControls && layout.columns == 2)
                 Alignment.TopCenter else Alignment.TopEnd)) { captureSlot() }
             Box(Modifier.align(Alignment.BottomStart).padding(start = 44.dp)) { localSlot() }
+            if (layout.photoReview) Box(Modifier.align(Alignment.BottomEnd)) {
+                MonitorDockLayer(panelProgress, dock = false,
+                    Modifier.blockMonitorPanelInput { dockOpen }) { reviewButton() }
+            }
         }
     }
     if (layout.bottomControls) {
@@ -186,7 +191,7 @@ internal fun LandscapeMonitorControls(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.weight(1f).fillMaxHeight()) { content() }
-                Box(Modifier.width(maxOf(116f, layout.shutterSize + 52f).dp)) { captureCluster() }
+                Box(Modifier.width(maxOf(if (layout.photoReview) 128f else 116f, layout.shutterSize + 52f).dp)) { captureCluster() }
             }
             Box(Modifier.fillMaxSize().padding(top = 40.dp)) { dockContent() }
             header()

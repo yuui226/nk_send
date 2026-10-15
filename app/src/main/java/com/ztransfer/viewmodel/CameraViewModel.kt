@@ -1183,9 +1183,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             }
             fileLoadJob?.cancel()
         } else if (wasActive) {
-            if (_state.value.isConnectedToCamera && !fhdActiveFlow.value) {
+            if (_state.value.isConnectedToCamera) {
                 log { "FILE_SCAN refresh after remote loaded=${_state.value.files.size}" }
                 // 监看期间完全不处理文件事件；退出后用连接级 knownHandles 一次性补差。
+                // FHD may already be open: loadFiles records pending and invalidates the stale
+                // snapshot without sending commands until that preview also releases the camera.
                 loadFiles(preserveExisting = true, detectNewHandles = true)
             }
         }
@@ -1226,9 +1228,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 }
                 loadFiles(preserveExisting = true, resumeSnapshot = snapshot)
             } else {
-                // 预览期间发生重连或暂停发生在 handles 取得之前：旧 handle 不可复用。
+                // 监看退页或重连可能使快照失效；重新枚举并补差，保留已显示的列表。
                 log { "FILE_SCAN resume after FHD with fresh handles" }
-                loadFiles()
+                loadFiles(preserveExisting = true, detectNewHandles = true)
             }
         }
     }
@@ -4326,6 +4328,65 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         return withContext(Dispatchers.Default) {
             // The displayed bitmap is borrowed from the preview cache; never recycle it here.
             com.ztransfer.crop.prepareCropPreview(image.asAndroidBitmap(), orientation, previewOrientation, rotation)
+        }
+    }
+
+    /** A private, unfiltered review snapshot. It never publishes into or clears the album. */
+    internal suspend fun openRemoteReviewCatalog(expectedCamera: NikonCamera): RemoteReviewCatalog {
+        fun checkCamera() {
+            if (camera !== expectedCamera || !_state.value.isConnectedToCamera) {
+                throw CancellationException("Review camera changed")
+            }
+        }
+        checkCamera()
+        val sta = _state.value.isStaConnection
+        val cached = (indexedCameraFiles.values + _state.value.files).associateBy { it.handle }
+        var storage = expectedCamera.getStorageIdsWithStatus(usePrefetched = false)
+        repeat(2) {
+            if (!storage.successful && storage.responseCode == PtpConstants.DEVICE_BUSY) {
+                delay(250)
+                checkCamera()
+                storage = expectedCamera.getStorageIdsWithStatus(usePrefetched = false)
+            }
+        }
+        if (!storage.successful) throw IOException("Review storage: ${storage.responseCode}")
+        val storageIds = usableStorageIds(storage.storageIds, sta)
+        val handles = storageIds.map { storageId ->
+            val query = objectHandleQueryStorageId(storageId, sta)
+            var result = expectedCamera.getObjectHandlesWithStatus(query, usePrefetched = false)
+            repeat(2) {
+                if (!result.successful && result.responseCode == PtpConstants.DEVICE_BUSY) {
+                    delay(250)
+                    checkCamera()
+                    result = expectedCamera.getObjectHandlesWithStatus(query, usePrefetched = false)
+                }
+            }
+            if (!result.successful) throw IOException("Review handles: ${result.responseCode}")
+            storageId to result.handles
+        }
+        checkCamera()
+        return RemoteReviewCatalog(newestFirstHandleOrders(handles).map { it.newestFirstHandles }) { handle ->
+            checkCamera()
+            cached[handle] ?: run {
+                var file: NikonCamera.FileInfo? = null
+                var succeeded = false
+                repeat(3) { attempt ->
+                    if (!succeeded) {
+                        if (attempt > 0) delay(250)
+                        checkCamera()
+                        succeeded = if (expectedCamera.staDirectObjectReadValidated) {
+                            expectedCamera.streamStaDirectFileInfo(listOf(handle), storageIds, batchSize = 1,
+                                onBatch = { batch, _, _ -> file = batch.firstOrNull() })
+                        } else {
+                            expectedCamera.streamFileInfo(listOf(handle), batchSize = 1,
+                                onBatch = { batch, _, _ -> file = batch.firstOrNull() })
+                        }
+                    }
+                }
+                checkCamera()
+                if (!succeeded) throw IOException("Review ObjectInfo: $handle")
+                file
+            }
         }
     }
 

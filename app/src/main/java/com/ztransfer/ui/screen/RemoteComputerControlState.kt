@@ -13,6 +13,7 @@ internal class RemoteComputerControlState {
     var enabled by mutableStateOf(false)
     var busy by mutableStateOf(false)
     var changeJob: Job? = null
+    var recordingJob: Job? = null
 
     companion object {
         // Serialize entry/reconnect with the previous monitor's non-cancellable camera release.

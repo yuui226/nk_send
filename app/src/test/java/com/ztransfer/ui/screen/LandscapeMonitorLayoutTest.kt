@@ -76,4 +76,19 @@ class LandscapeMonitorLayoutTest {
         }
     }
 
+    @Test fun photoReviewHasItsOwnFooterSpaceEvenOnNarrowRails() {
+        for (width in listOf(320f, 640f, 860f, 1000f)) {
+            for (height in listOf(240f, 360f, 500f, 800f)) {
+                for (aspect in listOf(1.5f, 2.35f, 3.56f)) {
+                    val layout = landscapeMonitorLayout(width, height, aspect, photoReview = true)
+                    assertTrue(layout.controls.width >= 128f)
+                    assertTrue(layout.footerHeight - layout.shutterSize >= 52f)
+                    assertTrue(layout.controls.bottom <= height)
+                    assertTrue(if (layout.bottomControls) layout.controls.y >= layout.image.bottom
+                        else layout.controls.x >= layout.image.right)
+                }
+            }
+        }
+    }
+
 }

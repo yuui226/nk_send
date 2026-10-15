@@ -2080,8 +2080,13 @@ class NikonCamera(private val context: Context) {
     // 远程录像兼容模式的成对记账放在连接对象上，而不是 Compose 页面里：
     // 横竖屏重建或离开后重进监看页时仍能正确停止录像并恢复相机状态；
     // 断线会创建新的 NikonCamera，自然不会把旧连接的记账带过去。
-    @Volatile internal var remoteMovieApplicationPropSet = false
-    @Volatile internal var remoteMovieApplicationOpSet = false
+    internal val remoteMovieApplicationState = RemoteMovieApplicationState()
+    internal var remoteMovieApplicationPropSet: Boolean
+        get() = remoteMovieApplicationState.propertySet
+        set(value) { remoteMovieApplicationState.propertySet = value }
+    internal var remoteMovieApplicationOpSet: Boolean
+        get() = remoteMovieApplicationState.operationSet
+        set(value) { remoteMovieApplicationState.operationSet = value }
     // USB 录像期间持有的尼康完整远控模式（0x90C2）。开录前设 1，停录回待机时
     // 成对清 0；放在连接对象上可跨横竖屏重建记账，断线换实例则自然清空。
     @Volatile internal var remoteControlModeSet = false
@@ -2690,12 +2695,12 @@ class NikonCamera(private val context: Context) {
     )
 
     /** All transports preserve status; an IO/response failure must not become an empty card. */
-    internal suspend fun getStorageIdsWithStatus(): StorageIdsResult = withCameraTransaction(
+    internal suspend fun getStorageIdsWithStatus(usePrefetched: Boolean = true): StorageIdsResult = withCameraTransaction(
         CameraRequestKind.BACKGROUND_THUMBNAIL,
         "GET_STORAGE_IDS",
     ) {
         withContext(Dispatchers.IO) {
-            prefetchedStorageIds?.let { storageIds ->
+            prefetchedStorageIds?.takeIf { usePrefetched }?.let { storageIds ->
                 prefetchedStorageIds = null
                 return@withContext StorageIdsResult(
                     storageIds = storageIds,
@@ -2704,6 +2709,7 @@ class NikonCamera(private val context: Context) {
                     payloadBytes = 4 + storageIds.size * 4,
                 )
             }
+            prefetchedStorageIds = null
             try {
                 sendCmd(PtpConstants.GET_STORAGE_IDS)
                 val (response, data) = recvRespWithPayload()
@@ -2748,12 +2754,13 @@ class NikonCamera(private val context: Context) {
 
     internal suspend fun getObjectHandlesWithStatus(
         storageId: Int = -1,
+        usePrefetched: Boolean = true,
     ): ObjectHandlesResult = withCameraTransaction(
         CameraRequestKind.BACKGROUND_THUMBNAIL,
         "GET_OBJECT_HANDLES",
     ) {
         withContext(Dispatchers.IO) {
-            prefetchedStaObjectHandles?.takeIf { it.queryStorageId == storageId }?.let { cached ->
+            prefetchedStaObjectHandles?.takeIf { usePrefetched && it.queryStorageId == storageId }?.let { cached ->
                 prefetchedStaObjectHandles = null
                 return@withContext ObjectHandlesResult(
                     handles = cached.handles,
@@ -2763,6 +2770,7 @@ class NikonCamera(private val context: Context) {
                     fromPrefetch = true,
                 )
             }
+            prefetchedStaObjectHandles = null
             try {
                 sendCmd(PtpConstants.GET_OBJECT_HANDLES, storageId, -1, 0)
                 val (respCode, data) = recvRespWithPayload()

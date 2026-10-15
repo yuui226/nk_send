@@ -3,6 +3,19 @@ package com.ztransfer.ui.screen
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 
+/** Keep tap-to-close separate from page drags and multi-touch, even if a page is replaced. */
+internal class PreviewReviewTapGuard {
+    private var start = Offset.Zero
+    var allowed = false
+        private set
+
+    fun begin(position: Offset) { start = position; allowed = true }
+
+    fun observe(positions: List<Offset>, touchSlop: Float) {
+        if (positions.size != 1 || (positions.single() - start).getDistance() > touchSlop) allowed = false
+    }
+}
+
 /** Keep the pixel under the gesture centroid stationary while applying incremental zoom. */
 internal fun previewPinchOffset(offset: Offset, centroidFromCenter: Offset, factor: Float, pan: Offset): Offset =
     offset * factor + centroidFromCenter * (1f - factor) + pan

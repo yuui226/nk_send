@@ -6,6 +6,25 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class PreviewGestureGeometryTest {
+    @Test fun reviewTapRejectsPageDragsEvenWhenTheyReturnToTheStartingPoint() {
+        val guard = PreviewReviewTapGuard()
+        guard.begin(Offset(100f, 100f))
+        guard.observe(listOf(Offset(140f, 100f)), 8f)
+        guard.observe(listOf(Offset(100f, 100f)), 8f)
+        org.junit.Assert.assertFalse(guard.allowed)
+        guard.begin(Offset(100f, 100f))
+        guard.observe(listOf(Offset(102f, 101f)), 8f)
+        org.junit.Assert.assertTrue(guard.allowed)
+    }
+
+    @Test fun reviewPinchCannotBecomeATapWhenOneFingerLifts() {
+        val guard = PreviewReviewTapGuard()
+        guard.begin(Offset(100f, 100f))
+        guard.observe(listOf(Offset(100f, 100f), Offset(110f, 100f)), 8f)
+        guard.observe(listOf(Offset(100f, 100f)), 8f)
+        org.junit.Assert.assertFalse(guard.allowed)
+    }
+
     @Test fun pinchKeepsTheSamePixelUnderTheFingersAtAnExistingZoom() {
         val offset = Offset(30f, -50f)
         val centroid = Offset(80f, 90f)

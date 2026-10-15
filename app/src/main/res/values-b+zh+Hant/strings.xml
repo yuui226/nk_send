@@ -701,4 +701,8 @@
     <string name="filter_rating_help_description">開啟會載入範圍內的評級資料，實現按評級篩選功能。重新開啟可重新載入最新評級資料。</string>
     <string name="filter_rating_off">關閉</string>
     <string name="filter_rating_on">開啟</string>
+    <string name="remote_review">回看</string>
+    <string name="remote_review_empty">暫無照片</string>
+    <string name="remote_review_retry">載入失敗 · 重試</string>
+    <string name="remote_review_disconnected">相機已中斷連線</string>
 </resources>

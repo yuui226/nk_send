@@ -395,8 +395,10 @@ fun RemoteScreen(
     var rotation by remember { mutableIntStateOf(if (tools.locked.value) tools.lockedRotation.value else 0) }
     val orientationLocked by tools.locked
     var editingTools by remember { mutableStateOf(false) }
-    // Keep the portrait editor stable while the user rearranges tools.
-    val orientationFrozen = orientationLocked || editingTools
+    val photoReview = remember { RemotePhotoReviewState() }
+    DisposableEffect(photoReview) { onDispose { photoReview.dispose() } }
+    // Freeze from the initial review load until close, including empty/error states.
+    val orientationFrozen = orientationLocked || editingTools || photoReview.active
     val currentOrientationLocked by rememberUpdatedState(orientationFrozen)
     var switchingRotation by remember { mutableStateOf(false) }
     val rotationFade = remember { Animatable(1f) }
@@ -415,14 +417,14 @@ fun RemoteScreen(
 
     LaunchedEffect(rotationRequests) {
         for (request in rotationRequests) {
-            if (currentOrientationLocked || request.rotation == rotation) continue
+            if (currentOrientationLocked || photoReview.active || request.rotation == rotation) continue
             switchingRotation = true
             try {
                 rotationFade.animateTo(
                     targetValue = 0f,
                     animationSpec = tween(REMOTE_ROTATION_FADE_OUT_MS),
                 )
-                if (!currentOrientationLocked) {
+                if (!currentOrientationLocked && !photoReview.active) {
                     rotation = request.rotation
                 }
                 // Let the new constraints/layout reach composition while the host is invisible.
@@ -440,7 +442,8 @@ fun RemoteScreen(
     DisposableEffect(context, lifecycleOwner, orientationSession, rotationRequests, orientationFrozen) {
         val listener = object : OrientationEventListener(context, SensorManager.SENSOR_DELAY_NORMAL) {
             override fun onOrientationChanged(orientation: Int) {
-                if (currentOrientationLocked) return
+                // Read the session directly too: a sensor callback can precede recomposition.
+                if (currentOrientationLocked || photoReview.active) return
                 val candidate = remoteRotationForDeviceOrientation(orientation)
                 if (candidate == orientationSession.candidateRotation) return
 
@@ -451,7 +454,8 @@ fun RemoteScreen(
                     orientationSession.manuallySuppressedRotation = null
                     orientationSession.pendingJob = screenScope.launch {
                         delay(REMOTE_ORIENTATION_STABLE_MS)
-                        if (orientationSession.candidateRotation == candidate) {
+                        if (!currentOrientationLocked && !photoReview.active &&
+                            orientationSession.candidateRotation == candidate) {
                             rotationRequests.trySend(
                                 RemoteRotationRequest(rotation = candidate)
                             )
@@ -463,7 +467,7 @@ fun RemoteScreen(
         val canDetectOrientation = listener.canDetectOrientation()
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_RESUME -> if (canDetectOrientation && !currentOrientationLocked) listener.enable()
+                Lifecycle.Event.ON_RESUME -> if (canDetectOrientation && !currentOrientationLocked && !photoReview.active) listener.enable()
                 Lifecycle.Event.ON_PAUSE -> {
                     listener.disable()
                     orientationSession.pause()
@@ -486,7 +490,7 @@ fun RemoteScreen(
     }
 
     fun cycleRotation() {
-        if (switchingRotation || currentOrientationLocked) return
+        if (switchingRotation || currentOrientationLocked || photoReview.active) return
         orientationSession.suppressCurrentDirection()
         rotationRequests.trySend(
             RemoteRotationRequest(rotation = (rotation + 1) % 3)
@@ -540,21 +544,24 @@ fun RemoteScreen(
                 else -> 0.dp to 0.dp
             }
             Box(hostModifier.background(backgroundBrush)) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .absolutePadding(
-                            left = contentInsets.first,
-                            right = contentInsets.second,
-                        )
-                ) {
                     RemoteContent(
                         cameraViewModel = cameraViewModel,
                         transferViewModel = transferViewModel,
                         onNavigateBack = { if (editingTools) editingTools = false else onNavigateBack() },
                         rotation = rotation,
+                        monitorPadding = PaddingValues.Absolute(left = contentInsets.first, right = contentInsets.second),
                         tools = tools,
                         editingTools = editingTools,
+                        photoReview = photoReview,
+                        reviewAllowed = !switchingRotation,
+                        onOpenReview = { camera ->
+                            // Do not open into the middle of the monitor's rotation fade.
+                            if (!switchingRotation && !photoReview.active) {
+                                orientationSession.pause()
+                                while (rotationRequests.tryReceive().isSuccess) { }
+                                photoReview.open(camera)
+                            }
+                        },
                         onEditingTools = { editing ->
                             orientationSession.pause()
                             while (rotationRequests.tryReceive().isSuccess) { }
@@ -571,7 +578,6 @@ fun RemoteScreen(
                         trialLeftSeconds = if (!isPro) ((trialLeftMs / 1000).coerceAtLeast(0)).toInt() else null,
                         isPro = isPro
                     )
-                }
             }
         }
     }
@@ -600,8 +606,12 @@ private fun RemoteContent(
     transferViewModel: TransferViewModel,
     onNavigateBack: () -> Unit,
     rotation: Int,
+    monitorPadding: PaddingValues,
     tools: RemoteToolPreferences,
     editingTools: Boolean,
+    photoReview: RemotePhotoReviewState,
+    reviewAllowed: Boolean,
+    onOpenReview: (NikonCamera) -> Unit,
     onEditingTools: (Boolean) -> Unit,
     onLockRotation: (Boolean) -> Unit,
     onCycleRotation: () -> Unit,
@@ -959,7 +969,6 @@ private fun RemoteContent(
     var lastStopCmdAt by remember { mutableLongStateOf(0L) }
     // Nikon Z 系远程开录前需要进入应用模式。USB 优先走已验证的 0x9435，
     // 明确不支持时回退 D1F0；成功的入口分别记账，停录回待机时成对恢复。
-    var appModeClearBusy by remember { mutableStateOf(false) }
     var movieUsbSessionDiagnostic by remember { mutableStateOf<String?>(null) }
     suspend fun ensureApplicationMode(cam: NikonCamera) {
         if (!cam.remoteMovieApplicationPropSet) {
@@ -977,36 +986,15 @@ private fun RemoteContent(
         targetCamera: NikonCamera? = cameraViewModel.getCamera(),
         force: Boolean = false
     ) {
-        if (appModeClearBusy) return
         val cam = targetCamera ?: return
         // USB 完整远控期间不能单独清 ApplicationMode；停录后的待机恢复会先结束 LV，
         // 再以 force=true 成对清理并退出 ControlMode，避免留下半套远控状态。
-        if (!force &&
-            cam.connectionType == CameraConnectionType.USB &&
-            cam.remoteControlModeSet
-        ) return
-        if (!cam.remoteMovieApplicationPropSet && !cam.remoteMovieApplicationOpSet) return
-        appModeClearBusy = true
-        try {
-            if (cam.remoteMovieApplicationOpSet) {
-                val rc = runCatching { cam.rcChangeApplicationMode(0) }.getOrDefault(-1)
-                if (rc == Lab.OK) {
-                    cam.remoteMovieApplicationOpSet = false
-                } else {
-                    devLog("!! ChangeApplicationMode(0) resp=0x%04X".format(rc and 0xFFFF))
-                }
-            }
-            if (cam.remoteMovieApplicationPropSet) {
-                val rc = runCatching { cam.rcSetApplicationMode(false) }.getOrDefault(-1)
-                if (rc == Lab.OK) {
-                    cam.remoteMovieApplicationPropSet = false
-                } else {
-                    devLog("!! ApplicationMode=0 resp=0x%04X".format(rc and 0xFFFF))
-                }
-            }
-        } finally {
-            appModeClearBusy = false
-        }
+        cam.remoteMovieApplicationState.clear(
+            allowed = { force || cam.connectionType != CameraConnectionType.USB || !cam.remoteControlModeSet },
+            clearOperation = { cam.rcChangeApplicationMode(0) },
+            clearProperty = { cam.rcSetApplicationMode(false) },
+            log = ::devLog,
+        )
     }
     // ---------- Live View 会话 ----------
     // 手动管理 + 新任务先 join 旧任务：保证"旧会话的 EndLiveView 一定先于新会话的
@@ -1060,9 +1048,11 @@ private fun RemoteContent(
                         true
                     } else {
                         // LV 分辨率须在 LV 关闭时设置
-                        runCatching { cam.rcSetLvSize(if (hd) 3 else 2) }
-                        runCatching { cam.labStartLiveView { devLog(it) } }
-                            .getOrDefault(false)
+                        photoReview.frames.withFrame {
+                            runCatching { cam.rcSetLvSize(if (hd) 3 else 2) }
+                            runCatching { cam.labStartLiveView { devLog(it) } }
+                                .getOrDefault(false)
+                        }
                     }
                     if (!started) { delay(3000); continue }
                     val warmupRemainingMs = liveViewWarmupRemainingMs(
@@ -1139,7 +1129,7 @@ private fun RemoteContent(
                     while (isActive) {
                         val pollStartedAtNanos = SystemClock.elapsedRealtimeNanos()
                         val grabbed = try {
-                            cam.labGrabFrame()
+                            photoReview.frames.withFrame { cam.labGrabFrame() }
                         } catch (e: CancellationException) {
                             throw e   // 会话被取消（退页/重启），不能当普通错误吞掉
                         } catch (e: Exception) {
@@ -1219,6 +1209,23 @@ private fun RemoteContent(
                 }
                 subjectTrackingActive = false
             }
+        }
+    }
+
+    fun closePhotoReview() {
+        val generation = photoReview.generation
+        services.scope.launch {
+            photoReview.close(generation) { reviewedCamera ->
+                if (connected && cameraViewModel.getCamera() === reviewedCamera) {
+                    lvJob?.cancel()
+                    startSession(hdLiveView, preserveFrameUntilNext = true)
+                }
+            }
+        }
+    }
+    LaunchedEffect(connected, movieMode, cameraViewModel.getCamera()) {
+        if (!connected || movieMode || (photoReview.active && photoReview.camera !== cameraViewModel.getCamera())) {
+            closePhotoReview()
         }
     }
 
@@ -1452,19 +1459,27 @@ private fun RemoteContent(
                         initialLoaded = false
                         computerControl.changeJob?.cancelAndJoin()
                         computerControl.changeJob = null
+                        // A stop/start command may still be applying or clearing application mode.
+                        // Join its final response accounting before deciding what exit must release.
+                        computerControl.recordingJob?.cancelAndJoin()
+                        computerControl.recordingJob = null
                         val releaseControl = (sessionCamera.connectionType == CameraConnectionType.USB ||
                             sessionCamera.remoteDiagnosticControlModeSet) && sessionCamera.remoteControlModeSet
-                        if (releaseControl && recording) {
+                        val releaseApplication = sessionCamera.remoteMovieApplicationOpSet ||
+                            sessionCamera.remoteMovieApplicationPropSet
+                        if ((releaseControl || releaseApplication) && recording) {
                             runCatching { sessionCamera.rcEndMovie() }
                             recording = false
                         }
                         val oldLvJob = lvJob
                         oldLvJob?.cancelAndJoin()
                         if (lvJob === oldLvJob) lvJob = null
+                        if (oldLvJob == null && (releaseControl || releaseApplication)) {
+                            runCatching { sessionCamera.labEndLiveView() }
+                        }
+                        clearAppMode(sessionCamera, force = true)
                         if (releaseControl) {
                             // USB recording and the PC button both release camera control on exit.
-                            if (oldLvJob == null) runCatching { sessionCamera.labEndLiveView() }
-                            clearAppMode(sessionCamera, force = true)
                             for (attempt in 0 until 3) {
                                 val rc = runCatching {
                                     sessionCamera.rcSetControlMode(false)
@@ -1491,7 +1506,7 @@ private fun RemoteContent(
         if (!connected || !initialLoaded) return@LaunchedEffect
         while (isActive) {
             delay(BATTERY_REFRESH_INTERVAL_MS)
-            while (isActive && (!liveViewStable || capturing || recording || recBusy)) {
+            while (isActive && (!liveViewStable || photoReview.active || capturing || recording || recBusy)) {
                 delay(1_000L)
             }
             refreshBattery()
@@ -1510,8 +1525,8 @@ private fun RemoteContent(
     // AUTO 开启时，照片和录像都从只读 D0B5 取得相机当前实际采用的 ISO。
     // D1AA 是录像侧的用户设定/基础 ISO，开启自动后不会随测光持续变化，不能用于读数。
     // 这里只轮询标量值，500ms 一次足够跟随测光变化，也不会重复拉取属性描述。
-    LaunchedEffect(connected, movieMode, autoIsoProp, autoIsoEnabled, liveViewStable) {
-        if (!connected || !liveViewStable || autoIsoEnabled != true) {
+    LaunchedEffect(connected, movieMode, autoIsoProp, autoIsoEnabled, liveViewStable, photoReview.active) {
+        if (!connected || !liveViewStable || photoReview.active || autoIsoEnabled != true) {
             return@LaunchedEffect
         }
         val cam = cameraViewModel.getCamera() ?: return@LaunchedEffect
@@ -1539,10 +1554,10 @@ private fun RemoteContent(
     // 对构图有意义。只在水平仪打开时轮询，关掉就一条命令都不发——本页所有相机 I/O
     // 共用相机事务调度器，多一个常驻轮询就是白占取帧通道。250ms 对水平指示足够跟手。
     // 机身不支持时停止轮询、不显示假角度，保留用户偏好供下次连接使用。
-    LaunchedEffect(showLevel, connected) {
+    LaunchedEffect(showLevel, connected, photoReview.active) {
         levelRoll = null
         levelPitch = null
-        if (!showLevel || !connected) return@LaunchedEffect
+        if (!showLevel || !connected || photoReview.active) return@LaunchedEffect
         while (isActive && !initialLoaded) delay(150)
         val cam = cameraViewModel.getCamera() ?: return@LaunchedEffect
         var param: RcParam? = null
@@ -1598,6 +1613,12 @@ private fun RemoteContent(
             if (!initialLoaded) { delay(150); continue }
             val cam = cameraViewModel.getCamera()
             if (cam == null) { delay(1500); continue }
+            if (photoReview.active) {
+                // Keep the link alive without consuming events or refreshing hidden controls.
+                delay(1_000)
+                if (photoReview.active) cam.keepalive()
+                continue
+            }
             if (!liveViewStable) {
                 // 正常停止后若退出电脑控制连续失败，在没有取帧任务争用时继续有界重试；
                 // 一旦成功便重建普通 LV，避免一次瞬时忙永久锁住机身拨杆。
@@ -1646,6 +1667,7 @@ private fun RemoteContent(
             for (e in events) {
                 eventFlow.emit(e)
                 when (e.first) {
+                    Lab.EVT_OBJECT_ADDED -> cameraViewModel.onCameraObjectAdded(e.second.toInt())
                     // 录像状态以相机事件为准（卡满/过热等相机自行停录也能收到）。
                     // 例外：本地刚（2s 内）发过停止命令时忽略"已开始"——那是上一次开始
                     // 的迟到回声（开始+停止落在同一轮询窗口内），别把 UI 翻回录制中。
@@ -2019,10 +2041,10 @@ private fun RemoteContent(
 
     // Read-only metering. No camera control-mode changes or per-frame protocol work.
     val meterEnabled = showMeter && tools.layout(movieMode).visible(RemoteTool.METER)
-    LaunchedEffect(meterEnabled, connected, initialLoaded, liveViewStable, lutResumed, movieMode) {
+    LaunchedEffect(meterEnabled, connected, initialLoaded, liveViewStable, lutResumed, movieMode, photoReview.active) {
         val generation = ++meterGeneration[0]
         meterSample = null
-        if (!meterEnabled || !connected || !initialLoaded || !liveViewStable || !lutResumed) return@LaunchedEffect
+        if (!meterEnabled || !connected || !initialLoaded || !liveViewStable || !lutResumed || photoReview.active) return@LaunchedEffect
         val cam = cameraViewModel.getCamera() ?: return@LaunchedEffect
         fun busy() = capturing || recBusy || autoIsoBusy ||
             afHeld || tapFocusBusy || afJob?.isActive == true || pendingSets.values.any { it.isActive }
@@ -2407,7 +2429,7 @@ private fun RemoteContent(
         if (recBusy || cameraToolWriting) return
         val expectedCamera = cameraViewModel.getCamera() ?: return
         recBusy = true
-        services.scope.launch {
+        computerControl.recordingJob = services.scope.launch {
             try {
                 waitForFocus?.join()
                 if (cameraViewModel.getCamera() !== expectedCamera) return@launch
@@ -2955,8 +2977,31 @@ private fun RemoteContent(
             }, button = { renderTool(it, 0) })
     }
 
+    // Local viewfinder recording requires continuous frames; finish it before reviewing photos.
+    val reviewVisible = !movieMode && viewfinderRecorder == null && !recFinalizing
+    val renderReview: @Composable (Modifier) -> Unit = { modifier ->
+            RemoteReviewButton(
+                enabled = reviewAllowed && connected && initialLoaded && liveViewStable && !capturing && !cameraToolWriting &&
+                    !afHeld && !tapFocusBusy && afJob?.isActive != true && !computerControl.busy && !photoReview.active,
+                onClick = {
+                    cameraViewModel.getCamera()?.let { camera ->
+                        services.haptics.tick()
+                        listProp = null
+                        cameraToolPanel = null
+                        gridPanelOpen = false
+                        pictureControl.panel = false
+                        lutState.dismissMenu()
+                        devPanel = false
+                        onOpenReview(camera)
+                    }
+                },
+                modifier = modifier,
+            )
+    }
+
     // ---------- 布局 ----------
-    Box(modifier = Modifier.fillMaxSize().background(rememberAppBackgroundBrush())
+    Box(Modifier.fillMaxSize()) {
+    Box(modifier = Modifier.fillMaxSize().padding(monitorPadding).background(rememberAppBackgroundBrush())
         .onGloballyPositioned { toolOverlayCoordinates = it }) {
         // The mode is resolved before initialLoaded is published. Keep the shell visible while
         // the first frame is requested so entering from the file list never shows a blank page;
@@ -3106,8 +3151,9 @@ private fun RemoteContent(
         )
         } else {
             BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-                val monitorLayout = landscapeMonitorLayout(maxWidth.value, maxHeight.value,
-                    viewfinderAspect * desqueezeMultiplier)
+                val monitorLayout = landscapeMonitorLayout(maxWidth.value,
+                    (maxHeight.value - if (reviewVisible && trialLeftSeconds != null) 28f else 0f).coerceAtLeast(0f),
+                    viewfinderAspect * desqueezeMultiplier, photoReview = reviewVisible)
                 val imageX = monitorLayout.image.x.dp
                 val imageY = monitorLayout.image.y.dp
                 val imageWidth = monitorLayout.image.width.dp
@@ -3183,17 +3229,17 @@ private fun RemoteContent(
                 val detailValues = rememberMonitorDetails(
                     cameraViewModel.getCamera(), movieMode,
                     enabled = connected && initialLoaded && cameraDisp,
-                    pollingAllowed = !recBusy && !capturing && !recording,
+                    pollingAllowed = !photoReview.active && !recBusy && !capturing && !recording,
                 )
                 val storageValues = rememberMonitorStorage(
                     cameraViewModel.getCamera(), camState.storageIds,
                     enabled = connected && initialLoaded && cameraDisp,
-                    pollingAllowed = !recBusy && !capturing && !recording,
+                    pollingAllowed = !photoReview.active && !recBusy && !capturing && !recording,
                 )
                 val movieFormat = rememberMonitorMovieFormat(
                     cameraViewModel.getCamera(),
                     enabled = connected && initialLoaded && cameraDisp && movieMode,
-                    pollingAllowed = lutResumed && !recBusy && !capturing && !recording,
+                    pollingAllowed = lutResumed && !photoReview.active && !recBusy && !capturing && !recording,
                 )
                 if (cameraDisp && connected) {
                     val cells = listOfNotNull(modeText?.let { "MODE" to it }) + listOfNotNull(
@@ -3242,6 +3288,7 @@ private fun RemoteContent(
                             diameter = landscapeShutterSize)
                     },
                     localRecorder = { renderTool(RemoteTool.RECORD, 0) },
+                    reviewButton = { renderReview(Modifier) },
                     parameter = { index, modifier ->
                         val prop = (if (movieMode) MOVIE_EXPOSURE_PROPS else EXPOSURE_PROPS)[index]
                         val isoProp = if (movieMode) Lab.PROP_NK_MOVIE_ISO else Lab.PROP_ISO
@@ -3261,6 +3308,11 @@ private fun RemoteContent(
                 )
             }
         }
+        }
+
+        if (reviewVisible && !landscapeLayout && !editingTools) {
+            renderReview(Modifier.align(Alignment.BottomStart).navigationBarsPadding()
+                .padding(start = 16.dp, bottom = 12.dp))
         }
 
         // 免费监看余量属于整页状态，不跟随 Dock 内容切换。竖屏避开系统
@@ -3567,6 +3619,11 @@ private fun RemoteContent(
             }
         }
     BackHandler(enabled = editingTools) { onEditingTools(false) }
+        }
+    // The review backdrop must also cover the monitor's cutout/navigation safe areas.
+    if (photoReview.active) {
+        RemotePhotoReview(photoReview, cameraViewModel, transferViewModel, rotation, ::closePhotoReview)
+    }
         }
     }
 
