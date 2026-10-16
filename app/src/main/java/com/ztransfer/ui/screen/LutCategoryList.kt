@@ -3,6 +3,7 @@ package com.ztransfer.ui.screen
 import android.net.Uri
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
@@ -105,10 +106,10 @@ internal fun LutChooserHeader(off: Boolean, folderLabel: String? = null, enabled
     Row(Modifier.fillMaxWidth().padding(bottom = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.weight(1f).clip(RoundedCornerShape(6.dp))
+        Box(Modifier.weight(1f).presetActionOutline(enabled)
             .clickable(enabled = enabled, role = Role.Button, onClick = onOff)
-            .heightIn(min = 30.dp).padding(horizontal = 6.dp, vertical = 5.dp),
-            contentAlignment = Alignment.CenterStart) {
+            .heightIn(min = 32.dp).padding(horizontal = 8.dp, vertical = 5.dp),
+            contentAlignment = Alignment.Center) {
             Text(offLabel ?: stringResource(R.string.lut_turn_off), maxLines = 1, overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.labelMedium,
                 color = if (off) colors.accentBlue else colors.onSurfaceVariant)
@@ -120,11 +121,21 @@ internal fun LutChooserHeader(off: Boolean, folderLabel: String? = null, enabled
 /** Same folder action in the LUT and camera preset choosers. */
 @Composable
 internal fun PresetFolderButton(label: String, enabled: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    Box(modifier.clip(RoundedCornerShape(6.dp))
+    Box(modifier.presetActionOutline(enabled)
         .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
-        .heightIn(min = 30.dp).padding(horizontal = 6.dp, vertical = 5.dp),
-        contentAlignment = Alignment.CenterEnd) {
+        .heightIn(min = 32.dp).padding(horizontal = 8.dp, vertical = 5.dp),
+        contentAlignment = Alignment.Center) {
         Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis,
             style = MaterialTheme.typography.labelMedium, color = AppTheme.colors.onSurfaceVariant)
     }
+}
+
+/** Shared lightweight outline for preset/LUT actions, without changing their hit areas. */
+@Composable
+internal fun Modifier.presetActionOutline(
+    enabled: Boolean = true,
+    color: Color = AppTheme.colors.onSurfaceVariant,
+): Modifier {
+    val shape = RoundedCornerShape(8.dp)
+    return clip(shape).border(0.75.dp, color.copy(alpha = if (enabled) .28f else .12f), shape)
 }

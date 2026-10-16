@@ -41,8 +41,8 @@ android {
         applicationId = "com.ztransfer"
         minSdk = 26
         targetSdk = 35
-        versionCode = 69
-        versionName = "1.96"
+        versionCode = 70
+        versionName = "1.97"
         // Keep the default explicit: AGP otherwise rewrites the first manifest entry when several
         // standalone instrumentation suites are registered.
         testInstrumentationRunner = "com.ztransfer.frame.FramePlaceLayoutInstrumentation"
@@ -147,10 +147,9 @@ val copyTimestampedDebugApk = tasks.register("copyTimestampedDebugApk") {
         val source = layout.buildDirectory.file("outputs/apk/debug/app-debug.apk").get().asFile
         check(source.isFile) { "Debug APK not found: ${source.absolutePath}" }
         val stamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))
-        val version = android.defaultConfig.versionName ?: "unknown"
         val destinationDirectory = rootProject.file("dist-debug").apply { mkdirs() }
         val destination = destinationDirectory.resolve(
-            "ZTransfer-debug-$version-$stamp.apk"
+            "ZD-$stamp.apk"
         )
         source.copyTo(destination, overwrite = false)
         println("Timestamped debug APK: ${destination.absolutePath}")

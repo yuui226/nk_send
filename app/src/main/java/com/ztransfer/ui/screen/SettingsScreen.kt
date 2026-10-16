@@ -57,7 +57,6 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -119,6 +118,8 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.toggleableState
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.TextRange
@@ -3644,6 +3645,7 @@ private fun BooleanSettingsWheel(
         onDetent = wheelHaptics::tick,
         label = label,
         accentColor = if (checked) colors.accentBlue else colors.statusWaiting,
+        labelTextColor = if (checked) null else colors.onBackground,
         emphasized = checked,
         wheelHeight = if (compact) {
             COMPACT_SETTINGS_WHEEL_HEIGHT
@@ -3677,6 +3679,7 @@ private fun StorageModeWheel(
         optionLabel = { labels.getValue(it) }, onValueCommitted = onModeChanged,
         onDetent = haptics::tick, label = stringResource(R.string.storage_mode),
         accentColor = if (mode == TransferStorageMode.UNIFIED) colors.statusWaiting else colors.accentBlue,
+        labelTextColor = if (mode == TransferStorageMode.UNIFIED) colors.onBackground else null,
         emphasized = mode != TransferStorageMode.UNIFIED,
         wheelHeight = BOOLEAN_SETTINGS_WHEEL_HEIGHT, optionRowHeight = 18.dp,
         optionFontSize = 14.sp, modifier = modifier, enabled = enabled,
@@ -3701,6 +3704,7 @@ private fun AutoTransferSettingsWheel(
         optionLabel = { labels.getValue(it) }, onValueCommitted = onModeChanged,
         onDetent = haptics::tick, label = stringResource(R.string.auto_transfer_new_media),
         accentColor = if (mode == AutoTransferMode.OFF) colors.statusWaiting else colors.accentBlue,
+        labelTextColor = if (mode == AutoTransferMode.OFF) colors.onBackground else null,
         emphasized = mode != AutoTransferMode.OFF, wheelHeight = BOOLEAN_SETTINGS_WHEEL_HEIGHT,
         optionRowHeight = 18.dp, optionFontSize = 14.sp, modifier = modifier, enabled = enabled)
 }
@@ -5413,7 +5417,7 @@ internal fun ProBadgeButton(
     }
 }
 
-/** Compact title-row switch; its hit area is wider than the drawn track. */
+/** Compact two-position wheel matching the other settings controls, without a corner badge. */
 @Composable
 private fun PhotoEffectsMasterSwitch(
     checked: Boolean,
@@ -5421,51 +5425,26 @@ private fun PhotoEffectsMasterSwitch(
 ) {
     val colors = AppTheme.colors
     val label = stringResource(R.string.photo_effects)
-    val position by animateFloatAsState(
-        targetValue = if (checked) 1f else 0f,
-        animationSpec = tween(180),
-        label = "photoEffectsSwitchPosition",
+    val offLabel = stringResource(R.string.setting_off_short)
+    val onLabel = stringResource(R.string.setting_on_short)
+    ReleaseCommitWheel(
+        options = BOOLEAN_SETTINGS_OPTIONS,
+        selected = checked,
+        optionLabel = { if (it) onLabel else offLabel },
+        onValueCommitted = onCheckedChange,
+        wheelHeight = 32.dp,
+        cornerRadius = 10.dp,
+        optionRowHeight = 18.dp,
+        optionFontSize = 14.sp,
+        showDragHint = false,
+        accentColor = if (checked) colors.accentOrange else colors.statusWaiting,
+        emphasized = checked,
+        modifier = Modifier.width(56.dp).semantics {
+            contentDescription = label
+            role = Role.Switch
+            toggleableState = if (checked) ToggleableState.On else ToggleableState.Off
+        },
     )
-    val trackColor by animateColorAsState(
-        targetValue = if (checked) colors.accentOrange else colors.onBackground.copy(alpha = 0.16f),
-        animationSpec = tween(180),
-        label = "photoEffectsSwitchTrack",
-    )
-    val thumbColor by animateColorAsState(
-        targetValue = if (checked) Color.White else colors.onSurfaceVariant,
-        animationSpec = tween(180),
-        label = "photoEffectsSwitchThumb",
-    )
-    Box(
-        modifier = Modifier
-            .size(width = 48.dp, height = 32.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .toggleable(
-                value = checked,
-                role = Role.Switch,
-                onValueChange = onCheckedChange,
-            )
-            .semantics { contentDescription = label },
-        contentAlignment = Alignment.Center,
-    ) {
-        androidx.compose.foundation.Canvas(Modifier.size(width = 36.dp, height = 20.dp)) {
-            drawRoundRect(
-                color = trackColor,
-                cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.height / 2f),
-            )
-            val progress = if (layoutDirection == androidx.compose.ui.unit.LayoutDirection.Rtl) {
-                1f - position
-            } else position
-            drawCircle(
-                color = thumbColor,
-                radius = 7.dp.toPx(),
-                center = androidx.compose.ui.geometry.Offset(
-                    x = size.height / 2f + (size.width - size.height) * progress,
-                    y = size.height / 2f,
-                ),
-            )
-        }
-    }
 }
 
 @Composable

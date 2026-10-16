@@ -11,7 +11,6 @@ import androidx.lifecycle.repeatOnLifecycle
 import com.ztransfer.R
 import com.ztransfer.presets.*
 import com.ztransfer.protocol.BuiltInPictureControl
-import com.ztransfer.protocol.builtInPictureControls
 import kotlinx.coroutines.awaitCancellation
 
 /** A choice has exactly one source; the destination slot belongs to the editing screen. */
@@ -29,11 +28,11 @@ internal sealed interface PictureControlPresetChoice {
 @Composable
 internal fun ColumnScope.PictureControlPresetChooser(
     folders: PictureControlFolderState, enabled: Boolean, browsingEnabled: Boolean,
+    presets: Result<List<BuiltInPictureControl>>,
     pending: String?, onNotice: (String) -> Unit,
     onChoose: (PictureControlPresetChoice) -> Unit,
 ) {
     val context = LocalContext.current
-    val presets = remember { runCatching { builtInPictureControls(context.assets) } }
     val uncategorized = stringResource(R.string.lut_uncategorized)
     val labels = remember(folders.files, uncategorized) { presetFileLabels(folders.files, uncategorized) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle

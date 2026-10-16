@@ -12,6 +12,8 @@ import androidx.compose.ui.layout.LayoutCoordinates
 import com.ztransfer.BuildConfig
 import com.ztransfer.R
 import com.ztransfer.presets.PictureControlFolderState
+import com.ztransfer.protocol.BuiltInPictureControl
+import com.ztransfer.protocol.builtInPictureControls
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -22,6 +24,9 @@ internal class PictureControlToolState(val folders: PictureControlFolderState) {
     var closeRequested by mutableStateOf(false)
     var anchor by mutableStateOf<LayoutCoordinates?>(null)
     var report by mutableStateOf("")
+    var loading by mutableStateOf(false)
+    var presets by mutableStateOf<Result<List<BuiltInPictureControl>>?>(null)
+        internal set
     var editingSlot by mutableStateOf<Int?>(null)
     var pickerActive by mutableStateOf(false)
         internal set
@@ -80,6 +85,9 @@ internal fun rememberPictureControlToolState(
         }
     }
     LaunchedEffect(state) {
+        state.presets = withContext(Dispatchers.IO) {
+            runCatching { builtInPictureControls(services.context.assets) }
+        }
         if (!BuildConfig.DEBUG) return@LaunchedEffect
         val initialReport = state.report
         val saved = withContext(Dispatchers.IO) {
@@ -103,6 +111,7 @@ internal fun PictureControlFolderReturnEffect(state: PictureControlToolState, re
             if (uri != null) state.folders.changeFolder(uri)
             if (visible) {
                 state.editingSlot = state.pickerTarget
+                state.loading = true
                 state.panel = true
                 state.closeRequested = false
             }

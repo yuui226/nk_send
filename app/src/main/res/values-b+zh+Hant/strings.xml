@@ -133,6 +133,8 @@
     <string name="cd_close">關閉</string>
     <string name="setting_off">關閉</string>
     <string name="setting_on">開啟</string>
+    <string name="setting_off_short">關</string>
+    <string name="setting_on_short">開</string>
     <string name="transfer_directory">傳輸目錄</string>
     <string name="dir_set">已設定</string>
     <string name="dir_not_set">未設定</string>

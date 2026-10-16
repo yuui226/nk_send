@@ -62,7 +62,11 @@ internal fun RemoteLutPanel(state: LutMonitorState, anchor: Rect?, landscape: Bo
 }
 
 @Composable
-internal fun RemotePresetChoice(text: String, selected: Boolean, pending: Boolean, enabled: Boolean, onClick: () -> Unit) {
+internal fun RemotePresetChoice(
+    text: String, selected: Boolean, pending: Boolean, enabled: Boolean,
+    showSelectionBackground: Boolean = true,
+    onClick: () -> Unit,
+) {
     val colors = AppTheme.colors
     val breathing = if (pending) {
         val transition = rememberInfiniteTransition(label = "lutPending")
@@ -74,6 +78,6 @@ internal fun RemotePresetChoice(text: String, selected: Boolean, pending: Boolea
         color = if (selected || pending) colors.accentBlue else colors.onBackground,
         maxLines = 2, overflow = TextOverflow.Ellipsis,
         modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).then(breathing)
-            .background(if (selected) colors.accentBlue.copy(alpha = .08f) else Color.Transparent)
+            .background(if (selected && showSelectionBackground) colors.accentBlue.copy(alpha = .08f) else Color.Transparent)
             .clickable(enabled = enabled, onClick = onClick).padding(horizontal = 12.dp, vertical = 8.dp))
 }

@@ -52,10 +52,10 @@ object LicenseManager {
 
     // 免费版限制(集中定义,调整数值只改这里)
     // 传输:每天完成 25 个(完成才计数,入队/跳过不计) + 单文件 ≤400MB;
-    // 监看:每天累计 3 分钟。
+    // 监看:每天累计 5 分钟。
     const val FREE_DAILY_TRANSFER_LIMIT = 25
     const val FREE_MAX_FILE_BYTES = 400L * 1024 * 1024
-    const val FREE_REMOTE_DAILY_MS = 3 * 60_000L
+    const val FREE_REMOTE_DAILY_MS = 5 * 60_000L
 
     // 软续签周期:有网时每天尝试换一张新通行证(顺带把服务器的"顶替/吊销"同步下来)。
     // 硬过期由服务器写进通行证的 exp(见 verifyToken);到期且续不上就降级。

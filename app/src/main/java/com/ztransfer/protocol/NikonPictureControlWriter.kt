@@ -74,7 +74,7 @@ internal class NikonPictureControlAccess(
     private val operations: Set<Int>,
     private val sessionCheck: () -> Boolean,
     private val transport: PictureControlTransport,
-    private val log: (String) -> Unit,
+    private val log: ((String) -> Unit)?,
 ) : PictureControlSlotAccess {
     init { require(slot in NIKON_PICTURE_CONTROL_SLOTS) { "Only C1–C9 are custom slots" } }
     private val mode get() = if (movie) 1 else 0
@@ -88,10 +88,10 @@ internal class NikonPictureControlAccess(
 
     private suspend fun command(code: Int, params: IntArray, data: ByteArray? = null): ByteArray? {
         checkSession()
-        if (data != null) log("out op=0x%04X params=%s bytes=%d data=%s".format(code,
+        if (data != null) log?.invoke("out op=0x%04X params=%s bytes=%d data=%s".format(code,
             params.joinToString(), data.size, data.joinToString("") { "%02x".format(it) }))
         val (rc, received) = transport.exchange(code, params, data)
-        log("in op=0x%04X params=%s rc=0x%04X bytes=%d data=%s".format(code, params.joinToString(), rc,
+        log?.invoke("in op=0x%04X params=%s rc=0x%04X bytes=%d data=%s".format(code, params.joinToString(), rc,
             received?.size ?: 0, received?.joinToString("") { "%02x".format(it) }.orEmpty()))
         check(rc == 0x2001) { "Picture Control op=0x%04X failed: 0x%04X".format(code, rc) }
         return received
@@ -232,14 +232,15 @@ internal suspend fun NikonCamera.changePictureControl(
 internal suspend fun NikonCamera.readPictureControlOverview(
     filesDir: File, movie: Boolean, isCurrentCamera: () -> Boolean,
 ): PictureControlOverview = withPictureControlAccess(filesDir, NIKON_PICTURE_CONTROL_SLOTS.first, movie,
-    isCurrentCamera, {}) { access, backup -> access.overview(backup) }
+    isCurrentCamera, null, atomic = false) { access, backup -> access.overview(backup) }
 
 private suspend fun <T> NikonCamera.withPictureControlAccess(
     filesDir: File,
     slot: Int,
     movie: Boolean,
     isCurrentCamera: () -> Boolean,
-    log: (String) -> Unit,
+    log: ((String) -> Unit)?,
+    atomic: Boolean = true,
     block: suspend (NikonPictureControlAccess, PictureControlBackupStore) -> T,
 ): T {
     val info = requireNotNull(cachedDeviceInfo) { "Camera information unavailable" }
@@ -248,26 +249,34 @@ private suspend fun <T> NikonCamera.withPictureControlAccess(
     check(identity.substringAfterLast('\u0000') != "unknown-device") { "A stable camera identity is required for slot backups" }
     val backup = PictureControlBackupStore(File(filesDir, "picture_control_backups"))
     val bankIdentity = "$identity\u0000picture-control-${if (movie) "movie" else "photo"}"
-    log("camera=${info.model} firmware=${info.deviceVersion} transport=$connectionType movie=$movie target=C${slot - 200}")
+    log?.invoke("camera=${info.model} firmware=${info.deviceVersion} transport=$connectionType movie=$movie target=C${slot - 200}")
+    suspend fun runAccess(): T = withContext(Dispatchers.IO) {
+        val access = NikonPictureControlAccess(bankIdentity, slot, movie, info.operations, isCurrentCamera,
+            PictureControlTransport { code, params, data ->
+                currentCoroutineContext().ensureActive()
+                suspend fun exchange() = withContext(NonCancellable) {
+                    val oldTimeout = setCommandReadTimeout(5_000)
+                    try {
+                        if (data == null) sendCmd(code, *params) else sendCmdWithData(code, data, *params)
+                        recvRespWithPayload()
+                    } catch (error: IOException) {
+                        abortProtocolTransport()
+                        throw error
+                    } finally { restoreCommandReadTimeout(oldTimeout) }
+                }
+                // Read-only enumeration yields the camera channel between complete PTP
+                // exchanges so monitor frames can proceed. Mutations remain fully atomic.
+                if (atomic) exchange() else withCameraTransaction(
+                    CameraRequestKind.INTERACTIVE, "PICTURE_CONTROL_READ",
+                ) { exchange() }
+            }, log)
+        block(access, backup)
+    }
     return focusMutex.withLock {
-        withCameraTransaction(CameraRequestKind.INTERACTIVE, "PICTURE_CONTROL_WRITE") {
-            withContext(Dispatchers.IO) {
-                val access = NikonPictureControlAccess(bankIdentity, slot, movie, info.operations, isCurrentCamera,
-                    PictureControlTransport { code, params, data ->
-                        currentCoroutineContext().ensureActive()
-                        withContext(NonCancellable) {
-                            val oldTimeout = setCommandReadTimeout(5_000)
-                            try {
-                                if (data == null) sendCmd(code, *params) else sendCmdWithData(code, data, *params)
-                                recvRespWithPayload()
-                            } catch (error: IOException) {
-                                abortProtocolTransport()
-                                throw error
-                            } finally { restoreCommandReadTimeout(oldTimeout) }
-                        }
-                    }, log)
-                block(access, backup)
-            }
+        if (atomic) withCameraTransaction(CameraRequestKind.INTERACTIVE, "PICTURE_CONTROL_WRITE") {
+            runAccess()
+        } else {
+            runAccess()
         }
     }
 }

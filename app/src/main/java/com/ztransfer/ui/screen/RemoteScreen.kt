@@ -2879,7 +2879,7 @@ private fun RemoteContent(
                         lutState.dismissMenu()
                         listProp = null; devPanel = false; cameraToolPanel = null; gridPanelOpen = false
                         if (pictureControl.panel) pictureControl.closeRequested = true
-                        else { pictureControl.editingSlot = null; pictureControl.closeRequested = false; pictureControl.panel = true }
+                        else { pictureControl.editingSlot = null; pictureControl.closeRequested = false; pictureControl.loading = true; pictureControl.panel = true }
                     }
                     RemoteTool.GRID -> {
                         lutState.dismissMenu()
@@ -2942,10 +2942,10 @@ private fun RemoteContent(
                 gridAnchor = it
             } else Modifier, enabled = !disabled) {
                 if (tool == null) Icon(if (editingTools) Icons.Default.Check else Icons.Default.Settings, null, Modifier.size(19.dp))
-                else if (cameraToolLoading && (
+                else if ((tool == RemoteTool.PICTURE_CONTROL && pictureControl.panel && pictureControl.loading) || (cameraToolLoading && (
                     (tool == RemoteTool.WHITE_BALANCE && cameraToolPanel == RemoteCameraTool.WHITE_BALANCE) ||
                     (tool == RemoteTool.FOCUS_AREA && cameraToolPanel == RemoteCameraTool.FOCUS_AREA) ||
-                    (tool == RemoteTool.FOCUS_MODE && cameraToolPanel == RemoteCameraTool.FOCUS_MODE))) {
+                    (tool == RemoteTool.FOCUS_MODE && cameraToolPanel == RemoteCameraTool.FOCUS_MODE)))) {
                     androidx.compose.material3.CircularProgressIndicator(
                         modifier=Modifier.size(18.dp),strokeWidth=1.5.dp,color=colors.accentBlue)
                 } else if (tool == RemoteTool.FOCUS_MODE) {
@@ -3549,6 +3549,7 @@ private fun RemoteContent(
                     lutResumed && !pictureControl.pickerActive,
                 movie = panelMovie, report = pictureControl.report,
                 folders = pictureControl.folders,
+                presets = pictureControl.presets, onLoadingChanged = { pictureControl.loading = it },
                 editingSlot = pictureControl.editingSlot,
                 onEditingSlot = { pictureControl.editingSlot = it },
                 onFolder = pictureControl.chooseFolder,

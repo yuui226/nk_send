@@ -2,6 +2,7 @@ package com.ztransfer.ui.screen
 
 import android.content.ClipData
 import android.content.Intent
+import androidx.activity.compose.BackHandler
 import androidx.core.content.FileProvider
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -54,6 +55,7 @@ internal fun RemotePictureControlPanel(
     camera: NikonCamera?, anchor: Rect?, landscape: Boolean, closeRequested: Boolean,
     canWrite: Boolean, movie: Boolean, report: String,
     folders: PictureControlFolderState,
+    presets: Result<List<BuiltInPictureControl>>?, onLoadingChanged: (Boolean) -> Unit,
     editingSlot: Int?, onEditingSlot: (Int?) -> Unit, onFolder: (Int) -> Unit,
     isCurrentCamera: () -> Boolean, onReport: (String) -> Unit,
     onDismiss: () -> Unit, onFeedback: () -> Unit, onNotice: (String) -> Unit,
@@ -73,6 +75,11 @@ internal fun RemotePictureControlPanel(
     val notice by rememberUpdatedState(onNotice)
     val allowed by rememberUpdatedState(canWrite)
     val busyChange by rememberUpdatedState(onWriteBusyChanged)
+    val dismiss by rememberUpdatedState(onDismiss)
+    val opening = overview == null || presets == null
+    LaunchedEffect(opening) { onLoadingChanged(opening) }
+    LaunchedEffect(closeRequested) { if (closeRequested && opening) dismiss() }
+    if (opening) BackHandler { dismiss() }
 
     suspend fun refresh(notifyFailure: Boolean = true) {
         if (camera == null || !currentCamera()) {
@@ -93,7 +100,10 @@ internal fun RemotePictureControlPanel(
         finally { loading = false }
         if (loadFailed && notifyFailure) notice(context.getString(R.string.picture_control_slots_read_failed))
     }
-    LaunchedEffect(camera, movie) { refresh() }
+    LaunchedEffect(camera, movie) {
+        refresh()
+        if (loadFailed) dismiss()
+    }
 
     val act: (SlotAction) -> Unit = action@ { action ->
         if (camera == null || !allowed || !currentCamera() || pending != null || loading || loadFailed) return@action
@@ -184,25 +194,28 @@ internal fun RemotePictureControlPanel(
     }
     val editor = overview?.slots?.singleOrNull { it.slot == editingSlot }
     val goBack: (() -> Unit)? = if (editingSlot != null) ({ back() }) else null
+    // Match camera-tool menus: start the popup animation with real content, never error placeholders.
+    val loadedOverview = overview ?: return
+    val loadedPresets = presets ?: return
     RemoteChoicePopup(anchor, landscape, 260.dp, closeRequested, onDismiss, onBack = goBack) { _, closing ->
         val idle = !closing && pending == null && !loading
         val enabled = idle && canWrite && !loadFailed
         // The popup shell contributes 4dp vertically, giving an even 8dp content inset.
         Column(Modifier.weight(1f, fill = false).fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
-            if (editingSlot != null) Row(Modifier.fillMaxWidth().heightIn(min = 32.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (editingSlot != null) Row(Modifier.fillMaxWidth().padding(bottom = 4.dp).heightIn(min = 32.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = { onFeedback(); back() }, enabled = idle,
-                    modifier = Modifier.size(32.dp)) {
+                    modifier = Modifier.size(32.dp).presetActionOutline(idle)) {
                     Icon(Icons.Default.ArrowBack, stringResource(R.string.picture_control_back),
                         tint = colors.onSurfaceVariant, modifier = Modifier.size(18.dp))
                 }
                 Text("C${editingSlot - 200}",
                     color = colors.onBackground, style = MaterialTheme.typography.labelLarge,
                     maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.alignByBaseline().padding(horizontal = 4.dp))
+                    modifier = Modifier.padding(horizontal = 6.dp))
                 if (!confirmClear && !confirmFolder && editor?.availability == PictureControlSlotAvailability.OCCUPIED) {
                     PictureControlClearButton(stringResource(R.string.picture_control_clear_slot),
                         enabled && overview?.canEdit == true,
-                        modifier = Modifier.alignByBaseline(), compact = true) {
+                        compact = true) {
                         onFeedback(); confirmClear = true
                     }
                 }
@@ -210,7 +223,7 @@ internal fun RemotePictureControlPanel(
                 if (!confirmClear && !confirmFolder) {
                     PresetFolderButton(
                         stringResource(R.string.picture_control_folder),
-                        idle, Modifier.alignByBaseline().widthIn(max = 112.dp),
+                        idle, Modifier.widthIn(max = 112.dp),
                     ) {
                         onFeedback()
                         if (folders.folder == null) confirmFolder = true else onFolder(editingSlot)
@@ -219,10 +232,9 @@ internal fun RemotePictureControlPanel(
             }
             when {
                 editingSlot == null -> {
-                    val slots = overview?.slots ?: NIKON_PICTURE_CONTROL_SLOTS.map {
-                        PictureControlSlotInfo(it, PictureControlSlotAvailability.UNREADABLE)
-                    }
-                    LazyColumn(Modifier.weight(1f, fill = false).fillMaxWidth()) {
+                    val slots = loadedOverview.slots
+                    LazyColumn(Modifier.weight(1f, fill = false).fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         items(slots, key = { it.slot }) { slot ->
                             PictureControlSlotRow(slot, overview?.selected == slot.slot,
                                 pending?.slot == slot.slot,
@@ -271,6 +283,7 @@ internal fun RemotePictureControlPanel(
                 }
                 else -> {
                     PictureControlPresetChooser(folders,
+                        presets = loadedPresets,
                         enabled = enabled && overview?.canEdit == true && editor?.readable == true,
                         browsingEnabled = idle, pending = (pending as? SlotAction.Write)?.choice?.key,
                         onNotice = onNotice,
@@ -285,11 +298,11 @@ internal fun RemotePictureControlPanel(
 private fun PictureControlClearButton(
     text: String, enabled: Boolean, modifier: Modifier = Modifier, compact: Boolean = false, onClick: () -> Unit,
 ) {
-    Box(modifier.clip(RoundedCornerShape(6.dp))
+    Box(modifier.presetActionOutline(enabled, AppTheme.colors.statusError)
         .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
-        .heightIn(min = 30.dp)
-        .padding(horizontal = if (compact) 6.dp else 12.dp, vertical = if (compact) 5.dp else 8.dp),
-        contentAlignment = Alignment.CenterStart) {
+        .heightIn(min = 32.dp)
+        .padding(horizontal = if (compact) 8.dp else 12.dp, vertical = if (compact) 5.dp else 8.dp),
+        contentAlignment = Alignment.Center) {
         Text(text,
             color = AppTheme.colors.statusError.copy(alpha = if (enabled) 1f else .35f),
             style = if (compact) MaterialTheme.typography.labelMedium else MaterialTheme.typography.labelLarge,
@@ -306,7 +319,7 @@ private fun PictureControlTestLogButton(report: String, enabled: Boolean, onFeed
     Text(stringResource(R.string.picture_control_test_log), maxLines = 1,
         color = if (canShare) colors.accentBlue else colors.onSurfaceVariant.copy(alpha = .35f),
         style = MaterialTheme.typography.labelLarge,
-        modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(enabled = canShare, role = Role.Button) {
+        modifier = Modifier.presetActionOutline(canShare).clickable(enabled = canShare, role = Role.Button) {
             onFeedback()
             scope.launch {
                 try {
@@ -344,13 +357,18 @@ private fun PictureControlSlotRow(
         Box(Modifier.weight(1f)) {
             RemotePresetChoice("C${info.number} · $label", selected, pending,
                 if (info.availability == PictureControlSlotAvailability.EMPTY) editable
-                else canActivate && info.availability == PictureControlSlotAvailability.OCCUPIED) {
+                else canActivate && info.availability == PictureControlSlotAvailability.OCCUPIED,
+                // The row owns selection; the label keeps its blue text without a second wash.
+                showSelectionBackground = false) {
                 if (info.availability == PictureControlSlotAvailability.EMPTY) onEdit() else onActivate()
             }
         }
-        IconButton(onClick = onEdit, enabled = editable, modifier = Modifier.size(36.dp)) {
+        val editColor = if (selected && editable) colors.accentBlue else colors.onSurfaceVariant
+        IconButton(onClick = onEdit, enabled = editable,
+            modifier = Modifier.size(36.dp).presetActionOutline(editable, editColor)
+                .background(colors.surface)) {
             Icon(Icons.Default.Edit, stringResource(R.string.picture_control_edit_slot, info.number),
-                tint = colors.onSurfaceVariant.copy(alpha = if (editable) 1f else .35f), modifier = Modifier.size(18.dp))
+                tint = editColor.copy(alpha = if (editable) 1f else .35f), modifier = Modifier.size(18.dp))
         }
     }
 }

@@ -34,6 +34,7 @@ internal fun RemoteChoicePopup(
     onDismiss: () -> Unit,
     besideAnchor: Boolean = false,
     onBack: (() -> Unit)? = null,
+    verticalContentPadding: Dp = 4.dp,
     content: @Composable ColumnScope.(close: () -> Unit, closing: Boolean) -> Unit,
 ) {
     val progress=remember { Animatable(0f) }
@@ -80,7 +81,7 @@ internal fun RemoteChoicePopup(
                     {geometry.recorded},{geometry.recorded=it},allowAboveAnchor=true)
                 .clip(RoundedCornerShape(12.dp)).background(AppTheme.colors.surface)
                 .clickable(interactionSource=remember { MutableInteractionSource() },indication=null) { }
-                .padding(vertical=4.dp)) { content(close,closing) }
+                .padding(vertical=verticalContentPadding)) { content(close,closing) }
         },modifier=Modifier.fillMaxSize()) { measurables,constraints ->
             val panel=measurables.single().measure(constraints.copy(minWidth=0,minHeight=0))
             val inset=margin.roundToPx()
