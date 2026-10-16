@@ -2,6 +2,7 @@ package com.ztransfer.ui.screen
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -27,8 +28,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.dp
@@ -40,6 +43,7 @@ private class PopupAnimationState(
     var panelBounds: Rect? = null,
     var expansionStarted: Boolean = false,
     var closing: Boolean = false,
+    var interactive: Boolean = false,
     // The panel is static during an open/close transition. Recording it once avoids
     // re-rasterizing the whole settings tree on every animation frame.
     var layerRecorded: Boolean = false,
@@ -58,6 +62,8 @@ fun AnchorPopup(
     // 遮罩是否压暗背景：大面板（设置）保持压暗聚焦；小面板（筛选下拉）传 false——
     // 全屏变暗对几个胶囊的下拉太兴师动众，遮罩仍在（点外部收起、拦滚动穿透），只是透明。
     dim: Boolean = true,
+    // 大图上的编辑面板采用轻缩放，不扭曲照片与表单；默认弹窗仍沿用原动画。
+    gentleMotion: Boolean = false,
     overlayContent: @Composable BoxScope.() -> Unit = {},
     content: @Composable BoxScope.(close: () -> Unit) -> Unit
 ) {
@@ -74,10 +80,11 @@ fun AnchorPopup(
     val startClose: () -> Unit = {
         if (!animationState.closing) {
             animationState.closing = true
+            animationState.interactive = false
             animationScope.launch {
                 progress.animateTo(0f,
-                    tween((GENIE_COLLAPSE_DURATION_MS * progress.value).toInt().coerceAtLeast(1),
-                        easing = GenieCollapseEasing))
+                    tween(((if (gentleMotion) 220 else GENIE_COLLAPSE_DURATION_MS) * progress.value).toInt().coerceAtLeast(1),
+                        easing = if (gentleMotion) FastOutSlowInEasing else GenieCollapseEasing))
                 // 收起期间调用方状态仍可能更新，始终执行最新回调，避免捕获关闭开始前的旧闭包。
                 currentOnDismiss()
             }
@@ -115,7 +122,9 @@ fun AnchorPopup(
                             withFrameNanos { }
                             if (!animationState.closing) {
                                 progress.animateTo(1f,
-                                    tween(GENIE_EXPAND_DURATION_MS,easing = GenieExpandEasing))
+                                    tween(if (gentleMotion) 260 else GENIE_EXPAND_DURATION_MS,
+                                        easing = if (gentleMotion) FastOutSlowInEasing else GenieExpandEasing))
+                                if (!animationState.closing) animationState.interactive = true
                             }
                         }
                     }
@@ -124,7 +133,20 @@ fun AnchorPopup(
         ) {
             Surface(
                 modifier = Modifier
-                    .geniePopupLayer(
+                    .then(if (gentleMotion) Modifier.graphicsLayer {
+                        val p = progress.value
+                        val panel = animationState.panelBounds
+                        val anchor = anchorBounds
+                        transformOrigin = if (panel != null && anchor != null && panel.width > 0 && panel.height > 0) {
+                            TransformOrigin(
+                                ((anchor.center.x - panel.left) / panel.width).coerceIn(0f, 1f),
+                                ((anchor.center.y - panel.top) / panel.height).coerceIn(0f, 1f),
+                            )
+                        } else TransformOrigin.Center
+                        alpha = p
+                        scaleX = .94f + .06f * p
+                        scaleY = scaleX
+                    } else Modifier.geniePopupLayer(
                         layer = genieLayer,
                         progress = { progress.value },
                         anchor = { anchorBounds },
@@ -132,7 +154,7 @@ fun AnchorPopup(
                         layerRecorded = { animationState.layerRecorded },
                         setLayerRecorded = { animationState.layerRecorded = it },
                         allowAboveAnchor = true,
-                    )
+                    ))
                     // Preserve the original settings-content render boundary beneath the warp.
                     .graphicsLayer {
                         compositingStrategy = CompositingStrategy.Auto
@@ -140,6 +162,15 @@ fun AnchorPopup(
                         scaleX = 1f
                         scaleY = 1f
                     }
+                    .then(if (gentleMotion) Modifier.pointerInput(Unit) {
+                        // 开合期间先于子控件消费事件，防止重复触发或收起时误改参数。
+                        awaitPointerEventScope {
+                            while (true) {
+                                val event = awaitPointerEvent(PointerEventPass.Initial)
+                                if (!animationState.interactive) event.changes.forEach { it.consume() }
+                            }
+                        }
+                    } else Modifier)
                     .pointerInput(Unit) { detectTapGestures { } },
                 shape = shape,
                 color = colors.glassSurfaceHeavy,
