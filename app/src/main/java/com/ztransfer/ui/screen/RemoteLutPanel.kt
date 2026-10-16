@@ -26,7 +26,7 @@ import com.ztransfer.ui.theme.AppTheme
 internal fun RemoteLutPanel(state: LutMonitorState, anchor: Rect?, landscape: Boolean,
     onFolder: () -> Unit, onFeedback: () -> Unit) {
     val colors = AppTheme.colors
-    val folderLabel = stringResource(if (state.folder == null || state.folderFailure == LutFolderFailure.MISSING || state.folderFailure == LutFolderFailure.DENIED) R.string.lut_choose_folder else R.string.lut_change_folder)
+    val folderLabel = stringResource(R.string.lut_folder)
     val guidance = when {
         state.folder == null -> stringResource(R.string.lut_choose_hint)
         state.folderFailure != null -> stringResource(folderMessage(state.folderFailure!!))

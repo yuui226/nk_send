@@ -1,10 +1,9 @@
 <resources>
     <string name="remote_tool_picture_control">Picture Control</string>
     <string name="picture_control_loading">Loading…</string>
-    <string name="picture_control_restore_original">Restore original C%1$d</string>
     <string name="picture_control_write_failed">Operation failed</string>
     <string name="picture_control_failed_restored">Failed. Previous settings restored.</string>
-    <string name="picture_control_restore_needed">Failed. Restore original C%1$d.</string>
+    <string name="picture_control_check_slot">Operation failed. Check C%1$d.</string>
     <string name="picture_control_files_failed">Presets unavailable</string>
     <string name="picture_control_busy_hint">Camera busy</string>
     <string name="picture_control_test_log">Test log</string>
@@ -12,7 +11,9 @@
     <string name="picture_control_report_share_failed">Could not share log</string>
     <string name="picture_control_report_save_failed">Log not saved. Share it now.</string>
     <string name="picture_control_built_in">Built-in</string>
+    <string name="picture_control_folder">Preset folder</string>
     <string name="picture_control_folder_empty">No .np3 files found</string>
+    <string name="picture_control_choose_folder_hint">Choose a folder containing .np3 files; one level of subfolders is supported as categories.</string>
     <string name="picture_control_file_read_failed">Could not read file</string>
     <string name="picture_control_file_invalid">Invalid NP3 file</string>
     <string name="picture_control_file_unsupported">Unsupported preset</string>
@@ -26,9 +27,9 @@
     <string name="picture_control_slots_read_failed">Camera disconnected</string>
     <string name="picture_control_slot_applied">C%1$d activated</string>
     <string name="picture_control_slot_cleared">C%1$d cleared</string>
-    <string name="picture_control_slot_restored">C%1$d restored</string>
     <string name="picture_control_slot_busy">Working…</string>
-    <string name="picture_control_clear_slot">Clear C%1$d</string>
-    <string name="picture_control_clear_confirm">Clear C%1$d? If active, switch to Standard.</string>
+    <string name="picture_control_clear_slot">Clear</string>
+    <string name="picture_control_clear_confirm">Clear C%1$d?</string>
     <string name="picture_control_cancel">Cancel</string>
+    <string name="picture_control_confirm">OK</string>
 </resources>

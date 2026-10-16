@@ -1,13 +1,10 @@
 package com.ztransfer.ui.screen
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
@@ -15,7 +12,6 @@ import com.ztransfer.R
 import com.ztransfer.presets.*
 import com.ztransfer.protocol.BuiltInPictureControl
 import com.ztransfer.protocol.builtInPictureControls
-import com.ztransfer.ui.theme.AppTheme
 import kotlinx.coroutines.awaitCancellation
 
 /** A choice has exactly one source; the destination slot belongs to the editing screen. */
@@ -29,15 +25,14 @@ internal sealed interface PictureControlPresetChoice {
     }
 }
 
-/** Same folder header, categories and rows as monitor LUT; no camera operations here. */
+/** Same categories and rows as monitor LUT; folder actions belong to the popup header. */
 @Composable
 internal fun ColumnScope.PictureControlPresetChooser(
     folders: PictureControlFolderState, enabled: Boolean, browsingEnabled: Boolean,
-    pending: String?, onFolder: () -> Unit, onFeedback: () -> Unit,
+    pending: String?, onNotice: (String) -> Unit,
     onChoose: (PictureControlPresetChoice) -> Unit,
 ) {
     val context = LocalContext.current
-    val colors = AppTheme.colors
     val presets = remember { runCatching { builtInPictureControls(context.assets) } }
     val uncategorized = stringResource(R.string.lut_uncategorized)
     val labels = remember(folders.files, uncategorized) { presetFileLabels(folders.files, uncategorized) }
@@ -49,19 +44,14 @@ internal fun ColumnScope.PictureControlPresetChooser(
             awaitCancellation()
         }
     }
-    PresetFolderButton(
-        stringResource(if (folders.folder == null) R.string.lut_choose_folder else R.string.lut_change_folder),
-        browsingEnabled, Modifier.fillMaxWidth().padding(bottom = 6.dp),
-    ) { onFeedback(); onFolder() }
     val guidance = when {
+        folders.scanning -> null
         folders.failure != null -> presetFolderMessage(folders.failure!!)
-        folders.scanning && folders.files.isEmpty() -> R.string.lut_reading_folder
-        folders.folder != null && folders.files.isEmpty() -> R.string.picture_control_folder_empty
+        folders.hasSnapshot && folders.folder != null && folders.files.isEmpty() -> R.string.picture_control_folder_empty
         presets.isFailure -> R.string.picture_control_files_failed
         else -> null
     }
-    if (guidance != null) Text(stringResource(guidance), color = colors.onSurfaceVariant,
-        style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+    LaunchedEffect(guidance) { guidance?.let { onNotice(context.getString(it)) } }
     val accessible = folders.failure != PresetFolderFailure.MISSING && folders.failure != PresetFolderFailure.DENIED
     val builtInLabel = stringResource(R.string.picture_control_built_in)
     val categories = remember(presets, folders.files, accessible, builtInLabel, uncategorized) {

@@ -154,7 +154,7 @@ class PictureControlFolderInstrumentation : Instrumentation() {
                     CompositionLocalProvider(LocalContext provides context, LocalLifecycleOwner provides owner) {
                         Column(Modifier.height(320.dp)) {
                             if (visible.value) {
-                                PictureControlPresetChooser(folders, true, true, null, {}, {}, {})
+                                PictureControlPresetChooser(folders, true, true, null, {}, {})
                                 DisposableEffect(Unit) {
                                     composed = true
                                     onDispose { composed = false }

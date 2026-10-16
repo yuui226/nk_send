@@ -196,7 +196,7 @@ internal fun PhotoLutEditor(state: PhotoLutEditorState, hapticsEnabled: Boolean)
                 shadowElevation = 6.dp,
             ) {
                 Column(Modifier.padding(10.dp).heightIn(max = maxHeight)) {
-                    LutChooserHeader(current == null, stringResource(R.string.lut_change_folder),
+                    LutChooserHeader(current == null, stringResource(R.string.lut_folder),
                         onOff = { haptics.tick(); state.choose(null); showChooser = false },
                         onFolder = { showChooser = false; openFolder() })
                     LutCategoryList(ordered, current, modifier = Modifier.weight(1f, fill = false).fillMaxWidth()) { file ->

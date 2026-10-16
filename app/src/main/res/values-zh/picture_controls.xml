@@ -1,10 +1,9 @@
 <resources>
     <string name="remote_tool_picture_control">优化校准</string>
     <string name="picture_control_loading">读取中…</string>
-    <string name="picture_control_restore_original">恢复 C%1$d 原内容</string>
     <string name="picture_control_write_failed">操作失败</string>
     <string name="picture_control_failed_restored">操作失败，已恢复</string>
-    <string name="picture_control_restore_needed">操作失败，请恢复 C%1$d</string>
+    <string name="picture_control_check_slot">操作失败，请检查 C%1$d</string>
     <string name="picture_control_files_failed">预设加载失败</string>
     <string name="picture_control_busy_hint">相机忙碌</string>
     <string name="picture_control_test_log">测试日志</string>
@@ -12,7 +11,9 @@
     <string name="picture_control_report_share_failed">日志分享失败</string>
     <string name="picture_control_report_save_failed">日志保存失败，请及时分享</string>
     <string name="picture_control_built_in">内置</string>
+    <string name="picture_control_folder">预设目录</string>
     <string name="picture_control_folder_empty">未找到 .np3 文件</string>
+    <string name="picture_control_choose_folder_hint">选择含 .np3 文件的文件夹，支持一层子文件夹作为分类。</string>
     <string name="picture_control_file_read_failed">文件读取失败</string>
     <string name="picture_control_file_invalid">NP3 文件无效</string>
     <string name="picture_control_file_unsupported">暂不支持此预设</string>
@@ -26,9 +27,9 @@
     <string name="picture_control_slots_read_failed">相机已断开</string>
     <string name="picture_control_slot_applied">已启用 C%1$d</string>
     <string name="picture_control_slot_cleared">已清除 C%1$d</string>
-    <string name="picture_control_slot_restored">已恢复 C%1$d</string>
     <string name="picture_control_slot_busy">处理中…</string>
-    <string name="picture_control_clear_slot">清除 C%1$d</string>
-    <string name="picture_control_clear_confirm">清除 C%1$d？当前启用时将切回「标准」。</string>
+    <string name="picture_control_clear_slot">清除</string>
+    <string name="picture_control_clear_confirm">清除 C%1$d？</string>
     <string name="picture_control_cancel">取消</string>
+    <string name="picture_control_confirm">确定</string>
 </resources>

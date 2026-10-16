@@ -638,8 +638,7 @@
 
     <string name="remote_tool_lut">LUT</string>
     <string name="lut_off">Off</string>
-    <string name="lut_choose_folder">Choose folder</string>
-    <string name="lut_change_folder">Change folder</string>
+    <string name="lut_folder">LUT folder</string>
     <string name="lut_choose_hint">Choose a folder containing .cube files; one level of subfolders is supported as categories.</string>
     <string name="lut_monitor_only">Monitor only; camera originals are unchanged</string>
     <string name="lut_folder_empty">No .cube files found</string>

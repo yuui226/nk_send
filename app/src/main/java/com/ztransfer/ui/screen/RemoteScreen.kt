@@ -3554,6 +3554,7 @@ private fun RemoteContent(
                 onFolder = pictureControl.chooseFolder,
                 isCurrentCamera = { connected && panelCamera != null && cameraViewModel.getCamera() === panelCamera && movieMode == panelMovie },
                 onReport = { pictureControl.report = it },
+                onNotice = { showHint(it) },
                 onDismiss = { pictureControl.panel = false; pictureControl.closeRequested = false; pictureControl.editingSlot = null },
                 onFeedback = { services.haptics.tick() },
                 onWriteBusyChanged = { busy ->

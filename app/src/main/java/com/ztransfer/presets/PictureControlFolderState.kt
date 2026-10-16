@@ -40,6 +40,8 @@ internal class PictureControlFolderState(
         private set
     var scanning by mutableStateOf(false)
         private set
+    var hasSnapshot by mutableStateOf(false)
+        private set
     private var generation = 0L
     private var ticket: PresetIoTicket? = null
     private var timeout: Job? = null
@@ -76,6 +78,7 @@ internal class PictureControlFolderState(
                 }
                 files = snapshot.files
                 failure = null
+                hasSnapshot = true
             }, onFailure = { error ->
                 val reason = (error as? PresetFolderException)?.reason ?: PresetFolderFailure.READ
                 if (replacing) notice(presetFolderMessage(reason)) else failure = reason
