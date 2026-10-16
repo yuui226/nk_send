@@ -136,6 +136,7 @@ class PictureControlFolderInstrumentation : Instrumentation() {
 
     /** Exercise the actual chooser's scan triggers, without connecting or writing to a camera. */
     private fun chooserRefreshes(context: Context, folders: PictureControlFolderState, root: File, bytes: ByteArray) {
+        val presets = runCatching { builtInPictureControls(context.assets) }
         val monitor = addMonitor(MainActivity::class.java.name, null, false)
         targetContext.startActivity(Intent(targetContext, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         val activity = checkNotNull(waitForMonitorWithTimeout(monitor, 10_000)) as MainActivity
@@ -154,7 +155,7 @@ class PictureControlFolderInstrumentation : Instrumentation() {
                     CompositionLocalProvider(LocalContext provides context, LocalLifecycleOwner provides owner) {
                         Column(Modifier.height(320.dp)) {
                             if (visible.value) {
-                                PictureControlPresetChooser(folders, true, true, null, {}, {})
+                                PictureControlPresetChooser(folders, true, true, presets, null, {}, {})
                                 DisposableEffect(Unit) {
                                     composed = true
                                     onDispose { composed = false }

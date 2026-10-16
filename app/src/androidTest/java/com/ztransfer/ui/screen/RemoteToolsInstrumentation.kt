@@ -95,12 +95,13 @@ class RemoteToolsInstrumentation : Instrumentation() {
         val movie = p.layout(true)
         check(RemoteTool.AUDIO !in photo.order && !photo.visible(RemoteTool.AUDIO))
         check(movie.visible(RemoteTool.AUDIO) && movie.order == RemoteTool.regular)
-        check(photo.lockStartsSecondRow && movie.lockStartsSecondRow)
-        photo.move(RemoteTool.LOCK, 0)
-        check(!photo.lockStartsSecondRow && movie.lockStartsSecondRow)
-        photo.setVisible(RemoteTool.LOCK, false)
-        photo.setVisible(RemoteTool.LOCK, true)
-        check(!photo.lockStartsSecondRow && photo.shownTools.last() == RemoteTool.LOCK)
+        val originalPhotoOrder = photo.order
+        RemoteTool.pinned.forEach { fixed ->
+            photo.move(fixed, 0)
+            photo.setVisible(fixed, false)
+            check(photo.visible(fixed) && movie.visible(fixed))
+        }
+        check(photo.order == originalPhotoOrder && p.locked.value)
         // Neither hiding nor reordering photo tools changes the movie layout.
         photo.setVisible(RemoteTool.HD, false)
         check(movie.visible(RemoteTool.HD))
@@ -114,17 +115,17 @@ class RemoteToolsInstrumentation : Instrumentation() {
         check(restored.layout(false).order == photo.order && restored.layout(true).order == movie.order)
         check(!restored.layout(false).visible(RemoteTool.HD) && restored.layout(true).visible(RemoteTool.HD))
         check(!restored.layout(true).visible(RemoteTool.AUDIO))
-        check(!restored.layout(false).lockStartsSecondRow && restored.layout(true).lockStartsSecondRow)
+        check(RemoteTool.pinned.all { restored.layout(false).visible(it) && restored.layout(true).visible(it) })
         // Entering a mode applies its hidden state without changing the other layout.
         p.hd.value = true
         photo.hiddenTools.forEach { photo.setVisible(it, false) }
         check(!p.hd.value && movie.visible(RemoteTool.HD))
         for (layout in listOf(photo, movie)) {
             val order = layout.order
-            layout.move(RemoteTool.ROTATE, 0); check(layout.order == order)
+            RemoteTool.pinned.forEach { layout.move(it, 0) }; check(layout.order == order)
             RemoteTool.entries.forEach { layout.setVisible(it, false) }
             check(layout.available.none(layout::visible))
-            check(layout.visible(RemoteTool.ROTATE))
+            check(RemoteTool.pinned.all(layout::visible))
             RemoteTool.entries.forEach { layout.setVisible(it, true) }
             check(layout.order == layout.available)
             layout.setVisible(RemoteTool.GRID, false)
@@ -138,11 +139,14 @@ class RemoteToolsInstrumentation : Instrumentation() {
             layout.move(RemoteTool.GRID, 0)
             check(layout.shownTools.first() == RemoteTool.GRID && layout.order.last() == RemoteTool.HD)
         }
-        check(!p.hd.value && !p.fps.value && !p.audio.value && p.histogram.value == HistogramMode.OFF && p.waveform.value == WaveformMode.OFF && !p.level.value && !p.locked.value)
+        check(!p.hd.value && !p.fps.value && !p.audio.value && p.histogram.value == HistogramMode.OFF && p.waveform.value == WaveformMode.OFF && !p.level.value && p.locked.value)
         check(p.grid.value == ViewfinderGrid.OFF && p.exposure.value == ExposureAssist.OFF && p.desqueeze.value == 1f)
-        check(disk.edit().putString("remote_tool_order_photo", "waveform,removed,waveform,rotate,audio,hd")
+        check(disk.edit().putString("remote_tool_order_photo", "waveform,lock,removed,waveform,rotate,audio,hd")
+            .putStringSet("remote_hidden_tools_photo", setOf("lock", "rotate"))
             .putString("remote_grid", "removed").putFloat("remote_desqueeze_multiplier", Float.NaN).commit())
         p = RemoteToolPreferences(disk)
+        check(RemoteTool.pinned.all(p.layout(false)::visible))
+        check(p.layout(false).hiddenTools.isEmpty())
         check(p.layout(false).order.take(2) == listOf(RemoteTool.WAVEFORM, RemoteTool.HD))
         check(p.layout(false).order.size == RemoteTool.regular.size - 1)
         check(p.layout(false).order.distinct().size == p.layout(false).order.size)

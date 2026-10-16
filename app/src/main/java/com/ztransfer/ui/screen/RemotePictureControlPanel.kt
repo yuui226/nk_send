@@ -11,23 +11,23 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import com.ztransfer.BuildConfig
 import com.ztransfer.R
@@ -197,24 +197,40 @@ internal fun RemotePictureControlPanel(
     // Match camera-tool menus: start the popup animation with real content, never error placeholders.
     val loadedOverview = overview ?: return
     val loadedPresets = presets ?: return
-    RemoteChoicePopup(anchor, landscape, 260.dp, closeRequested, onDismiss, onBack = goBack) { _, closing ->
+    val density = LocalDensity.current
+    val textMeasurer = rememberTextMeasurer()
+    val menuWidth = if (editingSlot == null) {
+        val labelWidth = loadedOverview.slots.maxOfOrNull { slot ->
+            with(density) {
+                textMeasurer.measure(pictureControlSlotLabel(slot), MaterialTheme.typography.labelLarge,
+                    softWrap = false, maxLines = 1).size.width.toDp()
+            }
+        } ?: 60.dp
+        // Label padding + compact edit target + trailing inset. The shell also caps to the screen.
+        (labelWidth + 24.dp + 32.dp + 3.dp).coerceAtMost(320.dp)
+    } else 260.dp
+    RemoteChoicePopup(anchor, landscape, menuWidth, closeRequested, onDismiss, onBack = goBack,
+        verticalContentPadding = if (editingSlot == null) 0.dp else 4.dp) { _, closing ->
         val idle = !closing && pending == null && !loading
         val enabled = idle && canWrite && !loadFailed
-        // The popup shell contributes 4dp vertically, giving an even 8dp content inset.
-        Column(Modifier.weight(1f, fill = false).fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
-            if (editingSlot != null) Row(Modifier.fillMaxWidth().padding(bottom = 4.dp).heightIn(min = 32.dp), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = { onFeedback(); back() }, enabled = idle,
-                    modifier = Modifier.size(32.dp).presetActionOutline(idle)) {
+        // Slot highlights meet the shell's clipped edges; only the editor keeps content insets.
+        Column(Modifier.weight(1f, fill = false).fillMaxWidth()
+            .padding(horizontal = if (editingSlot == null) 0.dp else 8.dp)
+            .padding(bottom = if (editingSlot == null) 0.dp else 4.dp)) {
+            if (editingSlot != null) Row(Modifier.fillMaxWidth().padding(bottom = 2.dp).heightIn(min = 32.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(32.dp).clickable(enabled = idle, role = Role.Button) { onFeedback(); back() },
+                    contentAlignment = Alignment.Center) {
                     Icon(Icons.Default.ArrowBack, stringResource(R.string.picture_control_back),
                         tint = colors.onSurfaceVariant, modifier = Modifier.size(18.dp))
                 }
                 Text("C${editingSlot - 200}",
-                    color = colors.onBackground, style = MaterialTheme.typography.labelLarge,
+                    color = colors.onBackground, style = MaterialTheme.typography.titleMedium,
                     maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(horizontal = 6.dp))
                 if (!confirmClear && !confirmFolder && editor?.availability == PictureControlSlotAvailability.OCCUPIED) {
                     PictureControlClearButton(stringResource(R.string.picture_control_clear_slot),
                         enabled && overview?.canEdit == true,
+                        modifier = Modifier.padding(start = 6.dp),
                         compact = true) {
                         onFeedback(); confirmClear = true
                     }
@@ -223,7 +239,7 @@ internal fun RemotePictureControlPanel(
                 if (!confirmClear && !confirmFolder) {
                     PresetFolderButton(
                         stringResource(R.string.picture_control_folder),
-                        idle, Modifier.widthIn(max = 112.dp),
+                        idle, Modifier.widthIn(max = 112.dp), compact = true,
                     ) {
                         onFeedback()
                         if (folders.folder == null) confirmFolder = true else onFolder(editingSlot)
@@ -233,8 +249,7 @@ internal fun RemotePictureControlPanel(
             when {
                 editingSlot == null -> {
                     val slots = loadedOverview.slots
-                    LazyColumn(Modifier.weight(1f, fill = false).fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    LazyColumn(Modifier.weight(1f, fill = false).fillMaxWidth()) {
                         items(slots, key = { it.slot }) { slot ->
                             PictureControlSlotRow(slot, overview?.selected == slot.slot,
                                 pending?.slot == slot.slot,
@@ -244,7 +259,7 @@ internal fun RemotePictureControlPanel(
                                 onEdit = { onFeedback(); onEditingSlot(slot.slot) })
                         }
                         if (BuildConfig.DEBUG) item(key = "test-log") {
-                            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+                            Box(Modifier.fillMaxWidth().padding(horizontal = 8.dp), contentAlignment = Alignment.CenterEnd) {
                                 PictureControlTestLogButton(report, pending == null && !closing, onFeedback, onNotice)
                             }
                         }
@@ -269,14 +284,16 @@ internal fun RemotePictureControlPanel(
                     Column(Modifier.weight(1f, fill = false).fillMaxWidth().verticalScroll(rememberScrollState())) {
                         Text(stringResource(R.string.picture_control_clear_confirm, editingSlot - 200),
                             color = colors.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.padding(12.dp))
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth().padding(12.dp))
                         PictureControlClearButton(stringResource(R.string.picture_control_confirm),
                             enabled && overview?.canEdit == true &&
                             editor?.availability == PictureControlSlotAvailability.OCCUPIED,
                             modifier = Modifier.fillMaxWidth()) {
                             act(SlotAction.Clear(editingSlot))
                         }
-                        RemotePresetChoice(stringResource(R.string.picture_control_cancel), false, false, idle) {
+                        RemotePresetChoice(stringResource(R.string.picture_control_cancel), false, false, idle,
+                            textAlign = TextAlign.Center) {
                             onFeedback(); confirmClear = false
                         }
                     }
@@ -300,8 +317,8 @@ private fun PictureControlClearButton(
 ) {
     Box(modifier.presetActionOutline(enabled, AppTheme.colors.statusError)
         .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
-        .heightIn(min = 32.dp)
-        .padding(horizontal = if (compact) 8.dp else 12.dp, vertical = if (compact) 5.dp else 8.dp),
+        .heightIn(min = if (compact) 28.dp else 32.dp)
+        .padding(horizontal = if (compact) 8.dp else 12.dp, vertical = if (compact) 3.dp else 8.dp),
         contentAlignment = Alignment.Center) {
         Text(text,
             color = AppTheme.colors.statusError.copy(alpha = if (enabled) 1f else .35f),
@@ -339,34 +356,40 @@ private fun PictureControlTestLogButton(report: String, enabled: Boolean, onFeed
 }
 
 @Composable
-private fun PictureControlSlotRow(
-    info: PictureControlSlotInfo, selected: Boolean, pending: Boolean,
-    canActivate: Boolean, canEdit: Boolean, onActivate: () -> Unit, onEdit: () -> Unit,
-) {
-    val colors = AppTheme.colors
-    val editable = canEdit && info.readable
+private fun pictureControlSlotLabel(info: PictureControlSlotInfo): String {
     val label = when (info.availability) {
         PictureControlSlotAvailability.OCCUPIED -> info.name.orEmpty()
         PictureControlSlotAvailability.EMPTY -> stringResource(R.string.picture_control_slot_empty)
         PictureControlSlotAvailability.UNREADABLE -> stringResource(R.string.picture_control_slot_unreadable)
         PictureControlSlotAvailability.UNSUPPORTED -> stringResource(R.string.picture_control_slot_unsupported)
     }
-    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
+    return "C${info.number} · $label"
+}
+
+@Composable
+private fun PictureControlSlotRow(
+    info: PictureControlSlotInfo, selected: Boolean, pending: Boolean,
+    canActivate: Boolean, canEdit: Boolean, onActivate: () -> Unit, onEdit: () -> Unit,
+) {
+    val colors = AppTheme.colors
+    val editable = canEdit && info.readable
+    Row(Modifier.fillMaxWidth()
         .background(if (selected) colors.accentBlue.copy(alpha = .08f) else androidx.compose.ui.graphics.Color.Transparent),
         verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.weight(1f)) {
-            RemotePresetChoice("C${info.number} · $label", selected, pending,
+            RemotePresetChoice(pictureControlSlotLabel(info), selected, pending,
                 if (info.availability == PictureControlSlotAvailability.EMPTY) editable
                 else canActivate && info.availability == PictureControlSlotAvailability.OCCUPIED,
                 // The row owns selection; the label keeps its blue text without a second wash.
-                showSelectionBackground = false) {
+                showSelectionBackground = false, verticalPadding = 4.dp) {
                 if (info.availability == PictureControlSlotAvailability.EMPTY) onEdit() else onActivate()
             }
         }
         val editColor = if (selected && editable) colors.accentBlue else colors.onSurfaceVariant
-        IconButton(onClick = onEdit, enabled = editable,
-            modifier = Modifier.size(36.dp).presetActionOutline(editable, editColor)
-                .background(colors.surface)) {
+        // 7dp inside the target + 3dp outside keeps the icon about 10dp from the edge.
+        Box(Modifier.padding(end = 3.dp).size(32.dp)
+            .clickable(enabled = editable, role = Role.Button, onClick = onEdit),
+            contentAlignment = Alignment.Center) {
             Icon(Icons.Default.Edit, stringResource(R.string.picture_control_edit_slot, info.number),
                 tint = editColor.copy(alpha = if (editable) 1f else .35f), modifier = Modifier.size(18.dp))
         }

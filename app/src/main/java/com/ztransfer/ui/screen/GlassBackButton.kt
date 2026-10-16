@@ -21,10 +21,11 @@ internal fun GlassBackButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     forward: Boolean = false,
+    enabled: Boolean = true,
 ) {
     GlassNavigationButton(onClick, modifier,
         if (forward) Icons.Default.ArrowForward else Icons.Default.ArrowBack,
-        stringResource(R.string.cd_back))
+        stringResource(R.string.cd_back), enabled)
 }
 
 @Composable
@@ -38,9 +39,13 @@ private fun GlassNavigationButton(
     modifier: Modifier,
     icon: ImageVector,
     description: String,
+    enabled: Boolean = true,
 ) {
     GlassButton(
         onClick = onClick,
+        enabled = enabled,
+        // The host animates visibility; disabling input must not add an abrupt dimming step.
+        disabledAlpha = 1f,
         shape = RoundedCornerShape(22.dp),
         contentPadding = PaddingValues(horizontal = 9.dp, vertical = 7.dp),
         enforceMinimumTouchTarget = false,

@@ -945,6 +945,7 @@ internal fun materialBadgeContentColor(
  * [enforceMinimumTouchTarget]：实体材质默认遵循 Material 的 48dp 最小触点；少量已有
  * 独立尺寸与外围布局保护的紧凑控件可关闭，毛玻璃分支的尺寸不受该开关影响。
  * [raised]：监看工具栏的棋子式微凸表面，保留主题材质，以连续弧面代替轮廓描边。
+ * [surfaceColor]：可选的按钮底色，保留现有材质、按压与选中效果。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -966,6 +967,7 @@ fun GlassButton(
     activeOutline: Boolean = false,
     enforceMinimumTouchTarget: Boolean = true,
     raised: Boolean = false,
+    surfaceColor: Color? = null,
     content: @Composable RowScope.() -> Unit
 ) {
     val colors = AppTheme.colors
@@ -1097,7 +1099,7 @@ fun GlassButton(
     // panel 是弹窗内容器里的低投影变体，不应该变成一枚高出面板的实体键帽。
     val appliedSkinTexture = if (isCameraControlButton && panel) null else skinTexture
     val isFrostedGlass = texturePalette?.skin == SkinPreset.FROSTED_GLASS
-    val baseColor = if (panel) colors.onBackground.copy(alpha = 0.05f) else colors.buttonSurface
+    val baseColor = surfaceColor ?: if (panel) colors.onBackground.copy(alpha = 0.05f) else colors.buttonSurface
     val containerColor =
         if (isFrostedGlass && !panel && frostedOpacityBoost > 0f) {
             val boost = frostedOpacityBoost.coerceIn(0f, 1f)

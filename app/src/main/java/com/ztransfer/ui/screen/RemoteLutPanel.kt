@@ -14,7 +14,9 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.ztransfer.R
 import com.ztransfer.lut.LutFolderFailure
@@ -65,6 +67,8 @@ internal fun RemoteLutPanel(state: LutMonitorState, anchor: Rect?, landscape: Bo
 internal fun RemotePresetChoice(
     text: String, selected: Boolean, pending: Boolean, enabled: Boolean,
     showSelectionBackground: Boolean = true,
+    verticalPadding: Dp = 8.dp,
+    textAlign: TextAlign = TextAlign.Start,
     onClick: () -> Unit,
 ) {
     val colors = AppTheme.colors
@@ -76,8 +80,8 @@ internal fun RemotePresetChoice(
     } else Modifier
     Text(text, style = MaterialTheme.typography.labelLarge,
         color = if (selected || pending) colors.accentBlue else colors.onBackground,
-        maxLines = 2, overflow = TextOverflow.Ellipsis,
+        maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = textAlign,
         modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).then(breathing)
             .background(if (selected && showSelectionBackground) colors.accentBlue.copy(alpha = .08f) else Color.Transparent)
-            .clickable(enabled = enabled, onClick = onClick).padding(horizontal = 12.dp, vertical = 8.dp))
+            .clickable(enabled = enabled, onClick = onClick).padding(horizontal = 12.dp, vertical = verticalPadding))
 }

@@ -37,11 +37,11 @@ internal fun LandscapeMonitorControls(
     onPanelChange: () -> Unit,
     dockButton: @Composable (Boolean, () -> Unit, Modifier) -> Unit,
     rotateButton: @Composable () -> Unit,
-    backButton: @Composable () -> Unit,
+    backButton: @Composable (Boolean) -> Unit,
     dispButton: @Composable () -> Unit,
-    shutter: @Composable () -> Unit,
+    shutter: @Composable (Float) -> Unit,
     localRecorder: @Composable () -> Unit,
-    reviewButton: @Composable () -> Unit = {},
+    reviewButton: @Composable (Float) -> Unit = {},
     parameter: @Composable (Int, Modifier) -> Unit,
     tool: @Composable (RemoteTool, Int) -> Unit,
     modifier: Modifier = Modifier,
@@ -74,7 +74,10 @@ internal fun LandscapeMonitorControls(
                 verticalAlignment = Alignment.CenterVertically) {
                 dockSlot()
                 Spacer(Modifier.weight(1f))
-                backButton()
+                MonitorDockLayer(panelProgress, dock = false,
+                    Modifier.blockMonitorPanelInput { dockOpen }) {
+                    backButton(!dockOpen)
+                }
             }
         }
     }
@@ -113,9 +116,10 @@ internal fun LandscapeMonitorControls(
                         ((widthPx + gapPx) / (maxOf(minCellPx, wordWidth) + gapPx))
                             .coerceIn(1, tools.size.coerceAtLeast(1))
                     else 3
-                    val columns = (maxColumns downTo 1).first { count ->
+                    val minColumns = tools.count { it.fixed }.coerceAtLeast(1)
+                    val columns = (maxColumns.coerceAtLeast(minColumns) downTo minColumns).first { count ->
                         val cell = ((widthPx - gapPx * (count - 1)) / count).coerceAtLeast(1)
-                        count == 1 || (cell >= maxOf(minCellPx, wordWidth) && names.all { name ->
+                        count == minColumns || (cell >= maxOf(minCellPx, wordWidth) && names.all { name ->
                             !measurer.measure(name, MonitorToolLabelStyle, maxLines = 2,
                                 constraints = Constraints(maxWidth = cell)).hasVisualOverflow
                         })
@@ -128,15 +132,20 @@ internal fun LandscapeMonitorControls(
                     columns to lines
                 }
                 val columns = measurements.first
+                val rows = monitorToolRows(tools, columns)
+                val linesByTool = tools.zip(measurements.second).toMap()
                 Column(Modifier.fillMaxSize().verticalScrollEdgeFade(dockScroll)
                     .verticalScroll(dockScroll).padding(vertical = 4.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    tools.chunked(columns).forEachIndexed { rowIndex, row ->
-                        val lines = measurements.second.drop(rowIndex * columns).take(row.size).maxOrNull() ?: 1
+                    rows.forEach { row ->
+                        val lines = row.filterNotNull().maxOfOrNull { linesByTool.getValue(it) } ?: 1
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            row.forEach { entry -> key(entry) {
-                                Box(Modifier.weight(1f), contentAlignment = Alignment.TopCenter) { tool(entry, lines) }
-                            } }
+                            row.forEach { entry ->
+                                if (entry == null) Spacer(Modifier.weight(1f))
+                                else key(entry) {
+                                    Box(Modifier.weight(1f), contentAlignment = Alignment.TopCenter) { tool(entry, lines) }
+                                }
+                            }
                             repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
                         }
                     }
@@ -144,10 +153,10 @@ internal fun LandscapeMonitorControls(
             }
         }
     }
-    val captureSlot: @Composable () -> Unit = {
-        Box(Modifier.size(layout.shutterSize.dp), contentAlignment = Alignment.Center) {
+    val captureSlot: @Composable (Float) -> Unit = { diameter ->
+        Box(Modifier.size(diameter.dp), contentAlignment = Alignment.Center) {
             MonitorDockLayer(panelProgress, dock = false,
-                Modifier.blockMonitorPanelInput { dockOpen }) { shutter() }
+                Modifier.blockMonitorPanelInput { dockOpen }) { shutter(diameter) }
         }
     }
     // Horizontal expansion stays in the bottom row, beside rotation.
@@ -170,19 +179,29 @@ internal fun LandscapeMonitorControls(
         }
     }
     val captureCluster: @Composable () -> Unit = {
-        Box(Modifier.fillMaxWidth().height((layout.footerHeight + layout.captureLift).dp)) {
+        BoxWithConstraints(Modifier.fillMaxWidth().height((layout.footerHeight + layout.captureLift).dp)) {
             Column(Modifier.align(Alignment.BottomStart).padding(start = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 dispSlot()
                 rotationSlot()
             }
-            Box(Modifier.align(if (!layout.bottomControls && layout.columns == 2)
-                Alignment.TopCenter else Alignment.TopEnd)) { captureSlot() }
-            Box(Modifier.align(Alignment.BottomStart).padding(start = 44.dp)) { localSlot() }
-            if (layout.photoReview) Box(Modifier.align(Alignment.BottomEnd)) {
-                MonitorDockLayer(panelProgress, dock = false,
-                    Modifier.blockMonitorPanelInput { dockOpen }) { reviewButton() }
+            if (layout.photoReview) {
+                val pair = landscapePhotoCaptureSizes(maxWidth.value, layout.shutterSize)
+                Box(Modifier.align(Alignment.TopStart).fillMaxWidth()
+                    .height(maxOf(pair.shutter, pair.reviewHeight).dp)) {
+                    Box(Modifier.align(Alignment.CenterStart).size(pair.reviewWidth.dp, pair.reviewHeight.dp),
+                        contentAlignment = Alignment.Center) {
+                        MonitorDockLayer(panelProgress, dock = false,
+                            Modifier.blockMonitorPanelInput { dockOpen }) { reviewButton(pair.reviewScale) }
+                    }
+                    Box(Modifier.align(if (!layout.bottomControls && layout.columns == 2)
+                        Alignment.TopCenter else Alignment.TopEnd)) { captureSlot(pair.shutter) }
+                }
+            } else {
+                Box(Modifier.align(if (!layout.bottomControls && layout.columns == 2)
+                    Alignment.TopCenter else Alignment.TopEnd)) { captureSlot(layout.shutterSize) }
             }
+            Box(Modifier.align(Alignment.BottomStart).padding(start = 44.dp)) { localSlot() }
         }
     }
     if (layout.bottomControls) {
@@ -212,6 +231,18 @@ internal fun LandscapeMonitorControls(
             header()
         }
     }
+}
+
+/** Fixed orientation controls occupy the right end of the drawer's first row too. */
+internal fun monitorToolRows(tools: List<RemoteTool>, columns: Int): List<List<RemoteTool?>> {
+    if (tools.isEmpty()) return emptyList()
+    val pinned = RemoteTool.pinned.filter { it in tools }
+    val regular = tools.filterNot { it.fixed }
+    val count = columns.coerceAtLeast(pinned.size).coerceAtLeast(1)
+    val firstCapacity = count - pinned.size
+    val firstRow = regular.take(firstCapacity) +
+        List((firstCapacity - regular.size).coerceAtLeast(0)) { null } + pinned
+    return listOf(firstRow) + regular.drop(firstCapacity).chunked(count)
 }
 
 /** Prevent outgoing/cached animation surfaces from activating controls or focusing behind them. */

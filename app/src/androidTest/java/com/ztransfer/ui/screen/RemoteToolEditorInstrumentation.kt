@@ -59,7 +59,7 @@ class RemoteToolEditorInstrumentation : Instrumentation() {
             SystemClock.sleep(600)
             val rotate = bounds(RemoteTool.ROTATE)
             val lock = bounds(RemoteTool.LOCK)
-            check(lock.centerY() > rotate.centerY() && kotlin.math.abs(lock.centerX() - bounds(RemoteTool.HD).centerX()) <= 8)
+            check(kotlin.math.abs(lock.centerY() - rotate.centerY()) <= 8 && lock.right <= rotate.left)
             screenshot("remote-editor-default.png")
             // Photo mode excludes the movie-only audio tool even while editing.
             check(node(label(RemoteTool.AUDIO.title)) == null)
@@ -79,16 +79,17 @@ class RemoteToolEditorInstrumentation : Instrumentation() {
             check(layout().shownTools.indexOf(RemoteTool.HD) >= 8) { "Cross-row drag did not move HD: ${layout().order}" }
             check(layout().visible(RemoteTool.HD) && layout().hiddenTools.isEmpty()) { "Drop incorrectly triggered a click" }
             check(kotlin.math.abs(bounds(RemoteTool.ROTATE).centerX() - rotate.centerX()) <= 8)
-            // Fixed actions are inert while editing.
-            tap(bounds(RemoteTool.ROTATE)); check(node(label(R.string.remote_tool_done)) != null)
-            // The default second-row item remains movable and hideable, independently per mode.
-            drag(bounds(RemoteTool.LOCK), bounds(RemoteTool.FPS)); SystemClock.sleep(600)
-            check(!layout().lockStartsSecondRow && tools().layout(true).lockStartsSecondRow)
-            check(layout().shownTools.first() == RemoteTool.LOCK)
-            tap(bounds(RemoteTool.LOCK)); SystemClock.sleep(400)
-            check(!layout().visible(RemoteTool.LOCK))
-            tap(bounds(RemoteTool.LOCK)); SystemClock.sleep(400)
-            check(layout().shownTools.last() == RemoteTool.LOCK && !layout().lockStartsSecondRow)
+            // Both orientation actions stay fixed and inert while editing.
+            val fixedOrder = layout().order
+            for (fixed in RemoteTool.pinned) {
+                tap(bounds(fixed))
+                check(node(label(R.string.remote_tool_done)) != null)
+                drag(bounds(fixed), bounds(RemoteTool.FPS))
+                SystemClock.sleep(400)
+                check(layout().order == fixedOrder && layout().visible(fixed))
+            }
+            check(kotlin.math.abs(bounds(RemoteTool.LOCK).centerX() - lock.centerX()) <= 8)
+            check(kotlin.math.abs(bounds(RemoteTool.LOCK).centerY() - lock.centerY()) <= 8)
             // Hidden tools cannot be reordered by a drag, but remain tappable.
             tap(bounds(RemoteTool.HD)); SystemClock.sleep(500)
             val order = layout().order
@@ -114,6 +115,7 @@ class RemoteToolEditorInstrumentation : Instrumentation() {
             check(node(label(R.string.remote_tool_manage)) != null)
             check(bounds(RemoteTool.ROTATE).centerX() > labels.resources.displayMetrics.widthPixels - 48)
             check(kotlin.math.abs(bounds(RemoteTool.ROTATE).centerX() - rotate.centerX()) <= 8)
+            check(kotlin.math.abs(bounds(RemoteTool.LOCK).centerX() - lock.centerX()) <= 8)
             screenshot("remote-editor-minimal.png")
             tap(bounds(RemoteTool.ROTATE)); SystemClock.sleep(900)
             check(node(label(R.string.remote_tool_done)) == null)
@@ -125,7 +127,7 @@ class RemoteToolEditorInstrumentation : Instrumentation() {
             tap(bounds(RemoteTool.ROTATE)); SystemClock.sleep(800)
             check(node(label(R.string.remote_tool_manage)) != null)
             check(node(label(R.string.remote_tool_done)) == null) { "Returning to portrait resumed editing" }
-            result.putString("result", "PASS: whole-button visibility, restore-to-tail, actual cross-row drag, no click after drag, hidden non-draggable, photo editor excludes audio, default lock at second-row start and drag/hide/restore, fixed controls, all-hidden manager access")
+            result.putString("result", "PASS: whole-button visibility, restore-to-tail, actual cross-row drag, no click after drag, hidden non-draggable, photo editor excludes audio, fixed first-row lock/rotation, non-draggable and non-hideable orientation controls, all-hidden manager access")
             outcome = Activity.RESULT_OK
         } catch (e: Throwable) {
             screenshot("remote-editor-failure.png")

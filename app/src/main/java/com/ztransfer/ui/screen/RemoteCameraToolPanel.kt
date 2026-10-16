@@ -222,7 +222,7 @@ internal fun RemoteCameraToolPanel(
     val menuWidth = if (whiteBalanceGrid) ((labelWidth + 12.dp) * 3 + 12.dp).coerceIn(252.dp, 300.dp)
         else (labelWidth + 24.dp).coerceIn(48.dp,280.dp)
     RemoteChoicePopup(anchor,landscape,menuWidth,closeRequested,onDismiss,
-        verticalContentPadding = if (tool == RemoteCameraTool.FOCUS_AREA) 0.dp else 4.dp,
+        verticalContentPadding = if (tool == RemoteCameraTool.FOCUS_AREA || tool == RemoteCameraTool.FOCUS_MODE) 0.dp else 4.dp,
     ) { close, closing ->
         val p = param
         if (!loading && (p == null || !p.writable || p.values.isEmpty())) Text(

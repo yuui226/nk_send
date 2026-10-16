@@ -111,7 +111,10 @@ internal fun PictureControlFolderReturnEffect(state: PictureControlToolState, re
             if (uri != null) state.folders.changeFolder(uri)
             if (visible) {
                 state.editingSlot = state.pickerTarget
-                state.loading = true
+                // The picker usually leaves the loaded panel mounted. Its opening effect
+                // will not run again, so do not replace its settled loading state here.
+                // A recreated/closed panel will read the camera and clear loading itself.
+                if (!state.panel) state.loading = true
                 state.panel = true
                 state.closeRequested = false
             }

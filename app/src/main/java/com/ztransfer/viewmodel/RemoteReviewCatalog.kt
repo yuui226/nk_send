@@ -7,22 +7,81 @@ import kotlinx.coroutines.sync.withLock
 
 private val REVIEW_PHOTO_EXTENSIONS = setOf(".jpg", ".jpeg", ".nef", ".nrw", ".tif", ".tiff", ".heif", ".hif", ".heic")
 
-/** A capture is one review page, even when JPEG/RAW or backup cards produce several objects. */
-internal fun reviewCaptureKey(file: NikonCamera.FileInfo): String =
-    if (file.captureDate.isNullOrBlank()) "handle:${file.handle}"
-    else "${file.captureDate}:${file.fileName.substringBeforeLast('.').lowercase(java.util.Locale.ROOT)}"
+private val REVIEW_JPEG_EXTENSIONS = setOf(".jpg", ".jpeg")
+private val REVIEW_RAW_EXTENSIONS = setOf(".nef", ".nrw")
 
-internal fun reviewPhotos(files: List<NikonCamera.FileInfo>): List<NikonCamera.FileInfo> {
-    val captures = linkedMapOf<String, NikonCamera.FileInfo>()
-    for (file in files) {
-        if (file.extension !in REVIEW_PHOTO_EXTENSIONS) continue
-        val key = reviewCaptureKey(file)
-        val previous = captures[key]
-        if (previous == null || (file.extension in setOf(".jpg", ".jpeg") &&
-                previous.extension !in setOf(".jpg", ".jpeg"))) captures[key] = file
-    }
-    return captures.values.toList()
+private fun reviewStem(file: NikonCamera.FileInfo) =
+    file.fileName.substringBeforeLast('.').lowercase(java.util.Locale.ROOT)
+
+// PTP and EXIF can describe the same capture with different subsecond precision.
+private fun reviewCaptureDate(file: NikonCamera.FileInfo): String? =
+    file.captureDate?.trim()?.takeIf { it.isNotEmpty() }?.take(15)
+
+private fun reviewCaptureDate(files: List<NikonCamera.FileInfo>): String? =
+    files.mapNotNull(::reviewCaptureDate).maxByOrNull { it.length }
+
+private fun reviewDatesCompatible(first: String?, second: String?): Boolean =
+    first == null || second == null || first.startsWith(second) || second.startsWith(first)
+
+private fun reviewCompanions(first: NikonCamera.FileInfo, second: NikonCamera.FileInfo): Boolean {
+    if (reviewStem(first) != reviewStem(second)) return false
+    val firstDate = reviewCaptureDate(first)
+    val secondDate = reviewCaptureDate(second)
+    if (!reviewDatesCompatible(firstDate, secondDate)) return false
+    return (first.extension in REVIEW_JPEG_EXTENSIONS && second.extension in REVIEW_RAW_EXTENSIONS) ||
+        (first.extension in REVIEW_RAW_EXTENSIONS && second.extension in REVIEW_JPEG_EXTENSIONS)
 }
+
+/** One page retains its source formats, prefers JPEG for FHD and keeps its first object's key. */
+internal data class RemoteReviewPhoto(val files: List<NikonCamera.FileInfo>) {
+    val key: Int get() = files.first().handle
+    val file: NikonCamera.FileInfo get() =
+        files.firstOrNull { it.extension in REVIEW_JPEG_EXTENSIONS } ?: files.first()
+    val pairedRawExtension: String? get() = if (file.extension in REVIEW_JPEG_EXTENSIONS)
+        files.firstOrNull { it.extension in REVIEW_RAW_EXTENSIONS }?.extension else null
+    val captureDate: String? get() = reviewCaptureDate(files)
+
+    fun canPair(file: NikonCamera.FileInfo): Boolean {
+        val date = reviewCaptureDate(file)
+        if (!reviewDatesCompatible(captureDate, date)) return false
+        // With no timestamp, merge only complementary formats, never two same-name JPEGs/RAWs.
+        val family = when (file.extension) {
+            in REVIEW_JPEG_EXTENSIONS -> REVIEW_JPEG_EXTENSIONS
+            in REVIEW_RAW_EXTENSIONS -> REVIEW_RAW_EXTENSIONS
+            else -> return false
+        }
+        return files.none { it.extension in family } && files.any { reviewCompanions(it, file) }
+    }
+}
+
+/** Append-only page positions: a later companion enriches its existing page, never inserts a duplicate. */
+private class ReviewPhotos {
+    private val photos = mutableListOf<RemoteReviewPhoto>()
+    private val indicesByStem = mutableMapOf<String, MutableList<Int>>()
+    private val handles = hashSetOf<Int>()
+    val size: Int get() = photos.size
+    fun snapshot(): List<RemoteReviewPhoto> = photos.toList()
+
+    fun addAll(files: List<NikonCamera.FileInfo>) {
+        for (file in files) {
+            if (file.extension !in REVIEW_PHOTO_EXTENSIONS || !handles.add(file.handle)) continue
+            val indices = indicesByStem.getOrPut(reviewStem(file)) { mutableListOf() }
+            val date = reviewCaptureDate(file)
+            val dated = if (date == null) emptyList() else indices.filter { photos[it].captureDate == date }
+            val target = if (dated.isNotEmpty()) dated.singleOrNull()
+                else indices.filter { photos[it].canPair(file) }.singleOrNull()
+            if (target == null) {
+                indices += photos.size
+                photos += RemoteReviewPhoto(listOf(file))
+            } else {
+                photos[target] = photos[target].copy(files = photos[target].files + file)
+            }
+        }
+    }
+}
+
+internal fun reviewPhotos(files: List<NikonCamera.FileInfo>): List<RemoteReviewPhoto> =
+    ReviewPhotos().apply { addAll(files) }.snapshot()
 
 /**
  * Handles are frozen at open. Metadata is read a page at a time, independently of album filters.
@@ -36,11 +95,17 @@ internal class RemoteReviewCatalog(
     private val mutex = Mutex()
     private val cursors = IntArray(handlesByStorage.size)
     private val heads = MutableList<NikonCamera.FileInfo?>(handlesByStorage.size) { null }
-    private val published = mutableListOf<NikonCamera.FileInfo>()
-    private val publishedKeys = hashSetOf<String>()
+    private val published = ReviewPhotos()
     private val pendingGroup = mutableListOf<NikonCamera.FileInfo>()
     var hasMore: Boolean = true
         private set
+
+    private fun pendingCompanion(file: NikonCamera.FileInfo): Boolean {
+        val date = reviewCaptureDate(pendingGroup)
+        val nextDate = reviewCaptureDate(file)
+        return reviewDatesCompatible(date, nextDate) &&
+            pendingGroup.any { reviewCompanions(it, file) }
+    }
 
     private suspend fun peek(): Pair<Int, NikonCamera.FileInfo>? {
         for (slot in handlesByStorage.indices) {
@@ -52,30 +117,32 @@ internal class RemoteReviewCatalog(
                 heads[slot] = file
             }
         }
-        val slot = selectNewestFileHeadIndex(heads) ?: return null
+        // A missing timestamp on one card must not postpone the other half past this page.
+        val partner = heads.indexOfFirst { head -> head != null && pendingCompanion(head) }
+        val slot = partner.takeIf { it >= 0 } ?: selectNewestFileHeadIndex(heads) ?: return null
         return slot to checkNotNull(heads[slot])
     }
 
-    suspend fun loadNextPage(pageSize: Int = 12): List<NikonCamera.FileInfo> = mutex.withLock {
+    suspend fun loadNextPage(pageSize: Int = 12): List<RemoteReviewPhoto> = mutex.withLock {
         require(pageSize > 0)
         val target = published.size + pageSize
         while (hasMore && published.size < target) {
             while (true) {
                 val next = peek()
-                val first = pendingGroup.firstOrNull()
-                if (next == null || (first != null &&
-                        (first.captureDate.isNullOrBlank() || next.second.captureDate != first.captureDate))) {
-                    reviewPhotos(pendingGroup).forEach { file ->
-                        if (publishedKeys.add(reviewCaptureKey(file))) published += file
-                    }
+                val date = reviewCaptureDate(pendingGroup)
+                val sameGroup = next != null && (pendingGroup.isEmpty() ||
+                    (date != null && date == reviewCaptureDate(next.second)) || pendingCompanion(next.second))
+                if (!sameGroup) {
+                    published.addAll(pendingGroup)
                     pendingGroup.clear()
                     if (next == null) hasMore = false
                     break
                 }
-                pendingGroup += next.second
-                heads[next.first] = null
+                val (slot, file) = checkNotNull(next)
+                pendingGroup += file
+                heads[slot] = null
             }
         }
-        published.toList()
+        published.snapshot()
     }
 }

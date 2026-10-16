@@ -114,16 +114,18 @@ internal fun LutChooserHeader(off: Boolean, folderLabel: String? = null, enabled
                 style = MaterialTheme.typography.labelMedium,
                 color = if (off) colors.accentBlue else colors.onSurfaceVariant)
         }
-        if (folderLabel != null) PresetFolderButton(folderLabel, enabled, Modifier.weight(1f), onFolder)
+        if (folderLabel != null) PresetFolderButton(folderLabel, enabled, Modifier.weight(1f), onClick = onFolder)
     }
 }
 
 /** Same folder action in the LUT and camera preset choosers. */
 @Composable
-internal fun PresetFolderButton(label: String, enabled: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+internal fun PresetFolderButton(label: String, enabled: Boolean, modifier: Modifier = Modifier,
+    compact: Boolean = false, onClick: () -> Unit) {
     Box(modifier.presetActionOutline(enabled)
         .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
-        .heightIn(min = 32.dp).padding(horizontal = 8.dp, vertical = 5.dp),
+        .heightIn(min = if (compact) 28.dp else 32.dp)
+        .padding(horizontal = 8.dp, vertical = if (compact) 3.dp else 5.dp),
         contentAlignment = Alignment.Center) {
         Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis,
             style = MaterialTheme.typography.labelMedium, color = AppTheme.colors.onSurfaceVariant)

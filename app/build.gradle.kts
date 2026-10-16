@@ -146,7 +146,7 @@ val copyTimestampedDebugApk = tasks.register("copyTimestampedDebugApk") {
     doLast {
         val source = layout.buildDirectory.file("outputs/apk/debug/app-debug.apk").get().asFile
         check(source.isFile) { "Debug APK not found: ${source.absolutePath}" }
-        val stamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))
+        val stamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("MMdd-HHmmss"))
         val destinationDirectory = rootProject.file("dist-debug").apply { mkdirs() }
         val destination = destinationDirectory.resolve(
             "ZD-$stamp.apk"

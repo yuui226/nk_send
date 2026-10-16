@@ -6,6 +6,18 @@ internal data class MonitorBounds(val x: Float, val y: Float, val width: Float, 
     val bottom get() = y + height
 }
 
+/** Sizes for the photo-only capture pair using the full width of its own row. */
+internal data class LandscapePhotoCaptureSizes(val shutter: Float, val reviewScale: Float, val gap: Float) {
+    val reviewWidth get() = 40f * reviewScale
+    val reviewHeight get() = 48f * reviewScale
+    val width get() = reviewWidth + gap + shutter
+}
+
+internal fun landscapePhotoCaptureSizes(availableWidth: Float, preferredShutter: Float): LandscapePhotoCaptureSizes {
+    val scale = (availableWidth.coerceAtLeast(0f) / (preferredShutter + 40f + 8f)).coerceIn(0f, 1f)
+    return LandscapePhotoCaptureSizes(preferredShutter * scale, scale, 8f * scale)
+}
+
 internal data class LandscapeMonitorLayout(
     val image: MonitorBounds,
     val controls: MonitorBounds,

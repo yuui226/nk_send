@@ -201,9 +201,11 @@ internal sealed interface PhotoPreviewItem {
 
     data class Photo(
         val file: NikonCamera.FileInfo,
-        val burstId: String? = null
+        val burstId: String? = null,
+        val pairedRawExtension: String? = null,
+        val reviewKey: Int? = null,
     ) : PhotoPreviewItem {
-        override val key: Any = file.handle
+        override val key: Any = reviewKey ?: file.handle
     }
 
     data class BurstCollection(
@@ -366,6 +368,13 @@ internal fun PhotoPreviewOverlay(
     }
     LaunchedEffect(closing) {
         if (closing) {
+            if (latestReview != null) {
+                // Monitor review owns a full-screen black surface outside this overlay.
+                // Let that host fade everything together instead of fading into its black
+                // backdrop first and then abruptly removing the backdrop and close button.
+                latestOnDismiss(null)
+                return@LaunchedEffect
+            }
             // 长列表的远距离预定位发生在不透明预览层之后；随后才向最新格子坐标缩回，
             // 因此既不会暴露 LazyGrid 的长距离跳段，也不会飞回已经失效的旧格位。
             val returnFile = latestCurrentFile
@@ -1332,7 +1341,10 @@ internal fun PhotoPreviewOverlay(
         // 文件名与下方曝光参数共用同一套无底框文字样式。随翻页跟手渐隐/渐显，
         // 内容在滑过半程、容器已接近透明时切换，避免新旧文件名硬叠在一起。
         currentFile?.let { file ->
-            val title = file.fileName
+            val rawExtension = (currentItem as? PhotoPreviewItem.Photo)?.pairedRawExtension
+            val title = file.fileName + (rawExtension?.let {
+                " +${it.removePrefix(".").uppercase(java.util.Locale.ROOT)}"
+            } ?: "")
             val task = currentFile?.let(queueTaskFor)
             val overlayTask = task?.takeIf { showsQueueStatusOverlay(it.status) }
             val transferred = currentFile?.let(isTransferred) == true

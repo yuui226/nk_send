@@ -49,9 +49,7 @@ private class ToolDragState {
         val target = tools.shownTools.firstOrNull { other ->
             other != tool && slots[other.id]?.contains(center) == true
         } ?: return
-        val displayedOrder = tools.shownTools.sortedWith(compareBy<RemoteTool>(
-            { slots[it.id]?.top ?: Float.MAX_VALUE }, { slots[it.id]?.left ?: Float.MAX_VALUE }))
-        tools.move(tool, tools.shownTools.indexOf(target), displayedOrder)
+        tools.move(tool, tools.shownTools.indexOf(target))
     }
 }
 
@@ -109,10 +107,9 @@ private fun RemoteToolBarContent(
     val dragState = remember(movie) { ToolDragState() }
     val layout = tools.layout(movie)
     val currentLayout by rememberUpdatedState(layout)
-    val secondRowLock = layout.lockStartsSecondRow
     val editEnabled = editing
     val sequence = layout.shownTools + (if (editEnabled) layout.hiddenTools else emptyList())
-    val endTools = listOf(RemoteTool.ROTATE)
+    val endTools = RemoteTool.pinned
     val gesture = if (!editEnabled) Modifier else Modifier.pointerInput(dragState, layout) {
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false)
@@ -184,7 +181,6 @@ private fun RemoteToolBarContent(
     AdaptiveRemoteToolBar(
         modifier.then(if (editEnabled) Modifier.animateContentSize(tween(220)) else Modifier).then(gesture),
         horizontalGap = gap, verticalGap = 4.dp, pinnedEndCount = endTools.size,
-        secondRowFirstId = if (secondRowLock) RemoteTool.LOCK.id else null,
     ) {
         leading()
         (sequence + listOf(null) + endTools).forEach { renderTool(it) }

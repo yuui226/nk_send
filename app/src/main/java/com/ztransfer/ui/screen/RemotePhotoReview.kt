@@ -1,6 +1,7 @@
 package com.ztransfer.ui.screen
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.Canvas
@@ -21,6 +22,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.platform.LocalDensity
@@ -35,6 +37,7 @@ import com.ztransfer.R
 import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.protocol.labEndLiveView
 import com.ztransfer.ui.theme.AppTheme
+import com.ztransfer.ui.theme.Motion
 import com.ztransfer.ui.theme.LocalButtonTexturePalette
 import com.ztransfer.ui.theme.SkinPreset
 import com.ztransfer.viewmodel.CameraViewModel
@@ -66,7 +69,7 @@ internal fun BoxScope.RemoteReviewCloseButton(landscape: Boolean, onClick: () ->
 
 /** Full-screen backdrop; only content avoids system bars, mapped into the monitor's rotation. */
 @Composable
-internal fun RemoteReviewSurface(rotation: Int, content: @Composable BoxScope.() -> Unit) {
+internal fun RemoteReviewSurface(rotation: Int, modifier: Modifier = Modifier, content: @Composable BoxScope.() -> Unit) {
     val density = LocalDensity.current
     val safe = WindowInsets.safeDrawing
     val left = with(density) { safe.getLeft(this, LayoutDirection.Ltr).toDp() }
@@ -91,7 +94,7 @@ internal fun RemoteReviewSurface(rotation: Int, content: @Composable BoxScope.()
             lightNavigation?.let { controller?.isAppearanceLightNavigationBars = it }
         }
     }
-    Box(Modifier.fillMaxSize().background(Color.Black)) {
+    Box(modifier.fillMaxSize().background(Color.Black)) {
         // Block monitor controls underneath, including the cutout/navigation margins.
         Box(Modifier.fillMaxSize().clickable(
             interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = {},
@@ -145,6 +148,7 @@ internal fun RemoteReviewButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     large: Boolean = false,
+    sizeScale: Float = 1f,
 ) {
     val label = stringResource(R.string.remote_review)
     // Camera-control skins keep a black keycap even in light mode.
@@ -157,10 +161,12 @@ internal fun RemoteReviewButton(
         onClick = onClick,
         enabled = enabled,
         raised = true,
+        enforceMinimumTouchTarget = large,
         materialContentColor = color,
-        modifier = modifier.size(width = if (large) 48.dp else 40.dp, height = if (large) 56.dp else 48.dp)
+        modifier = modifier.size(width = (if (large) 48.dp else 40.dp) * sizeScale,
+            height = (if (large) 56.dp else 48.dp) * sizeScale)
             .semantics { contentDescription = label },
-        shape = RoundedCornerShape(if (large) 14.dp else 12.dp),
+        shape = RoundedCornerShape((if (large) 14.dp else 12.dp) * sizeScale),
         contentPadding = PaddingValues(0.dp),
     ) {
         // One coordinate system keeps the compact and portrait icons proportional.
@@ -172,7 +178,8 @@ internal fun RemoteReviewButton(
             }
         }
         val stroke = remember { Stroke(1.7f, cap = StrokeCap.Round, join = StrokeJoin.Round) }
-        Canvas(Modifier.size(width = if (large) 24.dp else 21.dp, height = if (large) 28.dp else 24.5.dp)) {
+        Canvas(Modifier.size(width = (if (large) 24.dp else 21.dp) * sizeScale,
+            height = (if (large) 28.dp else 24.5.dp) * sizeScale)) {
             scale(size.width / 24f, size.height / 28f, pivot = Offset.Zero) {
                 drawRoundRect(color, Offset(2f, 1f), Size(20f, 26f), CornerRadius(3.5f), style = stroke)
                 drawCircle(color, 1.8f, Offset(16f, 8f))
@@ -193,6 +200,20 @@ internal fun RemotePhotoReview(
     val camera = state.camera ?: return
     key(camera) {
         val scope = rememberCoroutineScope()
+        val opacity = remember { Animatable(1f) }
+        var closing by remember { mutableStateOf(false) }
+        val latestOnClose by rememberUpdatedState(onClose)
+        val requestClose: () -> Unit = { closing = true }
+        LaunchedEffect(closing) {
+            if (closing) {
+                // Fade the backdrop, image and controls as one layer. Keep frame reads and
+                // rotation paused until the retained monitor frame has been fully revealed.
+                opacity.animateTo(0f, Motion.overlayCollapse)
+                latestOnClose()
+            }
+        }
+        // Also consume repeated Back presses during the fade and while the catalog loads.
+        BackHandler { requestClose() }
         val transfer by transferViewModel.state.collectAsState()
         var catalog by remember { mutableStateOf<RemoteReviewCatalog?>(null) }
         var items by remember { mutableStateOf<List<PhotoPreviewItem>>(emptyList()) }
@@ -213,7 +234,8 @@ internal fun RemotePhotoReview(
                     val files = snapshot.loadNextPage()
                     if (!stillCurrent()) return
                     catalog = snapshot
-                    items = files.map { PhotoPreviewItem.Photo(it) }
+                    items = files.map { PhotoPreviewItem.Photo(it.file,
+                        pairedRawExtension = it.pairedRawExtension, reviewKey = it.key) }
                 }
                 try { read() }
                 catch (cancelled: CancellationException) { throw cancelled }
@@ -240,7 +262,8 @@ internal fun RemotePhotoReview(
                 scope.launch {
                     try {
                         val files = snapshot.loadNextPage()
-                        if (stillCurrent()) items = files.map { PhotoPreviewItem.Photo(it) }
+                        if (stillCurrent()) items = files.map { PhotoPreviewItem.Photo(it.file,
+                            pairedRawExtension = it.pairedRawExtension, reviewKey = it.key) }
                     } catch (cancelled: CancellationException) { throw cancelled }
                     catch (_: Exception) { failed = true }
                     finally { loading = false }
@@ -249,7 +272,7 @@ internal fun RemotePhotoReview(
         }
         LaunchedEffect(retry) { loadFirst() }
 
-        RemoteReviewSurface(rotation) {
+        RemoteReviewSurface(rotation, Modifier.graphicsLayer { alpha = opacity.value }) {
             if (items.isNotEmpty()) {
                 PhotoPreviewOverlay(
                     items = items, initialIndex = 0, anchorRect = null,
@@ -273,11 +296,10 @@ internal fun RemotePhotoReview(
                         loadMore = loadMore, loadingMore = loading, loadMoreFailed = failed,
                         landscape = rotation != 0,
                     ),
-                    onDismiss = { onClose() },
+                    onDismiss = { requestClose() },
                 )
             } else {
-                BackHandler { onClose() }
-                RemoteReviewCloseButton(landscape = rotation != 0, onClick = onClose)
+                RemoteReviewCloseButton(landscape = rotation != 0, onClick = requestClose)
                 if (loading) CircularProgressIndicator(Modifier.align(Alignment.Center).size(28.dp),
                     color = Color.White, strokeWidth = 2.dp)
                 else if (failed) TextButton(onClick = { retry++ }, modifier = Modifier.align(Alignment.Center)) {

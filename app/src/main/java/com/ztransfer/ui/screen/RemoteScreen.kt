@@ -69,7 +69,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BugReport
-import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Lock
@@ -2816,6 +2815,7 @@ private fun RemoteContent(
     }
 
     fun setToolVisible(tool: RemoteTool, visible: Boolean) {
+        if (tool.fixed) return
         if (!visible) {
             when (tool) {
                 RemoteTool.RECORD -> if (viewfinderRecorder != null) stopRecorder()
@@ -2823,7 +2823,6 @@ private fun RemoteContent(
                     hdLiveView = false
                     startSession(false)
                 }
-                RemoteTool.LOCK -> onLockRotation(false)
                 RemoteTool.COMPUTER_CONTROL -> if (computerControl.enabled) setComputerControl(false)
                 RemoteTool.LUT -> { lutState.off(); lutState.dismissMenu() }
                 RemoteTool.GRID -> gridPanelOpen = false
@@ -2944,7 +2943,7 @@ private fun RemoteContent(
                 lutAnchor = it
             } else if (tool == RemoteTool.GRID) Modifier.onGloballyPositioned {
                 gridAnchor = it
-            } else Modifier, enabled = !disabled) {
+            } else Modifier, enabled = !disabled, fixedControl = tool?.fixed == true) {
                 if (tool == null) Icon(if (editingTools) Icons.Default.Check else Icons.Default.Settings, null, Modifier.size(19.dp))
                 else if ((tool == RemoteTool.PICTURE_CONTROL && pictureControl.panel && pictureControl.loading) || (cameraToolLoading && (
                     (tool == RemoteTool.WHITE_BALANCE && cameraToolPanel == RemoteCameraTool.WHITE_BALANCE) ||
@@ -2983,7 +2982,7 @@ private fun RemoteContent(
 
     // Local viewfinder recording requires continuous frames; finish it before reviewing photos.
     val reviewVisible = !movieMode && viewfinderRecorder == null && !recFinalizing
-    val renderReview: @Composable (Modifier, Boolean) -> Unit = { modifier, large ->
+    val renderReview: @Composable (Modifier, Boolean, Float) -> Unit = { modifier, large, sizeScale ->
             RemoteReviewButton(
                 enabled = reviewAllowed && connected && initialLoaded && liveViewStable && !capturing && !cameraToolWriting &&
                     !afHeld && !tapFocusBusy && afJob?.isActive != true && !computerControl.busy && !photoReview.active,
@@ -3001,6 +3000,7 @@ private fun RemoteContent(
                 },
                 modifier = modifier,
                 large = large,
+                sizeScale = sizeScale,
             )
     }
 
@@ -3093,7 +3093,7 @@ private fun RemoteContent(
             )
             },
             tools = {
-            // 竖屏按实际按钮宽度换行，旋转固定在第一行右端。
+            // 竖屏按实际按钮宽度换行，锁定和旋转固定在第一行右端。
             // HD/FPS 字号和录制控件宽度变化仍由同一套列轨道处理。
             renderTools(6.dp, Modifier)
             },
@@ -3141,7 +3141,7 @@ private fun RemoteContent(
             ) {
                 // Equal side slots keep the shutter centered when review is hidden.
                 Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                    if (reviewVisible && !editingTools) renderReview(Modifier, true)
+                    if (reviewVisible && !editingTools) renderReview(Modifier, true, 1f)
                 }
                 ShutterButton(
                     capturing = capturing,
@@ -3168,7 +3168,6 @@ private fun RemoteContent(
                 val imageY = monitorLayout.image.y.dp
                 val imageWidth = monitorLayout.image.width.dp
                 val imageHeight = monitorLayout.image.height.dp
-                val landscapeShutterSize = monitorLayout.shutterSize.dp
                 val landscapeMeterTop = if (movieMode) 34.dp else MonitorInfoTopInset
                 val audioTop = landscapeMeterTop + if (meterEnabled) MonitorExposureMeterHeight + MonitorMeterStackGap else 0.dp
                 val audioHeight = (imageHeight - audioTop - 8.dp).coerceIn(0.dp, 88.dp)
@@ -3268,7 +3267,7 @@ private fun RemoteContent(
                 )
                 LandscapeMonitorControls(
                     layout = monitorLayout,
-                    tools = tools.layout(movieMode).shownTools.filter { it != RemoteTool.RECORD },
+                    tools = tools.layout(movieMode).shownTools.filter { it != RemoteTool.RECORD } + RemoteTool.pinned,
                     onPanelChange = {
                         gridPanelOpen = false
                         cameraToolPanel = null
@@ -3282,23 +3281,23 @@ private fun RemoteContent(
                         }
                     },
                     rotateButton = { renderTool(RemoteTool.ROTATE, 0) },
-                    backButton = {
-                        GlassBackButton(onClick = onNavigateBack, forward = true)
+                    backButton = { enabled ->
+                        GlassBackButton(onClick = onNavigateBack, forward = true, enabled = enabled)
                     },
                     dispButton = {
                         TopIconToggle(false, "DISP", { dispMode = dispMode.next() }) {
                             Text("DISP", fontSize = 8.sp, maxLines = 1, softWrap = false)
                         }
                     },
-                    shutter = {
+                    shutter = { diameter ->
                         ShutterButton(capturing = capturing, focusing = afHeld,
                             enabled = connected && !cameraToolWriting, movie = movieMode, recording = recording,
                             onFocusStart = { startFocus() }, onRelease = ::finishShutterGesture,
                             onQuickTap = { if (movieMode) toggleRecord() else shoot() },
-                            diameter = landscapeShutterSize)
+                            diameter = diameter.dp)
                     },
                     localRecorder = { renderTool(RemoteTool.RECORD, 0) },
-                    reviewButton = { renderReview(Modifier, false) },
+                    reviewButton = { scale -> renderReview(Modifier, false, scale) },
                     parameter = { index, modifier ->
                         val prop = (if (movieMode) MOVIE_EXPOSURE_PROPS else EXPOSURE_PROPS)[index]
                         val isoProp = if (movieMode) Lab.PROP_NK_MOVIE_ISO else Lab.PROP_ISO
@@ -4988,7 +4987,6 @@ internal fun AdaptiveRemoteToolBar(
     horizontalGap: androidx.compose.ui.unit.Dp = 6.dp,
     verticalGap: androidx.compose.ui.unit.Dp = 4.dp,
     pinnedEndCount: Int = 0,
-    secondRowFirstId: String? = null,
     content: @Composable () -> Unit
 ) {
     Layout(modifier = modifier, content = content) { measurables, constraints ->
@@ -5013,17 +5011,11 @@ internal fun AdaptiveRemoteToolBar(
         fun span(index: Int) = ((placeables[index].width + gapPx + cellWidth + gapPx - 1) /
             (cellWidth + gapPx)).coerceIn(1, capacity)
         // Keep the full set of column tracks even when most tools are hidden.
-        // Otherwise three remaining buttons spread across the row and put full screen
-        // in its center instead of beside rotation at the trailing edge.
+        // Fixed lock/rotation controls always occupy the trailing two tracks.
         val columns = capacity
         val pitch = if (columns > 1) ((maxWidth - cellWidth).toFloat() / (columns - 1)) else 0f
         val pinnedSpans = pinned.sumOf(::span)
         val firstCapacity = (columns - pinnedSpans).coerceAtLeast(0)
-        val defaultLock = regular.firstOrNull { secondRowFirstId != null && measurables[it].layoutId == secondRowFirstId }
-        // If visible tools fit on the first row, leave the lock in their normal sequence;
-        // never put hidden tools ahead of it just to force the default second-row position.
-        val rowTwoLock = defaultLock?.takeIf { regular.takeWhile { index -> index != it }.sumOf(::span) >= firstCapacity }
-        if (rowTwoLock != null) regular.remove(rowTwoLock)
         val rows = mutableListOf<MutableList<Pair<Int, Int>>>(mutableListOf())
         var next = 0
         var used = 0
@@ -5034,7 +5026,7 @@ internal fun AdaptiveRemoteToolBar(
         }
         var pinnedColumn = (columns - pinnedSpans).coerceAtLeast(0)
         pinned.forEach { index -> rows[0] += index to pinnedColumn; pinnedColumn += span(index) }
-        val remaining = (if (rowTwoLock != null) listOf(rowTwoLock) else emptyList()) + regular.drop(next)
+        val remaining = regular.drop(next)
         var row: MutableList<Pair<Int, Int>>? = null
         used = columns
         for (index in remaining) {
@@ -5086,6 +5078,7 @@ internal fun TopIconToggle(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    fixedControl: Boolean = false,
     content: @Composable () -> Unit
 ) {
     val colors = AppTheme.colors
@@ -5104,8 +5097,19 @@ internal fun TopIconToggle(
         SkinPreset.CAMERA_CONTROLS -> Color(0xFF80D8FF)
         SkinPreset.FROSTED_GLASS -> colors.accentBlue
     }
+    // Orientation keys keep a distinct idle surface; blue outlines still mean an enabled toggle.
+    val fixedSurface = if (fixedControl) when (skin) {
+        SkinPreset.FROSTED_GLASS -> if (dark) Color(0xFF344650) else Color(0xFFDFE9F0)
+        SkinPreset.TITANIUM -> if (dark) Color(0xFF506575) else Color(0xFFA8BECA)
+        SkinPreset.WOOD -> if (dark) Color(0xFF57402B) else Color(0xFFDFC195)
+        SkinPreset.CAMERA_CONTROLS -> Color(0xFF273B47)
+    } else null
     val markColor by animateColorAsState(
-        if (active) activeColor else inactiveColor,
+        if (active) activeColor else if (fixedControl) {
+            // Warm wood keeps a matching engraving; the other materials use a blue-grey mark.
+            if (skin == SkinPreset.WOOD) inactiveColor
+            else if (dark || skin == SkinPreset.CAMERA_CONTROLS) Color(0xFFBDD1DD) else Color(0xFF3F6075)
+        } else inactiveColor,
         animationSpec = tween(180), label = "monitorToolTint"
     )
     GlassButton(
@@ -5114,6 +5118,7 @@ internal fun TopIconToggle(
         active = active,
         activeOutline = true,
         materialContentColor = markColor,
+        surfaceColor = fixedSurface,
         shape = CircleShape,
         raised = true,
         showSheen = true,
@@ -5161,7 +5166,8 @@ private fun DockToolMark() {
 internal fun RemoteToolMark(tool: RemoteTool, preferences: RemoteToolPreferences) {
     val mark = Modifier.size(19.dp)
     when (tool) {
-        RemoteTool.PICTURE_CONTROL -> Icon(Icons.Default.Palette, null, mark)
+        RemoteTool.PICTURE_CONTROL -> Icon(androidx.compose.ui.res.painterResource(R.drawable.ic_picture_control),
+            contentDescription = null, modifier = Modifier.size(22.dp))
         RemoteTool.LUT -> Text("LUT", fontSize = 10.sp, fontWeight = FontWeight.Bold)
         RemoteTool.HD -> HdMark()
         RemoteTool.FPS -> FpsMark()
@@ -5175,9 +5181,9 @@ internal fun RemoteToolMark(tool: RemoteTool, preferences: RemoteToolPreferences
         RemoteTool.METER -> Text("±EV", fontSize = 10.sp, fontWeight = FontWeight.Bold)
         RemoteTool.LEVEL -> LevelMark(mark)
         RemoteTool.RECORD -> Icon(Icons.Default.Videocam, null, mark)
-        RemoteTool.ROTATE -> RotateMark(mark)
+        RemoteTool.ROTATE -> RotateMark(Modifier.size(20.dp))
         RemoteTool.LOCK -> Icon(if (preferences.locked.value) Icons.Default.Lock else Icons.Default.LockOpen, null, mark)
-        RemoteTool.COMPUTER_CONTROL -> Text("PC", fontSize = 9.sp, fontWeight = FontWeight.Bold)
+        RemoteTool.COMPUTER_CONTROL -> Text("PC", fontSize = 11.sp, fontWeight = FontWeight.Bold)
         RemoteTool.WHITE_BALANCE -> Text("WB", fontSize = 11.sp, fontWeight = FontWeight.Bold)
         RemoteTool.FOCUS_MODE -> Text("MODE", fontSize = 9.sp, fontWeight = FontWeight.Bold)
         RemoteTool.FOCUS_FRAME -> FocusFrameMark()

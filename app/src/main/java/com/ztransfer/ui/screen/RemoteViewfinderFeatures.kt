@@ -33,8 +33,6 @@ import com.ztransfer.R
 import com.ztransfer.ui.theme.AppTheme
 import kotlin.math.abs
 import kotlin.math.ceil
-import kotlin.math.cos
-import kotlin.math.sin
 import kotlin.math.sqrt
 
 private val ToolMarkStrokeWidth = 1.5.dp
@@ -375,52 +373,14 @@ internal fun FpsMark(modifier: Modifier = Modifier) {
     }
 }
 
-/** 旋转：开放圆弧末端只保留外侧半边箭翼，小尺寸下比完整箭头更端正。 */
+/** A single round-ended arc and complete arrowhead, shared by every monitor layout. */
 @Composable
 internal fun RotateMark(modifier: Modifier = Modifier) {
-    val c = LocalContentColor.current
-    Canvas(modifier) {
-        val sw = ToolMarkStrokeWidth.toPx()
-        val s = size.minDimension
-        val cx = size.width * 0.50f
-        val cy = size.height * 0.49f
-        val r = s * 0.29f
-        val startAngle = -125f
-        val sweepAngle = 225f
-
-        // 略多于半圈，让右侧圆弧完整、左侧保持开放，避免看起来像“刷新”图标。
-        drawArc(
-            color = c,
-            startAngle = startAngle,
-            sweepAngle = sweepAngle,
-            useCenter = false,
-            topLeft = Offset(cx - r, cy - r),
-            size = Size(r * 2f, r * 2f),
-            style = Stroke(sw, cap = StrokeCap.Round)
-        )
-
-        // 箭头沿弧线末端的顺时针切线展开。只画外侧（下方）箭翼：内侧箭翼会与圆弧
-        // 挤在一起，在 20dp 图标里产生视觉歪斜；单翼仍保留明确的旋转方向。
-        val endAngle = startAngle + sweepAngle
-        fun pointAt(angle: Float, distance: Float): Offset {
-            val radians = Math.toRadians(angle.toDouble())
-            return Offset(
-                x = cx + cos(radians).toFloat() * distance,
-                y = cy + sin(radians).toFloat() * distance
-            )
-        }
-        val tip = pointAt(endAngle, r)
-        val tangentAngle = endAngle + 90f
-        val arrowLength = s * 0.16f
-        val wingSpread = 32f
-        val outerWingAngle = tangentAngle + 180f + wingSpread
-        val wingRadians = Math.toRadians(outerWingAngle.toDouble())
-        val wingEnd = Offset(
-            x = tip.x + cos(wingRadians).toFloat() * arrowLength,
-            y = tip.y + sin(wingRadians).toFloat() * arrowLength,
-        )
-        drawLine(c, tip, wingEnd, sw, StrokeCap.Round)
-    }
+    androidx.compose.material3.Icon(
+        painter = androidx.compose.ui.res.painterResource(R.drawable.ic_monitor_rotate),
+        contentDescription = null,
+        modifier = modifier,
+    )
 }
 
 /** 斑马纹——5 条等间距短斜线，纯粹条纹无需外框。 */
