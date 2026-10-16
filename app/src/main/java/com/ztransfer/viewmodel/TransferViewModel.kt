@@ -81,6 +81,7 @@ import com.ztransfer.protocol.ResumeUnavailableException
 import com.ztransfer.protocol.endToEndBytesPerSecond
 import com.ztransfer.service.TransferService
 import com.ztransfer.storage.HarmonyStorageCompatibility
+import com.ztransfer.storage.fingerprintHarmonyPublication
 import com.ztransfer.ui.theme.SkinPreset
 import com.ztransfer.ui.theme.ThemeMode
 import kotlinx.coroutines.CancellationException
@@ -2683,6 +2684,12 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                             } else {
                                                 "T_vs_F=CONTENT_MISMATCH"
                                             }
+                                            log {
+                                                "HARMONY_PUBLISH_VERIFY attempt=$attempt reason=$reason " +
+                                                    "provider=${candidate.authority} " +
+                                                    "expected=${harmonyStageResult?.bytes}/${harmonyStageResult?.sha256} " +
+                                                    "actual=${finalResult?.bytes}/${finalResult?.sha256}"
+                                            }
                                             saveError = HarmonyIntegrityException(reason)
                                             if (attempt == HARMONY_PUBLISH_ATTEMPTS) {
                                                 // The check below rejects this URI. The task finally
@@ -3258,25 +3265,15 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         }
 
     private suspend fun fingerprintHarmonyUri(uri: Uri): FingerprintResult? =
-        withContext(Dispatchers.IO) {
-            try {
-                val fingerprint = TransferFingerprint()
-                contentResolver.openInputStream(uri)?.use { input ->
-                    val buffer = ByteArray(256 * 1024)
-                    while (true) {
-                        currentCoroutineContext().ensureActive()
-                        val count = input.read(buffer)
-                        if (count < 0) break
-                        check(count > 0) { "provider returned an empty read" }
-                        fingerprint.update(buffer, 0, count)
-                    }
-                } ?: error("provider returned null input stream")
-                fingerprint.finish()
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                null
+        try {
+            fingerprintHarmonyPublication(contentResolver, uri) { mode ->
+                log { "HARMONY_PUBLISH_READ provider=${uri.authority} mode=$mode" }
             }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            log { "HARMONY_PUBLISH_READ failed provider=${uri.authority} error=${error.javaClass.simpleName}" }
+            null
         }
 
     /** Harmony-only publication writer. Each provider write receives a fresh byte array. */

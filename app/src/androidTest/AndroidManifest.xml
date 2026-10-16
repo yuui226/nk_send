@@ -35,4 +35,6 @@
         android:targetPackage="com.ztransfer.debug" />
     <instrumentation android:name="com.ztransfer.presets.PictureControlFolderInstrumentation"
         android:targetPackage="com.ztransfer.debug" />
+    <instrumentation android:name="com.ztransfer.storage.HarmonyPublicationInstrumentation"
+        android:targetPackage="com.ztransfer.debug" />
 </manifest>
