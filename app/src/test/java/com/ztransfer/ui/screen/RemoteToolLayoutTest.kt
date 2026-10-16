@@ -7,6 +7,61 @@ import org.junit.Test
 
 class RemoteToolLayoutTest {
     @Test
+    fun newInstallPlacesPresetSixthInBothModes() {
+        val prefs = preferences()
+        for (movie in listOf(false, true)) {
+            val layout = RemoteToolLayout(prefs, movie) {}
+            assertEquals(RemoteTool.PICTURE_CONTROL, layout.shownTools[5])
+            assertEquals(layout.available.filterNot { it == RemoteTool.PICTURE_CONTROL },
+                layout.order.filterNot { it == RemoteTool.PICTURE_CONTROL })
+        }
+    }
+
+    @Test
+    fun upgradeInsertsAmongVisibleToolsAndKeepsOtherOrderAndHiddenChoices() {
+        val preset = RemoteTool.PICTURE_CONTROL
+        val saved = RemoteTool.regular.filter { it.availableIn(false) }.reversed()
+        val hidden = setOf(preset.id, RemoteTool.FPS.id, RemoteTool.HISTOGRAM.id)
+        val prefs = preferences(mutableMapOf(
+            "remote_tool_order_photo" to saved.joinToString(",") { it.id },
+            "remote_hidden_tools_photo" to hidden,
+        ))
+        val layout = RemoteToolLayout(prefs, false) { fail("Migration must not toggle a tool") }
+        assertEquals(preset, layout.shownTools[5])
+        assertEquals(saved.filterNot { it == preset }, layout.order.filterNot { it == preset })
+        assertEquals(hidden - preset.id, layout.hiddenTools.map { it.id }.toSet())
+        assertEquals(layout.order, RemoteToolLayout(prefs, false) {}.order)
+    }
+
+    @Test
+    fun manualMovesAndHidingAfterMigrationSurviveReopening() {
+        val prefs = preferences()
+        var layout = RemoteToolLayout(prefs, false) {}
+        layout.move(RemoteTool.PICTURE_CONTROL, 1)
+        layout = RemoteToolLayout(prefs, false) {}
+        assertEquals(RemoteTool.PICTURE_CONTROL, layout.shownTools[1])
+        layout.setVisible(RemoteTool.PICTURE_CONTROL, false)
+        val order = layout.order
+        val reopened = RemoteToolLayout(prefs, false) {}
+        assertFalse(reopened.visible(RemoteTool.PICTURE_CONTROL))
+        assertEquals(order, reopened.order)
+        // Migrating the other mode must not reset the first mode's choices.
+        assertEquals(RemoteTool.PICTURE_CONTROL, RemoteToolLayout(prefs, true) {}.shownTools[5])
+        assertEquals(order, RemoteToolLayout(prefs, false) {}.order)
+        assertFalse(RemoteToolLayout(prefs, false) {}.visible(RemoteTool.PICTURE_CONTROL))
+    }
+
+    @Test
+    fun fewVisibleToolsPlacePresetAtTheEndWithoutDuplicates() {
+        val hidden = RemoteTool.regular.filterNot { it == RemoteTool.HD }.map { it.id }.toSet()
+        val layout = RemoteToolLayout(preferences(mutableMapOf(
+            "remote_hidden_tools_photo" to hidden,
+        )), false) {}
+        assertEquals(listOf(RemoteTool.HD, RemoteTool.PICTURE_CONTROL), layout.shownTools)
+        assertEquals(layout.order.size, layout.order.distinct().size)
+    }
+
+    @Test
     fun oldHiddenAndReorderedLockBecomesFixedWithoutChangingOtherTools() {
         val prefs = preferences(mutableMapOf(
             "remote_tool_order_photo" to "grid,lock,hd,rotate,fps",
@@ -72,7 +127,7 @@ class RemoteToolLayoutTest {
         val editor = Proxy.newProxyInstance(SharedPreferences.Editor::class.java.classLoader,
             arrayOf(SharedPreferences.Editor::class.java)) { self, method, args ->
             when (method.name) {
-                "putString", "putStringSet" -> {
+                "putString", "putStringSet", "putBoolean" -> {
                     values[args[0] as String] = args[1]
                     self
                 }
@@ -83,7 +138,7 @@ class RemoteToolLayoutTest {
         return Proxy.newProxyInstance(SharedPreferences::class.java.classLoader,
             arrayOf(SharedPreferences::class.java)) { _, method, args ->
             when (method.name) {
-                "getString", "getStringSet" -> values[args[0]] ?: args[1]
+                "getString", "getStringSet", "getBoolean" -> values[args[0]] ?: args[1]
                 "edit" -> editor
                 else -> error("Unexpected preferences operation: ${method.name}")
             }

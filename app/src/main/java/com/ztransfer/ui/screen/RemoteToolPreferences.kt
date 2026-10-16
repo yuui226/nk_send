@@ -129,12 +129,32 @@ internal class RemoteToolLayout(
     private val mode = if (movie) "movie" else "photo"
     private val orderKey = "remote_tool_order_$mode"
     private val hiddenKey = "remote_hidden_tools_$mode"
+    private val presetPlacementKey = "remote_picture_control_placement_v1_$mode"
     val available = RemoteTool.regular.filter { it.availableIn(movie) }
     var order by mutableStateOf(RemoteTool.ordered(prefs.getString(orderKey, "").orEmpty().split(',')).filter { it in available })
         private set
     // Older versions allowed hiding/reordering LOCK. Fixed controls ignore those saved entries.
     private var hidden by mutableStateOf(prefs.getStringSet(hiddenKey, emptySet()).orEmpty()
         .filter { id -> available.any { it.id == id } }.toSet())
+
+    init {
+        if (!prefs.getBoolean(presetPlacementKey, false)) {
+            // Introduce Picture Control once, including on fresh installs. Persist all three
+            // values together so later launches respect the user's own moves and visibility.
+            val preset = RemoteTool.PICTURE_CONTROL
+            hidden = hidden - preset.id
+            val others = order.filterNot { it == preset }
+            val preceding = others.withIndex().filter { visible(it.value) }.take(5)
+            val insertion = preceding.lastOrNull()?.let { it.index + 1 } ?: 0
+            order = others.toMutableList().apply { add(insertion, preset) }
+            prefs.edit()
+                .putString(orderKey, order.joinToString(",") { it.id })
+                .putStringSet(hiddenKey, hidden)
+                .putBoolean(presetPlacementKey, true)
+                .apply()
+        }
+    }
+
     fun visible(tool: RemoteTool) = tool.fixed || (tool in available && tool.id !in hidden)
     val shownTools: List<RemoteTool> get() = order.filter(::visible)
     val hiddenTools: List<RemoteTool> get() = order.filterNot(::visible)

@@ -31,12 +31,15 @@ internal fun ColumnScope.PictureControlPresetChooser(
     presets: Result<List<BuiltInPictureControl>>,
     pending: String?, onNotice: (String) -> Unit,
     onChoose: (PictureControlPresetChoice) -> Unit,
+    active: Boolean = true,
 ) {
     val context = LocalContext.current
     val uncategorized = stringResource(R.string.lut_uncategorized)
     val labels = remember(folders.files, uncategorized) { presetFileLabels(folders.files, uncategorized) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
-    LaunchedEffect(folders, lifecycle) {
+    LaunchedEffect(folders, lifecycle, active) {
+        // AnimatedContent retains the old page briefly; only the current page owns folder work.
+        if (!active) return@LaunchedEffect
         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             // Also pick up file-manager edits when returning to an already open chooser.
             folders.refresh()
@@ -50,7 +53,7 @@ internal fun ColumnScope.PictureControlPresetChooser(
         presets.isFailure -> R.string.picture_control_files_failed
         else -> null
     }
-    LaunchedEffect(guidance) { guidance?.let { onNotice(context.getString(it)) } }
+    LaunchedEffect(guidance, active) { if (active) guidance?.let { onNotice(context.getString(it)) } }
     val accessible = folders.failure != PresetFolderFailure.MISSING && folders.failure != PresetFolderFailure.DENIED
     val builtInLabel = stringResource(R.string.picture_control_built_in)
     val categories = remember(presets, folders.files, accessible, builtInLabel, uncategorized) {

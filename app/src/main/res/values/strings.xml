@@ -133,8 +133,6 @@
     <string name="cd_close">Close</string>
     <string name="setting_off">Disabled</string>
     <string name="setting_on">Enabled</string>
-    <string name="setting_off_short">Off</string>
-    <string name="setting_on_short">On</string>
     <string name="transfer_directory">Transfer folder</string>
     <string name="dir_set">Folder selected</string>
     <string name="dir_not_set">Not set</string>

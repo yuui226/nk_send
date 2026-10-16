@@ -3,14 +3,21 @@ package com.ztransfer.ui.screen
 import android.content.ClipData
 import android.content.Intent
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.updateTransition
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.core.content.FileProvider
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Edit
@@ -49,6 +56,13 @@ private sealed interface SlotAction {
     data class Clear(override val slot: Int) : SlotAction
 }
 
+private enum class PictureControlConfirmation { CLEAR, FOLDER }
+
+private data class PictureControlPage(
+    val slot: Int?,
+    val confirmation: PictureControlConfirmation?,
+)
+
 /** Slot list -> explicit destination editor -> shared preset chooser. No slot is chosen implicitly. */
 @Composable
 internal fun RemotePictureControlPanel(
@@ -68,8 +82,7 @@ internal fun RemotePictureControlPanel(
     var loading by remember { mutableStateOf(camera != null) }
     var loadFailed by remember { mutableStateOf(false) }
     var pending by remember { mutableStateOf<SlotAction?>(null) }
-    var confirmClear by remember(editingSlot) { mutableStateOf(false) }
-    var confirmFolder by remember(editingSlot) { mutableStateOf(false) }
+    var confirmation by remember(editingSlot) { mutableStateOf<PictureControlConfirmation?>(null) }
     val currentCamera by rememberUpdatedState(isCurrentCamera)
     val updateReport by rememberUpdatedState(onReport)
     val notice by rememberUpdatedState(onNotice)
@@ -117,7 +130,7 @@ internal fun RemotePictureControlPanel(
         if (!permitted || !busyChange(true)) return@action
         onFeedback()
         pending = action
-        confirmClear = false
+        confirmation = null
         scope.launch(start = CoroutineStart.UNDISPATCHED) {
             val text = StringBuilder()
             var journal: File? = null
@@ -150,8 +163,9 @@ internal fun RemotePictureControlPanel(
                     }
                     camera.changePictureControl(context.filesDir, action.slot, change, movie, { currentCamera() }, ::log)
                 }
-                onEditingSlot(null)
                 refresh() // A failed refresh is separate from a successfully verified mutation.
+                // Return with the final names/width, rather than resizing again after the transition.
+                onEditingSlot(null)
             } catch (error: CancellationException) {
                 withContext(Dispatchers.IO + NonCancellable) { log("UI cancelled; started mutation completed verification/rollback before releasing camera gate") }
                 throw error
@@ -186,125 +200,147 @@ internal fun RemotePictureControlPanel(
     }
     fun back() {
         if (pending != null) return
-        when {
-            confirmFolder -> confirmFolder = false
-            confirmClear -> confirmClear = false
-            else -> onEditingSlot(null)
-        }
+        if (confirmation != null) confirmation = null else onEditingSlot(null)
     }
-    val editor = overview?.slots?.singleOrNull { it.slot == editingSlot }
     val goBack: (() -> Unit)? = if (editingSlot != null) ({ back() }) else null
     // Match camera-tool menus: start the popup animation with real content, never error placeholders.
     val loadedOverview = overview ?: return
     val loadedPresets = presets ?: return
     val density = LocalDensity.current
-    val textMeasurer = rememberTextMeasurer()
-    val menuWidth = if (editingSlot == null) {
-        val labelWidth = loadedOverview.slots.maxOfOrNull { slot ->
+    val slotLabels = loadedOverview.slots.map { pictureControlSlotLabel(it) }
+    val slotTextStyle = MaterialTheme.typography.labelLarge
+    val textMeasurer = rememberTextMeasurer(cacheSize = slotLabels.size)
+    // Monitor state updates frequently. Names only need measuring again when their content,
+    // font or density changes; selection/busy/frame updates must not remeasure all nine rows.
+    val overviewWidth = remember(slotLabels, slotTextStyle, density, textMeasurer) {
+        val labelWidth = slotLabels.maxOfOrNull { label ->
             with(density) {
-                textMeasurer.measure(pictureControlSlotLabel(slot), MaterialTheme.typography.labelLarge,
+                textMeasurer.measure(label, slotTextStyle,
                     softWrap = false, maxLines = 1).size.width.toDp()
             }
         } ?: 60.dp
         // Label padding + compact edit target + trailing inset. The shell also caps to the screen.
         (labelWidth + 24.dp + 32.dp + 3.dp).coerceAtMost(320.dp)
-    } else 260.dp
-    RemoteChoicePopup(anchor, landscape, menuWidth, closeRequested, onDismiss, onBack = goBack,
-        verticalContentPadding = if (editingSlot == null) 0.dp else 4.dp) { _, closing ->
-        val idle = !closing && pending == null && !loading
-        val enabled = idle && canWrite && !loadFailed
-        // Slot highlights meet the shell's clipped edges; only the editor keeps content insets.
-        Column(Modifier.weight(1f, fill = false).fillMaxWidth()
-            .padding(horizontal = if (editingSlot == null) 0.dp else 8.dp)
-            .padding(bottom = if (editingSlot == null) 0.dp else 4.dp)) {
-            if (editingSlot != null) Row(Modifier.fillMaxWidth().padding(bottom = 2.dp).heightIn(min = 32.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(32.dp).clickable(enabled = idle, role = Role.Button) { onFeedback(); back() },
-                    contentAlignment = Alignment.Center) {
-                    Icon(Icons.Default.ArrowBack, stringResource(R.string.picture_control_back),
-                        tint = colors.onSurfaceVariant, modifier = Modifier.size(18.dp))
-                }
-                Text("C${editingSlot - 200}",
-                    color = colors.onBackground, style = MaterialTheme.typography.titleMedium,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(horizontal = 6.dp))
-                if (!confirmClear && !confirmFolder && editor?.availability == PictureControlSlotAvailability.OCCUPIED) {
-                    PictureControlClearButton(stringResource(R.string.picture_control_clear_slot),
-                        enabled && overview?.canEdit == true,
-                        modifier = Modifier.padding(start = 6.dp),
-                        compact = true) {
-                        onFeedback(); confirmClear = true
+    }
+    val page = PictureControlPage(editingSlot, confirmation)
+    RemoteChoicePopup(anchor, landscape, maxOf(overviewWidth, 260.dp), closeRequested, onDismiss, onBack = goBack,
+        verticalContentPadding = 0.dp, wrapContentWidth = true) { _, closing ->
+        val pageTransition = updateTransition(page, label = "pictureControlPage")
+        pageTransition.AnimatedContent(
+            modifier = Modifier.weight(1f, fill = false),
+            contentAlignment = Alignment.TopStart,
+            transitionSpec = {
+                (fadeIn(tween(180, delayMillis = 40)) togetherWith fadeOut(tween(140)))
+                    .using(SizeTransform { _, _ ->
+                        spring(dampingRatio = .85f, stiffness = Spring.StiffnessMediumLow)
+                    })
+            },
+        ) { displayedPage ->
+            // Keep outgoing content intact during the fade, but never let it dispatch another action.
+            val slotNumber = displayedPage.slot
+            val editor = loadedOverview.slots.singleOrNull { it.slot == slotNumber }
+            // A second tap must not select a preset while its page is still fading/resizing.
+            val settled = !pageTransition.isRunning && pageTransition.currentState == pageTransition.targetState
+            val idle = settled && displayedPage == page && !closing && pending == null && !loading
+            val enabled = idle && canWrite && !loadFailed
+            // Slot highlights meet the shell's clipped edges; only the editor keeps content insets.
+            Column(Modifier.width(if (slotNumber == null) overviewWidth else 260.dp)
+                .padding(horizontal = if (slotNumber == null) 0.dp else 8.dp)
+                .padding(top = if (slotNumber == null) 0.dp else 4.dp,
+                    bottom = if (slotNumber == null) 0.dp else 8.dp)) {
+                if (slotNumber != null) Row(Modifier.fillMaxWidth().padding(bottom = 2.dp).heightIn(min = 32.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(32.dp).clickable(enabled = idle, role = Role.Button) { onFeedback(); back() },
+                        contentAlignment = Alignment.Center) {
+                        Icon(Icons.Default.ArrowBack, stringResource(R.string.picture_control_back),
+                            tint = colors.onSurfaceVariant, modifier = Modifier.size(18.dp))
                     }
-                }
-                Spacer(Modifier.weight(1f))
-                if (!confirmClear && !confirmFolder) {
-                    PresetFolderButton(
-                        stringResource(R.string.picture_control_folder),
-                        idle, Modifier.widthIn(max = 112.dp), compact = true,
-                    ) {
-                        onFeedback()
-                        if (folders.folder == null) confirmFolder = true else onFolder(editingSlot)
-                    }
-                }
-            }
-            when {
-                editingSlot == null -> {
-                    val slots = loadedOverview.slots
-                    LazyColumn(Modifier.weight(1f, fill = false).fillMaxWidth()) {
-                        items(slots, key = { it.slot }) { slot ->
-                            PictureControlSlotRow(slot, overview?.selected == slot.slot,
-                                pending?.slot == slot.slot,
-                                canActivate = enabled && overview?.canActivate == true,
-                                canEdit = enabled && overview?.canEdit == true,
-                                onActivate = { act(SlotAction.Activate(slot.slot)) },
-                                onEdit = { onFeedback(); onEditingSlot(slot.slot) })
+                    Text("C${slotNumber - 200}",
+                        color = colors.onBackground, style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(horizontal = 6.dp))
+                    if (displayedPage.confirmation == null && editor?.availability == PictureControlSlotAvailability.OCCUPIED) {
+                        PictureControlClearButton(stringResource(R.string.picture_control_clear_slot),
+                            enabled && overview?.canEdit == true,
+                            modifier = Modifier.padding(start = 6.dp),
+                            compact = true) {
+                            onFeedback(); confirmation = PictureControlConfirmation.CLEAR
                         }
-                        if (BuildConfig.DEBUG) item(key = "test-log") {
-                            Box(Modifier.fillMaxWidth().padding(horizontal = 8.dp), contentAlignment = Alignment.CenterEnd) {
-                                PictureControlTestLogButton(report, pending == null && !closing, onFeedback, onNotice)
+                    }
+                    Spacer(Modifier.weight(1f))
+                    if (displayedPage.confirmation == null) {
+                        PresetFolderButton(
+                            stringResource(R.string.picture_control_folder),
+                            idle, Modifier.widthIn(max = 112.dp), compact = true,
+                        ) {
+                            onFeedback()
+                            if (folders.folder == null) confirmation = PictureControlConfirmation.FOLDER else onFolder(slotNumber)
+                        }
+                    }
+                }
+                when {
+                    slotNumber == null -> {
+                        val slots = loadedOverview.slots
+                        // Always nine small rows: compose them once instead of subcomposing
+                        // a lazy list while the popup is preparing its opening frame.
+                        Column(Modifier.weight(1f, fill = false).fillMaxWidth()
+                            .verticalScroll(rememberScrollState())) {
+                            slots.forEachIndexed { index, slot ->
+                                PictureControlSlotRow(slot, slotLabels[index], overview?.selected == slot.slot,
+                                    pending?.slot == slot.slot,
+                                    canActivate = enabled && overview?.canActivate == true,
+                                    canEdit = enabled && overview?.canEdit == true,
+                                    onActivate = { act(SlotAction.Activate(slot.slot)) },
+                                    onEdit = { onFeedback(); onEditingSlot(slot.slot) })
+                            }
+                            if (BuildConfig.DEBUG) {
+                                Box(Modifier.fillMaxWidth().padding(horizontal = 8.dp), contentAlignment = Alignment.CenterEnd) {
+                                    PictureControlTestLogButton(report, idle, onFeedback, onNotice)
+                                }
                             }
                         }
                     }
-                }
-                confirmFolder -> {
-                    Column(Modifier.weight(1f, fill = false).fillMaxWidth().verticalScroll(rememberScrollState())) {
-                        Text(stringResource(R.string.picture_control_choose_folder_hint),
-                            color = colors.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.padding(12.dp))
-                        RemotePresetChoice(stringResource(R.string.picture_control_confirm), false, false, idle) {
-                            onFeedback()
-                            confirmFolder = false
-                            onFolder(editingSlot)
-                        }
-                        RemotePresetChoice(stringResource(R.string.picture_control_cancel), false, false, idle) {
-                            onFeedback(); confirmFolder = false
-                        }
-                    }
-                }
-                confirmClear -> {
-                    Column(Modifier.weight(1f, fill = false).fillMaxWidth().verticalScroll(rememberScrollState())) {
-                        Text(stringResource(R.string.picture_control_clear_confirm, editingSlot - 200),
-                            color = colors.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.fillMaxWidth().padding(12.dp))
-                        PictureControlClearButton(stringResource(R.string.picture_control_confirm),
-                            enabled && overview?.canEdit == true &&
-                            editor?.availability == PictureControlSlotAvailability.OCCUPIED,
-                            modifier = Modifier.fillMaxWidth()) {
-                            act(SlotAction.Clear(editingSlot))
-                        }
-                        RemotePresetChoice(stringResource(R.string.picture_control_cancel), false, false, idle,
-                            textAlign = TextAlign.Center) {
-                            onFeedback(); confirmClear = false
+                    displayedPage.confirmation == PictureControlConfirmation.FOLDER -> {
+                        Column(Modifier.weight(1f, fill = false).fillMaxWidth().verticalScroll(rememberScrollState())) {
+                            Text(stringResource(R.string.picture_control_choose_folder_hint),
+                                color = colors.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.padding(12.dp))
+                            RemotePresetChoice(stringResource(R.string.picture_control_confirm), false, false, idle) {
+                                onFeedback()
+                                confirmation = null
+                                onFolder(slotNumber)
+                            }
+                            RemotePresetChoice(stringResource(R.string.picture_control_cancel), false, false, idle) {
+                                onFeedback(); confirmation = null
+                            }
                         }
                     }
-                }
-                else -> {
-                    PictureControlPresetChooser(folders,
-                        presets = loadedPresets,
-                        enabled = enabled && overview?.canEdit == true && editor?.readable == true,
-                        browsingEnabled = idle, pending = (pending as? SlotAction.Write)?.choice?.key,
-                        onNotice = onNotice,
-                        onChoose = { act(SlotAction.Write(editingSlot, it)) })
+                    displayedPage.confirmation == PictureControlConfirmation.CLEAR -> {
+                        Column(Modifier.weight(1f, fill = false).fillMaxWidth().verticalScroll(rememberScrollState())) {
+                            Text(stringResource(R.string.picture_control_clear_confirm, slotNumber - 200),
+                                color = colors.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.fillMaxWidth().padding(12.dp))
+                            PictureControlClearButton(stringResource(R.string.picture_control_confirm),
+                                enabled && overview?.canEdit == true &&
+                                editor?.availability == PictureControlSlotAvailability.OCCUPIED,
+                                modifier = Modifier.fillMaxWidth()) {
+                                act(SlotAction.Clear(slotNumber))
+                            }
+                            RemotePresetChoice(stringResource(R.string.picture_control_cancel), false, false, idle,
+                                textAlign = TextAlign.Center) {
+                                onFeedback(); confirmation = null
+                            }
+                        }
+                    }
+                    else -> {
+                        PictureControlPresetChooser(folders,
+                            presets = loadedPresets,
+                            enabled = enabled && overview?.canEdit == true && editor?.readable == true,
+                            browsingEnabled = idle, pending = (pending as? SlotAction.Write)?.choice?.key,
+                            onNotice = onNotice,
+                            active = displayedPage == page && !closing,
+                            onChoose = { act(SlotAction.Write(slotNumber, it)) })
+                    }
                 }
             }
         }
@@ -368,23 +404,24 @@ private fun pictureControlSlotLabel(info: PictureControlSlotInfo): String {
 
 @Composable
 private fun PictureControlSlotRow(
-    info: PictureControlSlotInfo, selected: Boolean, pending: Boolean,
+    info: PictureControlSlotInfo, label: String, selected: Boolean, pending: Boolean,
     canActivate: Boolean, canEdit: Boolean, onActivate: () -> Unit, onEdit: () -> Unit,
 ) {
     val colors = AppTheme.colors
     val editable = canEdit && info.readable
+    val empty = info.availability == PictureControlSlotAvailability.EMPTY
+    val activatable = if (empty) editable
+        else canActivate && info.availability == PictureControlSlotAvailability.OCCUPIED
     Row(Modifier.fillMaxWidth()
-        .background(if (selected) colors.accentBlue.copy(alpha = .08f) else androidx.compose.ui.graphics.Color.Transparent),
+        .background(if (selected) colors.accentBlue.copy(alpha = .08f) else androidx.compose.ui.graphics.Color.Transparent)
+        .clickable(enabled = activatable, role = Role.Button) {
+            if (empty) onEdit() else onActivate()
+        },
         verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.weight(1f)) {
-            RemotePresetChoice(pictureControlSlotLabel(info), selected, pending,
-                if (info.availability == PictureControlSlotAvailability.EMPTY) editable
-                else canActivate && info.availability == PictureControlSlotAvailability.OCCUPIED,
-                // The row owns selection; the label keeps its blue text without a second wash.
-                showSelectionBackground = false, verticalPadding = 4.dp) {
-                if (info.availability == PictureControlSlotAvailability.EMPTY) onEdit() else onActivate()
-            }
-        }
+        RemotePresetChoice(label, selected, pending, activatable,
+            // The row owns selection and ripple; the label only renders text/pending feedback.
+            showSelectionBackground = false, verticalPadding = 4.dp,
+            modifier = Modifier.weight(1f), onClick = null)
         val editColor = if (selected && editable) colors.accentBlue else colors.onSurfaceVariant
         // 7dp inside the target + 3dp outside keeps the icon about 10dp from the edge.
         Box(Modifier.padding(end = 3.dp).size(32.dp)

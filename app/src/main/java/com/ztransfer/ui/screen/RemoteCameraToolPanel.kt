@@ -212,13 +212,17 @@ internal fun RemoteCameraToolPanel(
         tool == RemoteCameraTool.FOCUS_AREA &&
             rcTapFocusPath(p.copy(current = value), camera?.deviceModel) in
                 listOf(RcTapFocusPath.TRACKING, RcTapFocusPath.MOVE_AREA)
-    // Measure only the connected camera's rows; unsupported long labels must not widen this menu.
-    val labelWidth = param?.let { p ->
-        (p.values + p.current).distinct().maxOfOrNull { value ->
-            with(density) { textMeasurer.measure(label(p, value), labelStyle).size.width.toDp() } +
-                if (hasTapMarker(p, value)) 22.dp else 0.dp
-        }
-    } ?: 60.dp
+    // Cache by rendered labels/badges so current-value polling does not repeatedly measure
+    // every row. Model-specific choices, localization and font changes still update the width.
+    val menuLabels = param?.let { p ->
+        (p.values + p.current).distinct().map { value -> label(p, value) to hasTapMarker(p, value) }
+    }.orEmpty()
+    val labelWidth = remember(menuLabels, density, textMeasurer, labelStyle) {
+        menuLabels.maxOfOrNull { (name, tapMarker) ->
+            with(density) { textMeasurer.measure(name, labelStyle).size.width.toDp() } +
+                if (tapMarker) 22.dp else 0.dp
+        } ?: 60.dp
+    }
     val menuWidth = if (whiteBalanceGrid) ((labelWidth + 12.dp) * 3 + 12.dp).coerceIn(252.dp, 300.dp)
         else (labelWidth + 24.dp).coerceIn(48.dp,280.dp)
     RemoteChoicePopup(anchor,landscape,menuWidth,closeRequested,onDismiss,

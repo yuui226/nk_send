@@ -26,7 +26,8 @@ class RemoteToolEditorInstrumentation : Instrumentation() {
         val savedTransferDir = disk.getString("transfer_dir", null)
         try {
             // Dedicated emulator run: restore toolbar defaults, preserving unrelated app preferences.
-            val keys = listOf("remote_tool_order_photo", "remote_hidden_tools_photo", "remote_lock_starts_second_row_photo", "remote_hd", "remote_grid", "remote_layout_locked")
+            val keys = listOf("remote_tool_order_photo", "remote_hidden_tools_photo", "remote_lock_starts_second_row_photo",
+                "remote_picture_control_placement_v1_photo", "remote_hd", "remote_grid", "remote_layout_locked")
             check(disk.edit().apply { keys.forEach { remove(it) } }.commit())
             // This UI-only test never records or transfers files. Supply a well-formed tree URI
             // to satisfy the monitor entry prerequisite, then restore the user's setting.

@@ -69,7 +69,8 @@ internal fun RemotePresetChoice(
     showSelectionBackground: Boolean = true,
     verticalPadding: Dp = 8.dp,
     textAlign: TextAlign = TextAlign.Start,
-    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)?,
 ) {
     val colors = AppTheme.colors
     val breathing = if (pending) {
@@ -81,7 +82,9 @@ internal fun RemotePresetChoice(
     Text(text, style = MaterialTheme.typography.labelLarge,
         color = if (selected || pending) colors.accentBlue else colors.onBackground,
         maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = textAlign,
-        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).then(breathing)
+        modifier = modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).then(breathing)
             .background(if (selected && showSelectionBackground) colors.accentBlue.copy(alpha = .08f) else Color.Transparent)
-            .clickable(enabled = enabled, onClick = onClick).padding(horizontal = 12.dp, vertical = verticalPadding))
+            // Slot rows own their full-height press feedback; ordinary choices remain clickable.
+            .then(if (onClick != null) Modifier.clickable(enabled = enabled, onClick = onClick) else Modifier)
+            .padding(horizontal = 12.dp, vertical = verticalPadding))
 }

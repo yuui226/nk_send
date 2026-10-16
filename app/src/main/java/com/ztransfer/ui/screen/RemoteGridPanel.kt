@@ -3,11 +3,12 @@ package com.ztransfer.ui.screen
 import androidx.compose.foundation.background
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
@@ -32,10 +33,13 @@ internal fun RemoteGridPanel(grid: ViewfinderGrid, anchor: Rect?, landscape: Boo
     val measurer=rememberTextMeasurer()
     val density=LocalDensity.current
     val style=MaterialTheme.typography.bodyMedium
-    val width=with(density) { labels.values.maxOf { measurer.measure(it,style).size.width }.toDp() }+24.dp
+    val width=remember(labels,measurer,density,style) {
+        with(density) { labels.values.maxOf { measurer.measure(it,style).size.width }.toDp() }+24.dp
+    }
     RemoteChoicePopup(anchor,landscape,width.coerceIn(48.dp,280.dp),closeRequested,onDismiss) { close,closing ->
-        LazyColumn(Modifier.weight(1f,fill=false)) {
-            items(framingGridOptions,key={it.name}) { option ->
+        // Ten fixed choices do not need lazy subcomposition on the opening frame.
+        Column(Modifier.weight(1f,fill=false).verticalScroll(rememberScrollState())) {
+            framingGridOptions.forEach { option ->
                 val selected=option==grid
                 Text(labels.getValue(option),color=if(selected) colors.accentBlue else colors.onBackground,
                     style=style,modifier=Modifier.fillMaxWidth()

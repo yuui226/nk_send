@@ -149,6 +149,7 @@ private fun RemoteToolBarContent(
                         // the neighbouring tools into a new column or row.
                         Box(Modifier.size(36.dp), contentAlignment = Alignment.Center) {
                             TopIconToggle(visible, title, { onVisible(tool, !layout.visible(tool)) },
+                                preserveContentColors = tool == RemoteTool.PICTURE_CONTROL,
                                 modifier = Modifier.semantics {
                                     stateDescription = stateLabel
                                     if (visible) customActions = listOf(

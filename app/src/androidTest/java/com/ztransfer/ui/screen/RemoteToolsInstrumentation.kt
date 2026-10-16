@@ -94,7 +94,9 @@ class RemoteToolsInstrumentation : Instrumentation() {
         val photo = p.layout(false)
         val movie = p.layout(true)
         check(RemoteTool.AUDIO !in photo.order && !photo.visible(RemoteTool.AUDIO))
-        check(movie.visible(RemoteTool.AUDIO) && movie.order == RemoteTool.regular)
+        check(movie.visible(RemoteTool.AUDIO) && movie.shownTools[5] == RemoteTool.PICTURE_CONTROL)
+        check(movie.order.filterNot { it == RemoteTool.PICTURE_CONTROL } ==
+            RemoteTool.regular.filterNot { it == RemoteTool.PICTURE_CONTROL })
         val originalPhotoOrder = photo.order
         RemoteTool.pinned.forEach { fixed ->
             photo.move(fixed, 0)

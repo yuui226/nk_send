@@ -41,7 +41,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
@@ -50,7 +49,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -84,7 +82,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -105,10 +102,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.layoutId
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
@@ -187,7 +182,6 @@ import com.ztransfer.ui.theme.LocalButtonTexturePalette
 import com.ztransfer.ui.theme.Motion
 import com.ztransfer.ui.theme.SkinPreset
 import com.ztransfer.ui.theme.rememberAppBackgroundBrush
-import com.ztransfer.ui.util.rememberHaptics
 import com.ztransfer.viewmodel.presentationConnectionType
 import com.ztransfer.viewmodel.presentationIsSta
 import com.ztransfer.viewmodel.CameraViewModel
@@ -2943,7 +2937,8 @@ private fun RemoteContent(
                 lutAnchor = it
             } else if (tool == RemoteTool.GRID) Modifier.onGloballyPositioned {
                 gridAnchor = it
-            } else Modifier, enabled = !disabled, fixedControl = tool?.fixed == true) {
+            } else Modifier, enabled = !disabled, fixedControl = tool?.fixed == true,
+                preserveContentColors = tool == RemoteTool.PICTURE_CONTROL) {
                 if (tool == null) Icon(if (editingTools) Icons.Default.Check else Icons.Default.Settings, null, Modifier.size(19.dp))
                 else if ((tool == RemoteTool.PICTURE_CONTROL && pictureControl.panel && pictureControl.loading) || (cameraToolLoading && (
                     (tool == RemoteTool.WHITE_BALANCE && cameraToolPanel == RemoteCameraTool.WHITE_BALANCE) ||
@@ -5079,6 +5074,7 @@ internal fun TopIconToggle(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     fixedControl: Boolean = false,
+    preserveContentColors: Boolean = false,
     content: @Composable () -> Unit
 ) {
     val colors = AppTheme.colors
@@ -5118,6 +5114,7 @@ internal fun TopIconToggle(
         active = active,
         activeOutline = true,
         materialContentColor = markColor,
+        preserveContentColors = preserveContentColors,
         surfaceColor = fixedSurface,
         shape = CircleShape,
         raised = true,
@@ -5166,8 +5163,13 @@ private fun DockToolMark() {
 internal fun RemoteToolMark(tool: RemoteTool, preferences: RemoteToolPreferences) {
     val mark = Modifier.size(19.dp)
     when (tool) {
-        RemoteTool.PICTURE_CONTROL -> Icon(androidx.compose.ui.res.painterResource(R.drawable.ic_picture_control),
-            contentDescription = null, modifier = Modifier.size(22.dp))
+        RemoteTool.PICTURE_CONTROL -> Box(Modifier.size(22.dp)) {
+            // The outline follows the theme and selection; the swatches keep their own colors.
+            Icon(androidx.compose.ui.res.painterResource(R.drawable.ic_picture_control),
+                contentDescription = null, modifier = Modifier.matchParentSize())
+            Icon(androidx.compose.ui.res.painterResource(R.drawable.ic_picture_control_colors),
+                contentDescription = null, modifier = Modifier.matchParentSize(), tint = Color.Unspecified)
+        }
         RemoteTool.LUT -> Text("LUT", fontSize = 10.sp, fontWeight = FontWeight.Bold)
         RemoteTool.HD -> HdMark()
         RemoteTool.FPS -> FpsMark()

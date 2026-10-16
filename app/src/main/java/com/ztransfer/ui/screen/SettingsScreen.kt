@@ -33,19 +33,16 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
@@ -68,8 +65,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -85,14 +82,18 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.Layout
@@ -118,8 +119,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
-import androidx.compose.ui.semantics.toggleableState
-import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.TextRange
@@ -189,7 +188,6 @@ import com.ztransfer.util.formatDegreesMinutesCoordinates
 import com.ztransfer.util.formatDegreesMinutesLatitude
 import com.ztransfer.util.formatDegreesMinutesLongitude
 import com.ztransfer.viewmodel.TransferViewModel
-import com.ztransfer.gps.GpsState
 import com.ztransfer.gps.GpsStatus
 import com.ztransfer.gps.GpsDiagnostics
 import com.ztransfer.gps.GpsPlaceLookupState
@@ -5417,7 +5415,7 @@ internal fun ProBadgeButton(
     }
 }
 
-/** Compact two-position wheel matching the other settings controls, without a corner badge. */
+/** Compact switch: a quiet track and sliding thumb, with the effects section's orange accent. */
 @Composable
 private fun PhotoEffectsMasterSwitch(
     checked: Boolean,
@@ -5425,26 +5423,75 @@ private fun PhotoEffectsMasterSwitch(
 ) {
     val colors = AppTheme.colors
     val label = stringResource(R.string.photo_effects)
-    val offLabel = stringResource(R.string.setting_off_short)
-    val onLabel = stringResource(R.string.setting_on_short)
-    ReleaseCommitWheel(
-        options = BOOLEAN_SETTINGS_OPTIONS,
-        selected = checked,
-        optionLabel = { if (it) onLabel else offLabel },
-        onValueCommitted = onCheckedChange,
-        wheelHeight = 32.dp,
-        cornerRadius = 10.dp,
-        optionRowHeight = 18.dp,
-        optionFontSize = 14.sp,
-        showDragHint = false,
-        accentColor = if (checked) colors.accentOrange else colors.statusWaiting,
-        emphasized = checked,
-        modifier = Modifier.width(56.dp).semantics {
-            contentDescription = label
-            role = Role.Switch
-            toggleableState = if (checked) ToggleableState.On else ToggleableState.Off
-        },
+    val dark = colors.background.luminance() < 0.5f
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val focused by interactionSource.collectIsFocusedAsState()
+    val position = animateFloatAsState(
+        targetValue = if (checked) 1f else 0f,
+        animationSpec = tween(180, easing = FastOutSlowInEasing),
+        label = "photoEffectsSwitchPosition",
     )
+    val press = animateFloatAsState(
+        targetValue = if (pressed) 1f else 0f,
+        animationSpec = tween(100),
+        label = "photoEffectsSwitchPress",
+    )
+    val offTrack = lerp(colors.surfaceVariant, colors.onSurfaceVariant, if (dark) 0.22f else 0.12f)
+    val onTrack = lerp(colors.accentOrange, colors.surface, if (dark) 0.16f else 0f)
+    val thumbColor = if (dark) Color(0xFFF4F5F7) else Color.White
+
+    androidx.compose.foundation.Canvas(
+        modifier = Modifier
+            .size(width = 56.dp, height = 32.dp)
+            .semantics { contentDescription = label }
+            // Standard toggle semantics retain keyboard/TalkBack support and cancel when
+            // the settings page takes over a scroll gesture. Only the parent owns persistence.
+            .toggleable(
+                value = checked,
+                interactionSource = interactionSource,
+                indication = null,
+                role = Role.Switch,
+                onValueChange = onCheckedChange,
+            ),
+    ) {
+        val progress = position.value
+        val trackSize = Size(48.dp.toPx(), 28.dp.toPx())
+        val trackOrigin = Offset((size.width - trackSize.width) / 2f, (size.height - trackSize.height) / 2f)
+        val trackRadius = CornerRadius(trackSize.height / 2f)
+        if (focused) {
+            val gap = 1.5.dp.toPx()
+            drawRoundRect(
+                color = colors.accentOrange.copy(alpha = 0.65f),
+                topLeft = trackOrigin - Offset(gap, gap),
+                size = Size(trackSize.width + gap * 2f, trackSize.height + gap * 2f),
+                cornerRadius = CornerRadius(trackRadius.x + gap),
+                style = Stroke(1.dp.toPx()),
+            )
+        }
+        drawRoundRect(lerp(offTrack, onTrack, progress), trackOrigin, trackSize, trackRadius)
+        drawRoundRect(
+            color = colors.onBackground.copy(alpha = 0.10f * (1f - progress)),
+            topLeft = trackOrigin,
+            size = trackSize,
+            cornerRadius = trackRadius,
+            style = Stroke(0.75.dp.toPx()),
+        )
+        val inset = 3.dp.toPx()
+        val thumbSize = Size((22f + 2f * press.value).dp.toPx(), 22.dp.toPx())
+        val thumbOrigin = trackOrigin + Offset(
+            inset + (trackSize.width - inset * 2f - thumbSize.width) * progress,
+            inset,
+        )
+        val thumbRadius = CornerRadius(thumbSize.height / 2f)
+        drawRoundRect(
+            color = Color.Black.copy(alpha = if (dark) 0.18f else 0.10f),
+            topLeft = thumbOrigin + Offset(0f, 0.75.dp.toPx()),
+            size = thumbSize,
+            cornerRadius = thumbRadius,
+        )
+        drawRoundRect(thumbColor, thumbOrigin, thumbSize, thumbRadius)
+    }
 }
 
 @Composable
