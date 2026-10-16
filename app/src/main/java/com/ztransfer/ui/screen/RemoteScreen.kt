@@ -2979,7 +2979,7 @@ private fun RemoteContent(
 
     // Local viewfinder recording requires continuous frames; finish it before reviewing photos.
     val reviewVisible = !movieMode && viewfinderRecorder == null && !recFinalizing
-    val renderReview: @Composable (Modifier) -> Unit = { modifier ->
+    val renderReview: @Composable (Modifier, Boolean) -> Unit = { modifier, large ->
             RemoteReviewButton(
                 enabled = reviewAllowed && connected && initialLoaded && liveViewStable && !capturing && !cameraToolWriting &&
                     !afHeld && !tapFocusBusy && afJob?.isActive != true && !computerControl.busy && !photoReview.active,
@@ -2996,6 +2996,7 @@ private fun RemoteContent(
                     }
                 },
                 modifier = modifier,
+                large = large,
             )
     }
 
@@ -3130,10 +3131,14 @@ private fun RemoteContent(
             // 约落在屏高 3/4 的拇指自然落点——比贴屏底好按，也离刚调完的参数更近；
             // 固定 padding 保证小屏上下限间距。快按=直接拍摄/切换录制；长按=半按对焦再拍；
             // 拍摄中转圈=正在等相机确认拍好。（不再显示拍摄缩略图）
-            Box(
+            Row(
                 modifier = Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 10.dp),
-                contentAlignment = Alignment.Center
+                verticalAlignment = Alignment.CenterVertically
             ) {
+                // Equal side slots keep the shutter centered when review is hidden.
+                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    if (reviewVisible && !editingTools) renderReview(Modifier, true)
+                }
                 ShutterButton(
                     capturing = capturing,
                     focusing = afHeld,
@@ -3146,6 +3151,7 @@ private fun RemoteContent(
                         if (movieMode) toggleRecord() else shoot()
                     }
                 )
+                Spacer(Modifier.weight(1f))
             }
             },
         )
@@ -3288,7 +3294,7 @@ private fun RemoteContent(
                             diameter = landscapeShutterSize)
                     },
                     localRecorder = { renderTool(RemoteTool.RECORD, 0) },
-                    reviewButton = { renderReview(Modifier) },
+                    reviewButton = { renderReview(Modifier, false) },
                     parameter = { index, modifier ->
                         val prop = (if (movieMode) MOVIE_EXPOSURE_PROPS else EXPOSURE_PROPS)[index]
                         val isoProp = if (movieMode) Lab.PROP_NK_MOVIE_ISO else Lab.PROP_ISO
@@ -3308,11 +3314,6 @@ private fun RemoteContent(
                 )
             }
         }
-        }
-
-        if (reviewVisible && !landscapeLayout && !editingTools) {
-            renderReview(Modifier.align(Alignment.BottomStart).navigationBarsPadding()
-                .padding(start = 16.dp, bottom = 12.dp))
         }
 
         // 免费监看余量属于整页状态，不跟随 Dock 内容切换。竖屏避开系统

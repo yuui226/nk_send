@@ -119,7 +119,7 @@ class RemoteEntryInstrumentation : Instrumentation() {
         val y = bounds.exactCenterY() / display.height
         display.recycle()
         val expectedCorner = when (rotation) {
-            0 -> x < .25f && y > .75f // portrait bottom-left
+            0 -> x < .25f && y > .75f // portrait shutter row, left of the centered shutter
             1 -> x < .30f && y > .70f // clockwise landscape bottom-right
             else -> x > .70f && y < .30f // counterclockwise landscape bottom-right
         }

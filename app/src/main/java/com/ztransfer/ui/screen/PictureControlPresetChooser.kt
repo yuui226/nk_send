@@ -8,11 +8,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import com.ztransfer.R
 import com.ztransfer.presets.*
 import com.ztransfer.protocol.BuiltInPictureControl
 import com.ztransfer.protocol.builtInPictureControls
 import com.ztransfer.ui.theme.AppTheme
+import kotlinx.coroutines.awaitCancellation
 
 /** A choice has exactly one source; the destination slot belongs to the editing screen. */
 internal sealed interface PictureControlPresetChoice {
@@ -37,7 +41,14 @@ internal fun ColumnScope.PictureControlPresetChooser(
     val presets = remember { runCatching { builtInPictureControls(context.assets) } }
     val uncategorized = stringResource(R.string.lut_uncategorized)
     val labels = remember(folders.files, uncategorized) { presetFileLabels(folders.files, uncategorized) }
-    LaunchedEffect(folders) { folders.refresh() }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(folders, lifecycle) {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            // Also pick up file-manager edits when returning to an already open chooser.
+            folders.refresh()
+            awaitCancellation()
+        }
+    }
     PresetFolderButton(
         stringResource(if (folders.folder == null) R.string.lut_choose_folder else R.string.lut_change_folder),
         browsingEnabled, Modifier.fillMaxWidth().padding(bottom = 6.dp),

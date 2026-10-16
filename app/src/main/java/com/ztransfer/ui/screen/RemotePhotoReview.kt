@@ -19,7 +19,10 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
@@ -32,6 +35,8 @@ import com.ztransfer.R
 import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.protocol.labEndLiveView
 import com.ztransfer.ui.theme.AppTheme
+import com.ztransfer.ui.theme.LocalButtonTexturePalette
+import com.ztransfer.ui.theme.SkinPreset
 import com.ztransfer.viewmodel.CameraViewModel
 import com.ztransfer.viewmodel.RemoteReviewCatalog
 import com.ztransfer.viewmodel.TransferViewModel
@@ -135,24 +140,44 @@ internal class RemotePhotoReviewState {
 }
 
 @Composable
-internal fun RemoteReviewButton(enabled: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+internal fun RemoteReviewButton(
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    large: Boolean = false,
+) {
     val label = stringResource(R.string.remote_review)
-    val color = AppTheme.colors.onBackground.copy(alpha = if (enabled) 0.9f else 0.35f)
-    GlassButton(onClick = onClick, enabled = enabled,
-        modifier = modifier.size(width = 40.dp, height = 48.dp).semantics { contentDescription = label },
-        shape = RoundedCornerShape(12.dp), contentPadding = PaddingValues(0.dp)) {
-        Canvas(Modifier.size(width = 19.dp, height = 26.dp)) {
-            val stroke = 1.5.dp.toPx()
-            drawRoundRect(color, Offset(stroke / 2, stroke / 2),
-                Size(size.width - stroke, size.height - stroke), CornerRadius(3.dp.toPx()), style = Stroke(stroke))
-            drawCircle(color, 1.6.dp.toPx(), Offset(size.width * .68f, size.height * .28f))
-            drawPath(Path().apply {
-                moveTo(size.width * .17f, size.height * .72f)
-                lineTo(size.width * .40f, size.height * .48f)
-                lineTo(size.width * .59f, size.height * .64f)
-                lineTo(size.width * .72f, size.height * .55f)
-                lineTo(size.width * .84f, size.height * .72f)
-            }, color, style = Stroke(stroke))
+    // Camera-control skins keep a black keycap even in light mode.
+    val color = if (LocalButtonTexturePalette.current?.skin == SkinPreset.CAMERA_CONTROLS) {
+        Color(0xFFD5D8DA)
+    } else {
+        AppTheme.colors.onBackground.copy(alpha = 0.9f)
+    }
+    GlassButton(
+        onClick = onClick,
+        enabled = enabled,
+        raised = true,
+        materialContentColor = color,
+        modifier = modifier.size(width = if (large) 48.dp else 40.dp, height = if (large) 56.dp else 48.dp)
+            .semantics { contentDescription = label },
+        shape = RoundedCornerShape(if (large) 14.dp else 12.dp),
+        contentPadding = PaddingValues(0.dp),
+    ) {
+        // One coordinate system keeps the compact and portrait icons proportional.
+        val mountain = remember {
+            Path().apply {
+                moveTo(5.5f, 21f)
+                lineTo(10.5f, 15.5f)
+                lineTo(18.5f, 21f)
+            }
+        }
+        val stroke = remember { Stroke(1.7f, cap = StrokeCap.Round, join = StrokeJoin.Round) }
+        Canvas(Modifier.size(width = if (large) 24.dp else 21.dp, height = if (large) 28.dp else 24.5.dp)) {
+            scale(size.width / 24f, size.height / 28f, pivot = Offset.Zero) {
+                drawRoundRect(color, Offset(2f, 1f), Size(20f, 26f), CornerRadius(3.5f), style = stroke)
+                drawCircle(color, 1.8f, Offset(16f, 8f))
+                drawPath(mountain, color, style = stroke)
+            }
         }
     }
 }

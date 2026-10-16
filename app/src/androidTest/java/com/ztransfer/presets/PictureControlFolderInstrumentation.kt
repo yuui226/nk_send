@@ -5,6 +5,7 @@ import android.app.Instrumentation
 import android.content.ContentResolver
 import android.content.Context
 import android.content.ContextWrapper
+import android.content.Intent
 import android.content.pm.ProviderInfo
 import android.database.Cursor
 import android.database.MatrixCursor
@@ -16,8 +17,23 @@ import android.os.SystemClock
 import android.provider.DocumentsContract
 import android.provider.DocumentsContract.Document
 import android.provider.DocumentsProvider
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.height
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LifecycleRegistry
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.ztransfer.MainActivity
 import com.ztransfer.protocol.builtInPictureControls
 import com.ztransfer.protocol.encodeClassicPictureControl
+import com.ztransfer.ui.screen.PictureControlPresetChooser
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -104,8 +120,9 @@ class PictureControlFolderInstrumentation : Instrumentation() {
             main { folders.close(); state = PictureControlFolderState(isolated, scope) { notices += it }; state!!.refresh() }
             await { state?.scanning == false }
             main { check(state!!.files.single().name == "reopened.NP3") }
+            chooserRefreshes(isolated, state!!, scratch, bytes)
             check(notices.isEmpty())
-            result.putString("result", "PASS: ${builtIns.size} catalog assets, saved-folder migration/reopen, NP3 extension filtering, root/subfolders, atomic failure, denied/missing recovery, changed/unsupported/deleted files, empty folder")
+            result.putString("result", "PASS: ${builtIns.size} catalog assets, saved-folder migration/reopen, chooser open/reopen/resume refresh, NP3 extension filtering, root/subfolders, atomic failure, denied/missing recovery, changed/unsupported/deleted files, empty folder")
             outcome = Activity.RESULT_OK
         } catch (error: Throwable) {
             result.putString("failure", error.stackTraceToString())
@@ -115,6 +132,57 @@ class PictureControlFolderInstrumentation : Instrumentation() {
             preferences.edit().clear().commit()
         }
         finish(outcome, result)
+    }
+
+    /** Exercise the actual chooser's scan triggers, without connecting or writing to a camera. */
+    private fun chooserRefreshes(context: Context, folders: PictureControlFolderState, root: File, bytes: ByteArray) {
+        val monitor = addMonitor(MainActivity::class.java.name, null, false)
+        targetContext.startActivity(Intent(targetContext, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        val activity = checkNotNull(waitForMonitorWithTimeout(monitor, 10_000)) as MainActivity
+        removeMonitor(monitor)
+        val owner = object : LifecycleOwner {
+            val registry = LifecycleRegistry(this)
+            override val lifecycle: Lifecycle get() = registry
+        }
+        val visible = mutableStateOf(false)
+        var composed = false
+        try {
+            await { activity.hasWindowFocus() && activity.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) }
+            main {
+                owner.registry.currentState = Lifecycle.State.RESUMED
+                activity.setContent {
+                    CompositionLocalProvider(LocalContext provides context, LocalLifecycleOwner provides owner) {
+                        Column(Modifier.height(320.dp)) {
+                            if (visible.value) {
+                                PictureControlPresetChooser(folders, true, true, null, {}, {}, {})
+                                DisposableEffect(Unit) {
+                                    composed = true
+                                    onDispose { composed = false }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            File(root, "added.NP3").writeBytes(bytes)
+            main { visible.value = true }
+            await { composed && !folders.scanning && folders.files.any { it.name == "added.NP3" } }
+            main { visible.value = false }
+            await { !composed }
+            check(File(root, "added.NP3").renameTo(File(root, "renamed.NP3")))
+            main { visible.value = true }
+            await { composed && !folders.scanning && folders.files.any { it.name == "renamed.NP3" } }
+            main { check(folders.files.none { it.name == "added.NP3" }) }
+
+            main { owner.registry.currentState = Lifecycle.State.CREATED }
+            check(File(root, "renamed.NP3").delete())
+            File(root, "after-resume.NP3").writeBytes(bytes)
+            main { owner.registry.currentState = Lifecycle.State.RESUMED }
+            await { !folders.scanning && folders.files.any { it.name == "after-resume.NP3" } }
+            main { check(folders.files.none { it.name == "renamed.NP3" }) }
+        } finally {
+            main { owner.registry.currentState = Lifecycle.State.DESTROYED; activity.finish() }
+        }
     }
 
     private fun <T> main(block: () -> T): T {
