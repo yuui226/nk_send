@@ -542,7 +542,10 @@
     <string name="checking_update">Checking…</string>
     <string name="update_latest">Up to date</string>
     <string name="update_fixed_download_url" translatable="false">https://apk.ztransfer.top/ZTransfer.apk</string>
-    <string name="update_check_failed">Update check failed\nDownload link copied\nOpen it in a browser</string>
+    <string name="update_check_failed">Check failed</string>
+    <string name="update_copy_download_link">Copy link</string>
+    <string name="update_browser_download">Browser download</string>
+    <string name="update_browser_unavailable">Cannot open a browser. Please copy the link.</string>
     <string name="update_available_title">Update available</string>
     <string name="update_required_title">Update required</string>
     <string name="update_version">Version %1$s</string>

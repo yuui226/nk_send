@@ -331,7 +331,8 @@ private data class RemoteLiveFrame(
     val zebraMask: ZebraMask?,
     val analysis: MonitorAnalysis?,
     val metadata: LiveViewMetadata?,
-    val receivedAtElapsedMs: Long
+    val receivedAtElapsedMs: Long,
+    val remainingVideoTimeMs: Long?
 )
 
 private data class ConfirmedFocusMarker(
@@ -792,7 +793,8 @@ private fun RemoteContent(
         bytes: ByteArray,
         offset: Int = 0,
         metadata: LiveViewMetadata? = null,
-        receivedAtElapsedMs: Long = SystemClock.elapsedRealtime()
+        receivedAtElapsedMs: Long = SystemClock.elapsedRealtime(),
+        remainingVideoTimeMs: Long? = metadata?.remainingVideoTimeMs
     ): RemoteLiveFrame? =
         withContext(Dispatchers.Default) {
             BitmapFactory.decodeByteArray(bytes, offset, bytes.size - offset)?.let { bitmap ->
@@ -834,7 +836,8 @@ private fun RemoteContent(
                     zebraMask = zebraMask,
                     analysis = analysis,
                     metadata = metadata,
-                    receivedAtElapsedMs = receivedAtElapsedMs
+                    receivedAtElapsedMs = receivedAtElapsedMs,
+                    remainingVideoTimeMs = remainingVideoTimeMs
                 )
             }
         }
@@ -1031,7 +1034,8 @@ private fun RemoteContent(
                         packet.bytes,
                         packet.jpegOffset,
                         packet.metadata,
-                        packet.receivedAtElapsedMs
+                        packet.receivedAtElapsedMs,
+                        packet.remainingVideoTimeMs
                     )?.let { frame = it }
                 }
             }
@@ -3255,7 +3259,7 @@ private fun RemoteContent(
                         rcBatteryPercentage(batteryParam), recording,
                         Modifier.offset(x = imageX, y = imageY).size(imageWidth, imageHeight),
                         storageSlotCount = camState.storageIds.filter { it != 0 && it != -1 }.distinct().size,
-                        remainingVideoMs = { frame?.metadata?.remainingVideoTimeMs }, movieFormat = movieFormat)
+                        remainingVideoMs = { frame?.remainingVideoTimeMs }, movieFormat = movieFormat)
                 }
                 MonitorDispSummary(
                     if (cameraDisp && connected) MonitorDispMode.CLEAN else dispMode, listOfNotNull(modeText), connected,

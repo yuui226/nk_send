@@ -152,9 +152,9 @@ object AppUpdateManager {
     }
 
     /**
-     * 授权服务器不可达时直接取固定地址。手动检查展示下载进度；自动检查安静下载，
+     * 授权服务器不可达时直接取固定地址，展示进度并提供复制链接/浏览器下载入口。
      * 只有安装包确实更新或系统读不出版本时才进入安装。两条路都失败时，手动检查
-     * 才显示失败弹窗，自动检查保持沉默。
+     * 保留失败弹窗，自动检查恢复空闲。
      */
     private suspend fun downloadFixedRelease(force: Boolean): LicenseManager.UpdateResult =
         withContext(Dispatchers.IO) {
@@ -173,20 +173,23 @@ object AppUpdateManager {
                 if (root == null || apk == null || partial == null) {
                     return@withContext failFixedRelease(force, placeholder, Failure.DOWNLOAD)
                 }
-                if (force) _state.value = UiState.Downloading(placeholder, null)
+                _state.value = UiState.Downloading(placeholder, null)
                 partial.delete()
                 apk.delete()
                 prefs.edit().remove(KEY_VERIFIED_PATH)
                     .putString(KEY_DOWNLOAD_PATH, partial.absolutePath).apply()
                 downloadDirect(url, partial, 0L) { progress ->
-                    if (force) _state.value = UiState.Downloading(placeholder, progress)
+                    _state.value = UiState.Downloading(placeholder, progress)
                 }
                 if (!partial.renameTo(apk)) throw IllegalStateException("无法保存下载文件")
                 prefs.edit().putString(KEY_DOWNLOAD_PATH, apk.absolutePath).apply()
+                currentCoroutineContext().ensureActive()
+                _state.value = UiState.Verifying(placeholder)
                 if (!hasZipMagic(apk)) {
                     return@withContext failFixedRelease(force, placeholder, Failure.INVALID_APK, apk)
                 }
                 val archive = archiveInfo(apk)
+                currentCoroutineContext().ensureActive()
                 val actualVersion = archive?.let(::versionCode)
                 if (archive != null && archive.packageName != context.packageName) {
                     return@withContext failFixedRelease(force, placeholder, Failure.INVALID_APK, apk)
@@ -194,7 +197,7 @@ object AppUpdateManager {
                 if (!isFixedReleaseInstallable(actualVersion, BuildConfig.VERSION_CODE.toLong())) {
                     apk.delete()
                     clearDownloadRecord(deleteFile = false)
-                    if (force) _state.value = UiState.Idle
+                    _state.value = UiState.Idle
                     return@withContext LicenseManager.UpdateResult.UpToDate
                 }
                 val info = fixedReleaseInfo(

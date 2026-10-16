@@ -86,7 +86,9 @@ data class LiveViewPacket(
     /** 收到完整帧的单调时钟时间；用于排除 AF 完成前已排队的旧帧。 */
     val receivedAtElapsedMs: Long,
     /** Actual operation after any protocol fallback. */
-    val operation: Int = 0
+    val operation: Int = 0,
+    /** Independent of AF geometry: video time is also available in legacy frames. */
+    val remainingVideoTimeMs: Long? = metadata?.remainingVideoTimeMs
 )
 
 private fun ByteArray.be16(offset: Int): Int =
@@ -354,4 +356,38 @@ internal fun parseLiveViewRemainingVideoTime(payload: ByteArray, headerSize: Int
     val millis = payload.be32(offset)
     // Reserved zero-filled standby blocks do not mean the card is full.
     return millis.takeIf { it in 0L..86_400_000L && (it > 0 || recording == 1) }
+}
+
+/** Read video time without requiring usable AF coordinates. Unknown layouts stay unknown. */
+internal fun parseLiveViewPacketVideoTime(
+    payload: ByteArray,
+    jpegOffset: Int,
+    operation: Int,
+    model: String?
+): Long? {
+    if ((jpegOffset != 384 && jpegOffset != 512 && jpegOffset != 1024) ||
+        payload.size < jpegOffset + 3
+    ) return null
+    if (payload[jpegOffset] != 0xFF.toByte() || payload[jpegOffset + 1] != 0xD8.toByte() ||
+        payload[jpegOffset + 2] != 0xFF.toByte()
+    ) return null
+    return when (operation) {
+        Lab.NK_GET_LIVE_VIEW_IMG_EX -> {
+            if (payload.be32(12) != (payload.size - jpegOffset).toLong()) return null
+            parseLiveViewRemainingVideoTime(payload, jpegOffset)
+        }
+        Lab.NK_GET_LIVE_VIEW_IMG -> {
+            // ZfUsbMtpE_02 §9.7.2: 8-byte size prefix + 376-byte display block.
+            // The Z30 V1.20 capture uses the same +64 time / +68 recording offsets.
+            val knownModel = model.orEmpty().trim().uppercase(java.util.Locale.ROOT)
+                .removePrefix("NIKON ").replace(" ", "")
+            if ((knownModel != "ZF" && knownModel != "Z30") || jpegOffset != 384 ||
+                payload.be32(4) != (payload.size - jpegOffset).toLong()
+            ) return null
+            val recording = payload[68].toInt() and 0xFF
+            val millis = payload.be32(64)
+            millis.takeIf { recording in 0..1 && it in 0L..7_500_000L && (it > 0 || recording == 1) }
+        }
+        else -> null
+    }
 }

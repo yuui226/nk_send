@@ -118,6 +118,15 @@ class HomeConnectionPresentationTest {
     }
 
     @Test
+    fun premiumLightTailFadesOutWithoutResidualOpacity() {
+        assertEquals(1f, premiumConnectionEffectFade(0.5f), 0f)
+        assertTrue(premiumConnectionEffectFade(0.8f) in 0f..1f)
+        assertTrue(premiumConnectionEffectFade(0.95f) < premiumConnectionEffectFade(0.8f))
+        assertEquals(0f, premiumConnectionEffectFade(1f), 0f)
+        assertEquals(0f, premiumConnectionEffectFade(2f), 0f)
+    }
+
+    @Test
     fun freeConnectionPulsesAreStaggeredAndDisappearCompletely() {
         assertEquals(0f, freeConnectionPulseVisibility(-1f), 0f)
         assertEquals(0f, freeConnectionPulseVisibility(0f), 0f)

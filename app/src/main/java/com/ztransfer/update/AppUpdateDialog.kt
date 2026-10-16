@@ -58,46 +58,31 @@ fun AppUpdateHost(
     cameraUsesWifi: Boolean
 ) {
     val state by AppUpdateManager.state.collectAsState()
+    LaunchedEffect(cameraUsesWifi) {
+        AppUpdateManager.setCameraApConnected(cameraUsesWifi)
+    }
     val info = state.infoOrNull() ?: return
     val required = info.isRequired(BuildConfig.VERSION_CODE)
     val context = LocalContext.current
     val activity = context.findActivity() ?: return
     var installerStarted by remember(info.versionCode) { mutableStateOf(false) }
     var inlineHint by remember(info.versionCode) { mutableStateOf<String?>(null) }
-    val manualCopiedHint = stringResource(R.string.update_manual_copied)
+    val fixedUrl = stringResource(R.string.update_fixed_download_url)
+    var manualBrowserChosen by remember { mutableStateOf(false) }
     val disconnectCameraHint = stringResource(R.string.update_disconnect_camera_wifi)
-    LaunchedEffect(cameraUsesWifi) {
-        AppUpdateManager.setCameraApConnected(cameraUsesWifi)
-    }
 
     val unknownSourcesLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) {
         val ready = AppUpdateManager.state.value as? AppUpdateManager.UiState.Ready
-        if (ready != null && AppUpdateManager.unknownSourcesIntent() == null) {
+        if (ready != null && !manualBrowserChosen && AppUpdateManager.unknownSourcesIntent() == null) {
             AppUpdateManager.launchInstaller(activity, ready)
         }
     }
 
-    fun copyManualUpdateInfo() {
-        val text = buildString {
-            append(info.fallbackUrl)
-            if (info.fallbackPassword.isNotBlank()) {
-                append("\n密码:")
-                append(info.fallbackPassword)
-            }
-        }
-        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        clipboard.setPrimaryClip(ClipData.newPlainText("ZTransfer update", text))
-    }
-
-    // 自动更新失败时复制手动更新信息；校验完成后自动拉起系统安装流程。
+    // Keep automatic installation, unless the user explicitly switches to browser download.
     LaunchedEffect(state) {
-        val failed = state as? AppUpdateManager.UiState.Failed
-        if (failed != null && info.fallbackUrl.isNotBlank()) {
-            copyManualUpdateInfo()
-            return@LaunchedEffect
-        }
+        if (manualBrowserChosen) return@LaunchedEffect
         val ready = state as? AppUpdateManager.UiState.Ready ?: return@LaunchedEffect
         if (installerStarted) return@LaunchedEffect
         installerStarted = true
@@ -112,21 +97,29 @@ fun AppUpdateHost(
             return
         }
         inlineHint = null
+        manualBrowserChosen = false
         AppUpdateManager.download(info)
     }
 
     fun openFallbackDownload() {
-        if (info.fallbackUrl.isBlank()) return
         if (cameraUsesWifi) {
             inlineHint = disconnectCameraHint
             return
         }
         inlineHint = null
-        copyManualUpdateInfo()
-        runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(info.fallbackUrl))) }
+        runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(fixedUrl))) }
+            .onSuccess {
+                manualBrowserChosen = true
+                // Optional downloads can stop; required updates keep their gate but do not
+                // interrupt the browser by automatically launching the installer afterwards.
+                if (!required) AppUpdateManager.cancelDownload(info)
+            }
+            .onFailure { inlineHint = context.getString(R.string.update_browser_unavailable) }
     }
 
-    val title = if (required) {
+    val title = if (info.versionCode == 0) {
+        stringResource(if (state is AppUpdateManager.UiState.Failed) R.string.update_check_failed else R.string.checking_update)
+    } else if (required) {
         stringResource(R.string.update_required_title)
     } else {
         stringResource(R.string.update_available_title)
@@ -267,15 +260,7 @@ fun AppUpdateHost(
                                         is AppUpdateManager.UiState.Failed -> {
                                             val failure = failureText(current.failure)
                                             Text(
-                                                if (info.fallbackUrl.isNotBlank()) {
-                                                    stringResource(
-                                                        R.string.update_failure_manual,
-                                                        failure,
-                                                        manualCopiedHint
-                                                    )
-                                                } else {
-                                                    failure
-                                                },
+                                                failure,
                                                 style = MaterialTheme.typography.bodySmall,
                                                 color = colors.statusError
                                             )
@@ -328,38 +313,6 @@ fun AppUpdateHost(
                                 }
                             }
                         }
-                        is AppUpdateManager.UiState.Failed -> {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(
-                                    8.dp,
-                                    Alignment.End
-                                )
-                            ) {
-                                if (!required) {
-                                    UpdateGlassButton(
-                                        label = stringResource(R.string.update_later),
-                                        onClick = { AppUpdateManager.postpone(info) },
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                }
-                                when {
-                                    info.fallbackUrl.isNotBlank() -> UpdateGlassButton(
-                                        label = stringResource(R.string.update_open_download_page),
-                                        onClick = ::openFallbackDownload,
-                                        modifier = if (required) Modifier else Modifier.weight(1f),
-                                        prominent = true
-                                    )
-                                    current.failure != AppUpdateManager.Failure.INSTALLER_UNAVAILABLE ->
-                                        UpdateGlassButton(
-                                            label = stringResource(R.string.retry),
-                                            onClick = ::startDownload,
-                                            modifier = if (required) Modifier else Modifier.weight(1f),
-                                            prominent = true
-                                        )
-                                }
-                            }
-                        }
                         is AppUpdateManager.UiState.Ready -> Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.End
@@ -367,6 +320,7 @@ fun AppUpdateHost(
                             UpdateGlassButton(
                                 label = stringResource(R.string.update_install),
                                 onClick = {
+                                    manualBrowserChosen = false
                                     val permission = AppUpdateManager.unknownSourcesIntent()
                                     if (permission != null) {
                                         unknownSourcesLauncher.launch(permission)
@@ -377,22 +331,42 @@ fun AppUpdateHost(
                                 prominent = true
                             )
                         }
-                        is AppUpdateManager.UiState.Downloading -> if (!required) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.End
-                            ) {
-                                UpdateGlassButton(
-                                    label = stringResource(R.string.cancel),
-                                    onClick = { AppUpdateManager.cancelDownload(info) }
-                                )
-                            }
-                        }
                         else -> Unit
+                    }
+                    if (state is AppUpdateManager.UiState.Downloading ||
+                        state is AppUpdateManager.UiState.Verifying ||
+                        state is AppUpdateManager.UiState.Ready ||
+                        state is AppUpdateManager.UiState.Failed) {
+                        if (state is AppUpdateManager.UiState.Ready) Spacer(Modifier.height(8.dp))
+                        UpdateManualDownloadActions(onBrowserDownload = ::openFallbackDownload)
                     }
                 }
             }
         }
+    }
+}
+
+/** The same two exits remain available throughout download, verification and installation. */
+@Composable
+private fun UpdateManualDownloadActions(onBrowserDownload: () -> Unit) {
+    val context = LocalContext.current
+    val url = stringResource(R.string.update_fixed_download_url)
+    var copied by remember { mutableStateOf(false) }
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        UpdateGlassButton(
+            label = stringResource(if (copied) R.string.code_copied else R.string.update_copy_download_link),
+            onClick = {
+                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                clipboard.setPrimaryClip(ClipData.newPlainText("ZTransfer download", url))
+                copied = true
+            },
+            modifier = Modifier.weight(1f), centerContent = true,
+        )
+        UpdateGlassButton(
+            label = stringResource(R.string.update_browser_download),
+            onClick = onBrowserDownload,
+            modifier = Modifier.weight(1f), centerContent = true,
+        )
     }
 }
 

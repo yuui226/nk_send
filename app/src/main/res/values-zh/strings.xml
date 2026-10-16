@@ -539,7 +539,10 @@
     <string name="check_update">更新</string>
     <string name="checking_update">检查中…</string>
     <string name="update_latest">已是最新版本</string>
-    <string name="update_check_failed">检查更新失败\n已复制下载地址\n请到浏览器下载</string>
+    <string name="update_check_failed">检查失败</string>
+    <string name="update_copy_download_link">复制下载链接</string>
+    <string name="update_browser_download">浏览器下载</string>
+    <string name="update_browser_unavailable">无法打开浏览器，请复制链接</string>
     <string name="update_available_title">发现新版本</string>
     <string name="update_required_title">必须更新</string>
     <string name="update_version">版本 %1$s</string>
